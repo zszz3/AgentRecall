@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent-Session-Search</title>
+    <script>
+      (() => {
+        try {
+          document.documentElement.dataset.theme =
+            localStorage.getItem("agent-session-search-theme") === "dark" ? "dark" : "light";
+        } catch {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-BCQnu5S1.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-1c-_3Pa9.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
