@@ -1,0 +1,410 @@
+- main [ref=e2]:
+  - generic [ref=e6]:
+    - heading "Agent" [level=1] [ref=e7]
+    - paragraph [ref=e8]: console
+  - generic [ref=e9]:
+    - generic [ref=e11]:
+      - textbox [ref=e12]: x
+      - generic [ref=e13]: ⌘K
+    - generic [ref=e15]: 30 sessions
+    - generic [ref=e16]:
+      - article [ref=e17] [cursor=pointer]:
+        - generic [ref=e18]:
+          - generic [ref=e21]: This is a fairly long session title number 0 that should occupy most of the row width
+          - generic [ref=e22]:
+            - generic [ref=e23]: Claude Code
+            - generic [ref=e24]: ~/some/project/path/that/is/long
+            - generic [ref=e25]: 2h ago
+            - generic [ref=e26]: 42 messages
+          - generic [ref=e27]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 0
+        - generic [ref=e29]: "#tag"
+      - article [ref=e30] [cursor=pointer]:
+        - generic [ref=e31]:
+          - generic [ref=e34]: This is a fairly long session title number 1 that should occupy most of the row width
+          - generic [ref=e35]:
+            - generic [ref=e36]: Claude Code
+            - generic [ref=e37]: ~/some/project/path/that/is/long
+            - generic [ref=e38]: 2h ago
+            - generic [ref=e39]: 42 messages
+          - generic [ref=e40]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 1
+        - generic [ref=e42]: "#tag"
+      - article [ref=e43] [cursor=pointer]:
+        - generic [ref=e44]:
+          - generic [ref=e47]: This is a fairly long session title number 2 that should occupy most of the row width
+          - generic [ref=e48]:
+            - generic [ref=e49]: Claude Code
+            - generic [ref=e50]: ~/some/project/path/that/is/long
+            - generic [ref=e51]: 2h ago
+            - generic [ref=e52]: 42 messages
+          - generic [ref=e53]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 2
+        - generic [ref=e55]: "#tag"
+      - article [ref=e56] [cursor=pointer]:
+        - generic [ref=e57]:
+          - generic [ref=e60]: This is a fairly long session title number 3 that should occupy most of the row width
+          - generic [ref=e61]:
+            - generic [ref=e62]: Claude Code
+            - generic [ref=e63]: ~/some/project/path/that/is/long
+            - generic [ref=e64]: 2h ago
+            - generic [ref=e65]: 42 messages
+          - generic [ref=e66]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 3
+        - generic [ref=e68]: "#tag"
+      - article [ref=e69] [cursor=pointer]:
+        - generic [ref=e70]:
+          - generic [ref=e73]: This is a fairly long session title number 4 that should occupy most of the row width
+          - generic [ref=e74]:
+            - generic [ref=e75]: Claude Code
+            - generic [ref=e76]: ~/some/project/path/that/is/long
+            - generic [ref=e77]: 2h ago
+            - generic [ref=e78]: 42 messages
+          - generic [ref=e79]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 4
+        - generic [ref=e81]: "#tag"
+      - article [ref=e82] [cursor=pointer]:
+        - generic [ref=e83]:
+          - generic [ref=e86]: This is a fairly long session title number 5 that should occupy most of the row width
+          - generic [ref=e87]:
+            - generic [ref=e88]: Claude Code
+            - generic [ref=e89]: ~/some/project/path/that/is/long
+            - generic [ref=e90]: 2h ago
+            - generic [ref=e91]: 42 messages
+          - generic [ref=e92]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 5
+        - generic [ref=e94]: "#tag"
+      - article [ref=e95] [cursor=pointer]:
+        - generic [ref=e96]:
+          - generic [ref=e99]: This is a fairly long session title number 6 that should occupy most of the row width
+          - generic [ref=e100]:
+            - generic [ref=e101]: Claude Code
+            - generic [ref=e102]: ~/some/project/path/that/is/long
+            - generic [ref=e103]: 2h ago
+            - generic [ref=e104]: 42 messages
+          - generic [ref=e105]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 6
+        - generic [ref=e107]: "#tag"
+      - article [ref=e108] [cursor=pointer]:
+        - generic [ref=e109]:
+          - generic [ref=e112]: This is a fairly long session title number 7 that should occupy most of the row width
+          - generic [ref=e113]:
+            - generic [ref=e114]: Claude Code
+            - generic [ref=e115]: ~/some/project/path/that/is/long
+            - generic [ref=e116]: 2h ago
+            - generic [ref=e117]: 42 messages
+          - generic [ref=e118]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 7
+        - generic [ref=e120]: "#tag"
+      - article [ref=e121] [cursor=pointer]:
+        - generic [ref=e122]:
+          - generic [ref=e125]: This is a fairly long session title number 8 that should occupy most of the row width
+          - generic [ref=e126]:
+            - generic [ref=e127]: Claude Code
+            - generic [ref=e128]: ~/some/project/path/that/is/long
+            - generic [ref=e129]: 2h ago
+            - generic [ref=e130]: 42 messages
+          - generic [ref=e131]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 8
+        - generic [ref=e133]: "#tag"
+      - article [ref=e134] [cursor=pointer]:
+        - generic [ref=e135]:
+          - generic [ref=e138]: This is a fairly long session title number 9 that should occupy most of the row width
+          - generic [ref=e139]:
+            - generic [ref=e140]: Claude Code
+            - generic [ref=e141]: ~/some/project/path/that/is/long
+            - generic [ref=e142]: 2h ago
+            - generic [ref=e143]: 42 messages
+          - generic [ref=e144]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 9
+        - generic [ref=e146]: "#tag"
+      - article [ref=e147] [cursor=pointer]:
+        - generic [ref=e148]:
+          - generic [ref=e151]: This is a fairly long session title number 10 that should occupy most of the row width
+          - generic [ref=e152]:
+            - generic [ref=e153]: Claude Code
+            - generic [ref=e154]: ~/some/project/path/that/is/long
+            - generic [ref=e155]: 2h ago
+            - generic [ref=e156]: 42 messages
+          - generic [ref=e157]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 10
+        - generic [ref=e159]: "#tag"
+      - article [ref=e160] [cursor=pointer]:
+        - generic [ref=e161]:
+          - generic [ref=e164]: This is a fairly long session title number 11 that should occupy most of the row width
+          - generic [ref=e165]:
+            - generic [ref=e166]: Claude Code
+            - generic [ref=e167]: ~/some/project/path/that/is/long
+            - generic [ref=e168]: 2h ago
+            - generic [ref=e169]: 42 messages
+          - generic [ref=e170]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 11
+        - generic [ref=e172]: "#tag"
+      - article [ref=e173] [cursor=pointer]:
+        - generic [ref=e174]:
+          - generic [ref=e177]: This is a fairly long session title number 12 that should occupy most of the row width
+          - generic [ref=e178]:
+            - generic [ref=e179]: Claude Code
+            - generic [ref=e180]: ~/some/project/path/that/is/long
+            - generic [ref=e181]: 2h ago
+            - generic [ref=e182]: 42 messages
+          - generic [ref=e183]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 12
+        - generic [ref=e185]: "#tag"
+      - article [ref=e186] [cursor=pointer]:
+        - generic [ref=e187]:
+          - generic [ref=e190]: This is a fairly long session title number 13 that should occupy most of the row width
+          - generic [ref=e191]:
+            - generic [ref=e192]: Claude Code
+            - generic [ref=e193]: ~/some/project/path/that/is/long
+            - generic [ref=e194]: 2h ago
+            - generic [ref=e195]: 42 messages
+          - generic [ref=e196]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 13
+        - generic [ref=e198]: "#tag"
+      - article [ref=e199] [cursor=pointer]:
+        - generic [ref=e200]:
+          - generic [ref=e203]: This is a fairly long session title number 14 that should occupy most of the row width
+          - generic [ref=e204]:
+            - generic [ref=e205]: Claude Code
+            - generic [ref=e206]: ~/some/project/path/that/is/long
+            - generic [ref=e207]: 2h ago
+            - generic [ref=e208]: 42 messages
+          - generic [ref=e209]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 14
+        - generic [ref=e211]: "#tag"
+      - article [ref=e212] [cursor=pointer]:
+        - generic [ref=e213]:
+          - generic [ref=e216]: This is a fairly long session title number 15 that should occupy most of the row width
+          - generic [ref=e217]:
+            - generic [ref=e218]: Claude Code
+            - generic [ref=e219]: ~/some/project/path/that/is/long
+            - generic [ref=e220]: 2h ago
+            - generic [ref=e221]: 42 messages
+          - generic [ref=e222]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 15
+        - generic [ref=e224]: "#tag"
+      - article [ref=e225] [cursor=pointer]:
+        - generic [ref=e226]:
+          - generic [ref=e229]: This is a fairly long session title number 16 that should occupy most of the row width
+          - generic [ref=e230]:
+            - generic [ref=e231]: Claude Code
+            - generic [ref=e232]: ~/some/project/path/that/is/long
+            - generic [ref=e233]: 2h ago
+            - generic [ref=e234]: 42 messages
+          - generic [ref=e235]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 16
+        - generic [ref=e237]: "#tag"
+      - article [ref=e238] [cursor=pointer]:
+        - generic [ref=e239]:
+          - generic [ref=e242]: This is a fairly long session title number 17 that should occupy most of the row width
+          - generic [ref=e243]:
+            - generic [ref=e244]: Claude Code
+            - generic [ref=e245]: ~/some/project/path/that/is/long
+            - generic [ref=e246]: 2h ago
+            - generic [ref=e247]: 42 messages
+          - generic [ref=e248]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 17
+        - generic [ref=e250]: "#tag"
+      - article [ref=e251] [cursor=pointer]:
+        - generic [ref=e252]:
+          - generic [ref=e255]: This is a fairly long session title number 18 that should occupy most of the row width
+          - generic [ref=e256]:
+            - generic [ref=e257]: Claude Code
+            - generic [ref=e258]: ~/some/project/path/that/is/long
+            - generic [ref=e259]: 2h ago
+            - generic [ref=e260]: 42 messages
+          - generic [ref=e261]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 18
+        - generic [ref=e263]: "#tag"
+      - article [ref=e264] [cursor=pointer]:
+        - generic [ref=e265]:
+          - generic [ref=e268]: This is a fairly long session title number 19 that should occupy most of the row width
+          - generic [ref=e269]:
+            - generic [ref=e270]: Claude Code
+            - generic [ref=e271]: ~/some/project/path/that/is/long
+            - generic [ref=e272]: 2h ago
+            - generic [ref=e273]: 42 messages
+          - generic [ref=e274]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 19
+        - generic [ref=e276]: "#tag"
+      - article [ref=e277] [cursor=pointer]:
+        - generic [ref=e278]:
+          - generic [ref=e281]: This is a fairly long session title number 20 that should occupy most of the row width
+          - generic [ref=e282]:
+            - generic [ref=e283]: Claude Code
+            - generic [ref=e284]: ~/some/project/path/that/is/long
+            - generic [ref=e285]: 2h ago
+            - generic [ref=e286]: 42 messages
+          - generic [ref=e287]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 20
+        - generic [ref=e289]: "#tag"
+      - article [ref=e290] [cursor=pointer]:
+        - generic [ref=e291]:
+          - generic [ref=e294]: This is a fairly long session title number 21 that should occupy most of the row width
+          - generic [ref=e295]:
+            - generic [ref=e296]: Claude Code
+            - generic [ref=e297]: ~/some/project/path/that/is/long
+            - generic [ref=e298]: 2h ago
+            - generic [ref=e299]: 42 messages
+          - generic [ref=e300]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 21
+        - generic [ref=e302]: "#tag"
+      - article [ref=e303] [cursor=pointer]:
+        - generic [ref=e304]:
+          - generic [ref=e307]: This is a fairly long session title number 22 that should occupy most of the row width
+          - generic [ref=e308]:
+            - generic [ref=e309]: Claude Code
+            - generic [ref=e310]: ~/some/project/path/that/is/long
+            - generic [ref=e311]: 2h ago
+            - generic [ref=e312]: 42 messages
+          - generic [ref=e313]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 22
+        - generic [ref=e315]: "#tag"
+      - article [ref=e316] [cursor=pointer]:
+        - generic [ref=e317]:
+          - generic [ref=e320]: This is a fairly long session title number 23 that should occupy most of the row width
+          - generic [ref=e321]:
+            - generic [ref=e322]: Claude Code
+            - generic [ref=e323]: ~/some/project/path/that/is/long
+            - generic [ref=e324]: 2h ago
+            - generic [ref=e325]: 42 messages
+          - generic [ref=e326]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 23
+        - generic [ref=e328]: "#tag"
+      - article [ref=e329] [cursor=pointer]:
+        - generic [ref=e330]:
+          - generic [ref=e333]: This is a fairly long session title number 24 that should occupy most of the row width
+          - generic [ref=e334]:
+            - generic [ref=e335]: Claude Code
+            - generic [ref=e336]: ~/some/project/path/that/is/long
+            - generic [ref=e337]: 2h ago
+            - generic [ref=e338]: 42 messages
+          - generic [ref=e339]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 24
+        - generic [ref=e341]: "#tag"
+      - article [ref=e342] [cursor=pointer]:
+        - generic [ref=e343]:
+          - generic [ref=e346]: This is a fairly long session title number 25 that should occupy most of the row width
+          - generic [ref=e347]:
+            - generic [ref=e348]: Claude Code
+            - generic [ref=e349]: ~/some/project/path/that/is/long
+            - generic [ref=e350]: 2h ago
+            - generic [ref=e351]: 42 messages
+          - generic [ref=e352]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 25
+        - generic [ref=e354]: "#tag"
+      - article [ref=e355] [cursor=pointer]:
+        - generic [ref=e356]:
+          - generic [ref=e359]: This is a fairly long session title number 26 that should occupy most of the row width
+          - generic [ref=e360]:
+            - generic [ref=e361]: Claude Code
+            - generic [ref=e362]: ~/some/project/path/that/is/long
+            - generic [ref=e363]: 2h ago
+            - generic [ref=e364]: 42 messages
+          - generic [ref=e365]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 26
+        - generic [ref=e367]: "#tag"
+      - article [ref=e368] [cursor=pointer]:
+        - generic [ref=e369]:
+          - generic [ref=e372]: This is a fairly long session title number 27 that should occupy most of the row width
+          - generic [ref=e373]:
+            - generic [ref=e374]: Claude Code
+            - generic [ref=e375]: ~/some/project/path/that/is/long
+            - generic [ref=e376]: 2h ago
+            - generic [ref=e377]: 42 messages
+          - generic [ref=e378]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 27
+        - generic [ref=e380]: "#tag"
+      - article [ref=e381] [cursor=pointer]:
+        - generic [ref=e382]:
+          - generic [ref=e385]: This is a fairly long session title number 28 that should occupy most of the row width
+          - generic [ref=e386]:
+            - generic [ref=e387]: Claude Code
+            - generic [ref=e388]: ~/some/project/path/that/is/long
+            - generic [ref=e389]: 2h ago
+            - generic [ref=e390]: 42 messages
+          - generic [ref=e391]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 28
+        - generic [ref=e393]: "#tag"
+      - article [ref=e394] [cursor=pointer]:
+        - generic [ref=e395]:
+          - generic [ref=e398]: This is a fairly long session title number 29 that should occupy most of the row width
+          - generic [ref=e399]:
+            - generic [ref=e400]: Claude Code
+            - generic [ref=e401]: ~/some/project/path/that/is/long
+            - generic [ref=e402]: 2h ago
+            - generic [ref=e403]: 42 messages
+          - generic [ref=e404]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 29
+        - generic [ref=e406]: "#tag"
+      - article [ref=e407] [cursor=pointer]:
+        - generic [ref=e408]:
+          - generic [ref=e411]: This is a fairly long session title number 30 that should occupy most of the row width
+          - generic [ref=e412]:
+            - generic [ref=e413]: Claude Code
+            - generic [ref=e414]: ~/some/project/path/that/is/long
+            - generic [ref=e415]: 2h ago
+            - generic [ref=e416]: 42 messages
+          - generic [ref=e417]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 30
+        - generic [ref=e419]: "#tag"
+      - article [ref=e420] [cursor=pointer]:
+        - generic [ref=e421]:
+          - generic [ref=e424]: This is a fairly long session title number 31 that should occupy most of the row width
+          - generic [ref=e425]:
+            - generic [ref=e426]: Claude Code
+            - generic [ref=e427]: ~/some/project/path/that/is/long
+            - generic [ref=e428]: 2h ago
+            - generic [ref=e429]: 42 messages
+          - generic [ref=e430]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 31
+        - generic [ref=e432]: "#tag"
+      - article [ref=e433] [cursor=pointer]:
+        - generic [ref=e434]:
+          - generic [ref=e437]: This is a fairly long session title number 32 that should occupy most of the row width
+          - generic [ref=e438]:
+            - generic [ref=e439]: Claude Code
+            - generic [ref=e440]: ~/some/project/path/that/is/long
+            - generic [ref=e441]: 2h ago
+            - generic [ref=e442]: 42 messages
+          - generic [ref=e443]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 32
+        - generic [ref=e445]: "#tag"
+      - article [ref=e446] [cursor=pointer]:
+        - generic [ref=e447]:
+          - generic [ref=e450]: This is a fairly long session title number 33 that should occupy most of the row width
+          - generic [ref=e451]:
+            - generic [ref=e452]: Claude Code
+            - generic [ref=e453]: ~/some/project/path/that/is/long
+            - generic [ref=e454]: 2h ago
+            - generic [ref=e455]: 42 messages
+          - generic [ref=e456]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 33
+        - generic [ref=e458]: "#tag"
+      - article [ref=e459] [cursor=pointer]:
+        - generic [ref=e460]:
+          - generic [ref=e463]: This is a fairly long session title number 34 that should occupy most of the row width
+          - generic [ref=e464]:
+            - generic [ref=e465]: Claude Code
+            - generic [ref=e466]: ~/some/project/path/that/is/long
+            - generic [ref=e467]: 2h ago
+            - generic [ref=e468]: 42 messages
+          - generic [ref=e469]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 34
+        - generic [ref=e471]: "#tag"
+      - article [ref=e472] [cursor=pointer]:
+        - generic [ref=e473]:
+          - generic [ref=e476]: This is a fairly long session title number 35 that should occupy most of the row width
+          - generic [ref=e477]:
+            - generic [ref=e478]: Claude Code
+            - generic [ref=e479]: ~/some/project/path/that/is/long
+            - generic [ref=e480]: 2h ago
+            - generic [ref=e481]: 42 messages
+          - generic [ref=e482]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 35
+        - generic [ref=e484]: "#tag"
+      - article [ref=e485] [cursor=pointer]:
+        - generic [ref=e486]:
+          - generic [ref=e489]: This is a fairly long session title number 36 that should occupy most of the row width
+          - generic [ref=e490]:
+            - generic [ref=e491]: Claude Code
+            - generic [ref=e492]: ~/some/project/path/that/is/long
+            - generic [ref=e493]: 2h ago
+            - generic [ref=e494]: 42 messages
+          - generic [ref=e495]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 36
+        - generic [ref=e497]: "#tag"
+      - article [ref=e498] [cursor=pointer]:
+        - generic [ref=e499]:
+          - generic [ref=e502]: This is a fairly long session title number 37 that should occupy most of the row width
+          - generic [ref=e503]:
+            - generic [ref=e504]: Claude Code
+            - generic [ref=e505]: ~/some/project/path/that/is/long
+            - generic [ref=e506]: 2h ago
+            - generic [ref=e507]: 42 messages
+          - generic [ref=e508]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 37
+        - generic [ref=e510]: "#tag"
+      - article [ref=e511] [cursor=pointer]:
+        - generic [ref=e512]:
+          - generic [ref=e515]: This is a fairly long session title number 38 that should occupy most of the row width
+          - generic [ref=e516]:
+            - generic [ref=e517]: Claude Code
+            - generic [ref=e518]: ~/some/project/path/that/is/long
+            - generic [ref=e519]: 2h ago
+            - generic [ref=e520]: 42 messages
+          - generic [ref=e521]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 38
+        - generic [ref=e523]: "#tag"
+      - article [ref=e524] [cursor=pointer]:
+        - generic [ref=e525]:
+          - generic [ref=e528]: This is a fairly long session title number 39 that should occupy most of the row width
+          - generic [ref=e529]:
+            - generic [ref=e530]: Claude Code
+            - generic [ref=e531]: ~/some/project/path/that/is/long
+            - generic [ref=e532]: 2h ago
+            - generic [ref=e533]: 42 messages
+          - generic [ref=e534]: This is a long snippet of matched conversation text that demonstrates how much horizontal space a single line of content can use inside the card before truncating 39
+        - generic [ref=e536]: "#tag"

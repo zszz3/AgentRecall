@@ -509,6 +509,7 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
   align-items: start;
+  flex: 0 0 auto;
   padding: 13px 15px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
