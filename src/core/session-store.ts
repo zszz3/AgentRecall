@@ -312,13 +312,18 @@ export class SessionStore {
     const query = options.query?.trim() || "";
     const ftsMatches = query ? this.searchFts(query) : new Map<string, string | null>();
     const rows = this.getCandidateRows(options);
+    const tagsBySession = this.getTagsForSessions(rows.map((row) => row.session_key));
     const merged = new Map<string, SessionSearchResult>();
 
     for (const row of rows) {
-      const ftsSnippet = ftsMatches.get(row.session_key);
-      const hydrated = this.hydrateRow(row, query ? ftsSnippet || this.findSnippet(row.session_key, query) : null);
-      if (!this.matchesFilters(hydrated, options)) continue;
-      if (query && !ftsMatches.has(row.session_key) && !this.matchesTextQuery(hydrated, query)) continue;
+      const hasFtsMatch = ftsMatches.has(row.session_key);
+      const ftsSnippet = hasFtsMatch ? (ftsMatches.get(row.session_key) ?? null) : null;
+      const hydrated = this.hydrateRow(row, query ? ftsSnippet : null, tagsBySession.get(row.session_key) ?? []);
+      if (query && !hasFtsMatch && !this.matchesTextFields(hydrated, query)) {
+        const snippet = this.findSnippet(row.session_key, query);
+        if (!snippet) continue;
+        hydrated.matchSnippet = snippet;
+      }
       merged.set(hydrated.sessionKey, hydrated);
     }
 
@@ -427,6 +432,19 @@ export class SessionStore {
         project_path,
         tokenize = 'unicode61'
       );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_hidden_favorited_pinned
+        ON sessions(hidden, favorited, pinned);
+      CREATE INDEX IF NOT EXISTS idx_sessions_source
+        ON sessions(source);
+      CREATE INDEX IF NOT EXISTS idx_sessions_project_path
+        ON sessions(project_path);
+      CREATE INDEX IF NOT EXISTS idx_session_tags_tag_session
+        ON session_tags(tag_id, session_key);
+      CREATE INDEX IF NOT EXISTS idx_token_events_timestamp
+        ON token_events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_token_events_dedupe
+        ON token_events(dedupe_key, total_tokens, timestamp);
     `);
     this.addColumnIfMissing("sessions", "favorited", "INTEGER NOT NULL DEFAULT 0");
     this.addColumnIfMissing("sessions", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
@@ -662,32 +680,56 @@ export class SessionStore {
   }
 
   private getCandidateRows(options: SearchOptions): SessionRow[] {
-    const rows = this.db.prepare("SELECT * FROM sessions").all() as SessionRow[];
-    if (options.visibility === "hidden") return rows.filter((row) => row.hidden === 1);
-    if (options.visibility === "favorites") return rows.filter((row) => row.hidden === 0 && row.favorited === 1);
-    if (options.visibility === "pinned") return rows.filter((row) => row.hidden === 0 && row.pinned === 1);
-    return rows.filter((row) => row.hidden === 0);
-  }
+    const where: string[] = [];
+    const args: unknown[] = [];
 
-  private matchesFilters(result: SessionSearchResult, options: SearchOptions): boolean {
-    if (options.tag && !result.tags.includes(options.tag)) return false;
-    if (options.projectPath && result.projectPath !== options.projectPath) return false;
-    if (options.source && options.source !== "all") {
-      if (options.source === "claude" && !result.source.startsWith("claude-")) return false;
-      else if (options.source === "codex" && !result.source.startsWith("codex-")) return false;
-      else if (options.source !== "claude" && options.source !== "codex" && result.source !== options.source) return false;
+    if (options.visibility === "hidden") where.push("hidden = 1");
+    else if (options.visibility === "favorites") where.push("hidden = 0 AND favorited = 1");
+    else if (options.visibility === "pinned") where.push("hidden = 0 AND pinned = 1");
+    else where.push("hidden = 0");
+
+    if (options.projectPath) {
+      where.push("project_path = ?");
+      args.push(options.projectPath);
     }
-    return true;
+
+    if (options.source && options.source !== "all") {
+      if (options.source === "claude") {
+        where.push("source IN ('claude-cli', 'claude-app')");
+      } else if (options.source === "codex") {
+        where.push("source IN ('codex-cli', 'codex-app')");
+      } else {
+        where.push("source = ?");
+        args.push(options.source);
+      }
+    }
+
+    if (options.tag) {
+      where.push(
+        `
+        EXISTS (
+          SELECT 1
+          FROM session_tags
+          JOIN tags ON tags.id = session_tags.tag_id
+          WHERE session_tags.session_key = sessions.session_key
+            AND tags.name = ?
+        )
+      `,
+      );
+      args.push(options.tag);
+    }
+
+    return this.db.prepare(`SELECT * FROM sessions WHERE ${where.join(" AND ")}`).all(...args) as SessionRow[];
   }
 
-  private matchesTextQuery(result: SessionSearchResult, query: string): boolean {
+  private matchesTextFields(result: SessionSearchResult, query: string): boolean {
     const lower = query.toLowerCase();
     if (result.displayTitle.toLowerCase().includes(lower)) return true;
     if (result.originalTitle.toLowerCase().includes(lower)) return true;
     if (result.firstQuestion.toLowerCase().includes(lower)) return true;
     if (result.projectPath.toLowerCase().includes(lower)) return true;
     if (result.rawId.toLowerCase().includes(lower)) return true;
-    return this.findSnippet(result.sessionKey, query) !== null;
+    return false;
   }
 
   private findSnippet(sessionKey: string, query: string): string | null {
@@ -731,8 +773,8 @@ export class SessionStore {
     }
   }
 
-  private hydrateRow(row: SessionRow, snippet: string | null): SessionSearchResult {
-    const tags = (
+  private getTagsForSession(sessionKey: string): string[] {
+    return (
       this.db
         .prepare(
           `
@@ -743,8 +785,39 @@ export class SessionStore {
           ORDER BY lower(tags.name)
         `,
         )
-        .all(row.session_key) as Array<{ name: string }>
+        .all(sessionKey) as Array<{ name: string }>
     ).map((tag) => tag.name);
+  }
+
+  private getTagsForSessions(sessionKeys: string[]): Map<string, string[]> {
+    const tagsBySession = new Map<string, string[]>();
+    if (sessionKeys.length === 0) return tagsBySession;
+
+    const shouldFilterBySession = sessionKeys.length <= 900;
+    const placeholders = shouldFilterBySession ? sessionKeys.map(() => "?").join(",") : "";
+    const rows = this.db
+      .prepare(
+        `
+        SELECT session_tags.session_key, tags.name
+        FROM session_tags
+        JOIN tags ON tags.id = session_tags.tag_id
+        ${shouldFilterBySession ? `WHERE session_tags.session_key IN (${placeholders})` : ""}
+        ORDER BY session_tags.session_key, lower(tags.name)
+      `,
+      )
+      .all(...(shouldFilterBySession ? sessionKeys : [])) as Array<{ session_key: string; name: string }>;
+
+    const allowed = shouldFilterBySession ? null : new Set(sessionKeys);
+    for (const row of rows) {
+      if (allowed && !allowed.has(row.session_key)) continue;
+      const tags = tagsBySession.get(row.session_key) ?? [];
+      tags.push(row.name);
+      tagsBySession.set(row.session_key, tags);
+    }
+    return tagsBySession;
+  }
+
+  private hydrateRow(row: SessionRow, snippet: string | null, tags = this.getTagsForSession(row.session_key)): SessionSearchResult {
     const displayTitle = row.custom_title || row.first_question || row.original_title || "Untitled Session";
     return {
       sessionKey: row.session_key,
