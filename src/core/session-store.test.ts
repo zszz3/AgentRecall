@@ -41,11 +41,12 @@ describe("SessionStore", () => {
     expect(results[0].matchSnippet).toContain("refresh token");
   });
 
-  it("keeps custom title, tags, pinned, and hidden state separate from reindexing", () => {
+  it("keeps custom title, tags, favorite, pinned, and hidden state separate from reindexing", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession(), messages);
     store.setCustomTitle("codex:abc", "Auth bug");
     store.addTag("codex:abc", "backend");
+    store.setFavorited("codex:abc", true);
     store.setPinned("codex:abc", true);
     store.setHidden("codex:abc", true);
 
@@ -55,10 +56,25 @@ describe("SessionStore", () => {
     expect(hidden[0]).toMatchObject({
       customTitle: "Auth bug",
       displayTitle: "Auth bug",
+      favorited: true,
       pinned: true,
       hidden: true,
       tags: ["backend"],
     });
+  });
+
+  it("filters favorite sessions while excluding hidden sessions", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:fav", rawId: "fav" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:plain", rawId: "plain" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:hidden-fav", rawId: "hidden-fav" }), messages);
+
+    store.setFavorited("codex:fav", true);
+    store.setFavorited("codex:hidden-fav", true);
+    store.setHidden("codex:hidden-fav", true);
+
+    expect(store.searchSessions({ visibility: "favorites" }).map((session) => session.sessionKey)).toEqual(["codex:fav"]);
+    expect(store.searchSessions({ visibility: "hidden" }).map((session) => session.sessionKey)).toEqual(["codex:hidden-fav"]);
   });
 
   it("does not search tag names from the text search box, but supports explicit tag filtering", () => {

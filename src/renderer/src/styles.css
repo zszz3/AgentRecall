@@ -609,7 +609,7 @@ button:disabled {
   color: var(--accent);
 }
 
-.session-title span:last-child {
+.session-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -804,6 +804,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+.detail-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .icon-button {
   display: inline-grid;
   place-items: center;
@@ -820,6 +826,36 @@ button:disabled {
   border-color: var(--border-strong);
   color: var(--text);
   background: rgba(255, 255, 255, 0.07);
+}
+
+.favorite-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--text-faint);
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.favorite-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.favorite-button.active {
+  color: var(--accent-bright);
+}
+
+.icon-button.favorite-button {
+  width: 32px;
+  height: 32px;
+}
+
+.session-title .favorite-button svg {
+  color: currentColor;
 }
 
 .detail-actions {

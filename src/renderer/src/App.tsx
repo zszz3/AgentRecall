@@ -15,6 +15,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Star,
   Tag,
   Terminal,
   Trash2,
@@ -47,7 +48,7 @@ const SORT_OPTIONS: Array<{ label: string; value: SessionSortBy }> = [
   { label: "Updated", value: "updated" },
 ];
 
-type ViewMode = "default" | "pinned" | "hidden";
+type ViewMode = "default" | "favorites" | "pinned" | "hidden";
 const INITIAL_MESSAGE_LIMIT = 20;
 const MESSAGE_PAGE_SIZE = 80;
 
@@ -271,6 +272,11 @@ export function App(): ReactElement {
     await refreshAfterAction();
   }
 
+  async function toggleFavorite(session: SessionSearchResult): Promise<void> {
+    await window.sessionSearch.setFavorited(session.sessionKey, !session.favorited);
+    await refreshAfterAction();
+  }
+
   async function deleteTagGlobally(tagName: string): Promise<void> {
     await window.sessionSearch.deleteTag(tagName);
     setDeleteTagName(null);
@@ -330,10 +336,16 @@ export function App(): ReactElement {
           <button className={visibility === "default" ? "active" : ""} onClick={() => setVisibility("default")}>
             All
           </button>
+          <button className={visibility === "favorites" ? "active" : ""} onClick={() => setVisibility("favorites")}>
+            <Star size={14} />
+            Favorites
+          </button>
           <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
+            <Pin size={14} />
             Pinned
           </button>
           <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
+            <EyeOff size={14} />
             Hidden
           </button>
         </nav>
@@ -444,6 +456,7 @@ export function App(): ReactElement {
               selected={selected?.sessionKey === session.sessionKey}
               onSelect={() => setSelectedKey(session.sessionKey)}
               onOpen={() => void openDetail(session)}
+              onFavorite={() => void toggleFavorite(session)}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setSelectedKey(session.sessionKey);
@@ -467,6 +480,7 @@ export function App(): ReactElement {
           onRename={() => beginRename(detail)}
           onAddTag={() => beginAddTag(detail)}
           onRemoveTag={(tagName) => void removeTag(detail, tagName)}
+          onFavorite={() => void toggleFavorite(detail)}
           onResume={() =>
             void runAction("Opening terminal", () => window.sessionSearch.resumeSession(detail.sessionKey), "Resume command sent to terminal.")
           }
@@ -488,6 +502,13 @@ export function App(): ReactElement {
           state={contextMenu}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
+          onFavorite={() =>
+            void runAction(
+              contextMenu.session.favorited ? "Removing favorite" : "Adding favorite",
+              () => window.sessionSearch.setFavorited(contextMenu.session.sessionKey, !contextMenu.session.favorited),
+              contextMenu.session.favorited ? "Removed from favorites." : "Added to favorites.",
+            )
+          }
           onPin={() =>
             void runAction("Updating pin", () => window.sessionSearch.setPinned(contextMenu.session.sessionKey, !contextMenu.session.pinned), "Pin updated.")
           }
@@ -545,12 +566,14 @@ function SessionRow({
   selected,
   onSelect,
   onOpen,
+  onFavorite,
   onContextMenu,
 }: {
   session: SessionSearchResult;
   selected: boolean;
   onSelect: () => void;
   onOpen: () => void;
+  onFavorite: () => void;
   onContextMenu: MouseEventHandler;
 }): ReactElement {
   return (
@@ -563,9 +586,20 @@ function SessionRow({
       <div className="session-main">
         <div className="session-title">
           <span className={`source-dot ${session.source.startsWith("claude") ? "claude" : "codex"}`} />
+          <button
+            className={`favorite-button ${session.favorited ? "active" : ""}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onFavorite();
+            }}
+            aria-label={session.favorited ? "Remove from favorites" : "Add to favorites"}
+            title={session.favorited ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star size={14} fill={session.favorited ? "currentColor" : "none"} />
+          </button>
           {session.pinned ? <Pin size={14} /> : null}
           {session.hidden ? <EyeOff size={14} /> : null}
-          <span>{session.displayTitle}</span>
+          <span className="session-name">{session.displayTitle}</span>
         </div>
         <div className="session-meta">
           <span className={`source-badge ${session.source.startsWith("claude") ? "claude" : "codex"}`}>
@@ -598,6 +632,7 @@ function DetailPanel({
   onRename,
   onAddTag,
   onRemoveTag,
+  onFavorite,
   onResume,
   onCopyResume,
   onCopyMarkdown,
@@ -614,6 +649,7 @@ function DetailPanel({
   onRename: () => void;
   onAddTag: () => void;
   onRemoveTag: (tagName: string) => void;
+  onFavorite: () => void;
   onResume: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
@@ -677,9 +713,19 @@ function DetailPanel({
             {session.projectPath || "No project"} · {new Date(session.timestamp).toLocaleString()} · {messages.length} messages
           </p>
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="Close">
-          <X size={17} />
-        </button>
+        <div className="detail-header-actions">
+          <button
+            className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
+            onClick={onFavorite}
+            aria-label={session.favorited ? "Remove from favorites" : "Add to favorites"}
+            title={session.favorited ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
+          </button>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={17} />
+          </button>
+        </div>
       </div>
       <div className="detail-actions">
         <button onClick={onResume} disabled={actionRunning}>
@@ -758,6 +804,7 @@ function ContextMenu({
   state,
   onRename,
   onAddTag,
+  onFavorite,
   onPin,
   onHide,
   onResume,
@@ -770,6 +817,7 @@ function ContextMenu({
   state: ContextMenuState;
   onRename: () => void;
   onAddTag: () => void;
+  onFavorite: () => void;
   onPin: () => void;
   onHide: () => void;
   onResume: () => void;
@@ -786,6 +834,10 @@ function ContextMenu({
       </button>
       <button onClick={onAddTag}>
         <Tag size={14} /> Add Tag
+      </button>
+      <button onClick={onFavorite}>
+        <Star size={14} fill={state.session.favorited ? "currentColor" : "none"} />{" "}
+        {state.session.favorited ? "Unfavorite" : "Favorite"}
       </button>
       <button onClick={onPin}>{state.session.pinned ? <PinOff size={14} /> : <Pin size={14} />} {state.session.pinned ? "Unpin" : "Pin"}</button>
       <button onClick={onHide}>

@@ -25,6 +25,7 @@ interface SessionRow {
   pr_url: string | null;
   pr_number: number | null;
   custom_title: string | null;
+  favorited: 0 | 1;
   pinned: 0 | 1;
   hidden: 0 | 1;
   last_opened_at: number | null;
@@ -96,6 +97,10 @@ export class SessionStore {
 
   setPinned(sessionKey: string, pinned: boolean): void {
     this.db.prepare("UPDATE sessions SET pinned = ? WHERE session_key = ?").run(pinned ? 1 : 0, sessionKey);
+  }
+
+  setFavorited(sessionKey: string, favorited: boolean): void {
+    this.db.prepare("UPDATE sessions SET favorited = ? WHERE session_key = ?").run(favorited ? 1 : 0, sessionKey);
   }
 
   setHidden(sessionKey: string, hidden: boolean): void {
@@ -259,6 +264,7 @@ export class SessionStore {
         pr_url TEXT,
         pr_number INTEGER,
         custom_title TEXT,
+        favorited INTEGER NOT NULL DEFAULT 0,
         pinned INTEGER NOT NULL DEFAULT 0,
         hidden INTEGER NOT NULL DEFAULT 0,
         last_opened_at INTEGER,
@@ -298,6 +304,14 @@ export class SessionStore {
         tokenize = 'unicode61'
       );
     `);
+    this.addColumnIfMissing("sessions", "favorited", "INTEGER NOT NULL DEFAULT 0");
+  }
+
+  private addColumnIfMissing(tableName: string, columnName: string, definition: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === columnName)) {
+      this.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    }
   }
 
   private refreshFtsForSession(sessionKey: string): void {
@@ -336,6 +350,7 @@ export class SessionStore {
   private getCandidateRows(options: SearchOptions): SessionRow[] {
     const rows = this.db.prepare("SELECT * FROM sessions").all() as SessionRow[];
     if (options.visibility === "hidden") return rows.filter((row) => row.hidden === 1);
+    if (options.visibility === "favorites") return rows.filter((row) => row.hidden === 0 && row.favorited === 1);
     if (options.visibility === "pinned") return rows.filter((row) => row.hidden === 0 && row.pinned === 1);
     return rows.filter((row) => row.hidden === 0);
   }
@@ -432,6 +447,7 @@ export class SessionStore {
       prNumber: row.pr_number,
       customTitle: row.custom_title,
       displayTitle,
+      favorited: row.favorited === 1,
       pinned: row.pinned === 1,
       hidden: row.hidden === 1,
       tags,

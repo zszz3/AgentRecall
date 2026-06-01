@@ -34,7 +34,7 @@ export interface SearchOptions {
   tag?: string;
   projectPath?: string;
   source?: SessionSource | "claude" | "codex" | "all";
-  visibility?: "default" | "hidden" | "pinned";
+  visibility?: "default" | "favorites" | "hidden" | "pinned";
   sortBy?: SessionSortBy;
   limit?: number;
 }
@@ -48,6 +48,7 @@ export interface ProjectSummary {
 export interface SessionSearchResult extends IndexedSession {
   customTitle: string | null;
   displayTitle: string;
+  favorited: boolean;
   pinned: boolean;
   hidden: boolean;
   tags: string[];
