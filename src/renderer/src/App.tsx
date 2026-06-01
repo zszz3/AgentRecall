@@ -32,6 +32,7 @@ import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
 import type { AppSettings } from "../../core/platform";
 import type {
+  LiveSessionSnapshot,
   ProjectSummary,
   SearchOptions,
   SessionMessage,
@@ -128,8 +129,25 @@ const EMPTY_QUOTAS: UsageQuotaSnapshot = {
   providers: [],
 };
 
+const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
+  generatedAt: "",
+  sessions: [],
+};
+
 function isBranchTag(tagName: string): boolean {
   return tagName.startsWith("branch:");
+}
+
+type LiveSessionState = "open" | "closed" | "unknown";
+
+function liveSessionKey(session: SessionSearchResult): string {
+  return `${session.source.startsWith("claude") ? "claude" : "codex"}:${session.rawId}`;
+}
+
+function liveStateLabel(state: LiveSessionState): string {
+  if (state === "open") return "Open";
+  if (state === "closed") return "Closed";
+  return "Unknown";
 }
 
 type ActionStatus = {
@@ -182,6 +200,7 @@ export function App(): ReactElement {
   const [quotas, setQuotas] = useState<UsageQuotaSnapshot>(EMPTY_QUOTAS);
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [quotaFeedback, setQuotaFeedback] = useState<QuotaFeedback>(null);
+  const [liveSessions, setLiveSessions] = useState<LiveSessionSnapshot>(EMPTY_LIVE_SESSIONS);
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionSearchResult | null>(null);
@@ -264,6 +283,18 @@ export function App(): ReactElement {
     }
   }, []);
 
+  const refreshLiveSessions = useCallback(async () => {
+    try {
+      setLiveSessions(await window.sessionSearch.getLiveSessions());
+    } catch (error) {
+      setLiveSessions({
+        generatedAt: new Date().toISOString(),
+        sessions: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 120);
     return () => window.clearTimeout(timer);
@@ -272,6 +303,12 @@ export function App(): ReactElement {
   useEffect(() => {
     void loadQuotas();
   }, [loadQuotas]);
+
+  useEffect(() => {
+    void refreshLiveSessions();
+    const timer = window.setInterval(() => void refreshLiveSessions(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [refreshLiveSessions]);
 
   useEffect(() => {
     void window.sessionSearch.getSettings().then(setAppSettings);
@@ -380,6 +417,10 @@ export function App(): ReactElement {
   const selected = useMemo(
     () => results.find((session) => session.sessionKey === selectedKey) || null,
     [results, selectedKey],
+  );
+  const liveSessionKeys = useMemo(
+    () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
+    [liveSessions],
   );
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -498,6 +539,8 @@ export function App(): ReactElement {
     try {
       await action();
       await refreshAfterAction();
+      await refreshLiveSessions();
+      window.setTimeout(() => void refreshLiveSessions(), 1200);
       setActionStatus({ kind: "success", message: successMessage });
       window.setTimeout(() => {
         setActionStatus((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
@@ -810,6 +853,7 @@ export function App(): ReactElement {
               key={session.sessionKey}
               session={session}
               selected={selected?.sessionKey === session.sessionKey}
+              liveState={liveSessions.error ? "unknown" : liveSessionKeys.has(liveSessionKey(session)) ? "open" : "closed"}
               onSelect={() => setSelectedKey(session.sessionKey)}
               onOpen={() => void openDetail(session)}
               onRename={() => beginRename(session)}
@@ -832,6 +876,7 @@ export function App(): ReactElement {
           loading={messagesLoading}
           actionStatus={actionStatus}
           query={query}
+          liveState={liveSessions.error ? "unknown" : liveSessionKeys.has(liveSessionKey(detail)) ? "open" : "closed"}
           onClose={closeDetail}
           onShowMore={() => void loadMoreMessages()}
           onRename={() => beginRename(detail)}
@@ -1023,6 +1068,7 @@ function SidebarSectionHeader({
 function SessionRow({
   session,
   selected,
+  liveState,
   onSelect,
   onOpen,
   onRename,
@@ -1031,6 +1077,7 @@ function SessionRow({
 }: {
   session: SessionSearchResult;
   selected: boolean;
+  liveState: LiveSessionState;
   onSelect: () => void;
   onOpen: () => void;
   onRename: () => void;
@@ -1074,6 +1121,10 @@ function SessionRow({
           </button>
         </div>
         <div className="session-meta">
+          <span className={`live-status ${liveState}`}>
+            <span className="live-status-dot" />
+            {liveStateLabel(liveState)}
+          </span>
           <span className={`source-badge ${session.source.startsWith("claude") ? "claude" : "codex"}`}>
             {session.source.startsWith("claude") ? <Code2 size={13} /> : <Terminal size={13} />}
             {SOURCE_LABEL[session.source]}
@@ -1102,6 +1153,7 @@ function DetailPanel({
   loading,
   actionStatus,
   query,
+  liveState,
   onClose,
   onShowMore,
   onRename,
@@ -1121,6 +1173,7 @@ function DetailPanel({
   loading: boolean;
   actionStatus: ActionStatus | null;
   query: string;
+  liveState: LiveSessionState;
   onClose: () => void;
   onShowMore: () => void;
   onRename: () => void;
@@ -1184,8 +1237,14 @@ function DetailPanel({
     <aside className="detail" onClick={(event) => event.stopPropagation()}>
       <div className="detail-header">
         <div>
-          <div className={`source-badge ${session.source.startsWith("claude") ? "claude" : "codex"}`}>
-            {SOURCE_LABEL[session.source]}
+          <div className="detail-badges">
+            <div className={`source-badge ${session.source.startsWith("claude") ? "claude" : "codex"}`}>
+              {SOURCE_LABEL[session.source]}
+            </div>
+            <span className={`live-status ${liveState}`}>
+              <span className="live-status-dot" />
+              {liveStateLabel(liveState)}
+            </span>
           </div>
           <div className="detail-title-row">
             <h2>{session.displayTitle}</h2>

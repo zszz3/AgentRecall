@@ -24,6 +24,7 @@ import {
   revealInFileManager,
 } from "../core/platform";
 import { loadUsageQuotaSnapshot } from "../core/quota";
+import { loadLiveSessionSnapshot } from "../core/session-activity";
 import { SessionStore } from "../core/session-store";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import type { AppSettings } from "../core/platform";
@@ -267,6 +268,7 @@ function registerIpc(): void {
   ipcMain.handle("session:messages", (_event, sessionKey: string, offset?: number, limit?: number) =>
     store.getMessages(sessionKey, offset ?? 0, limit ?? 120),
   );
+  ipcMain.handle("sessions:live", () => loadLiveSessionSnapshot());
   ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(options));
   ipcMain.handle("quota:get", () => loadUsageQuotaSnapshot());
   ipcMain.handle("tags:list", () => store.listTags());

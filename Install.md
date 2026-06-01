@@ -2,7 +2,7 @@
 
 ## 安装并使用（给使用者）
 
-只要本机有 **Node.js 22.13+**，复制下面这一行到终端回车即可安装（会自动下载、构建并注册命令）：
+只要本机有 **Node.js 22.13+**，复制下面这一行到终端回车即可安装（会自动下载 Electron 运行时、构建并注册命令）：
 
 ```bash
 npm install -g git+https://github.com/zszz3/agent-session-search.git
@@ -22,6 +22,8 @@ agent-session-search
 - Node.js 22.13 或更高版本（含 npm）
 
 > 说明：这种方式通过命令行启动，不打包成 `.app`，因此**不需要 Apple 签名或公证**，也不会被 Gatekeeper 拦截。
+>
+> SQLite 说明：项目使用 Electron 42 自带的 `node:sqlite`。安装时会下载 Electron binary（约 100MB+），但**不需要 Xcode、node-gyp、better-sqlite3 或 electron-rebuild**。
 
 ### 更新到新版本
 
@@ -93,6 +95,12 @@ Expected tools:
 - Git
 - macOS for the current desktop workflow
 
+Important dependency note:
+
+- The app depends on Electron 42+ because the runtime must expose built-in `node:sqlite`.
+- Do not add `better-sqlite3` or other native SQLite packages as an install workaround.
+- A first-time install may download an Electron binary around 100MB+. This is expected and does not require Xcode.
+
 Check versions:
 
 ```bash
@@ -107,7 +115,7 @@ If nvm is available, use the repository version before installing dependencies:
 nvm use
 ```
 
-The project uses built-in `node:sqlite`, so it does not need native SQLite npm rebuilds.
+The project uses Electron's built-in `node:sqlite`, so it does not need native SQLite npm rebuilds.
 
 ## Install Steps
 
@@ -147,6 +155,34 @@ The project uses built-in `node:sqlite`, so it does not need native SQLite npm r
    npm run dev
    ```
 
+## Troubleshooting
+
+### `No such built-in module: node:sqlite`
+
+This means the app is running under an Electron version that is too old for the current SQLite implementation.
+
+Fix:
+
+```bash
+npm install
+npm run typecheck
+npm run build
+```
+
+Confirm Electron exposes SQLite:
+
+```bash
+ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron -p "process.versions.node + ' sqlite=' + Boolean(process.getBuiltinModule?.('node:sqlite'))"
+```
+
+Expected output should include:
+
+```text
+sqlite=true
+```
+
+Do not fix this by installing `better-sqlite3`; that reintroduces native build tooling requirements.
+
 ## Runtime Data Boundary
 
 The app creates a local SQLite database at Electron's `userData` path:
@@ -185,6 +221,7 @@ Do not edit, rewrite, or delete those source files during installation.
 - [ ] Run `npm test`.
 - [ ] Run `npm run typecheck`.
 - [ ] Run `npm run build` if build verification is requested.
+- [ ] Confirm `node:sqlite` is available in Electron if startup fails.
 - [ ] Report the exact development launch command: `npm run dev`.
 - [ ] Confirm no SQLite database files are staged for commit.
 

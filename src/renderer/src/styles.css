@@ -1203,6 +1203,38 @@ select:focus-visible {
   color: var(--codex-badge-text);
 }
 
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 19px;
+  flex: 0 0 auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.live-status.open {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.live-status.unknown {
+  background: var(--running-bg);
+  color: var(--running-text);
+}
+
+.live-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .snippet {
   margin-top: 6px;
   overflow: hidden;
@@ -1300,6 +1332,13 @@ select:focus-visible {
   gap: 8px;
   min-width: 0;
   margin: 11px 0 7px;
+}
+
+.detail-badges {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
 }
 
 .detail-title-row .title-edit-button {

@@ -129,6 +129,20 @@ export interface UsageQuotaSnapshot {
   providers: UsageQuotaCard[];
 }
 
+export type LiveSessionFamily = "claude" | "codex";
+
+export interface LiveSession {
+  family: LiveSessionFamily;
+  rawId: string;
+  pid: number;
+}
+
+export interface LiveSessionSnapshot {
+  generatedAt: string;
+  sessions: LiveSession[];
+  error?: string;
+}
+
 export interface ClaudeSessionIndexFile {
   sessionId: string;
   cwd: string;
