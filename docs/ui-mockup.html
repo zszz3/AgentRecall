@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent-Session-Search · Design Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   Agent-Session-Search — "Raycast-grade command console"
+   Deep ink · frosted glass · dual source-accent (Claude amber / Codex teal)
+   ============================================================ */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg-base: #0a0b0d;
+  --bg-sidebar: #0d0e11;
+  --bg-elevated: #15171b;
+  --bg-elevated-2: #1a1d22;
+  --bg-glass: rgba(20, 22, 26, 0.72);
+
+  /* lines */
+  --border: rgba(255, 255, 255, 0.065);
+  --border-strong: rgba(255, 255, 255, 0.12);
+
+  /* text */
+  --text: #eceef1;
+  --text-dim: #9aa1aa;
+  --text-faint: #626871;
+
+  /* signature accent — honey amber */
+  --accent: #eca95c;
+  --accent-bright: #f4b86e;
+  --accent-soft: rgba(236, 169, 92, 0.14);
+  --accent-line: rgba(236, 169, 92, 0.55);
+  --accent-glow: rgba(236, 169, 92, 0.22);
+
+  /* source identity */
+  --claude: #e8924a;
+  --claude-tint: rgba(232, 146, 74, 0.16);
+  --codex: #34c79a;
+  --codex-tint: rgba(52, 199, 154, 0.15);
+
+  --danger: #f0795f;
+
+  --radius: 12px;
+  --radius-sm: 9px;
+
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* grain + ambient light overlay over everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 500px at 12% -8%, rgba(236, 169, 92, 0.08), transparent 60%),
+    radial-gradient(700px 500px at 100% 0%, rgba(52, 199, 154, 0.05), transparent 55%);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+button, input { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; }
+
+::selection { background: var(--accent-soft); color: #fff; }
+
+/* custom scrollbars */
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); background-clip: padding-box; }
+
+/* ============================================================ LAYOUT */
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  height: 100vh;
+}
+
+/* faux macOS hidden-inset titlebar drag strip */
+.titlebar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 40px;
+  z-index: 5;
+  -webkit-app-region: drag;
+  pointer-events: none;
+}
+.traffic {
+  position: absolute;
+  top: 14px; left: 14px;
+  display: flex; gap: 8px;
+}
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.traffic i:nth-child(1) { background: #ff5f57; }
+.traffic i:nth-child(2) { background: #febc2e; }
+.traffic i:nth-child(3) { background: #28c840; }
+
+/* ============================================================ SIDEBAR */
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 52px 12px 14px;
+  background:
+    linear-gradient(180deg, rgba(236, 169, 92, 0.05), transparent 200px),
+    var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.brand { display: flex; align-items: center; gap: 11px; padding: 0 6px 14px; }
+.brand-mark {
+  position: relative;
+  display: grid; place-items: center;
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(140deg, var(--accent-bright), #d97f38);
+  color: #1a1206;
+  box-shadow: 0 6px 18px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.35);
+}
+.brand h1 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -0.2px; }
+.brand p { margin: 2px 0 0; font-size: 11px; color: var(--text-faint); letter-spacing: 0.2px; }
+
+.primary {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 38px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0)), var(--bg-elevated-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-weight: 600; font-size: 13px;
+  transition: transform .12s ease, border-color .15s ease, background .15s ease;
+}
+.primary:hover { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-bright); }
+.primary:active { transform: translateY(1px); }
+.primary svg { color: var(--accent); }
+
+.status {
+  display: grid; gap: 5px;
+  padding: 11px 12px;
+  margin: 8px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.018);
+}
+.status-top { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--codex); box-shadow: 0 0 0 0 var(--codex); animation: pulse 2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,199,154,0.5); } 70% { box-shadow: 0 0 0 7px rgba(52,199,154,0); } 100% { box-shadow: 0 0 0 0 rgba(52,199,154,0); } }
+.status span { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+.filter-title {
+  margin: 14px 8px 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.7px;
+  text-transform: uppercase; color: var(--text-faint);
+}
+
+.nav-group, .tag-list { display: grid; gap: 2px; }
+.nav-group button, .tag-list .tag-row {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; min-height: 32px; padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text-dim); font-size: 13px; text-align: left;
+  transition: background .12s ease, color .12s ease;
+}
+.nav-group button:hover, .tag-row:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+.nav-group button.active {
+  position: relative;
+  background: var(--accent-soft); color: var(--accent-bright); font-weight: 600;
+}
+.nav-group button.active::before {
+  content: ""; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.nav-group button .count { margin-left: auto; font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+.tag-list .tag-row { cursor: pointer; }
+.tag-row .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--text-faint); }
+.tag-row.active { background: rgba(255,255,255,0.05); color: var(--text); }
+.tag-row .del { margin-left: auto; opacity: 0; color: var(--text-faint); display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; }
+.tag-row:hover .del { opacity: 1; }
+.tag-row .del:hover { background: rgba(240,121,95,0.14); color: var(--danger); }
+
+/* ============================================================ CONTENT */
+.content { display: flex; flex-direction: column; min-width: 0; padding: 44px 22px 18px; }
+
+.toolbar { display: flex; align-items: center; gap: 10px; }
+.searchbox {
+  position: relative;
+  display: flex; align-items: center; gap: 11px;
+  flex: 1; height: 46px; padding: 0 14px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 24px rgba(0,0,0,0.25);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.searchbox:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 8px 24px rgba(0,0,0,0.3);
+}
+.searchbox svg { color: var(--text-faint); flex: 0 0 auto; }
+.searchbox:focus-within svg { color: var(--accent); }
+.searchbox input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 15px; }
+.searchbox input::placeholder { color: var(--text-faint); }
+.kbd {
+  display: inline-flex; align-items: center; gap: 2px;
+  height: 22px; padding: 0 7px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-strong);
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+}
+
+.result-count {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 38px; padding: 0 4px;
+  font-size: 12px; color: var(--text-faint);
+}
+.result-count b { color: var(--text-dim); font-weight: 600; }
+.result-count .path { font-family: var(--mono); font-size: 11px; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.results { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 4px 4px; display: flex; flex-direction: column; gap: 7px; }
+
+/* session row */
+.row {
+  position: relative;
+  display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 14px;
+  padding: 13px 15px;
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform .14s cubic-bezier(.2,.7,.3,1), border-color .15s ease, background .15s ease;
+  opacity: 0;
+  animation: rise .5s cubic-bezier(.2,.7,.3,1) forwards;
+}
+.row:nth-child(1) { animation-delay: .02s; }
+.row:nth-child(2) { animation-delay: .06s; }
+.row:nth-child(3) { animation-delay: .10s; }
+.row:nth-child(4) { animation-delay: .14s; }
+.row:nth-child(5) { animation-delay: .18s; }
+.row:nth-child(6) { animation-delay: .22s; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.row::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: transparent; transition: background .15s ease;
+}
+.row:hover { transform: translateY(-1px); border-color: var(--border-strong); background: var(--bg-elevated-2); }
+.row.selected { border-color: var(--accent-line); background: linear-gradient(90deg, var(--accent-soft), transparent 40%), var(--bg-elevated-2); }
+.row.selected::before { background: var(--accent); }
+
+.row-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14.5px; font-weight: 600; letter-spacing: -0.1px; }
+.row-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.src-dot.claude { background: var(--claude); box-shadow: 0 0 8px var(--claude); }
+.src-dot.codex { background: var(--codex); box-shadow: 0 0 8px var(--codex); }
+.row-title .pin { color: var(--accent); flex: 0 0 auto; }
+
+.row-meta { display: flex; align-items: center; gap: 9px; margin-top: 7px; font-size: 11.5px; color: var(--text-faint); min-width: 0; }
+.row-meta .mono { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-meta .sep { opacity: 0.4; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
+  height: 21px; padding: 0 9px;
+  border-radius: 99px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.2px;
+}
+.badge.claude { background: var(--claude-tint); color: #f0a868; }
+.badge.codex { background: var(--codex-tint); color: #4fd6ad; }
+
+.snippet { margin-top: 9px; font-size: 12.5px; line-height: 1.5; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snippet mark { background: var(--accent-soft); color: var(--accent-bright); border-radius: 3px; padding: 0 2px; }
+
+.row-tags { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.row-tags span { padding: 3px 9px; border-radius: 99px; background: rgba(255,255,255,0.045); color: var(--text-dim); font-size: 11px; font-family: var(--mono); }
+
+/* ============================================================ DETAIL SLIDE-OVER */
+.detail-backdrop {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; justify-content: flex-end;
+  padding: 14px;
+  background: rgba(6, 7, 9, 0.5);
+  backdrop-filter: blur(4px);
+  animation: fade .2s ease;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.detail {
+  display: flex; flex-direction: column;
+  width: min(720px, calc(100vw - 290px));
+  height: 100%;
+  border-radius: 16px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 40px 120px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+  overflow: hidden;
+  animation: slide .42s cubic-bezier(.16,1,.3,1);
+}
+@keyframes slide { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.detail-header { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 14px; padding: 22px 22px 16px; border-bottom: 1px solid var(--border); }
+.detail-header h2 { margin: 11px 0 7px; font-size: 22px; font-weight: 700; letter-spacing: -0.4px; line-height: 1.2; }
+.detail-header .sub { margin: 0; font-size: 12px; color: var(--text-faint); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-btn { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text-dim); transition: all .14s ease; }
+.icon-btn:hover { border-color: var(--border-strong); color: var(--text); background: rgba(255,255,255,0.07); }
+
+.detail-actions { display: flex; flex-wrap: wrap; gap: 7px; padding: 14px 22px; border-bottom: 1px solid var(--border); }
+.detail-actions button {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+  color: var(--text-dim); font-size: 12.5px; font-weight: 500;
+  transition: all .14s ease;
+}
+.detail-actions button:hover { border-color: var(--border-strong); color: var(--text); background: rgba(255,255,255,0.07); }
+.detail-actions button.go { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-bright); }
+.detail-actions button.go:hover { background: rgba(236,169,92,0.22); }
+.detail-actions button svg { width: 14px; height: 14px; }
+
+.detail-tags { display: flex; flex-wrap: wrap; gap: 7px; padding: 13px 22px; border-bottom: 1px solid var(--border); }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 99px; background: var(--codex-tint); color: #4fd6ad; font-size: 12px; font-family: var(--mono); }
+
+.detail-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 22px 22px; }
+.section-label { margin: 18px 0 10px; font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-faint); }
+.section-label.matched { color: var(--accent); }
+
+.msg { margin-bottom: 11px; border-radius: 12px; border: 1px solid var(--border); overflow: hidden; background: rgba(255,255,255,0.018); }
+.msg.user { background: var(--accent-soft); border-color: rgba(236,169,92,0.2); }
+.msg-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; border-bottom: 1px solid var(--border); }
+.msg-head .who { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.3px; }
+.msg.user .who { color: var(--accent-bright); }
+.msg.assistant .who { color: var(--codex); }
+.msg-head time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.msg pre { margin: 0; padding: 13px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: #d4d8dd; white-space: pre-wrap; word-break: break-word; }
+.msg pre mark { background: var(--accent-soft); color: var(--accent-bright); border-radius: 3px; padding: 0 2px; }
+
+.show-more { width: 100%; height: 40px; margin-top: 6px; border-radius: 10px; border: 1px dashed var(--border-strong); background: transparent; color: var(--accent); font-weight: 600; font-size: 13px; transition: all .14s ease; }
+.show-more:hover { background: var(--accent-soft); border-style: solid; }
+
+/* helper to demonstrate toggling */
+.hint { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 40; padding: 8px 14px; border-radius: 99px; background: var(--bg-glass); backdrop-filter: blur(20px); border: 1px solid var(--border-strong); font-size: 12px; color: var(--text-dim); box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+.hint b { color: var(--accent-bright); }
+</style>
+</head>
+<body>
+<div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div></div>
+
+<div class="app">
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      </div>
+      <div>
+        <h1>Agent Sessions</h1>
+        <p>search · resume · organize</p>
+      </div>
+    </div>
+
+    <button class="primary">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      Refresh Index
+    </button>
+
+    <div class="status">
+      <div class="status-top"><span class="pulse"></span> Indexed</div>
+      <span>134 / 134 sessions · 2 min ago</span>
+    </div>
+
+    <div class="filter-title">Library</div>
+    <nav class="nav-group">
+      <button class="active">All <span class="count">134</span></button>
+      <button>Pinned <span class="count">5</span></button>
+      <button>Hidden <span class="count">12</span></button>
+    </nav>
+
+    <div class="filter-title">Sources</div>
+    <nav class="nav-group">
+      <button>All</button>
+      <button>Claude <span class="count">88</span></button>
+      <button>Codex <span class="count">46</span></button>
+    </nav>
+
+    <div class="filter-title">Tags</div>
+    <nav class="tag-list">
+      <div class="tag-row active"><span class="dot" style="background:var(--accent)"></span> ui-design <span class="del"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+      <div class="tag-row"><span class="dot" style="background:var(--codex)"></span> infra <span class="del"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+      <div class="tag-row"><span class="dot" style="background:var(--claude)"></span> bugfix <span class="del"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+      <div class="tag-row"><span class="dot"></span> research <span class="del"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span></div>
+    </nav>
+  </aside>
+
+  <!-- ===================== CONTENT ===================== -->
+  <main class="content">
+    <header class="toolbar">
+      <div class="searchbox">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input placeholder="Search titles, questions, full text, paths, or ids…" value="sqlite" />
+        <span class="kbd">⌘K</span>
+      </div>
+    </header>
+
+    <div class="result-count">
+      <span><b>134</b> sessions</span>
+      <span class="path">~/myProject/agent-session-search</span>
+    </div>
+
+    <div class="results" id="results">
+      <article class="row selected" data-i="0">
+        <div>
+          <div class="row-title"><span class="src-dot claude"></span><svg class="pin" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M16 4v6l3 3v2h-6v6l-1 1-1-1v-6H5v-2l3-3V4z"/></svg><span>Fix the SQLite ABI mismatch on rebuild</span></div>
+          <div class="row-meta">
+            <span class="badge claude">Claude Code</span>
+            <span class="mono">~/agent-session-search</span><span class="sep">·</span>
+            <span>42 messages</span><span class="sep">·</span><span>2h ago</span>
+          </div>
+          <div class="snippet">…the native <mark>sqlite</mark> module fails because better-sqlite3 was built against the wrong NODE_MODULE_VERSION…</div>
+        </div>
+        <div class="row-tags"><span>#infra</span><span>#bugfix</span></div>
+      </article>
+
+      <article class="row" data-i="1">
+        <div>
+          <div class="row-title"><span class="src-dot codex"></span><span>Redesign the session search console UI</span></div>
+          <div class="row-meta">
+            <span class="badge codex">Codex CLI</span>
+            <span class="mono">~/agent-session-search</span><span class="sep">·</span>
+            <span>18 messages</span><span class="sep">·</span><span>5h ago</span>
+          </div>
+          <div class="snippet">explore a Raycast-grade dark aesthetic with dual source accents and frosted glass panels…</div>
+        </div>
+        <div class="row-tags"><span>#ui-design</span></div>
+      </article>
+
+      <article class="row" data-i="2">
+        <div>
+          <div class="row-title"><span class="src-dot claude"></span><span>Index sessions in background batches</span></div>
+          <div class="row-meta">
+            <span class="badge claude">Claude Code</span>
+            <span class="mono">~/agent-session-search</span><span class="sep">·</span>
+            <span>67 messages</span><span class="sep">·</span><span>1d ago</span>
+          </div>
+          <div class="snippet">stream the index build so the window stays responsive while scanning thousands of jsonl files…</div>
+        </div>
+        <div class="row-tags"><span>#infra</span></div>
+      </article>
+
+      <article class="row" data-i="3">
+        <div>
+          <div class="row-title"><span class="src-dot codex"></span><span>Sort sessions by latest activity</span></div>
+          <div class="row-meta">
+            <span class="badge codex">Codex CLI</span>
+            <span class="mono">~/notes-app</span><span class="sep">·</span>
+            <span>9 messages</span><span class="sep">·</span><span>2d ago</span>
+          </div>
+          <div class="snippet">order results by the most recent message timestamp instead of file mtime…</div>
+        </div>
+        <div class="row-tags"></div>
+      </article>
+
+      <article class="row" data-i="4">
+        <div>
+          <div class="row-title"><span class="src-dot claude"></span><span>Restore double-click to open a session</span></div>
+          <div class="row-meta">
+            <span class="badge claude">Claude App</span>
+            <span class="mono">~/dashboard</span><span class="sep">·</span>
+            <span>14 messages</span><span class="sep">·</span><span>3d ago</span>
+          </div>
+          <div class="snippet">wire the row's dblclick handler back to openDetail after the selection refactor…</div>
+        </div>
+        <div class="row-tags"><span>#bugfix</span></div>
+      </article>
+
+      <article class="row" data-i="5">
+        <div>
+          <div class="row-title"><span class="src-dot codex"></span><span>Set the application menu name</span></div>
+          <div class="row-meta">
+            <span class="badge codex">Codex App</span>
+            <span class="mono">~/agent-session-search</span><span class="sep">·</span>
+            <span>6 messages</span><span class="sep">·</span><span>4d ago</span>
+          </div>
+          <div class="snippet">override productName so the macOS menu bar shows the right label instead of Electron…</div>
+        </div>
+        <div class="row-tags"><span>#research</span></div>
+      </article>
+    </div>
+  </main>
+</div>
+
+<!-- ===================== DETAIL SLIDE-OVER ===================== -->
+<div class="detail-backdrop" id="detail">
+  <section class="detail" onclick="event.stopPropagation()">
+    <div class="detail-header">
+      <div>
+        <span class="badge claude">Claude Code</span>
+        <h2>Fix the SQLite ABI mismatch on rebuild</h2>
+        <p class="sub">~/myProject/agent-session-search · Jun 1, 2026, 2:14 PM · 42 messages</p>
+      </div>
+      <button class="icon-btn" onclick="document.getElementById('detail').style.display='none'">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="detail-actions">
+      <button class="go"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Resume</button>
+      <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg> Open App</button>
+      <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Rename</button>
+      <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor"/></svg> Add Tag</button>
+      <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> Copy Cmd</button>
+      <button>Markdown</button>
+      <button>Plain Text</button>
+      <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h6l2 3h8v13H4z"/></svg> Finder</button>
+    </div>
+
+    <div class="detail-tags">
+      <span class="chip">#infra ×</span>
+      <span class="chip">#bugfix ×</span>
+    </div>
+
+    <div class="detail-body">
+      <div class="section-label matched">Matched context</div>
+      <div class="msg user">
+        <div class="msg-head"><span class="who">● User</span><time>2:14:09 PM</time></div>
+        <pre>npm run dev keeps crashing with a NODE_MODULE_VERSION error from <mark>sqlite</mark>. how do I rebuild it for electron?</pre>
+      </div>
+      <div class="msg assistant">
+        <div class="msg-head"><span class="who">● Assistant</span><time>2:14:31 PM</time></div>
+        <pre>better-sqlite3 is a native addon, so it must be compiled against the exact runtime that loads it.
+Run `npm run rebuild:electron` (electron-rebuild -f -w better-sqlite3) before electron-vite dev — the script already does this for you.</pre>
+      </div>
+
+      <div class="section-label">Full conversation</div>
+      <div class="msg user">
+        <div class="msg-head"><span class="who">● User</span><time>2:12:02 PM</time></div>
+        <pre>I just pulled main and the desktop app won't start.</pre>
+      </div>
+      <div class="msg assistant">
+        <div class="msg-head"><span class="who">● Assistant</span><time>2:12:20 PM</time></div>
+        <pre>Let's look at the error. Can you paste the stack trace from the terminal?</pre>
+      </div>
+      <button class="show-more">Show 38 more messages</button>
+    </div>
+  </section>
+</div>
+
+<div class="hint">Click a row to <b>select</b> · the panel on the right is the <b>detail slide-over</b> · click backdrop to dismiss</div>
+
+<script>
+  const rows = document.querySelectorAll('.row');
+  rows.forEach(r => r.addEventListener('click', () => {
+    rows.forEach(x => x.classList.remove('selected'));
+    r.classList.add('selected');
+  }));
+  rows.forEach(r => r.addEventListener('dblclick', () => {
+    document.getElementById('detail').style.display = 'flex';
+  }));
+  document.getElementById('detail').addEventListener('click', () => {
+    document.getElementById('detail').style.display = 'none';
+  });
+</script>
+</body>
+</html>

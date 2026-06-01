@@ -16,6 +16,8 @@
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/geist-mono": "^5.2.8",
     "better-sqlite3": "^11.10.0",
     "electron-store": "^10.0.1",
     "lucide-react": "^0.468.0",

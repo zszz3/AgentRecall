@@ -213,6 +213,7 @@ export function App(): ReactElement {
 
   return (
     <main className="app" onClick={() => setContextMenu(null)}>
+      <div className="titlebar-drag" />
       <section className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -301,6 +302,7 @@ export function App(): ReactElement {
               placeholder={tag ? `Search within #${tag}` : "Search titles, first questions, full text, paths, or ids"}
               autoFocus
             />
+            <span className="kbd-hint">⌘K</span>
           </div>
           {tag ? (
             <button className="chip clear" onClick={() => setTag(undefined)}>

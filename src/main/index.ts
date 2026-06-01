@@ -65,6 +65,10 @@ function createWindow(): void {
     minHeight: 560,
     title: PRODUCT_NAME,
     show: false,
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 14, y: 14 } }
+      : {}),
+    backgroundColor: "#0a0b0d",
     webPreferences: {
       preload: preloadPath,
       sandbox: false,
