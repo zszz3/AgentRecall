@@ -1,0 +1,37 @@
+{
+  "name": "agent-session-search",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop console for searching, tagging, and resuming AI agent coding sessions.",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run rebuild:electron && electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run rebuild:node && vitest run",
+    "test:watch": "vitest",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "electron-store": "^10.0.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}
