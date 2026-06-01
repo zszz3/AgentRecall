@@ -20,6 +20,7 @@ export function parseCodexSessionMetaLine(parsed: CodexConversationLine): {
   id: string;
   projectPath: string;
   ts: number;
+  gitBranch?: string;
   originator?: string;
 } | null {
   if (parsed.type === "session_meta" && parsed.payload?.id) {
@@ -27,6 +28,7 @@ export function parseCodexSessionMetaLine(parsed: CodexConversationLine): {
       id: parsed.payload.id,
       projectPath: parsed.payload.cwd || "",
       ts: parsed.timestamp ? new Date(parsed.timestamp).getTime() : 0,
+      gitBranch: parsed.payload.git?.branch,
       originator: parsed.payload.originator,
     };
   }
@@ -87,6 +89,15 @@ function firstQuestion(messages: SessionMessage[]): string {
   return messages.find((message) => message.role === "user" && isMeaningfulUserMessage(message.content))?.content || "";
 }
 
+function firstClaudeGitBranch(rows: unknown[]): string | null {
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || !("gitBranch" in row)) continue;
+    const branch = (row as ClaudeConversationLine).gitBranch?.trim();
+    if (branch) return branch;
+  }
+  return null;
+}
+
 function createIndexedSession(input: {
   family: "claude" | "codex";
   rawId: string;
@@ -98,6 +109,7 @@ function createIndexedSession(input: {
   timestamp: number;
   prUrl?: string | null;
   prNumber?: number | null;
+  gitBranch?: string | null;
 }): IndexedSession {
   const stat = safeStat(input.filePath);
   return {
@@ -113,6 +125,7 @@ function createIndexedSession(input: {
     fileSize: stat.size,
     prUrl: input.prUrl ?? null,
     prNumber: input.prNumber ?? null,
+    gitBranch: input.gitBranch ?? null,
   };
 }
 
@@ -135,6 +148,7 @@ export function loadCodexSessionFile(filePath: string, title?: string, updatedAt
     originalTitle: title || cleanTitle(question) || "Untitled Session",
     firstQuestion: question ? cleanTitle(question) : "",
     timestamp: updatedAt ? new Date(updatedAt).getTime() : meta.ts,
+    gitBranch: meta.gitBranch,
   });
 
   return { session, messages };
@@ -191,6 +205,7 @@ export function* loadCodexSessionsIterator(codexDir = path.join(os.homedir(), ".
         originalTitle: indexedTitle?.title || cleanTitle(question) || "Untitled Session",
         firstQuestion: question ? cleanTitle(question) : "",
         timestamp: indexedTitle?.updatedAt ? new Date(indexedTitle.updatedAt).getTime() : meta.ts,
+        gitBranch: meta.gitBranch,
       }),
       messages,
     };
@@ -240,6 +255,7 @@ export function* loadClaudeCliSessionsIterator(claudeDir = path.join(os.homedir(
       const embeddedCwd = (rows.find((row) => row && typeof row === "object" && "cwd" in row) as
         | ClaudeConversationLine
         | undefined)?.cwd;
+      const gitBranch = firstClaudeGitBranch(rows);
       yield {
         session: createIndexedSession({
           family: "claude",
@@ -250,6 +266,7 @@ export function* loadClaudeCliSessionsIterator(claudeDir = path.join(os.homedir(
           originalTitle: cleanTitle(question) || "Untitled Session",
           firstQuestion: cleanTitle(question),
           timestamp: index.get(rawId)?.startedAt || 0,
+          gitBranch,
         }),
         messages,
       };
@@ -299,6 +316,7 @@ export function* loadClaudeAppSessionsIterator(
     const messages = extractMessages(rows, "claude");
     const question = firstQuestion(messages);
     const title = appMeta.title && !/^Session\s+\d+$/i.test(appMeta.title) ? appMeta.title : cleanTitle(question);
+    const gitBranch = firstClaudeGitBranch(rows);
     yield {
       session: createIndexedSession({
         family: "claude",
@@ -311,6 +329,7 @@ export function* loadClaudeAppSessionsIterator(
         timestamp: appMeta.lastActivityAt || appMeta.createdAt || 0,
         prUrl: appMeta.prUrl || null,
         prNumber: appMeta.prNumber || null,
+        gitBranch,
       }),
       messages,
     };

@@ -366,6 +366,24 @@ button:disabled {
   color: var(--text);
 }
 
+.tag-list-row.branch-tag .tag-filter {
+  color: #7dd3fc;
+}
+
+.tag-list-row.branch-tag .tag-filter svg {
+  color: #38bdf8;
+}
+
+.tag-list-row.branch-tag:hover,
+.tag-list-row.branch-tag.active {
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.tag-list-row.branch-tag.active .tag-filter {
+  color: #e0f2fe;
+  font-weight: 650;
+}
+
 .tag-filter span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -721,6 +739,13 @@ button:disabled {
   font-family: var(--mono);
 }
 
+.row-tags span.branch-tag {
+  border: 1px solid rgba(56, 189, 248, 0.34);
+  background: rgba(14, 165, 233, 0.18);
+  color: #bae6fd;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -737,6 +762,17 @@ button:disabled {
 
 .chip:hover {
   background: rgba(52, 199, 154, 0.24);
+}
+
+.chip.branch-tag {
+  border: 1px solid rgba(56, 189, 248, 0.36);
+  background: rgba(14, 165, 233, 0.2);
+  color: #bae6fd;
+}
+
+.chip.branch-tag:hover {
+  background: rgba(14, 165, 233, 0.3);
+  color: #e0f2fe;
 }
 
 .chip.clear {

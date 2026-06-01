@@ -84,6 +84,8 @@ export class SessionStore {
       }
 
       this.refreshFtsForSession(session.sessionKey);
+      const branchTag = branchTagName(session.gitBranch);
+      if (branchTag) this.addTagToSession(session.sessionKey, branchTag);
     });
 
     write();
@@ -119,11 +121,7 @@ export class SessionStore {
     const name = tagName.trim();
     if (!name) return;
     const write = this.db.transaction(() => {
-      this.db.prepare("INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING").run(name);
-      const tag = this.db.prepare("SELECT id FROM tags WHERE name = ?").get(name) as { id: number };
-      this.db
-        .prepare("INSERT INTO session_tags (session_key, tag_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
-        .run(sessionKey, tag.id);
+      this.addTagToSession(sessionKey, name);
     });
     write();
   }
@@ -347,6 +345,16 @@ export class SessionStore {
       .run(tagName);
   }
 
+  private addTagToSession(sessionKey: string, tagName: string): void {
+    const name = tagName.trim();
+    if (!name) return;
+    this.db.prepare("INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING").run(name);
+    const tag = this.db.prepare("SELECT id FROM tags WHERE name = ?").get(name) as { id: number };
+    this.db
+      .prepare("INSERT INTO session_tags (session_key, tag_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
+      .run(sessionKey, tag.id);
+  }
+
   private getCandidateRows(options: SearchOptions): SessionRow[] {
     const rows = this.db.prepare("SELECT * FROM sessions").all() as SessionRow[];
     if (options.visibility === "hidden") return rows.filter((row) => row.hidden === 1);
@@ -491,6 +499,11 @@ function buildFtsQuery(query: string): string {
     .filter(Boolean)
     .map((token) => `${token}*`)
     .join(" ");
+}
+
+function branchTagName(branch: string | null | undefined): string | null {
+  const normalized = branch?.trim();
+  return normalized ? `branch:${normalized}` : null;
 }
 
 function projectParts(projectPath: string): string[] {

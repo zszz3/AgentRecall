@@ -11,6 +11,7 @@ import {
   EyeOff,
   Folder,
   FolderOpen,
+  GitBranch,
   Pin,
   PinOff,
   Play,
@@ -52,6 +53,10 @@ const SORT_OPTIONS: Array<{ label: string; value: SessionSortBy }> = [
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
 const INITIAL_MESSAGE_LIMIT = 20;
 const MESSAGE_PAGE_SIZE = 80;
+
+function isBranchTag(tagName: string): boolean {
+  return tagName.startsWith("branch:");
+}
 
 type ActionStatus = {
   kind: "running" | "success" | "error";
@@ -385,9 +390,12 @@ export function App(): ReactElement {
             All Tags
           </button>
           {tags.map((tagName) => (
-            <div key={tagName} className={`tag-list-row ${tag === tagName ? "active" : ""}`}>
+            <div
+              key={tagName}
+              className={`tag-list-row ${tag === tagName ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
+            >
               <button className="tag-filter" onClick={() => setTag(tagName)} title={`Filter by ${tagName}`}>
-                <Tag size={13} />
+                {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
                 <span>{tagName}</span>
               </button>
               <button
@@ -636,7 +644,9 @@ function SessionRow({
       </div>
       <div className="row-tags">
         {session.tags.slice(0, 3).map((tagName) => (
-          <span key={tagName}>#{tagName}</span>
+          <span key={tagName} className={isBranchTag(tagName) ? "branch-tag" : undefined}>
+            #{tagName}
+          </span>
         ))}
       </div>
     </article>
@@ -783,7 +793,7 @@ function DetailPanel({
       {actionStatus ? <div className={`action-status ${actionStatus.kind}`}>{actionStatus.message}</div> : null}
       <div className="detail-tags">
         {session.tags.map((tagName) => (
-          <button key={tagName} className="chip" onClick={() => onRemoveTag(tagName)}>
+          <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)}>
             #{tagName} ×
           </button>
         ))}

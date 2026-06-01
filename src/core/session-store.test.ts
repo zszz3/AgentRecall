@@ -86,6 +86,15 @@ describe("SessionStore", () => {
     expect(store.searchSessions({ query: "", tag: "backend" })).toHaveLength(1);
   });
 
+  it("adds a branch tag from indexed Codex metadata", () => {
+    const store = createInMemoryStore();
+
+    store.upsertIndexedSession(sampleSession({ gitBranch: "feat/session-tags" }), messages);
+
+    expect(store.listTags()).toEqual(["branch:feat/session-tags"]);
+    expect(store.searchSessions({ tag: "branch:feat/session-tags" }).map((session) => session.sessionKey)).toEqual(["codex:abc"]);
+  });
+
   it("lists projects with counts and disambiguates duplicate folder names", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(

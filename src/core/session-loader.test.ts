@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadCodexSessionFile, parseCodexSessionMetaLine } from "./session-loader";
+import { loadClaudeCliSessions, loadCodexSessionFile, parseCodexSessionMetaLine } from "./session-loader";
 
 describe("Codex session loading", () => {
   it("extracts id, cwd, originator, first question, and visible messages from a rollout file", () => {
@@ -14,7 +14,7 @@ describe("Codex session loading", () => {
         JSON.stringify({
           type: "session_meta",
           timestamp: "2026-06-01T10:00:00Z",
-          payload: { id: "codex-1", cwd: "/repo", originator: "Codex Desktop" },
+          payload: { id: "codex-1", cwd: "/repo", originator: "Codex Desktop", git: { branch: "feat/session-tags" } },
         }),
         JSON.stringify({
           type: "response_item",
@@ -43,6 +43,7 @@ describe("Codex session loading", () => {
       projectPath: "/repo",
       firstQuestion: "修复登录态失效",
       originalTitle: "修复登录态失效",
+      gitBranch: "feat/session-tags",
     });
     expect(loaded?.messages.map((m) => m.content)).toEqual(["修复登录态失效", "我来检查 auth 逻辑"]);
 
@@ -54,9 +55,9 @@ describe("Codex session loading", () => {
       parseCodexSessionMetaLine({
         type: "session_meta",
         timestamp: "2026-06-01T10:00:00Z",
-        payload: { id: "new-id", cwd: "/new" },
+        payload: { id: "new-id", cwd: "/new", git: { branch: "feat/session-tags" } },
       }),
-    ).toMatchObject({ id: "new-id", projectPath: "/new" });
+    ).toMatchObject({ id: "new-id", projectPath: "/new", gitBranch: "feat/session-tags" });
 
     expect(
       parseCodexSessionMetaLine({
@@ -66,5 +67,47 @@ describe("Codex session loading", () => {
         git: { cwd: "/old" },
       }),
     ).toMatchObject({ id: "old-id", projectPath: "/old" });
+  });
+});
+
+describe("Claude session loading", () => {
+  it("extracts branch metadata from Claude Code jsonl rows", () => {
+    const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-claude-"));
+    const projectDir = path.join(claudeDir, "projects", "-repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "claude-1.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-06-01T10:00:00Z",
+          cwd: "/repo",
+          sessionId: "claude-1",
+          gitBranch: "feat/claude-tags",
+          message: { role: "user", content: "修复会话列表" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-06-01T10:01:00Z",
+          cwd: "/repo",
+          sessionId: "claude-1",
+          gitBranch: "feat/claude-tags",
+          message: { role: "assistant", content: "我来处理" },
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadClaudeCliSessions(claudeDir);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      sessionKey: "claude:claude-1",
+      rawId: "claude-1",
+      source: "claude-cli",
+      projectPath: "/repo",
+      gitBranch: "feat/claude-tags",
+    });
+
+    fs.rmSync(claudeDir, { recursive: true, force: true });
   });
 });

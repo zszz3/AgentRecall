@@ -22,6 +22,7 @@ export interface IndexedSession {
   fileSize: number;
   prUrl: string | null;
   prNumber: number | null;
+  gitBranch?: string | null;
 }
 
 export interface LoadedSession {
@@ -80,6 +81,7 @@ export interface ClaudeConversationLine {
   type: "user" | "assistant" | string;
   timestamp?: string;
   cwd?: string;
+  gitBranch?: string;
   message?: {
     role: "user" | "assistant";
     content?: string | Array<{ type?: string; text?: string }>;
@@ -100,6 +102,11 @@ export interface CodexConversationLine {
     content?: Array<{ type?: string; text?: string }>;
     id?: string;
     cwd?: string;
+    git?: {
+      branch?: string;
+      commit_hash?: string;
+      repository_url?: string;
+    };
     originator?: string;
   };
 }
