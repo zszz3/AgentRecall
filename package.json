@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "electron-vite build"
+    "prepare": "node ./node_modules/electron-vite/bin/electron-vite.js build"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
