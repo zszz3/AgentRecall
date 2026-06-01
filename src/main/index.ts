@@ -18,7 +18,6 @@ import { formatSessionMarkdown, formatSessionPlainText } from "../core/format-se
 import {
   defaultSettings,
   getResumeCommand,
-  getTerminalAvailability,
   openNativeApp,
   openResumeInSpecificTerminal,
   openResumeInTerminal,
@@ -259,7 +258,6 @@ function registerIpc(): void {
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
-  ipcMain.handle("terminal:availability", () => getTerminalAvailability());
   ipcMain.handle("settings:get", () => getSettings());
   ipcMain.handle("settings:set", (_event, settings: Partial<AppSettings>) => {
     settingsStore.set({ ...getSettings(), ...settings });

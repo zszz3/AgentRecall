@@ -1090,6 +1090,38 @@ select:focus-visible {
   color: var(--danger);
 }
 
+.action-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  max-width: min(420px, calc(100vw - 36px));
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 9px;
+  background: var(--panel-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-popover);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.action-toast.running {
+  border-left-color: var(--running-text);
+  color: var(--running-text);
+}
+
+.action-toast.success {
+  border-left-color: var(--success-text);
+  color: var(--success-text);
+}
+
+.action-toast.error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
 .matched,
 .conversation {
   padding: 4px 18px 0;

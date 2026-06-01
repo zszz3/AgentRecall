@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppSettings, TerminalAvailability } from "../core/platform";
+import type { AppSettings } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
 import type { ProjectSummary, SearchOptions, SessionMessage, SessionSearchResult } from "../core/types";
 
@@ -19,7 +19,6 @@ const api = {
   setHidden: (sessionKey: string, hidden: boolean): Promise<void> => ipcRenderer.invoke("hide:set", sessionKey, hidden),
   refreshIndex: (): Promise<IndexStatus> => ipcRenderer.invoke("index:refresh"),
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
-  getTerminalAvailability: (): Promise<TerminalAvailability> => ipcRenderer.invoke("terminal:availability"),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: Partial<AppSettings>): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   copyResumeCommand: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-resume", sessionKey),

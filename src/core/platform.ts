@@ -9,10 +9,6 @@ export interface AppSettings {
   codexBinary: string;
 }
 
-export interface TerminalAvailability {
-  iTerm: boolean;
-}
-
 export const defaultSettings: AppSettings = {
   defaultTerminal: "Terminal",
   claudeBinary: "claude",
@@ -107,11 +103,6 @@ export async function openResumeInSpecificTerminal(
   terminal: AppSettings["defaultTerminal"],
 ): Promise<void> {
   await openResumeInTerminal(session, { ...settings, defaultTerminal: terminal });
-}
-
-export async function getTerminalAvailability(): Promise<TerminalAvailability> {
-  if (process.platform !== "darwin") return { iTerm: false };
-  return { iTerm: Boolean(await resolveMacApplicationName(ITERM_APPLICATION_NAMES)) };
 }
 
 export async function resolveMacApplicationName(names: string[], runner: ProcessRunner = runProcess): Promise<string | null> {
