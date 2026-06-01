@@ -10,7 +10,8 @@
   --bg-sidebar: #0d0e11;
   --bg-elevated: #15171b;
   --bg-elevated-2: #1a1d22;
-  --bg-glass: rgba(20, 22, 26, 0.72);
+  --bg-glass: rgba(22, 24, 28, 0.92);
+  --bg-panel: #16181c;
 
   /* lines */
   --border: rgba(255, 255, 255, 0.065);
@@ -728,7 +729,7 @@ button:disabled {
   display: flex;
   justify-content: flex-end;
   padding: 14px;
-  background: rgba(6, 7, 9, 0.5);
+  background: rgba(5, 6, 8, 0.66);
   backdrop-filter: blur(4px);
   overflow: hidden;
   animation: fade 0.2s ease;
@@ -753,8 +754,7 @@ button:disabled {
   overflow: hidden;
   border-radius: 16px;
   border: 1px solid var(--border-strong);
-  background: var(--bg-glass);
-  backdrop-filter: blur(24px) saturate(140%);
+  background: var(--bg-panel);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   animation: slide 0.42s cubic-bezier(0.16, 1, 0.3, 1);
 }
