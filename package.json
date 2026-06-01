@@ -28,7 +28,7 @@
     "@electron/rebuild": "^3.7.1",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.10.0",
     "electron": "^33.2.1",
     "electron-store": "^10.0.1",
     "lucide-react": "^0.468.0",
