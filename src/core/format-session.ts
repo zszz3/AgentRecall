@@ -3,8 +3,10 @@ import type { IndexedSession, SessionMessage, SessionSearchResult } from "./type
 const SOURCE_LABEL: Record<string, string> = {
   "claude-cli": "Claude Code",
   "claude-app": "Claude App",
+  "claude-internal": "Claude Internal",
   "codex-cli": "Codex CLI",
   "codex-app": "Codex App",
+  "codex-internal": "Codex Internal",
 };
 
 export function formatRelativeTime(ts: number): string {

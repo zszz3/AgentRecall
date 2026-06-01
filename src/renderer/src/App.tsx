@@ -54,11 +54,13 @@ import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 const SOURCE_LABEL: Record<SessionSource, string> = {
   "claude-cli": "Claude Code",
   "claude-app": "Claude App",
+  "claude-internal": "Claude Internal",
   "codex-cli": "Codex CLI",
   "codex-app": "Codex App",
+  "codex-internal": "Codex Internal",
 };
 
-const SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
+const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
   { label: "All", value: "all" },
   { label: "Claude", value: "claude" },
   { label: "Codex", value: "codex" },
@@ -67,6 +69,14 @@ const SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> =
   { label: "Codex CLI", value: "codex-cli" },
   { label: "Codex App", value: "codex-app" },
 ];
+
+function sourceFilters(settings: AppSettings | null): Array<{ label: string; value: SearchOptions["source"] }> {
+  return [
+    ...BASE_SOURCE_FILTERS,
+    ...(settings?.includeClaudeInternal ? [{ label: "Claude Internal", value: "claude-internal" as const }] : []),
+    ...(settings?.includeCodexInternal ? [{ label: "Codex Internal", value: "codex-internal" as const }] : []),
+  ];
+}
 
 const SORT_OPTIONS: Array<{ label: string; value: SessionSortBy }> = [
   { label: "Latest activity", value: "activity" },
@@ -205,6 +215,11 @@ export function App(): ReactElement {
     void window.sessionSearch.getSettings().then(setAppSettings);
   }, []);
 
+  useEffect(() => {
+    if (source === "claude-internal" && appSettings && !appSettings.includeClaudeInternal) setSource("all");
+    if (source === "codex-internal" && appSettings && !appSettings.includeCodexInternal) setSource("all");
+  }, [source, appSettings]);
+
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -304,6 +319,7 @@ export function App(): ReactElement {
     () => results.find((session) => session.sessionKey === selectedKey) || null,
     [results, selectedKey],
   );
+  const visibleSourceFilters = useMemo(() => sourceFilters(appSettings), [appSettings]);
   const selectedProject = useMemo(
     () => projects.find((project) => project.path === projectPath) || null,
     [projects, projectPath],
@@ -434,11 +450,20 @@ export function App(): ReactElement {
   }
 
   async function updateDefaultTerminal(defaultTerminal: AppSettings["defaultTerminal"]): Promise<void> {
+    await updateSettings({ defaultTerminal });
+  }
+
+  async function updateSettings(next: Partial<AppSettings>): Promise<void> {
     setSettingsFeedback({ kind: "running", message: "Saving settings..." });
     try {
-      const nextSettings = await window.sessionSearch.setSettings({ defaultTerminal });
+      const shouldRefreshIndex =
+        (next.includeClaudeInternal === true && !appSettings?.includeClaudeInternal) ||
+        (next.includeCodexInternal === true && !appSettings?.includeCodexInternal);
+      const nextSettings = await window.sessionSearch.setSettings(next);
       setAppSettings(nextSettings);
-      setSettingsFeedback({ kind: "success", message: "Default terminal updated." });
+      if (shouldRefreshIndex) await window.sessionSearch.refreshIndex();
+      await load();
+      setSettingsFeedback({ kind: "success", message: "Settings saved." });
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
       }, 1600);
@@ -527,7 +552,7 @@ export function App(): ReactElement {
         <SidebarSectionHeader title="Sources" expanded={sidebarSections.sources} onToggle={() => toggleSidebarSectionById("sources")} />
         {sidebarSections.sources ? (
           <nav className="nav-group">
-            {SOURCE_FILTERS.map((item) => (
+            {visibleSourceFilters.map((item) => (
               <button key={item.label} className={source === item.value ? "active" : ""} onClick={() => setSource(item.value)}>
                 {item.label}
               </button>
@@ -776,6 +801,7 @@ export function App(): ReactElement {
         <SettingsDialog
           settings={appSettings}
           feedback={settingsFeedback}
+          onSettingsChange={(next) => void updateSettings(next)}
           onDefaultTerminalChange={(terminal) => void updateDefaultTerminal(terminal)}
           onClose={() => setSettingsOpen(false)}
         />
@@ -1146,16 +1172,19 @@ function ContextMenu({
 function SettingsDialog({
   settings,
   feedback,
+  onSettingsChange,
   onDefaultTerminalChange,
   onClose,
 }: {
   settings: AppSettings | null;
   feedback: SettingsFeedback;
+  onSettingsChange: (settings: Partial<AppSettings>) => void;
   onDefaultTerminalChange: (terminal: AppSettings["defaultTerminal"]) => void;
   onClose: () => void;
 }): ReactElement {
   const defaultTerminal = settings?.defaultTerminal ?? "Terminal";
   const saving = feedback?.kind === "running";
+  const [activeSection, setActiveSection] = useState<"terminal" | "sources">("terminal");
 
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -1166,21 +1195,63 @@ function SettingsDialog({
             <X size={16} />
           </button>
         </div>
-        <div className="settings-row">
-          <label htmlFor="default-terminal">Default terminal</label>
-          <select
-            id="default-terminal"
-            value={defaultTerminal}
-            disabled={!settings || saving}
-            onChange={(event) => onDefaultTerminalChange(event.target.value as AppSettings["defaultTerminal"])}
-          >
-            {DEFAULT_TERMINAL_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <p>Used by Resume and the main list shortcut.</p>
+        <div className="settings-shell">
+          <nav className="settings-sidebar" aria-label="Settings sections">
+            <button className={activeSection === "terminal" ? "active" : ""} onClick={() => setActiveSection("terminal")}>
+              Default terminal
+            </button>
+            <button className={activeSection === "sources" ? "active" : ""} onClick={() => setActiveSection("sources")}>
+              Personal sources
+            </button>
+          </nav>
+          <div className="settings-content">
+            {activeSection === "terminal" ? (
+              <section className="settings-row">
+                <div>
+                  <h3>Default terminal</h3>
+                  <p>Choose which terminal app is used by Resume and the main list shortcut.</p>
+                </div>
+                <select
+                  id="default-terminal"
+                  value={defaultTerminal}
+                  disabled={!settings || saving}
+                  onChange={(event) => onDefaultTerminalChange(event.target.value as AppSettings["defaultTerminal"])}
+                >
+                  {DEFAULT_TERMINAL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </section>
+            ) : null}
+            {activeSection === "sources" ? (
+              <section className="settings-row">
+                <div>
+                  <h3>Personal sources</h3>
+                  <p>Internal sessions stay separate from the normal Claude and Codex filters.</p>
+                </div>
+                <label className="settings-check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings?.includeClaudeInternal)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ includeClaudeInternal: event.currentTarget.checked })}
+                  />
+                  <span>Include ~/.claude-internal</span>
+                </label>
+                <label className="settings-check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings?.includeCodexInternal)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ includeCodexInternal: event.currentTarget.checked })}
+                  />
+                  <span>Include ~/.codex-internal</span>
+                </label>
+              </section>
+            ) : null}
+          </div>
         </div>
         {feedback ? <div className={`settings-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
       </section>

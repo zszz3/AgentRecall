@@ -1,4 +1,4 @@
-export type SessionSource = "claude-cli" | "claude-app" | "codex-cli" | "codex-app";
+export type SessionSource = "claude-cli" | "claude-app" | "claude-internal" | "codex-cli" | "codex-app" | "codex-internal";
 export type SessionFormat = "claude" | "codex";
 export type SessionSortBy = "activity" | "created" | "updated";
 

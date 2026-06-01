@@ -212,6 +212,10 @@ async function runIndexSync(): Promise<IndexStatus> {
 
   activeIndexRun = syncDefaultSessionsInBatches(store, {
     batchSize: 2,
+    loadOptions: {
+      includeClaudeInternal: getSettings().includeClaudeInternal,
+      includeCodexInternal: getSettings().includeCodexInternal,
+    },
     onProgress: (status) => {
       indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
       mainWindow?.webContents.send("index-status", indexStatus);
@@ -276,8 +280,12 @@ function registerIpc(): void {
   ipcMain.handle("index:status", () => indexStatus);
   ipcMain.handle("settings:get", () => getSettings());
   ipcMain.handle("settings:set", (_event, settings: Partial<AppSettings>) => {
+    const previous = getSettings();
     settingsStore.set({ ...getSettings(), ...settings });
-    return getSettings();
+    const next = getSettings();
+    if (previous.includeClaudeInternal && !next.includeClaudeInternal) store.deleteSessionsBySource(["claude-internal"]);
+    if (previous.includeCodexInternal && !next.includeCodexInternal) store.deleteSessionsBySource(["codex-internal"]);
+    return next;
   });
   ipcMain.handle("command:copy-resume", (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);

@@ -17,6 +17,13 @@ import type {
 } from "./types";
 
 const CODEX_APP_ORIGINATOR = "Codex Desktop";
+const CLAUDE_INTERNAL_DIR = ".claude-internal";
+const CODEX_INTERNAL_DIR = ".codex-internal";
+
+export interface SessionLoadOptions {
+  includeClaudeInternal?: boolean;
+  includeCodexInternal?: boolean;
+}
 
 function emptyTokenUsage(): TokenUsage {
   return {
@@ -246,7 +253,7 @@ function firstClaudeGitBranch(rows: unknown[]): string | null {
 }
 
 function createIndexedSession(input: {
-  family: "claude" | "codex";
+  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -261,7 +268,7 @@ function createIndexedSession(input: {
 }): IndexedSession {
   const stat = safeStat(input.filePath);
   return {
-    sessionKey: `${input.family}:${input.rawId}`,
+    sessionKey: `${input.keyPrefix}:${input.rawId}`,
     rawId: input.rawId,
     source: input.source,
     projectPath: input.projectPath,
@@ -291,7 +298,7 @@ export function loadCodexSessionFile(filePath: string, title?: string, updatedAt
   const question = firstQuestion(messages);
   const source: SessionSource = meta.originator === CODEX_APP_ORIGINATOR ? "codex-app" : "codex-cli";
   const session = createIndexedSession({
-    family: "codex",
+    keyPrefix: "codex",
     rawId: meta.id,
     source,
     projectPath: meta.projectPath,
@@ -323,11 +330,11 @@ function walkJsonlFiles(dir: string): string[] {
   return files;
 }
 
-export function loadCodexSessions(codexDir = path.join(os.homedir(), ".codex")): LoadedSession[] {
-  return [...loadCodexSessionsIterator(codexDir)];
+export function loadCodexSessions(codexDir = path.join(os.homedir(), ".codex"), sourceOverride?: SessionSource): LoadedSession[] {
+  return [...loadCodexSessionsIterator(codexDir, sourceOverride)];
 }
 
-export function* loadCodexSessionsIterator(codexDir = path.join(os.homedir(), ".codex")): Generator<LoadedSession> {
+export function* loadCodexSessionsIterator(codexDir = path.join(os.homedir(), ".codex"), sourceOverride?: SessionSource): Generator<LoadedSession> {
   const sessionsDir = path.join(codexDir, "sessions");
   if (!fs.existsSync(sessionsDir)) return;
 
@@ -348,10 +355,10 @@ export function* loadCodexSessionsIterator(codexDir = path.join(os.homedir(), ".
     const tokenEvents = extractCodexTokenEvents(rows);
     const tokenUsage = tokenUsageFromEvents(tokenEvents);
     const question = firstQuestion(messages);
-    const source: SessionSource = meta.originator === CODEX_APP_ORIGINATOR ? "codex-app" : "codex-cli";
+    const source: SessionSource = sourceOverride || (meta.originator === CODEX_APP_ORIGINATOR ? "codex-app" : "codex-cli");
     yield {
       session: createIndexedSession({
-        family: "codex",
+        keyPrefix: source === "codex-internal" ? "codex-internal" : "codex",
         rawId: meta.id,
         source,
         projectPath: meta.projectPath,
@@ -376,11 +383,11 @@ function loadClaudeMessages(filePath: string): SessionMessage[] {
   return extractMessages(readJsonl(filePath), "claude");
 }
 
-export function loadClaudeCliSessions(claudeDir = path.join(os.homedir(), ".claude")): LoadedSession[] {
-  return [...loadClaudeCliSessionsIterator(claudeDir)];
+export function loadClaudeCliSessions(claudeDir = path.join(os.homedir(), ".claude"), source: SessionSource = "claude-cli"): LoadedSession[] {
+  return [...loadClaudeCliSessionsIterator(claudeDir, source)];
 }
 
-export function* loadClaudeCliSessionsIterator(claudeDir = path.join(os.homedir(), ".claude")): Generator<LoadedSession> {
+export function* loadClaudeCliSessionsIterator(claudeDir = path.join(os.homedir(), ".claude"), source: SessionSource = "claude-cli"): Generator<LoadedSession> {
   const sessionsDir = path.join(claudeDir, "sessions");
   const projectsDir = path.join(claudeDir, "projects");
   if (!fs.existsSync(projectsDir)) return;
@@ -416,9 +423,9 @@ export function* loadClaudeCliSessionsIterator(claudeDir = path.join(os.homedir(
       const gitBranch = firstClaudeGitBranch(rows);
       yield {
         session: createIndexedSession({
-          family: "claude",
+          keyPrefix: source === "claude-internal" ? "claude-internal" : "claude",
           rawId,
-          source: "claude-cli",
+          source,
           projectPath: index.get(rawId)?.cwd || embeddedCwd || "",
           filePath,
           originalTitle: cleanTitle(question) || "Untitled Session",
@@ -481,7 +488,7 @@ export function* loadClaudeAppSessionsIterator(
     const gitBranch = firstClaudeGitBranch(rows);
     yield {
       session: createIndexedSession({
-        family: "claude",
+        keyPrefix: "claude",
         rawId,
         source: "claude-app",
         projectPath: cwd,
@@ -500,12 +507,14 @@ export function* loadClaudeAppSessionsIterator(
   }
 }
 
-export function loadDefaultSessions(): LoadedSession[] {
-  return [...loadDefaultSessionsIterator()];
+export function loadDefaultSessions(options: SessionLoadOptions = {}): LoadedSession[] {
+  return [...loadDefaultSessionsIterator(options)];
 }
 
-export function* loadDefaultSessionsIterator(): Generator<LoadedSession> {
+export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): Generator<LoadedSession> {
   yield* loadClaudeCliSessionsIterator();
   yield* loadClaudeAppSessionsIterator();
   yield* loadCodexSessionsIterator();
+  if (options.includeClaudeInternal) yield* loadClaudeCliSessionsIterator(path.join(os.homedir(), CLAUDE_INTERNAL_DIR), "claude-internal");
+  if (options.includeCodexInternal) yield* loadCodexSessionsIterator(path.join(os.homedir(), CODEX_INTERNAL_DIR), "codex-internal");
 }

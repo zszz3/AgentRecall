@@ -281,6 +281,36 @@ describe("SessionStore", () => {
     expect(store.searchSessions({ query: "", tag: "backend" })).toHaveLength(1);
   });
 
+  it("keeps internal sources out of the regular Claude and Codex source filters", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(sampleSession({ sessionKey: "claude:regular", rawId: "regular", source: "claude-cli" }), messages);
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "claude-internal:internal", rawId: "internal", source: "claude-internal" }),
+      messages,
+    );
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:regular", rawId: "codex-regular", source: "codex-cli" }), messages);
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex-internal:internal", rawId: "codex-internal", source: "codex-internal" }),
+      messages,
+    );
+
+    expect(store.searchSessions({ source: "claude" }).map((session) => session.source)).toEqual(["claude-cli"]);
+    expect(store.searchSessions({ source: "codex" }).map((session) => session.source)).toEqual(["codex-cli"]);
+    expect(store.searchSessions({ source: "claude-internal" }).map((session) => session.sessionKey)).toEqual(["claude-internal:internal"]);
+    expect(store.searchSessions({ source: "codex-internal" }).map((session) => session.sessionKey)).toEqual(["codex-internal:internal"]);
+  });
+
+  it("deletes indexed sessions by source and removes unused tags", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(sampleSession({ sessionKey: "claude-internal:one", rawId: "one", source: "claude-internal" }), messages);
+    store.addTag("claude-internal:one", "internal");
+
+    store.deleteSessionsBySource(["claude-internal"]);
+
+    expect(store.searchSessions({ source: "claude-internal" })).toEqual([]);
+    expect(store.listTags()).toEqual([]);
+  });
+
   it("adds a branch tag from indexed Codex metadata", () => {
     const store = createInMemoryStore();
 

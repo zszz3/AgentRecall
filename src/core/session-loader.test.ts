@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadClaudeCliSessions, loadCodexSessionFile, parseCodexSessionMetaLine } from "./session-loader";
+import { loadClaudeCliSessions, loadCodexSessionFile, loadCodexSessions, parseCodexSessionMetaLine } from "./session-loader";
 
 describe("Codex session loading", () => {
   it("extracts id, cwd, originator, first question, and visible messages from a rollout file", () => {
@@ -138,6 +138,40 @@ describe("Codex session loading", () => {
       }),
     ).toMatchObject({ id: "old-id", projectPath: "/old" });
   });
+
+  it("loads Codex internal sessions with a separate source and session key namespace", () => {
+    const codexDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-internal-"));
+    const sessionDir = path.join(codexDir, "sessions", "2026", "06", "01");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionDir, "rollout.jsonl"),
+      [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-06-01T10:00:00Z",
+          payload: { id: "codex-internal-1", cwd: "/internal", git: { branch: "feat/internal" } },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-06-01T10:01:00Z",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "内部会话" }] },
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadCodexSessions(codexDir, "codex-internal");
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      sessionKey: "codex-internal:codex-internal-1",
+      rawId: "codex-internal-1",
+      source: "codex-internal",
+      projectPath: "/internal",
+      gitBranch: "feat/internal",
+    });
+
+    fs.rmSync(codexDir, { recursive: true, force: true });
+  });
 });
 
 describe("Claude session loading", () => {
@@ -176,6 +210,38 @@ describe("Claude session loading", () => {
       source: "claude-cli",
       projectPath: "/repo",
       gitBranch: "feat/claude-tags",
+    });
+
+    fs.rmSync(claudeDir, { recursive: true, force: true });
+  });
+
+  it("loads Claude internal sessions with a separate source and session key namespace", () => {
+    const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-claude-internal-"));
+    const projectDir = path.join(claudeDir, "projects", "-repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "claude-internal-1.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-06-01T10:00:00Z",
+          cwd: "/repo",
+          sessionId: "claude-internal-1",
+          gitBranch: "feat/internal",
+          message: { role: "user", content: "内部 Claude 会话" },
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadClaudeCliSessions(claudeDir, "claude-internal");
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      sessionKey: "claude-internal:claude-internal-1",
+      rawId: "claude-internal-1",
+      source: "claude-internal",
+      projectPath: "/repo",
+      gitBranch: "feat/internal",
     });
 
     fs.rmSync(claudeDir, { recursive: true, force: true });

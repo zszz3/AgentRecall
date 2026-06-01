@@ -78,7 +78,7 @@ export const codexAdapter: FormatAdapter = {
 };
 
 export function getFormatForSource(source: SessionSource): SessionFormat {
-  return source === "claude-cli" || source === "claude-app" ? "claude" : "codex";
+  return source === "claude-cli" || source === "claude-app" || source === "claude-internal" ? "claude" : "codex";
 }
 
 export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): FormatAdapter {

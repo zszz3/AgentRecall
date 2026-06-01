@@ -1,4 +1,4 @@
-import { loadDefaultSessions, loadDefaultSessionsIterator } from "./session-loader";
+import { loadDefaultSessions, loadDefaultSessionsIterator, type SessionLoadOptions } from "./session-loader";
 import type { SessionStore } from "./session-store";
 import type { LoadedSession } from "./types";
 
@@ -10,8 +10,8 @@ export interface IndexStatus {
   error: string | null;
 }
 
-export function syncDefaultSessions(store: SessionStore): IndexStatus {
-  const loaded = loadDefaultSessions();
+export function syncDefaultSessions(store: SessionStore, loadOptions: SessionLoadOptions = {}): IndexStatus {
+  const loaded = loadDefaultSessions(loadOptions);
   let indexed = 0;
   for (const item of loaded) {
     store.upsertIndexedSession(item.session, item.messages, item.tokenEvents);
@@ -28,6 +28,7 @@ export function syncDefaultSessions(store: SessionStore): IndexStatus {
 
 export interface BatchIndexOptions {
   batchSize?: number;
+  loadOptions?: SessionLoadOptions;
   onProgress?: (status: IndexStatus) => void;
   yieldToEventLoop?: () => Promise<void>;
 }
@@ -71,5 +72,5 @@ export async function syncLoadedSessionsInBatches(
 }
 
 export function syncDefaultSessionsInBatches(store: SessionStore, options: BatchIndexOptions = {}): Promise<IndexStatus> {
-  return syncLoadedSessionsInBatches(store, loadDefaultSessionsIterator(), options);
+  return syncLoadedSessionsInBatches(store, loadDefaultSessionsIterator(options.loadOptions), options);
 }

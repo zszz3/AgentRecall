@@ -7,18 +7,22 @@ export interface AppSettings {
   defaultTerminal: "Terminal" | "iTerm" | "Ghostty" | "WezTerm" | "Warp";
   claudeBinary: string;
   codexBinary: string;
+  includeClaudeInternal: boolean;
+  includeCodexInternal: boolean;
 }
 
 export const defaultSettings: AppSettings = {
   defaultTerminal: "Terminal",
   claudeBinary: "claude",
   codexBinary: "codex",
+  includeClaudeInternal: false,
+  includeCodexInternal: false,
 };
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
 
 export function sourceFamily(source: SessionSource): "claude" | "codex" {
-  return source === "claude-cli" || source === "claude-app" ? "claude" : "codex";
+  return source === "claude-cli" || source === "claude-app" || source === "claude-internal" ? "claude" : "codex";
 }
 
 export function getResumeCommand(
