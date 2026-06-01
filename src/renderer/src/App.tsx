@@ -625,6 +625,44 @@ function DetailPanel({
     : -1;
   const context = matchIndex >= 0 ? messages.slice(Math.max(0, matchIndex - 1), Math.min(messages.length, matchIndex + 2)) : [];
   const actionRunning = actionStatus?.kind === "running";
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const el = bodyRef.current;
+      if (!el) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const page = el.clientHeight * 0.9;
+      switch (event.key) {
+        case "ArrowDown":
+          el.scrollBy({ top: 64 });
+          break;
+        case "ArrowUp":
+          el.scrollBy({ top: -64 });
+          break;
+        case "PageDown":
+        case " ":
+          el.scrollBy({ top: page });
+          break;
+        case "PageUp":
+          el.scrollBy({ top: -page });
+          break;
+        case "Home":
+          el.scrollTo({ top: 0 });
+          break;
+        case "End":
+          el.scrollTo({ top: el.scrollHeight });
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="detail-backdrop" onClick={onClose}>
@@ -670,27 +708,29 @@ function DetailPanel({
           </button>
         ))}
       </div>
-      {context.length > 0 ? (
-        <section className="matched">
-          <h3>Matched Context</h3>
-          {context.map((message) => (
+      <div className="detail-body" ref={bodyRef}>
+        {context.length > 0 ? (
+          <section className="matched">
+            <h3>Matched Context</h3>
+            {context.map((message) => (
+              <MessageBlock key={message.index} message={message} query={query} />
+            ))}
+          </section>
+        ) : null}
+        <section className="conversation">
+          <h3>Full Conversation</h3>
+          {loading ? <div className="loading-state">Loading conversation...</div> : null}
+          {!loading && messages.length === 0 ? <div className="loading-state">No visible messages indexed for this session.</div> : null}
+          {messages.map((message) => (
             <MessageBlock key={message.index} message={message} query={query} />
           ))}
+          {!loading && messages.length < session.messageCount ? (
+            <button className="show-more" onClick={onShowMore}>
+              Show {Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} more messages
+            </button>
+          ) : null}
         </section>
-      ) : null}
-      <section className="conversation">
-        <h3>Full Conversation</h3>
-        {loading ? <div className="loading-state">Loading conversation...</div> : null}
-        {!loading && messages.length === 0 ? <div className="loading-state">No visible messages indexed for this session.</div> : null}
-        {messages.map((message) => (
-          <MessageBlock key={message.index} message={message} query={query} />
-        ))}
-        {!loading && messages.length < session.messageCount ? (
-          <button className="show-more" onClick={onShowMore}>
-            Show {Math.min(MESSAGE_PAGE_SIZE, session.messageCount - messages.length)} more messages
-          </button>
-        ) : null}
-      </section>
+      </div>
     </aside>
     </div>
   );

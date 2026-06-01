@@ -910,11 +910,14 @@ button:disabled {
   color: var(--accent);
 }
 
-.conversation {
+.detail-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.conversation {
   padding-bottom: 22px;
 }
 
