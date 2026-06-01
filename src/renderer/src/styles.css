@@ -269,8 +269,7 @@ select:focus-visible {
   font-size: 10.5px;
 }
 
-.primary,
-.theme-toggle {
+.primary {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -286,14 +285,12 @@ select:focus-visible {
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.primary:hover,
-.theme-toggle:hover {
+.primary:hover {
   background: var(--panel-hover);
   color: var(--text);
 }
 
-.primary svg,
-.theme-toggle svg {
+.primary svg {
   color: var(--text-muted);
 }
 
@@ -643,6 +640,18 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.toolbar-icon-button {
+  width: 38px;
+  height: 38px;
 }
 
 .searchbox {
@@ -1425,6 +1434,59 @@ select:focus-visible {
 .command-dialog input:focus {
   border-color: var(--accent-line);
   box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.settings-dialog {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.settings-row {
+  display: grid;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+
+.settings-row label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-row select {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.settings-row select:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.settings-row p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-feedback {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-feedback.success {
+  color: var(--success-text);
+}
+
+.settings-feedback.error {
+  color: var(--danger);
 }
 
 .tag-suggestions {

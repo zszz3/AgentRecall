@@ -20,6 +20,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Settings,
   Star,
   Sun,
   Tag,
@@ -29,6 +30,7 @@ import {
 } from "lucide-react";
 import type { IndexStatus } from "../../core/indexer";
 import { formatMessageTime, formatRelativeTime } from "../../core/format-session";
+import type { AppSettings } from "../../core/platform";
 import type {
   ProjectSummary,
   SearchOptions,
@@ -79,6 +81,14 @@ const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> 
   { label: "All", value: "allTime" },
 ];
 
+const DEFAULT_TERMINAL_OPTIONS: Array<{ label: string; value: AppSettings["defaultTerminal"] }> = [
+  { label: "Terminal", value: "Terminal" },
+  { label: "iTerm", value: "iTerm" },
+  { label: "Ghostty", value: "Ghostty" },
+  { label: "WezTerm", value: "WezTerm" },
+  { label: "Warp", value: "Warp" },
+];
+
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
 const INITIAL_MESSAGE_LIMIT = 20;
 const MESSAGE_PAGE_SIZE = 80;
@@ -111,6 +121,7 @@ type ActionStatus = {
 };
 
 type RefreshFeedback = ActionStatus | null;
+type SettingsFeedback = ActionStatus | null;
 
 interface ContextMenuState {
   x: number;
@@ -157,6 +168,9 @@ export function App(): ReactElement {
   const [deleteTagName, setDeleteTagName] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -186,6 +200,10 @@ export function App(): ReactElement {
     const timer = window.setTimeout(() => void load(), 120);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    void window.sessionSearch.getSettings().then(setAppSettings);
+  }, []);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -222,6 +240,7 @@ export function App(): ReactElement {
         if (dialog) setDialog(null);
         else if (deleteTagName) setDeleteTagName(null);
         else if (contextMenu) setContextMenu(null);
+        else if (settingsOpen) setSettingsOpen(false);
         else if (detail) setDetail(null);
         else return;
         event.preventDefault();
@@ -229,7 +248,7 @@ export function App(): ReactElement {
       }
 
       // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || dialog || deleteTagName || contextMenu) return;
+      if (detail || dialog || deleteTagName || contextMenu || settingsOpen) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
@@ -269,7 +288,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [results, selectedKey, detail, dialog, deleteTagName, contextMenu, actionStatus]);
+  }, [results, selectedKey, detail, dialog, deleteTagName, contextMenu, settingsOpen, actionStatus]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -414,6 +433,20 @@ export function App(): ReactElement {
     }
   }
 
+  async function updateDefaultTerminal(defaultTerminal: AppSettings["defaultTerminal"]): Promise<void> {
+    setSettingsFeedback({ kind: "running", message: "Saving settings..." });
+    try {
+      const nextSettings = await window.sessionSearch.setSettings({ defaultTerminal });
+      setAppSettings(nextSettings);
+      setSettingsFeedback({ kind: "success", message: "Default terminal updated." });
+      window.setTimeout(() => {
+        setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
+      }, 1600);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   return (
     <main className="app" data-theme={theme} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
@@ -435,15 +468,6 @@ export function App(): ReactElement {
           </button>
           {refreshFeedback ? <div className={`refresh-feedback ${refreshFeedback.kind}`}>{refreshFeedback.message}</div> : null}
         </div>
-
-        <button
-          className="theme-toggle"
-          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-          title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-        >
-          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          {theme === "dark" ? "Light" : "Dark"}
-        </button>
 
         <div className="stats-panel">
           <div className="stats-header">
@@ -603,6 +627,24 @@ export function App(): ReactElement {
               ))}
             </select>
           </label>
+          <div className="top-actions">
+            <button
+              className="icon-button toolbar-icon-button"
+              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+              title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            >
+              {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+            <button
+              className="icon-button toolbar-icon-button"
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings size={15} />
+            </button>
+          </div>
         </header>
 
         <div className="result-count">
@@ -727,6 +769,15 @@ export function App(): ReactElement {
           tagName={deleteTagName}
           onConfirm={() => void deleteTagGlobally(deleteTagName)}
           onCancel={() => setDeleteTagName(null)}
+        />
+      ) : null}
+
+      {settingsOpen ? (
+        <SettingsDialog
+          settings={appSettings}
+          feedback={settingsFeedback}
+          onDefaultTerminalChange={(terminal) => void updateDefaultTerminal(terminal)}
+          onClose={() => setSettingsOpen(false)}
         />
       ) : null}
     </main>
@@ -1088,6 +1139,51 @@ function ContextMenu({
       <button onClick={onReveal}>
         <FolderOpen size={14} /> Show in Finder
       </button>
+    </div>
+  );
+}
+
+function SettingsDialog({
+  settings,
+  feedback,
+  onDefaultTerminalChange,
+  onClose,
+}: {
+  settings: AppSettings | null;
+  feedback: SettingsFeedback;
+  onDefaultTerminalChange: (terminal: AppSettings["defaultTerminal"]) => void;
+  onClose: () => void;
+}): ReactElement {
+  const defaultTerminal = settings?.defaultTerminal ?? "Terminal";
+  const saving = feedback?.kind === "running";
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={onClose}>
+      <section className="command-dialog settings-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="dialog-title">
+          <span>Settings</span>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="settings-row">
+          <label htmlFor="default-terminal">Default terminal</label>
+          <select
+            id="default-terminal"
+            value={defaultTerminal}
+            disabled={!settings || saving}
+            onChange={(event) => onDefaultTerminalChange(event.target.value as AppSettings["defaultTerminal"])}
+          >
+            {DEFAULT_TERMINAL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <p>Used by Resume and the main list shortcut.</p>
+        </div>
+        {feedback ? <div className={`settings-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
+      </section>
     </div>
   );
 }
