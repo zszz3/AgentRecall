@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
+import tls from "node:tls";
 import type { UsageQuota, UsageQuotaCard, UsageQuotaSnapshot } from "./types";
 
 const CODEX_USAGE_PRIMARY_URL = "https://chatgpt.com/backend-api/wham/usage";
@@ -134,7 +137,8 @@ export async function loadCodexQuotaCard(options: UsageQuotaLoadOptions = {}): P
     };
   }
 
-  const fetcher = options.codexFetcher ?? fetchCodexUsageHTTP;
+  const proxyUrl = selectProxyUrl(options.env ?? process.env);
+  const fetcher: CodexUsageFetcher = options.codexFetcher ?? ((token, account) => fetchCodexUsageHTTP(token, account, { proxyUrl }));
   try {
     const usage = await fetcher(accessToken, accountId);
     const quotas = codexQuotasFromResponse(usage, now);
@@ -365,7 +369,23 @@ function quotaLabel(key: string): string {
   return key;
 }
 
-async function fetchCodexUsageHTTP(accessToken: string, accountId: string): Promise<CodexUsageResponse> {
+const CODEX_REQUEST_TIMEOUT_MS = 12_000;
+
+// chatgpt.com is unreachable directly on many networks; Node's https does not honor proxy
+// env vars, so we resolve one here and tunnel through it via HTTP CONNECT. SOCKS proxies are
+// skipped because CONNECT tunneling only works with http(s) proxies.
+export function selectProxyUrl(env: Record<string, string | undefined> = process.env): string | undefined {
+  const candidates = [env.HTTPS_PROXY, env.https_proxy, env.ALL_PROXY, env.all_proxy];
+  for (const raw of candidates) {
+    const value = raw?.trim();
+    if (!value) continue;
+    if (/^socks/i.test(value)) continue;
+    return value;
+  }
+  return undefined;
+}
+
+async function fetchCodexUsageHTTP(accessToken: string, accountId: string, options: { proxyUrl?: string } = {}): Promise<CodexUsageResponse> {
   if (process.platform === "win32") {
     try {
       return await doCodexUsagePowerShellRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId);
@@ -378,10 +398,10 @@ async function fetchCodexUsageHTTP(accessToken: string, accountId: string): Prom
   }
 
   try {
-    return await doCodexUsageRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId);
+    return await doCodexUsageRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId, options.proxyUrl);
   } catch (error) {
     if (error instanceof CodexHttpError && error.statusCode === 404) {
-      return doCodexUsageRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId);
+      return doCodexUsageRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId, options.proxyUrl);
     }
     throw error;
   }
@@ -459,7 +479,53 @@ class CodexHttpError extends Error {
   }
 }
 
-function doCodexUsageRequest(endpoint: string, accessToken: string, accountId: string): Promise<CodexUsageResponse> {
+// Opens an HTTP CONNECT tunnel through an http(s) proxy and resolves the raw tunneled socket.
+export function connectViaProxy(proxyUrl: string, host: string, port: number, timeoutMs: number): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    let proxy: URL;
+    try {
+      proxy = new URL(proxyUrl);
+    } catch {
+      reject(new Error(`Invalid proxy URL: ${proxyUrl}`));
+      return;
+    }
+
+    const headers: Record<string, string> = { Host: `${host}:${port}` };
+    if (proxy.username || proxy.password) {
+      const credentials = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+      headers["Proxy-Authorization"] = `Basic ${Buffer.from(credentials).toString("base64")}`;
+    }
+
+    const request = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port) || (proxy.protocol === "https:" ? 443 : 80),
+      method: "CONNECT",
+      path: `${host}:${port}`,
+      headers,
+      timeout: timeoutMs,
+    });
+
+    request.once("connect", (response, socket, head) => {
+      if (response.statusCode !== 200) {
+        socket.destroy();
+        reject(new CodexHttpError(`Proxy CONNECT failed: HTTP ${response.statusCode}.`, response.statusCode));
+        return;
+      }
+      if (head.length > 0) socket.unshift(head);
+      resolve(socket);
+    });
+    request.once("timeout", () => request.destroy(new Error("Proxy connection timed out.")));
+    request.once("error", (error) => reject(normalizeNetworkError(error)));
+    request.end();
+  });
+}
+
+async function doCodexUsageRequest(endpoint: string, accessToken: string, accountId: string, proxyUrl?: string): Promise<CodexUsageResponse> {
+  const target = new URL(endpoint);
+  const host = target.hostname;
+  const port = target.port ? Number(target.port) : 443;
+  const tunnelSocket = proxyUrl ? await connectViaProxy(proxyUrl, host, port, CODEX_REQUEST_TIMEOUT_MS) : undefined;
+
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -472,7 +538,18 @@ function doCodexUsageRequest(endpoint: string, accessToken: string, accountId: s
       headers["ChatGPT-Account-Id"] = accountId;
     }
 
-    const request = https.request(endpoint, { method: "GET", headers, timeout: 8_000 }, (response) => {
+    const requestOptions: https.RequestOptions = { method: "GET", headers, timeout: CODEX_REQUEST_TIMEOUT_MS };
+    if (tunnelSocket) {
+      // Run TLS over the proxy tunnel instead of opening a direct socket. A one-off agent whose
+      // createConnection returns the tunneled TLS socket is the reliable way to do this; the bare
+      // `createConnection` request option is ignored once an agent (default or `false`) is in play.
+      const agent = new https.Agent({ maxSockets: 1 });
+      (agent as unknown as { createConnection: () => net.Socket }).createConnection = () =>
+        tls.connect({ socket: tunnelSocket, servername: host }) as unknown as net.Socket;
+      requestOptions.agent = agent;
+    }
+
+    const request = https.request(endpoint, requestOptions, (response) => {
       const statusCode = response.statusCode ?? 0;
       const chunks: Buffer[] = [];
       let size = 0;
@@ -500,9 +577,21 @@ function doCodexUsageRequest(endpoint: string, accessToken: string, accountId: s
     });
 
     request.on("timeout", () => request.destroy(new Error("Codex quota refresh timed out.")));
-    request.on("error", reject);
+    request.on("error", (error) => reject(normalizeNetworkError(error)));
     request.end();
   });
+}
+
+// ETIMEDOUT surfaces as an AggregateError with an empty message, which left the quota card
+// blank. Turn empty/opaque network errors into something the UI can show.
+function normalizeNetworkError(error: unknown): Error {
+  if (error instanceof CodexHttpError) return error;
+  if (!(error instanceof Error)) return new Error(String(error));
+  if (error.message.trim()) return error;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ETIMEDOUT") return new Error("Could not reach chatgpt.com (connection timed out). A proxy may be required.");
+  if (code === "ECONNREFUSED") return new Error("Connection to chatgpt.com was refused.");
+  return new Error(code ? `Network error (${code}) while contacting chatgpt.com.` : "Network error while contacting chatgpt.com.");
 }
 
 function codexHttpStatusMessage(statusCode: number): string {

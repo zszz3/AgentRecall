@@ -98,7 +98,7 @@ See [Install.md](../Install.md) for updating, uninstalling, installing from a fr
 
 Codex quota is loaded read-only through `~/.codex/auth.json`. Claude Code does not expose an equivalent local quota file or read-only usage API; quota appears in the `rate_limits` field passed to statusline commands.
 
-To show Claude Code 5h / 7d quota in the app, add this to `~/.claude/settings.json` after globally installing this project:
+**This is configured automatically on install.** The `postinstall` hook runs `bin/install-claude-statusline.cjs` during `npm install` (including `npm install -g .`) and writes the following into `~/.claude/settings.json`:
 
 ```json
 {
@@ -110,6 +110,12 @@ To show Claude Code 5h / 7d quota in the app, add this to `~/.claude/settings.js
 ```
 
 Then run Claude Code once and wait for the first API response. The bridge writes `~/.claude/statusline-snapshot.json`, which the app reads on Usage refresh. The script stores only `rate_limits`, optional plan, and update time, not the full statusline input.
+
+The auto-setup is **non-destructive**:
+
+- If you already have a custom `statusLine`, the installer leaves it untouched and prints how to enable Claude quota manually (point `statusLine.command` at `agent-session-search-claude-statusline`, or `node "<install dir>/bin/claude-statusline-snapshot.cjs"`).
+- Set `AGENT_SESSION_SEARCH_SKIP_STATUSLINE_INSTALL=1`, or run under `CI`, to skip the auto-setup.
+- The installer always exits 0, so it never fails `npm install`.
 
 ## Development Setup
 

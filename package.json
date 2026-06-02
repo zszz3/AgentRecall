@@ -24,6 +24,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "postinstall": "node bin/install-claude-statusline.cjs",
     "prepare": "electron-vite build"
   },
   "dependencies": {
