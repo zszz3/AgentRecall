@@ -9,8 +9,10 @@ export interface AppSettings {
   globalShortcut: GlobalShortcut;
   claudeBinary: string;
   codexBinary: string;
+  codeBuddyBinary: string;
   includeClaudeInternal: boolean;
   includeCodexInternal: boolean;
+  includeCodeBuddyCli: boolean;
 }
 
 export const defaultSettings: AppSettings = {
@@ -18,13 +20,16 @@ export const defaultSettings: AppSettings = {
   globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
   claudeBinary: "claude",
   codexBinary: "codex",
+  codeBuddyBinary: "codebuddy",
   includeClaudeInternal: false,
   includeCodexInternal: false,
+  includeCodeBuddyCli: false,
 };
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
 
-export function sourceFamily(source: SessionSource): "claude" | "codex" {
+export function sourceFamily(source: SessionSource): "claude" | "codex" | "codebuddy" {
+  if (source === "codebuddy-cli") return "codebuddy";
   return source === "claude-cli" || source === "claude-app" || source === "claude-internal" ? "claude" : "codex";
 }
 
@@ -35,9 +40,12 @@ export function getResumeCommand(
 ): string {
   const { withCwd = true, skipPermissions = false } = opts;
   let cmd: string;
-  if (sourceFamily(session.source) === "claude") {
+  const family = sourceFamily(session.source);
+  if (family === "claude") {
     cmd = `${settings.claudeBinary} --resume ${session.rawId}`;
     if (skipPermissions) cmd += " --dangerously-skip-permissions";
+  } else if (family === "codebuddy") {
+    cmd = `${settings.codeBuddyBinary} --resume ${session.rawId}`;
   } else {
     cmd = `${settings.codexBinary} resume ${session.rawId}`;
     if (skipPermissions) cmd += " --dangerously-bypass-approvals-and-sandbox";
@@ -125,7 +133,8 @@ export async function resolveMacApplicationName(names: string[], runner: Process
 }
 
 export async function openNativeApp(source: SessionSource): Promise<void> {
-  const appName = sourceFamily(source) === "claude" ? "Claude" : "Codex";
+  const family = sourceFamily(source);
+  const appName = family === "claude" ? "Claude" : family === "codebuddy" ? "CodeBuddy CN" : "Codex";
   if (process.platform === "darwin") {
     await runProcess("/usr/bin/open", ["-a", appName]);
   }

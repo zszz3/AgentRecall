@@ -70,6 +70,7 @@ const SOURCE_LABEL: Record<SessionSource, string> = {
   "codex-cli": "Codex CLI",
   "codex-app": "Codex App",
   "codex-internal": "Codex Internal",
+  "codebuddy-cli": "CodeBuddy CLI",
 };
 
 const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
@@ -87,6 +88,7 @@ function sourceFilters(settings: AppSettings | null): Array<{ label: string; val
     ...BASE_SOURCE_FILTERS,
     ...(settings?.includeClaudeInternal ? [{ label: "Claude Internal", value: "claude-internal" as const }] : []),
     ...(settings?.includeCodexInternal ? [{ label: "Codex Internal", value: "codex-internal" as const }] : []),
+    ...(settings?.includeCodeBuddyCli ? [{ label: "CodeBuddy CLI", value: "codebuddy-cli" as const }] : []),
   ];
 }
 
@@ -151,6 +153,12 @@ const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
 
 function isBranchTag(tagName: string): boolean {
   return tagName.startsWith("branch:");
+}
+
+function sourceUiFamily(source: SessionSource): "claude" | "codex" | "codebuddy" {
+  if (source.startsWith("claude")) return "claude";
+  if (source.startsWith("codex")) return "codex";
+  return "codebuddy";
 }
 
 type ActionStatus = {
@@ -218,7 +226,11 @@ export function App(): ReactElement {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
-  const [pendingInternal, setPendingInternal] = useState<{ claude: boolean; codex: boolean }>({ claude: false, codex: false });
+  const [pendingPersonalSources, setPendingPersonalSources] = useState<{ claude: boolean; codex: boolean; codebuddy: boolean }>({
+    claude: false,
+    codex: false,
+    codebuddy: false,
+  });
   const loadSeqRef = useRef(0);
   const detailLoadSeqRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -321,6 +333,7 @@ export function App(): ReactElement {
   useEffect(() => {
     if (source === "claude-internal" && appSettings && !appSettings.includeClaudeInternal) setSource("all");
     if (source === "codex-internal" && appSettings && !appSettings.includeCodexInternal) setSource("all");
+    if (source === "codebuddy-cli" && appSettings && !appSettings.includeCodeBuddyCli) setSource("all");
   }, [source, appSettings]);
 
   useLayoutEffect(() => {
@@ -437,10 +450,11 @@ export function App(): ReactElement {
     // Reveal an internal source filter only once its background load has finished.
     return sourceFilters({
       ...appSettings,
-      includeClaudeInternal: appSettings.includeClaudeInternal && !pendingInternal.claude,
-      includeCodexInternal: appSettings.includeCodexInternal && !pendingInternal.codex,
+      includeClaudeInternal: appSettings.includeClaudeInternal && !pendingPersonalSources.claude,
+      includeCodexInternal: appSettings.includeCodexInternal && !pendingPersonalSources.codex,
+      includeCodeBuddyCli: appSettings.includeCodeBuddyCli && !pendingPersonalSources.codebuddy,
     });
-  }, [appSettings, pendingInternal]);
+  }, [appSettings, pendingPersonalSources]);
   const selectedProject = useMemo(
     () => projects.find((project) => project.path === projectPath) || null,
     [projects, projectPath],
@@ -598,23 +612,26 @@ export function App(): ReactElement {
   async function updateSettings(next: Partial<AppSettings>): Promise<void> {
     const enablingClaude = next.includeClaudeInternal === true && !appSettings?.includeClaudeInternal;
     const enablingCodex = next.includeCodexInternal === true && !appSettings?.includeCodexInternal;
+    const enablingCodeBuddy = next.includeCodeBuddyCli === true && !appSettings?.includeCodeBuddyCli;
     setSettingsFeedback({ kind: "running", message: "Saving settings..." });
     try {
       const nextSettings = await window.sessionSearch.setSettings(next);
       setAppSettings(nextSettings);
 
-      if (enablingClaude || enablingCodex) {
-        // Keep the toggle responsive: scan the internal source in the background
+      if (enablingClaude || enablingCodex || enablingCodeBuddy) {
+        // Keep the toggle responsive: scan the personal source in the background
         // and only reveal its sidebar filter once that scan finishes.
-        if (enablingClaude) setPendingInternal((current) => ({ ...current, claude: true }));
-        if (enablingCodex) setPendingInternal((current) => ({ ...current, codex: true }));
+        if (enablingClaude) setPendingPersonalSources((current) => ({ ...current, claude: true }));
+        if (enablingCodex) setPendingPersonalSources((current) => ({ ...current, codex: true }));
+        if (enablingCodeBuddy) setPendingPersonalSources((current) => ({ ...current, codebuddy: true }));
         setSettingsFeedback({ kind: "success", message: "Loading sessions in the background…" });
         void window.sessionSearch
           .refreshIndex()
           .then(async () => {
-            setPendingInternal((current) => ({
+            setPendingPersonalSources((current) => ({
               claude: enablingClaude ? false : current.claude,
               codex: enablingCodex ? false : current.codex,
+              codebuddy: enablingCodeBuddy ? false : current.codebuddy,
             }));
             await load();
             setSettingsFeedback({ kind: "success", message: "Sources ready." });
@@ -623,8 +640,9 @@ export function App(): ReactElement {
             }, 1600);
           })
           .catch((error) => {
-            if (enablingClaude) setPendingInternal((current) => ({ ...current, claude: false }));
-            if (enablingCodex) setPendingInternal((current) => ({ ...current, codex: false }));
+            if (enablingClaude) setPendingPersonalSources((current) => ({ ...current, claude: false }));
+            if (enablingCodex) setPendingPersonalSources((current) => ({ ...current, codex: false }));
+            if (enablingCodeBuddy) setPendingPersonalSources((current) => ({ ...current, codebuddy: false }));
             setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
           });
         return;
@@ -1140,7 +1158,7 @@ function SessionRow({
     >
       <div className="session-main">
         <div className="session-title">
-          <span className={`source-dot ${session.source.startsWith("claude") ? "claude" : "codex"}`} />
+          <span className={`source-dot ${sourceUiFamily(session.source)}`} />
           <button
             className={`favorite-button ${session.favorited ? "active" : ""}`}
             onClick={(event) => {
@@ -1172,8 +1190,8 @@ function SessionRow({
             <span className="live-status-dot" />
             {liveStateLabel(liveState)}
           </span>
-          <span className={`source-badge ${session.source.startsWith("claude") ? "claude" : "codex"}`}>
-            {session.source.startsWith("claude") ? <Code2 size={13} /> : <Terminal size={13} />}
+          <span className={`source-badge ${sourceUiFamily(session.source)}`}>
+            {sourceUiFamily(session.source) === "claude" ? <Code2 size={13} /> : <Terminal size={13} />}
             {SOURCE_LABEL[session.source]}
           </span>
           <span>{session.projectPath || "No project path"}</span>
@@ -1285,7 +1303,7 @@ function DetailPanel({
       <div className="detail-header">
         <div>
           <div className="detail-badges">
-            <div className={`source-badge ${session.source.startsWith("claude") ? "claude" : "codex"}`}>
+            <div className={`source-badge ${sourceUiFamily(session.source)}`}>
               {SOURCE_LABEL[session.source]}
             </div>
             <span className={`live-status ${liveState}`}>
@@ -1569,7 +1587,7 @@ function SettingsDialog({
               <section className="settings-pane">
                 <header className="settings-pane-head">
                   <h3>Personal sources</h3>
-                  <p>Internal sessions stay separate from the normal Claude and Codex filters.</p>
+                  <p>Personal sources stay separate from the normal Claude and Codex filters.</p>
                 </header>
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
@@ -1595,6 +1613,19 @@ function SettingsDialog({
                     checked={Boolean(settings?.includeCodexInternal)}
                     disabled={!settings || saving}
                     onChange={(event) => onSettingsChange({ includeCodexInternal: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">Include ~/.codebuddy</span>
+                    <span className="settings-field-sub">Adds a separate CodeBuddy CLI source filter.</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.includeCodeBuddyCli)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ includeCodeBuddyCli: event.currentTarget.checked })}
                   />
                 </label>
               </section>

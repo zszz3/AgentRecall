@@ -26,8 +26,20 @@ It indexes existing local session files, lets you add your own titles and tags, 
 | Codex Desktop | `~/.codex/sessions/**/*.jsonl`, detected by session metadata |
 | Claude Code CLI | `~/.claude/projects/*/*.jsonl` plus optional `~/.claude/sessions/*.json` metadata |
 | Claude Desktop app | `~/Library/Application Support/Claude/claude-code-sessions/**/local_*.json` plus Claude Code project logs |
+| CodeBuddy CLI | Optional in settings; reads `~/.codebuddy/projects/**/*.jsonl` |
 
 Codex title metadata is read from `~/.codex/session_index.jsonl` when that file exists. If no upstream title is available, the app uses the first meaningful user question as the default title.
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Option+Space` | Show or hide the search window on macOS |
+| `Cmd/Ctrl+K` | Focus and select the search box |
+| `↑` / `↓` | Move through the main session list |
+| `Space` | Open details for the selected session |
+| `Enter` | Open details for the selected session when the search box is focused |
+| `Cmd/Ctrl+Enter` | Resume the selected session in the default terminal |
 
 ## Data Model
 

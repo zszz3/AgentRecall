@@ -82,7 +82,7 @@ function detectResumeCommand(tokens: string[]): { family: LiveSessionFamily; raw
     if (!family) continue;
 
     const args = tokens.slice(index + 1);
-    const rawId = family === "codex" ? codexResumeId(args) : claudeResumeId(args);
+    const rawId = family === "codex" ? codexResumeId(args) : flagResumeId(args);
     if (rawId) return { family, rawId };
   }
 
@@ -96,7 +96,7 @@ function codexResumeId(args: string[]): string | null {
   return rawId && !rawId.startsWith("-") ? rawId : null;
 }
 
-function claudeResumeId(args: string[]): string | null {
+function flagResumeId(args: string[]): string | null {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--resume" || arg === "-r") {
@@ -117,10 +117,12 @@ function executableFamily(token: string | undefined): LiveSessionFamily | null {
   const normalized = normalizedExecutableName(token);
   if (normalized === "codex") return "codex";
   if (normalized === "claude" || normalized === "claude-code") return "claude";
+  if (normalized === "codebuddy" || normalized === "cbc") return "codebuddy";
 
   const lower = token.toLowerCase();
   if (lower.includes("@openai/codex")) return "codex";
   if (lower.includes("@anthropic-ai/claude") || lower.includes("claude-code")) return "claude";
+  if (lower.includes("@tencent-ai/codebuddy-code") || lower.includes("codebuddy")) return "codebuddy";
   return null;
 }
 

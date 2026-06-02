@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadClaudeCliSessions, loadCodexSessionFile, loadCodexSessions, parseCodexSessionMetaLine } from "./session-loader";
+import {
+  loadClaudeCliSessions,
+  loadCodeBuddyCliSessions,
+  loadCodexSessionFile,
+  loadCodexSessions,
+  parseCodexSessionMetaLine,
+} from "./session-loader";
 
 describe("Codex session loading", () => {
   it("extracts id, cwd, originator, first question, and visible messages from a rollout file", () => {
@@ -305,5 +311,80 @@ describe("Claude session loading", () => {
     ]);
 
     fs.rmSync(claudeDir, { recursive: true, force: true });
+  });
+});
+
+describe("CodeBuddy session loading", () => {
+  it("loads CodeBuddy CLI jsonl sessions with a separate source namespace", () => {
+    const codeBuddyDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codebuddy-"));
+    const projectDir = path.join(codeBuddyDir, "projects", "Users-xjx");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "codebuddy-1.jsonl"),
+      [
+        JSON.stringify({
+          id: "msg-user",
+          timestamp: 1_780_321_278_404,
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "接入 CodeBuddy CLI" }],
+          sessionId: "codebuddy-1",
+          cwd: "/repo",
+        }),
+        JSON.stringify({
+          id: "msg-assistant",
+          parentId: "msg-user",
+          timestamp: 1_780_321_303_135,
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "我来处理" }],
+          providerData: {
+            messageId: "provider-message-1",
+            usage: {
+              input_tokens: 120,
+              output_tokens: 30,
+              cached_input_tokens: 10,
+              reasoning_output_tokens: 5,
+            },
+          },
+          sessionId: "codebuddy-1",
+          cwd: "/repo",
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadCodeBuddyCliSessions(codeBuddyDir);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      sessionKey: "codebuddy:codebuddy-1",
+      rawId: "codebuddy-1",
+      source: "codebuddy-cli",
+      projectPath: "/repo",
+      firstQuestion: "接入 CodeBuddy CLI",
+      originalTitle: "接入 CodeBuddy CLI",
+      timestamp: 1_780_321_278_404,
+      tokenUsage: {
+        inputTokens: 120,
+        outputTokens: 30,
+        cachedInputTokens: 10,
+        reasoningOutputTokens: 5,
+        totalTokens: 165,
+      },
+    });
+    expect(loaded[0].messages.map((message) => message.content)).toEqual(["接入 CodeBuddy CLI", "我来处理"]);
+    expect(loaded[0].tokenEvents).toEqual([
+      {
+        dedupeKey: "codebuddy:provider-message-1",
+        timestamp: 1_780_321_303_135,
+        inputTokens: 120,
+        outputTokens: 30,
+        cachedInputTokens: 10,
+        reasoningOutputTokens: 5,
+        totalTokens: 165,
+      },
+    ]);
+
+    fs.rmSync(codeBuddyDir, { recursive: true, force: true });
   });
 });

@@ -281,7 +281,7 @@ describe("SessionStore", () => {
     expect(store.searchSessions({ query: "", tag: "backend" })).toHaveLength(1);
   });
 
-  it("keeps internal sources out of the regular Claude and Codex source filters", () => {
+  it("keeps personal sources out of the regular Claude and Codex source filters", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession({ sessionKey: "claude:regular", rawId: "regular", source: "claude-cli" }), messages);
     store.upsertIndexedSession(
@@ -293,21 +293,29 @@ describe("SessionStore", () => {
       sampleSession({ sessionKey: "codex-internal:internal", rawId: "codex-internal", source: "codex-internal" }),
       messages,
     );
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codebuddy:regular", rawId: "codebuddy-regular", source: "codebuddy-cli" }),
+      messages,
+    );
 
     expect(store.searchSessions({ source: "claude" }).map((session) => session.source)).toEqual(["claude-cli"]);
     expect(store.searchSessions({ source: "codex" }).map((session) => session.source)).toEqual(["codex-cli"]);
     expect(store.searchSessions({ source: "claude-internal" }).map((session) => session.sessionKey)).toEqual(["claude-internal:internal"]);
     expect(store.searchSessions({ source: "codex-internal" }).map((session) => session.sessionKey)).toEqual(["codex-internal:internal"]);
+    expect(store.searchSessions({ source: "codebuddy-cli" }).map((session) => session.sessionKey)).toEqual(["codebuddy:regular"]);
   });
 
   it("deletes indexed sessions by source and removes unused tags", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession({ sessionKey: "claude-internal:one", rawId: "one", source: "claude-internal" }), messages);
     store.addTag("claude-internal:one", "internal");
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codebuddy:one", rawId: "codebuddy-one", source: "codebuddy-cli" }), messages);
+    store.addTag("codebuddy:one", "codebuddy");
 
-    store.deleteSessionsBySource(["claude-internal"]);
+    store.deleteSessionsBySource(["claude-internal", "codebuddy-cli"]);
 
     expect(store.searchSessions({ source: "claude-internal" })).toEqual([]);
+    expect(store.searchSessions({ source: "codebuddy-cli" })).toEqual([]);
     expect(store.listTags()).toEqual([]);
   });
 

@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { cleanTitle, getAdapter, isMeaningfulUserMessage } from "./format-adapters";
 import type {
+  CodeBuddyConversationLine,
   ClaudeAppSessionFile,
   ClaudeConversationLine,
   ClaudeSessionIndexFile,
@@ -19,10 +20,12 @@ import type {
 const CODEX_APP_ORIGINATOR = "Codex Desktop";
 const CLAUDE_INTERNAL_DIR = ".claude-internal";
 const CODEX_INTERNAL_DIR = ".codex-internal";
+const CODEBUDDY_DIR = ".codebuddy";
 
 export interface SessionLoadOptions {
   includeClaudeInternal?: boolean;
   includeCodexInternal?: boolean;
+  includeCodeBuddyCli?: boolean;
 }
 
 function emptyTokenUsage(): TokenUsage {
@@ -149,6 +152,7 @@ function createTokenUsage(inputTokens: number, outputTokens: number, cachedInput
 }
 
 function parseTimestampMs(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return 0;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
@@ -243,6 +247,33 @@ function extractClaudeTokenEvents(rows: unknown[]): TokenUsageEvent[] {
   return [...entries.values()];
 }
 
+function extractCodeBuddyTokenEvents(rows: unknown[]): TokenUsageEvent[] {
+  const entries = new Map<string, TokenUsageEvent>();
+
+  rows.forEach((row, index) => {
+    if (!isRecord(row) || row.type !== "message" || row.role !== "assistant") return;
+    const providerData = objectField(row, "providerData");
+    const usage = objectField(providerData, "usage") || objectField(providerData, "rawUsage");
+    if (!usage) return;
+
+    const cached = numberField(usage, "cache_read_input_tokens") + numberField(usage, "cached_input_tokens");
+    const entry = createTokenUsage(
+      numberField(usage, "input_tokens"),
+      numberField(usage, "output_tokens"),
+      cached,
+      numberField(usage, "reasoning_output_tokens"),
+    );
+    const key = stringField(providerData, "messageId") || stringField(row, "id") || `${index}:${JSON.stringify(usage)}`;
+    putTokenEvent(entries, {
+      ...entry,
+      timestamp: parseTimestampMs(row.timestamp),
+      dedupeKey: key.startsWith("codebuddy:") ? key : `codebuddy:${key}`,
+    });
+  });
+
+  return [...entries.values()];
+}
+
 function firstClaudeGitBranch(rows: unknown[]): string | null {
   for (const row of rows) {
     if (!row || typeof row !== "object" || !("gitBranch" in row)) continue;
@@ -253,7 +284,7 @@ function firstClaudeGitBranch(rows: unknown[]): string | null {
 }
 
 function createIndexedSession(input: {
-  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal";
+  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "codebuddy";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -283,6 +314,25 @@ function createIndexedSession(input: {
     gitBranch: input.gitBranch ?? null,
     tokenUsage: input.tokenUsage ?? emptyTokenUsage(),
   };
+}
+
+function firstCodeBuddySessionMeta(rows: unknown[], fallbackRawId: string): { rawId: string; projectPath: string; timestamp: number } {
+  let rawId = fallbackRawId;
+  let projectPath = "";
+  let timestamp = 0;
+
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const sessionId = stringField(row, "sessionId");
+    const cwd = stringField(row, "cwd");
+    const ts = parseTimestampMs(row.timestamp);
+    if (sessionId && rawId === fallbackRawId) rawId = sessionId;
+    if (cwd && !projectPath) projectPath = cwd;
+    if (ts && !timestamp) timestamp = ts;
+    if (rawId !== fallbackRawId && projectPath && timestamp) break;
+  }
+
+  return { rawId, projectPath, timestamp };
 }
 
 export function loadCodexSessionFile(filePath: string, title?: string, updatedAt?: string): LoadedSession | null {
@@ -507,6 +557,43 @@ export function* loadClaudeAppSessionsIterator(
   }
 }
 
+export function loadCodeBuddyCliSessions(codeBuddyDir = path.join(os.homedir(), CODEBUDDY_DIR)): LoadedSession[] {
+  return [...loadCodeBuddyCliSessionsIterator(codeBuddyDir)];
+}
+
+export function* loadCodeBuddyCliSessionsIterator(codeBuddyDir = path.join(os.homedir(), CODEBUDDY_DIR)): Generator<LoadedSession> {
+  const projectsDir = path.join(codeBuddyDir, "projects");
+  if (!fs.existsSync(projectsDir)) return;
+
+  for (const filePath of walkJsonlFiles(projectsDir)) {
+    const rows = readJsonl(filePath);
+    if (rows.length === 0) continue;
+
+    const fallbackRawId = path.basename(filePath, ".jsonl");
+    const meta = firstCodeBuddySessionMeta(rows, fallbackRawId);
+    const messages = extractMessages(rows, "codebuddy");
+    const tokenEvents = extractCodeBuddyTokenEvents(rows);
+    const tokenUsage = tokenUsageFromEvents(tokenEvents);
+    const question = firstQuestion(messages);
+
+    yield {
+      session: createIndexedSession({
+        keyPrefix: "codebuddy",
+        rawId: meta.rawId,
+        source: "codebuddy-cli",
+        projectPath: meta.projectPath,
+        filePath,
+        originalTitle: cleanTitle(question) || "Untitled Session",
+        firstQuestion: cleanTitle(question),
+        timestamp: meta.timestamp,
+        tokenUsage,
+      }),
+      messages,
+      tokenEvents,
+    };
+  }
+}
+
 export function loadDefaultSessions(options: SessionLoadOptions = {}): LoadedSession[] {
   return [...loadDefaultSessionsIterator(options)];
 }
@@ -517,4 +604,5 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   yield* loadCodexSessionsIterator();
   if (options.includeClaudeInternal) yield* loadClaudeCliSessionsIterator(path.join(os.homedir(), CLAUDE_INTERNAL_DIR), "claude-internal");
   if (options.includeCodexInternal) yield* loadCodexSessionsIterator(path.join(os.homedir(), CODEX_INTERNAL_DIR), "codex-internal");
+  if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(os.homedir(), CODEBUDDY_DIR));
 }

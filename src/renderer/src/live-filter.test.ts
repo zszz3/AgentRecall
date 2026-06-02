@@ -3,11 +3,13 @@ import { filterSessionsByLiveStatus, getLiveSessionState, liveSessionKeyForSessi
 
 const codex = { source: "codex-cli", rawId: "codex-1", sessionKey: "codex:codex-1" } as const;
 const claude = { source: "claude-cli", rawId: "claude-1", sessionKey: "claude:claude-1" } as const;
+const codebuddy = { source: "codebuddy-cli", rawId: "codebuddy-1", sessionKey: "codebuddy:codebuddy-1" } as const;
 
 describe("live session filtering", () => {
   it("builds stable live keys from session source family and raw id", () => {
     expect(liveSessionKeyForSession(codex)).toBe("codex:codex-1");
     expect(liveSessionKeyForSession(claude)).toBe("claude:claude-1");
+    expect(liveSessionKeyForSession(codebuddy)).toBe("codebuddy:codebuddy-1");
   });
 
   it("filters sessions by open and closed live status", () => {

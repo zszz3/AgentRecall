@@ -7,6 +7,7 @@ const SOURCE_LABEL: Record<string, string> = {
   "codex-cli": "Codex CLI",
   "codex-app": "Codex App",
   "codex-internal": "Codex Internal",
+  "codebuddy-cli": "CodeBuddy CLI",
 };
 
 export function formatRelativeTime(ts: number): string {

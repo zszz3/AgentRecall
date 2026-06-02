@@ -249,6 +249,7 @@ async function runIndexSync(): Promise<IndexStatus> {
     loadOptions: {
       includeClaudeInternal: getSettings().includeClaudeInternal,
       includeCodexInternal: getSettings().includeCodexInternal,
+      includeCodeBuddyCli: getSettings().includeCodeBuddyCli,
     },
     onProgress: (status) => {
       indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
@@ -326,6 +327,7 @@ function registerIpc(): void {
     settingsStore.set(next);
     if (previous.includeClaudeInternal && !next.includeClaudeInternal) store.deleteSessionsBySource(["claude-internal"]);
     if (previous.includeCodexInternal && !next.includeCodexInternal) store.deleteSessionsBySource(["codex-internal"]);
+    if (previous.includeCodeBuddyCli && !next.includeCodeBuddyCli) store.deleteSessionsBySource(["codebuddy-cli"]);
     return next;
   });
   ipcMain.handle("command:copy-resume", (_event, sessionKey: string) => {

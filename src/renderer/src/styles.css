@@ -47,6 +47,9 @@
   --codex: #19966f;
   --codex-badge-bg: #e6f4ef;
   --codex-badge-text: #096b4b;
+  --codebuddy: #6d5dfc;
+  --codebuddy-badge-bg: #eef0ff;
+  --codebuddy-badge-text: #4f46e5;
 
   --tag-bg: #f1f5f9;
   --tag-text: #475569;
@@ -120,6 +123,9 @@
   --codex: #34c79a;
   --codex-badge-bg: rgba(52, 199, 154, 0.15);
   --codex-badge-text: #4fd6ad;
+  --codebuddy: #a78bfa;
+  --codebuddy-badge-bg: rgba(129, 112, 255, 0.18);
+  --codebuddy-badge-text: #c4b5fd;
 
   --tag-bg: rgba(255, 255, 255, 0.05);
   --tag-text: #c9ced6;
@@ -1248,6 +1254,10 @@ select:focus-visible {
   background: var(--codex);
 }
 
+.source-dot.codebuddy {
+  background: var(--codebuddy);
+}
+
 .session-meta {
   display: flex;
   align-items: center;
@@ -1284,6 +1294,11 @@ select:focus-visible {
 .source-badge.codex {
   background: var(--codex-badge-bg);
   color: var(--codex-badge-text);
+}
+
+.source-badge.codebuddy {
+  background: var(--codebuddy-badge-bg);
+  color: var(--codebuddy-badge-text);
 }
 
 .live-status {

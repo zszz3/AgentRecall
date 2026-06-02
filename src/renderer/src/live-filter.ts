@@ -9,7 +9,8 @@ export interface LiveFilterableSession {
 }
 
 export function liveSessionKeyForSession(session: LiveFilterableSession): string {
-  return `${session.source.startsWith("claude") ? "claude" : "codex"}:${session.rawId}`;
+  const family = session.source.startsWith("claude") ? "claude" : session.source.startsWith("codex") ? "codex" : "codebuddy";
+  return `${family}:${session.rawId}`;
 }
 
 export function getLiveSessionState(session: LiveFilterableSession, liveSessionKeys: Set<string>, liveDetectionFailed: boolean): LiveSessionState {

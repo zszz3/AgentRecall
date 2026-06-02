@@ -1,5 +1,12 @@
-export type SessionSource = "claude-cli" | "claude-app" | "claude-internal" | "codex-cli" | "codex-app" | "codex-internal";
-export type SessionFormat = "claude" | "codex";
+export type SessionSource =
+  | "claude-cli"
+  | "claude-app"
+  | "claude-internal"
+  | "codex-cli"
+  | "codex-app"
+  | "codex-internal"
+  | "codebuddy-cli";
+export type SessionFormat = "claude" | "codex" | "codebuddy";
 export type SessionSortBy = "activity" | "created" | "updated";
 
 export interface SessionMessage {
@@ -129,7 +136,7 @@ export interface UsageQuotaSnapshot {
   providers: UsageQuotaCard[];
 }
 
-export type LiveSessionFamily = "claude" | "codex";
+export type LiveSessionFamily = "claude" | "codex" | "codebuddy";
 
 export interface LiveSession {
   family: LiveSessionFamily;
@@ -192,5 +199,34 @@ export interface CodexConversationLine {
       repository_url?: string;
     };
     originator?: string;
+  };
+}
+
+export interface CodeBuddyConversationLine {
+  id?: string;
+  parentId?: string;
+  timestamp?: number;
+  type?: string;
+  role?: "user" | "assistant" | string;
+  content?: Array<{ type?: string; text?: string }>;
+  sessionId?: string;
+  cwd?: string;
+  providerData?: {
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cached_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      reasoning_output_tokens?: number;
+    };
+    rawUsage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cached_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      reasoning_output_tokens?: number;
+    };
+    model?: string;
+    messageId?: string;
   };
 }

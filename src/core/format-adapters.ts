@@ -1,4 +1,5 @@
 import type {
+  CodeBuddyConversationLine,
   ClaudeConversationLine,
   CodexConversationLine,
   SessionFormat,
@@ -77,7 +78,27 @@ export const codexAdapter: FormatAdapter = {
   },
 };
 
+export const codebuddyAdapter: FormatAdapter = {
+  format: "codebuddy",
+  parseLine(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const line = raw as CodeBuddyConversationLine;
+    if (line.type !== "message" || !line.role || !line.content) return null;
+    if (line.role !== "user" && line.role !== "assistant") return null;
+
+    const content = extractTextBlocks(line.content);
+    if (!content) return null;
+
+    return {
+      role: line.role,
+      content,
+      timestamp: typeof line.timestamp === "number" ? new Date(line.timestamp).toISOString() : "",
+    };
+  },
+};
+
 export function getFormatForSource(source: SessionSource): SessionFormat {
+  if (source === "codebuddy-cli") return "codebuddy";
   return source === "claude-cli" || source === "claude-app" || source === "claude-internal" ? "claude" : "codex";
 }
 
@@ -85,7 +106,11 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (sourceOrFormat === "claude" || sourceOrFormat === "codex") {
     return sourceOrFormat === "claude" ? claudeAdapter : codexAdapter;
   }
-  return getFormatForSource(sourceOrFormat) === "claude" ? claudeAdapter : codexAdapter;
+  if (sourceOrFormat === "codebuddy") return codebuddyAdapter;
+  const format = getFormatForSource(sourceOrFormat);
+  if (format === "claude") return claudeAdapter;
+  if (format === "codebuddy") return codebuddyAdapter;
+  return codexAdapter;
 }
 
 export function isMeaningfulUserMessage(text: string): boolean {

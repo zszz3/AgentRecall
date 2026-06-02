@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeAdapter, codexAdapter, cleanTitle, isMeaningfulUserMessage } from "./format-adapters";
+import { claudeAdapter, codebuddyAdapter, codexAdapter, cleanTitle, isMeaningfulUserMessage } from "./format-adapters";
 
 describe("format adapters", () => {
   it("extracts visible Claude text and skips tool blocks", () => {
@@ -46,6 +46,21 @@ describe("format adapters", () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it("extracts visible CodeBuddy CLI messages", () => {
+    expect(
+      codebuddyAdapter.parseLine({
+        type: "message",
+        role: "assistant",
+        timestamp: 1_780_321_303_135,
+        content: [{ type: "output_text", text: "我来处理" }],
+      }),
+    ).toEqual({
+      role: "assistant",
+      content: "我来处理",
+      timestamp: new Date(1_780_321_303_135).toISOString(),
+    });
   });
 
   it("filters injected user-role noise while keeping short real replies", () => {

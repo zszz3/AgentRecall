@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveMacApplicationName } from "./platform";
+import { getResumeCommand, resolveMacApplicationName } from "./platform";
+import type { SessionSearchResult } from "./types";
 
 describe("platform application resolution", () => {
   it("returns the first macOS application name that resolves", async () => {
@@ -19,5 +20,17 @@ describe("platform application resolution", () => {
     };
 
     await expect(resolveMacApplicationName(["iTerm", "iTerm2"], runner)).resolves.toBeNull();
+  });
+});
+
+describe("resume commands", () => {
+  it("uses CodeBuddy CLI resume syntax for CodeBuddy sessions", () => {
+    const session = {
+      source: "codebuddy-cli",
+      rawId: "codebuddy-1",
+      projectPath: "/repo",
+    } as SessionSearchResult;
+
+    expect(getResumeCommand(session)).toBe("cd /repo && codebuddy --resume codebuddy-1");
   });
 });
