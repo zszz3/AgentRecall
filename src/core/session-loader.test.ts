@@ -445,4 +445,48 @@ describe("CodeBuddy session loading", () => {
 
     fs.rmSync(codeBuddyDir, { recursive: true, force: true });
   });
+
+  it("prefers the CodeBuddy ai-title over slash-command first messages", () => {
+    const codeBuddyDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codebuddy-title-"));
+    const projectDir = path.join(codeBuddyDir, "projects", "Users-xjx");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "codebuddy-title.jsonl"),
+      [
+        // Root bootstrap "code" message is dropped, and the first real user
+        // message is a slash command that should NOT become the title.
+        JSON.stringify({
+          id: "root",
+          timestamp: 1_780_321_278_000,
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "code" }],
+          sessionId: "codebuddy-title",
+          cwd: "/repo",
+        }),
+        JSON.stringify({
+          id: "cmd",
+          parentId: "root",
+          timestamp: 1_780_321_278_404,
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "/model" }],
+          sessionId: "codebuddy-title",
+          cwd: "/repo",
+        }),
+        JSON.stringify({
+          type: "ai-title",
+          aiTitle: "Switch the active model",
+          sessionId: "codebuddy-title",
+          cwd: "/repo",
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadCodeBuddyCliSessions(codeBuddyDir);
+
+    expect(loaded[0].session.originalTitle).toBe("Switch the active model");
+
+    fs.rmSync(codeBuddyDir, { recursive: true, force: true });
+  });
 });

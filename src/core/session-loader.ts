@@ -372,6 +372,19 @@ function firstCodeBuddySessionMeta(rows: unknown[], fallbackRawId: string): { ra
   return { rawId, projectPath, timestamp };
 }
 
+// CodeBuddy writes its AI-generated session title as a dedicated `ai-title` row
+// (e.g. `{ type: "ai-title", aiTitle: "..." }`). Prefer it over the first user
+// message, which is often a slash command like "/model" that CodeBuddy stores as
+// plain text rather than wrapping in a <command-name> tag we could filter.
+function firstCodeBuddyAiTitle(rows: unknown[]): string {
+  for (const row of rows) {
+    if (!isRecord(row) || row.type !== "ai-title") continue;
+    const title = stringField(row, "aiTitle").trim();
+    if (title) return title;
+  }
+  return "";
+}
+
 export function loadCodexSessionFile(filePath: string, title?: string, updatedAt?: string): LoadedSession | null {
   const rows = readJsonl(filePath);
   if (rows.length === 0) return null;
@@ -612,6 +625,7 @@ export function* loadCodeBuddyCliSessionsIterator(codeBuddyDir = path.join(os.ho
     const tokenEvents = extractCodeBuddyTokenEvents(rows);
     const tokenUsage = tokenUsageFromEvents(tokenEvents);
     const question = firstQuestion(messages);
+    const aiTitle = firstCodeBuddyAiTitle(rows);
 
     yield {
       session: createIndexedSession({
@@ -620,7 +634,7 @@ export function* loadCodeBuddyCliSessionsIterator(codeBuddyDir = path.join(os.ho
         source: "codebuddy-cli",
         projectPath: meta.projectPath,
         filePath,
-        originalTitle: cleanTitle(question) || "Untitled Session",
+        originalTitle: aiTitle || cleanTitle(question) || "Untitled Session",
         firstQuestion: cleanTitle(question),
         timestamp: meta.timestamp,
         tokenUsage,
