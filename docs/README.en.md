@@ -151,15 +151,6 @@ Build the app bundle output:
 npm run build
 ```
 
-## Useful Scripts
-
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Start the Electron development app |
-| `npm test` | Run tests |
-| `npm run typecheck` | Run TypeScript checks |
-| `npm run build` | Typecheck and build the Electron app |
-
 ## Repository Notes
 
 - `README.md` is the Chinese project overview for users and developers.
