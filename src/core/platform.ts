@@ -216,6 +216,15 @@ export function getResumeProcessSpec(
   };
 }
 
+// Ghostty has no `--initial-command` option, so the previous flag was silently
+// ignored and the window opened without resuming. The documented way to run a
+// command is the special `-e <command>` argument; run it through the user's
+// shell so the `cd … &&` chain plus PATH/aliases resolve, mirroring WezTerm.
+export function buildGhosttyOpenArgs(session: SessionSearchResult, settings: AppSettings): string[] {
+  const shell = process.env.SHELL || "/bin/zsh";
+  return ["-na", "Ghostty.app", "--args", "-e", shell, "-ic", getResumeCommand(session, settings, { withCwd: true })];
+}
+
 export async function openResumeInTerminal(session: SessionSearchResult, settings: AppSettings): Promise<void> {
   const command = getResumeCommand(session, settings, { withCwd: true });
   if (process.platform === "win32") {
@@ -256,7 +265,7 @@ end tell`);
   }
 
   if (settings.defaultTerminal === "Ghostty") {
-    await runProcess("/usr/bin/open", ["-na", "Ghostty.app", "--args", `--initial-command=${command}`]);
+    await runProcess("/usr/bin/open", buildGhosttyOpenArgs(session, settings));
     return;
   }
 

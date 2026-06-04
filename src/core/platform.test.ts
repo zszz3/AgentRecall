@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGhosttyOpenArgs,
   buildWindowsLaunchPlan,
   defaultApiConfig,
   defaultClaudeApiConfig,
@@ -72,6 +73,28 @@ describe("resume commands", () => {
     expect(getResumeCommand(session, defaultSettings, { platform: "win32", withCwd: false })).toBe(
       "claude --resume abc",
     );
+  });
+});
+
+describe("Ghostty resume launch args", () => {
+  it("runs the resume command via -e and the shell, not the unsupported --initial-command flag", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "/repo",
+    } as SessionSearchResult;
+    const originalShell = process.env.SHELL;
+    process.env.SHELL = "/bin/zsh";
+    try {
+      const args = buildGhosttyOpenArgs(session, defaultSettings);
+      expect(args.slice(0, 5)).toEqual(["-na", "Ghostty.app", "--args", "-e", "/bin/zsh"]);
+      expect(args[5]).toBe("-ic");
+      expect(args[6]).toBe("cd /repo && claude --resume abc");
+      expect(args.some((arg) => arg.includes("--initial-command"))).toBe(false);
+    } finally {
+      if (originalShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = originalShell;
+    }
   });
 });
 
