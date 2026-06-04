@@ -3,6 +3,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEventHand
 import {
   AppWindow,
   Archive,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Clipboard,
@@ -53,6 +54,7 @@ import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
 import type {
   LiveSessionSnapshot,
+  ProjectGroupingMode,
   ProjectSummary,
   SearchOptions,
   SessionMessage,
@@ -81,6 +83,7 @@ import {
   type SidebarSectionsState,
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
+import { buildRepoBrowser, findContainingProjectRoot, joinProjectPath, toRelativeProjectPath } from "./repo-browser";
 import { filterInstalledSkills, sortInstalledSkills, skillSourceLabel, type SkillSourceFilter } from "./skill-manager";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 
@@ -143,6 +146,7 @@ const INITIAL_SESSION_LIMIT = 30;
 const SESSION_PAGE_SIZE = 30;
 const INITIAL_MESSAGE_LIMIT = 20;
 const MESSAGE_PAGE_SIZE = 80;
+const REPO_BROWSER_FETCH_LIMIT = 10_000;
 
 const EMPTY_STATS: SessionStats = {
   total: {
@@ -235,7 +239,10 @@ type SkillsFeedback = ActionStatus | null;
 interface ContextMenuState {
   x: number;
   y: number;
-  session: SessionSearchResult;
+  target:
+    | { kind: "session"; session: SessionSearchResult }
+    | { kind: "directory"; path: string; label: string }
+    | { kind: "project"; project: ProjectSummary; promoted: boolean };
 }
 
 type DialogState =
@@ -253,6 +260,47 @@ function loadInitialSidebarSections(): SidebarSectionsState {
   return readSidebarSections(window.localStorage.getItem(SIDEBAR_SECTIONS_STORAGE_KEY));
 }
 
+function formatSessionProjectDisplay(
+  projectPath: string,
+  projects: ProjectSummary[],
+  projectGrouping: ProjectGroupingMode,
+  language: LanguageMode,
+): string {
+  if (!projectPath) return "";
+  if (projectGrouping !== "repo") return projectPath;
+  const repoRoot = findContainingProjectRoot(projectPath, projects);
+  if (!repoRoot) return projectPath;
+  const relativePath = toRelativeProjectPath(projectPath, repoRoot);
+  if (relativePath === null) return projectPath;
+  if (!relativePath) return localize(language, "Repository root", "仓库根目录");
+  return relativePath;
+}
+
+function comparableProjectPath(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, "");
+  return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+function findMatchingPromotedRoot(targetPath: string, promotedRoots: string[]): string | null {
+  const normalizedTargetPath = targetPath.trim();
+  if (!normalizedTargetPath) return null;
+  const comparableTargetPath = comparableProjectPath(normalizedTargetPath);
+  let bestMatch: string | null = null;
+  let bestLength = -1;
+
+  for (const root of promotedRoots) {
+    const normalizedRoot = root.trim();
+    if (!normalizedRoot) continue;
+    const comparableRoot = comparableProjectPath(normalizedRoot);
+    if (comparableTargetPath !== comparableRoot && !comparableTargetPath.startsWith(`${comparableRoot}/`)) continue;
+    if (comparableRoot.length <= bestLength) continue;
+    bestMatch = normalizedRoot;
+    bestLength = comparableRoot.length;
+  }
+
+  return bestMatch;
+}
+
 export function App(): ReactElement {
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
@@ -261,6 +309,7 @@ export function App(): ReactElement {
   const [source, setSource] = useState<SearchOptions["source"]>("all");
   const [tag, setTag] = useState<string | undefined>();
   const [projectPath, setProjectPath] = useState<string | undefined>();
+  const [repoBrowserSegments, setRepoBrowserSegments] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<ViewMode>("default");
   const [sortBy, setSortBy] = useState<SessionSortBy>("created");
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
@@ -307,21 +356,25 @@ export function App(): ReactElement {
   const detailLoadSeqRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
+  const projectGrouping = appSettings?.projectGrouping ?? "cwd";
+  const repoBrowserEnabled = projectGrouping === "repo" && Boolean(projectPath);
   const searchScopeKey = useMemo(
-    () => JSON.stringify([query, source, tag ?? "", projectPath ?? "", visibility, sortBy]),
-    [query, source, tag, projectPath, visibility, sortBy],
+    () => JSON.stringify([query, source, tag ?? "", projectPath ?? "", visibility, sortBy, projectGrouping]),
+    [query, source, tag, projectPath, visibility, sortBy, projectGrouping],
   );
 
   const load = useCallback(async () => {
     const requestId = ++loadSeqRef.current;
+    const fetchAllRepoSessions = projectGrouping === "repo" && Boolean(projectPath);
     const options: SearchOptions = {
       query,
       source,
       tag,
       projectPath,
+      projectGrouping,
       visibility,
       sortBy,
-      limit: sessionLimit + 1,
+      limit: fetchAllRepoSessions ? REPO_BROWSER_FETCH_LIMIT : sessionLimit + 1,
     };
     const [rawResults, nextTags, nextProjects, nextStats] = await Promise.all([
       window.sessionSearch.searchSessions(options),
@@ -330,16 +383,16 @@ export function App(): ReactElement {
       window.sessionSearch.getStats({ period: statsPeriod }),
     ]);
     if (requestId !== loadSeqRef.current) return;
-    const nextResults = rawResults.slice(0, sessionLimit);
+    const nextResults = fetchAllRepoSessions ? rawResults : rawResults.slice(0, sessionLimit);
     setResults(nextResults);
-    setHasMoreSessions(rawResults.length > sessionLimit);
+    setHasMoreSessions(!fetchAllRepoSessions && rawResults.length > sessionLimit);
     setTags(nextTags);
     setProjects(nextProjects);
     setStats(nextStats);
     setSelectedKey((current) =>
       current && !nextResults.some((session) => session.sessionKey === current) ? null : current,
     );
-  }, [query, source, tag, projectPath, visibility, sortBy, sessionLimit, statsPeriod]);
+  }, [projectGrouping, query, source, tag, projectPath, visibility, sortBy, sessionLimit, statsPeriod]);
 
   const refreshStats = useCallback(async () => {
     setStatsRefreshing(true);
@@ -466,6 +519,15 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
+    setProjectPath(undefined);
+    setRepoBrowserSegments([]);
+  }, [projectGrouping]);
+
+  useEffect(() => {
+    setRepoBrowserSegments([]);
+  }, [projectPath]);
+
+  useEffect(() => {
     if (source === "claude-internal" && appSettings && !appSettings.includeClaudeInternal) setSource("all");
     if (source === "codex-internal" && appSettings && !appSettings.includeCodexInternal) setSource("all");
     if (source === "codebuddy-cli" && appSettings && !appSettings.includeCodeBuddyCli) setSource("all");
@@ -512,9 +574,17 @@ export function App(): ReactElement {
     () => filterSessionsByLiveStatus(results, liveSessionKeys, liveStatus, liveDetectionFailed),
     [results, liveSessionKeys, liveStatus, liveDetectionFailed],
   );
+  const repoBrowserState = useMemo(
+    () => (repoBrowserEnabled && projectPath ? buildRepoBrowser(displayedResults, projectPath, repoBrowserSegments) : null),
+    [displayedResults, projectPath, repoBrowserEnabled, repoBrowserSegments],
+  );
+  const visibleSessions = useMemo(
+    () => (repoBrowserState ? repoBrowserState.sessions : displayedResults),
+    [displayedResults, repoBrowserState],
+  );
   const selected = useMemo(
-    () => displayedResults.find((session) => session.sessionKey === selectedKey) || null,
-    [displayedResults, selectedKey],
+    () => visibleSessions.find((session) => session.sessionKey === selectedKey) || null,
+    [visibleSessions, selectedKey],
   );
 
   useEffect(() => {
@@ -555,7 +625,7 @@ export function App(): ReactElement {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
         if (actionStatus?.kind === "running" || !selectedKey) return;
-        const session = displayedResults.find((item) => item.sessionKey === selectedKey);
+        const session = visibleSessions.find((item) => item.sessionKey === selectedKey);
         if (session) {
           void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language));
         }
@@ -563,17 +633,17 @@ export function App(): ReactElement {
       }
 
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        if (displayedResults.length === 0) return;
+        if (visibleSessions.length === 0) return;
         event.preventDefault();
-        const currentIndex = displayedResults.findIndex((session) => session.sessionKey === selectedKey);
+        const currentIndex = visibleSessions.findIndex((session) => session.sessionKey === selectedKey);
         const delta = event.key === "ArrowDown" ? 1 : -1;
         const nextIndex =
           currentIndex < 0
             ? RUNTIME_PLATFORM === "darwin" && delta === -1
-              ? displayedResults.length - 1
+              ? visibleSessions.length - 1
               : 0
-            : Math.min(displayedResults.length - 1, Math.max(0, currentIndex + delta));
-        setSelectedKey(displayedResults[nextIndex].sessionKey);
+            : Math.min(visibleSessions.length - 1, Math.max(0, currentIndex + delta));
+        setSelectedKey(visibleSessions[nextIndex].sessionKey);
         return;
       }
 
@@ -581,7 +651,7 @@ export function App(): ReactElement {
         const target = event.target as HTMLElement | null;
         const tag = target?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-        const session = displayedResults.find((item) => item.sessionKey === selectedKey);
+        const session = visibleSessions.find((item) => item.sessionKey === selectedKey);
         if (session) {
           event.preventDefault();
           void openDetail(session);
@@ -590,7 +660,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, dialog, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, settingsOpen, actionStatus, t]);
+  }, [visibleSessions, selectedKey, detail, dialog, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, settingsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -616,6 +686,9 @@ export function App(): ReactElement {
     () => projects.find((project) => project.path === projectPath) || null,
     [projects, projectPath],
   );
+  const promotedProjectRoots = appSettings?.promotedProjectRoots ?? [];
+  const repoBrowserRootLabel = selectedProject?.label || t("Repository root", "仓库根目录");
+  const repoBrowserPathLabel = repoBrowserSegments.length > 0 ? repoBrowserSegments.join("/") : repoBrowserRootLabel;
   const searchPlaceholder = projectPath
     ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
     : tag
@@ -624,9 +697,9 @@ export function App(): ReactElement {
 
   useEffect(() => {
     setSelectedKey((current) =>
-      current && !displayedResults.some((session) => session.sessionKey === current) ? null : current,
+      current && !visibleSessions.some((session) => session.sessionKey === current) ? null : current,
     );
-  }, [displayedResults]);
+  }, [visibleSessions]);
 
   function toggleSidebarSectionById(section: SidebarSectionId): void {
     setSidebarSections((current) => toggleSidebarSection(current, section));
@@ -856,6 +929,59 @@ export function App(): ReactElement {
     }
   }
 
+  async function promoteToRoot(rootPath: string): Promise<void> {
+    if (projectGrouping !== "repo") return;
+    const normalizedPath = rootPath.trim();
+    if (!normalizedPath) return;
+    setContextMenu(null);
+    const nextRoots = promotedProjectRoots.includes(normalizedPath) ? promotedProjectRoots : [...promotedProjectRoots, normalizedPath];
+    setSettingsFeedback({ kind: "running", message: t("Promoting root...", "正在提升根目录...") });
+    try {
+      const nextSettings = await window.sessionSearch.setSettings({ promotedProjectRoots: nextRoots });
+      setAppSettings(nextSettings);
+      setProjectPath(normalizedPath);
+      setRepoBrowserSegments([]);
+      await load();
+      const successMessage = t("Root promoted.", "根目录已提升。");
+      setSettingsFeedback({ kind: "success", message: successMessage });
+      window.setTimeout(() => {
+        setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
+      }, 1600);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  async function demotePromotedRoot(rootPath: string): Promise<void> {
+    if (projectGrouping !== "repo") return;
+    const normalizedPath = rootPath.trim();
+    if (!normalizedPath) return;
+    const matchedRoot = findMatchingPromotedRoot(normalizedPath, promotedProjectRoots);
+    if (!matchedRoot) return;
+    setContextMenu(null);
+    const nextRoots = promotedProjectRoots.filter((root) => root !== matchedRoot);
+    setSettingsFeedback({ kind: "running", message: t("Reverting promoted root...", "正在回退提升根目录...") });
+    try {
+      const nextSettings = await window.sessionSearch.setSettings({ promotedProjectRoots: nextRoots });
+      const nextProjects = await window.sessionSearch.listProjects();
+      setAppSettings(nextSettings);
+      setProjects(nextProjects);
+      const nextProjectPath = projectPath
+        ? findContainingProjectRoot(projectPath, nextProjects) ?? findContainingProjectRoot(normalizedPath, nextProjects) ?? undefined
+        : undefined;
+      setProjectPath(nextProjectPath);
+      setRepoBrowserSegments([]);
+      if (nextProjectPath === projectPath) await load();
+      const successMessage = t("Promoted root reverted.", "提升根目录已回退。");
+      setSettingsFeedback({ kind: "success", message: successMessage });
+      window.setTimeout(() => {
+        setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
+      }, 1600);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   async function applyApiConfigToCodex(apiConfig: ApiConfig): Promise<void> {
     setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
     try {
@@ -890,6 +1016,25 @@ export function App(): ReactElement {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
+
+  const sessionContextMenu =
+    contextMenu?.target.kind === "session"
+      ? { x: contextMenu.x, y: contextMenu.y, session: contextMenu.target.session }
+      : null;
+  const directoryContextMenu =
+    contextMenu?.target.kind === "directory"
+      ? { x: contextMenu.x, y: contextMenu.y, path: contextMenu.target.path, label: contextMenu.target.label }
+      : null;
+  const projectContextMenu =
+    contextMenu?.target.kind === "project"
+      ? { x: contextMenu.x, y: contextMenu.y, project: contextMenu.target.project, promoted: contextMenu.target.promoted }
+      : null;
+  const sessionPromotedRoot = sessionContextMenu
+    ? findMatchingPromotedRoot(sessionContextMenu.session.projectPath, promotedProjectRoots)
+    : null;
+  const directoryPromotedRoot = directoryContextMenu
+    ? findMatchingPromotedRoot(directoryContextMenu.path, promotedProjectRoots)
+    : null;
 
   return (
     <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
@@ -1015,6 +1160,19 @@ export function App(): ReactElement {
                 key={project.path}
                 className={`project-row ${projectPath === project.path ? "active" : ""}`}
                 onClick={() => setProjectPath(project.path)}
+                onContextMenu={(event) => {
+                  if (projectGrouping !== "repo") return;
+                  event.preventDefault();
+                  setContextMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                    target: {
+                      kind: "project",
+                      project,
+                      promoted: promotedProjectRoots.includes(project.path),
+                    },
+                  });
+                }}
                 title={project.path}
               >
                 <Folder size={13} />
@@ -1157,14 +1315,75 @@ export function App(): ReactElement {
               ? t(`${results.length} sessions`, `${results.length} 个会话`)
               : t(`${displayedResults.length} of ${results.length} sessions`, `${displayedResults.length} / ${results.length} 个会话`)}
           </span>
-          {selected ? <span className="selected-path">{selected.projectPath || selected.rawId}</span> : null}
+          {repoBrowserState ? (
+            <span className="selected-path" title={repoBrowserPathLabel}>
+              {repoBrowserPathLabel}
+            </span>
+          ) : selected ? (
+            <span className="selected-path" title={selected.projectPath || undefined}>
+              {formatSessionProjectDisplay(selected.projectPath, projects, projectGrouping, language) || selected.rawId}
+            </span>
+          ) : null}
         </div>
 
         <div className="results">
-          {displayedResults.map((session) => (
+          {repoBrowserState ? (
+            <div className="repo-browser-bar">
+              <button
+                className="repo-browser-back"
+                onClick={() => setRepoBrowserSegments((current) => current.slice(0, -1))}
+                disabled={repoBrowserSegments.length === 0}
+              >
+                <ChevronLeft size={14} />
+                {t("Back", "返回")}
+              </button>
+              <div className="repo-browser-breadcrumbs">
+                <button className={repoBrowserSegments.length === 0 ? "active" : ""} onClick={() => setRepoBrowserSegments([])}>
+                  {repoBrowserRootLabel}
+                </button>
+                {repoBrowserSegments.map((segment, index) => (
+                  <button
+                    key={`${segment}:${index}`}
+                    className={index === repoBrowserSegments.length - 1 ? "active" : ""}
+                    onClick={() => setRepoBrowserSegments(repoBrowserSegments.slice(0, index + 1))}
+                  >
+                    {segment}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {repoBrowserState
+            ? repoBrowserState.directories.map((directory) => (
+                <button
+                  key={directory.key}
+                  className="repo-directory-row"
+                  onClick={() => setRepoBrowserSegments(directory.segments)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      target: { kind: "directory", path: directory.absolutePath, label: directory.relativePath || directory.name },
+                    });
+                  }}
+                  title={directory.relativePath}
+                >
+                  <span className="repo-directory-main">
+                    <Folder size={15} />
+                    <span className="repo-directory-name">{directory.name}</span>
+                  </span>
+                  <span className="repo-directory-meta">
+                    <span className="repo-directory-path">{directory.relativePath}</span>
+                    <em>{t(`${directory.sessionCount} sessions`, `${directory.sessionCount} 个会话`)}</em>
+                  </span>
+                </button>
+              ))
+            : null}
+          {visibleSessions.map((session) => (
             <SessionRow
               key={session.sessionKey}
-              session={session}
+              session={{ ...session, projectPath: formatSessionProjectDisplay(session.projectPath, projects, projectGrouping, language) }}
               selected={selected?.sessionKey === session.sessionKey}
               liveState={getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
               language={language}
@@ -1175,12 +1394,15 @@ export function App(): ReactElement {
               onContextMenu={(event) => {
                 event.preventDefault();
                 setSelectedKey(session.sessionKey);
-                setContextMenu({ x: event.clientX, y: event.clientY, session });
+                setContextMenu({ x: event.clientX, y: event.clientY, target: { kind: "session", session } });
               }}
             />
           ))}
+          {repoBrowserState && repoBrowserState.directories.length === 0 && visibleSessions.length === 0 ? (
+            <div className="empty">{t(`No sessions in ${repoBrowserPathLabel}.`, `${repoBrowserPathLabel} 下没有会话。`)}</div>
+          ) : null}
           {displayedResults.length === 0 && !hasMoreSessions ? <div className="empty">{t("No sessions found.", "没有找到会话。")}</div> : null}
-          {hasMoreSessions ? (
+          {!repoBrowserState && hasMoreSessions ? (
             <button className="load-more-sessions" onClick={() => setSessionLimit((current) => current + SESSION_PAGE_SIZE)}>
               <ChevronDown size={14} />
               {t(`Load ${SESSION_PAGE_SIZE} more`, `再加载 ${SESSION_PAGE_SIZE} 个`)}
@@ -1191,7 +1413,7 @@ export function App(): ReactElement {
 
       {detail ? (
         <DetailPanel
-          session={detail}
+          session={{ ...detail, projectPath: formatSessionProjectDisplay(detail.projectPath, projects, projectGrouping, language) }}
           messages={messages}
           traceEvents={traceEvents}
           loading={messagesLoading}
@@ -1234,54 +1456,106 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {contextMenu ? (
-        <ContextMenu
-          state={contextMenu}
+      {sessionContextMenu ? (
+        <SessionContextMenu
+          state={sessionContextMenu}
           language={language}
           revealLabel={FILE_MANAGER_LABEL}
           showMacActions={IS_MAC}
-          onRename={() => beginRename(contextMenu.session)}
-          onAddTag={() => beginAddTag(contextMenu.session)}
+          onRename={() => beginRename(sessionContextMenu.session)}
+          onAddTag={() => beginAddTag(sessionContextMenu.session)}
           onFavorite={() =>
             void runAction(
-              contextMenu.session.favorited ? t("Removing favorite", "正在取消收藏") : t("Adding favorite", "正在加入收藏"),
-              () => window.sessionSearch.setFavorited(contextMenu.session.sessionKey, !contextMenu.session.favorited),
-              contextMenu.session.favorited ? t("Removed from favorites.", "已取消收藏。") : t("Added to favorites.", "已加入收藏。"),
+              sessionContextMenu.session.favorited ? t("Removing favorite", "正在取消收藏") : t("Adding favorite", "正在加入收藏"),
+              () => window.sessionSearch.setFavorited(sessionContextMenu.session.sessionKey, !sessionContextMenu.session.favorited),
+              sessionContextMenu.session.favorited
+                ? t("Removed from favorites.", "已取消收藏。")
+                : t("Added to favorites.", "已加入收藏。"),
             )
           }
           onPin={() =>
-            void runAction(t("Updating pin", "正在更新置顶"), () => window.sessionSearch.setPinned(contextMenu.session.sessionKey, !contextMenu.session.pinned), t("Pin updated.", "置顶已更新。"))
+            void runAction(
+              t("Updating pin", "正在更新置顶"),
+              () => window.sessionSearch.setPinned(sessionContextMenu.session.sessionKey, !sessionContextMenu.session.pinned),
+              t("Pin updated.", "置顶已更新。"),
+            )
           }
           onHide={() =>
             void runAction(
               t("Updating visibility", "正在更新可见性"),
-              () => window.sessionSearch.setHidden(contextMenu.session.sessionKey, !contextMenu.session.hidden),
+              () => window.sessionSearch.setHidden(sessionContextMenu.session.sessionKey, !sessionContextMenu.session.hidden),
               t("Visibility updated.", "可见性已更新。"),
             )
           }
           onResume={() =>
-            void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(contextMenu.session.sessionKey), (result) => resumeRouteMessage(result, language))
+            void runAction(
+              t("Opening terminal", "正在打开终端"),
+              () => window.sessionSearch.resumeSession(sessionContextMenu.session.sessionKey),
+              (result) => resumeRouteMessage(result, language),
+            )
           }
           onResumeIterm={() =>
-            void runAction(t("Opening iTerm", "正在打开 iTerm"), () => window.sessionSearch.resumeSessionInIterm(contextMenu.session.sessionKey), t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"))
+            void runAction(
+              t("Opening iTerm", "正在打开 iTerm"),
+              () => window.sessionSearch.resumeSessionInIterm(sessionContextMenu.session.sessionKey),
+              t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
+            )
           }
           onOpenApp={() =>
-            void runAction(t("Opening native app", "正在打开原生应用"), () => window.sessionSearch.openNativeApp(contextMenu.session.sessionKey), t("Native app opened.", "原生应用已打开。"))
+            void runAction(
+              t("Opening native app", "正在打开原生应用"),
+              () => window.sessionSearch.openNativeApp(sessionContextMenu.session.sessionKey),
+              t("Native app opened.", "原生应用已打开。"),
+            )
           }
           onCopyResume={() =>
-            void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(contextMenu.session.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
+            void runAction(
+              t("Copying resume command", "正在复制 Resume 命令"),
+              () => window.sessionSearch.copyResumeCommand(sessionContextMenu.session.sessionKey),
+              t("Resume command copied.", "Resume 命令已复制。"),
+            )
           }
           onCopyMarkdown={() =>
-            void runAction(t("Copying markdown", "正在复制 Markdown"), () => window.sessionSearch.copyMarkdown(contextMenu.session.sessionKey), t("Markdown copied.", "Markdown 已复制。"))
+            void runAction(
+              t("Copying markdown", "正在复制 Markdown"),
+              () => window.sessionSearch.copyMarkdown(sessionContextMenu.session.sessionKey),
+              t("Markdown copied.", "Markdown 已复制。"),
+            )
           }
-          onExportMarkdown={() => void exportMarkdown(contextMenu.session.sessionKey)}
+          onExportMarkdown={() => void exportMarkdown(sessionContextMenu.session.sessionKey)}
           onReveal={() =>
             void runAction(
               `Opening ${FILE_MANAGER_LABEL}`,
-              () => window.sessionSearch.revealSession(contextMenu.session.sessionKey),
+              () => window.sessionSearch.revealSession(sessionContextMenu.session.sessionKey),
               `${FILE_MANAGER_LABEL} opened.`,
             )
           }
+          onPromoteToRoot={
+            projectGrouping === "repo" && !sessionPromotedRoot ? () => void promoteToRoot(sessionContextMenu.session.projectPath) : undefined
+          }
+        />
+      ) : directoryContextMenu ? (
+        <DirectoryContextMenu
+          state={directoryContextMenu}
+          language={language}
+          onPromoteToRoot={directoryPromotedRoot ? undefined : () => void promoteToRoot(directoryContextMenu.path)}
+        />
+      ) : projectContextMenu ? (
+        <ProjectContextMenu
+          state={projectContextMenu}
+          language={language}
+          onDemote={() => {
+            if (!projectContextMenu.promoted) {
+              setContextMenu(null);
+              const message = t("No higher-level directory.", "没有更高层的目录");
+              setActionStatus({ kind: "error", message });
+              window.setTimeout(() => {
+                setActionStatus((current) => (current?.message === message ? null : current));
+              }, 1600);
+              return;
+            }
+            void demotePromotedRoot(projectContextMenu.project.path);
+          }}
         />
       ) : null}
 
@@ -2059,7 +2333,7 @@ function ActionToast({ status }: { status: ActionStatus }): ReactElement {
   );
 }
 
-function ContextMenu({
+function SessionContextMenu({
   state,
   language,
   revealLabel,
@@ -2076,8 +2350,9 @@ function ContextMenu({
   onCopyMarkdown,
   onExportMarkdown,
   onReveal,
+  onPromoteToRoot,
 }: {
-  state: ContextMenuState;
+  state: { x: number; y: number; session: SessionSearchResult };
   language: LanguageMode;
   revealLabel: string;
   showMacActions: boolean;
@@ -2093,6 +2368,7 @@ function ContextMenu({
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
   onReveal: () => void;
+  onPromoteToRoot?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   return (
@@ -2134,6 +2410,51 @@ function ContextMenu({
       </button>
       <button onClick={onReveal}>
         <FolderOpen size={14} /> Show in {revealLabel}
+      </button>
+      {onPromoteToRoot ? (
+        <button onClick={onPromoteToRoot}>
+          <Folder size={14} /> {l("Promote to Root", "提升为根目录")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function DirectoryContextMenu({
+  state,
+  language,
+  onPromoteToRoot,
+}: {
+  state: { x: number; y: number; path: string; label: string };
+  language: LanguageMode;
+  onPromoteToRoot?: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  return (
+    <div className="context-menu" style={{ left: state.x, top: state.y }} onClick={(event) => event.stopPropagation()}>
+      {onPromoteToRoot ? (
+        <button onClick={onPromoteToRoot}>
+          <Folder size={14} /> {l("Promote to Root", "提升为根目录")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectContextMenu({
+  state,
+  language,
+  onDemote,
+}: {
+  state: { x: number; y: number; project: ProjectSummary; promoted: boolean };
+  language: LanguageMode;
+  onDemote: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  return (
+    <div className="context-menu" style={{ left: state.x, top: state.y }} onClick={(event) => event.stopPropagation()}>
+      <button onClick={onDemote} disabled={!state.promoted} title={state.promoted ? state.project.path : l("No higher-level directory.", "没有更高层的目录")}>
+        <FolderOpen size={14} /> {state.promoted ? l("Revert to Repository Root", "回退到仓库级") : l("No higher-level directory.", "没有更高层的目录")}
       </button>
     </div>
   );
@@ -2659,6 +2980,25 @@ function SettingsDialog({
                   <h3>{l("Default terminal", "默认终端")}</h3>
                   <p>{l("Choose which terminal app Resume and the selected-session shortcut use to reopen a session.", "选择 Resume 和选中会话快捷键用于恢复会话的终端应用。")}</p>
                 </header>
+                <div className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Project grouping", "项目分组")}</span>
+                    <span className="settings-field-sub">
+                      {l(
+                        "Choose whether the Projects sidebar groups sessions by working directory or repository root.",
+                        "选择项目侧栏按工作目录还是仓库根目录聚合会话。",
+                      )}
+                    </span>
+                  </div>
+                  <select
+                    value={settings?.projectGrouping ?? "cwd"}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ projectGrouping: event.target.value as AppSettings["projectGrouping"] })}
+                  >
+                    <option value="cwd">{l("Working directory", "工作目录")}</option>
+                    <option value="repo">{l("Repository root", "仓库根目录")}</option>
+                  </select>
+                </div>
                 <div className="settings-field">
                   <div className="settings-field-text">
                     <span className="settings-field-title">{l("Terminal app", "终端应用")}</span>

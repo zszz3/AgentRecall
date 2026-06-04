@@ -15,7 +15,8 @@ import {
   normalizeTerminal,
   terminalOptionsFor,
 } from "./terminal-options";
-import type { SessionSearchResult, SessionSource } from "./types";
+import { normalizeProjectGrouping } from "./project-grouping";
+import type { ProjectGroupingMode, SessionSearchResult, SessionSource } from "./types";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
 export {
@@ -45,6 +46,8 @@ export interface AppSettings {
   claudeBinary: string;
   codexBinary: string;
   codeBuddyBinary: string;
+  projectGrouping: ProjectGroupingMode;
+  promotedProjectRoots: string[];
   includeClaudeInternal: boolean;
   includeCodexInternal: boolean;
   includeCodeBuddyCli: boolean;
@@ -65,6 +68,8 @@ export const defaultSettings: AppSettings = {
   claudeBinary: "claude",
   codexBinary: "codex",
   codeBuddyBinary: "codebuddy",
+  projectGrouping: "cwd",
+  promotedProjectRoots: [],
   includeClaudeInternal: false,
   includeCodexInternal: false,
   includeCodeBuddyCli: false,
@@ -80,9 +85,25 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     ...merged,
     defaultTerminal: normalizeTerminal(merged.defaultTerminal),
     globalShortcut: normalizeGlobalShortcut(merged.globalShortcut),
+    projectGrouping: normalizeProjectGrouping(merged.projectGrouping),
+    promotedProjectRoots: normalizePromotedProjectRoots(merged.promotedProjectRoots),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),
     claudeApiConfig: normalizeClaudeApiConfig({ ...previous.claudeApiConfig, ...(updates.claudeApiConfig ?? {}) }),
   };
+}
+
+export function normalizePromotedProjectRoots(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return normalized;
 }
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
@@ -222,7 +243,7 @@ export function getResumeProcessSpec(
 // shell so the `cd … &&` chain plus PATH/aliases resolve, mirroring WezTerm.
 export function buildGhosttyOpenArgs(session: SessionSearchResult, settings: AppSettings): string[] {
   const shell = process.env.SHELL || "/bin/zsh";
-  return ["-na", "Ghostty.app", "--args", "-e", shell, "-ic", getResumeCommand(session, settings, { withCwd: true })];
+  return ["-na", "Ghostty.app", "--args", "-e", shell, "-ic", getResumeCommand(session, settings, { withCwd: true, platform: "darwin" })];
 }
 
 export async function openResumeInTerminal(session: SessionSearchResult, settings: AppSettings): Promise<void> {

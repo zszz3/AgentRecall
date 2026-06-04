@@ -161,6 +161,21 @@ describe("API settings", () => {
     });
   });
 
+  it("defaults project grouping to cwd and normalizes invalid values", () => {
+    expect(defaultSettings.projectGrouping).toBe("cwd");
+    expect(mergeAppSettings(defaultSettings, { projectGrouping: "repo" }).projectGrouping).toBe("repo");
+    expect(mergeAppSettings(defaultSettings, { projectGrouping: "invalid" as never }).projectGrouping).toBe("cwd");
+  });
+
+  it("normalizes promoted project roots by trimming and deduping", () => {
+    expect(defaultSettings.promotedProjectRoots).toEqual([]);
+    expect(
+      mergeAppSettings(defaultSettings, {
+        promotedProjectRoots: ["  /repo/frontend  ", "", "/repo/frontend", "/repo/backend", 123 as never],
+      }).promotedProjectRoots,
+    ).toEqual(["/repo/frontend", "/repo/backend"]);
+  });
+
   it("normalizes Claude Code API provider config fields", () => {
     expect(
       normalizeClaudeApiConfig({

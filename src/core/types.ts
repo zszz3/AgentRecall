@@ -8,6 +8,7 @@ export type SessionSource =
   | "codebuddy-cli";
 export type SessionFormat = "claude" | "codex" | "codebuddy";
 export type SessionSortBy = "activity" | "created" | "updated";
+export type ProjectGroupingMode = "cwd" | "repo";
 
 export interface SessionMessage {
   role: "user" | "assistant";
@@ -71,6 +72,8 @@ export interface SearchOptions {
   query?: string;
   tag?: string;
   projectPath?: string;
+  projectGrouping?: ProjectGroupingMode;
+  promotedProjectRoots?: string[];
   source?: SessionSource | "claude" | "codex" | "all";
   visibility?: "default" | "favorites" | "hidden" | "pinned";
   sortBy?: SessionSortBy;

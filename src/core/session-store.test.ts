@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createInMemoryStore } from "./session-store";
 import { TRACE_DETAIL_PREVIEW_MAX_CHARS } from "./trace-detail";
@@ -527,6 +530,121 @@ describe("SessionStore", () => {
     expect(store.searchSessions({ projectPath: "/work/app", tag: "backend" }).map((session) => session.sessionKey)).toEqual([
       "claude:app",
     ]);
+  });
+
+  it("optionally groups projects by repository root", () => {
+    const store = createInMemoryStore();
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-projects-"));
+
+    try {
+      const repoA = path.join(tempRoot, "repo-a");
+      const repoB = path.join(tempRoot, "repo-b");
+      const frontend = path.join(repoA, "frontend");
+      const backend = path.join(repoA, "backend");
+      const worker = path.join(repoB, "worker");
+      for (const dir of [frontend, backend, worker]) fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(path.join(repoA, ".git"));
+      fs.mkdirSync(path.join(repoB, ".git"));
+
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:frontend", rawId: "frontend", projectPath: frontend }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:backend", rawId: "backend", projectPath: backend }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:worker", rawId: "worker", projectPath: worker }), messages);
+
+      expect(store.listProjects("repo")).toEqual([
+        { path: repoA, label: "repo-a", sessionCount: 2 },
+        { path: repoB, label: "repo-b", sessionCount: 1 },
+      ]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers promoted sub-roots over the detected repository root", () => {
+    const store = createInMemoryStore();
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-promoted-root-"));
+
+    try {
+      const repoRoot = path.join(tempRoot, "repo");
+      const frontendRoot = path.join(repoRoot, "frontend");
+      const frontendApp = path.join(frontendRoot, "app");
+      const frontendWeb = path.join(frontendRoot, "web");
+      const backendApi = path.join(repoRoot, "backend", "api");
+      for (const dir of [frontendApp, frontendWeb, backendApi]) fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(path.join(repoRoot, ".git"));
+
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:frontend-app", rawId: "frontend-app", projectPath: frontendApp }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:frontend-web", rawId: "frontend-web", projectPath: frontendWeb }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:backend-api", rawId: "backend-api", projectPath: backendApi }), messages);
+
+      expect(store.listProjects("repo", [frontendRoot])).toEqual([
+        { path: frontendRoot, label: "frontend", sessionCount: 2 },
+        { path: repoRoot, label: "repo", sessionCount: 1 },
+      ]);
+      expect(
+        store.searchSessions({
+          projectPath: frontendRoot,
+          projectGrouping: "repo",
+          promotedProjectRoots: [frontendRoot],
+        }).map((session) => session.sessionKey).sort(),
+      ).toEqual(["codex:frontend-app", "codex:frontend-web"]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the repository root after removing a promoted sub-root", () => {
+    const store = createInMemoryStore();
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-promoted-root-revert-"));
+
+    try {
+      const repoRoot = path.join(tempRoot, "repo");
+      const frontendRoot = path.join(repoRoot, "frontend");
+      const frontendApp = path.join(frontendRoot, "app");
+      const backendApi = path.join(repoRoot, "backend", "api");
+      for (const dir of [frontendApp, backendApi]) fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(path.join(repoRoot, ".git"));
+
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:frontend-app", rawId: "frontend-app", projectPath: frontendApp }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:backend-api", rawId: "backend-api", projectPath: backendApi }), messages);
+
+      expect(store.searchSessions({ projectPath: frontendRoot, projectGrouping: "repo", promotedProjectRoots: [frontendRoot] })).toHaveLength(1);
+      expect(
+        store.searchSessions({
+          projectPath: repoRoot,
+          projectGrouping: "repo",
+          promotedProjectRoots: [],
+        }).map((session) => session.sessionKey).sort(),
+      ).toEqual(["codex:backend-api", "codex:frontend-app"]);
+      expect(store.listProjects("repo", [])).toEqual([{ path: repoRoot, label: "repo", sessionCount: 2 }]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("optionally filters sessions by repository root while preserving cwd filters", () => {
+    const store = createInMemoryStore();
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-filter-"));
+
+    try {
+      const repoRoot = path.join(tempRoot, "repo");
+      const appDir = path.join(repoRoot, "app");
+      const apiDir = path.join(repoRoot, "api");
+      const otherDir = path.join(tempRoot, "other");
+      for (const dir of [appDir, apiDir, otherDir]) fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(path.join(repoRoot, ".git"));
+
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:app", rawId: "app", projectPath: appDir }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:api", rawId: "api", projectPath: apiDir }), messages);
+      store.upsertIndexedSession(sampleSession({ sessionKey: "codex:other", rawId: "other", projectPath: otherDir }), messages);
+
+      expect(
+        store.searchSessions({ projectPath: repoRoot, projectGrouping: "repo" }).map((session) => session.sessionKey).sort(),
+      ).toEqual(["codex:api", "codex:app"]);
+      expect(store.searchSessions({ projectPath: repoRoot }).map((session) => session.sessionKey)).toEqual([]);
+      expect(store.searchSessions({ projectPath: appDir }).map((session) => session.sessionKey)).toEqual(["codex:app"]);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("sorts default results by created time", () => {

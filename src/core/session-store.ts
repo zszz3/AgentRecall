@@ -6,9 +6,11 @@ import {
   type SkillUsageSnapshot,
   type SkillUsageSource,
 } from "./skill-usage";
+import { groupProjectPath } from "./project-grouping";
 import { truncateTraceDetail } from "./trace-detail";
 import type {
   IndexedSession,
+  ProjectGroupingMode,
   ProjectSummary,
   SearchOptions,
   SessionMessage,
@@ -286,7 +288,32 @@ export class SessionStore {
     );
   }
 
-  listProjects(): ProjectSummary[] {
+  listProjects(grouping: ProjectGroupingMode = "cwd", promotedRoots: string[] = []): ProjectSummary[] {
+    if (grouping === "repo") {
+      const rows = this.db
+        .prepare(
+          `
+          SELECT project_path
+          FROM sessions
+          WHERE trim(project_path) != ''
+        `,
+        )
+        .all() as Array<{ project_path: string }>;
+      const groupedCounts = new Map<string, number>();
+      for (const row of rows) {
+        const groupedPath = groupProjectPath(row.project_path, grouping, promotedRoots);
+        if (!groupedPath) continue;
+        groupedCounts.set(groupedPath, (groupedCounts.get(groupedPath) || 0) + 1);
+      }
+      return this.sortProjectSummaries(
+        [...groupedCounts.entries()].map(([path, sessionCount]) => ({
+          path,
+          label: projectLabel(path),
+          sessionCount,
+        })),
+      );
+    }
+
     const rows = this.db
       .prepare(
         `
@@ -297,11 +324,16 @@ export class SessionStore {
       `,
       )
       .all() as Array<{ project_path: string; session_count: number }>;
-    const summaries = rows.map((row) => ({
-      path: row.project_path,
-      label: projectLabel(row.project_path),
-      sessionCount: row.session_count,
-    }));
+    return this.sortProjectSummaries(
+      rows.map((row) => ({
+        path: row.project_path,
+        label: projectLabel(row.project_path),
+        sessionCount: row.session_count,
+      })),
+    );
+  }
+
+  private sortProjectSummaries(summaries: ProjectSummary[]): ProjectSummary[] {
     const basenameCounts = new Map<string, number>();
     for (const summary of summaries) {
       const basename = projectBasename(summary.path);
@@ -508,12 +540,15 @@ export class SessionStore {
   searchSessions(options: SearchOptions = {}): SessionSearchResult[] {
     const limit = options.limit ?? 200;
     const query = options.query?.trim() || "";
+    const projectGrouping = options.projectGrouping ?? "cwd";
+    const promotedRoots = options.promotedProjectRoots ?? [];
     const ftsMatches = query ? this.searchFts(query) : new Map<string, string | null>();
-    const rows = this.getCandidateRows(options);
+    const rows = this.getCandidateRows(options, projectGrouping);
     const tagsBySession = this.getTagsForSessions(rows.map((row) => row.session_key));
     const merged = new Map<string, SessionSearchResult>();
 
     for (const row of rows) {
+      if (options.projectPath && groupProjectPath(row.project_path, projectGrouping, promotedRoots) !== options.projectPath) continue;
       const hasFtsMatch = ftsMatches.has(row.session_key);
       const ftsSnippet = hasFtsMatch ? (ftsMatches.get(row.session_key) ?? null) : null;
       const hydrated = this.hydrateRow(row, query ? ftsSnippet : null, tagsBySession.get(row.session_key) ?? []);
@@ -950,7 +985,7 @@ export class SessionStore {
     }>;
   }
 
-  private getCandidateRows(options: SearchOptions): SessionRow[] {
+  private getCandidateRows(options: SearchOptions, projectGrouping: ProjectGroupingMode): SessionRow[] {
     const where: string[] = [];
     const args: SQLInputValue[] = [];
 
@@ -959,7 +994,7 @@ export class SessionStore {
     else if (options.visibility === "pinned") where.push("hidden = 0 AND pinned = 1");
     else where.push("hidden = 0");
 
-    if (options.projectPath) {
+    if (options.projectPath && projectGrouping === "cwd") {
       where.push("project_path = ?");
       args.push(options.projectPath);
     }

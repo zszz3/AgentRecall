@@ -1177,6 +1177,154 @@ select:focus-visible {
   background: var(--row-bg);
 }
 
+.repo-browser-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--panel);
+}
+
+.repo-browser-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.repo-browser-back:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.repo-browser-back:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.repo-browser-breadcrumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.repo-browser-breadcrumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.repo-browser-breadcrumbs button {
+  position: relative;
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.repo-browser-breadcrumbs button + button {
+  margin-left: 10px;
+}
+
+.repo-browser-breadcrumbs button + button::before {
+  content: "/";
+  position: absolute;
+  left: -8px;
+  color: var(--text-faint);
+}
+
+.repo-browser-breadcrumbs button:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.repo-browser-breadcrumbs button.active {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.repo-directory-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--row-bg);
+  color: inherit;
+  text-align: left;
+}
+
+.repo-directory-row:hover {
+  background: var(--row-hover-bg);
+}
+
+.repo-directory-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.repo-directory-main svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.repo-directory-name,
+.repo-directory-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-directory-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.repo-directory-path {
+  max-width: 280px;
+  font-family: var(--mono);
+}
+
+.repo-directory-meta em {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-style: normal;
+}
+
 .load-more-sessions {
   display: inline-flex;
   min-height: 36px;
