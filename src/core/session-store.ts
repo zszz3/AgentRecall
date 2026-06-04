@@ -28,6 +28,7 @@ const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
 
 type Db = DatabaseSyncType;
+type ApiProviderKeyTarget = "codex" | "claude";
 
 interface StatsRange {
   period: SessionStatsPeriod;
@@ -433,6 +434,31 @@ export class SessionStore {
     return skillUsageSnapshotFromEvents(rows, "", sourceCountRow.count > 0 || rows.length > 0);
   }
 
+  getApiProviderKey(target: ApiProviderKeyTarget, providerId: string): string {
+    const normalizedProviderId = providerId.trim();
+    if (!normalizedProviderId) return "";
+    const row = this.db
+      .prepare("SELECT api_key FROM api_provider_keys WHERE target = ? AND provider_id = ?")
+      .get(target, normalizedProviderId) as { api_key: string } | undefined;
+    return row?.api_key ?? "";
+  }
+
+  setApiProviderKey(target: ApiProviderKeyTarget, providerId: string, apiKey: string): void {
+    const normalizedProviderId = providerId.trim();
+    if (!normalizedProviderId) return;
+    this.db
+      .prepare(
+        `
+        INSERT INTO api_provider_keys (target, provider_id, api_key, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(target, provider_id) DO UPDATE SET
+          api_key = excluded.api_key,
+          updated_at = excluded.updated_at
+      `,
+      )
+      .run(target, normalizedProviderId, apiKey.trim(), Date.now());
+  }
+
   getStats(options: SessionStatsOptions = {}, now = Date.now()): SessionStats {
     const range = resolveStatsRange(options, now);
     const summariesBySource = new Map<SessionSource, SessionStatsSummary>();
@@ -638,6 +664,14 @@ export class SessionStore {
         timestamp INTEGER NOT NULL,
         PRIMARY KEY (source_path, event_index),
         FOREIGN KEY (source_path) REFERENCES skill_usage_sources(source_path) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS api_provider_keys (
+        target TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (target, provider_id)
       );
 
       CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(

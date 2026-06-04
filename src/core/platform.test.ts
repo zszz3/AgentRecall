@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { mergeApiConfigWithProfileDefaults, mergeClaudeApiConfigWithProfileDefaults } from "./api-config";
 import {
   buildGhosttyOpenArgs,
   buildWindowsLaunchPlan,
@@ -191,6 +192,47 @@ describe("API settings", () => {
   it("defaults API config to the official Codex provider", () => {
     expect(defaultSettings.apiConfig).toEqual(defaultApiConfig);
     expect(defaultSettings.claudeApiConfig).toEqual(defaultClaudeApiConfig);
+  });
+
+  it("keeps explicitly saved empty API keys empty instead of refilling profile defaults", () => {
+    expect(
+      mergeApiConfigWithProfileDefaults(
+        { ...defaultApiConfig, customApiKey: "" },
+        { customApiKey: "" },
+        { customBaseUrl: "https://profile.example/v1", customApiKey: "sk-from-profile", customModel: "profile-model" },
+      ),
+    ).toMatchObject({ customApiKey: "" });
+    expect(
+      mergeClaudeApiConfigWithProfileDefaults(
+        { ...defaultClaudeApiConfig, customApiKey: "" },
+        { customApiKey: "" },
+        {
+          customBaseUrl: "https://profile.example/anthropic",
+          customApiKey: "sk-from-profile",
+          customModel: "profile-model",
+          customHaikuModel: "profile-haiku",
+          customSonnetModel: "profile-sonnet",
+          customOpusModel: "profile-opus",
+        },
+      ),
+    ).toMatchObject({ customApiKey: "" });
+  });
+
+  it("does not auto-fill API keys from profile defaults when the user has not saved one in the app", () => {
+    expect(
+      mergeApiConfigWithProfileDefaults(
+        { ...defaultApiConfig, customApiKey: "" },
+        {},
+        { customApiKey: "sk-from-profile" },
+      ).customApiKey,
+    ).toBe("");
+    expect(
+      mergeClaudeApiConfigWithProfileDefaults(
+        { ...defaultClaudeApiConfig, customApiKey: "" },
+        {},
+        { customApiKey: "sk-from-profile" },
+      ).customApiKey,
+    ).toBe("");
   });
 });
 

@@ -95,6 +95,28 @@ describe("theme controls", () => {
     expect(apiDialog).toMatch(/Save/);
   });
 
+  it("lets API keys be revealed without changing the saved value", () => {
+    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+
+    expect(apiDialog).toContain("showCodexApiKey");
+    expect(apiDialog).toContain("showClaudeApiKey");
+    expect(apiDialog).toContain('type={showCodexApiKey ? "text" : "password"}');
+    expect(apiDialog).toContain('type={showClaudeApiKey ? "text" : "password"}');
+    expect(apiDialog).toContain("setShowCodexApiKey");
+    expect(apiDialog).toContain("setShowClaudeApiKey");
+  });
+
+  it("loads saved API keys when switching provider presets", () => {
+    const apiDialog = appSource.slice(appSource.indexOf("function ApiConfigDialog"), appSource.indexOf("function SettingsDialog"));
+    const selectApiPreset = apiDialog.slice(apiDialog.indexOf("const selectApiPreset"), apiDialog.indexOf("const selectClaudeApiPreset"));
+    const selectClaudeApiPreset = apiDialog.slice(apiDialog.indexOf("const selectClaudeApiPreset"), apiDialog.indexOf("useEffect"));
+
+    expect(selectApiPreset).toContain('getApiProviderKey("codex", preset.id)');
+    expect(selectApiPreset).toContain("customApiKey: apiKey");
+    expect(selectClaudeApiPreset).toContain('getApiProviderKey("claude", preset.id)');
+    expect(selectClaudeApiPreset).toContain("customApiKey: apiKey");
+  });
+
   it("opens settings with the standard preferences shortcut", () => {
     expect(appSource).toContain('event.key === ","');
     expect(appSource).toContain("setSettingsOpen(true)");

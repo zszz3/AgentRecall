@@ -55,6 +55,7 @@ import type { SearchOptions, SessionStatsOptions } from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PRODUCT_NAME = "Agent-Session-Search";
+type ApiProviderKeyTarget = "codex" | "claude";
 
 // The skill-usage hook installer is a self-contained CommonJS script in bin/
 // (sibling of out/), shared with the global-install path. Load it lazily via a
@@ -146,7 +147,7 @@ async function getHydratedSettings(): Promise<AppSettings> {
     loadCodexProfileDefaults(),
     loadClaudeApiConfigDefaults(),
   ]);
-  return {
+  return withStoredApiProviderKeys({
     ...settings,
     apiConfig: mergeApiConfigWithProfileDefaults(settings.apiConfig, getSavedApiConfigPatch(), profileDefaults),
     claudeApiConfig: mergeClaudeApiConfigWithProfileDefaults(
@@ -154,7 +155,66 @@ async function getHydratedSettings(): Promise<AppSettings> {
       getSavedClaudeApiConfigPatch(),
       claudeProfileDefaults,
     ),
+  });
+}
+
+function withStoredApiProviderKeys(settings: AppSettings): AppSettings {
+  const next = { ...settings };
+  if (next.apiConfig.activeProvider === "custom") {
+    next.apiConfig = {
+      ...next.apiConfig,
+      customApiKey: store.getApiProviderKey("codex", next.apiConfig.customProviderId),
+    };
+  }
+  if (next.claudeApiConfig.activeProvider === "custom") {
+    next.claudeApiConfig = {
+      ...next.claudeApiConfig,
+      customApiKey: store.getApiProviderKey("claude", next.claudeApiConfig.customProviderId),
+    };
+  }
+  return next;
+}
+
+function withoutApiProviderKeys(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    apiConfig: { ...settings.apiConfig, customApiKey: "" },
+    claudeApiConfig: { ...settings.claudeApiConfig, customApiKey: "" },
   };
+}
+
+function persistApiProviderKeysFromUpdate(update: AppSettingsUpdate, next: AppSettings): void {
+  if (update.apiConfig && next.apiConfig.activeProvider === "custom") {
+    store.setApiProviderKey("codex", next.apiConfig.customProviderId, next.apiConfig.customApiKey);
+  }
+  if (update.claudeApiConfig && next.claudeApiConfig.activeProvider === "custom") {
+    store.setApiProviderKey("claude", next.claudeApiConfig.customProviderId, next.claudeApiConfig.customApiKey);
+  }
+}
+
+function migrateLegacyApiProviderKeys(): void {
+  const settings = getSettings();
+  if (
+    settings.apiConfig.activeProvider === "custom" &&
+    settings.apiConfig.customApiKey &&
+    !store.getApiProviderKey("codex", settings.apiConfig.customProviderId)
+  ) {
+    store.setApiProviderKey("codex", settings.apiConfig.customProviderId, settings.apiConfig.customApiKey);
+  }
+  if (
+    settings.claudeApiConfig.activeProvider === "custom" &&
+    settings.claudeApiConfig.customApiKey &&
+    !store.getApiProviderKey("claude", settings.claudeApiConfig.customProviderId)
+  ) {
+    store.setApiProviderKey("claude", settings.claudeApiConfig.customProviderId, settings.claudeApiConfig.customApiKey);
+  }
+  settingsStore.set("apiConfig.customApiKey", "");
+  settingsStore.set("claudeApiConfig.customApiKey", "");
+}
+
+function normalizeApiProviderKeyTarget(target: unknown): ApiProviderKeyTarget {
+  if (target === "codex" || target === "claude") return target;
+  throw new Error("Unknown API provider key target.");
 }
 
 function getSavedApiConfigPatch(): Partial<ApiConfig> {
@@ -497,12 +557,16 @@ function registerIpc(): void {
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
       );
     }
-    settingsStore.set(next);
+    persistApiProviderKeysFromUpdate(settings, next);
+    settingsStore.set(withoutApiProviderKeys(next));
     if (previous.includeClaudeInternal && !next.includeClaudeInternal) store.deleteSessionsBySource(["claude-internal"]);
     if (previous.includeCodexInternal && !next.includeCodexInternal) store.deleteSessionsBySource(["codex-internal"]);
     if (previous.includeCodeBuddyCli && !next.includeCodeBuddyCli) store.deleteSessionsBySource(["codebuddy-cli"]);
-    return next;
+    return withStoredApiProviderKeys(next);
   });
+  ipcMain.handle("api-provider-key:get", (_event, target: unknown, providerId: string) =>
+    store.getApiProviderKey(normalizeApiProviderKeyTarget(target), providerId),
+  );
   ipcMain.handle("skills:list", () => buildSkillsSnapshot());
   ipcMain.handle("skills:refresh-usage", () => refreshSkillUsageIndex());
   ipcMain.handle("skills:copy-path", (_event, skillPath: string) => {
@@ -584,6 +648,7 @@ function registerIpc(): void {
 app.whenReady().then(() => {
   const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
   store = new SessionStore(dbPath);
+  migrateLegacyApiProviderKeys();
   registerIpc();
   createApplicationMenu();
   createWindow();

@@ -167,7 +167,7 @@ function executableFamily(token: string | undefined): LiveSessionFamily | null {
   const lower = token.toLowerCase();
   if (lower.includes("@openai/codex")) return "codex";
   if (lower.includes("@anthropic-ai/claude") || lower.includes("claude-code")) return "claude";
-  if (lower.includes("@tencent-ai/codebuddy-code") || lower.includes("codebuddy")) return "codebuddy";
+  if (lower.includes("codebuddy")) return "codebuddy";
   return null;
 }
 

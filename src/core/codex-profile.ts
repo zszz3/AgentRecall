@@ -102,16 +102,22 @@ export async function applyCodexProfile(options: ApplyCodexProfileOptions): Prom
 
   if (profile === "codexzh" && options.apiConfig) {
     const apiConfig = normalizeApiConfig(options.apiConfig);
-    const configText = applyCodexZhConfigOverrides(await readFile(configSource, "utf8"), apiConfig);
-    const authText = apiConfig.customApiKey ? `${JSON.stringify({ OPENAI_API_KEY: apiConfig.customApiKey }, null, 2)}\n` : await readFile(authSource, "utf8");
+    const activeConfigText = await readOptionalFile(configTarget);
+    const sourceConfigText = await readFile(configSource, "utf8");
+    const configText = applyCodexZhConfigOverrides(activeConfigText.trim() ? activeConfigText : sourceConfigText, apiConfig);
     await writeFile(configTarget, configText, { mode: 0o600 });
-    await writeFile(authTarget, authText, { mode: 0o600 });
+  } else if (profile === "codex" && options.apiConfig) {
+    const activeConfigText = await readOptionalFile(configTarget);
+    const sourceConfigText = await readFile(configSource, "utf8");
+    const configText = applyCodexOfficialConfigOverrides(activeConfigText.trim() ? activeConfigText : sourceConfigText, sourceConfigText);
+    await writeFile(configTarget, configText, { mode: 0o600 });
+    await copyFile(authSource, authTarget);
   } else {
     await copyFile(configSource, configTarget);
     await copyFile(authSource, authTarget);
   }
 
-  await chmod(authTarget, 0o600);
+  await chmodIfExists(authTarget, 0o600);
   await chmod(configTarget, 0o600);
 
   return {
@@ -148,9 +154,10 @@ async function applyGeneratedCodexProvider(options: {
     { target: configTarget, backup: path.join(backupDir, `config.toml.before-${providerId}-${stamp}`) },
   ]);
 
-  await writeFile(authTarget, `${JSON.stringify({ OPENAI_API_KEY: apiConfig.customApiKey }, null, 2)}\n`, { mode: 0o600 });
-  await writeFile(configTarget, generatedCodexConfig(apiConfig, providerId), { mode: 0o600 });
-  await chmod(authTarget, 0o600);
+  const activeConfigText = await readOptionalFile(configTarget);
+  const baseConfigText = activeConfigText.trim() ? activeConfigText : generatedCodexConfig(apiConfig, providerId);
+  await writeFile(configTarget, applyCodexProviderConfig(baseConfigText, apiConfig, providerId), { mode: 0o600 });
+  await chmodIfExists(authTarget, 0o600);
   await chmod(configTarget, 0o600);
 
   return {
@@ -186,14 +193,45 @@ async function backupExistingTargets(targets: Array<{ target: string; backup: st
   return backupPaths;
 }
 
+async function chmodIfExists(filePath: string, mode: number): Promise<void> {
+  try {
+    await stat(filePath);
+  } catch {
+    // A custom Codex route can use config.toml bearer tokens without owning auth.json.
+    return;
+  }
+  await chmod(filePath, mode);
+}
+
 function applyCodexZhConfigOverrides(text: string, apiConfig: ApiConfig): string {
   const providerId = codexProviderId(apiConfig.customProviderName);
-  let next = replaceTopLevelString(text, "model_provider", providerId);
+  return applyCodexProviderConfig(text, apiConfig, providerId);
+}
+
+function applyCodexOfficialConfigOverrides(text: string, sourceText: string): string {
+  let next = removeTopLevelTomlKey(text, "experimental_bearer_token");
+  const providerId = readTomlString(sourceText, "model_provider");
+  const model = readTomlString(sourceText, "model");
+  const reasoningEffort = readTomlString(sourceText, "model_reasoning_effort");
+
+  if (providerId) next = replaceTopLevelString(next, "model_provider", providerId);
+  if (model) next = replaceTopLevelString(next, "model", model);
+  if (reasoningEffort) next = replaceTopLevelString(next, "model_reasoning_effort", reasoningEffort);
+  if (providerId) next = mergeTomlSectionAssignments(next, sourceText, `[model_providers.${providerId}]`);
+  return next.endsWith("\n") ? next : `${next}\n`;
+}
+
+function applyCodexProviderConfig(text: string, apiConfig: ApiConfig, providerId: string): string {
+  let next = removeTopLevelTomlKey(text, "experimental_bearer_token");
+  next = replaceTopLevelString(next, "model_provider", providerId);
   if (apiConfig.customModel) next = replaceTopLevelString(next, "model", apiConfig.customModel);
-  next = replaceFirstProviderSectionHeader(next, providerId);
   next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "name", apiConfig.customProviderName);
   if (apiConfig.customBaseUrl) next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "base_url", apiConfig.customBaseUrl);
   next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "wire_api", "responses");
+  next = replaceOrInsertSectionLiteral(next, `[model_providers.${providerId}]`, "requires_openai_auth", "true");
+  if (apiConfig.customApiKey) {
+    next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "experimental_bearer_token", apiConfig.customApiKey);
+  }
   return next.endsWith("\n") ? next : `${next}\n`;
 }
 
@@ -240,14 +278,33 @@ function replaceTopLevelString(text: string, key: string, value: string): string
   return `${line}\n${text}`;
 }
 
-function replaceFirstProviderSectionHeader(text: string, providerId: string): string {
-  const header = `[model_providers.${providerId}]`;
-  const pattern = /^\[model_providers\.[^\]]+\]\s*$/m;
-  if (pattern.test(text)) return text.replace(pattern, header);
-  return `${text.trimEnd()}\n\n${header}\n`;
+function removeTopLevelTomlKey(text: string, key: string): string {
+  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
+  let inTopLevel = true;
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      if (/^\s*\[/.test(line)) inTopLevel = false;
+      return !(inTopLevel && pattern.test(line));
+    })
+    .join("\n");
+}
+
+function mergeTomlSectionAssignments(text: string, sourceText: string, sectionHeader: string): string {
+  const sourceSection = readTomlSection(sourceText, sectionHeader);
+  if (!sourceSection.trim()) return text;
+  return sourceSection.split(/\r?\n/).reduce((next, line) => {
+    const match = line.match(/^\s*([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/);
+    if (!match) return next;
+    return replaceOrInsertSectionLiteral(next, sectionHeader, match[1], match[2].trim());
+  }, text);
 }
 
 function replaceOrInsertSectionString(text: string, sectionHeader: string, key: string, value: string): string {
+  return replaceOrInsertSectionLiteral(text, sectionHeader, key, tomlString(value));
+}
+
+function replaceOrInsertSectionLiteral(text: string, sectionHeader: string, key: string, value: string): string {
   const lines = text.split(/\r?\n/);
   let sectionStart = lines.findIndex((line) => line.trim() === sectionHeader);
   if (sectionStart < 0) {
@@ -264,7 +321,7 @@ function replaceOrInsertSectionString(text: string, sectionHeader: string, key: 
   }
 
   const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=`);
-  const line = `${key} = ${tomlString(value)}`;
+  const line = `${key} = ${value}`;
   for (let i = sectionStart + 1; i < sectionEnd; i += 1) {
     if (pattern.test(lines[i])) {
       lines[i] = line;

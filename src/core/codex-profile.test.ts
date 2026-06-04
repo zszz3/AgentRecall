@@ -43,9 +43,10 @@ describe("codex profile switching", () => {
     });
   });
 
-  it("overlays CodexZH form fields onto the copied profile", async () => {
+  it("overlays CodexZH form fields onto the active config without replacing auth.json", async () => {
     await withCodexHome(async (codexHome) => {
       await writeFile(path.join(codexHome, "auth_codexzh.json"), "{\"OPENAI_API_KEY\":\"profile-key\"}\n");
+      await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"official-login\"}\n");
       await writeFile(
         path.join(codexHome, "config_codexzh.toml"),
         [
@@ -60,6 +61,22 @@ describe("codex profile switching", () => {
           "",
           "[features]",
           "hooks = true",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "codex"',
+          'model = "gpt-5"',
+          "",
+          "[model_providers.codex]",
+          'name = "OpenAI"',
+          'base_url = "https://api.openai.com/v1"',
+          'wire_api = "responses"',
+          "",
+          "[mcp_servers.echo]",
+          'command = "echo"',
           "",
         ].join("\n"),
       );
@@ -84,8 +101,10 @@ describe("codex profile switching", () => {
       expect(config).toContain('name = "CodexZH"');
       expect(config).toContain('base_url = "https://api.codexzh.com/v1"');
       expect(config).toContain('wire_api = "responses"');
-      expect(config).toContain("[features]");
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe('{\n  "OPENAI_API_KEY": "sk-new"\n}\n');
+      expect(config).toContain('experimental_bearer_token = "sk-new"');
+      expect(config).toContain("[model_providers.codex]");
+      expect(config).toContain("[mcp_servers.echo]");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"official-login\"}\n");
     });
   });
 
@@ -93,6 +112,58 @@ describe("codex profile switching", () => {
     expect(codexProfileForApiConfig({ activeProvider: "official" })).toBe("codex");
     expect(codexProfileForApiConfig({ activeProvider: "custom", customProviderId: "codexzh" })).toBe("codexzh");
     expect(codexProfileForApiConfig({ activeProvider: "custom", customProviderId: "deepseek" })).toBe("generated");
+  });
+
+  it("merges official Codex profile into active config without overwriting unrelated sections", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(path.join(codexHome, "auth_codex.json"), "{\"OPENAI_API_KEY\":\"official\"}\n");
+      await writeFile(
+        path.join(codexHome, "config_codex.toml"),
+        [
+          'model_provider = "openai"',
+          'model = "gpt-5.5"',
+          'model_reasoning_effort = "medium"',
+          "",
+          "[features]",
+          "hooks = true",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"old\"}\n");
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "deepseek"',
+          'model = "deepseek-v4-flash"',
+          'model_reasoning_effort = "high"',
+          'experimental_bearer_token = "old-top-level-token"',
+          "",
+          "[model_providers.deepseek]",
+          'name = "deepseek"',
+          'base_url = "https://api.deepseek.com"',
+          'wire_api = "responses"',
+          'experimental_bearer_token = "sk-deepseek"',
+          "",
+          "[mcp_servers.echo]",
+          'command = "echo"',
+          "",
+        ].join("\n"),
+      );
+
+      await applyCodexApiConfig({
+        codexHome,
+        apiConfig: { activeProvider: "official" },
+      });
+
+      const config = await readFile(path.join(codexHome, "config.toml"), "utf8");
+      expect(config).toContain('model_provider = "openai"');
+      expect(config).toContain('model = "gpt-5.5"');
+      expect(config).toContain('model_reasoning_effort = "medium"');
+      expect(config).not.toContain('experimental_bearer_token = "old-top-level-token"');
+      expect(config).toContain("[model_providers.deepseek]");
+      expect(config).toContain("[mcp_servers.echo]");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"official\"}\n");
+    });
   });
 
   it("loads CodexZH defaults from local Codex profile files", async () => {
@@ -124,7 +195,7 @@ describe("codex profile switching", () => {
     });
   });
 
-  it("fills missing API settings from profile defaults without overriding saved fields", () => {
+  it("fills missing non-secret API settings from profile defaults without overriding saved fields", () => {
     expect(
       mergeApiConfigWithProfileDefaults(
         { ...defaultApiConfig, customBaseUrl: "https://saved.example/v1" },
@@ -140,7 +211,7 @@ describe("codex profile switching", () => {
     ).toMatchObject({
       activeProvider: "custom",
       customBaseUrl: "https://saved.example/v1",
-      customApiKey: "profile-key",
+      customApiKey: "",
       customModel: "gpt-5.5",
       customApiFormat: "openai_responses",
     });
@@ -188,10 +259,26 @@ describe("codex profile switching", () => {
     expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "missing" }).customProviderId).toBe("codexzh");
   });
 
-  it("generates active Codex config for common providers without profile files", async () => {
+  it("merges common providers into the active Codex config without overwriting unrelated sections", async () => {
     await withCodexHome(async (codexHome) => {
       await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"old\"}\n");
-      await writeFile(path.join(codexHome, "config.toml"), "model_provider = \"old\"\n");
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "old"',
+          'model = "old-model"',
+          'model_reasoning_effort = "medium"',
+          "",
+          "[model_providers.old]",
+          'name = "Old"',
+          'base_url = "https://old.example/v1"',
+          'wire_api = "responses"',
+          "",
+          "[mcp_servers.echo]",
+          'command = "echo"',
+          "",
+        ].join("\n"),
+      );
 
       const result = await applyCodexApiConfig({
         codexHome,
@@ -210,10 +297,14 @@ describe("codex profile switching", () => {
       const config = await readFile(path.join(codexHome, "config.toml"), "utf8");
       expect(config).toContain('model_provider = "deepseek"');
       expect(config).toContain('model = "deepseek-v4-flash"');
+      expect(config).toContain('model_reasoning_effort = "medium"');
+      expect(config).toContain("[model_providers.old]");
       expect(config).toContain("[model_providers.deepseek]");
       expect(config).toContain('base_url = "https://api.deepseek.com"');
       expect(config).toContain('wire_api = "responses"');
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe('{\n  "OPENAI_API_KEY": "sk-deepseek"\n}\n');
+      expect(config).toContain('experimental_bearer_token = "sk-deepseek"');
+      expect(config).toContain("[mcp_servers.echo]");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"old\"}\n");
       expect(result.profile).toBe("deepseek");
       await expect(readFile(path.join(codexHome, "backups/auth.json.before-deepseek-2026-06-03T08-09-10-111Z"), "utf8")).resolves.toBe(
         "{\"OPENAI_API_KEY\":\"old\"}\n",

@@ -251,7 +251,7 @@ export function mergeApiConfigWithProfileDefaults(
     customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
     customProviderName: fieldWasSaved(savedSource.customProviderName) ? current.customProviderName : defaults.customProviderName ?? current.customProviderName,
     customBaseUrl: fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
-    customApiKey: fieldWasSaved(savedSource.customApiKey) ? current.customApiKey : defaults.customApiKey ?? current.customApiKey,
+    customApiKey: current.customApiKey,
     customModel: fieldWasSaved(savedSource.customModel) ? current.customModel : defaults.customModel ?? current.customModel,
     customApiFormat: savedSource.customApiFormat ?? defaults.customApiFormat ?? current.customApiFormat,
   });
@@ -271,7 +271,7 @@ export function mergeClaudeApiConfigWithProfileDefaults(
       ? current.customProviderName
       : defaults.customProviderName ?? current.customProviderName,
     customBaseUrl: fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
-    customApiKey: fieldWasSaved(savedSource.customApiKey) ? current.customApiKey : defaults.customApiKey ?? current.customApiKey,
+    customApiKey: current.customApiKey,
     customModel: fieldWasSaved(savedSource.customModel) ? current.customModel : defaults.customModel ?? current.customModel,
     customHaikuModel: fieldWasSaved(savedSource.customHaikuModel)
       ? current.customHaikuModel

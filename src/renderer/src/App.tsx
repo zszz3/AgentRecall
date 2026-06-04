@@ -87,10 +87,10 @@ import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 const SOURCE_LABEL: Record<SessionSource, string> = {
   "claude-cli": "Claude Code",
   "claude-app": "Claude App",
-  "claude-internal": "Claude Internal",
+  "claude-internal": "Claude Extra",
   "codex-cli": "Codex CLI",
   "codex-app": "Codex App",
-  "codex-internal": "Codex Internal",
+  "codex-internal": "Codex Extra",
   "codebuddy-cli": "CodeBuddy CLI",
 };
 
@@ -107,8 +107,8 @@ const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"]
 function sourceFilters(settings: AppSettings | null): Array<{ label: string; value: SearchOptions["source"] }> {
   return [
     ...BASE_SOURCE_FILTERS,
-    ...(settings?.includeClaudeInternal ? [{ label: "Claude Internal", value: "claude-internal" as const }] : []),
-    ...(settings?.includeCodexInternal ? [{ label: "Codex Internal", value: "codex-internal" as const }] : []),
+    ...(settings?.includeClaudeInternal ? [{ label: "Claude Extra", value: "claude-internal" as const }] : []),
+    ...(settings?.includeCodexInternal ? [{ label: "Codex Extra", value: "codex-internal" as const }] : []),
     ...(settings?.includeCodeBuddyCli ? [{ label: "CodeBuddy CLI", value: "codebuddy-cli" as const }] : []),
   ];
 }
@@ -604,7 +604,7 @@ export function App(): ReactElement {
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
-    // Reveal an internal source filter only once its background load has finished.
+    // Reveal an extra source filter only once its background load has finished.
     return sourceFilters({
       ...appSettings,
       includeClaudeInternal: appSettings.includeClaudeInternal && !pendingPersonalSources.claude,
@@ -2159,10 +2159,14 @@ function ApiConfigDialog({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const saving = feedback?.kind === "running";
   const [apiTarget, setApiTarget] = useState<"codex" | "claude">("codex");
+  const [showCodexApiKey, setShowCodexApiKey] = useState(false);
+  const [showClaudeApiKey, setShowClaudeApiKey] = useState(false);
   const [draftApiConfig, setDraftApiConfig] = useState<ApiConfig>(() => settings?.apiConfig ?? { ...defaultApiConfig });
   const [draftClaudeApiConfig, setDraftClaudeApiConfig] = useState<ClaudeApiConfig>(
     () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
   );
+  const apiPresetSelectionRef = useRef(0);
+  const claudeApiPresetSelectionRef = useRef(0);
   const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
   const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
   const selectedPreset = API_PROVIDER_PRESETS.find((preset) => preset.id === draftApiConfig.customProviderId) ?? API_PROVIDER_PRESETS[0];
@@ -2171,21 +2175,29 @@ function ApiConfigDialog({
     CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
   const customClaudeName = selectedClaudePreset?.label ?? (draftClaudeApiConfig.customProviderName || "Claude Code");
 
-  const selectApiPreset = (presetId: ApiProviderPresetId) => {
+  const selectApiPreset = async (presetId: ApiProviderPresetId) => {
+    const selectionId = ++apiPresetSelectionRef.current;
     const preset = API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? API_PROVIDER_PRESETS[0];
+    const apiKey = await window.sessionSearch.getApiProviderKey("codex", preset.id).catch(() => "");
+    if (selectionId !== apiPresetSelectionRef.current) return;
     setDraftApiConfig((current) => ({
       ...current,
       activeProvider: "custom",
       customProviderId: preset.id,
       customProviderName: preset.providerName,
       customBaseUrl: preset.baseUrl,
+      customApiKey: apiKey,
       customModel: preset.model,
       customApiFormat: preset.apiFormat,
     }));
+    setShowCodexApiKey(false);
   };
 
-  const selectClaudeApiPreset = (presetId: ClaudeApiProviderPresetId) => {
+  const selectClaudeApiPreset = async (presetId: ClaudeApiProviderPresetId) => {
+    const selectionId = ++claudeApiPresetSelectionRef.current;
     const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
+    const apiKey = await window.sessionSearch.getApiProviderKey("claude", preset.id).catch(() => "");
+    if (selectionId !== claudeApiPresetSelectionRef.current) return;
     setDraftClaudeApiConfig((current) => {
       if (preset.id === "custom") {
         return {
@@ -2193,6 +2205,7 @@ function ApiConfigDialog({
           activeProvider: "custom",
           customProviderId: "custom",
           customProviderName: current.customProviderName || preset.providerName,
+          customApiKey: apiKey,
         };
       }
       return {
@@ -2201,6 +2214,7 @@ function ApiConfigDialog({
         customProviderId: preset.id,
         customProviderName: preset.providerName,
         customBaseUrl: preset.baseUrl,
+        customApiKey: apiKey,
         customModel: preset.model,
         customHaikuModel: preset.haikuModel,
         customSonnetModel: preset.sonnetModel,
@@ -2209,6 +2223,7 @@ function ApiConfigDialog({
         customApiKeyField: preset.apiKeyField,
       };
     });
+    setShowClaudeApiKey(false);
   };
 
   useEffect(() => {
@@ -2260,7 +2275,10 @@ function ApiConfigDialog({
                 type="button"
                 className={draftApiConfig.activeProvider === "official" ? "active" : ""}
                 disabled={!settings || saving}
-                onClick={() => updateDraftApiConfig({ activeProvider: "official" })}
+                onClick={() => {
+                  apiPresetSelectionRef.current += 1;
+                  updateDraftApiConfig({ activeProvider: "official" });
+                }}
               >
                 <strong>Codex Official</strong>
                 <span>{l("Use existing official Codex auth.", "使用现有 Codex 官网认证。")}</span>
@@ -2271,7 +2289,7 @@ function ApiConfigDialog({
                   type="button"
                   className={draftApiConfig.activeProvider === "custom" && draftApiConfig.customProviderId === preset.id ? "active" : ""}
                   disabled={!settings || saving}
-                  onClick={() => selectApiPreset(preset.id)}
+                  onClick={() => void selectApiPreset(preset.id)}
                 >
                   <strong>{preset.label}</strong>
                   <span>{preset.model}</span>
@@ -2280,15 +2298,15 @@ function ApiConfigDialog({
             </div>
             {draftApiConfig.activeProvider === "official" ? (
               <div className="api-config-note">
-                {l("Official Codex uses ~/.codex/config_codex.toml and auth_codex.json when you apply it to Codex.", "官网 Codex 会在应用时使用 ~/.codex/config_codex.toml 和 auth_codex.json。")}
+                {l("Apply merges the official route into ~/.codex/config.toml and uses ~/.codex/auth_codex.json.", "应用时会把官网路由合并到 ~/.codex/config.toml，并使用 ~/.codex/auth_codex.json。")}
               </div>
             ) : null}
             {draftApiConfig.activeProvider === "custom" ? (
               <>
                 <div className="api-config-note">
                   {draftApiConfig.customProviderId === "codexzh"
-                    ? l("Apply copies ~/.codex/config_codexzh.toml and auth_codexzh.json, then overlays the non-empty fields below.", "应用时会复制 ~/.codex/config_codexzh.toml 和 auth_codexzh.json，再用下面非空字段覆盖。")
-                    : l(`Apply writes a generated ${customName} config to ~/.codex/config.toml and auth.json.`, `应用时会把生成的 ${customName} 配置写入 ~/.codex/config.toml 和 auth.json。`)}
+                    ? l("Apply updates the active ~/.codex/config.toml route and preserves existing auth.json.", "应用时只更新当前 ~/.codex/config.toml 的路由配置，并保留现有 auth.json。")
+                    : l(`Apply merges the ${customName} route into ~/.codex/config.toml and preserves existing auth.json.`, `应用时会把 ${customName} 路由合并到 ~/.codex/config.toml，并保留现有 auth.json。`)}
                 </div>
                 <label className="settings-field">
                   <div className="settings-field-text">
@@ -2321,13 +2339,24 @@ function ApiConfigDialog({
                     <span className="settings-field-title">API Key</span>
                     <span className="settings-field-sub">{l("Stored locally. Applying it to Codex CLI will be a separate explicit action.", "保存在本地；写入 Codex CLI 会作为单独的显式动作。")}</span>
                   </div>
-                  <input
-                    type="password"
-                    value={draftApiConfig.customApiKey}
-                    disabled={!settings || saving}
-                    placeholder="sk-..."
-                    onChange={(event) => updateDraftApiConfig({ customApiKey: event.currentTarget.value })}
-                  />
+                  <div className="secret-input">
+                    <input
+                      type={showCodexApiKey ? "text" : "password"}
+                      value={draftApiConfig.customApiKey}
+                      disabled={!settings || saving}
+                      placeholder="sk-..."
+                      onChange={(event) => updateDraftApiConfig({ customApiKey: event.currentTarget.value })}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCodexApiKey((current) => !current)}
+                      disabled={!settings || saving}
+                      aria-label={showCodexApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+                      title={showCodexApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+                    >
+                      {showCodexApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
                 </label>
                 <label className="settings-field">
                   <div className="settings-field-text">
@@ -2375,7 +2404,10 @@ function ApiConfigDialog({
                   type="button"
                   className={draftClaudeApiConfig.activeProvider === "official" ? "active" : ""}
                   disabled={!settings || saving}
-                  onClick={() => updateDraftClaudeApiConfig({ activeProvider: "official" })}
+                  onClick={() => {
+                    claudeApiPresetSelectionRef.current += 1;
+                    updateDraftClaudeApiConfig({ activeProvider: "official" });
+                  }}
                 >
                   <strong>Claude Official</strong>
                   <span>{l("Use existing Claude Code auth.", "使用现有 Claude Code 官方认证。")}</span>
@@ -2386,7 +2418,7 @@ function ApiConfigDialog({
                     type="button"
                     className={draftClaudeApiConfig.activeProvider === "custom" && draftClaudeApiConfig.customProviderId === preset.id ? "active" : ""}
                     disabled={!settings || saving}
-                    onClick={() => selectClaudeApiPreset(preset.id)}
+                    onClick={() => void selectClaudeApiPreset(preset.id)}
                   >
                     <strong>{preset.label}</strong>
                     <span>{preset.model || l("Manual route", "手动配置")}</span>
@@ -2434,13 +2466,24 @@ function ApiConfigDialog({
                       <span className="settings-field-title">API Key</span>
                       <span className="settings-field-sub">{l("Stored locally and written to Claude Code only when applied.", "保存在本地，只在应用时写入 Claude Code。")}</span>
                     </div>
-                    <input
-                      type="password"
-                      value={draftClaudeApiConfig.customApiKey}
-                      disabled={!settings || saving}
-                      placeholder="sk-..."
-                      onChange={(event) => updateDraftClaudeApiConfig({ customApiKey: event.currentTarget.value })}
-                    />
+                    <div className="secret-input">
+                      <input
+                        type={showClaudeApiKey ? "text" : "password"}
+                        value={draftClaudeApiConfig.customApiKey}
+                        disabled={!settings || saving}
+                        placeholder="sk-..."
+                        onChange={(event) => updateDraftClaudeApiConfig({ customApiKey: event.currentTarget.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowClaudeApiKey((current) => !current)}
+                        disabled={!settings || saving}
+                        aria-label={showClaudeApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+                        title={showClaudeApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+                      >
+                        {showClaudeApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
                   </label>
                   <label className="settings-field">
                     <div className="settings-field-text">
@@ -2671,7 +2714,7 @@ function SettingsDialog({
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
                     <span className="settings-field-title">Include ~/.claude-internal</span>
-                    <span className="settings-field-sub">{l("Adds a separate Claude Internal source filter.", "添加独立的 Claude Internal 来源过滤项。")}</span>
+                    <span className="settings-field-sub">{l("Adds a separate Claude Extra source filter.", "添加独立的 Claude Extra 来源过滤项。")}</span>
                   </div>
                   <input
                     type="checkbox"
@@ -2684,7 +2727,7 @@ function SettingsDialog({
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
                     <span className="settings-field-title">Include ~/.codex-internal</span>
-                    <span className="settings-field-sub">{l("Adds a separate Codex Internal source filter.", "添加独立的 Codex Internal 来源过滤项。")}</span>
+                    <span className="settings-field-sub">{l("Adds a separate Codex Extra source filter.", "添加独立的 Codex Extra 来源过滤项。")}</span>
                   </div>
                   <input
                     type="checkbox"

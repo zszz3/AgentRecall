@@ -44,7 +44,9 @@ describe("stylesheet theme contract", () => {
     expect(apiDialog).toMatch(/height:\s*min\([^;]*100vh/);
     expect(apiBody).toMatch(/overflow-y:\s*auto/);
     expect(providerSwitch).toMatch(/grid-template-columns:\s*repeat\(auto-fit/);
+    expect(providerSwitch).toMatch(/minmax\(92px,\s*1fr\)/);
     expect(apiField).toMatch(/display:\s*grid/);
+    expect(apiField).toMatch(/grid-template-columns:\s*minmax\(140px,\s*180px\)\s+minmax\(0,\s*1fr\)/);
     expect(apiInput).toMatch(/width:\s*100%/);
   });
 });

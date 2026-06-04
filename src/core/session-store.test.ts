@@ -322,6 +322,24 @@ describe("SessionStore", () => {
     expect(store.isSkillUsageSourceFresh(claudeSource)).toBe(true);
   });
 
+  it("stores API keys separately by target and provider", () => {
+    const store = createInMemoryStore();
+
+    store.setApiProviderKey("codex", "codexzh", "sk-codexzh");
+    store.setApiProviderKey("codex", "zhipu_glm", "sk-glm");
+    store.setApiProviderKey("claude", "zhipu_glm", "sk-claude-glm");
+
+    expect(store.getApiProviderKey("codex", "codexzh")).toBe("sk-codexzh");
+    expect(store.getApiProviderKey("codex", "zhipu_glm")).toBe("sk-glm");
+    expect(store.getApiProviderKey("claude", "zhipu_glm")).toBe("sk-claude-glm");
+    expect(store.getApiProviderKey("claude", "codexzh")).toBe("");
+
+    store.setApiProviderKey("codex", "zhipu_glm", "");
+
+    expect(store.getApiProviderKey("codex", "zhipu_glm")).toBe("");
+    expect(store.getApiProviderKey("codex", "codexzh")).toBe("sk-codexzh");
+  });
+
   it("dedupes token events after applying the selected stats range", () => {
     const store = createInMemoryStore();
     const now = new Date("2026-06-01T12:00:00Z").getTime();
