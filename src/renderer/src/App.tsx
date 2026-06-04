@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEventHandler, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
@@ -1322,6 +1322,7 @@ function SkillsDialog({
     null;
   const codexCount = snapshot.skills.filter((skill) => skill.agent === "codex").length;
   const claudeCount = snapshot.skills.filter((skill) => skill.agent === "claude").length;
+  const activeItemRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!filteredSkills.length) {
@@ -1331,9 +1332,23 @@ function SkillsDialog({
     if (!selectedSkillId || !filteredSkills.some((skill) => skill.id === selectedSkillId)) setSelectedSkillId(filteredSkills[0].id);
   }, [filteredSkills, selectedSkillId]);
 
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selectedSkill?.id]);
+
+  const handleListKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (!filteredSkills.length) return;
+    event.preventDefault();
+    const currentIndex = filteredSkills.findIndex((skill) => skill.id === selectedSkill?.id);
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    const nextIndex = Math.min(filteredSkills.length - 1, Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + delta));
+    setSelectedSkillId(filteredSkills[nextIndex].id);
+  };
+
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
-      <section className="command-dialog skills-dialog" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="command-dialog skills-dialog" onMouseDown={(event) => event.stopPropagation()} onKeyDown={handleListKeyDown}>
         <div className="dialog-title">
           <span>{l("Skills", "Skills 管理")}</span>
           <span className="skills-dialog-count">
@@ -1379,6 +1394,7 @@ function SkillsDialog({
               ? filteredSkills.map((skill) => (
                   <button
                     key={skill.id}
+                    ref={selectedSkill?.id === skill.id ? activeItemRef : undefined}
                     type="button"
                     className={`skill-item ${selectedSkill?.id === skill.id ? "active" : ""}`}
                     onClick={() => setSelectedSkillId(skill.id)}
