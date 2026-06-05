@@ -5,7 +5,7 @@ import type { ApplyCodexProfileResult } from "../core/codex-profile";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
 import type { ResumeRouteResult } from "../core/resume-router";
-import type { InstalledSkillsSnapshot } from "../core/skill-manager";
+import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type {
   LiveSessionSnapshot,
@@ -50,6 +50,7 @@ const api = {
   refreshSkillUsage: (): Promise<SkillUsageRefreshStatus> => ipcRenderer.invoke("skills:refresh-usage"),
   copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
   revealSkill: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", skillPath),
+  deleteSkill: (skillPath: string): Promise<DeleteInstalledSkillResult> => ipcRenderer.invoke("skills:delete", skillPath),
   getSkillUsageHookStatus: (): Promise<boolean> => ipcRenderer.invoke("skills:usage-hook-status"),
   installSkillUsageHook: (): Promise<string> => ipcRenderer.invoke("skills:install-usage-hook"),
   uninstallSkillUsageHook: (): Promise<string> => ipcRenderer.invoke("skills:uninstall-usage-hook"),

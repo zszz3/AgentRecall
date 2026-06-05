@@ -49,6 +49,7 @@ describe("skill manager renderer data", () => {
     ];
 
     expect(sortInstalledSkills(skills, "usage").map((item) => item.name)).toEqual(["bravo", "alpha", "charlie"]);
+    expect(sortInstalledSkills(skills, "usage-asc").map((item) => item.name)).toEqual(["charlie", "alpha", "bravo"]);
     expect(sortInstalledSkills(skills, "name").map((item) => item.name)).toEqual(["alpha", "bravo", "charlie"]);
     expect(sortInstalledSkills(skills, "updated").map((item) => item.name)).toEqual(["bravo", "charlie", "alpha"]);
   });

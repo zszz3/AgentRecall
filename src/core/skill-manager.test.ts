@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { listInstalledSkills } from "./skill-manager";
+import { deleteInstalledSkill, listInstalledSkills } from "./skill-manager";
 
 function writeSkill(root: string, directoryName: string, content: string): string {
   const skillDir = path.join(root, directoryName);
@@ -118,6 +118,47 @@ describe("skill manager", () => {
         expect.objectContaining({ source: "claude-project", exists: false, skillCount: 0 }),
       ]),
     );
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("deletes a scanned user skill directory", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-delete-"));
+    const codexHome = path.join(homeDir, ".codex");
+    const skillPath = writeSkill(
+      path.join(codexHome, "skills"),
+      "old-helper",
+      ["---", "name: old-helper", "description: Remove me", "---", "", "# Old"].join("\n"),
+    );
+    fs.writeFileSync(path.join(path.dirname(skillPath), "notes.txt"), "extra file", "utf8");
+
+    const result = deleteInstalledSkill(skillPath, { homeDir, codexHome, projectDirs: [] });
+
+    expect(result).toEqual({ deletedPath: path.dirname(skillPath), skillName: "old-helper" });
+    expect(fs.existsSync(path.dirname(skillPath))).toBe(false);
+    expect(listInstalledSkills({ homeDir, codexHome, projectDirs: [] }).skills).toHaveLength(0);
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("rejects deleting paths that are not scanned skills", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-delete-outside-"));
+    const codexHome = path.join(homeDir, ".codex");
+    const outsidePath = writeSkill(path.join(homeDir, "outside"), "not-installed", "# Outside");
+
+    expect(() => deleteInstalledSkill(outsidePath, { homeDir, codexHome, projectDirs: [] })).toThrow("Skill is no longer installed or is outside managed roots.");
+    expect(fs.existsSync(path.dirname(outsidePath))).toBe(true);
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("rejects deleting Codex system skills", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-delete-system-"));
+    const codexHome = path.join(homeDir, ".codex");
+    const skillPath = writeSkill(path.join(codexHome, "skills", ".system"), "system-helper", "# System");
+
+    expect(() => deleteInstalledSkill(skillPath, { homeDir, codexHome, projectDirs: [] })).toThrow("Codex system skills cannot be deleted from this app.");
+    expect(fs.existsSync(path.dirname(skillPath))).toBe(true);
 
     fs.rmSync(homeDir, { recursive: true, force: true });
   });

@@ -51,6 +51,11 @@ export interface SkillManagerOptions {
   claudePluginsDir?: string;
 }
 
+export interface DeleteInstalledSkillResult {
+  deletedPath: string;
+  skillName: string;
+}
+
 interface SkillRootConfig {
   agent: SkillAgent;
   source: SkillSource;
@@ -107,6 +112,23 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
     roots: rootStatuses,
     scannedAt: Date.now(),
   };
+}
+
+export function deleteInstalledSkill(skillPath: string, options: SkillManagerOptions = {}): DeleteInstalledSkillResult {
+  const normalizedSkillPath = normalizePathKey(skillPath);
+  const skill = listInstalledSkills(options).skills.find((item) => normalizePathKey(item.path) === normalizedSkillPath);
+  if (!skill) throw new Error("Skill is no longer installed or is outside managed roots.");
+  if (skill.source === "codex-system") throw new Error("Codex system skills cannot be deleted from this app.");
+
+  const directoryPath = normalizePathKey(skill.directoryPath);
+  const rootPath = normalizePathKey(skill.rootPath);
+  const relativeToRoot = path.relative(rootPath, directoryPath);
+  if (!relativeToRoot || relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
+    throw new Error("Refusing to delete an unsafe skill directory.");
+  }
+
+  fs.rmSync(directoryPath, { recursive: true, force: false });
+  return { deletedPath: directoryPath, skillName: skill.name };
 }
 
 function collectClaudePluginRoots(pluginsDir: string): SkillRootConfig[] {

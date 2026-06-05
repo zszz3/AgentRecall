@@ -41,7 +41,7 @@ import { focusLiveSessionTerminal } from "../core/session-focus";
 import { loadLiveSessionSnapshot } from "../core/session-activity";
 import { routeResumeSession } from "../core/resume-router";
 import { SessionStore } from "../core/session-store";
-import { listInstalledSkills, type InstalledSkillsSnapshot } from "../core/skill-manager";
+import { deleteInstalledSkill, listInstalledSkills, type InstalledSkillsSnapshot } from "../core/skill-manager";
 import {
   listSkillUsageSources,
   readSkillUsageSourceEvents,
@@ -585,6 +585,7 @@ function registerIpc(): void {
   ipcMain.handle("skills:reveal", async (_event, skillPath: string) => {
     await revealInFileManager(skillPath);
   });
+  ipcMain.handle("skills:delete", (_event, skillPath: string) => deleteInstalledSkill(skillPath, { projectDirs: [process.cwd()] }));
   ipcMain.handle("skills:usage-hook-status", () => {
     try {
       return loadSkillUsageHookSetup().skillUsageHookStatus().installed;
