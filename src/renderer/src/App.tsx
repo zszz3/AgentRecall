@@ -85,6 +85,7 @@ import {
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
 import { buildRepoBrowser, findContainingProjectRoot, joinProjectPath, toRelativeProjectPath } from "./repo-browser";
 import { filterInstalledSkills, sortInstalledSkills, skillSourceLabel, type SkillSourceFilter } from "./skill-manager";
+import { filterInstalledSkills, sortInstalledSkills, skillSourceLabel, type SkillSortKey, type SkillSourceFilter } from "./skill-manager";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 
 const SOURCE_LABEL: Record<SessionSource, string> = {
@@ -1656,11 +1657,12 @@ function SkillsDialog({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
+  const [sortKey, setSortKey] = useState<SkillSortKey>("usage");
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const filteredSkills = useMemo(() => {
     const filtered = filterInstalledSkills(snapshot.skills, query, sourceFilter);
-    return sortInstalledSkills(filtered, "usage");
-  }, [snapshot.skills, query, sourceFilter]);
+    return sortInstalledSkills(filtered, sortKey);
+  }, [snapshot.skills, query, sourceFilter, sortKey]);
   const selectedSkill =
     filteredSkills.find((skill) => skill.id === selectedSkillId) ??
     filteredSkills[0] ??
@@ -1716,6 +1718,13 @@ function SkillsDialog({
               </button>
             ))}
           </div>
+          <label className="skills-sort" title={l("Sort skills", "排序 Skills")}>
+            <span>{l("Sort", "排序")}</span>
+            <select value={sortKey} onChange={(event) => setSortKey(event.currentTarget.value as SkillSortKey)} aria-label={l("Sort skills", "排序 Skills")}>
+              <option value="usage">{l("Most used", "最多使用")}</option>
+              <option value="usage-asc">{l("Least used", "最少使用")}</option>
+            </select>
+          </label>
           <button className="stats-refresh" onClick={onRefresh} disabled={loading} title={l("Refresh skill usage", "刷新 Skill 使用统计")} aria-label={l("Refresh skill usage", "刷新 Skill 使用统计")}>
             <RefreshCw size={13} />
           </button>
@@ -2619,7 +2628,10 @@ function ApiConfigDialog({
             </div>
             {draftApiConfig.activeProvider === "official" ? (
               <div className="api-config-note">
-                {l("Apply merges the official route into ~/.codex/config.toml and uses ~/.codex/auth_codex.json.", "应用时会把官网路由合并到 ~/.codex/config.toml，并使用 ~/.codex/auth_codex.json。")}
+                {l(
+                  "Apply clears Codex route fields in ~/.codex/config.toml so Codex uses its default official route, and preserves auth.json.",
+                  "应用时会清理 ~/.codex/config.toml 里的 Codex 路由字段，让 Codex 使用默认官网路由，并保留现有 auth.json。",
+                )}
               </div>
             ) : null}
             {draftApiConfig.activeProvider === "custom" ? (

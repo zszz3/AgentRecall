@@ -1,9 +1,9 @@
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { API_PROVIDER_PRESETS, defaultApiConfig, mergeApiConfigWithProfileDefaults, normalizeApiConfig } from "./api-config";
-import { applyCodexApiConfig, applyCodexProfile, codexProfileForApiConfig, loadCodexProfileDefaults } from "./codex-profile";
+import { applyCodexApiConfig, codexProfileForApiConfig, loadCodexProfileDefaults } from "./codex-profile";
 
 async function withCodexHome<T>(run: (codexHome: string) => Promise<T>): Promise<T> {
   const codexHome = await mkdtemp(path.join(tmpdir(), "agent-session-search-codex-"));
@@ -15,29 +15,49 @@ async function withCodexHome<T>(run: (codexHome: string) => Promise<T>): Promise
 }
 
 describe("codex profile switching", () => {
-  it("copies the selected profile into active Codex files and backs up existing files", async () => {
+  it("applies CodexZH into active Codex config without requiring profile template files", async () => {
     await withCodexHome(async (codexHome) => {
-      await writeFile(path.join(codexHome, "auth_codexzh.json"), "{\"OPENAI_API_KEY\":\"profile-key\"}\n");
-      await writeFile(path.join(codexHome, "config_codexzh.toml"), "model_provider = \"codexzh\"\n");
       await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"old\"}\n");
-      await writeFile(path.join(codexHome, "config.toml"), "model_provider = \"old\"\n");
-      await chmod(path.join(codexHome, "auth.json"), 0o600);
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "openai"',
+          'model = "gpt-5"',
+          "",
+          "[mcp_servers.echo]",
+          'command = "echo"',
+          "",
+        ].join("\n"),
+      );
 
-      const result = await applyCodexProfile({
+      const result = await applyCodexApiConfig({
         codexHome,
-        profile: "codexzh",
+        apiConfig: {
+          activeProvider: "custom",
+          customProviderId: "codexzh",
+          customProviderName: "codexzh",
+          customBaseUrl: "https://api.codexzh.com/v1",
+          customApiKey: "sk-new",
+          customModel: "gpt-5.5",
+          customApiFormat: "openai_responses",
+        },
         now: new Date("2026-06-03T08:09:10.111Z"),
       });
 
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"profile-key\"}\n");
-      await expect(readFile(path.join(codexHome, "config.toml"), "utf8")).resolves.toBe("model_provider = \"codexzh\"\n");
+      const config = await readFile(path.join(codexHome, "config.toml"), "utf8");
+      expect(config).toContain('model_provider = "codexzh"');
+      expect(config).toContain('model = "gpt-5.5"');
+      expect(config).toContain("[model_providers.codexzh]");
+      expect(config).toContain('base_url = "https://api.codexzh.com/v1"');
+      expect(config).toContain('experimental_bearer_token = "sk-new"');
+      expect(config).toContain("[mcp_servers.echo]");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"old\"}\n");
       await expect(readFile(path.join(codexHome, "backups/auth.json.before-codexzh-2026-06-03T08-09-10-111Z"), "utf8")).resolves.toBe(
         "{\"OPENAI_API_KEY\":\"old\"}\n",
       );
       await expect(readFile(path.join(codexHome, "backups/config.toml.before-codexzh-2026-06-03T08-09-10-111Z"), "utf8")).resolves.toBe(
-        "model_provider = \"old\"\n",
+        ['model_provider = "openai"', 'model = "gpt-5"', "", "[mcp_servers.echo]", 'command = "echo"', ""].join("\n"),
       );
-      expect((await stat(path.join(codexHome, "auth.json"))).mode & 0o777).toBe(0o600);
       expect(result.profile).toBe("codexzh");
       expect(result.backupPaths).toHaveLength(2);
     });
@@ -45,25 +65,7 @@ describe("codex profile switching", () => {
 
   it("overlays CodexZH form fields onto the active config without replacing auth.json", async () => {
     await withCodexHome(async (codexHome) => {
-      await writeFile(path.join(codexHome, "auth_codexzh.json"), "{\"OPENAI_API_KEY\":\"profile-key\"}\n");
       await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"official-login\"}\n");
-      await writeFile(
-        path.join(codexHome, "config_codexzh.toml"),
-        [
-          'model_provider = "codexzh"',
-          'model = "old-model"',
-          "",
-          "[model_providers.codexzh]",
-          'name = "codexzh"',
-          'base_url = "https://old.example/v1"',
-          'wire_api = "responses"',
-          "requires_openai_auth = true",
-          "",
-          "[features]",
-          "hooks = true",
-          "",
-        ].join("\n"),
-      );
       await writeFile(
         path.join(codexHome, "config.toml"),
         [
@@ -81,11 +83,11 @@ describe("codex profile switching", () => {
         ].join("\n"),
       );
 
-      await applyCodexProfile({
+      await applyCodexApiConfig({
         codexHome,
-        profile: "codexzh",
         apiConfig: {
           activeProvider: "custom",
+          customProviderId: "codexzh",
           customProviderName: "  CodexZH  ",
           customBaseUrl: " https://api.codexzh.com/v1 ",
           customApiKey: " sk-new ",
@@ -110,25 +112,12 @@ describe("codex profile switching", () => {
 
   it("maps the app provider choice to local Codex profile names", () => {
     expect(codexProfileForApiConfig({ activeProvider: "official" })).toBe("codex");
-    expect(codexProfileForApiConfig({ activeProvider: "custom", customProviderId: "codexzh" })).toBe("codexzh");
+    expect(codexProfileForApiConfig({ activeProvider: "custom", customProviderId: "codexzh" })).toBe("generated");
     expect(codexProfileForApiConfig({ activeProvider: "custom", customProviderId: "deepseek" })).toBe("generated");
   });
 
-  it("merges official Codex profile into active config without overwriting unrelated sections", async () => {
+  it("restores official Codex defaults without requiring profile template files", async () => {
     await withCodexHome(async (codexHome) => {
-      await writeFile(path.join(codexHome, "auth_codex.json"), "{\"OPENAI_API_KEY\":\"official\"}\n");
-      await writeFile(
-        path.join(codexHome, "config_codex.toml"),
-        [
-          'model_provider = "openai"',
-          'model = "gpt-5.5"',
-          'model_reasoning_effort = "medium"',
-          "",
-          "[features]",
-          "hooks = true",
-          "",
-        ].join("\n"),
-      );
       await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"old\"}\n");
       await writeFile(
         path.join(codexHome, "config.toml"),
@@ -156,21 +145,22 @@ describe("codex profile switching", () => {
       });
 
       const config = await readFile(path.join(codexHome, "config.toml"), "utf8");
-      expect(config).toContain('model_provider = "openai"');
-      expect(config).toContain('model = "gpt-5.5"');
-      expect(config).toContain('model_reasoning_effort = "medium"');
+      expect(config).not.toContain('model_provider = "openai"');
+      expect(config).not.toContain('model_provider = "deepseek"');
+      expect(config).not.toContain('model = "deepseek-v4-flash"');
+      expect(config).not.toContain('model_reasoning_effort = "high"');
       expect(config).not.toContain('experimental_bearer_token = "old-top-level-token"');
+      expect(config).not.toContain('experimental_bearer_token = "sk-deepseek"');
       expect(config).toContain("[model_providers.deepseek]");
       expect(config).toContain("[mcp_servers.echo]");
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"official\"}\n");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"old\"}\n");
     });
   });
 
-  it("loads CodexZH defaults from local Codex profile files", async () => {
+  it("loads Codex route defaults from active config.toml", async () => {
     await withCodexHome(async (codexHome) => {
-      await writeFile(path.join(codexHome, "config.toml"), 'model_provider = "codexzh"\n');
       await writeFile(
-        path.join(codexHome, "config_codexzh.toml"),
+        path.join(codexHome, "config.toml"),
         [
           'model_provider = "codexzh"',
           'model = "gpt-5.5"',
@@ -182,16 +172,16 @@ describe("codex profile switching", () => {
           "",
         ].join("\n"),
       );
-      await writeFile(path.join(codexHome, "auth_codexzh.json"), '{"OPENAI_API_KEY":"profile-key"}\n');
+      await writeFile(path.join(codexHome, "auth.json"), '{"OPENAI_API_KEY":"profile-key"}\n');
 
       await expect(loadCodexProfileDefaults(codexHome)).resolves.toMatchObject({
         activeProvider: "custom",
         customProviderName: "codexzh",
         customBaseUrl: "https://api.codexzh.com/v1",
-        customApiKey: "profile-key",
         customModel: "gpt-5.5",
         customApiFormat: "openai_responses",
       });
+      await expect(loadCodexProfileDefaults(codexHome)).resolves.not.toHaveProperty("customApiKey");
     });
   });
 

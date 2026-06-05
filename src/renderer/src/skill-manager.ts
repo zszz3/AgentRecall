@@ -1,7 +1,7 @@
 import type { InstalledSkill, SkillSource } from "../../core/skill-manager";
 
 export type SkillSourceFilter = "all" | "codex" | "claude" | "shared" | "project";
-export type SkillSortKey = "usage" | "name" | "updated";
+export type SkillSortKey = "usage" | "usage-asc" | "name" | "updated";
 
 export function filterInstalledSkills(skills: InstalledSkill[], query: string, sourceFilter: SkillSourceFilter): InstalledSkill[] {
   const normalizedQuery = query.trim().toLowerCase();
@@ -14,6 +14,8 @@ export function sortInstalledSkills(skills: InstalledSkill[], sortKey: SkillSort
     sorted.sort((a, b) => byName(a, b));
   } else if (sortKey === "updated") {
     sorted.sort((a, b) => b.mtimeMs - a.mtimeMs || byName(a, b));
+  } else if (sortKey === "usage-asc") {
+    sorted.sort((a, b) => (a.usageCount ?? 0) - (b.usageCount ?? 0) || (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0) || byName(a, b));
   } else {
     // Most-used first; skills never used fall back to alphabetical order.
     sorted.sort((a, b) => (b.usageCount ?? 0) - (a.usageCount ?? 0) || (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || byName(a, b));
