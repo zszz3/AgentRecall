@@ -53,4 +53,13 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).toContain("olderMessageCount > 0");
     expect(detailPanelSource).toContain("Show ${Math.min(messagePageSize, olderMessageCount)} older messages");
   });
+
+  it("keeps title rename icon but removes the duplicate rename action from the detail toolbar", () => {
+    const detailActions = detailPanelSource.slice(detailPanelSource.indexOf('<div className="detail-actions">'), detailPanelSource.indexOf('<div className="detail-tags">'));
+
+    expect(detailPanelSource).toContain("detail-title-edit");
+    expect(detailPanelSource).toContain("<Edit3 size={14} />");
+    expect(detailActions).not.toContain("Clipboard size={15}");
+    expect(detailActions).not.toContain('l("Rename", "重命名")');
+  });
 });

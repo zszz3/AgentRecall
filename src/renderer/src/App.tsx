@@ -1220,7 +1220,6 @@ export function App(): ReactElement {
           onRename={() => beginRename(detail)}
           onAddTag={() => beginAddTag(detail)}
           onRemoveTag={(tagName) => void removeTag(detail, tagName)}
-          onRenameTitle={() => beginRename(detail)}
           onFavorite={() => void toggleFavorite(detail)}
           onResume={() =>
             void runAction(t("Opening terminal", "正在打开终端"), () => window.sessionSearch.resumeSession(detail.sessionKey), (result) => resumeRouteMessage(result, language))

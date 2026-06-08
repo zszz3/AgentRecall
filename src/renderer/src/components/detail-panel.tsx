@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReactElement } from "react";
-import { Clipboard, Copy, Download, Edit3, FolderOpen, Play, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { Copy, Download, Edit3, FolderOpen, Play, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../core/types";
 import { formatTokenCount } from "../format-count";
@@ -76,7 +76,6 @@ export function DetailPanel({
   onRename,
   onAddTag,
   onRemoveTag,
-  onRenameTitle,
   onFavorite,
   onResume,
   onResumeIterm,
@@ -104,7 +103,6 @@ export function DetailPanel({
   onRename: () => void;
   onAddTag: () => void;
   onRemoveTag: (tagName: string) => void;
-  onRenameTitle: () => void;
   onFavorite: () => void;
   onResume: () => void;
   onResumeIterm: () => void;
@@ -177,7 +175,7 @@ export function DetailPanel({
             </div>
             <div className="detail-title-row">
               <h2>{session.displayTitle}</h2>
-              <button className="title-edit-button detail-title-edit" onClick={onRenameTitle} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
+              <button className="title-edit-button detail-title-edit" onClick={onRename} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
                 <Edit3 size={14} />
               </button>
             </div>
@@ -210,9 +208,6 @@ export function DetailPanel({
               <TerminalIcon size={15} /> iTerm
             </button>
           ) : null}
-          <button onClick={onRename} disabled={actionRunning}>
-            <Clipboard size={15} /> {l("Rename", "重命名")}
-          </button>
           <button onClick={onAddTag} disabled={actionRunning}>
             <Tag size={15} /> {l("Add Tag", "添加标签")}
           </button>
