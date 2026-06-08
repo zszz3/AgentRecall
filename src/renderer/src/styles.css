@@ -1026,8 +1026,10 @@ select:focus-visible {
 .top-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   margin-left: auto;
 }
 
@@ -1596,6 +1598,8 @@ select:focus-visible {
 .detail-header-actions {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
