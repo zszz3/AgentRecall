@@ -331,8 +331,8 @@ async function chooseMarkdownExportPath(defaultFileName: string): Promise<string
 }
 
 function getPreferredWindowBounds(): { width: number; height: number; x: number; y: number } {
-  const defaultWidth = 1120;
-  const defaultHeight = 760;
+  const defaultWidth = 1280;
+  const defaultHeight = 820;
   const cursorPoint = screen.getCursorScreenPoint();
   const { workArea } = screen.getDisplayNearestPoint(cursorPoint);
   const width = Math.min(defaultWidth, workArea.width);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mergeApiConfigWithProfileDefaults, mergeClaudeApiConfigWithProfileDefaults } from "./api-config";
 import {
   buildGhosttyOpenArgs,
+  buildRevealCommand,
   buildWindowsResumeLaunchPlan,
   buildWindowsLaunchPlan,
   defaultApiConfig,
@@ -62,6 +63,33 @@ describe("resume commands", () => {
 
     expect(getResumeCommand(session, defaultSettings, { platform: "win32" })).toBe(
       'cd /d "C:\\my repo" && claude --resume abc',
+    );
+  });
+
+  it("builds a PowerShell-compatible resume command when the terminal is PowerShell", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "C:\\my repo",
+    } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
+
+    const command = getResumeCommand(session, settings, { platform: "win32" });
+    expect(command).toBe("cd 'C:\\my repo'; claude --resume abc");
+    expect(command).not.toContain("cd /d");
+    expect(command).not.toContain("&&");
+  });
+
+  it("quotes a PowerShell path with single quotes by doubling embedded quotes", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "C:\\o'brien repo",
+    } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
+
+    expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
+      "cd 'C:\\o''brien repo'; claude --resume abc",
     );
   });
 
@@ -205,17 +233,17 @@ describe("Ghostty resume launch args", () => {
 
 describe("terminal options per platform", () => {
   it("returns Windows terminals on win32", () => {
-    expect(terminalOptionsFor("win32")).toEqual(["WindowsTerminal", "PowerShell", "Cmd"]);
+    expect(terminalOptionsFor("win32")).toEqual(["WindowsTerminal", "PowerShell", "Cmd", "WezTerm"]);
   });
   it("returns macOS terminals elsewhere", () => {
     expect(terminalOptionsFor("darwin")).toEqual(["Terminal", "iTerm", "Ghostty", "WezTerm", "Warp"]);
   });
-  it("defaults to WindowsTerminal on win32 and Terminal on macOS", () => {
-    expect(defaultTerminalFor("win32")).toBe("WindowsTerminal");
+  it("defaults to PowerShell on win32 and Terminal on macOS", () => {
+    expect(defaultTerminalFor("win32")).toBe("PowerShell");
     expect(defaultTerminalFor("darwin")).toBe("Terminal");
   });
   it("normalizes a cross-platform value to the platform default", () => {
-    expect(normalizeTerminal("Terminal", "win32")).toBe("WindowsTerminal");
+    expect(normalizeTerminal("WindowsTerminal", "darwin")).toBe("Terminal");
     expect(normalizeTerminal("Cmd", "darwin")).toBe("Terminal");
     expect(normalizeTerminal("PowerShell", "win32")).toBe("PowerShell");
   });
@@ -435,6 +463,72 @@ describe("resume terminal launch plans", () => {
     expect(pwshCommand).not.toContain("^&^&");
     expect(pwshCommand).toContain("cd ''/remote repo'' && codex resume codex-1");
     expect(powershellCommand).toBe(pwshCommand);
+  });
+
+  it("offers a WezTerm launch on Windows that wraps the command in cmd.exe", () => {
+    const session = {
+      source: "codex-cli",
+      rawId: "codex-1",
+      projectPath: process.cwd(),
+    } as SessionSearchResult;
+
+    const plan = buildWindowsResumeLaunchPlan(session, defaultSettings, {
+      terminal: "WezTerm",
+      platform: "win32",
+    });
+
+    expect(plan[0].file).toBe("wezterm.exe");
+    expect(plan[0].args).toEqual(["start", "--cwd", process.cwd(), "--", "cmd.exe", "/d", "/k", "codex resume codex-1"]);
+    expect(plan.map((launch) => launch.file)).toEqual([
+      "wezterm.exe",
+      "wt.exe",
+      "pwsh.exe",
+      "powershell.exe",
+      "cmd.exe",
+    ]);
+  });
+
+  it("keeps the launch command in cmd syntax even when the user prefers PowerShell", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "/remote repo",
+    } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
+
+    const plan = buildWindowsResumeLaunchPlan(session, settings, {
+      platform: "win32",
+      sshArgs: ["--", "alice@example.com"],
+    });
+
+    const cmdLaunch = plan.find((launch) => launch.file === "cmd.exe");
+    expect(cmdLaunch?.args.at(-1)).toContain("^&^&");
+  });
+});
+
+describe("reveal in file manager", () => {
+  it("reveals (selects) the item in Finder on macOS", () => {
+    expect(buildRevealCommand("/Users/me/skills/foo", "darwin")).toEqual({
+      file: "/usr/bin/open",
+      args: ["-R", "/Users/me/skills/foo"],
+      ignoreExitCode: false,
+    });
+  });
+
+  it("uses explorer /select with backslashes and tolerates its non-zero exit on Windows", () => {
+    expect(buildRevealCommand("C:/Users/me/skills/foo", "win32")).toEqual({
+      file: "explorer.exe",
+      args: ["/select,C:\\Users\\me\\skills\\foo"],
+      ignoreExitCode: true,
+    });
+  });
+
+  it("falls back to xdg-open on Linux", () => {
+    expect(buildRevealCommand("/home/me/skills/foo", "linux")).toEqual({
+      file: "xdg-open",
+      args: ["/home/me/skills/foo"],
+      ignoreExitCode: false,
+    });
   });
 });
 

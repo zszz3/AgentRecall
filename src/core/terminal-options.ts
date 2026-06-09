@@ -11,7 +11,7 @@ export type TerminalChoice =
   | "Cmd";
 
 const MAC_TERMINALS: TerminalChoice[] = ["Terminal", "iTerm", "Ghostty", "WezTerm", "Warp"];
-const WINDOWS_TERMINALS: TerminalChoice[] = ["WindowsTerminal", "PowerShell", "Cmd"];
+const WINDOWS_TERMINALS: TerminalChoice[] = ["WindowsTerminal", "PowerShell", "Cmd", "WezTerm"];
 
 const TERMINAL_LABELS: Record<TerminalChoice, string> = {
   Terminal: "Terminal",
@@ -34,7 +34,7 @@ export function terminalOptionsFor(platform: NodeJS.Platform = currentPlatform()
 }
 
 export function defaultTerminalFor(platform: NodeJS.Platform = currentPlatform()): TerminalChoice {
-  return platform === "win32" ? "WindowsTerminal" : "Terminal";
+  return platform === "win32" ? "PowerShell" : "Terminal";
 }
 
 export function normalizeTerminal(value: unknown, platform: NodeJS.Platform = currentPlatform()): TerminalChoice {
