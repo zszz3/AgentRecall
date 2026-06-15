@@ -299,7 +299,10 @@ export function ApiConfigDialog({
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("API format", "API 格式")}</span>
                       <span className="settings-field-sub">
-                        {l("Matches cc-switch's OpenAI Chat / Responses split.", "对应 cc-switch 里的 OpenAI Chat / Responses 区分。")}
+                        {l(
+                          "Responses routes are applied directly; Chat routes use the local Codex proxy.",
+                          "Responses 路径会直连写入；Chat 路径会通过本地 Codex proxy。",
+                        )}
                       </span>
                     </div>
                     <select
@@ -311,6 +314,14 @@ export function ApiConfigDialog({
                       <option value="openai_responses">OpenAI Responses API</option>
                     </select>
                   </label>
+                  {draftApiConfig.customApiFormat === "openai_chat" ? (
+                    <div className="api-config-note">
+                      {l(
+                        "Applying this provider starts a local proxy at 127.0.0.1:15721 and points Codex at its Responses endpoint.",
+                        "应用这个供应商时会启动 127.0.0.1:15721 本地 proxy，并让 Codex 连接它的 Responses 端点。",
+                      )}
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </section>

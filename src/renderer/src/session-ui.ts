@@ -1,4 +1,4 @@
-import type { SearchOptions, SessionSearchResult, SessionSource, SessionStatsPeriod } from "../../core/types";
+import type { ProjectSummary, SearchOptions, SessionSearchResult, SessionSortBy, SessionSource, SessionStatsPeriod } from "../../core/types";
 import type { AppSettings } from "../../core/platform";
 import type { ResumeRouteResult } from "../../core/resume-router";
 import { localize, type LanguageMode } from "./language";
@@ -52,6 +52,26 @@ export function sourceUiFamily(source: SessionSource): "claude" | "codex" | "cod
 
 export function supportsResumeSource(source: SessionSource): boolean {
   return source.startsWith("claude") || source.startsWith("codex") || source === "codebuddy-cli";
+}
+
+export function sessionSortOptions(): Array<{ label: string; value: SessionSortBy }> {
+  return [
+    { label: "Recent conversation", value: "activity" },
+    { label: "Created", value: "created" },
+  ];
+}
+
+export function sessionSortTimestamp(
+  session: Pick<SessionSearchResult, "timestamp" | "fileMtimeMs" | "lastActivityAt">,
+  sortBy: SessionSortBy,
+): number {
+  if (sortBy === "created") return session.timestamp || 0;
+  return session.lastActivityAt || session.fileMtimeMs || session.timestamp || 0;
+}
+
+export function projectSortTimestamp(project: Pick<ProjectSummary, "createdAt" | "lastActivityAt">, sortBy: SessionSortBy): number {
+  if (sortBy === "created") return project.createdAt || 0;
+  return project.lastActivityAt || project.createdAt || 0;
 }
 
 export function statsPeriodLabel(value: SessionStatsPeriod, language: LanguageMode): string {

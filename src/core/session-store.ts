@@ -72,6 +72,7 @@ interface SessionRow {
   hidden: 0 | 1;
   last_opened_at: number | null;
   last_resumed_at: number | null;
+  last_activity_at: number;
   message_count: number;
   input_tokens: number;
   output_tokens: number;
@@ -543,20 +544,35 @@ export class SessionStore {
     const rows = this.db
       .prepare(
         `
-        SELECT sessions.project_path, sessions.environment_id, environments.label AS environment_label, COUNT(*) AS session_count
+        SELECT
+          sessions.project_path,
+          sessions.environment_id,
+          environments.label AS environment_label,
+          COUNT(*) AS session_count,
+          MAX(COALESCE(sessions.timestamp, 0)) AS created_at,
+          MAX(${sessionActivitySql("sessions")}) AS last_activity_at
         FROM sessions
         LEFT JOIN environments ON environments.id = sessions.environment_id
         WHERE trim(project_path) != ''
         GROUP BY sessions.project_path, sessions.environment_id
       `,
       )
-      .all() as Array<{ project_path: string; environment_id: string; environment_label: string | null; session_count: number }>;
+      .all() as Array<{
+        project_path: string;
+        environment_id: string;
+        environment_label: string | null;
+        session_count: number;
+        created_at: number;
+        last_activity_at: number;
+      }>;
     const summaries = rows.map((row) => ({
       path: row.project_path,
       label: projectLabel(row.project_path),
       sessionCount: row.session_count,
       environmentId: row.environment_id,
       environmentLabel: row.environment_label ?? localEnvironment().label,
+      createdAt: row.created_at,
+      lastActivityAt: row.last_activity_at,
     }));
     const basenameCounts = new Map<string, number>();
     const environmentsByPath = new Map<string, Set<string>>();
@@ -1364,7 +1380,7 @@ export class SessionStore {
       return this.db
         .prepare(
           `
-          SELECT *
+          SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
           ORDER BY pinned DESC, ${sessionSortSql(options.sortBy)} DESC
@@ -1374,7 +1390,9 @@ export class SessionStore {
         .all(...args) as unknown as SessionRow[];
     }
 
-    return this.db.prepare(`SELECT * FROM sessions WHERE ${where.join(" AND ")}`).all(...args) as unknown as SessionRow[];
+    return this.db
+      .prepare(`SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at FROM sessions WHERE ${where.join(" AND ")}`)
+      .all(...args) as unknown as SessionRow[];
   }
 
   private countCandidateRows(options: SearchOptions): number {
@@ -1576,6 +1594,7 @@ export class SessionStore {
       matchSnippet: snippet,
       lastOpenedAt: row.last_opened_at,
       lastResumedAt: row.last_resumed_at,
+      lastActivityAt: row.last_activity_at,
       messageCount: row.message_count,
       aiSummary: row.ai_summary?.trim() || null,
       aiSummaryStale: Boolean(row.ai_summary) && row.file_mtime_ms > (row.ai_summary_basis ?? 0),
@@ -1599,8 +1618,7 @@ export class SessionStore {
 
   private sortValue(result: SessionSearchResult, sortBy: SessionSortBy = "created"): number {
     if (sortBy === "created") return result.timestamp || 0;
-    if (sortBy === "updated") return result.fileMtimeMs || result.timestamp || 0;
-    return Math.max(result.lastResumedAt || 0, result.fileMtimeMs || 0, result.timestamp || 0);
+    return result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
   }
 }
 
@@ -1776,9 +1794,22 @@ function buildFtsQuery(query: string): string {
 }
 
 function sessionSortSql(sortBy: SessionSortBy = "created"): string {
-  if (sortBy === "updated") return "CASE WHEN file_mtime_ms > 0 THEN file_mtime_ms ELSE timestamp END";
-  if (sortBy === "activity") return "MAX(COALESCE(last_resumed_at, 0), COALESCE(file_mtime_ms, 0), COALESCE(timestamp, 0))";
+  if (sortBy === "activity") return sessionActivitySql("sessions");
   return "COALESCE(timestamp, 0)";
+}
+
+function sessionActivitySql(sessionTable: string): string {
+  return `
+    COALESCE(
+      (
+        SELECT MAX(CAST(strftime('%s', messages.timestamp) AS INTEGER) * 1000)
+        FROM messages
+        WHERE messages.session_key = ${sessionTable}.session_key
+      ),
+      CASE WHEN ${sessionTable}.file_mtime_ms > 0 THEN ${sessionTable}.file_mtime_ms ELSE ${sessionTable}.timestamp END,
+      0
+    )
+  `;
 }
 
 function branchTagName(branch: string | null | undefined): string | null {

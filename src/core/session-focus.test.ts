@@ -29,6 +29,7 @@ function session(overrides: Partial<SessionSearchResult>): SessionSearchResult {
     matchSnippet: null,
     lastOpenedAt: null,
     lastResumedAt: null,
+    lastActivityAt: 0,
     messageCount: 0,
     aiSummary: null,
     aiSummaryStale: false,

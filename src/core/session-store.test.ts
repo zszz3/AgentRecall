@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -640,9 +640,63 @@ describe("SessionStore", () => {
     );
     store.upsertIndexedSession(sampleSession({ sessionKey: "codex:no-project", rawId: "no-project", projectPath: "" }), messages);
 
+    const createdAt = new Date("2026-06-01T10:00:00Z").getTime();
+    const lastActivityAt = new Date("2026-06-01T10:01:00Z").getTime();
     expect(store.listProjects()).toEqual([
-      { path: "/work/team-a/app", label: "team-a/app", sessionCount: 2, environmentId: "local", environmentLabel: "Local" },
-      { path: "/work/team-b/app", label: "team-b/app", sessionCount: 1, environmentId: "local", environmentLabel: "Local" },
+      {
+        path: "/work/team-a/app",
+        label: "team-a/app",
+        sessionCount: 2,
+        environmentId: "local",
+        environmentLabel: "Local",
+        createdAt,
+        lastActivityAt,
+      },
+      {
+        path: "/work/team-b/app",
+        label: "team-b/app",
+        sessionCount: 1,
+        environmentId: "local",
+        environmentLabel: "Local",
+        createdAt,
+        lastActivityAt,
+      },
+    ]);
+  });
+
+  it("lists project creation and latest activity timestamps", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:old-active",
+        rawId: "old-active",
+        projectPath: "/work/app",
+        timestamp: Date.parse("2026-06-01T10:00:00Z"),
+        fileMtimeMs: Date.parse("2026-06-01T10:00:00Z"),
+      }),
+      [{ role: "user", content: "latest project conversation", timestamp: "2026-06-04T10:00:00Z", index: 0 }],
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:new-created",
+        rawId: "new-created",
+        projectPath: "/work/app",
+        timestamp: Date.parse("2026-06-03T10:00:00Z"),
+        fileMtimeMs: Date.parse("2026-06-03T10:00:00Z"),
+      }),
+      [{ role: "user", content: "older project conversation", timestamp: "2026-06-02T10:00:00Z", index: 0 }],
+    );
+
+    expect(store.listProjects()).toEqual([
+      {
+        path: "/work/app",
+        label: "app",
+        sessionCount: 2,
+        environmentId: "local",
+        environmentLabel: "Local",
+        createdAt: Date.parse("2026-06-03T10:00:00Z"),
+        lastActivityAt: Date.parse("2026-06-04T10:00:00Z"),
+      },
     ]);
   });
 
@@ -688,35 +742,70 @@ describe("SessionStore", () => {
     expect(store.searchSessions({ query: "" }).map((session) => session.sessionKey)).toEqual(["codex:idle", "codex:active"]);
   });
 
-  it("sorts by explicit activity, created, and updated time modes", () => {
+  it("sorts by explicit recent conversation and created time modes", () => {
     const store = createInMemoryStore();
-    const oldButUpdated = sampleSession({
-      sessionKey: "codex:updated",
-      rawId: "updated",
+    const oldButRecent = sampleSession({
+      sessionKey: "codex:recent",
+      rawId: "recent",
       timestamp: new Date("2026-05-01T10:00:00Z").getTime(),
       fileMtimeMs: new Date("2026-06-01T12:00:00Z").getTime(),
     });
-    const newButIdle = sampleSession({
+    const newButOlderConversation = sampleSession({
       sessionKey: "codex:created",
       rawId: "created",
       timestamp: new Date("2026-06-01T10:00:00Z").getTime(),
       fileMtimeMs: new Date("2026-06-01T10:00:00Z").getTime(),
     });
-    store.upsertIndexedSession(oldButUpdated, messages);
-    store.upsertIndexedSession(newButIdle, messages);
+    store.upsertIndexedSession(oldButRecent, [
+      { role: "user", content: "newer conversation", timestamp: "2026-06-02T10:00:00Z", index: 0 },
+    ]);
+    store.upsertIndexedSession(newButOlderConversation, [
+      { role: "user", content: "older conversation", timestamp: "2026-06-01T10:00:00Z", index: 0 },
+    ]);
 
     expect(store.searchSessions({ query: "", sortBy: "activity" }).map((session) => session.sessionKey)).toEqual([
-      "codex:updated",
+      "codex:recent",
       "codex:created",
     ]);
     expect(store.searchSessions({ query: "", sortBy: "created" }).map((session) => session.sessionKey)).toEqual([
       "codex:created",
-      "codex:updated",
+      "codex:recent",
     ]);
-    expect(store.searchSessions({ query: "", sortBy: "updated" }).map((session) => session.sessionKey)).toEqual([
-      "codex:updated",
-      "codex:created",
-    ]);
+  });
+
+  it("sorts activity by latest conversation time instead of resume time", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:resumed",
+        rawId: "resumed",
+        timestamp: Date.parse("2026-06-01T10:00:00Z"),
+        fileMtimeMs: Date.parse("2026-06-01T10:00:00Z"),
+      }),
+      [{ role: "user", content: "old conversation", timestamp: "2026-06-02T10:00:00Z", index: 0 }],
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:conversation",
+        rawId: "conversation",
+        timestamp: Date.parse("2026-06-01T10:00:00Z"),
+        fileMtimeMs: Date.parse("2026-06-01T10:00:00Z"),
+      }),
+      [{ role: "user", content: "new conversation", timestamp: "2026-06-03T10:00:00Z", index: 0 }],
+    );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-04T10:00:00Z"));
+    try {
+      store.markResumed("codex:resumed");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const results = store.searchSessions({ query: "", sortBy: "activity" });
+    expect(results.map((session) => session.sessionKey)).toEqual(["codex:conversation", "codex:resumed"]);
+    expect(results[0].lastActivityAt).toBe(Date.parse("2026-06-03T10:00:00Z"));
+    expect(results[1].lastActivityAt).toBe(Date.parse("2026-06-02T10:00:00Z"));
   });
 
   it("returns a limited search page with the total matching session count", () => {
@@ -1111,9 +1200,27 @@ describe("SessionStore", () => {
       messages,
     );
 
+    const createdAt = new Date("2026-06-01T10:00:00Z").getTime();
+    const lastActivityAt = new Date("2026-06-01T10:01:00Z").getTime();
     expect(store.listProjects()).toEqual([
-      { path: "/work/app", label: "app · Local", sessionCount: 1, environmentId: "local", environmentLabel: "Local" },
-      { path: "/work/app", label: "app · devbox", sessionCount: 1, environmentId: "ssh-devbox", environmentLabel: "devbox" },
+      {
+        path: "/work/app",
+        label: "app · Local",
+        sessionCount: 1,
+        environmentId: "local",
+        environmentLabel: "Local",
+        createdAt,
+        lastActivityAt,
+      },
+      {
+        path: "/work/app",
+        label: "app · devbox",
+        sessionCount: 1,
+        environmentId: "ssh-devbox",
+        environmentLabel: "devbox",
+        createdAt,
+        lastActivityAt,
+      },
     ]);
   });
 

@@ -12,7 +12,7 @@ export type SessionSource =
   | "cursor-agent"
   | "trae";
 export type SessionFormat = "claude" | "codex" | "codebuddy" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
-export type SessionSortBy = "activity" | "created" | "updated";
+export type SessionSortBy = "activity" | "created";
 export type EnvironmentKind = "local" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";
 export type SshAuthMode = "none" | "identityFile";
@@ -130,6 +130,8 @@ export interface ProjectSummary {
   sessionCount: number;
   environmentId: string;
   environmentLabel: string;
+  createdAt: number;
+  lastActivityAt: number;
 }
 
 export interface SessionSearchResult extends IndexedSession {
@@ -146,6 +148,7 @@ export interface SessionSearchResult extends IndexedSession {
   matchSnippet: string | null;
   lastOpenedAt: number | null;
   lastResumedAt: number | null;
+  lastActivityAt: number;
   messageCount: number;
   aiSummary: string | null;
   aiSummaryStale: boolean;

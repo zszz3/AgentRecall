@@ -59,6 +59,7 @@ export async function loadCodexProfileDefaults(codexHome = path.join(os.homedir(
 export async function applyCodexApiConfig(options: {
   codexHome?: string;
   apiConfig: Partial<ApiConfig>;
+  chatProxyBaseUrl?: string;
   now?: Date;
 }): Promise<ApplyCodexProfileResult> {
   const apiConfig = apiConfigWithPresetDefaults(options.apiConfig);
@@ -67,6 +68,7 @@ export async function applyCodexApiConfig(options: {
   return applyGeneratedCodexProvider({
     codexHome: options.codexHome,
     apiConfig,
+    chatProxyBaseUrl: options.chatProxyBaseUrl,
     now: options.now,
   });
 }
@@ -121,6 +123,7 @@ async function applyOfficialCodexProvider(options: {
 async function applyGeneratedCodexProvider(options: {
   codexHome?: string;
   apiConfig: ApiConfig;
+  chatProxyBaseUrl?: string;
   now?: Date;
 }): Promise<ApplyCodexProfileResult> {
   const codexHome = options.codexHome ?? path.join(os.homedir(), ".codex");
@@ -143,7 +146,7 @@ async function applyGeneratedCodexProvider(options: {
 
   const activeConfigText = await readOptionalFile(configTarget);
   const baseConfigText = activeConfigText.trim() ? activeConfigText : generatedCodexConfig(apiConfig, providerId);
-  await writeFile(configTarget, applyCodexProviderConfig(baseConfigText, apiConfig, providerId), { mode: 0o600 });
+  await writeFile(configTarget, applyCodexProviderConfig(baseConfigText, apiConfig, providerId, options.chatProxyBaseUrl), { mode: 0o600 });
   await chmodIfExists(authTarget, 0o600);
   await chmod(configTarget, 0o600);
 
@@ -191,12 +194,13 @@ function applyCodexOfficialConfigOverrides(text: string): string {
   return next.endsWith("\n") ? next : `${next}\n`;
 }
 
-function applyCodexProviderConfig(text: string, apiConfig: ApiConfig, providerId: string): string {
+function applyCodexProviderConfig(text: string, apiConfig: ApiConfig, providerId: string, chatProxyBaseUrl?: string): string {
+  const baseUrl = apiConfig.customApiFormat === "openai_chat" && chatProxyBaseUrl ? chatProxyBaseUrl : apiConfig.customBaseUrl;
   let next = removeTopLevelTomlKey(text, "experimental_bearer_token");
   next = replaceTopLevelString(next, "model_provider", providerId);
   if (apiConfig.customModel) next = replaceTopLevelString(next, "model", apiConfig.customModel);
   next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "name", apiConfig.customProviderName);
-  if (apiConfig.customBaseUrl) next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "base_url", apiConfig.customBaseUrl);
+  if (baseUrl) next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "base_url", baseUrl);
   next = replaceOrInsertSectionString(next, `[model_providers.${providerId}]`, "wire_api", "responses");
   next = replaceOrInsertSectionLiteral(next, `[model_providers.${providerId}]`, "requires_openai_auth", "true");
   if (apiConfig.customApiKey) {

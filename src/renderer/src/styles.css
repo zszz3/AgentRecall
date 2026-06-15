@@ -985,10 +985,14 @@ select:focus-visible {
 
 .project-row em {
   flex: 0 0 auto;
+  max-width: 78px;
+  overflow: hidden;
   color: var(--text-faint);
   font-size: 11px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-row.active em {

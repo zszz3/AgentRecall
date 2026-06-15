@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { ApiConfig, ClaudeApiConfig } from "../core/api-config";
 import type { ApplyClaudeProfileResult } from "../core/claude-profile";
+import type { CodexChatProxyStatus } from "../core/codex-chat-proxy";
 import type { ApplyCodexProfileResult } from "../core/codex-profile";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
@@ -68,6 +69,8 @@ const api = {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   applyCodexProfile: (apiConfig: ApiConfig): Promise<ApplyCodexProfileResult> => ipcRenderer.invoke("codex-profile:apply", apiConfig),
+  getCodexChatProxyStatus: (): Promise<CodexChatProxyStatus | null> => ipcRenderer.invoke("codex-chat-proxy:status"),
+  stopCodexChatProxy: (): Promise<null> => ipcRenderer.invoke("codex-chat-proxy:stop"),
   applyClaudeProfile: (apiConfig: ClaudeApiConfig): Promise<ApplyClaudeProfileResult> => ipcRenderer.invoke("claude-profile:apply", apiConfig),
   getApiProviderKey: (target: "codex" | "claude" | "summary", providerId: string): Promise<string> =>
     ipcRenderer.invoke("api-provider-key:get", target, providerId),

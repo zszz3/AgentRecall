@@ -19,11 +19,14 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import {
+  apiProviderPreset,
   mergeApiConfigWithProfileDefaults,
   mergeClaudeApiConfigWithProfileDefaults,
+  normalizeApiConfig,
   type ApiConfig,
   type ClaudeApiConfig,
 } from "../core/api-config";
+import { CodexChatProxy, type CodexChatProxyStatus } from "../core/codex-chat-proxy";
 import { applyClaudeApiConfig, loadClaudeApiConfigDefaults } from "../core/claude-profile";
 import { applyCodexApiConfig, loadCodexProfileDefaults } from "../core/codex-profile";
 import { syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
@@ -169,6 +172,8 @@ let liveTracker = new Map<string, TrackedLiveSession>();
 let registeredGlobalShortcut: string | null = null;
 let remoteWatchManager: RemoteWatchManager | null = null;
 let remoteEnvironmentLifecycle: RemoteEnvironmentLifecycle | null = null;
+let codexChatProxy: CodexChatProxy | null = null;
+let codexChatProxySignature: string | null = null;
 const remoteDetailLoads = new Map<string, Promise<void>>();
 
 const settingsStore = new Store<AppSettings>({
@@ -268,6 +273,93 @@ function migrateLegacyApiProviderKeys(): void {
   }
   settingsStore.set("apiConfig.customApiKey", "");
   settingsStore.set("claudeApiConfig.customApiKey", "");
+}
+
+function apiConfigWithPresetDefaultsForProxy(config: Partial<ApiConfig>): ApiConfig {
+  const normalized = normalizeApiConfig(config);
+  const preset = apiProviderPreset(normalized.customProviderId);
+  return normalizeApiConfig({
+    ...normalized,
+    customProviderId: preset.id,
+    customProviderName: config.customProviderName?.trim() || preset.providerName,
+    customBaseUrl: config.customBaseUrl?.trim() || preset.baseUrl,
+    customModel: config.customModel?.trim() || preset.model,
+    customApiFormat: config.customApiFormat ?? preset.apiFormat,
+  });
+}
+
+function shouldUseCodexChatProxy(apiConfig: ApiConfig): boolean {
+  return apiConfig.activeProvider === "custom" && apiConfig.customApiFormat === "openai_chat";
+}
+
+async function stopCodexChatProxy(): Promise<void> {
+  const proxy = codexChatProxy;
+  codexChatProxy = null;
+  codexChatProxySignature = null;
+  await proxy?.stop();
+}
+
+function codexChatProxySignatureFor(apiConfig: ApiConfig): string {
+  return JSON.stringify({
+    upstreamBaseUrl: apiConfig.customBaseUrl.replace(/\/+$/, ""),
+    model: apiConfig.customModel,
+    apiKey: apiConfig.customApiKey,
+  });
+}
+
+async function ensureCodexChatProxy(apiConfig: ApiConfig): Promise<CodexChatProxyStatus> {
+  if (!apiConfig.customApiKey) throw new Error(`API key is required to start ${apiConfig.customProviderName} proxy.`);
+  if (!apiConfig.customBaseUrl) throw new Error(`Base URL is required to start ${apiConfig.customProviderName} proxy.`);
+  if (!apiConfig.customModel) throw new Error(`Model is required to start ${apiConfig.customProviderName} proxy.`);
+
+  const current = codexChatProxy?.getStatus();
+  const targetSignature = codexChatProxySignatureFor(apiConfig);
+  if (
+    current?.running &&
+    codexChatProxySignature === targetSignature &&
+    current.upstreamBaseUrl === apiConfig.customBaseUrl.replace(/\/+$/, "") &&
+    current.model === apiConfig.customModel
+  ) {
+    return current;
+  }
+
+  await stopCodexChatProxy();
+  const proxy = new CodexChatProxy({
+    upstreamBaseUrl: apiConfig.customBaseUrl,
+    apiKey: apiConfig.customApiKey,
+    model: apiConfig.customModel,
+    listenHost: "127.0.0.1",
+    listenPort: 15721,
+  });
+  const status = await proxy.start();
+  codexChatProxy = proxy;
+  codexChatProxySignature = targetSignature;
+  return status;
+}
+
+async function applyCodexApiConfigWithProxy(apiConfigInput: Partial<ApiConfig>) {
+  const apiConfig = apiConfigWithPresetDefaultsForProxy(apiConfigInput);
+  if (!shouldUseCodexChatProxy(apiConfig)) {
+    await stopCodexChatProxy();
+    return applyCodexApiConfig({ apiConfig });
+  }
+  const proxyStatus = await ensureCodexChatProxy(apiConfig);
+  return applyCodexApiConfig({ apiConfig, chatProxyBaseUrl: proxyStatus.baseUrl });
+}
+
+async function restoreCodexChatProxyFromSettings(): Promise<void> {
+  const settings = getSettings();
+  const apiConfig = apiConfigWithPresetDefaultsForProxy({
+    ...settings.apiConfig,
+    customApiKey:
+      settings.apiConfig.activeProvider === "custom" ? store.getApiProviderKey("codex", settings.apiConfig.customProviderId) : "",
+  });
+  if (!shouldUseCodexChatProxy(apiConfig) || !apiConfig.customApiKey) return;
+  try {
+    await ensureCodexChatProxy(apiConfig);
+  } catch (error) {
+    console.error(`Failed to restore Codex Chat proxy: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function normalizeApiProviderKeyTarget(target: unknown): ApiProviderKeyTarget {
@@ -929,8 +1021,13 @@ function registerIpc(): void {
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
   ipcMain.handle("settings:get", () => getHydratedSettings());
-  ipcMain.handle("codex-profile:apply", (_event, apiConfig: Partial<ApiConfig>) => applyCodexApiConfig({ apiConfig }));
+  ipcMain.handle("codex-profile:apply", (_event, apiConfig: Partial<ApiConfig>) => applyCodexApiConfigWithProxy(apiConfig));
   ipcMain.handle("claude-profile:apply", (_event, apiConfig: Partial<ClaudeApiConfig>) => applyClaudeApiConfig({ apiConfig }));
+  ipcMain.handle("codex-chat-proxy:status", () => codexChatProxy?.getStatus() ?? null);
+  ipcMain.handle("codex-chat-proxy:stop", async () => {
+    await stopCodexChatProxy();
+    return null;
+  });
   ipcMain.handle("settings:set", (_event, settings: AppSettingsUpdate) => {
     const previous = getSettings();
     const next = mergeAppSettings(previous, settings);
@@ -1067,6 +1164,7 @@ app.whenReady().then(() => {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
   }
   ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
+  void restoreCodexChatProxyFromSettings();
   setTimeout(() => void runIndexSync(), INITIAL_INDEX_DELAY_MS);
   startAutoIndexRefresh();
   startLiveNotifyPolling();
@@ -1084,6 +1182,7 @@ app.on("before-quit", () => {
   stopAutoIndexRefresh();
   stopLiveNotifyPolling();
   remoteEnvironmentLifecycle?.stopAll();
+  void stopCodexChatProxy();
   globalShortcut.unregisterAll();
   store?.close();
 });

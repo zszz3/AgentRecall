@@ -105,21 +105,18 @@ import {
   isRemoteSession,
   liveStatusFilterLabel,
   localizedLiveStateLabel,
+  projectSortTimestamp,
   remoteOpenAppTitle,
   remoteRevealTitle,
   resumeRouteMessage,
+  sessionSortOptions,
+  sessionSortTimestamp,
   sourceFilterLabel,
   sourceFilters,
   sourceUiFamily,
   statsPeriodLabel,
   supportsResumeSource,
 } from "./session-ui";
-
-const SORT_OPTIONS: Array<{ label: string; value: SessionSortBy }> = [
-  { label: "Latest activity", value: "activity" },
-  { label: "Created", value: "created" },
-  { label: "Updated", value: "updated" },
-];
 
 const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> = [
   { label: "Today", value: "today" },
@@ -206,8 +203,7 @@ const EMPTY_SKILLS: InstalledSkillsSnapshot = {
 
 function sortLabel(value: SessionSortBy, language: LanguageMode): string {
   if (value === "created") return localize(language, "Created", "创建时间");
-  if (value === "updated") return localize(language, "Updated", "更新时间");
-  return localize(language, "Latest activity", "最近活动");
+  return localize(language, "Recent conversation", "最近对话");
 }
 
 function environmentStatus(environment: SessionEnvironment): EnvironmentSyncState | "local" {
@@ -1163,7 +1159,10 @@ export function App(): ReactElement {
       setAppSettings(nextSettings);
       const result = await window.sessionSearch.applyCodexProfile(apiConfig);
       const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
-      const successMessage = t(`Applied ${profileLabel} to ~/.codex.`, `已将 ${profileLabel} 应用到 ~/.codex。`);
+      const usesLocalProxy = apiConfig.activeProvider === "custom" && apiConfig.customApiFormat === "openai_chat";
+      const successMessage = usesLocalProxy
+        ? t(`Applied ${profileLabel} to ~/.codex via local proxy.`, `已通过本地 proxy 将 ${profileLabel} 应用到 ~/.codex。`)
+        : t(`Applied ${profileLabel} to ~/.codex.`, `已将 ${profileLabel} 应用到 ~/.codex。`);
       setSettingsFeedback({ kind: "success", message: successMessage });
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
@@ -1342,11 +1341,11 @@ export function App(): ReactElement {
                 key={`${project.environmentId}:${project.path}`}
                 className={`project-row ${projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""}`}
                 onClick={() => selectProject(project)}
-                title={project.path}
+                title={t(`${project.path} · ${project.sessionCount} sessions`, `${project.path} · ${project.sessionCount} 个会话`)}
               >
                 <Folder size={13} />
                 <span>{project.label}</span>
-                <em>{project.sessionCount}</em>
+                <em>{formatRelativeTime(projectSortTimestamp(project, sortBy))}</em>
               </button>
             ))}
           </nav>
@@ -1440,7 +1439,7 @@ export function App(): ReactElement {
             <label className="sort-menu">
               <span>{t("Sort", "排序")}</span>
               <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SessionSortBy)}>
-                {SORT_OPTIONS.map((option) => (
+                {sessionSortOptions().map((option) => (
                   <option key={option.value} value={option.value}>
                     {sortLabel(option.value, language)}
                   </option>
@@ -1502,6 +1501,7 @@ export function App(): ReactElement {
               session={session}
               selected={selected?.sessionKey === session.sessionKey}
               liveState={getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
+              sortBy={sortBy}
               language={language}
               onSelect={() => setSelectedKey(session.sessionKey)}
               onOpen={() => void openDetail(session)}
@@ -1842,6 +1842,7 @@ function SessionRow({
   session,
   selected,
   liveState,
+  sortBy,
   language,
   onSelect,
   onOpen,
@@ -1852,6 +1853,7 @@ function SessionRow({
   session: SessionSearchResult;
   selected: boolean;
   liveState: LiveSessionState;
+  sortBy: SessionSortBy;
   language: LanguageMode;
   onSelect: () => void;
   onOpen: () => void;
@@ -1909,7 +1911,7 @@ function SessionRow({
             {environmentBadgeLabel(session, language)}
           </span>
           <span>{session.projectPath || l("No project path", "无项目路径")}</span>
-          <span>{formatRelativeTime(session.timestamp)}</span>
+          <span>{formatRelativeTime(sessionSortTimestamp(session, sortBy))}</span>
           <span>{l(`${session.messageCount} messages`, `${session.messageCount} 条消息`)}</span>
           <span>{l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}</span>
         </div>

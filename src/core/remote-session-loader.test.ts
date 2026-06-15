@@ -80,6 +80,7 @@ describe("remote session loader", () => {
       matchSnippet: null,
       lastOpenedAt: null,
       lastResumedAt: null,
+      lastActivityAt: new Date("2026-06-04T09:00:00Z").getTime(),
       messageCount: 0,
       aiSummary: null,
       aiSummaryStale: false,

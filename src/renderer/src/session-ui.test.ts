@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings } from "../../core/platform";
-import { sourceFilterLabel, sourceFilters } from "./session-ui";
+import { projectSortTimestamp, sessionSortOptions, sessionSortTimestamp, sourceFilterLabel, sourceFilters } from "./session-ui";
 
 describe("session source labels", () => {
   it("keeps Claude Code and Codex as the only first-party source filters", () => {
@@ -28,5 +28,35 @@ describe("session source labels", () => {
     }).map((filter) => sourceFilterLabel(filter, "en"));
 
     expect(enabledLabels).toEqual(expect.arrayContaining(["OpenClaw", "Hermes", "OpenCode", "Cursor Agent", "Trae"]));
+  });
+
+  it("uses the selected sort mode to choose the session timestamp shown in rows", () => {
+    const session = {
+      timestamp: 100,
+      fileMtimeMs: 300,
+      lastResumedAt: 500,
+      lastActivityAt: 400,
+    };
+
+    expect(sessionSortTimestamp(session, "created")).toBe(100);
+    expect(sessionSortTimestamp(session, "activity")).toBe(400);
+  });
+
+  it("uses latest activity instead of creation time for project rows sorted by activity", () => {
+    const project = {
+      createdAt: 100,
+      lastActivityAt: 900,
+    };
+
+    expect(projectSortTimestamp(project, "created")).toBe(100);
+    expect(projectSortTimestamp(project, "activity")).toBe(900);
+  });
+
+  it("does not expose updated time as a separate session sort option", () => {
+    expect(sessionSortOptions().map((option) => option.value)).toEqual(["activity", "created"]);
+  });
+
+  it("labels activity sorting as recent conversation", () => {
+    expect(sessionSortOptions()[0]).toEqual({ label: "Recent conversation", value: "activity" });
   });
 });

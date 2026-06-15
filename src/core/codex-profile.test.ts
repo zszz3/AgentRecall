@@ -301,4 +301,43 @@ describe("codex profile switching", () => {
       );
     });
   });
+
+  it("routes Chat Completions providers through the local Codex proxy when available", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"old\"}\n");
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "openai"',
+          'model = "gpt-5.5"',
+          "",
+          "[mcp_servers.echo]",
+          'command = "echo"',
+          "",
+        ].join("\n"),
+      );
+
+      await applyCodexApiConfig({
+        codexHome,
+        chatProxyBaseUrl: "http://127.0.0.1:15721/v1",
+        apiConfig: {
+          activeProvider: "custom",
+          customProviderId: "zhipu_glm",
+          customProviderName: "zhipu_glm",
+          customBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
+          customApiKey: "sk-glm",
+          customModel: "glm-5.1",
+          customApiFormat: "openai_chat",
+        },
+      });
+
+      const config = await readFile(path.join(codexHome, "config.toml"), "utf8");
+      expect(config).toContain('model_provider = "zhipu_glm"');
+      expect(config).toContain('model = "glm-5.1"');
+      expect(config).toContain('base_url = "http://127.0.0.1:15721/v1"');
+      expect(config).toContain('wire_api = "responses"');
+      expect(config).toContain('experimental_bearer_token = "sk-glm"');
+      expect(config).toContain("[mcp_servers.echo]");
+    });
+  });
 });
