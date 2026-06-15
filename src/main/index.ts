@@ -745,12 +745,31 @@ let summaryBackfillRunning = false;
 // the existing Codex API config when it is not configured.
 function resolveSummaryEndpointFromSettings(): SummaryEndpoint | null {
   const settings = withStoredApiProviderKeys(getSettings());
-  return resolveSummaryEndpoint([settings.summaryApiConfig, settings.apiConfig]);
+  // Dedicated summary provider first, then the Codex (OpenAI) provider, then the
+  // Claude (Anthropic) provider — so a coding-plan set up for Claude Code is reused.
+  return resolveSummaryEndpoint([settings.summaryApiConfig, settings.apiConfig, settings.claudeApiConfig]);
 }
 
+const SUMMARY_HEAD_MESSAGES = 24;
+const SUMMARY_TAIL_MESSAGES = 16;
+// Sessions at or below this many messages are summarized in full.
+const SUMMARY_FULL_THRESHOLD = SUMMARY_HEAD_MESSAGES + SUMMARY_TAIL_MESSAGES;
+
+// Short sessions are summarized in full; long ones use a head + tail excerpt so the
+// original problem and the final resolution both survive, fetching only a bounded slice.
 async function summarizeOneSession(sessionKey: string, endpoint: SummaryEndpoint): Promise<void> {
-  const messages = store.getMessages(sessionKey, 0, 40);
-  const result = await summarizeSession(messages, endpoint);
+  const count = store.getMessageCount(sessionKey);
+  let excerpt;
+  if (count <= SUMMARY_FULL_THRESHOLD) {
+    excerpt = { head: store.getMessages(sessionKey, 0, SUMMARY_FULL_THRESHOLD), tail: [], omittedCount: 0 };
+  } else {
+    excerpt = {
+      head: store.getMessages(sessionKey, 0, SUMMARY_HEAD_MESSAGES),
+      tail: store.getMessages(sessionKey, count - SUMMARY_TAIL_MESSAGES, SUMMARY_TAIL_MESSAGES),
+      omittedCount: count - SUMMARY_HEAD_MESSAGES - SUMMARY_TAIL_MESSAGES,
+    };
+  }
+  const result = await summarizeSession(excerpt, endpoint);
   store.setAiSummary(sessionKey, result.summary, endpoint.model);
 }
 
@@ -814,24 +833,40 @@ function registerIpc(): void {
     await summarizeOneSession(sessionKey, endpoint);
     return store.getSession(sessionKey);
   });
-  ipcMain.handle("session:summarize-missing", async () => {
+  ipcMain.handle("session:summarize-missing", async (event) => {
     const endpoint = resolveSummaryEndpointFromSettings();
     if (!endpoint) {
       throw new Error("No AI summary provider is configured. Set a custom provider in Settings.");
     }
     const settings = getSettings();
     const maxAgeMs = settings.summaryMaxAgeDays * 86_400_000;
-    const candidates = store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 50);
+    // Cover all missing/stale sessions in the age window in one run (bounded for
+    // safety). Failed ones stay missing and are retried on the next run.
+    const candidates = store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 500);
+    const total = candidates.length;
     let processed = 0;
-    for (const candidate of candidates) {
-      try {
-        await summarizeOneSession(candidate.sessionKey, endpoint);
-        processed += 1;
-      } catch {
-        // Skip sessions the provider cannot summarize; keep going.
+    let failed = 0;
+    let next = 0;
+    const sendProgress = (): void => {
+      event.sender.send("summary:progress", { processed, failed, total });
+    };
+    sendProgress();
+    // A few in parallel so a large backlog finishes in reasonable wall time; each
+    // request is individually time-bounded, so one slow provider can't stall it.
+    const worker = async (): Promise<void> => {
+      while (next < candidates.length) {
+        const candidate = candidates[next++];
+        try {
+          await summarizeOneSession(candidate.sessionKey, endpoint);
+          processed += 1;
+        } catch {
+          failed += 1;
+        }
+        sendProgress();
       }
-    }
-    return { processed, total: candidates.length };
+    };
+    await Promise.all(Array.from({ length: Math.min(3, total) }, worker));
+    return { processed, failed, total };
   });
   ipcMain.handle("mcp:status", () => {
     try {

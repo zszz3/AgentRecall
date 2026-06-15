@@ -31,6 +31,7 @@ import {
   Search,
   Server,
   Settings,
+  Sparkles,
   Star,
   Sun,
   Tag,
@@ -282,7 +283,7 @@ export function App(): ReactElement {
   const [projectPath, setProjectPath] = useState<string | undefined>();
   const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<ViewMode>("default");
-  const [sortBy, setSortBy] = useState<SessionSortBy>("created");
+  const [sortBy, setSortBy] = useState<SessionSortBy>("activity");
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
   const [sessionTotalCount, setSessionTotalCount] = useState(0);
@@ -1693,6 +1694,10 @@ export function App(): ReactElement {
           onDiagnoseEnvironment={(environment) => void diagnoseEnvironment(environment)}
           onDeleteEnvironment={(environment) => void deleteEnvironment(environment)}
           onAddSsh={() => setSshDialogOpen(true)}
+          onOpenApiConfig={() => {
+            setSettingsOpen(false);
+            setApiConfigOpen(true);
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
@@ -2071,6 +2076,7 @@ function SettingsDialog({
   onDiagnoseEnvironment,
   onDeleteEnvironment,
   onAddSsh,
+  onOpenApiConfig,
   onClose,
 }: {
   settings: AppSettings | null;
@@ -2092,6 +2098,7 @@ function SettingsDialog({
   onDiagnoseEnvironment: (environment: SessionEnvironment) => void;
   onDeleteEnvironment: (environment: SessionEnvironment) => void;
   onAddSsh: () => void;
+  onOpenApiConfig: () => void;
   onClose: () => void;
 }): ReactElement {
   const defaultTerminal = settings?.defaultTerminal ?? (RUNTIME_PLATFORM === "win32" ? "WindowsTerminal" : "Terminal");
@@ -2119,20 +2126,37 @@ function SettingsDialog({
     }
   }
 
+  useEffect(() => {
+    const off = window.sessionSearch.onSummaryProgress((progress) => {
+      setSummaryBatch((current) =>
+        current.running
+          ? {
+              running: true,
+              message: localize(
+                language,
+                `Summarizing ${progress.processed + progress.failed}/${progress.total}...`,
+                `摘要中 ${progress.processed + progress.failed}/${progress.total}...`,
+              ),
+            }
+          : current,
+      );
+    });
+    return off;
+  }, [language]);
+
   async function runSummaryBatch(): Promise<void> {
-    setSummaryBatch({ running: true, message: null });
+    setSummaryBatch({ running: true, message: localize(language, "Starting...", "开始...") });
     try {
       const result = await window.sessionSearch.summarizeMissingSessions();
-      setSummaryBatch({
-        running: false,
-        message: localize(language, `Summarized ${result.processed}/${result.total} sessions.`, `已摘要 ${result.processed}/${result.total} 个会话。`),
-      });
+      const base = localize(language, `Summarized ${result.processed}/${result.total} sessions.`, `已摘要 ${result.processed}/${result.total} 个会话。`);
+      const failedNote = result.failed > 0 ? localize(language, ` ${result.failed} failed.`, ` ${result.failed} 个失败。`) : "";
+      setSummaryBatch({ running: false, message: base + failedNote });
     } catch (error) {
       setSummaryBatch({ running: false, message: error instanceof Error ? error.message : String(error) });
     }
   }
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "connections" | "sources" | "usage" | "skills" | "appearance">("terminal");
+  const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "connections" | "sources" | "usage" | "ai" | "skills" | "appearance">("terminal");
 
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -2164,6 +2188,10 @@ function SettingsDialog({
             <button className={activeSection === "usage" ? "active" : ""} onClick={() => setActiveSection("usage")}>
               <Gauge size={15} />
               <span>{l("Usage limits", "剩余额度")}</span>
+            </button>
+            <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
+              <Sparkles size={15} />
+              <span>{l("AI", "AI")}</span>
             </button>
             <button className={activeSection === "skills" ? "active" : ""} onClick={() => setActiveSection("skills")}>
               <PackageSearch size={15} />
@@ -2485,14 +2513,23 @@ function SettingsDialog({
                     />
                   </label>
                 ) : null}
-                <header className="settings-pane-head" style={{ marginTop: 18 }}>
-                  <h3>{l("AI summaries", "AI 摘要")}</h3>
-                  <p>
-                    {l(
-                      "Generate a one-line searchable summary per session using your custom API provider (the dedicated summary provider if set, otherwise the Codex provider). Session content is sent to that provider.",
-                      "用你的自定义 API provider 为每个会话生成一句可搜索的摘要(若设置了专用摘要 provider 则用它，否则用 Codex 的 provider)。会话内容会发送给该 provider。",
-                    )}
-                  </p>
+              </section>
+            ) : null}
+            {activeSection === "ai" ? (
+              <section className="settings-pane">
+                <header className="settings-pane-head settings-pane-head-row">
+                  <div>
+                    <h3>{l("AI summaries", "AI 摘要")}</h3>
+                    <p>
+                      {l(
+                        "Generate a one-line searchable summary per session. Configure the provider and API key under the AI Summary tab of the API dialog (falls back to the Codex provider). Session content is sent to that provider.",
+                        "为每个会话生成一句可搜索的摘要。在 API 弹窗的「AI 摘要」标签里配置 provider 和 API key(未配则回落 Codex provider)。会话内容会发送给该 provider。",
+                      )}
+                    </p>
+                  </div>
+                  <button type="button" className="settings-action-button" onClick={onOpenApiConfig}>
+                    {l("Configure provider", "配置 provider")}
+                  </button>
                 </header>
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
@@ -2527,7 +2564,7 @@ function SettingsDialog({
                     <span className="settings-field-title">{l("Backfill missing summaries now", "立即补全缺失摘要")}</span>
                     <span className="settings-field-sub">{summaryBatch.message ?? l("Summarize recent sessions that have no summary yet.", "为还没有摘要的近期会话批量生成。")}</span>
                   </div>
-                  <button disabled={!settings || summaryBatch.running} onClick={() => void runSummaryBatch()}>
+                  <button className="settings-action-button" disabled={!settings || summaryBatch.running} onClick={() => void runSummaryBatch()}>
                     {summaryBatch.running ? l("Summarizing...", "摘要中...") : l("Run", "运行")}
                   </button>
                 </div>

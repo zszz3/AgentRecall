@@ -19,15 +19,57 @@ function serverScriptPath() {
   return path.join(__dirname, "agent-session-search-mcp.mjs");
 }
 
+function nodeMajor(version) {
+  return parseInt(String(version).replace(/^v/, "").split(".")[0], 10) || 0;
+}
+
+// The MCP server needs node >= 22 (node:sqlite). The default `node` on PATH may be
+// older, so resolve an absolute path to a recent enough node and bake it into the
+// config; fall back to bare "node" only if nothing better is found.
+function nodeCommand() {
+  const base = path.basename(process.execPath).toLowerCase();
+  if ((base === "node" || base === "node.exe") && nodeMajor(process.versions.node) >= 22) {
+    return process.execPath;
+  }
+  try {
+    const version = require("node:child_process").execSync("node -v", { encoding: "utf8" }).trim();
+    if (nodeMajor(version) >= 22) return "node";
+  } catch {
+    // No node on PATH; keep searching.
+  }
+  const nvmCandidates = [];
+  const nvmRoot = path.join(homeDir(), ".nvm", "versions", "node");
+  try {
+    for (const dir of fs.readdirSync(nvmRoot)) {
+      if (nodeMajor(dir) >= 22) nvmCandidates.push(path.join(nvmRoot, dir, "bin", "node"));
+    }
+  } catch {
+    // No nvm; ignore.
+  }
+  // Highest nvm version first, then common install locations.
+  nvmCandidates.sort((a, b) => (a < b ? 1 : -1));
+  const candidates = [...nvmCandidates, "/opt/homebrew/bin/node", "/usr/local/bin/node"];
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const version = require("node:child_process").execSync(`${JSON.stringify(candidate)} -v`, { encoding: "utf8" }).trim();
+      if (nodeMajor(version) >= 22) return candidate;
+    } catch {
+      // Not runnable; try the next candidate.
+    }
+  }
+  return "node";
+}
+
 // --- Claude (~/.claude.json, JSON) -----------------------------------------
 
-function applyClaudeConfig(config, scriptPath, remove) {
+function applyClaudeConfig(config, scriptPath, remove, command = "node") {
   const next = config && typeof config === "object" && !Array.isArray(config) ? { ...config } : {};
   const servers = next.mcpServers && typeof next.mcpServers === "object" ? { ...next.mcpServers } : {};
   if (remove) {
     delete servers[SERVER_NAME];
   } else {
-    servers[SERVER_NAME] = { command: "node", args: [scriptPath] };
+    servers[SERVER_NAME] = { command, args: [scriptPath] };
   }
   if (Object.keys(servers).length > 0) next.mcpServers = servers;
   else delete next.mcpServers;
@@ -36,8 +78,8 @@ function applyClaudeConfig(config, scriptPath, remove) {
 
 // --- Codex (~/.codex/config.toml, TOML) ------------------------------------
 
-function applyCodexConfig(toml, scriptPath, remove) {
-  const block = `[${CODEX_SECTION}]\ncommand = "node"\nargs = ["${scriptPath}"]\n`;
+function applyCodexConfig(toml, scriptPath, remove, command = "node") {
+  const block = `[${CODEX_SECTION}]\ncommand = ${JSON.stringify(command)}\nargs = ["${scriptPath}"]\n`;
   const stripped = removeCodexBlock(toml);
   if (remove) return stripped;
   const base = stripped.trim();
@@ -80,10 +122,11 @@ function writeFileAtomic(filePath, contents) {
 function run(remove) {
   const home = homeDir();
   const scriptPath = serverScriptPath();
+  const command = remove ? "node" : nodeCommand();
   const messages = [];
 
   const claudePath = path.join(home, ".claude.json");
-  const claudeConfig = applyClaudeConfig(readJson(claudePath), scriptPath, remove);
+  const claudeConfig = applyClaudeConfig(readJson(claudePath), scriptPath, remove, command);
   writeFileAtomic(claudePath, `${JSON.stringify(claudeConfig, null, 2)}\n`);
   messages.push(`${remove ? "Removed" : "Configured"} MCP server in ${claudePath}`);
 
@@ -91,13 +134,14 @@ function run(remove) {
   if (fs.existsSync(codexDir)) {
     const codexPath = path.join(codexDir, "config.toml");
     const current = fs.existsSync(codexPath) ? fs.readFileSync(codexPath, "utf8") : "";
-    const nextToml = applyCodexConfig(current, scriptPath, remove);
+    const nextToml = applyCodexConfig(current, scriptPath, remove, command);
     writeFileAtomic(codexPath, nextToml.endsWith("\n") ? nextToml : `${nextToml}\n`);
     messages.push(`${remove ? "Removed" : "Configured"} MCP server in ${codexPath}`);
   } else {
     messages.push("Skipped Codex (~/.codex not found).");
   }
 
+  if (!remove) messages.push(`Using node: ${command}`);
   return messages;
 }
 

@@ -628,6 +628,13 @@ export class SessionStore {
     return rows.map((row) => this.hydrateRow(row, null));
   }
 
+  getMessageCount(sessionKey: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE session_key = ?").get(sessionKey) as
+      | { n: number }
+      | undefined;
+    return row?.n ?? 0;
+  }
+
   getMessages(sessionKey: string, offset = 0, limit = 120): SessionMessage[] {
     return (
       this.db

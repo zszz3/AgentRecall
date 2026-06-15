@@ -1,19 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { ApiConfig } from "./api-config";
 import {
   buildSummaryMessages,
   needsBackfill,
   parseSummaryResponse,
   resolveSummaryEndpoint,
+  type SummaryProviderConfig,
   summarizeSession,
   summaryFreshness,
 } from "./session-summarizer";
 
-function customConfig(overrides: Partial<ApiConfig>): ApiConfig {
+function customConfig(overrides: Partial<SummaryProviderConfig>): SummaryProviderConfig {
   return {
     activeProvider: "custom",
-    customProviderId: "deepseek",
-    customProviderName: "DeepSeek",
     customBaseUrl: "https://api.deepseek.com",
     customApiKey: "sk-test",
     customModel: "deepseek-v4-flash",
@@ -39,6 +37,22 @@ describe("resolveSummaryEndpoint", () => {
   it("skips official providers and returns null when nothing is usable", () => {
     expect(resolveSummaryEndpoint([customConfig({ activeProvider: "official" })])).toBeNull();
   });
+
+  it("maps an anthropic config (e.g. a coding-plan provider) to the anthropic format", () => {
+    const endpoint = resolveSummaryEndpoint([
+      customConfig({ activeProvider: "official" }),
+      customConfig({ customBaseUrl: "https://open.bigmodel.cn/api/anthropic", customModel: "glm-5.1", customApiFormat: "anthropic" }),
+    ]);
+    expect(endpoint?.apiFormat).toBe("anthropic");
+    expect(endpoint?.baseUrl).toBe("https://open.bigmodel.cn/api/anthropic");
+  });
+
+  it("infers anthropic from an /anthropic base URL even when the format says openai_chat", () => {
+    const endpoint = resolveSummaryEndpoint([
+      customConfig({ customBaseUrl: "https://open.bigmodel.cn/api/anthropic", customModel: "glm-5.1", customApiFormat: "openai_chat" }),
+    ]);
+    expect(endpoint?.apiFormat).toBe("anthropic");
+  });
 });
 
 describe("parseSummaryResponse", () => {
@@ -62,22 +76,39 @@ describe("parseSummaryResponse", () => {
 
 describe("buildSummaryMessages", () => {
   it("includes only user/assistant content in the transcript", () => {
-    const messages = buildSummaryMessages([
-      { role: "user", content: "how do I fix this" },
-      { role: "tool", content: "noise" },
-      { role: "assistant", content: "do this" },
-    ]);
+    const messages = buildSummaryMessages({
+      head: [
+        { role: "user", content: "how do I fix this" },
+        { role: "tool", content: "noise" },
+        { role: "assistant", content: "do this" },
+      ],
+      tail: [],
+      omittedCount: 0,
+    });
     expect(messages).toHaveLength(2);
     expect(messages[1].content).toContain("USER: how do I fix this");
     expect(messages[1].content).toContain("ASSISTANT: do this");
     expect(messages[1].content).not.toContain("noise");
+  });
+
+  it("joins head and tail with an omitted marker for long sessions", () => {
+    const messages = buildSummaryMessages({
+      head: [{ role: "user", content: "the original problem" }],
+      tail: [{ role: "assistant", content: "the final fix" }],
+      omittedCount: 120,
+    });
+    const transcript = messages[1].content;
+    expect(transcript).toContain("USER: the original problem");
+    expect(transcript).toContain("[... 120 messages omitted ...]");
+    expect(transcript).toContain("ASSISTANT: the final fix");
+    expect(transcript.indexOf("original problem")).toBeLessThan(transcript.indexOf("final fix"));
   });
 });
 
 describe("summarizeSession", () => {
   it("calls the chat fn and parses its reply", async () => {
     const result = await summarizeSession(
-      [{ role: "user", content: "fix the build" }],
+      { head: [{ role: "user", content: "fix the build" }], tail: [], omittedCount: 0 },
       { baseUrl: "https://x", model: "m", apiKey: "k", apiFormat: "openai_chat" },
       async () => '{"summary":"Fixed the build.","title":"Build fix","tags":["ci"]}',
     );
@@ -87,7 +118,7 @@ describe("summarizeSession", () => {
   it("throws before calling the model when there is nothing to summarize", async () => {
     let called = false;
     await expect(
-      summarizeSession([{ role: "tool", content: "only tool output" }], { baseUrl: "x", model: "m", apiKey: "k", apiFormat: "openai_chat" }, async () => {
+      summarizeSession({ head: [{ role: "tool", content: "only tool output" }], tail: [], omittedCount: 0 }, { baseUrl: "x", model: "m", apiKey: "k", apiFormat: "openai_chat" }, async () => {
         called = true;
         return "{}";
       }),

@@ -35,8 +35,13 @@ const api = {
   getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),
   summarizeSession: (sessionKey: string): Promise<SessionSearchResult | null> =>
     ipcRenderer.invoke("session:summarize", sessionKey),
-  summarizeMissingSessions: (): Promise<{ processed: number; total: number }> =>
+  summarizeMissingSessions: (): Promise<{ processed: number; failed: number; total: number }> =>
     ipcRenderer.invoke("session:summarize-missing"),
+  onSummaryProgress: (callback: (progress: { processed: number; failed: number; total: number }) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: { processed: number; failed: number; total: number }) => callback(progress);
+    ipcRenderer.on("summary:progress", listener);
+    return () => ipcRenderer.removeListener("summary:progress", listener);
+  },
   getStats: (options?: SessionStatsOptions): Promise<SessionStats> => ipcRenderer.invoke("stats:get", options),
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),

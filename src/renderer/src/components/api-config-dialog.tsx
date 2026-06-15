@@ -506,8 +506,8 @@ export function ApiConfigDialog({
                 <h3>{l("AI summary provider", "AI 摘要供应商")}</h3>
                 <p>
                   {l(
-                    "Dedicated OpenAI-compatible provider used to generate session summaries. When set to fallback, the Codex provider is used instead. Saved locally; never written to any CLI config.",
-                    "用于生成会话摘要的专用 OpenAI-compatible 供应商。选择回落时改用 Codex 的供应商。仅本地保存，不会写入任何 CLI 配置。",
+                    "Dedicated OpenAI-compatible provider for summaries. On Fallback, the Codex then Claude provider is used — so an Anthropic coding-plan (e.g. GLM coding plan) set up in the Claude Code tab is reused. Saved locally; never written to any CLI config.",
+                    "用于生成摘要的专用 OpenAI-compatible 供应商。选「回落」时依次用 Codex、Claude 的供应商——这样在 Claude Code 标签里配置的 Anthropic coding plan(如 GLM coding plan）会被复用。仅本地保存，不写入任何 CLI 配置。",
                   )}
                 </p>
               </header>
@@ -521,8 +521,8 @@ export function ApiConfigDialog({
                     updateDraftSummaryApiConfig({ activeProvider: "official" });
                   }}
                 >
-                  <strong>{l("Fallback to Codex", "回落到 Codex")}</strong>
-                  <span>{l("Reuse the Codex provider above.", "复用上面的 Codex 供应商。")}</span>
+                  <strong>{l("Fallback (Codex / Claude)", "回落(Codex / Claude)")}</strong>
+                  <span>{l("Reuse the Codex or Claude provider.", "复用 Codex 或 Claude 供应商。")}</span>
                 </button>
                 {API_PROVIDER_PRESETS.filter((preset) => preset.apiFormat === "openai_chat").map((preset) => (
                   <button
@@ -595,9 +595,9 @@ export function ApiConfigDialog({
           )}
         </div>
         <div className="dialog-actions api-config-actions">
-          <button type="button" onClick={onClose} disabled={saving}>
-            {l("Cancel", "取消")}
-          </button>
+          <span className={`api-config-status ${feedback?.kind ?? ""}`} aria-live="polite">
+            {feedback?.message ?? ""}
+          </span>
           <button type="button" className={apiTarget === "summary" ? "primary-action" : ""} disabled={!settings || saving} onClick={saveDraft}>
             {l("Save", "保存")}
           </button>
@@ -606,9 +606,6 @@ export function ApiConfigDialog({
               {apiTarget === "codex" ? l("Apply to Codex", "应用到 Codex") : l("Apply to Claude Code", "应用到 Claude Code")}
             </button>
           )}
-        </div>
-        <div className={`settings-feedback ${feedback?.kind ?? ""}`} aria-live="polite">
-          {feedback?.message ?? ""}
         </div>
       </section>
     </div>
