@@ -7,7 +7,9 @@ describe("selectProxyUrl", () => {
   it("prefers HTTPS_PROXY then falls back through the env chain", () => {
     expect(selectProxyUrl({ HTTPS_PROXY: "http://a:1" })).toBe("http://a:1");
     expect(selectProxyUrl({ https_proxy: "http://b:2" })).toBe("http://b:2");
-    expect(selectProxyUrl({ ALL_PROXY: "http://c:3" })).toBe("http://c:3");
+    expect(selectProxyUrl({ HTTP_PROXY: "http://c:3" })).toBe("http://c:3");
+    expect(selectProxyUrl({ http_proxy: "http://d:4" })).toBe("http://d:4");
+    expect(selectProxyUrl({ ALL_PROXY: "http://e:5" })).toBe("http://e:5");
   });
 
   it("ignores socks proxies that CONNECT tunneling cannot use", () => {

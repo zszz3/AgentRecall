@@ -35,7 +35,10 @@ export type CodexUsageFetcher = (accessToken: string, accountId: string) => Prom
 
 export interface CodexUsageWindow {
   used_percent?: number;
+  percent_left?: number;
+  remaining_percent?: number;
   reset_at?: number;
+  reset_after_seconds?: number;
   limit_window_seconds?: number;
 }
 
@@ -89,7 +92,9 @@ interface ClaudeOnwatchWindow {
 interface ClaudeStatuslineQuota {
   label?: string;
   used_percent?: number;
+  used_percentage?: number;
   remaining_percent?: number;
+  remaining_percentage?: number;
   resets_at?: string;
   stale?: boolean;
 }
@@ -243,8 +248,10 @@ function ensureClaudeStatuslineBridge(options: QuotaLoadOptions): ClaudeStatusli
   const existing = settings.statusLine;
   if (existing !== undefined && existing !== null) {
     const existingCommand = isPlainObject(existing) && typeof existing.command === "string" ? existing.command : "";
-    if (!isOurClaudeStatuslineCommand(existingCommand)) return "conflict";
-    if (existingCommand === command) return "already";
+    // If the existing statusLine command is already ours (regardless of path), leave it alone.
+    // Changing the path risks breaking the bridge when the resolved path differs between runs.
+    if (isOurClaudeStatuslineCommand(existingCommand)) return "already";
+    if (existingCommand) return "conflict";
   }
 
   settings.statusLine = { type: "command", command };
@@ -351,14 +358,34 @@ function expandHome(value: string, homeDir: string): string {
   return homeDir ? path.join(homeDir, value.slice(2)) : value;
 }
 
+function pickNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined;
+}
+
+function codexWindowUsedPercent(window: CodexUsageWindow): number | undefined {
+  if (isFiniteNumber(window.used_percent)) return window.used_percent;
+  // Some API versions return the remaining percentage instead of the used percentage.
+  if (isFiniteNumber(window.percent_left)) return 100 - window.percent_left;
+  if (isFiniteNumber(window.remaining_percent)) return 100 - window.remaining_percent;
+  return undefined;
+}
+
+function codexWindowResetAt(window: CodexUsageWindow, now: Date): number | undefined {
+  if (isFiniteNumber(window.reset_at)) return window.reset_at;
+  if (isFiniteNumber(window.reset_after_seconds) && window.reset_after_seconds >= 0) {
+    return Math.floor(now.getTime() / 1000) + window.reset_after_seconds;
+  }
+  return undefined;
+}
+
 function codexQuotasFromResponse(response: CodexUsageResponse, now: Date): UsageQuota[] {
   const quotas: UsageQuota[] = [];
   const primary = response.rate_limit?.primary_window ?? null;
   const secondary = response.rate_limit?.secondary_window ?? null;
   const codeReview = response.code_review_rate_limit?.primary_window ?? null;
-  if (primary) quotas.push(quotaFromUsedPercent(QUOTA_FIVE_HOUR, "5h", primary.used_percent, primary.reset_at, now));
-  if (secondary) quotas.push(quotaFromUsedPercent(QUOTA_SEVEN_DAY, "7d", secondary.used_percent, secondary.reset_at, now));
-  if (codeReview) quotas.push(quotaFromUsedPercent(QUOTA_CODE_REVIEW, "Review", codeReview.used_percent, codeReview.reset_at, now));
+  if (primary) quotas.push(quotaFromUsedPercent(QUOTA_FIVE_HOUR, "5h", codexWindowUsedPercent(primary), codexWindowResetAt(primary, now), now));
+  if (secondary) quotas.push(quotaFromUsedPercent(QUOTA_SEVEN_DAY, "7d", codexWindowUsedPercent(secondary), codexWindowResetAt(secondary, now), now));
+  if (codeReview) quotas.push(quotaFromUsedPercent(QUOTA_CODE_REVIEW, "Review", codexWindowUsedPercent(codeReview), codexWindowResetAt(codeReview, now), now));
   return quotas.filter(Boolean);
 }
 
@@ -372,7 +399,14 @@ function claudeQuotasFromStatusline(raw: ClaudeStatuslineFile, now: Date): Usage
   if (raw.quotas && Object.keys(raw.quotas).length > 0) {
     for (const [key, value] of Object.entries(raw.quotas)) {
       if (!value) continue;
-      add(key, value.label || quotaLabel(key), value.used_percent, value.remaining_percent, value.resets_at, value.stale);
+      // Some tools write used_percentage / remaining_percentage (with "age" suffix)
+      // instead of used_percent / remaining_percent.
+      const usedPct = pickNumber(value.used_percent) ?? pickNumber(value.used_percentage);
+      const remainingPct = pickNumber(value.remaining_percent) ?? pickNumber(value.remaining_percentage);
+      // Leave stale undefined (not false) when the field is absent so normalizeQuota can still
+      // auto-detect staleness from resets_at; an explicit `false` would suppress that.
+      const staleFlag = value.stale === true ? true : undefined;
+      add(key, value.label || quotaLabel(key), usedPct, remainingPct, value.resets_at, staleFlag);
     }
     return quotas;
   }
@@ -424,12 +458,14 @@ function normalizeQuota(quota: Omit<UsageQuota, "usedDisplay" | "remainingDispla
   const usedPercent = normalizePercent(quota.usedPercent);
   const remainingPercent = normalizePercent(quota.remainingPercent);
   const resetsAt = quota.resetsAt?.trim() || undefined;
+  // Round consistently so usedDisplay + remainingDisplay always sums to 100.
+  const roundedUsed = Math.round(usedPercent);
   return {
     ...quota,
     usedPercent,
     remainingPercent,
-    usedDisplay: `${Math.round(usedPercent)}%`,
-    remainingDisplay: `${Math.round(remainingPercent)}%`,
+    usedDisplay: `${roundedUsed}%`,
+    remainingDisplay: `${100 - roundedUsed}%`,
     resetsAt,
     stale: quota.stale ?? isResetStale(resetsAt, now),
   };
@@ -462,13 +498,13 @@ function quotaLabel(key: string): string {
   return key;
 }
 
-const CODEX_REQUEST_TIMEOUT_MS = 12_000;
+const CODEX_REQUEST_TIMEOUT_MS = 20_000;
 
 // chatgpt.com is unreachable directly on many networks; Node's https does not honor proxy
 // env vars, so we resolve one here and tunnel through it via HTTP CONNECT. SOCKS proxies are
 // skipped because CONNECT tunneling only works with http(s) proxies.
 export function selectProxyUrl(env: Record<string, string | undefined> = process.env): string | undefined {
-  const candidates = [env.HTTPS_PROXY, env.https_proxy, env.ALL_PROXY, env.all_proxy];
+  const candidates = [env.HTTPS_PROXY, env.https_proxy, env.HTTP_PROXY, env.http_proxy, env.ALL_PROXY, env.all_proxy];
   for (const raw of candidates) {
     const value = raw?.trim();
     if (!value) continue;
@@ -480,24 +516,44 @@ export function selectProxyUrl(env: Record<string, string | undefined> = process
 
 async function fetchCodexUsageHTTP(accessToken: string, accountId: string, options: { proxyUrl?: string } = {}): Promise<CodexUsageResponse> {
   if (process.platform === "win32") {
-    try {
-      return await doCodexUsagePowerShellRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId);
-    } catch (error) {
-      if (error instanceof CodexHttpError && error.statusCode === 404) {
-        return doCodexUsagePowerShellRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId);
-      }
-      throw error;
-    }
+    return codexRequestWith404Fallback(
+      () => doCodexUsagePowerShellRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId),
+      () => doCodexUsagePowerShellRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId),
+    );
   }
 
+  // On macOS/Linux, prefer a Python subprocess: Node's bundled TLS ClientHello fingerprint is
+  // silently dropped by chatgpt.com's Cloudflare edge (the connection hangs until timeout),
+  // while Python's system-OpenSSL handshake passes through. Falls back to the Node https path
+  // only when python3 is not on PATH.
   try {
-    return await doCodexUsageRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId, options.proxyUrl);
+    return await codexRequestWith404Fallback(
+      () => doCodexUsagePythonRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId, options.proxyUrl),
+      () => doCodexUsagePythonRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId, options.proxyUrl),
+    );
   } catch (error) {
-    if (error instanceof CodexHttpError && error.statusCode === 404) {
-      return doCodexUsageRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId, options.proxyUrl);
-    }
+    if (!isCodexPythonUnavailable(error)) throw error;
+    return codexRequestWith404Fallback(
+      () => doCodexUsageRequest(CODEX_USAGE_PRIMARY_URL, accessToken, accountId, options.proxyUrl),
+      () => doCodexUsageRequest(CODEX_USAGE_FALLBACK_URL, accessToken, accountId, options.proxyUrl),
+    );
+  }
+}
+
+async function codexRequestWith404Fallback(
+  primary: () => Promise<CodexUsageResponse>,
+  fallback: () => Promise<CodexUsageResponse>,
+): Promise<CodexUsageResponse> {
+  try {
+    return await primary();
+  } catch (error) {
+    if (error instanceof CodexHttpError && error.statusCode === 404) return fallback();
     throw error;
   }
+}
+
+function isCodexPythonUnavailable(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "ENOENT";
 }
 
 function doCodexUsagePowerShellRequest(endpoint: string, accessToken: string, accountId: string): Promise<CodexUsageResponse> {
@@ -546,6 +602,95 @@ try {
       },
       (error, stdout, stderr) => {
         if (error) {
+          const message = stderr.trim() || error.message;
+          const statusCode = Number(message.match(/HTTP\s+(\d+)/)?.[1]);
+          if (Number.isFinite(statusCode)) {
+            reject(new CodexHttpError(codexHttpStatusMessage(statusCode), statusCode));
+            return;
+          }
+          reject(new Error(message));
+          return;
+        }
+        try {
+          resolve(JSON.parse(stdout) as CodexUsageResponse);
+        } catch (parseError) {
+          reject(parseError instanceof Error ? new Error(`Invalid Codex usage response: ${parseError.message}`) : parseError);
+        }
+      },
+    );
+  });
+}
+
+export function doCodexUsagePythonRequest(endpoint: string, accessToken: string, accountId: string, proxyUrl?: string): Promise<CodexUsageResponse> {
+  // urllib's default opener honors both *_proxy env vars and macOS SystemConfiguration proxies;
+  // Node's https honors neither unless wired up by hand. For users whose only proxy is set at the
+  // OS level (no env vars), the Node path connects directly to chatgpt.com and times out, while
+  // Python transparently routes through the system proxy. An explicit proxyUrl from selectProxyUrl
+  // (env-var based) overrides this when present.
+  const script = `
+import os, sys, urllib.request, urllib.error
+
+url = os.environ["AGENT_SESSION_SEARCH_CODEX_USAGE_URL"]
+token = os.environ["AGENT_SESSION_SEARCH_CODEX_ACCESS_TOKEN"]
+account = (os.environ.get("AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID") or "").strip()
+proxy_url = (os.environ.get("AGENT_SESSION_SEARCH_CODEX_PROXY") or "").strip()
+
+headers = {
+    "Accept": "application/json",
+    "Authorization": "Bearer " + token,
+    "User-Agent": "agent-session-search",
+}
+if account:
+    headers["X-Account-Id"] = account
+    headers["ChatClaude-Account-Id"] = account
+    headers["ChatGPT-Account-Id"] = account
+
+if proxy_url:
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+    )
+else:
+    # Default handlers install a ProxyHandler that reads macOS SystemConfiguration proxies AND
+    # *_proxy env vars — this is exactly what the Node path is missing.
+    opener = urllib.request.build_opener()
+req = urllib.request.Request(url, headers=headers, method="GET")
+
+try:
+    resp = opener.open(req, timeout=15)
+except urllib.error.HTTPError as exc:
+    sys.stderr.write("HTTP {}".format(exc.code))
+    sys.exit(1)
+except Exception as exc:
+    name = type(exc).__name__
+    sys.stderr.write(name + (": " + str(exc) if str(exc) else ""))
+    sys.exit(1)
+else:
+    sys.stdout.buffer.write(resp.read())
+`;
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      "python3",
+      ["-c", script],
+      {
+        timeout: CODEX_REQUEST_TIMEOUT_MS,
+        maxBuffer: HTTP_BODY_LIMIT,
+        env: {
+          ...process.env,
+          AGENT_SESSION_SEARCH_CODEX_USAGE_URL: endpoint,
+          AGENT_SESSION_SEARCH_CODEX_ACCESS_TOKEN: accessToken,
+          AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID: accountId,
+          AGENT_SESSION_SEARCH_CODEX_PROXY: proxyUrl ?? "",
+        },
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            const err = new Error("python3 is not installed on PATH.");
+            (err as NodeJS.ErrnoException).code = "ENOENT";
+            reject(err);
+            return;
+          }
           const message = stderr.trim() || error.message;
           const statusCode = Number(message.match(/HTTP\s+(\d+)/)?.[1]);
           if (Number.isFinite(statusCode)) {
