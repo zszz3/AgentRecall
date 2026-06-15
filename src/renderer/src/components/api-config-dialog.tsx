@@ -34,17 +34,21 @@ export function ApiConfigDialog({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const saving = feedback?.kind === "running";
-  const [apiTarget, setApiTarget] = useState<"codex" | "claude">("codex");
+  const [apiTarget, setApiTarget] = useState<"codex" | "claude" | "summary">("codex");
   const [showCodexApiKey, setShowCodexApiKey] = useState(false);
   const [showClaudeApiKey, setShowClaudeApiKey] = useState(false);
+  const [showSummaryApiKey, setShowSummaryApiKey] = useState(false);
   const [draftApiConfig, setDraftApiConfig] = useState<ApiConfig>(() => settings?.apiConfig ?? { ...defaultApiConfig });
   const [draftClaudeApiConfig, setDraftClaudeApiConfig] = useState<ClaudeApiConfig>(
     () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
   );
+  const [draftSummaryApiConfig, setDraftSummaryApiConfig] = useState<ApiConfig>(() => settings?.summaryApiConfig ?? { ...defaultApiConfig });
   const apiPresetSelectionRef = useRef(0);
   const claudeApiPresetSelectionRef = useRef(0);
+  const summaryApiPresetSelectionRef = useRef(0);
   const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
   const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
+  const updateDraftSummaryApiConfig = (next: Partial<ApiConfig>) => setDraftSummaryApiConfig((current) => ({ ...current, ...next }));
   const selectedPreset = API_PROVIDER_PRESETS.find((preset) => preset.id === draftApiConfig.customProviderId) ?? API_PROVIDER_PRESETS[0];
   const customName = selectedPreset?.label ?? (draftApiConfig.customProviderName || "CodexZH");
   const selectedClaudePreset =
@@ -102,19 +106,39 @@ export function ApiConfigDialog({
     setShowClaudeApiKey(false);
   };
 
+  const selectSummaryPreset = async (presetId: ApiProviderPresetId) => {
+    const selectionId = ++summaryApiPresetSelectionRef.current;
+    const preset = API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? API_PROVIDER_PRESETS[0];
+    const apiKey = await window.sessionSearch.getApiProviderKey("summary", preset.id).catch(() => "");
+    if (selectionId !== summaryApiPresetSelectionRef.current) return;
+    setDraftSummaryApiConfig((current) => ({
+      ...current,
+      activeProvider: "custom",
+      customProviderId: preset.id,
+      customProviderName: preset.providerName,
+      customBaseUrl: preset.baseUrl,
+      customApiKey: apiKey,
+      customModel: preset.model,
+      customApiFormat: preset.apiFormat,
+    }));
+    setShowSummaryApiKey(false);
+  };
+
   useEffect(() => {
     setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
     setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
-  }, [settings?.apiConfig, settings?.claudeApiConfig]);
+    setDraftSummaryApiConfig(settings?.summaryApiConfig ?? { ...defaultApiConfig });
+  }, [settings?.apiConfig, settings?.claudeApiConfig, settings?.summaryApiConfig]);
 
   const saveDraft = () => {
     if (apiTarget === "codex") onSettingsChange({ apiConfig: draftApiConfig });
-    else onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
+    else if (apiTarget === "claude") onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
+    else onSettingsChange({ summaryApiConfig: draftSummaryApiConfig });
   };
 
   const applyDraft = () => {
     if (apiTarget === "codex") onApplyToCodex(draftApiConfig);
-    else onApplyToClaude(draftClaudeApiConfig);
+    else if (apiTarget === "claude") onApplyToClaude(draftClaudeApiConfig);
   };
 
   return (
@@ -132,6 +156,9 @@ export function ApiConfigDialog({
           </button>
           <button type="button" className={apiTarget === "claude" ? "active" : ""} onClick={() => setApiTarget("claude")}>
             Claude Code
+          </button>
+          <button type="button" className={apiTarget === "summary" ? "active" : ""} onClick={() => setApiTarget("summary")}>
+            {l("AI Summary", "AI 摘要")}
           </button>
         </div>
         <div className="api-config-body">
@@ -287,7 +314,7 @@ export function ApiConfigDialog({
                 </>
               ) : null}
             </section>
-          ) : (
+          ) : apiTarget === "claude" ? (
             <section className="settings-pane api-settings-form">
               <header className="settings-pane-head">
                 <h3>{l("Claude Code providers", "Claude Code 供应商")}</h3>
@@ -473,18 +500,112 @@ export function ApiConfigDialog({
                 </>
               ) : null}
             </section>
+          ) : (
+            <section className="settings-pane api-settings-form">
+              <header className="settings-pane-head">
+                <h3>{l("AI summary provider", "AI 摘要供应商")}</h3>
+                <p>
+                  {l(
+                    "Dedicated OpenAI-compatible provider used to generate session summaries. When set to fallback, the Codex provider is used instead. Saved locally; never written to any CLI config.",
+                    "用于生成会话摘要的专用 OpenAI-compatible 供应商。选择回落时改用 Codex 的供应商。仅本地保存，不会写入任何 CLI 配置。",
+                  )}
+                </p>
+              </header>
+              <div className="api-provider-switch" role="group" aria-label={l("AI summary provider", "AI 摘要供应商")}>
+                <button
+                  type="button"
+                  className={draftSummaryApiConfig.activeProvider === "official" ? "active" : ""}
+                  disabled={!settings || saving}
+                  onClick={() => {
+                    summaryApiPresetSelectionRef.current += 1;
+                    updateDraftSummaryApiConfig({ activeProvider: "official" });
+                  }}
+                >
+                  <strong>{l("Fallback to Codex", "回落到 Codex")}</strong>
+                  <span>{l("Reuse the Codex provider above.", "复用上面的 Codex 供应商。")}</span>
+                </button>
+                {API_PROVIDER_PRESETS.filter((preset) => preset.apiFormat === "openai_chat").map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={draftSummaryApiConfig.activeProvider === "custom" && draftSummaryApiConfig.customProviderId === preset.id ? "active" : ""}
+                    disabled={!settings || saving}
+                    onClick={() => void selectSummaryPreset(preset.id)}
+                  >
+                    <strong>{preset.label}</strong>
+                    <span>{preset.model}</span>
+                  </button>
+                ))}
+              </div>
+              {draftSummaryApiConfig.activeProvider === "custom" ? (
+                <>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">Base URL</span>
+                      <span className="settings-field-sub">{l("OpenAI-compatible endpoint.", "OpenAI-compatible 接口地址。")}</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={draftSummaryApiConfig.customBaseUrl}
+                      disabled={!settings || saving}
+                      placeholder="https://api.deepseek.com"
+                      onChange={(event) => updateDraftSummaryApiConfig({ customBaseUrl: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Model", "模型")}</span>
+                      <span className="settings-field-sub">{l("A cheap, fast chat model works well.", "选个便宜快速的聊天模型即可。")}</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={draftSummaryApiConfig.customModel}
+                      disabled={!settings || saving}
+                      placeholder="deepseek-v4-flash"
+                      onChange={(event) => updateDraftSummaryApiConfig({ customModel: event.currentTarget.value })}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">API Key</span>
+                      <span className="settings-field-sub">{l("Stored locally.", "保存在本地。")}</span>
+                    </div>
+                    <div className="secret-input">
+                      <input
+                        type={showSummaryApiKey ? "text" : "password"}
+                        value={draftSummaryApiConfig.customApiKey}
+                        disabled={!settings || saving}
+                        placeholder="sk-..."
+                        onChange={(event) => updateDraftSummaryApiConfig({ customApiKey: event.currentTarget.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSummaryApiKey((current) => !current)}
+                        disabled={!settings || saving}
+                        aria-label={showSummaryApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+                        title={showSummaryApiKey ? l("Hide API key", "隐藏 API Key") : l("Show API key", "显示 API Key")}
+                      >
+                        {showSummaryApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </label>
+                </>
+              ) : null}
+            </section>
           )}
         </div>
         <div className="dialog-actions api-config-actions">
           <button type="button" onClick={onClose} disabled={saving}>
             {l("Cancel", "取消")}
           </button>
-          <button type="button" disabled={!settings || saving} onClick={saveDraft}>
+          <button type="button" className={apiTarget === "summary" ? "primary-action" : ""} disabled={!settings || saving} onClick={saveDraft}>
             {l("Save", "保存")}
           </button>
-          <button type="button" className="primary-action" disabled={!settings || saving} onClick={applyDraft}>
-            {apiTarget === "codex" ? l("Apply to Codex", "应用到 Codex") : l("Apply to Claude Code", "应用到 Claude Code")}
-          </button>
+          {apiTarget === "summary" ? null : (
+            <button type="button" className="primary-action" disabled={!settings || saving} onClick={applyDraft}>
+              {apiTarget === "codex" ? l("Apply to Codex", "应用到 Codex") : l("Apply to Claude Code", "应用到 Claude Code")}
+            </button>
+          )}
         </div>
         <div className={`settings-feedback ${feedback?.kind ?? ""}`} aria-live="polite">
           {feedback?.message ?? ""}
