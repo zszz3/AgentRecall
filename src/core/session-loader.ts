@@ -468,9 +468,35 @@ function tokenUsageFromEvents(events: TokenUsageEvent[]): TokenUsage {
   return total;
 }
 
+// Codex reports OpenAI-style usage where `input_tokens` already includes cached
+// tokens and `output_tokens` already includes reasoning tokens. Split them into
+// the distinct buckets createTokenUsage expects (input excludes cached, output
+// excludes reasoning) so the summed total matches Codex's own accounting.
+function normalizeCodexUsage(usage: Record<string, unknown>): {
+  input: number;
+  output: number;
+  cached: number;
+  reasoning: number;
+} {
+  const cached = numberField(usage, "cached_input_tokens") + numberField(usage, "cache_read_input_tokens");
+  const reasoning = numberField(usage, "reasoning_output_tokens");
+  return {
+    input: Math.max(0, numberField(usage, "input_tokens") - cached),
+    output: Math.max(0, numberField(usage, "output_tokens") - reasoning),
+    cached,
+    reasoning,
+  };
+}
+
 function extractCodexTokenEvents(rows: unknown[]): TokenUsageEvent[] {
   const entries = new Map<string, TokenUsageEvent>();
   let currentModel = "";
+  // Codex carries a running cumulative `total_token_usage` on every token_count
+  // event; the final one is the authoritative session total. Prefer it over
+  // summing per-turn `last_token_usage`, which omits intermediate requests made
+  // within a single turn (e.g. tool-call round-trips) and undercounts. Fall back
+  // to summing last_token_usage only when no cumulative total is present.
+  let authoritative: TokenUsageEvent | null = null;
 
   for (const row of rows) {
     if (!isRecord(row)) continue;
@@ -481,24 +507,26 @@ function extractCodexTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     }
     if (row.type !== "event_msg" || stringField(payload, "type") !== "token_count") continue;
     const info = objectField(payload, "info");
-    const usage = objectField(info, "last_token_usage") || objectField(info, "total_token_usage");
-    if (!usage) continue;
-    const totalUsage = objectField(info, "total_token_usage");
-
-    const rawInput = numberField(usage, "input_tokens");
-    const rawOutput = numberField(usage, "output_tokens");
-    const cached = numberField(usage, "cached_input_tokens") + numberField(usage, "cache_read_input_tokens");
-    const reasoning = numberField(usage, "reasoning_output_tokens");
-    const normalizedInput = Math.max(0, rawInput - cached);
-    const normalizedOutput = Math.max(0, rawOutput - reasoning);
     const model = stringField(info, "model") || currentModel;
-    const totalInput = numberField(totalUsage, "input_tokens");
-    const totalOutput = numberField(totalUsage, "output_tokens");
-    const key = ["codex", model, normalizedInput, normalizedOutput, cached, reasoning, totalInput, totalOutput].join(":");
-    putTokenEvent(entries, tokenEvent(parseTimestampMs(row.timestamp), key, normalizedInput, normalizedOutput, cached, reasoning));
+    const timestamp = parseTimestampMs(row.timestamp);
+
+    const totalUsage = objectField(info, "total_token_usage");
+    if (totalUsage) {
+      const t = normalizeCodexUsage(totalUsage);
+      authoritative = tokenEvent(timestamp, `codex-total:${model}`, t.input, t.output, t.cached, t.reasoning);
+    }
+
+    const lastUsage = objectField(info, "last_token_usage");
+    if (lastUsage) {
+      const l = normalizeCodexUsage(lastUsage);
+      const totalInput = numberField(totalUsage, "input_tokens");
+      const totalOutput = numberField(totalUsage, "output_tokens");
+      const key = ["codex", model, l.input, l.output, l.cached, l.reasoning, totalInput, totalOutput].join(":");
+      putTokenEvent(entries, tokenEvent(timestamp, key, l.input, l.output, l.cached, l.reasoning));
+    }
   }
 
-  return [...entries.values()];
+  return authoritative ? [authoritative] : [...entries.values()];
 }
 
 function extractClaudeTokenEvents(rows: unknown[]): TokenUsageEvent[] {
@@ -510,7 +538,14 @@ function extractClaudeTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     const usage = objectField(message, "usage");
     if (!usage) return;
 
-    const cached = numberField(usage, "cache_read_input_tokens") + numberField(usage, "cached_input_tokens");
+    // Anthropic splits input across three billed buckets: fresh `input_tokens`,
+    // `cache_creation_input_tokens` (written to cache, billed ~1.25x) and
+    // `cache_read_input_tokens` (cache hit, billed ~0.1x). All three are really
+    // processed, so the cache buckets belong in the cached total.
+    const cached =
+      numberField(usage, "cache_read_input_tokens") +
+      numberField(usage, "cached_input_tokens") +
+      numberField(usage, "cache_creation_input_tokens");
     const entry = createTokenUsage(
       numberField(usage, "input_tokens"),
       numberField(usage, "output_tokens"),

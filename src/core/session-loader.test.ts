@@ -127,6 +127,74 @@ describe("Codex session loading", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("uses the cumulative total_token_usage rather than summing per-turn last usage", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-"));
+    const filePath = path.join(dir, "rollout.jsonl");
+    fs.writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-06-01T10:00:00Z",
+          payload: { id: "codex-total-1", cwd: "/repo" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-06-01T10:01:00Z",
+          payload: {
+            type: "token_count",
+            info: {
+              model: "gpt-5-codex",
+              last_token_usage: { input_tokens: 1000, output_tokens: 200 },
+              total_token_usage: { input_tokens: 1000, output_tokens: 200 },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-06-01T10:02:00Z",
+          payload: {
+            type: "token_count",
+            info: {
+              model: "gpt-5-codex",
+              // last reflects only the final request of the turn (1200 input),
+              // but the cumulative total grew to 4000 input because intermediate
+              // tool-call requests were not emitted as their own last usage.
+              last_token_usage: { input_tokens: 1200, cached_input_tokens: 1000, output_tokens: 100, reasoning_output_tokens: 10 },
+              total_token_usage: { input_tokens: 4000, cached_input_tokens: 1000, output_tokens: 600, reasoning_output_tokens: 60 },
+            },
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadCodexSessionFile(filePath);
+
+    // Authoritative cumulative total: input 4000 - cached 1000 = 3000 fresh,
+    // output 600 - reasoning 60 = 540, cached 1000, reasoning 60.
+    // (Summing per-turn last usage would wrongly yield input 1200, output 290.)
+    expect(loaded?.session.tokenUsage).toEqual({
+      inputTokens: 3000,
+      outputTokens: 540,
+      cachedInputTokens: 1000,
+      reasoningOutputTokens: 60,
+      totalTokens: 4600,
+    });
+    expect(loaded?.tokenEvents).toEqual([
+      {
+        dedupeKey: "codex-total:gpt-5-codex",
+        timestamp: new Date("2026-06-01T10:02:00Z").getTime(),
+        inputTokens: 3000,
+        outputTokens: 540,
+        cachedInputTokens: 1000,
+        reasoningOutputTokens: 60,
+        totalTokens: 4600,
+      },
+    ]);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("extracts Codex tool calls and execution events as trace events", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-"));
     const filePath = path.join(dir, "rollout.jsonl");
@@ -418,6 +486,55 @@ describe("Claude session loading", () => {
         totalTokens: 1360,
       },
     ]);
+
+    fs.rmSync(claudeDir, { recursive: true, force: true });
+  });
+
+  it("counts cache_creation_input_tokens as processed input", () => {
+    const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-claude-"));
+    const projectDir = path.join(claudeDir, "projects", "-repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "claude-cache-create.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-06-01T10:00:00Z",
+          cwd: "/repo",
+          sessionId: "claude-cache-create",
+          message: { role: "user", content: "首轮请求会写入缓存" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-06-01T10:01:00Z",
+          cwd: "/repo",
+          sessionId: "claude-cache-create",
+          message: {
+            id: "msg_cache",
+            role: "assistant",
+            content: "好的",
+            usage: {
+              input_tokens: 500,
+              output_tokens: 100,
+              cache_creation_input_tokens: 2000,
+              cache_read_input_tokens: 300,
+            },
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadClaudeCliSessions(claudeDir);
+
+    // cached bucket = cache_read 300 + cache_creation 2000 = 2300; the 2000
+    // cache-creation tokens were previously dropped entirely.
+    expect(loaded[0].session.tokenUsage).toEqual({
+      inputTokens: 500,
+      outputTokens: 100,
+      cachedInputTokens: 2300,
+      reasoningOutputTokens: 0,
+      totalTokens: 2900,
+    });
 
     fs.rmSync(claudeDir, { recursive: true, force: true });
   });
