@@ -182,13 +182,117 @@ describe("Codex session loading", () => {
     });
     expect(loaded?.tokenEvents).toEqual([
       {
-        dedupeKey: "codex-total:gpt-5-codex",
+        dedupeKey: "codex-total:gpt-5-codex:1780308060000:1000:200:0:0",
+        timestamp: new Date("2026-06-01T10:01:00Z").getTime(),
+        inputTokens: 1000,
+        outputTokens: 200,
+        cachedInputTokens: 0,
+        reasoningOutputTokens: 0,
+        totalTokens: 1200,
+      },
+      {
+        dedupeKey: "codex-total:gpt-5-codex:1780308120000:3000:540:1000:60",
         timestamp: new Date("2026-06-01T10:02:00Z").getTime(),
-        inputTokens: 3000,
-        outputTokens: 540,
+        inputTokens: 2000,
+        outputTokens: 340,
         cachedInputTokens: 1000,
         reasoningOutputTokens: 60,
-        totalTokens: 4600,
+        totalTokens: 3400,
+      },
+    ]);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("splits Codex cumulative token totals into dated deltas for period stats", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-"));
+    const filePath = path.join(dir, "rollout.jsonl");
+    fs.writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-06-04T10:00:00Z",
+          payload: { id: "codex-long-running", cwd: "/repo" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-06-04T10:01:00Z",
+          payload: {
+            type: "token_count",
+            info: {
+              model: "gpt-5-codex",
+              total_token_usage: {
+                input_tokens: 10_000,
+                cached_input_tokens: 8_000,
+                output_tokens: 500,
+                reasoning_output_tokens: 100,
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-06-16T06:23:00Z",
+          payload: {
+            type: "token_count",
+            info: {
+              model: "gpt-5-codex",
+              total_token_usage: {
+                input_tokens: 12_500,
+                cached_input_tokens: 9_500,
+                output_tokens: 700,
+                reasoning_output_tokens: 150,
+              },
+            },
+          },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-06-16T06:24:00Z",
+          payload: {
+            type: "token_count",
+            info: {
+              model: "gpt-5.4",
+              total_token_usage: {
+                input_tokens: 12_500,
+                cached_input_tokens: 9_500,
+                output_tokens: 700,
+                reasoning_output_tokens: 150,
+              },
+            },
+          },
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadCodexSessionFile(filePath);
+
+    expect(loaded?.session.tokenUsage).toEqual({
+      inputTokens: 3000,
+      outputTokens: 550,
+      cachedInputTokens: 9500,
+      reasoningOutputTokens: 150,
+      totalTokens: 13200,
+    });
+    expect(loaded?.tokenEvents).toEqual([
+      {
+        dedupeKey: "codex-total:gpt-5-codex:1780567260000:2000:400:8000:100",
+        timestamp: new Date("2026-06-04T10:01:00Z").getTime(),
+        inputTokens: 2000,
+        outputTokens: 400,
+        cachedInputTokens: 8000,
+        reasoningOutputTokens: 100,
+        totalTokens: 10500,
+      },
+      {
+        dedupeKey: "codex-total:gpt-5-codex:1781590980000:3000:550:9500:150",
+        timestamp: new Date("2026-06-16T06:23:00Z").getTime(),
+        inputTokens: 1000,
+        outputTokens: 150,
+        cachedInputTokens: 1500,
+        reasoningOutputTokens: 50,
+        totalTokens: 2700,
       },
     ]);
 

@@ -468,6 +468,16 @@ function tokenUsageFromEvents(events: TokenUsageEvent[]): TokenUsage {
   return total;
 }
 
+function subtractTokenUsage(current: TokenUsage, previous: TokenUsage | null): TokenUsage {
+  if (!previous) return current;
+  return createTokenUsage(
+    Math.max(0, current.inputTokens - previous.inputTokens),
+    Math.max(0, current.outputTokens - previous.outputTokens),
+    Math.max(0, current.cachedInputTokens - previous.cachedInputTokens),
+    Math.max(0, current.reasoningOutputTokens - previous.reasoningOutputTokens),
+  );
+}
+
 // Codex reports OpenAI-style usage where `input_tokens` already includes cached
 // tokens and `output_tokens` already includes reasoning tokens. Split them into
 // the distinct buckets createTokenUsage expects (input excludes cached, output
@@ -490,13 +500,14 @@ function normalizeCodexUsage(usage: Record<string, unknown>): {
 
 function extractCodexTokenEvents(rows: unknown[]): TokenUsageEvent[] {
   const entries = new Map<string, TokenUsageEvent>();
+  const cumulativeEntries = new Map<string, TokenUsageEvent>();
+  let previousTotal: TokenUsage | null = null;
   let currentModel = "";
   // Codex carries a running cumulative `total_token_usage` on every token_count
-  // event; the final one is the authoritative session total. Prefer it over
-  // summing per-turn `last_token_usage`, which omits intermediate requests made
-  // within a single turn (e.g. tool-call round-trips) and undercounts. Fall back
-  // to summing last_token_usage only when no cumulative total is present.
-  let authoritative: TokenUsageEvent | null = null;
+  // event. Convert those cumulative totals into per-event deltas so period stats
+  // only count the tokens added inside that period while the full-session sum
+  // still matches the final cumulative total. Fall back to summing
+  // last_token_usage only when no cumulative total is present.
 
   for (const row of rows) {
     if (!isRecord(row)) continue;
@@ -513,7 +524,28 @@ function extractCodexTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     const totalUsage = objectField(info, "total_token_usage");
     if (totalUsage) {
       const t = normalizeCodexUsage(totalUsage);
-      authoritative = tokenEvent(timestamp, `codex-total:${model}`, t.input, t.output, t.cached, t.reasoning);
+      const current = createTokenUsage(t.input, t.output, t.cached, t.reasoning);
+      const delta = subtractTokenUsage(current, previousTotal);
+      previousTotal = current;
+      if (delta.totalTokens > 0) {
+        const key = [
+          "codex-total",
+          model,
+          timestamp,
+          current.inputTokens,
+          current.outputTokens,
+          current.cachedInputTokens,
+          current.reasoningOutputTokens,
+        ].join(":");
+        putTokenEvent(
+          cumulativeEntries,
+          {
+            ...delta,
+            timestamp,
+            dedupeKey: key,
+          },
+        );
+      }
     }
 
     const lastUsage = objectField(info, "last_token_usage");
@@ -526,7 +558,7 @@ function extractCodexTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     }
   }
 
-  return authoritative ? [authoritative] : [...entries.values()];
+  return cumulativeEntries.size > 0 ? [...cumulativeEntries.values()] : [...entries.values()];
 }
 
 function extractClaudeTokenEvents(rows: unknown[]): TokenUsageEvent[] {
