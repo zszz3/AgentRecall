@@ -11,7 +11,7 @@
 // and Anthropic /v1/messages) but adds tool support. Network functions are
 // injectable so the tool-call loop is unit-testable without a real provider.
 
-import type { SummaryEndpoint } from "./session-summarizer";
+import { requestSummaryCompletion, type ChatMessage, type SummaryEndpoint } from "./session-summarizer";
 
 export type { SummaryEndpoint } from "./session-summarizer";
 
@@ -159,6 +159,80 @@ export async function runAiAssistantTurn(
   // Hit the round cap: ask once more for a final answer with tools disabled.
   const final = await chat(endpoint, [...messages, { role: "user", content: "Summarize what you found so far." }], options.signal);
   return { reply: final.content.trim(), sessionKeys: dedupe(sessionKeys) };
+}
+
+// Endpoints that run a local CLI (`codex exec` / `claude`) cannot use our HTTP
+// function-calling protocol — they are one-shot text completions. For those we
+// fall back to a degraded flow: search the store with the user's own words, then
+// ask the CLI to write a natural-language answer grounded in the results.
+export function isLocalCliEndpoint(endpoint: SummaryEndpoint): boolean {
+  return endpoint.apiFormat === "codex_exec" || endpoint.apiFormat === "claude_exec";
+}
+
+// A session hit handed to the fallback so it can be described to the CLI and
+// surfaced as a clickable card.
+export interface FallbackSessionHit {
+  sessionKey: string;
+  title: string;
+  source: string;
+  project: string;
+  summary: string | null;
+}
+
+// Injected by the caller: runs a keyword search against the store and returns
+// the hits (already shaped for the prompt + cards).
+export type FallbackSearchFn = (query: string) => Promise<FallbackSessionHit[]>;
+
+// A plain (no-tools) completion. Defaults to the summarizer's completion, which
+// already routes codex_exec / claude_exec / HTTP formats.
+export type PlainCompletionFn = (endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal) => Promise<string>;
+
+const FALLBACK_SYSTEM_PROMPT =
+  "You help a developer find a past AI-coding session. You are given the user's request and a list of candidate " +
+  "sessions already retrieved from their local history (each with an index, title, source, project, and summary). " +
+  "Pick the best matches, answer briefly in the same language the user wrote in, and refer to sessions by their " +
+  "title. If none fit, say so and suggest different keywords. Do not invent sessions.";
+
+// Pulls plain keywords from the latest user message for the store's FTS search.
+// We strip punctuation and keep it simple — the store does the real matching.
+export function extractFallbackQuery(history: readonly AiChatMessage[]): string {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i].role === "user") return history[i].content.trim();
+  }
+  return "";
+}
+
+export async function runAiAssistantFallback(
+  endpoint: SummaryEndpoint,
+  history: AiChatMessage[],
+  search: FallbackSearchFn,
+  options: { complete?: PlainCompletionFn; signal?: AbortSignal } = {},
+): Promise<AiAssistantReplyInternal> {
+  const complete = options.complete ?? requestSummaryCompletion;
+  const query = extractFallbackQuery(history);
+  const hits = query ? await search(query) : [];
+
+  const catalog = hits
+    .map((hit, index) => {
+      const summary = hit.summary ? ` — ${hit.summary}` : "";
+      return `[${index + 1}] ${hit.title} (source: ${hit.source}; project: ${hit.project || "n/a"})${summary}`;
+    })
+    .join("\n");
+
+  const userPrompt = hits.length
+    ? `User request: ${query}\n\nCandidate sessions:\n${catalog}\n\nWhich of these best match, and why?`
+    : `User request: ${query}\n\nNo sessions matched a keyword search of the local history.`;
+
+  const reply = await complete(
+    endpoint,
+    [
+      { role: "system", content: FALLBACK_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+    options.signal,
+  );
+
+  return { reply: reply.trim(), sessionKeys: dedupe(hits.map((hit) => hit.sessionKey)) };
 }
 
 function parseToolArgs(raw: string): Record<string, unknown> {

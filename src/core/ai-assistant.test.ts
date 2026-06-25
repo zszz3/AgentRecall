@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  isLocalCliEndpoint,
+  runAiAssistantFallback,
   runAiAssistantTurn,
   type AiChatMessage,
+  type FallbackSessionHit,
   type SummaryEndpoint,
   type ToolChatCompletionFn,
   type ToolExecutor,
 } from "./ai-assistant";
 
 const endpoint: SummaryEndpoint = { baseUrl: "http://x", model: "m", apiKey: "k", apiFormat: "openai_chat" };
+const codexEndpoint: SummaryEndpoint = { baseUrl: "", model: "codex", apiKey: "", apiFormat: "codex_exec", command: "codex" };
 
 describe("runAiAssistantTurn", () => {
   it("executes a tool call, feeds the result back, and returns the final reply with surfaced sessionKeys", async () => {
@@ -82,5 +86,62 @@ describe("runAiAssistantTurn", () => {
     expect(result.reply).toBe("I hit an error but here is what I can say.");
     const toolMsg = captured[1].find((m) => m.role === "tool");
     expect(toolMsg?.content).toContain("db is locked");
+  });
+});
+
+describe("isLocalCliEndpoint", () => {
+  it("flags codex_exec and claude_exec, not HTTP formats", () => {
+    expect(isLocalCliEndpoint(codexEndpoint)).toBe(true);
+    expect(isLocalCliEndpoint({ ...codexEndpoint, apiFormat: "claude_exec" })).toBe(true);
+    expect(isLocalCliEndpoint(endpoint)).toBe(false);
+    expect(isLocalCliEndpoint({ ...endpoint, apiFormat: "anthropic" })).toBe(false);
+  });
+});
+
+describe("runAiAssistantFallback", () => {
+  it("searches with the user's words and asks the CLI to ground its answer over the hits", async () => {
+    const hits: FallbackSessionHit[] = [
+      { sessionKey: "s1", title: "Fix SQLite migration", source: "claude-cli", project: "/p", summary: "fixed it" },
+      { sessionKey: "s2", title: "Other", source: "codex-cli", project: "/q", summary: null },
+    ];
+    let searchedQuery = "";
+    const search = async (query: string): Promise<FallbackSessionHit[]> => {
+      searchedQuery = query;
+      return hits;
+    };
+    let promptSeen = "";
+    const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
+      promptSeen = messages.map((m) => m.content).join("\n");
+      return "The first session matches best.";
+    };
+
+    const history: AiChatMessage[] = [{ role: "user", content: "find my sqlite migration fix" }];
+    const result = await runAiAssistantFallback(codexEndpoint, history, search, { complete });
+
+    expect(searchedQuery).toBe("find my sqlite migration fix");
+    expect(result.reply).toBe("The first session matches best.");
+    expect(result.sessionKeys).toEqual(["s1", "s2"]);
+    // The CLI prompt must include the candidate catalog so the answer is grounded.
+    expect(promptSeen).toContain("Fix SQLite migration");
+    expect(promptSeen).toContain("[1]");
+  });
+
+  it("tells the CLI when nothing matched", async () => {
+    const search = async (): Promise<FallbackSessionHit[]> => [];
+    let promptSeen = "";
+    const complete = async (_e: SummaryEndpoint, messages: { role: string; content: string }[]) => {
+      promptSeen = messages.map((m) => m.content).join("\n");
+      return "No matching sessions; try other keywords.";
+    };
+
+    const result = await runAiAssistantFallback(
+      codexEndpoint,
+      [{ role: "user", content: "nonexistent topic" }],
+      search,
+      { complete },
+    );
+
+    expect(result.sessionKeys).toEqual([]);
+    expect(promptSeen).toContain("No sessions matched");
   });
 });

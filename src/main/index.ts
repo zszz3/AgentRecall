@@ -50,7 +50,14 @@ import { focusLiveSessionTerminal } from "../core/session-focus";
 import { loadLiveSessionSnapshot } from "../core/session-activity";
 import { type TrackedLiveSession, updateLiveTracker } from "../core/live-transitions";
 import { resolveSummaryEndpoint, summarizeSession, type SummaryEndpoint } from "../core/session-summarizer";
-import { runAiAssistantTurn, type AiChatMessage, type ToolExecutionResult } from "../core/ai-assistant";
+import {
+  isLocalCliEndpoint,
+  runAiAssistantFallback,
+  runAiAssistantTurn,
+  type AiChatMessage,
+  type FallbackSessionHit,
+  type ToolExecutionResult,
+} from "../core/ai-assistant";
 import { applyMigrationLengthPolicy, createMigrationCompressor } from "../core/session-migration-compression";
 import { migrateSession } from "../core/session-migration";
 import { writeMigratedSession } from "../core/session-migration-writers";
@@ -1097,9 +1104,30 @@ function registerIpc(): void {
     return { processed, failed, total };
   });
   ipcMain.handle("ai:assistant-chat", async (_event, messages: AiChatMessage[]) => {
-    const endpoint = resolveSummaryEndpointFromSettings();
+    const endpoint = await resolveSummaryEndpointFromSettings();
     if (!endpoint) {
-      throw new Error("No AI provider is configured. Set a custom provider in the API configuration.");
+      throw new Error("No AI provider is available. Select Codex, Claude Code, or configure a direct API provider in the API configuration.");
+    }
+
+    // Local CLI providers (codex exec / claude) can't do HTTP function calling.
+    // Fall back to: keyword-search the store with the user's words, then let the
+    // CLI write a grounded answer over the hits.
+    if (isLocalCliEndpoint(endpoint)) {
+      const search = async (query: string): Promise<FallbackSessionHit[]> => {
+        const sessions = store.searchSessions({ query, limit: 12 });
+        return sessions.map((session) => ({
+          sessionKey: session.sessionKey,
+          title: session.displayTitle,
+          source: session.source,
+          project: session.projectPath,
+          summary: session.aiSummary ?? session.firstQuestion ?? null,
+        }));
+      };
+      const { reply, sessionKeys } = await runAiAssistantFallback(endpoint, messages, search);
+      const sessions = sessionKeys
+        .map((key) => store.getSession(key))
+        .filter((session): session is SessionSearchResult => session !== null);
+      return { reply, sessions };
     }
     // The model's tool calls run against the local SessionStore — the same data
     // the MCP server exposes. We collect surfaced sessionKeys so the renderer can
