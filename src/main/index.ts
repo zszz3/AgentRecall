@@ -13,6 +13,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import Store from "electron-store";
+import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -97,6 +98,7 @@ import type {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PRODUCT_NAME = "Agent-Session-Search";
+const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
 type ApiProviderKeyTarget = "codex" | "claude" | "summary";
 
 const OPTIONAL_SOURCE_SETTINGS: Array<{ key: keyof Pick<AppSettings, "includeClaudeInternal" | "includeCodexInternal" | "includeCodeBuddyCli" | "includeOpenClaw" | "includeHermes" | "includeOpenCode" | "includeCursorAgent" | "includeTrae">; sources: SessionSource[] }> = [
@@ -635,9 +637,7 @@ function registerAppGlobalShortcut(accelerator: string): boolean {
 }
 
 function createTray(): void {
-  const image = nativeImage.createFromDataURL(
-    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'><rect x='2' y='3' width='14' height='12' rx='2' fill='black'/><rect x='4' y='5' width='10' height='1.5' fill='white'/><rect x='4' y='8' width='7' height='1.5' fill='white'/><rect x='4' y='11' width='4' height='1.5' fill='white'/></svg>",
-  );
+  const image = loadTrayIcon();
   image.setTemplateImage(true);
   tray = new Tray(image);
   tray.setToolTip(PRODUCT_NAME);
@@ -650,6 +650,26 @@ function createTray(): void {
     ]),
   );
   tray.on("click", showWindow);
+}
+
+function loadTrayIcon(): Electron.NativeImage {
+  const iconPath = resolveAssetPath(TRAY_ICON_RELATIVE_PATH);
+  if (iconPath) {
+    const image = nativeImage.createFromPath(iconPath);
+    if (!image.isEmpty()) return image;
+  }
+  return nativeImage.createFromDataURL(
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAEqADAAQAAAABAAAAEgAAAACaqbJVAAABU0lEQVQ4Ec2Tu0pDQRCGk2iCighpJSKIVaqANvbaWQdBsZAgWFr5CD6EMRAh4FsIFmm8lIKFAa8kNqmMF6Lm+4+7um62Sghk4GNn/rNnzuzMnlhs2CzuFVQg3oQJT1fYgiMoKvBtxBGU5AAS8OLo1s3gbMAjXFoxtJ4i3kEy9NDo96za12WjjqLjPMM0VGAMrL3hrEMDQseOjmE397W6FdlEtzjbMG6EV9Yr42s4/oDMo7/lHFcswbfHMvExfBldfZqHX3OzK4lMidbArShPvApNaMMUaHpZeIdgjybRF2EBtPEMlOQQaqDJ7sIcrEBkoR7N8EQ90tQ0rROQ3UAu8n58uWkT/1t0bn3Nv0e6tA/wBLoeF1AHHXEWuqyAoiYrmfrlck38CXYItun7aJG5v4iuvRqor/hVfaCpKlVdhj1QC7ZAv1MVerYUb5Zgp+cMA32xA3OAR0Jsy3XjAAAAAElFTkSuQmCC",
+  );
+}
+
+function resolveAssetPath(relativePath: string): string | null {
+  const candidates = [
+    path.join(__dirname, "..", "..", relativePath),
+    path.join(app.getAppPath(), relativePath),
+    path.join(process.resourcesPath, relativePath),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function createApplicationMenu(): void {

@@ -20,7 +20,8 @@
   },
   "files": [
     "out",
-    "bin"
+    "bin",
+    "assets"
   ],
   "scripts": {
     "dev": "electron-vite dev",

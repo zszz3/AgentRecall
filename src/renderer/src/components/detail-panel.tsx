@@ -141,9 +141,23 @@ export function DetailPanel({
   const actionRunning = actionStatus?.kind === "running";
   const l = (en: string, zh: string) => localize(language, en, zh);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const pendingInitialScrollRef = useRef<string | null>(session.sessionKey);
   const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
   const localOnlyDisabled = isRemoteSession(session);
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
+
+  useEffect(() => {
+    pendingInitialScrollRef.current = session.sessionKey;
+  }, [session.sessionKey]);
+
+  useEffect(() => {
+    if (loading || messages.length === 0 || pendingInitialScrollRef.current !== session.sessionKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+      pendingInitialScrollRef.current = null;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, messages.length, session.sessionKey]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -297,6 +311,11 @@ export function DetailPanel({
             <h3>{l("Full Conversation", "完整会话")}</h3>
             {loading ? <div className="loading-state">{l("Loading conversation...", "正在加载会话...")}</div> : null}
             {!loading && messages.length === 0 ? <div className="loading-state">{l("No visible messages indexed for this session.", "这个会话没有可见消息被索引。")}</div> : null}
+            {!loading && olderMessageCount > 0 ? (
+              <button className="show-more" onClick={onShowMore}>
+                {l(`Show ${Math.min(messagePageSize, olderMessageCount)} older messages`, `再显示 ${Math.min(messagePageSize, olderMessageCount)} 条更早消息`)}
+              </button>
+            ) : null}
             {timelineItems.map((item) => (
               item.kind === "message" ? (
                 <MessageBlock key={item.key} message={item.message} query={query} language={language} />
@@ -304,11 +323,6 @@ export function DetailPanel({
                 <TraceEventBlock key={item.key} event={item.event} language={language} />
               )
             ))}
-            {!loading && olderMessageCount > 0 ? (
-              <button className="show-more" onClick={onShowMore}>
-                {l(`Show ${Math.min(messagePageSize, olderMessageCount)} older messages`, `再显示 ${Math.min(messagePageSize, olderMessageCount)} 条更早消息`)}
-              </button>
-            ) : null}
           </section>
         </div>
       </aside>
