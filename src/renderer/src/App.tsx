@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEventHandler, ReactElement } from "react";
+import { forwardRef, memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
@@ -278,6 +278,60 @@ function loadInitialSidebarSections(): SidebarSectionsState {
   return readSidebarSections(window.localStorage.getItem(SIDEBAR_SECTIONS_STORAGE_KEY));
 }
 
+const SEARCH_DEBOUNCE_MS = 300;
+
+// The search input keeps its typed value in local state so each keystroke only
+// re-renders this tiny component instead of the whole App tree (sidebar, stats,
+// and the full result list). The committed query is pushed to the parent on a
+// debounce, and that commit is wrapped in startTransition so the heavy result
+// re-render stays interruptible and never blocks the next keystroke.
+const SearchBox = forwardRef<
+  HTMLInputElement,
+  {
+    placeholder: string;
+    onQueryChange: (value: string) => void;
+    onSubmit: () => void;
+  }
+>(function SearchBox({ placeholder, onQueryChange, onSubmit }, ref) {
+  const [value, setValue] = useState("");
+  const commitTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (commitTimerRef.current !== undefined) window.clearTimeout(commitTimerRef.current);
+    },
+    [],
+  );
+
+  function handleChange(next: string): void {
+    setValue(next);
+    if (commitTimerRef.current !== undefined) window.clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = window.setTimeout(() => {
+      startTransition(() => onQueryChange(next));
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  return (
+    <div className="searchbox">
+      <Search size={18} />
+      <input
+        ref={ref}
+        value={value}
+        onChange={(event) => handleChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (!event.metaKey && !event.ctrlKey && event.key === "Enter") onSubmit();
+        }}
+        placeholder={placeholder}
+        autoFocus
+      />
+      <span className="kbd-hint">{RUNTIME_PLATFORM === "darwin" ? "⌘K" : "Ctrl+K"}</span>
+      <span className="kbd-hint" title="Resume selected session in the default terminal">
+        {RUNTIME_PLATFORM === "darwin" ? "⌘↵" : "Ctrl+Enter"}
+      </span>
+    </div>
+  );
+});
+
 export function App(): ReactElement {
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
@@ -383,12 +437,16 @@ export function App(): ReactElement {
       ? { sessions: [], totalCount: 0, hasMore: false }
       : await window.sessionSearch.searchSessionPage(options);
     if (requestId !== loadSeqRef.current) return;
-    setResults(page.sessions);
-    setSessionTotalCount(page.totalCount);
-    setHasMoreSessions(page.hasMore);
-    setSelectedKey((current) =>
-      current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
-    );
+    // Applying results re-renders the (unvirtualized) list, so mark it as a
+    // transition to keep it interruptible and avoid blocking active typing.
+    startTransition(() => {
+      setResults(page.sessions);
+      setSessionTotalCount(page.totalCount);
+      setHasMoreSessions(page.hasMore);
+      setSelectedKey((current) =>
+        current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
+      );
+    });
   }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
 
   const loadSidebarMetadata = useCallback(async () => {
@@ -526,8 +584,9 @@ export function App(): ReactElement {
   }, [searchScopeKey]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 120);
-    return () => window.clearTimeout(timer);
+    // Typing is debounced inside SearchBox, so the search can run immediately
+    // here; filter and sort changes then respond without an extra delay.
+    void load();
   }, [load]);
 
   useEffect(() => {
@@ -1261,6 +1320,21 @@ export function App(): ReactElement {
     }
   }
 
+  // Stable callbacks for SessionRow so the memoized rows don't re-render on every
+  // App render (e.g. when a search commits). The latest closures are read via a
+  // ref so the callbacks can stay referentially stable without going stale.
+  const rowHandlersRef = useRef({ openDetail, beginRename, toggleFavorite });
+  rowHandlersRef.current = { openDetail, beginRename, toggleFavorite };
+  const handleRowSelect = useCallback((sessionKey: string) => setSelectedKey(sessionKey), []);
+  const handleRowOpen = useCallback((session: SessionSearchResult) => void rowHandlersRef.current.openDetail(session), []);
+  const handleRowRename = useCallback((session: SessionSearchResult) => rowHandlersRef.current.beginRename(session), []);
+  const handleRowFavorite = useCallback((session: SessionSearchResult) => void rowHandlersRef.current.toggleFavorite(session), []);
+  const handleRowContextMenu = useCallback((event: ReactMouseEvent, session: SessionSearchResult) => {
+    event.preventDefault();
+    setSelectedKey(session.sessionKey);
+    setContextMenu({ x: event.clientX, y: event.clientY, session });
+  }, []);
+
   return (
     <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
@@ -1456,23 +1530,14 @@ export function App(): ReactElement {
 
       <section className="content">
         <header className="toolbar">
-          <div className="searchbox">
-            <Search size={18} />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (!event.metaKey && !event.ctrlKey && event.key === "Enter" && selected) void openDetail(selected);
-              }}
-              placeholder={searchPlaceholder}
-              autoFocus
-            />
-            <span className="kbd-hint">{RUNTIME_PLATFORM === "darwin" ? "⌘K" : "Ctrl+K"}</span>
-            <span className="kbd-hint" title="Resume selected session in the default terminal">
-              {RUNTIME_PLATFORM === "darwin" ? "⌘↵" : "Ctrl+Enter"}
-            </span>
-          </div>
+          <SearchBox
+            ref={searchRef}
+            placeholder={searchPlaceholder}
+            onQueryChange={setQuery}
+            onSubmit={() => {
+              if (selected) void openDetail(selected);
+            }}
+          />
           <div className="toolbar-filters">
             {selectedProject ? (
               <button
@@ -1587,15 +1652,11 @@ export function App(): ReactElement {
               liveState={getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
               sortBy={sortBy}
               language={language}
-              onSelect={() => setSelectedKey(session.sessionKey)}
-              onOpen={() => void openDetail(session)}
-              onRename={() => beginRename(session)}
-              onFavorite={() => void toggleFavorite(session)}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setSelectedKey(session.sessionKey);
-                setContextMenu({ x: event.clientX, y: event.clientY, session });
-              }}
+              onSelect={handleRowSelect}
+              onOpen={handleRowOpen}
+              onRename={handleRowRename}
+              onFavorite={handleRowFavorite}
+              onContextMenu={handleRowContextMenu}
             />
           ))}
           {displayedResults.length === 0 && !hasMoreSessions ? <div className="empty">{t("No sessions found.", "没有找到会话。")}</div> : null}
@@ -1963,7 +2024,7 @@ function SidebarSectionHeader({
   );
 }
 
-function SessionRow({
+const SessionRow = memo(function SessionRow({
   session,
   selected,
   liveState,
@@ -1980,19 +2041,19 @@ function SessionRow({
   liveState: LiveSessionState;
   sortBy: SessionSortBy;
   language: LanguageMode;
-  onSelect: () => void;
-  onOpen: () => void;
-  onRename: () => void;
-  onFavorite: () => void;
-  onContextMenu: MouseEventHandler;
+  onSelect: (sessionKey: string) => void;
+  onOpen: (session: SessionSearchResult) => void;
+  onRename: (session: SessionSearchResult) => void;
+  onFavorite: (session: SessionSearchResult) => void;
+  onContextMenu: (event: ReactMouseEvent, session: SessionSearchResult) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   return (
     <article
       className={`session-row ${selected ? "selected" : ""}`}
-      onClick={onSelect}
-      onDoubleClick={onOpen}
-      onContextMenu={onContextMenu}
+      onClick={() => onSelect(session.sessionKey)}
+      onDoubleClick={() => onOpen(session)}
+      onContextMenu={(event) => onContextMenu(event, session)}
     >
       <div className="session-main">
         <div className="session-title">
@@ -2000,7 +2061,7 @@ function SessionRow({
             className={`favorite-button ${session.favorited ? "active" : ""}`}
             onClick={(event) => {
               event.stopPropagation();
-              onFavorite();
+              onFavorite(session);
             }}
             aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
             title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
@@ -2014,7 +2075,7 @@ function SessionRow({
             className="title-edit-button"
             onClick={(event) => {
               event.stopPropagation();
-              onRename();
+              onRename(session);
             }}
             aria-label={l("Rename session", "重命名会话")}
             title={l("Rename session", "重命名会话")}
@@ -2051,7 +2112,7 @@ function SessionRow({
       </div>
     </article>
   );
-}
+});
 
 function ActionToast({ status, onClose }: { status: ActionStatus; onClose: () => void }): ReactElement {
   return (
