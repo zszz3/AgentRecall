@@ -12,3 +12,7 @@ dist/
 # 本地草稿与 vitest 临时时间戳
 km-推广文-重写版.md
 vitest.config.ts.timestamp-*
+
+# 本地设计/计划文档，不入库
+docs/plans/
+docs/specs/
