@@ -8,6 +8,7 @@ import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
 import type { RemoteHealthReport } from "../core/remote-health";
 import type { ResumeRouteResult } from "../core/resume-router";
+import type { TraceEventQueryOptions } from "../core/session-store";
 import type { SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadResult } from "../core/skill-sync";
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
@@ -43,7 +44,8 @@ const api = {
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   getMessages: (sessionKey: string, offset?: number, limit?: number): Promise<SessionMessage[]> =>
     ipcRenderer.invoke("session:messages", sessionKey, offset, limit),
-  getTraceEvents: (sessionKey: string): Promise<SessionTraceEvent[]> => ipcRenderer.invoke("session:trace-events", sessionKey),
+  getTraceEvents: (sessionKey: string, options?: TraceEventQueryOptions): Promise<SessionTraceEvent[]> =>
+    ipcRenderer.invoke("session:trace-events", sessionKey, options),
   getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),
   summarizeSession: (sessionKey: string): Promise<SessionSearchResult | null> =>
     ipcRenderer.invoke("session:summarize", sessionKey),

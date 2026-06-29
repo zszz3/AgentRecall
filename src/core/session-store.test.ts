@@ -1156,6 +1156,19 @@ describe("SessionStore", () => {
     expect(stored.detail).toContain("characters omitted");
   });
 
+  it("limits trace events to the visible message timestamp window", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(sampleSession(), messages, [], traceEvents);
+
+    expect(
+      store.getTraceEvents("codex:abc", {
+        startTimestamp: "2026-06-01T10:02:30Z",
+        endTimestamp: "2026-06-01T10:04:00Z",
+        limit: 1,
+      }),
+    ).toEqual([traceEvents[1]]);
+  });
+
   it("creates a local environment and stores environment metadata on sessions", () => {
     const store = createInMemoryStore();
 

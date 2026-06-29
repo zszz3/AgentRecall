@@ -2,7 +2,7 @@ import { execFile, type ExecFileOptions } from "node:child_process";
 import { loadRemoteSessionPayloads, type RemoteSessionFilePayload } from "./remote-session-loader";
 import type { SessionStore } from "./session-store";
 import { buildSshArgs } from "./ssh-config";
-import type { IndexedSession, SessionEnvironment, SessionSearchResult, SessionSource } from "./types";
+import type { IndexedSession, SessionEnvironment, SessionMessage, SessionSearchResult, SessionSource } from "./types";
 
 export interface RemoteSyncStatus {
   environmentId: string;
@@ -158,6 +158,18 @@ export async function fetchRemoteSessionFilePayload(
   return payload;
 }
 
+export async function fetchRemoteSessionMessagePage(
+  environment: SessionEnvironment,
+  session: SessionSearchResult,
+  offset = 0,
+  limit = 120,
+  options: RemoteSessionFileFetchOptions = {},
+): Promise<SessionMessage[]> {
+  const runSsh = options.runSsh ?? runSystemSsh;
+  const output = await runSsh(environment, buildRemoteMessagePageCommand(session, offset, limit));
+  return decodeRemoteMessagePage(output);
+}
+
 function buildRemoteFileFetchCommand(filePath: string): string {
   const script = String.raw`import base64, json
 from pathlib import Path
@@ -175,6 +187,131 @@ print(json.dumps({
   "contentBase64": base64.b64encode(content).decode("ascii"),
 }, ensure_ascii=False))`.replace("__PATH_B64__", Buffer.from(filePath, "utf-8").toString("base64"));
   return buildPythonBase64Command(script);
+}
+
+function buildRemoteMessagePageCommand(session: SessionSearchResult, offset: number, limit: number): string {
+  const request = {
+    path: session.filePath,
+    kind: session.source.startsWith("claude") ? "claude" : "codex",
+    offset: Math.max(0, Math.floor(offset)),
+    limit: Math.max(0, Math.min(500, Math.floor(limit))),
+  };
+  const script = String.raw`import json
+from pathlib import Path
+
+request = __REQUEST_JSON__
+path = Path(request["path"])
+kind = request["kind"]
+offset = int(request["offset"])
+limit = int(request["limit"])
+end = offset + limit
+
+def text_from_blocks(content):
+  if isinstance(content, str):
+    return content
+  if not isinstance(content, list):
+    return ""
+  parts = []
+  for block in content:
+    if not isinstance(block, dict):
+      continue
+    if block.get("type") in {"tool_use", "tool_result", "input_image"}:
+      continue
+    text = block.get("text")
+    if isinstance(text, str) and text:
+      parts.append(text)
+  return "\n".join(parts)
+
+def meaningful_user(text):
+  value = text.strip()
+  if not value:
+    return False
+  import re
+  if re.match(r"^#\s*(AGENTS|CLAUDE)\.md", value, re.I):
+    return False
+  if re.match(r"^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]", value):
+    return False
+  if value.startswith("Caveat:"):
+    return False
+  if re.match(r"^\[Request interrupted by user(?: for tool use)?\]$", value):
+    return False
+  if re.match(r"^\[Image:[^\]]*\]$", value):
+    return False
+  return True
+
+def parse_message(row):
+  if not isinstance(row, dict):
+    return None
+  if kind == "codex":
+    role = None
+    content = None
+    if row.get("type") == "response_item":
+      payload = row.get("payload")
+      if isinstance(payload, dict) and payload.get("type") == "message":
+        role = payload.get("role")
+        content = payload.get("content")
+    elif row.get("type") == "message":
+      role = row.get("role")
+      content = row.get("content")
+    if role not in {"user", "assistant"}:
+      return None
+    text = text_from_blocks(content)
+    if not text or (role == "user" and not meaningful_user(text)):
+      return None
+    return {"role": role, "content": text, "timestamp": row.get("timestamp") if isinstance(row.get("timestamp"), str) else ""}
+  if row.get("type") not in {"user", "assistant"}:
+    return None
+  message = row.get("message")
+  content = message.get("content") if isinstance(message, dict) else None
+  text = text_from_blocks(content)
+  if not text or (row.get("type") == "user" and not meaningful_user(text)):
+    return None
+  return {"role": row.get("type"), "content": text, "timestamp": row.get("timestamp") if isinstance(row.get("timestamp"), str) else ""}
+
+messages = []
+message_index = 0
+with path.open("r", encoding="utf-8", errors="replace") as handle:
+  for line in handle:
+    if limit <= 0:
+      break
+    try:
+      row = json.loads(line)
+    except Exception:
+      continue
+    parsed = parse_message(row)
+    if not parsed:
+      continue
+    if message_index >= offset and message_index < end:
+      messages.append({
+        "index": message_index,
+        "role": parsed["role"],
+        "content": parsed["content"],
+        "timestamp": parsed["timestamp"],
+      })
+    message_index += 1
+    if message_index >= end:
+      break
+
+print(json.dumps({"messages": messages}, ensure_ascii=False))`.replace("__REQUEST_JSON__", JSON.stringify(request));
+  return buildPythonBase64Command(script);
+}
+
+function decodeRemoteMessagePage(output: string): SessionMessage[] {
+  const line = output
+    .split("\n")
+    .map((item) => item.trim())
+    .find(Boolean);
+  if (!line) return [];
+  const parsed = JSON.parse(line) as unknown;
+  if (!isRecord(parsed) || !Array.isArray(parsed.messages)) throw new Error("Invalid remote message page payload.");
+  return parsed.messages.flatMap((item): SessionMessage[] => {
+    if (!isRecord(item)) return [];
+    const index = numberField(item, "index");
+    const role = item.role;
+    const content = stringField(item, "content");
+    if ((role !== "user" && role !== "assistant") || !content) return [];
+    return [{ index: Math.max(0, Math.floor(index)), role, content, timestamp: stringField(item, "timestamp") }];
+  });
 }
 
 export function formatRemoteSyncProcessError(error: unknown, stdout: string, stderr: string): string {

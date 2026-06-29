@@ -46,6 +46,7 @@ import { formatRelativeTime } from "../../core/format-session";
 import { QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { RemoteHealthReport } from "../../core/remote-health";
+import type { TraceEventQueryOptions } from "../../core/session-store";
 import type { SkillSyncSnapshot } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
@@ -177,6 +178,7 @@ const INITIAL_SESSION_LIMIT = 30;
 const SESSION_PAGE_SIZE = 30;
 const INITIAL_MESSAGE_LIMIT = 20;
 const MESSAGE_PAGE_SIZE = 80;
+const TRACE_EVENT_WINDOW_LIMIT = 300;
 
 const EMPTY_STATS: SessionStats = {
   total: {
@@ -222,6 +224,25 @@ const EMPTY_SKILL_SYNC: SkillSyncSnapshot = {
   bindings: [],
   scannedAt: 0,
 };
+
+function traceWindowForMessages(messages: SessionMessage[]): TraceEventQueryOptions {
+  const times = messages
+    .map((message) => new Date(message.timestamp).getTime())
+    .filter((time) => Number.isFinite(time));
+  if (times.length === 0) return { limit: TRACE_EVENT_WINDOW_LIMIT };
+  return {
+    startTimestamp: new Date(Math.min(...times)).toISOString(),
+    endTimestamp: new Date(Math.max(...times)).toISOString(),
+    limit: TRACE_EVENT_WINDOW_LIMIT,
+  };
+}
+
+function mergeTraceEventsByIndex(current: SessionTraceEvent[], next: SessionTraceEvent[]): SessionTraceEvent[] {
+  if (next.length === 0) return current;
+  const byIndex = new Map(current.map((event) => [event.index, event]));
+  for (const event of next) byIndex.set(event.index, event);
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+}
 
 function sortLabel(value: SessionSortBy, language: LanguageMode): string {
   if (value === "created") return localize(language, "Created", "创建时间");
@@ -946,10 +967,7 @@ export function App(): ReactElement {
 
     const sessionKey = session.sessionKey;
     try {
-      const [fresh, loadedTraceEvents] = await Promise.all([
-        window.sessionSearch.getSession(sessionKey),
-        window.sessionSearch.getTraceEvents(sessionKey),
-      ]);
+      const fresh = await window.sessionSearch.getSession(sessionKey);
       if (requestId !== detailLoadSeqRef.current) return;
       if (!fresh) {
         setMessagesLoading(false);
@@ -958,6 +976,8 @@ export function App(): ReactElement {
 
       const initialOffset = Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT);
       const loadedMessages = await window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT);
+      if (requestId !== detailLoadSeqRef.current) return;
+      const loadedTraceEvents = await window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(loadedMessages));
       if (requestId !== detailLoadSeqRef.current) return;
 
       setDetail(fresh);
@@ -991,9 +1011,11 @@ export function App(): ReactElement {
     setMessagesLoading(true);
     try {
       const nextMessages = await window.sessionSearch.getMessages(sessionKey, nextOffset, limit);
+      const nextTraceEvents = await window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(nextMessages));
       if (requestId !== detailLoadSeqRef.current) return;
       setMessageOffset(nextOffset);
       setMessages((current) => [...nextMessages, ...current]);
+      setTraceEvents((current) => mergeTraceEventsByIndex(current, nextTraceEvents));
     } catch (error) {
       if (requestId === detailLoadSeqRef.current) {
         setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });

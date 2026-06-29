@@ -65,11 +65,11 @@ import { writeMigratedSession } from "../core/session-migration-writers";
 import { writeDbPointer } from "../core/app-paths";
 import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
-import { fetchRemoteSessionFilePayload, syncRemoteEnvironment } from "../core/remote-sync";
+import { fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
 import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
 import { RemoteWatchManager } from "../core/remote-watch";
-import { SessionStore } from "../core/session-store";
+import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
 import {
   deleteInstalledSkill,
   installRemoteSkillLocally,
@@ -600,10 +600,14 @@ async function ensureRemoteResumePreflight(session: SessionSearchResult): Promis
   throw new Error(`Remote resume preflight failed: ${detail}`);
 }
 
+function hasHydratedRemoteDetails(sessionKey: string): boolean {
+  return store.getMessages(sessionKey, 0, 1).length > 0;
+}
+
 async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<void> {
   const session = store.getSession(sessionKey);
   if (!session || isLocalSession(session)) return;
-  if (store.getMessages(sessionKey, 0, 1).length > 0) return;
+  if (hasHydratedRemoteDetails(sessionKey)) return;
 
   const active = remoteDetailLoads.get(sessionKey);
   if (active) return active;
@@ -1187,12 +1191,23 @@ function registerIpc(): void {
     return store.getSession(sessionKey);
   });
   ipcMain.handle("session:messages", async (_event, sessionKey: string, offset?: number, limit?: number) => {
+    const pageOffset = offset ?? 0;
+    const pageLimit = limit ?? 120;
+    const session = store.getSession(sessionKey);
+    if (session && !isLocalSession(session) && !hasHydratedRemoteDetails(sessionKey)) {
+      if (session.messageCount <= 0) return [];
+      const environment = requireRemoteSshEnvironment(session);
+      if (!environment) return [];
+      return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit);
+    }
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    return store.getMessages(sessionKey, offset ?? 0, limit ?? 120);
+    return store.getMessages(sessionKey, pageOffset, pageLimit);
   });
-  ipcMain.handle("session:trace-events", async (_event, sessionKey: string) => {
+  ipcMain.handle("session:trace-events", async (_event, sessionKey: string, options?: TraceEventQueryOptions) => {
+    const session = store.getSession(sessionKey);
+    if (session && !isLocalSession(session) && !hasHydratedRemoteDetails(sessionKey)) return [];
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    return store.getTraceEvents(sessionKey);
+    return store.getTraceEvents(sessionKey, options);
   });
   ipcMain.handle("sessions:live", () => loadLiveSessionSnapshot({ includeTrae: getSettings().includeTrae }));
   ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
@@ -1441,13 +1456,11 @@ function registerIpc(): void {
     return result.status;
   });
   ipcMain.handle("command:copy-resume", async (_event, sessionKey: string) => {
-    await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return;
     clipboard.writeText(getResumeCommand(session, getSettings(), { sshArgs: requireSshArgsForRemoteSession(session) }));
   });
   ipcMain.handle("command:resume", async (_event, sessionKey: string) => {
-    await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return { route: "resume" as const };
     const sshArgs = requireSshArgsForRemoteSession(session);
@@ -1469,7 +1482,6 @@ function registerIpc(): void {
     return route;
   });
   ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
-    await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return;
     const sshArgs = requireSshArgsForRemoteSession(session);

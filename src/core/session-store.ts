@@ -133,6 +133,12 @@ export interface SkillSyncBinding {
   direction: SkillSyncDirection;
 }
 
+export interface TraceEventQueryOptions {
+  startTimestamp?: string;
+  endTimestamp?: string;
+  limit?: number;
+}
+
 interface SkillSyncBindingRow {
   local_skill_path: string;
   remote_skill_id: string;
@@ -776,18 +782,31 @@ export class SessionStore {
     return this.getMessages(sessionKey, 0, 100_000);
   }
 
-  getTraceEvents(sessionKey: string): SessionTraceEvent[] {
+  getTraceEvents(sessionKey: string, options: TraceEventQueryOptions = {}): SessionTraceEvent[] {
+    const where = ["session_key = ?"];
+    const params: Array<string | number> = [sessionKey];
+    if (options.startTimestamp) {
+      where.push("timestamp >= ?");
+      params.push(options.startTimestamp);
+    }
+    if (options.endTimestamp) {
+      where.push("timestamp <= ?");
+      params.push(options.endTimestamp);
+    }
+    const limit = Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit ?? 0)) : 0;
+    if (limit > 0) params.push(limit);
     return (
       this.db
         .prepare(
           `
           SELECT trace_index, kind, source, title, detail, timestamp, call_id, event_type, status
           FROM trace_events
-          WHERE session_key = ?
+          WHERE ${where.join(" AND ")}
           ORDER BY trace_index
+          ${limit > 0 ? "LIMIT ?" : ""}
         `,
         )
-        .all(sessionKey) as unknown as TraceEventRow[]
+        .all(...params) as unknown as TraceEventRow[]
     ).map((row) => ({
       index: row.trace_index,
       kind: row.kind,

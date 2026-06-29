@@ -63,6 +63,20 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).toContain("Show ${Math.min(messagePageSize, olderMessageCount)} older messages");
   });
 
+  it("loads the visible message window before trace events when opening detail", () => {
+    const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
+    const freshIndex = openDetail.indexOf("const fresh = await window.sessionSearch.getSession(sessionKey)");
+    const messagesIndex = openDetail.indexOf(
+      "window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT)",
+    );
+    const traceIndex = openDetail.indexOf("window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(loadedMessages))");
+
+    expect(freshIndex).toBeGreaterThanOrEqual(0);
+    expect(messagesIndex).toBeGreaterThan(freshIndex);
+    expect(traceIndex).toBeGreaterThan(messagesIndex);
+    expect(openDetail).not.toContain("const [fresh, loadedTraceEvents] = await Promise.all");
+  });
+
   it("keeps title rename icon but removes the duplicate rename action from the detail toolbar", () => {
     const detailActions = detailPanelSource.slice(detailPanelSource.indexOf('<div className="detail-actions">'), detailPanelSource.indexOf('<div className="detail-tags">'));
 
@@ -131,15 +145,25 @@ describe("detail panel actions", () => {
     expect(mainSource).toContain("await ensureRemoteSessionDetailsLoaded(sessionKey)");
   });
 
-  it("loads remote session details before building resume commands", () => {
+  it("does not hydrate remote session details before building resume commands", () => {
     for (const channel of ["command:copy-resume", "command:resume", "command:resume-iterm"]) {
       const handler = mainHandlerSource(channel);
-      expect(handler).toContain("await ensureRemoteSessionDetailsLoaded(sessionKey)");
-      expect(handler.indexOf("await ensureRemoteSessionDetailsLoaded(sessionKey)")).toBeLessThan(
-        handler.indexOf("const session = store.getSession(sessionKey)"),
-      );
+      expect(handler).not.toContain("ensureRemoteSessionDetailsLoaded(sessionKey)");
+      expect(handler).toContain("const session = store.getSession(sessionKey)");
     }
     expect(mainHandlerSource("command:copy-resume")).toContain("async (_event, sessionKey: string)");
+  });
+
+  it("uses lightweight remote message paging for unhydrated remote detail views", () => {
+    const messagesHandler = mainHandlerSource("session:messages");
+    const traceHandler = mainHandlerSource("session:trace-events");
+
+    expect(messagesHandler).toContain("fetchRemoteSessionMessagePage");
+    expect(messagesHandler.indexOf("fetchRemoteSessionMessagePage")).toBeLessThan(
+      messagesHandler.indexOf("await ensureRemoteSessionDetailsLoaded(sessionKey)"),
+    );
+    expect(traceHandler).toContain("return []");
+    expect(traceHandler).toContain("store.getTraceEvents(sessionKey, options)");
   });
 
   it("exposes cross-agent session migration through IPC", () => {
