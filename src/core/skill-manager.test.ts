@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { deleteInstalledSkill, listInstalledSkills, skillProjectDirsFromIndexedProjects } from "./skill-manager";
+import {
+  deleteInstalledSkill,
+  installRemoteSkillLocally,
+  listInstalledSkills,
+  skillProjectDirsFromIndexedProjects,
+} from "./skill-manager";
+import type { RemoteSkill } from "./skill-sync";
 
 function writeSkill(root: string, directoryName: string, content: string): string {
   const skillDir = path.join(root, directoryName);
@@ -275,6 +281,65 @@ describe("skill manager", () => {
 
     expect(() => deleteInstalledSkill(skillPath, { homeDir, codexHome, projectDirs: [] })).toThrow("Codex system skills cannot be deleted from this app.");
     expect(fs.existsSync(path.dirname(skillPath))).toBe(true);
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("installs a remote Codex skill into the user skill root", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-install-codex-"));
+    const codexHome = path.join(homeDir, ".codex");
+    const remoteSkill: RemoteSkill = {
+      id: "remote-review",
+      name: "Review Code!",
+      description: "Review code changes",
+      agent: "codex",
+      source: "codex-user",
+      markdown: "---\nname: Review Code!\ndescription: Review code changes\n---\n\n# Review",
+      localFingerprint: "fp",
+      uploadedFromPath: "/old/SKILL.md",
+      createdAt: "2026-06-29T10:00:00.000Z",
+      updatedAt: "2026-06-29T10:01:00.000Z",
+      version: 1,
+      metadata: {},
+    };
+
+    const result = installRemoteSkillLocally(remoteSkill, { homeDir, codexHome });
+
+    expect(result).toEqual({
+      installedPath: path.join(codexHome, "skills", "review-code", "SKILL.md"),
+      directoryPath: path.join(codexHome, "skills", "review-code"),
+      overwritten: false,
+    });
+    expect(fs.readFileSync(result.installedPath, "utf8")).toBe(remoteSkill.markdown);
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("installs a remote Claude skill into the user skill root and reports overwrite", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-install-claude-"));
+    const remoteSkill: RemoteSkill = {
+      id: "remote-deploy",
+      name: "deploy-helper",
+      description: "Deploy safely",
+      agent: "claude",
+      source: "claude-user",
+      markdown: "# Deploy v2",
+      localFingerprint: "fp",
+      uploadedFromPath: "/old/SKILL.md",
+      createdAt: "2026-06-29T10:00:00.000Z",
+      updatedAt: "2026-06-29T10:01:00.000Z",
+      version: 2,
+      metadata: {},
+    };
+    const target = path.join(homeDir, ".claude", "skills", "deploy-helper", "SKILL.md");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, "# Deploy v1", "utf8");
+
+    const result = installRemoteSkillLocally(remoteSkill, { homeDir });
+
+    expect(result.installedPath).toBe(target);
+    expect(result.overwritten).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toBe("# Deploy v2");
 
     fs.rmSync(homeDir, { recursive: true, force: true });
   });

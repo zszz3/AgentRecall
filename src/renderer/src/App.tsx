@@ -46,6 +46,8 @@ import { formatRelativeTime } from "../../core/format-session";
 import { QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { RemoteHealthReport } from "../../core/remote-health";
+import type { TraceEventQueryOptions } from "../../core/session-store";
+import type { SkillSyncSnapshot } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
@@ -176,6 +178,7 @@ const INITIAL_SESSION_LIMIT = 30;
 const SESSION_PAGE_SIZE = 30;
 const INITIAL_MESSAGE_LIMIT = 20;
 const MESSAGE_PAGE_SIZE = 80;
+const TRACE_EVENT_WINDOW_LIMIT = 300;
 
 const EMPTY_STATS: SessionStats = {
   total: {
@@ -210,6 +213,36 @@ const EMPTY_SKILLS: InstalledSkillsSnapshot = {
   roots: [],
   scannedAt: 0,
 };
+
+const EMPTY_SKILL_SYNC: SkillSyncSnapshot = {
+  status: {
+    kind: "unconfigured",
+    setupSql: "",
+    message: "Configure Supabase URL and anon key in Settings to sync skills.",
+  },
+  remoteSkills: [],
+  bindings: [],
+  scannedAt: 0,
+};
+
+function traceWindowForMessages(messages: SessionMessage[]): TraceEventQueryOptions {
+  const times = messages
+    .map((message) => new Date(message.timestamp).getTime())
+    .filter((time) => Number.isFinite(time));
+  if (times.length === 0) return { limit: TRACE_EVENT_WINDOW_LIMIT };
+  return {
+    startTimestamp: new Date(Math.min(...times)).toISOString(),
+    endTimestamp: new Date(Math.max(...times)).toISOString(),
+    limit: TRACE_EVENT_WINDOW_LIMIT,
+  };
+}
+
+function mergeTraceEventsByIndex(current: SessionTraceEvent[], next: SessionTraceEvent[]): SessionTraceEvent[] {
+  if (next.length === 0) return current;
+  const byIndex = new Map(current.map((event) => [event.index, event]));
+  for (const event of next) byIndex.set(event.index, event);
+  return [...byIndex.values()].sort((a, b) => a.index - b.index);
+}
 
 function sortLabel(value: SessionSortBy, language: LanguageMode): string {
   if (value === "created") return localize(language, "Created", "创建时间");
@@ -383,6 +416,7 @@ export function App(): ReactElement {
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
+  const [skillSyncSnapshot, setSkillSyncSnapshot] = useState<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
@@ -523,7 +557,12 @@ export function App(): ReactElement {
           usageError = error;
         }
       }
-      setInstalledSkills(await window.sessionSearch.listSkills());
+      const [nextSkills, nextSkillSync] = await Promise.all([
+        window.sessionSearch.listSkills(),
+        window.sessionSearch.getSkillSyncSnapshot(),
+      ]);
+      setInstalledSkills(nextSkills);
+      setSkillSyncSnapshot(nextSkillSync);
       if (usageError) {
         if (!silent) setSkillsFeedback({ kind: "error", message: usageError instanceof Error ? usageError.message : String(usageError) });
         return;
@@ -539,7 +578,10 @@ export function App(): ReactElement {
         }, 2200);
       }
     } catch (error) {
-      if (!refreshUsage) setInstalledSkills(EMPTY_SKILLS);
+      if (!refreshUsage) {
+        setInstalledSkills(EMPTY_SKILLS);
+        setSkillSyncSnapshot(EMPTY_SKILL_SYNC);
+      }
       setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
       setSkillsLoading(false);
@@ -551,7 +593,12 @@ export function App(): ReactElement {
     setSkillsFeedback({ kind: "running", message: t(`Deleting ${skill.name}...`, `正在删除 ${skill.name}...`) });
     try {
       const result = await window.sessionSearch.deleteSkill(skill.path);
-      setInstalledSkills(await window.sessionSearch.listSkills());
+      const [nextSkills, nextSkillSync] = await Promise.all([
+        window.sessionSearch.listSkills(),
+        window.sessionSearch.getSkillSyncSnapshot(),
+      ]);
+      setInstalledSkills(nextSkills);
+      setSkillSyncSnapshot(nextSkillSync);
       const message = t(`Deleted ${result.skillName}.`, `已删除 ${result.skillName}。`);
       setSkillsFeedback({ kind: "success", message });
       window.setTimeout(() => {
@@ -563,6 +610,52 @@ export function App(): ReactElement {
       throw error;
     } finally {
       setSkillsLoading(false);
+    }
+  }, [t]);
+
+  const uploadSkillToSync = useCallback(async (skill: InstalledSkill) => {
+    setSkillsLoading(true);
+    setSkillsFeedback({ kind: "running", message: t(`Uploading ${skill.name}...`, `正在上传 ${skill.name}...`) });
+    try {
+      const result = await window.sessionSearch.uploadSkillToSync(skill.path);
+      await loadSkills({ silent: true });
+      const message = t(`Uploaded ${result.remoteSkill.name}.`, `已上传 ${result.remoteSkill.name}。`);
+      setSkillsFeedback({ kind: "success", message });
+      window.setTimeout(() => {
+        setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
+      }, 2200);
+    } catch (error) {
+      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, [loadSkills, t]);
+
+  const installSyncedSkill = useCallback(async (remoteSkillId: string) => {
+    setSkillsLoading(true);
+    setSkillsFeedback({ kind: "running", message: t("Installing remote skill...", "正在安装远程 Skill...") });
+    try {
+      const result = await window.sessionSearch.installSyncedSkill(remoteSkillId);
+      await loadSkills({ silent: true });
+      const verb = result.overwritten ? t("Updated", "已更新") : t("Installed", "已安装");
+      const message = `${verb} ${result.remoteSkill.name}.`;
+      setSkillsFeedback({ kind: "success", message });
+      window.setTimeout(() => {
+        setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
+      }, 2200);
+    } catch (error) {
+      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, [loadSkills, t]);
+
+  const copySkillSyncSetupSql = useCallback(async () => {
+    try {
+      await window.sessionSearch.copySkillSyncSetupSql();
+      setSkillsFeedback({ kind: "success", message: t("Supabase setup SQL copied.", "Supabase 初始化 SQL 已复制。") });
+    } catch (error) {
+      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }, [t]);
 
@@ -874,10 +967,7 @@ export function App(): ReactElement {
 
     const sessionKey = session.sessionKey;
     try {
-      const [fresh, loadedTraceEvents] = await Promise.all([
-        window.sessionSearch.getSession(sessionKey),
-        window.sessionSearch.getTraceEvents(sessionKey),
-      ]);
+      const fresh = await window.sessionSearch.getSession(sessionKey);
       if (requestId !== detailLoadSeqRef.current) return;
       if (!fresh) {
         setMessagesLoading(false);
@@ -886,6 +976,8 @@ export function App(): ReactElement {
 
       const initialOffset = Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT);
       const loadedMessages = await window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT);
+      if (requestId !== detailLoadSeqRef.current) return;
+      const loadedTraceEvents = await window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(loadedMessages));
       if (requestId !== detailLoadSeqRef.current) return;
 
       setDetail(fresh);
@@ -919,9 +1011,11 @@ export function App(): ReactElement {
     setMessagesLoading(true);
     try {
       const nextMessages = await window.sessionSearch.getMessages(sessionKey, nextOffset, limit);
+      const nextTraceEvents = await window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(nextMessages));
       if (requestId !== detailLoadSeqRef.current) return;
       setMessageOffset(nextOffset);
       setMessages((current) => [...nextMessages, ...current]);
+      setTraceEvents((current) => mergeTraceEventsByIndex(current, nextTraceEvents));
     } catch (error) {
       if (requestId === detailLoadSeqRef.current) {
         setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -1890,11 +1984,16 @@ export function App(): ReactElement {
       {skillsOpen ? (
         <SkillsDialog
           snapshot={installedSkills}
+          syncSnapshot={skillSyncSnapshot}
           loading={skillsLoading}
           feedback={skillsFeedback}
           language={language}
           revealLabel={FILE_MANAGER_LABEL}
           onRefresh={() => void loadSkills({ refreshUsage: true })}
+          onUpload={(skill) => uploadSkillToSync(skill)}
+          onInstallRemote={(remoteSkillId) => installSyncedSkill(remoteSkillId)}
+          onRefreshRemote={() => void loadSkills({ silent: true })}
+          onCopySetupSql={() => void copySkillSyncSetupSql()}
           onCopyPath={(skillPath) =>
             void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
           }
@@ -2415,7 +2514,7 @@ function SettingsDialog({
             </button>
             <button className={activeSection === "skills" ? "active" : ""} onClick={() => setActiveSection("skills")}>
               <PackageSearch size={15} />
-              <span>{l("Skill usage", "Skill 统计")}</span>
+              <span>{l("Skills", "Skills")}</span>
             </button>
             <button className={activeSection === "appearance" ? "active" : ""} onClick={() => setActiveSection("appearance")}>
               <Sun size={15} />
@@ -2837,6 +2936,56 @@ function SettingsDialog({
                     checked={Boolean(skillHookInstalled)}
                     disabled={skillHookInstalled === null || skillHookBusy}
                     onChange={(event) => onSkillHookChange(event.currentTarget.checked)}
+                  />
+                </label>
+                <header className="settings-pane-head" style={{ marginTop: 18 }}>
+                  <h3>{l("Supabase skill sync", "Supabase Skill 同步")}</h3>
+                  <p>
+                    {l(
+                      "Use your own Supabase project to upload local skills and install them on another machine. Get the Project URL and anon key from supabase.com/dashboard.",
+                      "使用你自己的 Supabase 项目上传本地 Skills，并在另一台机器安装。可在 supabase.com/dashboard 获取 Project URL 和 anon key。",
+                    )}
+                  </p>
+                </header>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Enable Supabase sync", "启用 Supabase 同步")}</span>
+                    <span className="settings-field-sub">
+                      {l("Advanced automatic table creation is not used; the app will show SQL when the table is missing.", "不使用高级自动建表；缺表时应用会展示可复制的初始化 SQL。")}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.skillSyncEnabled)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ skillSyncEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field skills-sync-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">Supabase URL</span>
+                    <span className="settings-field-sub">https://your-project.supabase.co</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings?.skillSyncSupabaseUrl ?? ""}
+                    disabled={!settings || saving}
+                    placeholder="https://your-project.supabase.co"
+                    onChange={(event) => onSettingsChange({ skillSyncSupabaseUrl: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="settings-field skills-sync-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">anon key</span>
+                    <span className="settings-field-sub">{l("Stored locally and used only for the skills sync table.", "保存在本地，仅用于 Skills 同步表。")}</span>
+                  </div>
+                  <input
+                    type="password"
+                    value={settings?.skillSyncSupabaseAnonKey ?? ""}
+                    disabled={!settings || saving}
+                    placeholder="eyJhbGciOi..."
+                    onChange={(event) => onSettingsChange({ skillSyncSupabaseAnonKey: event.currentTarget.value })}
                   />
                 </label>
               </section>

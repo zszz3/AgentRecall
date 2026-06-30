@@ -3,6 +3,7 @@ import { createInMemoryStore } from "./session-store";
 import {
   buildRemoteSyncSshArgs,
   encodeRemotePayloadForTest,
+  fetchRemoteSessionMessagePage,
   fetchRemoteSessionFilePayload,
   formatRemoteSyncProcessError,
   REMOTE_SYNC_EXEC_OPTIONS,
@@ -82,13 +83,66 @@ describe("remote sync", () => {
     expect(status.indexed).toBe(1);
     expect(session).toMatchObject({
       originalTitle: "Remote Summary",
-      displayTitle: "summary first question",
+      displayTitle: "Remote Summary",
       firstQuestion: "summary first question",
       messageCount: 12,
       projectPath: "/repo",
       fileSize: 2048,
     });
     expect(store.getMessages("ssh:ssh-devbox:codex:remote-codex-summary")).toEqual([]);
+  });
+
+  it("fetches a remote session message page without transferring the full session payload", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const session = {
+      sessionKey: "ssh:ssh-devbox:codex:remote-codex-summary",
+      rawId: "remote-codex-summary",
+      source: "codex-cli",
+      filePath: "/home/me/.codex/sessions/rollout.jsonl",
+      projectPath: "/repo",
+      environmentId: "ssh-devbox",
+      environmentKind: "ssh",
+      environmentLabel: "devbox",
+      originalTitle: "Remote Summary",
+      firstQuestion: "older prompt",
+      timestamp: new Date("2026-06-04T10:00:00Z").getTime(),
+      fileMtimeMs: 100,
+      fileSize: 2048,
+      prUrl: null,
+      prNumber: null,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 },
+      customTitle: null,
+      displayTitle: "Remote Summary",
+      favorited: false,
+      pinned: false,
+      hidden: false,
+      tags: [],
+      matchSnippet: null,
+      lastOpenedAt: null,
+      lastResumedAt: null,
+      lastActivityAt: new Date("2026-06-04T10:00:00Z").getTime(),
+      messageCount: 12,
+      aiSummary: null,
+      aiSummaryStale: false,
+    } as SessionSearchResult;
+
+    const page = await fetchRemoteSessionMessagePage(environment, session, 10, 2, {
+      runSsh: async (_environment, remoteCommand) => {
+        expect(remoteCommand).toContain("python3 -c");
+        return JSON.stringify({
+          messages: [
+            { index: 10, role: "user", content: "older prompt", timestamp: "2026-06-04T10:10:00Z" },
+            { index: 11, role: "assistant", content: "older answer", timestamp: "2026-06-04T10:11:00Z" },
+          ],
+        });
+      },
+    });
+
+    expect(page).toEqual([
+      { index: 10, role: "user", content: "older prompt", timestamp: "2026-06-04T10:10:00Z" },
+      { index: 11, role: "assistant", content: "older answer", timestamp: "2026-06-04T10:11:00Z" },
+    ]);
   });
 
   it("rejects invalid remote payload protocol output and records sync error", async () => {

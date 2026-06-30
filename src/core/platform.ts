@@ -71,6 +71,9 @@ export interface AppSettings {
   summaryMaxAgeDays: number;
   summarySource: "codex" | "claude" | "custom";
   sessionSearchMcpEnabled: boolean;
+  skillSyncEnabled: boolean;
+  skillSyncSupabaseUrl: string;
+  skillSyncSupabaseAnonKey: string;
   apiConfig: ApiConfig;
   claudeApiConfig: ClaudeApiConfig;
   summaryApiConfig: ApiConfig;
@@ -104,6 +107,9 @@ export const defaultSettings: AppSettings = {
   summaryMaxAgeDays: 30,
   summarySource: "codex",
   sessionSearchMcpEnabled: true,
+  skillSyncEnabled: false,
+  skillSyncSupabaseUrl: "",
+  skillSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
   claudeApiConfig: defaultClaudeApiConfig,
   summaryApiConfig: defaultApiConfig,
@@ -118,10 +124,17 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     notifyMinDurationSeconds: normalizeNotifyDuration(merged.notifyMinDurationSeconds),
     summaryMaxAgeDays: normalizeSummaryMaxAgeDays(merged.summaryMaxAgeDays),
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
+    skillSyncEnabled: Boolean(merged.skillSyncEnabled),
+    skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
+    skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),
     claudeApiConfig: normalizeClaudeApiConfig({ ...previous.claudeApiConfig, ...(updates.claudeApiConfig ?? {}) }),
     summaryApiConfig: normalizeApiConfig({ ...previous.summaryApiConfig, ...(updates.summaryApiConfig ?? {}) }),
   };
+}
+
+function normalizeSupabaseSettingUrl(value: string | undefined): string {
+  return String(value ?? "").trim().replace(/\/+$/, "");
 }
 
 function normalizeNotifyDuration(value: number): number {

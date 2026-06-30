@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
-import { Copy, FolderOpen, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Copy, Download, FolderOpen, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
+import type { RemoteSkill, SkillSyncSnapshot } from "../../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot, SkillRootStatus, SkillSource } from "../../../core/skill-manager";
 import { formatCompactNumber } from "../format-count";
 import { localize, type LanguageMode } from "../language";
@@ -10,22 +11,32 @@ import { useClampedContextMenuStyle } from "../context-menu-position";
 
 export function SkillsDialog({
   snapshot,
+  syncSnapshot,
   loading,
   feedback,
   language,
   revealLabel,
   onRefresh,
+  onUpload,
+  onInstallRemote,
+  onRefreshRemote,
+  onCopySetupSql,
   onCopyPath,
   onReveal,
   onDelete,
   onClose,
 }: {
   snapshot: InstalledSkillsSnapshot;
+  syncSnapshot: SkillSyncSnapshot;
   loading: boolean;
   feedback: SkillsFeedback;
   language: LanguageMode;
   revealLabel: string;
   onRefresh: () => void;
+  onUpload: (skill: InstalledSkill) => Promise<void>;
+  onInstallRemote: (remoteSkillId: string) => Promise<void>;
+  onRefreshRemote: () => void;
+  onCopySetupSql: () => void;
   onCopyPath: (skillPath: string) => void;
   onReveal: (skillPath: string) => void;
   onDelete: (skill: InstalledSkill) => Promise<void>;
@@ -33,9 +44,11 @@ export function SkillsDialog({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [query, setQuery] = useState("");
+  const [syncView, setSyncView] = useState<"local" | "remote">("local");
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
   const [sortKey, setSortKey] = useState<SkillSortKey>("usage");
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [selectedRemoteId, setSelectedRemoteId] = useState<string | null>(null);
   const [skillContextMenu, setSkillContextMenu] = useState<{ x: number; y: number; skill: InstalledSkill } | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<InstalledSkill | null>(null);
   const [deletingSkill, setDeletingSkill] = useState(false);
@@ -44,10 +57,18 @@ export function SkillsDialog({
     return sortInstalledSkills(filtered, sortKey);
   }, [snapshot.skills, query, sourceFilter, sortKey]);
   const visibleRoots = useMemo(() => summarizeSkillRoots(snapshot.roots), [snapshot.roots]);
+  const remoteSkills = useMemo(() => filterRemoteSkills(syncSnapshot.remoteSkills, query), [syncSnapshot.remoteSkills, query]);
   const selectedSkill =
     filteredSkills.find((skill) => skill.id === selectedSkillId) ??
     filteredSkills[0] ??
     null;
+  const selectedRemote =
+    remoteSkills.find((skill) => skill.id === selectedRemoteId) ??
+    remoteSkills[0] ??
+    null;
+  const selectedSkillBinding = selectedSkill ? syncSnapshot.bindings.find((binding) => binding.localSkillPath === selectedSkill.path) : null;
+  const selectedRemoteBinding = selectedRemote ? syncSnapshot.bindings.find((binding) => binding.remoteSkillId === selectedRemote.id) : null;
+  const syncReady = syncSnapshot.status.kind === "ready";
   const codexCount = snapshot.skills.filter((skill) => skill.agent === "codex").length;
   const claudeCount = snapshot.skills.filter((skill) => skill.agent === "claude").length;
   const activeItemRef = useRef<HTMLButtonElement>(null);
@@ -64,6 +85,14 @@ export function SkillsDialog({
     activeItemRef.current?.scrollIntoView({ block: "nearest" });
   }, [selectedSkill?.id]);
 
+  useEffect(() => {
+    if (!remoteSkills.length) {
+      if (selectedRemoteId) setSelectedRemoteId(null);
+      return;
+    }
+    if (!selectedRemoteId || !remoteSkills.some((skill) => skill.id === selectedRemoteId)) setSelectedRemoteId(remoteSkills[0].id);
+  }, [remoteSkills, selectedRemoteId]);
+
   const handleListKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
       if (deleteCandidate) setDeleteCandidate(null);
@@ -73,6 +102,7 @@ export function SkillsDialog({
       event.stopPropagation();
       return;
     }
+    if (syncView !== "local") return;
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     if (!filteredSkills.length) return;
     event.preventDefault();
@@ -111,10 +141,19 @@ export function SkillsDialog({
         <div className="dialog-title">
           <span>{l("Skills", "Skills 管理")}</span>
           <span className="skills-dialog-count">
-            Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)}
+            Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)} · Remote {formatCompactNumber(syncSnapshot.remoteSkills.length)}
           </span>
           <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
             <X size={16} />
+          </button>
+        </div>
+
+        <div className="skills-view-tabs" role="tablist" aria-label={l("Skills view", "Skills 视图")}>
+          <button type="button" className={syncView === "local" ? "active" : ""} onClick={() => setSyncView("local")}>
+            {l("Local", "本地")}
+          </button>
+          <button type="button" className={syncView === "remote" ? "active" : ""} onClick={() => setSyncView("remote")}>
+            {l("Remote", "远程")}
           </button>
         </div>
 
@@ -124,39 +163,42 @@ export function SkillsDialog({
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={l("Search name, description, or path", "搜索名称、描述或路径")} autoFocus />
           </label>
           <div className="skills-filter" role="group" aria-label={l("Skill source filter", "Skill 来源筛选")}>
-            {SKILL_SOURCE_FILTERS.map((filter) => (
-              <button key={filter} className={sourceFilter === filter ? "active" : ""} onClick={() => setSourceFilter(filter)}>
-                {skillFilterLabel(filter, language)}
-              </button>
-            ))}
+            {syncView === "local"
+              ? SKILL_SOURCE_FILTERS.map((filter) => (
+                  <button key={filter} className={sourceFilter === filter ? "active" : ""} onClick={() => setSourceFilter(filter)}>
+                    {skillFilterLabel(filter, language)}
+                  </button>
+                ))
+              : null}
           </div>
-          <label className="skills-sort" title={l("Sort skills", "排序 Skills")}>
+          {syncView === "local" ? <label className="skills-sort" title={l("Sort skills", "排序 Skills")}>
             <span>{l("Sort", "排序")}</span>
             <select value={sortKey} onChange={(event) => setSortKey(event.currentTarget.value as SkillSortKey)} aria-label={l("Sort skills", "排序 Skills")}>
               <option value="usage">{l("Most used", "最多使用")}</option>
               <option value="usage-asc">{l("Least used", "最少使用")}</option>
             </select>
-          </label>
-          <button className="stats-refresh" onClick={onRefresh} disabled={loading} title={l("Refresh skill usage", "刷新 Skill 使用统计")} aria-label={l("Refresh skill usage", "刷新 Skill 使用统计")}>
+          </label> : null}
+          <button className="stats-refresh" onClick={syncView === "local" ? onRefresh : onRefreshRemote} disabled={loading} title={l("Refresh skills", "刷新 Skills")} aria-label={l("Refresh skills", "刷新 Skills")}>
             <RefreshCw size={13} />
           </button>
         </div>
 
-        <div className="skills-roots">
+        {syncView === "local" ? <div className="skills-roots">
           {visibleRoots.map((root) => (
             <span key={`${root.source}:${root.path}`} className={root.exists ? "" : "missing"} title={root.path}>
               <strong>{skillSourceUiLabel(root.source, language)}</strong>
               {root.exists ? l(`${root.skillCount} skills`, `${root.skillCount} 个`) : l("Missing", "未找到")}
             </span>
           ))}
-        </div>
+        </div> : <SkillSyncStatusPanel snapshot={syncSnapshot} language={language} onCopySetupSql={onCopySetupSql} />}
 
         {feedback ? <div className={`skills-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
         <div className="skills-shell">
           <div className="skills-list">
-            {loading ? <div className="skills-empty">{l("Loading installed skills...", "正在加载已安装 Skills...")}</div> : null}
-            {!loading && filteredSkills.length === 0 ? <div className="skills-empty">{l("No skills found.", "没有找到 Skill。")}</div> : null}
-            {!loading
+            {loading ? <div className="skills-empty">{syncView === "local" ? l("Loading installed skills...", "正在加载已安装 Skills...") : l("Loading remote skills...", "正在加载远程 Skills...")}</div> : null}
+            {!loading && syncView === "local" && filteredSkills.length === 0 ? <div className="skills-empty">{l("No skills found.", "没有找到 Skill。")}</div> : null}
+            {!loading && syncView === "remote" && remoteSkills.length === 0 ? <div className="skills-empty">{remoteEmptyLabel(syncSnapshot, language)}</div> : null}
+            {!loading && syncView === "local"
               ? filteredSkills.map((skill) => (
                   <button
                     key={skill.id}
@@ -180,10 +222,28 @@ export function SkillsDialog({
                   </button>
                 ))
               : null}
+            {!loading && syncView === "remote"
+              ? remoteSkills.map((skill) => (
+                  <button
+                    key={skill.id}
+                    type="button"
+                    className={`skill-item ${selectedRemote?.id === skill.id ? "active" : ""}`}
+                    onClick={() => setSelectedRemoteId(skill.id)}
+                  >
+                    <span className="skill-item-head">
+                      <strong>{skill.name}</strong>
+                      {syncSnapshot.bindings.some((binding) => binding.remoteSkillId === skill.id) ? <span className="skill-usage-count">{l("Local", "本地")}</span> : null}
+                      <span className={`skill-source-badge ${skill.source}`}>{skill.agent === "codex" ? "Codex" : "Claude Code"}</span>
+                    </span>
+                    <span className="skill-item-desc">{skill.description || l("No description", "无描述")}</span>
+                    <span className="skill-item-path">{new Date(skill.updatedAt).toLocaleString()}</span>
+                  </button>
+                ))
+              : null}
           </div>
 
           <div className="skill-preview">
-            {selectedSkill ? (
+            {syncView === "local" && selectedSkill ? (
               <>
                 <div className="skill-preview-head">
                   <div>
@@ -192,6 +252,12 @@ export function SkillsDialog({
                       <SkillSourceBadge source={selectedSkill.source} language={language} />
                     </div>
                     <p>{selectedSkill.description || l("No description", "无描述")}</p>
+                  </div>
+                  <div className="skill-preview-actions">
+                    <button type="button" disabled={!syncReady || loading} onClick={() => void onUpload(selectedSkill)} title={!syncReady ? syncDisabledTitle(syncSnapshot, language) : ""}>
+                      <Upload size={14} />
+                      {selectedSkillBinding ? l("Update remote", "更新远程") : l("Upload", "上传")}
+                    </button>
                   </div>
                 </div>
                 <dl className="skill-meta">
@@ -215,8 +281,53 @@ export function SkillsDialog({
                     <dt>{l("Path", "路径")}</dt>
                     <dd title={selectedSkill.path}>{selectedSkill.path}</dd>
                   </div>
+                  {selectedSkillBinding ? (
+                    <div>
+                      <dt>{l("Remote", "远程")}</dt>
+                      <dd>{new Date(selectedSkillBinding.lastSyncedAt).toLocaleString()}</dd>
+                    </div>
+                  ) : null}
                 </dl>
                 <pre className="skill-markdown-preview">{skillPreviewMarkdown(selectedSkill.markdown, language)}</pre>
+              </>
+            ) : syncView === "remote" && selectedRemote ? (
+              <>
+                <div className="skill-preview-head">
+                  <div>
+                    <div className="skill-preview-title">
+                      <h3>{selectedRemote.name}</h3>
+                      <span className={`skill-source-badge ${selectedRemote.source}`}>{selectedRemote.agent === "codex" ? "Codex" : "Claude Code"}</span>
+                    </div>
+                    <p>{selectedRemote.description || l("No description", "无描述")}</p>
+                  </div>
+                  <div className="skill-preview-actions">
+                    <button type="button" disabled={!syncReady || loading} onClick={() => void onInstallRemote(selectedRemote.id)}>
+                      <Download size={14} />
+                      {selectedRemoteBinding ? l("Update local", "更新本地") : l("Install locally", "安装到本地")}
+                    </button>
+                  </div>
+                </div>
+                <dl className="skill-meta">
+                  <div>
+                    <dt>{l("Agent", "Agent")}</dt>
+                    <dd>{selectedRemote.agent === "codex" ? "Codex" : "Claude Code"}</dd>
+                  </div>
+                  <div>
+                    <dt>{l("Updated", "更新时间")}</dt>
+                    <dd>{new Date(selectedRemote.updatedAt).toLocaleString()}</dd>
+                  </div>
+                  <div>
+                    <dt>{l("Remote ID", "远程 ID")}</dt>
+                    <dd title={selectedRemote.id}>{selectedRemote.id}</dd>
+                  </div>
+                  {selectedRemoteBinding ? (
+                    <div>
+                      <dt>{l("Local", "本地")}</dt>
+                      <dd title={selectedRemoteBinding.localSkillPath}>{selectedRemoteBinding.localSkillPath}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+                <pre className="skill-markdown-preview">{skillPreviewMarkdown(selectedRemote.markdown, language)}</pre>
               </>
             ) : (
               <div className="skills-empty">{l("Select a skill to preview it.", "选择一个 Skill 查看内容。")}</div>
@@ -303,6 +414,56 @@ function skillSourceUiLabel(source: SkillSource, language: LanguageMode): string
   if (source === "claude-project") return localize(language, "Project", "项目");
   if (source === "claude-plugin") return localize(language, "Claude Plugin", "Claude 插件");
   return skillSourceLabel(source);
+}
+
+function filterRemoteSkills(skills: RemoteSkill[], query: string): RemoteSkill[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = normalizedQuery
+    ? skills.filter((skill) => [skill.name, skill.description, skill.agent, skill.source, skill.id].join("\n").toLowerCase().includes(normalizedQuery))
+    : skills;
+  return [...filtered].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.name.localeCompare(b.name));
+}
+
+function syncDisabledTitle(snapshot: SkillSyncSnapshot, language: LanguageMode): string {
+  if (snapshot.status.kind === "missing-table") return localize(language, "Initialize the Supabase table first.", "请先初始化 Supabase 表。");
+  if (snapshot.status.kind === "unconfigured") return localize(language, "Configure Supabase sync in Settings first.", "请先在设置中配置 Supabase 同步。");
+  if (snapshot.status.kind === "error") return snapshot.status.message;
+  return "";
+}
+
+function remoteEmptyLabel(snapshot: SkillSyncSnapshot, language: LanguageMode): string {
+  if (snapshot.status.kind === "ready") return localize(language, "No remote skills found.", "没有远程 Skill。");
+  return syncDisabledTitle(snapshot, language);
+}
+
+function SkillSyncStatusPanel({
+  snapshot,
+  language,
+  onCopySetupSql,
+}: {
+  snapshot: SkillSyncSnapshot;
+  language: LanguageMode;
+  onCopySetupSql: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (snapshot.status.kind === "ready") {
+    return (
+      <div className="skill-sync-panel ready">
+        <span>{l(`${snapshot.remoteSkills.length} remote skills`, `${snapshot.remoteSkills.length} 个远程 Skill`)}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`skill-sync-panel ${snapshot.status.kind}`}>
+      <span>{snapshot.status.message}</span>
+      {snapshot.status.kind === "missing-table" ? (
+        <button type="button" onClick={onCopySetupSql}>
+          <Copy size={14} />
+          {l("Copy setup SQL", "复制初始化 SQL")}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function SkillSourceBadge({ source, language }: { source: SkillSource; language: LanguageMode }): ReactElement {

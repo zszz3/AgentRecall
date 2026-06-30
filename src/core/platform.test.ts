@@ -385,6 +385,24 @@ describe("API settings", () => {
     expect(mergeAppSettings(defaultSettings, { sessionSearchMcpEnabled: false }).sessionSearchMcpEnabled).toBe(false);
   });
 
+  it("keeps Supabase skill sync disabled by default and normalizes saved credentials", () => {
+    expect(defaultSettings.skillSyncEnabled).toBe(false);
+    expect(defaultSettings.skillSyncSupabaseUrl).toBe("");
+    expect(defaultSettings.skillSyncSupabaseAnonKey).toBe("");
+
+    expect(
+      mergeAppSettings(defaultSettings, {
+        skillSyncEnabled: true,
+        skillSyncSupabaseUrl: " https://example.supabase.co/ ",
+        skillSyncSupabaseAnonKey: " anon-key ",
+      }),
+    ).toMatchObject({
+      skillSyncEnabled: true,
+      skillSyncSupabaseUrl: "https://example.supabase.co",
+      skillSyncSupabaseAnonKey: "anon-key",
+    });
+  });
+
   it("keeps explicitly saved empty API keys empty instead of refilling profile defaults", () => {
     expect(
       mergeApiConfigWithProfileDefaults(

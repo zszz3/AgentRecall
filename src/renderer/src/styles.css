@@ -1581,6 +1581,9 @@ select:focus-visible {
 .detail-header h2 {
   margin: 0;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--text);
   font-size: 18px;
@@ -2196,6 +2199,34 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.skills-view-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  margin: 10px 14px 0;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-subtle);
+}
+
+.skills-view-tabs button {
+  height: 30px;
+  min-width: 76px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.skills-view-tabs button.active {
+  background: var(--panel-bg);
+  color: var(--accent-bright);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
 .skills-toolbar {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto auto auto;
@@ -2321,6 +2352,53 @@ select:focus-visible {
 
 .skills-roots .missing {
   opacity: 0.62;
+}
+
+.skill-sync-panel {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 35px;
+  margin: 0 14px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.skill-sync-panel.ready {
+  color: var(--text-dim);
+}
+
+.skill-sync-panel.missing-table,
+.skill-sync-panel.error {
+  border-color: var(--danger-soft);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.skill-sync-panel button,
+.skill-preview-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.skill-preview-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .skill-usage-count {
@@ -2467,10 +2545,16 @@ select:focus-visible {
 
 .skill-preview-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   padding: 16px 18px 12px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.skill-preview-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .skill-preview-title {
@@ -2927,6 +3011,17 @@ select:focus-visible {
 
 .settings-field select {
   cursor: pointer;
+}
+
+.skills-sync-field {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  align-items: center;
+}
+
+.skills-sync-field input {
+  width: 100%;
+  min-width: 0;
 }
 
 /* A single card that stacks a toggle row with a dependent sub-row (e.g. its threshold). */
@@ -3548,6 +3643,11 @@ select:focus-visible {
 }
 
 @media (max-width: 640px) {
+  .skills-sync-field {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
   .api-settings-form .settings-field {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;

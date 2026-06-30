@@ -65,12 +65,26 @@ import { writeMigratedSession } from "../core/session-migration-writers";
 import { writeDbPointer } from "../core/app-paths";
 import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
-import { fetchRemoteSessionFilePayload, syncRemoteEnvironment } from "../core/remote-sync";
+import { fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
 import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
 import { RemoteWatchManager } from "../core/remote-watch";
-import { SessionStore } from "../core/session-store";
-import { deleteInstalledSkill, listInstalledSkills, skillProjectDirsFromIndexedProjects, type InstalledSkillsSnapshot } from "../core/skill-manager";
+import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
+import {
+  deleteInstalledSkill,
+  installRemoteSkillLocally,
+  listInstalledSkills,
+  skillProjectDirsFromIndexedProjects,
+  type InstalledSkill,
+  type InstalledSkillsSnapshot,
+} from "../core/skill-manager";
+import {
+  buildSkillSyncSetupSql,
+  SupabaseSkillSyncClient,
+  type SkillSyncInstallResult,
+  type SkillSyncSnapshot,
+  type SkillSyncUploadResult,
+} from "../core/skill-sync";
 import {
   listSkillUsageSources,
   readSkillUsageSourceEvents,
@@ -196,6 +210,89 @@ function refreshSkillUsageIndexSafely(): void {
   } catch (error) {
     console.error(`Failed to refresh skill usage: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function createSkillSyncClient(): SupabaseSkillSyncClient {
+  const settings = getSettings();
+  if (!settings.skillSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
+    throw new Error("Supabase skill sync is not configured.");
+  }
+  return new SupabaseSkillSyncClient({
+    url: settings.skillSyncSupabaseUrl,
+    anonKey: settings.skillSyncSupabaseAnonKey,
+  });
+}
+
+async function buildSkillSyncSnapshot(): Promise<SkillSyncSnapshot> {
+  const setupSql = buildSkillSyncSetupSql();
+  const settings = getSettings();
+  if (!settings.skillSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
+    return {
+      status: {
+        kind: "unconfigured",
+        setupSql,
+        message: "Configure Supabase URL and anon key in Settings to sync skills.",
+      },
+      remoteSkills: [],
+      bindings: store.listSkillSyncBindings(),
+      scannedAt: Date.now(),
+    };
+  }
+
+  const client = createSkillSyncClient();
+  const status = await client.checkStatus();
+  const remoteSkills = status.kind === "ready" ? await client.listRemoteSkills() : [];
+  return {
+    status,
+    remoteSkills,
+    bindings: store.listSkillSyncBindings(),
+    scannedAt: Date.now(),
+  };
+}
+
+async function uploadLocalSkillToSupabase(skillPath: string): Promise<SkillSyncUploadResult> {
+  const skill = findInstalledSkillByPath(skillPath);
+  const client = createSkillSyncClient();
+  const existing = store.getSkillSyncBindingForLocalPath(skill.path);
+  const remoteSkill = existing
+    ? await client.updateRemoteSkill(existing.remoteSkillId, skill)
+    : await client.upsertLocalSkill(skill);
+  const binding = {
+    localSkillPath: skill.path,
+    remoteSkillId: remoteSkill.id,
+    remoteUpdatedAt: remoteSkill.updatedAt,
+    lastSyncedAt: Date.now(),
+    direction: "upload" as const,
+  };
+  store.upsertSkillSyncBinding(binding);
+  return { remoteSkill, binding };
+}
+
+async function installRemoteSkillFromSupabase(remoteSkillId: string): Promise<SkillSyncInstallResult> {
+  const client = createSkillSyncClient();
+  const remoteSkill = await client.getRemoteSkill(remoteSkillId);
+  const installed = installRemoteSkillLocally(remoteSkill);
+  const binding = {
+    localSkillPath: installed.installedPath,
+    remoteSkillId: remoteSkill.id,
+    remoteUpdatedAt: remoteSkill.updatedAt,
+    lastSyncedAt: Date.now(),
+    direction: "download" as const,
+  };
+  store.upsertSkillSyncBinding(binding);
+  return {
+    remoteSkill,
+    binding,
+    installedPath: installed.installedPath,
+    overwritten: installed.overwritten,
+  };
+}
+
+function findInstalledSkillByPath(skillPath: string): InstalledSkill {
+  const normalized = path.resolve(skillPath);
+  const skill = buildSkillsSnapshot().skills.find((item) => path.resolve(item.path) === normalized);
+  if (!skill) throw new Error("Skill is no longer installed or is outside managed roots.");
+  return skill;
 }
 
 app.setName(PRODUCT_NAME);
@@ -503,10 +600,14 @@ async function ensureRemoteResumePreflight(session: SessionSearchResult): Promis
   throw new Error(`Remote resume preflight failed: ${detail}`);
 }
 
+function hasHydratedRemoteDetails(sessionKey: string): boolean {
+  return store.getMessages(sessionKey, 0, 1).length > 0;
+}
+
 async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<void> {
   const session = store.getSession(sessionKey);
   if (!session || isLocalSession(session)) return;
-  if (store.getMessages(sessionKey, 0, 1).length > 0) return;
+  if (hasHydratedRemoteDetails(sessionKey)) return;
 
   const active = remoteDetailLoads.get(sessionKey);
   if (active) return active;
@@ -1090,12 +1191,23 @@ function registerIpc(): void {
     return store.getSession(sessionKey);
   });
   ipcMain.handle("session:messages", async (_event, sessionKey: string, offset?: number, limit?: number) => {
+    const pageOffset = offset ?? 0;
+    const pageLimit = limit ?? 120;
+    const session = store.getSession(sessionKey);
+    if (session && !isLocalSession(session) && !hasHydratedRemoteDetails(sessionKey)) {
+      if (session.messageCount <= 0) return [];
+      const environment = requireRemoteSshEnvironment(session);
+      if (!environment) return [];
+      return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit);
+    }
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    return store.getMessages(sessionKey, offset ?? 0, limit ?? 120);
+    return store.getMessages(sessionKey, pageOffset, pageLimit);
   });
-  ipcMain.handle("session:trace-events", async (_event, sessionKey: string) => {
+  ipcMain.handle("session:trace-events", async (_event, sessionKey: string, options?: TraceEventQueryOptions) => {
+    const session = store.getSession(sessionKey);
+    if (session && !isLocalSession(session) && !hasHydratedRemoteDetails(sessionKey)) return [];
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    return store.getTraceEvents(sessionKey);
+    return store.getTraceEvents(sessionKey, options);
   });
   ipcMain.handle("sessions:live", () => loadLiveSessionSnapshot({ includeTrae: getSettings().includeTrae }));
   ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
@@ -1313,6 +1425,12 @@ function registerIpc(): void {
   );
   ipcMain.handle("skills:list", () => buildSkillsSnapshot());
   ipcMain.handle("skills:refresh-usage", () => refreshSkillUsageIndex());
+  ipcMain.handle("skills:sync-snapshot", () => buildSkillSyncSnapshot());
+  ipcMain.handle("skills:sync-upload", (_event, skillPath: string) => uploadLocalSkillToSupabase(skillPath));
+  ipcMain.handle("skills:sync-install", (_event, remoteSkillId: string) => installRemoteSkillFromSupabase(remoteSkillId));
+  ipcMain.handle("skills:sync-copy-setup-sql", () => {
+    clipboard.writeText(buildSkillSyncSetupSql());
+  });
   ipcMain.handle("skills:copy-path", (_event, skillPath: string) => {
     clipboard.writeText(skillPath);
   });
@@ -1338,13 +1456,11 @@ function registerIpc(): void {
     return result.status;
   });
   ipcMain.handle("command:copy-resume", async (_event, sessionKey: string) => {
-    await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return;
     clipboard.writeText(getResumeCommand(session, getSettings(), { sshArgs: requireSshArgsForRemoteSession(session) }));
   });
   ipcMain.handle("command:resume", async (_event, sessionKey: string) => {
-    await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return { route: "resume" as const };
     const sshArgs = requireSshArgsForRemoteSession(session);
@@ -1366,7 +1482,6 @@ function registerIpc(): void {
     return route;
   });
   ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
-    await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return;
     const sshArgs = requireSshArgsForRemoteSession(session);

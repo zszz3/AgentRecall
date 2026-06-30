@@ -4,6 +4,7 @@ import { summarizeSkillRoots } from "./components/skills-dialog";
 import type { SkillRootStatus } from "../../core/skill-manager";
 
 const skillsDialogSource = readFileSync(new URL("./components/skills-dialog.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
 describe("skills dialog actions", () => {
   it("copies the SKILL.md path but reveals the skill directory", () => {
@@ -26,5 +27,19 @@ describe("skills dialog actions", () => {
       { source: "codex-shared", exists: true, skillCount: 3 },
       { source: "codex-project", exists: true, skillCount: 2 },
     ]);
+  });
+
+  it("surfaces Supabase sync configuration and local/remote skill actions", () => {
+    const supabaseSettings = appSource.slice(appSource.indexOf("Supabase skill sync"), appSource.indexOf("Appearance", appSource.indexOf("Supabase skill sync")));
+
+    expect(appSource).toContain("skillSyncSupabaseUrl");
+    expect(appSource).toContain("skillSyncSupabaseAnonKey");
+    expect(appSource).toContain("supabase.com/dashboard");
+    expect(appSource.match(/settings-field skills-sync-field/g)).toHaveLength(2);
+    expect(supabaseSettings.match(/settings-field skills-sync-field/g)).toHaveLength(2);
+    expect(skillsDialogSource).toContain("syncView");
+    expect(skillsDialogSource).toContain("onUpload");
+    expect(skillsDialogSource).toContain("onInstallRemote");
+    expect(skillsDialogSource).toContain("onCopySetupSql");
   });
 });

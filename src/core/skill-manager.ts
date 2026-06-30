@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { RemoteSkill } from "./skill-sync";
 
 export type SkillAgent = "codex" | "claude";
 export type SkillSource =
@@ -66,6 +67,17 @@ export interface SkillProjectSource {
 export interface DeleteInstalledSkillResult {
   deletedPath: string;
   skillName: string;
+}
+
+export interface InstallRemoteSkillOptions {
+  homeDir?: string;
+  codexHome?: string;
+}
+
+export interface InstallRemoteSkillResult {
+  installedPath: string;
+  directoryPath: string;
+  overwritten: boolean;
 }
 
 interface SkillRootConfig {
@@ -166,6 +178,23 @@ export function deleteInstalledSkill(skillPath: string, options: SkillManagerOpt
 
   fs.rmSync(directoryPath, { recursive: true, force: false });
   return { deletedPath: directoryPath, skillName: skill.name };
+}
+
+export function installRemoteSkillLocally(remoteSkill: RemoteSkill, options: InstallRemoteSkillOptions = {}): InstallRemoteSkillResult {
+  const homeDir = options.homeDir || os.homedir();
+  const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(homeDir, ".codex");
+  const rootPath = remoteSkill.agent === "codex" ? path.join(codexHome, "skills") : path.join(homeDir, ".claude", "skills");
+  const directoryName = safeSkillDirectoryName(remoteSkill.name);
+  const directoryPath = path.join(rootPath, directoryName);
+  const installedPath = path.join(directoryPath, "SKILL.md");
+  const rootKey = normalizePathKey(rootPath);
+  const directoryKey = normalizePathKey(directoryPath);
+  if (!directoryKey.startsWith(`${rootKey}${path.sep}`)) throw new Error("Refusing to install skill outside the managed root.");
+
+  const overwritten = fs.existsSync(installedPath);
+  fs.mkdirSync(directoryPath, { recursive: true });
+  fs.writeFileSync(installedPath, remoteSkill.markdown, "utf8");
+  return { installedPath, directoryPath, overwritten };
 }
 
 function collectClaudePluginRoots(pluginsDir: string): SkillRootConfig[] {
@@ -368,6 +397,16 @@ function hasProjectSkillRoot(projectDir: string): boolean {
 
 function shouldSkipProjectSkillSearchDir(name: string): boolean {
   return name.startsWith(".") || name === "node_modules" || name === "vendor" || name === "out" || name === "dist" || name === "build";
+}
+
+function safeSkillDirectoryName(name: string): string {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return normalized || "skill";
 }
 
 function dedupePaths(paths: string[]): string[] {

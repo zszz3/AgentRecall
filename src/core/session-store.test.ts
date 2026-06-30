@@ -164,6 +164,32 @@ describe("SessionStore", () => {
     expect(results[0].matchSnippet).toContain("refresh token");
   });
 
+  it("uses the indexed title for display when first question is a long remote summary prompt", () => {
+    const store = createInMemoryStore();
+    const longFirstQuestion = [
+      "# AGENTS.md instructions for /data00/home/xuguowei.x/meta_resource_generator",
+      "<INSTRUCTIONS>",
+      "Global Coding Preferences - Before concrete code work or commit preparation, read the target repository's local rules first.",
+    ].join("\n");
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "ssh:dev:codex:remote",
+        rawId: "remote",
+        environmentId: "ssh-dev",
+        environmentKind: "ssh",
+        environmentLabel: "SSH · dev",
+        originalTitle: "# AGENTS.md instructions for /data00/home/xuguowei.x/meta_resource_generator",
+        firstQuestion: longFirstQuestion,
+      }),
+      [],
+    );
+
+    const session = store.getSession("ssh:dev:codex:remote");
+
+    expect(session?.displayTitle).toBe("# AGENTS.md instructions for /data00/home/xuguowei.x/meta_resource_generator");
+    expect(session?.displayTitle).not.toContain("<INSTRUCTIONS>");
+  });
+
   it("stores token usage per session and aggregates selected stats periods by source", () => {
     const store = createInMemoryStore();
     const now = new Date("2026-06-01T12:00:00Z").getTime();
@@ -436,6 +462,47 @@ describe("SessionStore", () => {
 
     expect(store.getApiProviderKey("codex", "zhipu_glm")).toBe("");
     expect(store.getApiProviderKey("codex", "codexzh")).toBe("sk-codexzh");
+  });
+
+  it("stores skill sync bindings for local and remote lookup", () => {
+    const store = createInMemoryStore();
+
+    store.upsertSkillSyncBinding({
+      localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
+      remoteSkillId: "remote-review",
+      remoteUpdatedAt: "2026-06-29T10:00:00.000Z",
+      lastSyncedAt: 100,
+      direction: "upload",
+    });
+
+    expect(store.getSkillSyncBindingForLocalPath("/tmp/.codex/skills/review-code/SKILL.md")).toEqual({
+      localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
+      remoteSkillId: "remote-review",
+      remoteUpdatedAt: "2026-06-29T10:00:00.000Z",
+      lastSyncedAt: 100,
+      direction: "upload",
+    });
+    expect(store.getSkillSyncBindingForRemoteId("remote-review")?.localSkillPath).toBe("/tmp/.codex/skills/review-code/SKILL.md");
+
+    store.upsertSkillSyncBinding({
+      localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
+      remoteSkillId: "remote-review",
+      remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+      lastSyncedAt: 200,
+      direction: "download",
+    });
+
+    expect(store.listSkillSyncBindings()).toEqual([
+      {
+        localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
+        remoteSkillId: "remote-review",
+        remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+        lastSyncedAt: 200,
+        direction: "download",
+      },
+    ]);
+
+    store.close();
   });
 
   it("records duplicate session migrations and lists them in descending creation order", () => {
@@ -1087,6 +1154,19 @@ describe("SessionStore", () => {
     expect(stored.detail.length).toBeLessThanOrEqual(TRACE_DETAIL_PREVIEW_MAX_CHARS);
     expect(stored.detail).toContain("Indexed preview truncated");
     expect(stored.detail).toContain("characters omitted");
+  });
+
+  it("limits trace events to the visible message timestamp window", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(sampleSession(), messages, [], traceEvents);
+
+    expect(
+      store.getTraceEvents("codex:abc", {
+        startTimestamp: "2026-06-01T10:02:30Z",
+        endTimestamp: "2026-06-01T10:04:00Z",
+        limit: 1,
+      }),
+    ).toEqual([traceEvents[1]]);
   });
 
   it("creates a local environment and stores environment metadata on sessions", () => {
