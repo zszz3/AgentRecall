@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { SkillSyncBinding } from "./session-store";
 import type { InstalledSkill } from "./skill-manager";
 
 export const AGENT_SESSION_SEARCH_SKILLS_TABLE = "agent_session_search_skills";
+const REMOTE_SKILL_LIST_COLUMNS = "id,name,description,agent,source,markdown,local_fingerprint,uploaded_from_path,created_at,updated_at,version";
 
 export interface RemoteSkill {
   id: string;
@@ -17,6 +20,12 @@ export interface RemoteSkill {
   updatedAt: string;
   version: number;
   metadata: Record<string, unknown>;
+}
+
+export interface SkillSyncFile {
+  relativePath: string;
+  contentBase64: string;
+  mode?: number;
 }
 
 export type SkillSyncStatus =
@@ -146,7 +155,7 @@ export class SupabaseSkillSyncClient {
   }
 
   async listRemoteSkills(): Promise<RemoteSkill[]> {
-    const response = await this.request(`/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=*&order=updated_at.desc`, { method: "GET" });
+    const response = await this.request(`/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=${REMOTE_SKILL_LIST_COLUMNS}&order=updated_at.desc`, { method: "GET" });
     const body = await readResponseBody(response);
     if (!response.ok) throw new Error(supabaseErrorMessage(response.status, body));
     return parseRemoteRows(body);
@@ -217,6 +226,7 @@ function remotePayloadFromSkill(skill: InstalledSkill): Omit<SupabaseSkillRow, "
       directoryPath: skill.directoryPath,
       rootPath: skill.rootPath,
       mtimeMs: skill.mtimeMs,
+      skillFiles: collectSkillDirectoryFiles(skill.directoryPath),
     },
   };
 }
@@ -243,6 +253,7 @@ function isRemoteRow(value: unknown): value is SupabaseSkillRow {
 }
 
 function remoteSkillFromRow(row: SupabaseSkillRow): RemoteSkill {
+  const metadata = row.metadata ?? {};
   return {
     id: row.id,
     name: row.name,
@@ -255,8 +266,49 @@ function remoteSkillFromRow(row: SupabaseSkillRow): RemoteSkill {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: row.version ?? 1,
-    metadata: row.metadata ?? {},
+    metadata,
   };
+}
+
+export function skillSyncFilesFromMetadata(metadata: Record<string, unknown>): SkillSyncFile[] {
+  const value = metadata.skillFiles;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const file = item as Partial<SkillSyncFile>;
+    if (typeof file.relativePath !== "string" || typeof file.contentBase64 !== "string") return [];
+    const mode = typeof file.mode === "number" && Number.isFinite(file.mode) ? file.mode : undefined;
+    return [{ relativePath: file.relativePath, contentBase64: file.contentBase64, ...(mode === undefined ? {} : { mode }) }];
+  });
+}
+
+function collectSkillDirectoryFiles(directoryPath: string): SkillSyncFile[] {
+  const root = path.resolve(directoryPath);
+  const files: SkillSyncFile[] = [];
+  const visit = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const filePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(filePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const stat = fs.statSync(filePath);
+      files.push({
+        relativePath: path.relative(root, filePath).split(path.sep).join("/"),
+        contentBase64: fs.readFileSync(filePath).toString("base64"),
+        mode: stat.mode & 0o777,
+      });
+    }
+  };
+  visit(root);
+  return files;
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   AGENT_SESSION_SEARCH_SKILLS_TABLE,
   SupabaseSkillSyncClient,
@@ -102,7 +105,9 @@ describe("skill sync", () => {
       url: "https://example.supabase.co/",
       anonKey: "anon",
       fetchImpl: async (url, init) => {
-        expect(String(url)).toBe(`https://example.supabase.co/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=*&order=updated_at.desc`);
+        expect(String(url)).toBe(
+          `https://example.supabase.co/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=id,name,description,agent,source,markdown,local_fingerprint,uploaded_from_path,created_at,updated_at,version&order=updated_at.desc`,
+        );
         expect((init?.headers as Record<string, string>).apikey).toBe("anon");
         return new Response(JSON.stringify(rows), { status: 200 });
       },
@@ -156,6 +161,46 @@ describe("skill sync", () => {
       name: "review-code",
       localFingerprint: skillSyncFingerprint(uploaded),
     });
+  });
+
+  it("uploads the full skill directory as metadata files", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skill-sync-files-"));
+    const skillDir = path.join(homeDir, ".codex", "skills", "review-code");
+    const skillPath = path.join(skillDir, "SKILL.md");
+    fs.mkdirSync(path.join(skillDir, "references"), { recursive: true });
+    fs.writeFileSync(skillPath, "# Review\n", "utf8");
+    fs.writeFileSync(path.join(skillDir, "references", "rubric.md"), "Check edge cases.\n", "utf8");
+    const uploaded = localSkill({ path: skillPath, directoryPath: skillDir, rootPath: path.dirname(skillDir), markdown: "# Review\n" });
+
+    const client = new SupabaseSkillSyncClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        expect(body.metadata.skillFiles).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              relativePath: "SKILL.md",
+              contentBase64: Buffer.from("# Review\n").toString("base64"),
+            }),
+            expect.objectContaining({
+              relativePath: "references/rubric.md",
+              contentBase64: Buffer.from("Check edge cases.\n").toString("base64"),
+            }),
+          ]),
+        );
+        return new Response(JSON.stringify([{
+          ...body,
+          id: "remote-1",
+          created_at: "2026-06-29T10:00:00.000Z",
+          updated_at: "2026-06-29T10:01:00.000Z",
+        }]), { status: 201 });
+      },
+    });
+
+    await client.upsertLocalSkill(uploaded);
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
   it("updates a remote skill by id when the local binding is known", async () => {
