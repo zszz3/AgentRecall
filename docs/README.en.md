@@ -66,10 +66,12 @@ To sync your personal skills between machines, enable Settings -> Skills -> Supa
 2. Copy the Project URL and anon key from Project Settings -> API.
 3. Paste them into Settings -> Skills and enable Supabase sync.
 4. If the remote table does not exist yet, open the Remote view in the Skills window, click Copy setup SQL, and run it once in the Supabase SQL Editor.
-5. In the Local view, select a local skill and click Upload. A stable fingerprint identifies skills by agent and name, so repeat uploads update the existing remote record.
-6. On another machine, configure the same Supabase URL and anon key, open the Remote view, then click Install locally / Update local.
+5. In the Local view, select a local skill and click Upload. A stable fingerprint identifies skills by agent and name. Each upload that actually changes the content adds a new version (v1, v2, …); uploads with unchanged content are skipped, and if the latest remote version came from a different same-named skill you are asked to confirm before appending a version.
+6. On another machine, configure the same Supabase URL and anon key, open the Remote view, pick a version from the dropdown to preview any point in history (the newest is tagged latest), then click Install locally / Update local to install that version.
 
 Sync uploads the full skill directory's regular files, including `SKILL.md`, `references/`, `scripts/`, examples, and other supporting files. Downloads restore them into the local user skill root. Codex skills install into `$CODEX_HOME/skills` or `~/.codex/skills`; Claude Code skills install into `~/.claude/skills`.
+
+If you created the `agent_session_search_skills` table with an earlier version, re-run the Copy setup SQL script once after upgrading to enable version history. The script is idempotent: it adds the `content_hash` column and changes the unique constraint from `local_fingerprint` to `(local_fingerprint, version)`.
 
 Supabase sync is designed for personal projects. It does not create tables automatically and does not require a service role key. The app stores only the Project URL and anon key locally, then uses the Supabase REST API to access the `agent_session_search_skills` table. The copied setup SQL grants anon read/write access through RLS for personal sync convenience; adjust the RLS policy first if you plan to share the project with other users or expose it more broadly.
 
