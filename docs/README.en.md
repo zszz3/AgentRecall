@@ -32,7 +32,7 @@
 - **Unified agent usage and quota view**:
   Track token usage by agent for today, 7 days, 30 days, and all time; also view current Claude Code / Codex quota status.
 - **Unified Skills and API Provider management**:
-  View and manage Claude Code / Codex skills, track skill usage, and switch Codex / Claude Code between official accounts and third-party API providers.
+  View and manage Claude Code / Codex skills, track skill usage, sync personal skills across machines through your own Supabase project, and switch Codex / Claude Code between official accounts and third-party API providers.
 
 ## Supported Sources
 
@@ -53,6 +53,23 @@
 Codex title metadata is read from `~/.codex/session_index.jsonl` when that file exists. If no upstream title is available, the app uses the first meaningful user question as the default title.
 
 CodeBuddy CLI, OpenClaw, Hermes, OpenCode, Cursor Agent, and Trae are off by default and can be selected from Settings -> Optional sources. Once enabled, they support local read-only indexing, search, details, and source filtering. Resume, SSH remote sync, and provider-specific usage stats for these sources are intentionally separate follow-up work. Trae also supports open-state detection.
+
+## Skills Management and Sync
+
+The Skills window lists installed Codex / Claude Code skills, lets you filter by source, inspect usage counts, preview `SKILL.md`, copy paths, reveal skill folders, and delete non-system skills.
+
+To sync your personal skills between machines, enable Settings -> Skills -> Supabase skill sync:
+
+1. Create or select a project in the [Supabase Dashboard](https://supabase.com/dashboard).
+2. Copy the Project URL and anon key from Project Settings -> API.
+3. Paste them into Settings -> Skills and enable Supabase sync.
+4. If the remote table does not exist yet, open the Remote view in the Skills window, click Copy setup SQL, and run it once in the Supabase SQL Editor.
+5. In the Local view, select a local skill and click Upload. A stable fingerprint identifies skills by agent and name, so repeat uploads update the existing remote record.
+6. On another machine, configure the same Supabase URL and anon key, open the Remote view, then click Install locally / Update local.
+
+Sync uploads the full skill directory's regular files, including `SKILL.md`, `references/`, `scripts/`, examples, and other supporting files. Downloads restore them into the local user skill root. Codex skills install into `$CODEX_HOME/skills` or `~/.codex/skills`; Claude Code skills install into `~/.claude/skills`.
+
+Supabase sync is designed for personal projects. It does not create tables automatically and does not require a service role key. The app stores only the Project URL and anon key locally, then uses the Supabase REST API to access the `agent_session_search_skills` table. The copied setup SQL grants anon read/write access through RLS for personal sync convenience; adjust the RLS policy first if you plan to share the project with other users or expose it more broadly.
 
 ## Installation
 

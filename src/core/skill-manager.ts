@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { RemoteSkill } from "./skill-sync";
+import { skillSyncFilesFromMetadata, type RemoteSkill, type SkillSyncFile } from "./skill-sync";
 
 export type SkillAgent = "codex" | "claude";
 export type SkillSource =
@@ -193,8 +193,38 @@ export function installRemoteSkillLocally(remoteSkill: RemoteSkill, options: Ins
 
   const overwritten = fs.existsSync(installedPath);
   fs.mkdirSync(directoryPath, { recursive: true });
+  for (const file of skillSyncFilesFromMetadata(remoteSkill.metadata)) {
+    writeBundledSkillFile(directoryPath, file);
+  }
   fs.writeFileSync(installedPath, remoteSkill.markdown, "utf8");
   return { installedPath, directoryPath, overwritten };
+}
+
+function writeBundledSkillFile(directoryPath: string, file: SkillSyncFile): void {
+  const targetPath = safeBundledSkillFilePath(directoryPath, file.relativePath);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, Buffer.from(file.contentBase64, "base64"));
+  if (file.mode !== undefined) {
+    try {
+      fs.chmodSync(targetPath, file.mode);
+    } catch {
+      // Best effort only; Windows and some mounted filesystems may ignore POSIX modes.
+    }
+  }
+}
+
+function safeBundledSkillFilePath(directoryPath: string, relativePath: string): string {
+  const normalizedRelative = relativePath.replace(/\\/g, "/");
+  if (!normalizedRelative || normalizedRelative.startsWith("/") || normalizedRelative.includes("\0")) {
+    throw new Error("Refusing to install unsafe bundled skill file.");
+  }
+  const targetPath = path.resolve(directoryPath, ...normalizedRelative.split("/"));
+  const directoryKey = normalizePathKey(directoryPath);
+  if (targetPath !== directoryKey && !targetPath.startsWith(`${directoryKey}${path.sep}`)) {
+    throw new Error("Refusing to install bundled skill file outside the skill directory.");
+  }
+  if (targetPath === directoryKey) throw new Error("Refusing to install bundled skill file over the skill directory.");
+  return targetPath;
 }
 
 function collectClaudePluginRoots(pluginsDir: string): SkillRootConfig[] {
