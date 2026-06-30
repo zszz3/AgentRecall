@@ -47,7 +47,7 @@ import { QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { RemoteHealthReport } from "../../core/remote-health";
 import type { TraceEventQueryOptions } from "../../core/session-store";
-import type { SkillSyncSnapshot } from "../../core/skill-sync";
+import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import { globalShortcutOptions } from "../../core/shortcuts";
 import { terminalSelectOptions } from "../../core/terminal-options";
@@ -224,7 +224,7 @@ const EMPTY_SKILL_SYNC: SkillSyncSnapshot = {
     setupSql: "",
     message: "Configure Supabase URL and anon key in Settings to sync skills.",
   },
-  remoteSkills: [],
+  remoteSkillGroups: [],
   bindings: [],
   scannedAt: 0,
 };
@@ -619,13 +619,44 @@ export function App(): ReactElement {
     }
   }, [t]);
 
-  const uploadSkillToSync = useCallback(async (skill: InstalledSkill) => {
+  const uploadSkillToSync = useCallback(
+    async (skill: InstalledSkill, force = false): Promise<SkillSyncUploadOutcome | null> => {
+      setSkillsLoading(true);
+      setSkillsFeedback({ kind: "running", message: t(`Uploading ${skill.name}...`, `正在上传 ${skill.name}...`) });
+      try {
+        const result = await window.sessionSearch.uploadSkillToSync(skill.path, force);
+        if (result.status === "needs-confirmation") {
+          setSkillsFeedback(null);
+          return result;
+        }
+        await loadSkills({ silent: true });
+        const message =
+          result.status === "skipped"
+            ? t(`${skill.name} is already the latest version (v${result.version}).`, `${skill.name} 已是最新版本（v${result.version}）。`)
+            : t(`Uploaded ${result.remoteSkill.name} v${result.version}.`, `已上传 ${result.remoteSkill.name} v${result.version}。`);
+        setSkillsFeedback({ kind: "success", message });
+        window.setTimeout(() => {
+          setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
+        }, 2200);
+        return result;
+      } catch (error) {
+        setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+        return null;
+      } finally {
+        setSkillsLoading(false);
+      }
+    },
+    [loadSkills, t],
+  );
+
+  const installSyncedSkill = useCallback(async (remoteSkillId: string) => {
     setSkillsLoading(true);
-    setSkillsFeedback({ kind: "running", message: t(`Uploading ${skill.name}...`, `正在上传 ${skill.name}...`) });
+    setSkillsFeedback({ kind: "running", message: t("Installing remote skill...", "正在安装远程 Skill...") });
     try {
-      const result = await window.sessionSearch.uploadSkillToSync(skill.path);
+      const result = await window.sessionSearch.installSyncedSkill(remoteSkillId);
       await loadSkills({ silent: true });
-      const message = t(`Uploaded ${result.remoteSkill.name}.`, `已上传 ${result.remoteSkill.name}。`);
+      const verb = result.overwritten ? t("Updated", "已更新") : t("Installed", "已安装");
+      const message = `${verb} ${result.remoteSkill.name} v${result.remoteSkill.version}.`;
       setSkillsFeedback({ kind: "success", message });
       window.setTimeout(() => {
         setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
@@ -637,24 +668,9 @@ export function App(): ReactElement {
     }
   }, [loadSkills, t]);
 
-  const installSyncedSkill = useCallback(async (remoteSkillId: string) => {
-    setSkillsLoading(true);
-    setSkillsFeedback({ kind: "running", message: t("Installing remote skill...", "正在安装远程 Skill...") });
-    try {
-      const result = await window.sessionSearch.installSyncedSkill(remoteSkillId);
-      await loadSkills({ silent: true });
-      const verb = result.overwritten ? t("Updated", "已更新") : t("Installed", "已安装");
-      const message = `${verb} ${result.remoteSkill.name}.`;
-      setSkillsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 2200);
-    } catch (error) {
-      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setSkillsLoading(false);
-    }
-  }, [loadSkills, t]);
+  const fetchSyncedSkillVersion = useCallback((remoteSkillId: string): Promise<RemoteSkill> => {
+    return window.sessionSearch.getSyncedSkillVersion(remoteSkillId);
+  }, []);
 
   const copySkillSyncSetupSql = useCallback(async () => {
     try {
@@ -1998,8 +2014,9 @@ export function App(): ReactElement {
           language={language}
           revealLabel={FILE_MANAGER_LABEL}
           onRefresh={() => void loadSkills({ refreshUsage: true })}
-          onUpload={(skill) => uploadSkillToSync(skill)}
+          onUpload={(skill, force) => uploadSkillToSync(skill, force)}
           onInstallRemote={(remoteSkillId) => installSyncedSkill(remoteSkillId)}
+          onFetchVersion={(remoteSkillId) => fetchSyncedSkillVersion(remoteSkillId)}
           onRefreshRemote={() => void loadSkills({ silent: true })}
           onCopySetupSql={() => void copySkillSyncSetupSql()}
           onCopyPath={(skillPath) =>

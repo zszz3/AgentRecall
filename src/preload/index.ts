@@ -9,7 +9,7 @@ import type { IndexStatus } from "../core/indexer";
 import type { RemoteHealthReport } from "../core/remote-health";
 import type { ResumeRouteResult } from "../core/resume-router";
 import type { TraceEventQueryOptions } from "../core/session-store";
-import type { SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadResult } from "../core/skill-sync";
+import type { RemoteSkill, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SshConfigHost } from "../core/ssh-config";
@@ -90,8 +90,9 @@ const api = {
   listSkills: (): Promise<InstalledSkillsSnapshot> => ipcRenderer.invoke("skills:list"),
   refreshSkillUsage: (): Promise<SkillUsageRefreshStatus> => ipcRenderer.invoke("skills:refresh-usage"),
   getSkillSyncSnapshot: (): Promise<SkillSyncSnapshot> => ipcRenderer.invoke("skills:sync-snapshot"),
-  uploadSkillToSync: (skillPath: string): Promise<SkillSyncUploadResult> => ipcRenderer.invoke("skills:sync-upload", skillPath),
+  uploadSkillToSync: (skillPath: string, force?: boolean): Promise<SkillSyncUploadOutcome> => ipcRenderer.invoke("skills:sync-upload", skillPath, force),
   installSyncedSkill: (remoteSkillId: string): Promise<SkillSyncInstallResult> => ipcRenderer.invoke("skills:sync-install", remoteSkillId),
+  getSyncedSkillVersion: (remoteSkillId: string): Promise<RemoteSkill> => ipcRenderer.invoke("skills:sync-get-version", remoteSkillId),
   copySkillSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("skills:sync-copy-setup-sql"),
   copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
   revealSkill: (targetPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", targetPath),

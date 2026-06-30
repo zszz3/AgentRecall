@@ -471,6 +471,7 @@ describe("SessionStore", () => {
       localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
       remoteSkillId: "remote-review",
       remoteUpdatedAt: "2026-06-29T10:00:00.000Z",
+      remoteVersion: 3,
       lastSyncedAt: 100,
       direction: "upload",
     });
@@ -479,6 +480,7 @@ describe("SessionStore", () => {
       localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
       remoteSkillId: "remote-review",
       remoteUpdatedAt: "2026-06-29T10:00:00.000Z",
+      remoteVersion: 3,
       lastSyncedAt: 100,
       direction: "upload",
     });
@@ -488,6 +490,7 @@ describe("SessionStore", () => {
       localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
       remoteSkillId: "remote-review",
       remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+      remoteVersion: 5,
       lastSyncedAt: 200,
       direction: "download",
     });
@@ -497,6 +500,7 @@ describe("SessionStore", () => {
         localSkillPath: "/tmp/.codex/skills/review-code/SKILL.md",
         remoteSkillId: "remote-review",
         remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+        remoteVersion: 5,
         lastSyncedAt: 200,
         direction: "download",
       },
@@ -512,6 +516,7 @@ describe("SessionStore", () => {
         localSkillPath: "/tmp/.claude/skills/foo/SKILL.md",
         remoteSkillId: "remote-foo",
         remoteUpdatedAt: "2026-06-29T10:00:00.000Z",
+        remoteVersion: 1,
         lastSyncedAt: 100,
         direction: "upload",
       });
@@ -523,6 +528,7 @@ describe("SessionStore", () => {
           localSkillPath: "/work/project/.claude/skills/foo/SKILL.md",
           remoteSkillId: "remote-foo",
           remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+          remoteVersion: 2,
           lastSyncedAt: 200,
           direction: "upload",
         }),
@@ -533,6 +539,7 @@ describe("SessionStore", () => {
           localSkillPath: "/work/project/.claude/skills/foo/SKILL.md",
           remoteSkillId: "remote-foo",
           remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+          remoteVersion: 2,
           lastSyncedAt: 200,
           direction: "upload",
         },

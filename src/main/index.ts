@@ -69,7 +69,7 @@ import { fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemot
 import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
 import { RemoteWatchManager } from "../core/remote-watch";
-import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
+import { SessionStore, type SkillSyncBinding, type TraceEventQueryOptions } from "../core/session-store";
 import {
   deleteInstalledSkill,
   installRemoteSkillLocally,
@@ -80,10 +80,14 @@ import {
 } from "../core/skill-manager";
 import {
   buildSkillSyncSetupSql,
+  buildSkillVersionBasePayload,
+  groupRemoteSkillVersions,
+  skillSyncFingerprint,
   SupabaseSkillSyncClient,
+  type RemoteSkill,
   type SkillSyncInstallResult,
   type SkillSyncSnapshot,
-  type SkillSyncUploadResult,
+  type SkillSyncUploadOutcome,
 } from "../core/skill-sync";
 import {
   listSkillUsageSources,
@@ -235,7 +239,7 @@ async function buildSkillSyncSnapshot(): Promise<SkillSyncSnapshot> {
         setupSql,
         message: "Configure Supabase URL and anon key in Settings to sync skills.",
       },
-      remoteSkills: [],
+      remoteSkillGroups: [],
       bindings: store.listSkillSyncBindings(),
       scannedAt: Date.now(),
     };
@@ -243,51 +247,76 @@ async function buildSkillSyncSnapshot(): Promise<SkillSyncSnapshot> {
 
   const client = createSkillSyncClient();
   const status = await client.checkStatus();
-  const remoteSkills = status.kind === "ready" ? await client.listRemoteSkills() : [];
+  const remoteSkillGroups = status.kind === "ready" ? groupRemoteSkillVersions(await client.listRemoteSkillVersions()) : [];
   return {
     status,
-    remoteSkills,
+    remoteSkillGroups,
     bindings: store.listSkillSyncBindings(),
     scannedAt: Date.now(),
   };
 }
 
-async function uploadLocalSkillToSupabase(skillPath: string): Promise<SkillSyncUploadResult> {
+async function uploadLocalSkillToSupabase(skillPath: string, force = false): Promise<SkillSyncUploadOutcome> {
   const skill = findInstalledSkillByPath(skillPath);
   const client = createSkillSyncClient();
-  const existing = store.getSkillSyncBindingForLocalPath(skill.path);
-  const remoteSkill = existing
-    ? await client.updateRemoteSkill(existing.remoteSkillId, skill)
-    : await client.upsertLocalSkill(skill);
-  const binding = {
-    localSkillPath: skill.path,
-    remoteSkillId: remoteSkill.id,
-    remoteUpdatedAt: remoteSkill.updatedAt,
-    lastSyncedAt: Date.now(),
-    direction: "upload" as const,
-  };
-  store.upsertSkillSyncBinding(binding);
-  return { remoteSkill, binding };
+  const fingerprint = skillSyncFingerprint(skill);
+  const { base, contentHash } = buildSkillVersionBasePayload(skill);
+  const latest = await client.getLatestSkillVersion(fingerprint);
+
+  // Nothing changed since the current latest version: keep the binding, don't create noise.
+  if (latest && latest.contentHash === contentHash) {
+    const binding = persistSkillSyncBinding(skill.path, latest.id, latest.updatedAt, latest.version, "upload");
+    return { status: "skipped", remoteSkillId: latest.id, binding, version: latest.version };
+  }
+
+  // The latest version came from a different local skill (different source/path) with different
+  // content. Because identity is agent+name, uploading would push it onto the same version line;
+  // ask the caller to confirm first.
+  if (latest && !force && (latest.source !== skill.source || latest.uploadedFromPath !== skill.path)) {
+    return {
+      status: "needs-confirmation",
+      conflict: {
+        name: skill.name,
+        agent: skill.agent,
+        latestVersion: latest.version,
+        latestSource: latest.source,
+        latestPath: latest.uploadedFromPath,
+      },
+    };
+  }
+
+  const remoteSkill = await client.uploadSkillVersion(base, (latest?.version ?? 0) + 1);
+  const binding = persistSkillSyncBinding(skill.path, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, "upload");
+  return { status: "uploaded", remoteSkill, binding, version: remoteSkill.version };
 }
 
 async function installRemoteSkillFromSupabase(remoteSkillId: string): Promise<SkillSyncInstallResult> {
   const client = createSkillSyncClient();
   const remoteSkill = await client.getRemoteSkill(remoteSkillId);
   const installed = installRemoteSkillLocally(remoteSkill);
-  const binding = {
-    localSkillPath: installed.installedPath,
-    remoteSkillId: remoteSkill.id,
-    remoteUpdatedAt: remoteSkill.updatedAt,
-    lastSyncedAt: Date.now(),
-    direction: "download" as const,
-  };
-  store.upsertSkillSyncBinding(binding);
+  const binding = persistSkillSyncBinding(installed.installedPath, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, "download");
   return {
     remoteSkill,
     binding,
     installedPath: installed.installedPath,
     overwritten: installed.overwritten,
   };
+}
+
+function getRemoteSkillVersionDetail(remoteSkillId: string): Promise<RemoteSkill> {
+  return createSkillSyncClient().getRemoteSkill(remoteSkillId);
+}
+
+function persistSkillSyncBinding(
+  localSkillPath: string,
+  remoteSkillId: string,
+  remoteUpdatedAt: string,
+  remoteVersion: number,
+  direction: "upload" | "download",
+): SkillSyncBinding {
+  const binding: SkillSyncBinding = { localSkillPath, remoteSkillId, remoteUpdatedAt, remoteVersion, lastSyncedAt: Date.now(), direction };
+  store.upsertSkillSyncBinding(binding);
+  return binding;
 }
 
 function findInstalledSkillByPath(skillPath: string): InstalledSkill {
@@ -1432,8 +1461,9 @@ function registerIpc(): void {
   ipcMain.handle("skills:list", () => buildSkillsSnapshot());
   ipcMain.handle("skills:refresh-usage", () => refreshSkillUsageIndex());
   ipcMain.handle("skills:sync-snapshot", () => buildSkillSyncSnapshot());
-  ipcMain.handle("skills:sync-upload", (_event, skillPath: string) => uploadLocalSkillToSupabase(skillPath));
+  ipcMain.handle("skills:sync-upload", (_event, skillPath: string, force?: boolean) => uploadLocalSkillToSupabase(skillPath, force ?? false));
   ipcMain.handle("skills:sync-install", (_event, remoteSkillId: string) => installRemoteSkillFromSupabase(remoteSkillId));
+  ipcMain.handle("skills:sync-get-version", (_event, remoteSkillId: string) => getRemoteSkillVersionDetail(remoteSkillId));
   ipcMain.handle("skills:sync-copy-setup-sql", () => {
     clipboard.writeText(buildSkillSyncSetupSql());
   });

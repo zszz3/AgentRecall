@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import { Copy, Download, FolderOpen, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
-import type { RemoteSkill, SkillSyncSnapshot } from "../../../core/skill-sync";
+import type { RemoteSkill, RemoteSkillGroup, RemoteSkillVersion, SkillSyncSnapshot, SkillSyncUploadConflict, SkillSyncUploadOutcome } from "../../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot, SkillRootStatus, SkillSource } from "../../../core/skill-manager";
 import { formatCompactNumber } from "../format-count";
 import { localize, type LanguageMode } from "../language";
@@ -19,6 +19,7 @@ export function SkillsDialog({
   onRefresh,
   onUpload,
   onInstallRemote,
+  onFetchVersion,
   onRefreshRemote,
   onCopySetupSql,
   onCopyPath,
@@ -33,8 +34,9 @@ export function SkillsDialog({
   language: LanguageMode;
   revealLabel: string;
   onRefresh: () => void;
-  onUpload: (skill: InstalledSkill) => Promise<void>;
+  onUpload: (skill: InstalledSkill, force?: boolean) => Promise<SkillSyncUploadOutcome | null>;
   onInstallRemote: (remoteSkillId: string) => Promise<void>;
+  onFetchVersion: (remoteSkillId: string) => Promise<RemoteSkill>;
   onRefreshRemote: () => void;
   onCopySetupSql: () => void;
   onCopyPath: (skillPath: string) => void;
@@ -48,26 +50,33 @@ export function SkillsDialog({
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
   const [sortKey, setSortKey] = useState<SkillSortKey>("usage");
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-  const [selectedRemoteId, setSelectedRemoteId] = useState<string | null>(null);
+  const [selectedGroupFingerprint, setSelectedGroupFingerprint] = useState<string | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [versionContent, setVersionContent] = useState<Record<string, string>>({});
+  const [versionLoadingId, setVersionLoadingId] = useState<string | null>(null);
+  const [versionError, setVersionError] = useState<string | null>(null);
   const [skillContextMenu, setSkillContextMenu] = useState<{ x: number; y: number; skill: InstalledSkill } | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<InstalledSkill | null>(null);
   const [deletingSkill, setDeletingSkill] = useState(false);
+  const [uploadConfirm, setUploadConfirm] = useState<{ skill: InstalledSkill; conflict: SkillSyncUploadConflict } | null>(null);
   const filteredSkills = useMemo(() => {
     const filtered = filterInstalledSkills(snapshot.skills, query, sourceFilter);
     return sortInstalledSkills(filtered, sortKey);
   }, [snapshot.skills, query, sourceFilter, sortKey]);
   const visibleRoots = useMemo(() => summarizeSkillRoots(snapshot.roots), [snapshot.roots]);
-  const remoteSkills = useMemo(() => filterRemoteSkills(syncSnapshot.remoteSkills, query), [syncSnapshot.remoteSkills, query]);
+  const remoteGroups = useMemo(() => filterRemoteSkillGroups(syncSnapshot.remoteSkillGroups, query), [syncSnapshot.remoteSkillGroups, query]);
   const selectedSkill =
     filteredSkills.find((skill) => skill.id === selectedSkillId) ??
     filteredSkills[0] ??
     null;
-  const selectedRemote =
-    remoteSkills.find((skill) => skill.id === selectedRemoteId) ??
-    remoteSkills[0] ??
+  const selectedGroup =
+    remoteGroups.find((group) => group.fingerprint === selectedGroupFingerprint) ??
+    remoteGroups[0] ??
     null;
+  const selectedVersion =
+    selectedGroup?.versions.find((version) => version.id === selectedVersionId) ?? selectedGroup?.latest ?? null;
   const selectedSkillBinding = selectedSkill ? syncSnapshot.bindings.find((binding) => binding.localSkillPath === selectedSkill.path) : null;
-  const selectedRemoteBinding = selectedRemote ? syncSnapshot.bindings.find((binding) => binding.remoteSkillId === selectedRemote.id) : null;
+  const selectedGroupBinding = selectedGroup ? bindingForGroup(syncSnapshot, selectedGroup) : null;
   const syncReady = syncSnapshot.status.kind === "ready";
   const codexCount = snapshot.skills.filter((skill) => skill.agent === "codex").length;
   const claudeCount = snapshot.skills.filter((skill) => skill.agent === "claude").length;
@@ -86,16 +95,52 @@ export function SkillsDialog({
   }, [selectedSkill?.id]);
 
   useEffect(() => {
-    if (!remoteSkills.length) {
-      if (selectedRemoteId) setSelectedRemoteId(null);
+    if (!remoteGroups.length) {
+      if (selectedGroupFingerprint) setSelectedGroupFingerprint(null);
       return;
     }
-    if (!selectedRemoteId || !remoteSkills.some((skill) => skill.id === selectedRemoteId)) setSelectedRemoteId(remoteSkills[0].id);
-  }, [remoteSkills, selectedRemoteId]);
+    if (!selectedGroupFingerprint || !remoteGroups.some((group) => group.fingerprint === selectedGroupFingerprint)) {
+      setSelectedGroupFingerprint(remoteGroups[0].fingerprint);
+    }
+  }, [remoteGroups, selectedGroupFingerprint]);
+
+  // Default to the latest version whenever the selected skill group changes.
+  useEffect(() => {
+    if (!selectedGroup) {
+      if (selectedVersionId) setSelectedVersionId(null);
+      return;
+    }
+    if (!selectedVersionId || !selectedGroup.versions.some((version) => version.id === selectedVersionId)) {
+      setSelectedVersionId(selectedGroup.latest.id);
+    }
+  }, [selectedGroup, selectedVersionId]);
+
+  // The version list is lightweight (no markdown); fetch the body on demand for preview.
+  useEffect(() => {
+    const id = selectedVersion?.id;
+    if (!id || versionContent[id] !== undefined) return;
+    let cancelled = false;
+    setVersionLoadingId(id);
+    setVersionError(null);
+    onFetchVersion(id)
+      .then((full) => {
+        if (!cancelled) setVersionContent((current) => ({ ...current, [id]: full.markdown }));
+      })
+      .catch((error) => {
+        if (!cancelled) setVersionError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setVersionLoadingId((current) => (current === id ? null : current));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVersion?.id, versionContent, onFetchVersion]);
 
   const handleListKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
-      if (deleteCandidate) setDeleteCandidate(null);
+      if (uploadConfirm) setUploadConfirm(null);
+      else if (deleteCandidate) setDeleteCandidate(null);
       else if (skillContextMenu) setSkillContextMenu(null);
       else return;
       event.preventDefault();
@@ -128,6 +173,18 @@ export function SkillsDialog({
     }
   };
 
+  const handleUpload = async (skill: InstalledSkill) => {
+    const outcome = await onUpload(skill, false);
+    if (outcome && outcome.status === "needs-confirmation") setUploadConfirm({ skill, conflict: outcome.conflict });
+  };
+
+  const confirmUpload = async () => {
+    if (!uploadConfirm) return;
+    const { skill } = uploadConfirm;
+    setUploadConfirm(null);
+    await onUpload(skill, true);
+  };
+
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
       <section
@@ -141,7 +198,7 @@ export function SkillsDialog({
         <div className="dialog-title">
           <span>{l("Skills", "Skills 管理")}</span>
           <span className="skills-dialog-count">
-            Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)} · Remote {formatCompactNumber(syncSnapshot.remoteSkills.length)}
+            Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)} · Remote {formatCompactNumber(syncSnapshot.remoteSkillGroups.length)}
           </span>
           <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
             <X size={16} />
@@ -197,7 +254,7 @@ export function SkillsDialog({
           <div className="skills-list">
             {loading ? <div className="skills-empty">{syncView === "local" ? l("Loading installed skills...", "正在加载已安装 Skills...") : l("Loading remote skills...", "正在加载远程 Skills...")}</div> : null}
             {!loading && syncView === "local" && filteredSkills.length === 0 ? <div className="skills-empty">{l("No skills found.", "没有找到 Skill。")}</div> : null}
-            {!loading && syncView === "remote" && remoteSkills.length === 0 ? <div className="skills-empty">{remoteEmptyLabel(syncSnapshot, language)}</div> : null}
+            {!loading && syncView === "remote" && remoteGroups.length === 0 ? <div className="skills-empty">{remoteEmptyLabel(syncSnapshot, language)}</div> : null}
             {!loading && syncView === "local"
               ? filteredSkills.map((skill) => (
                   <button
@@ -223,22 +280,28 @@ export function SkillsDialog({
                 ))
               : null}
             {!loading && syncView === "remote"
-              ? remoteSkills.map((skill) => (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    className={`skill-item ${selectedRemote?.id === skill.id ? "active" : ""}`}
-                    onClick={() => setSelectedRemoteId(skill.id)}
-                  >
-                    <span className="skill-item-head">
-                      <strong>{skill.name}</strong>
-                      {syncSnapshot.bindings.some((binding) => binding.remoteSkillId === skill.id) ? <span className="skill-usage-count">{l("Local", "本地")}</span> : null}
-                      <span className={`skill-source-badge ${skill.source}`}>{skill.agent === "codex" ? "Codex" : "Claude Code"}</span>
-                    </span>
-                    <span className="skill-item-desc">{skill.description || l("No description", "无描述")}</span>
-                    <span className="skill-item-path">{new Date(skill.updatedAt).toLocaleString()}</span>
-                  </button>
-                ))
+              ? remoteGroups.map((group) => {
+                  const binding = bindingForGroup(syncSnapshot, group);
+                  return (
+                    <button
+                      key={group.fingerprint}
+                      type="button"
+                      className={`skill-item ${selectedGroup?.fingerprint === group.fingerprint ? "active" : ""}`}
+                      onClick={() => setSelectedGroupFingerprint(group.fingerprint)}
+                    >
+                      <span className="skill-item-head">
+                        <strong>{group.name}</strong>
+                        <span className="skill-usage-count" title={l("Latest version", "最新版本")}>v{group.latest.version}</span>
+                        {binding ? <span className="skill-usage-count">{l(`Local v${binding.remoteVersion}`, `本地 v${binding.remoteVersion}`)}</span> : null}
+                        <span className={`skill-source-badge ${group.source}`}>{group.agent === "codex" ? "Codex" : "Claude Code"}</span>
+                      </span>
+                      <span className="skill-item-desc">{group.description || l("No description", "无描述")}</span>
+                      <span className="skill-item-path">
+                        {l(`${group.versions.length} versions`, `${group.versions.length} 个版本`)} · {new Date(group.latest.updatedAt).toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })
               : null}
           </div>
 
@@ -254,9 +317,9 @@ export function SkillsDialog({
                     <p>{selectedSkill.description || l("No description", "无描述")}</p>
                   </div>
                   <div className="skill-preview-actions">
-                    <button type="button" disabled={!syncReady || loading} onClick={() => void onUpload(selectedSkill)} title={!syncReady ? syncDisabledTitle(syncSnapshot, language) : ""}>
+                    <button type="button" disabled={!syncReady || loading} onClick={() => void handleUpload(selectedSkill)} title={!syncReady ? syncDisabledTitle(syncSnapshot, language) : ""}>
                       <Upload size={14} />
-                      {selectedSkillBinding ? l("Update remote", "更新远程") : l("Upload", "上传")}
+                      {selectedSkillBinding ? l("Upload new version", "上传新版本") : l("Upload", "上传")}
                     </button>
                   </div>
                 </div>
@@ -284,50 +347,64 @@ export function SkillsDialog({
                   {selectedSkillBinding ? (
                     <div>
                       <dt>{l("Remote", "远程")}</dt>
-                      <dd>{new Date(selectedSkillBinding.lastSyncedAt).toLocaleString()}</dd>
+                      <dd>{l(`v${selectedSkillBinding.remoteVersion} · ${new Date(selectedSkillBinding.lastSyncedAt).toLocaleString()}`, `v${selectedSkillBinding.remoteVersion} · ${new Date(selectedSkillBinding.lastSyncedAt).toLocaleString()}`)}</dd>
                     </div>
                   ) : null}
                 </dl>
                 <pre className="skill-markdown-preview">{skillPreviewMarkdown(selectedSkill.markdown, language)}</pre>
               </>
-            ) : syncView === "remote" && selectedRemote ? (
+            ) : syncView === "remote" && selectedGroup && selectedVersion ? (
               <>
                 <div className="skill-preview-head">
                   <div>
                     <div className="skill-preview-title">
-                      <h3>{selectedRemote.name}</h3>
-                      <span className={`skill-source-badge ${selectedRemote.source}`}>{selectedRemote.agent === "codex" ? "Codex" : "Claude Code"}</span>
+                      <h3>{selectedGroup.name}</h3>
+                      <span className={`skill-source-badge ${selectedGroup.source}`}>{selectedGroup.agent === "codex" ? "Codex" : "Claude Code"}</span>
                     </div>
-                    <p>{selectedRemote.description || l("No description", "无描述")}</p>
+                    <p>{selectedGroup.description || l("No description", "无描述")}</p>
                   </div>
                   <div className="skill-preview-actions">
-                    <button type="button" disabled={!syncReady || loading} onClick={() => void onInstallRemote(selectedRemote.id)}>
+                    <label className="skills-sort" title={l("Version", "版本")}>
+                      <span>{l("Version", "版本")}</span>
+                      <select
+                        value={selectedVersion.id}
+                        onChange={(event) => setSelectedVersionId(event.currentTarget.value)}
+                        aria-label={l("Select version", "选择版本")}
+                      >
+                        {selectedGroup.versions.map((version) => (
+                          <option key={version.id} value={version.id}>
+                            {versionOptionLabel(version, selectedGroup.latest.id, language)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button type="button" disabled={!syncReady || loading} onClick={() => void onInstallRemote(selectedVersion.id)}>
                       <Download size={14} />
-                      {selectedRemoteBinding ? l("Update local", "更新本地") : l("Install locally", "安装到本地")}
+                      {selectedGroupBinding ? l("Update local", "更新本地") : l("Install locally", "安装到本地")}
                     </button>
                   </div>
                 </div>
                 <dl className="skill-meta">
                   <div>
                     <dt>{l("Agent", "Agent")}</dt>
-                    <dd>{selectedRemote.agent === "codex" ? "Codex" : "Claude Code"}</dd>
+                    <dd>{selectedGroup.agent === "codex" ? "Codex" : "Claude Code"}</dd>
+                  </div>
+                  <div>
+                    <dt>{l("Version", "版本")}</dt>
+                    <dd>{versionOptionLabel(selectedVersion, selectedGroup.latest.id, language)}</dd>
                   </div>
                   <div>
                     <dt>{l("Updated", "更新时间")}</dt>
-                    <dd>{new Date(selectedRemote.updatedAt).toLocaleString()}</dd>
+                    <dd>{new Date(selectedVersion.updatedAt).toLocaleString()}</dd>
                   </div>
-                  <div>
-                    <dt>{l("Remote ID", "远程 ID")}</dt>
-                    <dd title={selectedRemote.id}>{selectedRemote.id}</dd>
-                  </div>
-                  {selectedRemoteBinding ? (
+                  {selectedGroupBinding ? (
                     <div>
                       <dt>{l("Local", "本地")}</dt>
-                      <dd title={selectedRemoteBinding.localSkillPath}>{selectedRemoteBinding.localSkillPath}</dd>
+                      <dd title={selectedGroupBinding.localSkillPath}>{l(`v${selectedGroupBinding.remoteVersion}`, `v${selectedGroupBinding.remoteVersion}`)} · {selectedGroupBinding.localSkillPath}</dd>
                     </div>
                   ) : null}
                 </dl>
-                <pre className="skill-markdown-preview">{skillPreviewMarkdown(selectedRemote.markdown, language)}</pre>
+                <pre className="skill-markdown-preview">{remoteVersionPreview(selectedVersion.id, versionContent, versionLoadingId, versionError, language)}</pre>
               </>
             ) : (
               <div className="skills-empty">{l("Select a skill to preview it.", "选择一个 Skill 查看内容。")}</div>
@@ -359,6 +436,15 @@ export function SkillsDialog({
             onCancel={() => {
               if (!deletingSkill) setDeleteCandidate(null);
             }}
+          />
+        ) : null}
+        {uploadConfirm ? (
+          <UploadVersionConfirmDialog
+            skill={uploadConfirm.skill}
+            conflict={uploadConfirm.conflict}
+            language={language}
+            onConfirm={() => void confirmUpload()}
+            onCancel={() => setUploadConfirm(null)}
           />
         ) : null}
       </section>
@@ -416,12 +502,34 @@ function skillSourceUiLabel(source: SkillSource, language: LanguageMode): string
   return skillSourceLabel(source);
 }
 
-function filterRemoteSkills(skills: RemoteSkill[], query: string): RemoteSkill[] {
+function bindingForGroup(snapshot: SkillSyncSnapshot, group: RemoteSkillGroup) {
+  const versionIds = new Set(group.versions.map((version) => version.id));
+  return snapshot.bindings.find((binding) => versionIds.has(binding.remoteSkillId)) ?? null;
+}
+
+function versionOptionLabel(version: RemoteSkillVersion, latestId: string, language: LanguageMode): string {
+  return version.id === latestId ? localize(language, `v${version.version} · latest`, `v${version.version} · 最新`) : `v${version.version}`;
+}
+
+function filterRemoteSkillGroups(groups: RemoteSkillGroup[], query: string): RemoteSkillGroup[] {
   const normalizedQuery = query.trim().toLowerCase();
-  const filtered = normalizedQuery
-    ? skills.filter((skill) => [skill.name, skill.description, skill.agent, skill.source, skill.id].join("\n").toLowerCase().includes(normalizedQuery))
-    : skills;
-  return [...filtered].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.name.localeCompare(b.name));
+  if (!normalizedQuery) return groups;
+  return groups.filter((group) =>
+    [group.name, group.description, group.agent, group.source, group.fingerprint].join("\n").toLowerCase().includes(normalizedQuery),
+  );
+}
+
+function remoteVersionPreview(
+  versionId: string,
+  versionContent: Record<string, string>,
+  loadingId: string | null,
+  error: string | null,
+  language: LanguageMode,
+): string {
+  if (versionContent[versionId] !== undefined) return skillPreviewMarkdown(versionContent[versionId], language);
+  if (loadingId === versionId) return localize(language, "Loading version...", "正在加载版本...");
+  if (error) return error;
+  return localize(language, "Loading version...", "正在加载版本...");
 }
 
 function syncDisabledTitle(snapshot: SkillSyncSnapshot, language: LanguageMode): string {
@@ -449,7 +557,7 @@ function SkillSyncStatusPanel({
   if (snapshot.status.kind === "ready") {
     return (
       <div className="skill-sync-panel ready">
-        <span>{l(`${snapshot.remoteSkills.length} remote skills`, `${snapshot.remoteSkills.length} 个远程 Skill`)}</span>
+        <span>{l(`${snapshot.remoteSkillGroups.length} remote skills`, `${snapshot.remoteSkillGroups.length} 个远程 Skill`)}</span>
       </div>
     );
   }
@@ -555,6 +663,57 @@ function DeleteSkillDialog({
           </button>
           <button type="button" className="danger-action" onClick={onConfirm} disabled={deleting}>
             {deleting ? l("Deleting...", "正在删除...") : l("Delete Permanently", "永久删除")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UploadVersionConfirmDialog({
+  skill,
+  conflict,
+  language,
+  onConfirm,
+  onCancel,
+}: {
+  skill: InstalledSkill;
+  conflict: SkillSyncUploadConflict;
+  language: LanguageMode;
+  onConfirm: () => void;
+  onCancel: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  return (
+    <div className="dialog-backdrop" onMouseDown={onCancel}>
+      <div className="command-dialog delete-skill-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="dialog-title">
+          <span>{l("Upload new version?", "上传新版本？")}</span>
+          <button type="button" className="icon-button" onClick={onCancel} aria-label={l("Close", "关闭")}>
+            <X size={16} />
+          </button>
+        </div>
+        <p className="dialog-copy">
+          {l(
+            `The latest remote version (v${conflict.latestVersion}) of "${skill.name}" was uploaded from a different skill.`,
+            `"${skill.name}" 的最新远程版本（v${conflict.latestVersion}）是从另一个 Skill 上传的。`,
+          )}
+        </p>
+        <p className="dialog-copy danger-copy">
+          {l(
+            `Uploading will add v${conflict.latestVersion + 1} to the same skill (matched by name).`,
+            `上传会把 v${conflict.latestVersion + 1} 追加到同一个 Skill（按名称匹配）。`,
+          )}
+        </p>
+        <div className="delete-skill-path" title={conflict.latestPath}>
+          {l(`Latest from: ${conflict.latestPath || conflict.latestSource}`, `最新来自：${conflict.latestPath || conflict.latestSource}`)}
+        </div>
+        <div className="dialog-actions">
+          <button type="button" onClick={onCancel}>
+            {l("Cancel", "取消")}
+          </button>
+          <button type="button" className="danger-action" onClick={onConfirm}>
+            {l("Upload new version", "上传新版本")}
           </button>
         </div>
       </div>

@@ -131,6 +131,7 @@ export interface SkillSyncBinding {
   localSkillPath: string;
   remoteSkillId: string;
   remoteUpdatedAt: string;
+  remoteVersion: number;
   lastSyncedAt: number;
   direction: SkillSyncDirection;
 }
@@ -145,6 +146,7 @@ interface SkillSyncBindingRow {
   local_skill_path: string;
   remote_skill_id: string;
   remote_updated_at: string;
+  remote_version: number;
   last_synced_at: number;
   direction: SkillSyncDirection;
 }
@@ -899,16 +901,24 @@ export class SessionStore {
       this.db
         .prepare(
           `
-        INSERT INTO skill_sync_bindings (local_skill_path, remote_skill_id, remote_updated_at, last_synced_at, direction)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO skill_sync_bindings (local_skill_path, remote_skill_id, remote_updated_at, remote_version, last_synced_at, direction)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(local_skill_path) DO UPDATE SET
           remote_skill_id = excluded.remote_skill_id,
           remote_updated_at = excluded.remote_updated_at,
+          remote_version = excluded.remote_version,
           last_synced_at = excluded.last_synced_at,
           direction = excluded.direction
       `,
         )
-        .run(localSkillPath, remoteSkillId, binding.remoteUpdatedAt, binding.lastSyncedAt, binding.direction);
+        .run(
+          localSkillPath,
+          remoteSkillId,
+          binding.remoteUpdatedAt,
+          nonNegativeNumber(binding.remoteVersion) || 1,
+          binding.lastSyncedAt,
+          binding.direction,
+        );
     });
   }
 
@@ -916,7 +926,7 @@ export class SessionStore {
     const row = this.db
       .prepare(
         `
-        SELECT local_skill_path, remote_skill_id, remote_updated_at, last_synced_at, direction
+        SELECT local_skill_path, remote_skill_id, remote_updated_at, remote_version, last_synced_at, direction
         FROM skill_sync_bindings
         WHERE local_skill_path = ?
       `,
@@ -929,7 +939,7 @@ export class SessionStore {
     const row = this.db
       .prepare(
         `
-        SELECT local_skill_path, remote_skill_id, remote_updated_at, last_synced_at, direction
+        SELECT local_skill_path, remote_skill_id, remote_updated_at, remote_version, last_synced_at, direction
         FROM skill_sync_bindings
         WHERE remote_skill_id = ?
       `,
@@ -942,7 +952,7 @@ export class SessionStore {
     const rows = this.db
       .prepare(
         `
-        SELECT local_skill_path, remote_skill_id, remote_updated_at, last_synced_at, direction
+        SELECT local_skill_path, remote_skill_id, remote_updated_at, remote_version, last_synced_at, direction
         FROM skill_sync_bindings
         ORDER BY last_synced_at DESC, local_skill_path
       `,
@@ -1287,6 +1297,7 @@ export class SessionStore {
         local_skill_path TEXT PRIMARY KEY,
         remote_skill_id TEXT NOT NULL UNIQUE,
         remote_updated_at TEXT NOT NULL,
+        remote_version INTEGER NOT NULL DEFAULT 1,
         last_synced_at INTEGER NOT NULL,
         direction TEXT NOT NULL
       );
@@ -1354,6 +1365,7 @@ export class SessionStore {
     this.addColumnIfMissing("sessions", "ai_summary_at", "INTEGER");
     this.addColumnIfMissing("sessions", "ai_summary_basis", "INTEGER");
     this.addColumnIfMissing("sessions", "indexed_at", "INTEGER NOT NULL DEFAULT 0");
+    this.addColumnIfMissing("skill_sync_bindings", "remote_version", "INTEGER NOT NULL DEFAULT 1");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_sessions_environment
         ON sessions(environment_id);
@@ -2018,6 +2030,7 @@ function skillSyncBindingFromRow(row: SkillSyncBindingRow): SkillSyncBinding {
     localSkillPath: row.local_skill_path,
     remoteSkillId: row.remote_skill_id,
     remoteUpdatedAt: row.remote_updated_at,
+    remoteVersion: typeof row.remote_version === "number" && Number.isFinite(row.remote_version) ? row.remote_version : 1,
     lastSyncedAt: row.last_synced_at,
     direction: row.direction,
   };
