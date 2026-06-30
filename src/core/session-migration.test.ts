@@ -187,9 +187,9 @@ describe("session migration model", () => {
   });
 
   it.each([
-    ["claude-cli", ["codex", "codebuddy"]],
-    ["codex-app", ["claude", "codebuddy"]],
-    ["codebuddy-cli", ["claude", "codex"]],
+    ["claude-cli", ["claude", "codex", "codebuddy"]],
+    ["codex-app", ["claude", "codex", "codebuddy"]],
+    ["codebuddy-cli", ["claude", "codex", "codebuddy"]],
     ["hermes", []],
   ] as const)("returns ordered migration targets for %s", (source, expected) => {
     expect(supportedMigrationTargets(source)).toEqual(expected);
@@ -254,12 +254,15 @@ describe("session migration model", () => {
 
 describe("migrateSession", () => {
   it.each([
+    ["claude-cli", "claude"],
     ["claude-cli", "codex"],
     ["claude-cli", "codebuddy"],
     ["codex-cli", "claude"],
+    ["codex-cli", "codex"],
     ["codex-cli", "codebuddy"],
     ["codebuddy-cli", "claude"],
     ["codebuddy-cli", "codex"],
+    ["codebuddy-cli", "codebuddy"],
   ] as const)("migrates %s to %s", async (source, target) => {
     const { deps, write, launch, refreshIndex, seenRecords } = createDependencies();
 
@@ -308,12 +311,6 @@ describe("migrateSession", () => {
       session("claude-cli", { environmentKind: "ssh", environmentId: "remote" }),
       "codex",
       "Remote session migration is not supported yet.",
-    ],
-    [
-      "same target",
-      session("claude-cli"),
-      "claude",
-      "Session is already a claude session.",
     ],
     [
       "empty project path",

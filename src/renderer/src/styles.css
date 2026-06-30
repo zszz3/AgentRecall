@@ -2111,6 +2111,8 @@ select:focus-visible {
   background: var(--panel-bg);
   color: var(--text);
   text-align: left;
+  font-size: 15px;
+  font-weight: 700;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 

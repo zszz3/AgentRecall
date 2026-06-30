@@ -72,7 +72,7 @@ export function migrationAgentForSource(source: SessionSource): MigrationAgent |
 
 export function supportedMigrationTargets(source: SessionSource): MigrationAgent[] {
   const sourceAgent = migrationAgentForSource(source);
-  return sourceAgent ? MIGRATION_AGENTS.filter((target) => target !== sourceAgent) : [];
+  return sourceAgent ? [...MIGRATION_AGENTS] : [];
 }
 
 export function portableSessionFrom(
@@ -224,9 +224,6 @@ async function validateMigrationRequest(
   }
   if (!MIGRATION_AGENTS.includes(target)) {
     throw new Error(`Migration target ${target} is not supported.`);
-  }
-  if (target === sourceAgent) {
-    throw new Error(`Session is already a ${sourceAgent} session.`);
   }
 
   const projectPath = source.projectPath;

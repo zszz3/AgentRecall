@@ -1791,7 +1791,7 @@ export function App(): ReactElement {
             isRemoteSession(detail)
               ? remoteMigrationTitle(language)
               : supportsMigrationSource(detail.source)
-                ? t("Migrate to another agent", "迁移到另一个 Agent")
+                ? t("Migrate session to…", "迁移会话到…")
                 : unsupportedMigrationTitle(language)
           }
           onResume={() =>
@@ -2318,7 +2318,7 @@ function ContextMenu({
   const migrateTitle = localOnlyDisabled
     ? remoteMigrationTitle(language)
     : canMigrate
-      ? l("Migrate to another agent", "迁移到另一个 Agent")
+      ? l("Migrate session to…", "迁移会话到…")
       : unsupportedMigrationTitle(language);
   return (
     <div ref={menu.ref} className="context-menu" style={menu.style} onClick={(event) => event.stopPropagation()}>

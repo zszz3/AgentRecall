@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { Copy, X } from "lucide-react";
 import type { MigrationAgent, SessionMigrationResult, SessionSearchResult } from "../../../core/types";
 import { localize, type LanguageMode } from "../language";
-import { isRemoteSession, migrationAgentLabel, migrationTargetsForSource, sourceMigrationAgent } from "../session-ui";
+import { isRemoteSession, migrationAgentLabel, migrationTargetsForSource } from "../session-ui";
 
 export function SessionMigrationDialog({
   session,
@@ -18,7 +18,6 @@ export function SessionMigrationDialog({
   onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const sourceAgent = sourceMigrationAgent(session.source);
   const targets = migrationTargetsForSource(session.source);
   const remote = isRemoteSession(session);
 
@@ -37,7 +36,7 @@ export function SessionMigrationDialog({
         {remote ? <p className="dialog-copy danger-copy">{l("Remote session migration is not supported yet.", "首版仅支持本地会话迁移。")}</p> : null}
         <div className="migration-targets">
           {(["claude", "codex", "codebuddy"] as const).map((target) => {
-            const disabled = busy || remote || target === sourceAgent || !targets.includes(target);
+            const disabled = busy || remote || !targets.includes(target);
             return (
               <button key={target} type="button" onClick={() => onSelect(target)} disabled={disabled}>
                 {migrationAgentLabel(target)}
