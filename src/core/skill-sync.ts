@@ -57,7 +57,10 @@ export interface SupabaseSkillSyncClientOptions {
   url: string;
   anonKey: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }
+
+const DEFAULT_SKILL_SYNC_TIMEOUT_MS = 15_000;
 
 interface SupabaseSkillRow {
   id: string;
@@ -130,11 +133,13 @@ export class SupabaseSkillSyncClient {
   private readonly baseUrl: string;
   private readonly anonKey: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
 
   constructor(options: SupabaseSkillSyncClientOptions) {
     this.baseUrl = normalizeSupabaseUrl(options.url);
     this.anonKey = options.anonKey.trim();
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_SKILL_SYNC_TIMEOUT_MS;
     if (!this.baseUrl) throw new Error("Supabase URL is required.");
     if (!this.anonKey) throw new Error("Supabase anon key is required.");
   }
@@ -199,16 +204,28 @@ export class SupabaseSkillSyncClient {
     return remoteSkill;
   }
 
-  private request(path: string, init: RequestInit): Promise<Response> {
-    return this.fetchImpl(`${this.baseUrl}/rest/v1${path}`, {
-      ...init,
-      headers: {
-        apikey: this.anonKey,
-        Authorization: `Bearer ${this.anonKey}`,
-        "Content-Type": "application/json",
-        ...(init.headers ?? {}),
-      },
-    });
+  private async request(path: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await this.fetchImpl(`${this.baseUrl}/rest/v1${path}`, {
+        ...init,
+        signal: controller.signal,
+        headers: {
+          apikey: this.anonKey,
+          Authorization: `Bearer ${this.anonKey}`,
+          "Content-Type": "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`Supabase request timed out after ${Math.round(this.timeoutMs / 1000)}s.`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

@@ -254,4 +254,21 @@ describe("skill sync", () => {
 
     await expect(client.getRemoteSkill("remote-1")).resolves.toEqual(remote);
   });
+
+  it("aborts a slow Supabase request with a timeout instead of hanging forever", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const client = new SupabaseSkillSyncClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      timeoutMs: 50,
+      fetchImpl: (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          receivedSignal = init?.signal ?? undefined;
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        }),
+    });
+
+    await expect(client.checkStatus()).rejects.toThrow(/timed out/i);
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+  });
 });

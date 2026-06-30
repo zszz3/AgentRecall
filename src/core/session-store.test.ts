@@ -505,6 +505,45 @@ describe("SessionStore", () => {
     store.close();
   });
 
+  it("rebinds a remote skill to the latest local path instead of crashing on the unique remote id", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertSkillSyncBinding({
+        localSkillPath: "/tmp/.claude/skills/foo/SKILL.md",
+        remoteSkillId: "remote-foo",
+        remoteUpdatedAt: "2026-06-29T10:00:00.000Z",
+        lastSyncedAt: 100,
+        direction: "upload",
+      });
+
+      // A different local skill that shares the same agent+name resolves to the same remote
+      // fingerprint/id. Re-binding must move the remote pointer, not violate UNIQUE(remote_skill_id).
+      expect(() =>
+        store.upsertSkillSyncBinding({
+          localSkillPath: "/work/project/.claude/skills/foo/SKILL.md",
+          remoteSkillId: "remote-foo",
+          remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+          lastSyncedAt: 200,
+          direction: "upload",
+        }),
+      ).not.toThrow();
+
+      expect(store.listSkillSyncBindings()).toEqual([
+        {
+          localSkillPath: "/work/project/.claude/skills/foo/SKILL.md",
+          remoteSkillId: "remote-foo",
+          remoteUpdatedAt: "2026-06-29T11:00:00.000Z",
+          lastSyncedAt: 200,
+          direction: "upload",
+        },
+      ]);
+      expect(store.getSkillSyncBindingForRemoteId("remote-foo")?.localSkillPath).toBe("/work/project/.claude/skills/foo/SKILL.md");
+      expect(store.getSkillSyncBindingForLocalPath("/tmp/.claude/skills/foo/SKILL.md")).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
   it("records duplicate session migrations and lists them in descending creation order", () => {
     const store = createInMemoryStore();
     try {

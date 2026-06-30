@@ -889,9 +889,16 @@ export class SessionStore {
     const localSkillPath = binding.localSkillPath.trim();
     const remoteSkillId = binding.remoteSkillId.trim();
     if (!localSkillPath || !remoteSkillId) return;
-    this.db
-      .prepare(
-        `
+    // A remote skill maps to exactly one local path. Two local skills that share an agent+name
+    // resolve to the same remote fingerprint/id, so re-binding must move the remote pointer to the
+    // latest local path rather than violating the UNIQUE(remote_skill_id) constraint.
+    this.transaction(() => {
+      this.db
+        .prepare(`DELETE FROM skill_sync_bindings WHERE remote_skill_id = ? AND local_skill_path <> ?`)
+        .run(remoteSkillId, localSkillPath);
+      this.db
+        .prepare(
+          `
         INSERT INTO skill_sync_bindings (local_skill_path, remote_skill_id, remote_updated_at, last_synced_at, direction)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(local_skill_path) DO UPDATE SET
@@ -900,8 +907,9 @@ export class SessionStore {
           last_synced_at = excluded.last_synced_at,
           direction = excluded.direction
       `,
-      )
-      .run(localSkillPath, remoteSkillId, binding.remoteUpdatedAt, binding.lastSyncedAt, binding.direction);
+        )
+        .run(localSkillPath, remoteSkillId, binding.remoteUpdatedAt, binding.lastSyncedAt, binding.direction);
+    });
   }
 
   getSkillSyncBindingForLocalPath(localSkillPath: string): SkillSyncBinding | null {
