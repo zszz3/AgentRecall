@@ -28,7 +28,7 @@
 - **AI / Agent 辅助检索历史会话**：
   可以使用 AI 摘要增强历史会话检索，也支持自然语言找会话；同时开放只读 MCP 能力，让 Claude Code / Codex / CodeBuddy 可以在对话里直接搜索和读取历史会话。
 - **跨 Agent 迁移会话**：
-  支持把 Claude / Codex / CodeBuddy 会话迁移到另一个 Agent，并在迁移后继续工作。
+  **支持把 Claude / Codex / CodeBuddy 会话迁移到Claude / Codex / CodeBuddy，并在迁移后继续工作，非常好用！！！**。
 - **统一查看 Agent 用量和额度**：
   统计今日、近 7 天、近 30 天和全部时间的各 Agent token 使用量；同时查看 Claude Code / Codex 的当前额度状态。
 - **统一管理 Skills 和 API Provider**：
