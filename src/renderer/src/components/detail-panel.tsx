@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, Copy, Download, Edit3, FolderOpen, Laptop, Play, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, CloudUpload, Copy, Download, Edit3, FolderOpen, Laptop, Play, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../core/types";
 import { formatTokenCount } from "../format-count";
@@ -94,12 +94,14 @@ export function DetailPanel({
   onResume,
   onResumeIterm,
   onMigrate,
+  onUploadRemote,
   onCopyResume,
   onCopyMarkdown,
   onExportMarkdown,
   onCopyPlain,
   onDelete,
   onReveal,
+  readOnly = false,
 }: {
   session: SessionSearchResult;
   messages: SessionMessage[];
@@ -127,12 +129,14 @@ export function DetailPanel({
   onResume: () => void;
   onResumeIterm: () => void;
   onMigrate: () => void;
+  onUploadRemote?: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
   onCopyPlain: () => void;
   onDelete: () => void;
   onReveal: () => void;
+  readOnly?: boolean;
 }): ReactElement {
   const matchIndex = query
     ? messages.findIndex((message) => message.content.toLowerCase().includes(query.toLowerCase()))
@@ -216,9 +220,11 @@ export function DetailPanel({
             </div>
             <div className="detail-title-row">
               <h2>{session.displayTitle}</h2>
-              <button className="title-edit-button detail-title-edit" onClick={onRename} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
-                <Edit3 size={14} />
-              </button>
+              {!readOnly ? (
+                <button className="title-edit-button detail-title-edit" onClick={onRename} aria-label={l("Rename session", "重命名会话")} title={l("Rename session", "重命名会话")}>
+                  <Edit3 size={14} />
+                </button>
+              ) : null}
             </div>
             <p>
               {session.projectPath || l("No project", "无项目")} · {new Date(session.timestamp).toLocaleString()} · {l(`${messages.length} messages`, `${messages.length} 条消息`)} ·{" "}
@@ -227,20 +233,22 @@ export function DetailPanel({
             </p>
           </div>
           <div className="detail-header-actions">
-            <button
-              className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
-              onClick={onFavorite}
-              aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-              title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
-            >
-              <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
-            </button>
+            {!readOnly ? (
+              <button
+                className={`icon-button favorite-button ${session.favorited ? "active" : ""}`}
+                onClick={onFavorite}
+                aria-label={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
+                title={session.favorited ? l("Remove from favorites", "取消收藏") : l("Add to favorites", "加入收藏")}
+              >
+                <Star size={17} fill={session.favorited ? "currentColor" : "none"} />
+              </button>
+            ) : null}
             <button className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
               <X size={17} />
             </button>
           </div>
         </div>
-        <div className="detail-actions">
+        {!readOnly ? <div className="detail-actions">
           {canResume ? (
             <button onClick={onResume} disabled={actionRunning}>
               <Play size={15} /> Resume
@@ -265,6 +273,11 @@ export function DetailPanel({
           <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
             <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
           </button>
+          {onUploadRemote ? (
+            <button onClick={onUploadRemote} disabled={actionRunning}>
+              <CloudUpload size={15} /> {l("Upload", "上传")}
+            </button>
+          ) : null}
           {canResume ? (
             <button onClick={onCopyResume} disabled={actionRunning}>
               <Copy size={15} /> {l("Copy Cmd", "复制命令")}
@@ -281,7 +294,7 @@ export function DetailPanel({
           <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
             <FolderOpen size={15} /> {revealLabel}
           </button>
-        </div>
+        </div> : null}
         {session.aiSummary ? (
           <div className="detail-summary">
             <span className="detail-summary-label">
@@ -293,7 +306,7 @@ export function DetailPanel({
         ) : null}
         <div className="detail-tags">
           {session.tags.map((tagName) => (
-            <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)}>
+            <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
               #{tagName} ×
             </button>
           ))}

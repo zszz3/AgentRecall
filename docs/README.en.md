@@ -29,6 +29,8 @@
   Use AI summaries to improve history search, ask for sessions in natural language, and expose read-only MCP capabilities so Claude Code / Codex / CodeBuddy can search and read session history directly in chat.
 - **Cross-agent session migration**:
   Migrate Claude / Codex / CodeBuddy sessions into another agent and continue from the migrated session.
+- **Remote session storage and cross-device restore**:
+  Upload session snapshots manually to your own Supabase project, search and inspect them on another device, and restore them into Claude Code / Codex / CodeBuddy.
 - **Unified agent usage and quota view**:
   Track token usage by agent for today, 7 days, 30 days, and all time; also view current Claude Code / Codex quota status.
 - **Unified Skills and API Provider management**:
@@ -55,6 +57,57 @@
 Codex title metadata is read from `~/.codex/session_index.jsonl` when that file exists. If no upstream title is available, the app uses the first meaningful user question as the default title.
 
 CodeBuddy CLI, TClaude, TCodex, OpenClaw, Hermes, OpenCode, Cursor Agent, and Trae are off by default and can be selected from Settings -> Optional sources. Once enabled, they support local read-only indexing, search, details, and source filtering. Because TClaude / TCodex share the Claude Code / Codex formats, they additionally support Resume and one-click launch (invoking the `tclaude` / `tcodex` commands respectively). For the other sources, Resume, SSH remote sync, and provider-specific usage stats are intentionally separate follow-up work. Trae also supports open-state detection.
+
+## Remote Session Sync
+
+Remote session sync saves a selected local session into your own Supabase project. After configuring the same Supabase URL and anon key on another device, you can open the remote session list, search, filter by source, inspect details, and restore the remote session into any supported local agent. For example, device A can upload a Codex session, and device B can view that session from Remote Sessions and restore it into Claude Code, Codex, or CodeBuddy.
+
+This version is designed for **single-user, manual snapshot sync**:
+
+- There is no user isolation or app login. It assumes you control the Supabase project and anon key.
+- There is no automatic background sync. If you continue a local session after uploading it, the remote copy stays at the last uploaded snapshot until you upload it again.
+- Re-uploading the same local session updates the latest remote snapshot. If the content has not changed, the upload is skipped. Remote sessions do not keep version history.
+- Remote details include the session metadata, messages, tool calls / trace events, tags, AI summary, and the other information currently supported by the detail view.
+- Restore uses the stored portable session and asks you to choose a local project directory on the current device as the target project path.
+
+### Configure Supabase
+
+1. Create or select a project in the [Supabase Dashboard](https://supabase.com/dashboard).
+2. Copy the Project URL and anon key from Project Settings -> API.
+3. In the app, open Settings -> Remote sync, paste the Supabase URL and anon key, and enable remote session sync.
+4. Open Remote Sessions from the cloud icon in the top toolbar, then click Copy SQL.
+5. Paste the copied SQL into the Supabase SQL Editor and run it once.
+
+The setup SQL creates:
+
+- Table: `public.agent_session_remote_sessions`
+- Storage bucket: `agent-session-remote`
+- Storage object paths:
+  - `sessions/{id}/detail.json`: used by the remote detail view
+  - `sessions/{id}/portable.json`: used for cross-device and cross-agent restore
+
+The script is idempotent and can be run more than once. It creates anon-role read/write policies suitable for a personal project. Those policies are convenient for single-user sync, but they are not a multi-user isolation model. If you plan to share the project with other users or expose it more broadly, adjust the RLS policies for your own Supabase security model first.
+
+### Upload A Session
+
+1. Open a local session from the search results.
+2. Click the Upload button with the cloud-upload icon at the top of the detail view.
+3. After upload succeeds, the session appears in the Remote Sessions list.
+
+If the same session has already been uploaded:
+
+- Unchanged content: the app reports that the remote session is already up to date.
+- Changed content: the app updates the remote table row and the `detail.json` / `portable.json` objects in Storage.
+
+### Search, Inspect, And Restore Remote Sessions
+
+Click the cloud icon in the top toolbar to open Remote Sessions:
+
+- Search remote sessions by title, project path, summary, tags, and full text.
+- Use Source to filter uploaded sessions by Claude, Codex, or CodeBuddy.
+- Click View to open a read-only remote detail view.
+- Choose the target agent under Restore to, then click Restore on a session row.
+- On first restore, choose a local project directory on the current device. The app writes the session into the target agent's local session directory and attempts to launch that agent so you can continue working.
 
 ## Skills Management and Sync
 

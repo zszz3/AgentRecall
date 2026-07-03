@@ -78,6 +78,9 @@ export interface AppSettings {
   skillSyncEnabled: boolean;
   skillSyncSupabaseUrl: string;
   skillSyncSupabaseAnonKey: string;
+  remoteSyncEnabled: boolean;
+  remoteSyncSupabaseUrl: string;
+  remoteSyncSupabaseAnonKey: string;
   apiConfig: ApiConfig;
   claudeApiConfig: ClaudeApiConfig;
   summaryApiConfig: ApiConfig;
@@ -118,6 +121,9 @@ export const defaultSettings: AppSettings = {
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",
   skillSyncSupabaseAnonKey: "",
+  remoteSyncEnabled: false,
+  remoteSyncSupabaseUrl: "",
+  remoteSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
   claudeApiConfig: defaultClaudeApiConfig,
   summaryApiConfig: defaultApiConfig,
@@ -135,6 +141,9 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),
+    remoteSyncEnabled: Boolean(merged.remoteSyncEnabled),
+    remoteSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.remoteSyncSupabaseUrl),
+    remoteSyncSupabaseAnonKey: String(merged.remoteSyncSupabaseAnonKey ?? "").trim(),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),
     claudeApiConfig: normalizeClaudeApiConfig({ ...previous.claudeApiConfig, ...(updates.claudeApiConfig ?? {}) }),
     summaryApiConfig: normalizeApiConfig({ ...previous.summaryApiConfig, ...(updates.summaryApiConfig ?? {}) }),

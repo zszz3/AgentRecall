@@ -29,6 +29,8 @@
   可以使用 AI 摘要增强历史会话检索，也支持自然语言找会话；同时开放只读 MCP 能力，让 Claude Code / Codex / CodeBuddy 可以在对话里直接搜索和读取历史会话。
 - **跨 Agent 迁移会话**：
   **支持把 Claude / Codex / CodeBuddy 会话迁移到Claude / Codex / CodeBuddy，并在迁移后继续工作，非常好用！！！**。
+- **远程保存和跨设备恢复会话**：
+  支持使用自己的 Supabase 项目手动上传会话快照，在另一台设备搜索远程会话、查看完整详情，并恢复到 Claude Code / Codex / CodeBuddy 中继续工作。
 - **统一查看 Agent 用量和额度**：
   统计今日、近 7 天、近 30 天和全部时间的各 Agent token 使用量；同时查看 Claude Code / Codex 的当前额度状态。
 - **统一管理 Skills 和 API Provider**：
@@ -55,6 +57,57 @@
 当 `~/.codex/session_index.jsonl` 存在时，应用会读取 Codex 的标题元数据。没有上游标题时，会使用第一个有效用户问题作为默认标题。
 
 CodeBuddy CLI、TClaude、TCodex、OpenClaw、Hermes、OpenCode、Cursor Agent 和 Trae 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地只读索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令）。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 额外支持打开状态检测。
+
+## 远程会话同步
+
+远程会话同步用于把本机某段会话保存到你自己的 Supabase 项目里。另一台设备配置同一个 Supabase URL 和 anon key 后，可以打开远程会话列表，搜索、按来源筛选、查看详情，并把远程会话恢复到本机任意支持的 Agent 中。比如设备 A 上传了一段 Codex 会话，设备 B 可以在远程会话列表里查看这段会话，并选择恢复到 Claude Code、Codex 或 CodeBuddy。
+
+当前版本按**单人使用、手动同步快照**设计：
+
+- 不做用户隔离，也不需要登录系统；默认使用你自己的 Supabase 项目和 anon key。
+- 不会自动后台同步。本地会话继续对话后，远程仍然是上次上传时的快照；需要再次点击上传才会更新远程版本。
+- 同一段本地会话重复上传会覆盖远程的最新快照；内容没变会自动跳过，不维护多版本历史。
+- 远程详情包含会话元数据、消息、tool call / trace event、标签和 AI summary 等当前详情页支持的信息。
+- 恢复时会使用远程保存的 portable session，并要求在当前设备选择一个本地项目目录作为恢复目标路径。
+
+### 配置 Supabase
+
+1. 在 [Supabase Dashboard](https://supabase.com/dashboard) 创建或选择一个自己的项目。
+2. 在 Project Settings -> API 中复制 Project URL 和 anon key。
+3. 回到应用的 Settings -> Remote sync，填入 Supabase URL 和 anon key，并开启 Enable remote session sync。
+4. 打开顶部工具栏的云图标 Remote Sessions，点击 Copy SQL。
+5. 把复制出来的 SQL 粘贴到 Supabase SQL Editor 执行一次。
+
+初始化 SQL 会创建：
+
+- 表：`public.agent_session_remote_sessions`
+- Storage bucket：`agent-session-remote`
+- Storage 对象路径：
+  - `sessions/{id}/detail.json`：用于远程详情查看
+  - `sessions/{id}/portable.json`：用于跨设备、跨 Agent 恢复
+
+脚本是幂等的，可以重复执行。它会为 anon role 创建适合个人项目的读写策略。这个策略方便单人同步，但不是多用户隔离方案；如果要多人共享或公开分发，请先按自己的 Supabase 安全模型调整 RLS policy。
+
+### 上传会话
+
+1. 在本地搜索结果里打开一段会话详情。
+2. 点击详情页顶部带云上传图标的 Upload / 上传按钮。
+3. 上传成功后，这段会话会出现在 Remote Sessions 列表中。
+
+如果同一段会话已经上传过：
+
+- 内容没变：提示远程会话已经是最新。
+- 内容有变化：更新远程表记录和 Storage 中的 `detail.json` / `portable.json`。
+
+### 搜索、查看和恢复远程会话
+
+点击顶部工具栏的云图标打开 Remote Sessions：
+
+- 使用搜索框按标题、项目路径、摘要、标签和全文搜索远程会话。
+- 使用 Source / 来源筛选只看 Claude、Codex 或 CodeBuddy 上传的会话。
+- 点击 View / 查看可以打开远程详情页；这个详情页是只读的。
+- 在 Restore to / 恢复到 中选择目标 Agent，再点击某条会话的 Restore。
+- 第一次恢复时需要选择当前设备上的本地项目目录；恢复完成后会写入目标 Agent 的本机会话目录，并尝试启动对应 Agent 继续工作。
 
 ## Skills 管理与同步
 

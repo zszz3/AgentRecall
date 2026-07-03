@@ -3026,6 +3026,17 @@ select:focus-visible {
   min-width: 0;
 }
 
+.remote-sync-field {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  align-items: center;
+}
+
+.remote-sync-field input {
+  width: 100%;
+  min-width: 0;
+}
+
 /* A single card that stacks a toggle row with a dependent sub-row (e.g. its threshold). */
 .settings-field.settings-stack {
   flex-direction: column;
@@ -3650,6 +3661,11 @@ select:focus-visible {
     align-items: stretch;
   }
 
+  .remote-sync-field {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
   .api-settings-form .settings-field {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -4256,4 +4272,210 @@ body.overlay-open .sidebar {
 .ai-assistant-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.remote-sessions-dialog {
+  width: min(980px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+}
+
+.remote-sessions-toolbar,
+.remote-restore-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.remote-sessions-toolbar {
+  flex-wrap: wrap;
+}
+
+.remote-search {
+  flex: 1 1 260px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.remote-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.remote-search svg {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.remote-search:focus-within svg {
+  color: var(--accent);
+}
+
+.remote-search input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.remote-search input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.remote-restore-bar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.remote-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.remote-filter-group > span {
+  flex: 0 0 auto;
+}
+
+.remote-targets {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+}
+
+.remote-targets button {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.remote-targets button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.remote-targets.compact button {
+  padding: 0 8px;
+}
+
+.remote-session-list {
+  min-height: 260px;
+  max-height: 500px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.remote-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.remote-session-row:last-child {
+  border-bottom: 0;
+}
+
+.remote-session-main {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.remote-session-main strong {
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-session-main p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.remote-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.remote-session-actions button:not(.icon-button) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.remote-session-actions button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.remote-session-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.remote-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .remote-session-row {
+    grid-template-columns: 1fr;
+  }
+
+  .remote-session-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
 }

@@ -10,6 +10,7 @@ import {
   Notification,
   screen,
   Tray,
+  type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from "electron";
 import Store from "electron-store";
@@ -67,6 +68,16 @@ import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
 import { fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
 import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
+import { restoreRemotePortableSession } from "../core/remote-session-restore";
+import {
+  buildRemoteSessionSetupSql,
+  buildRemoteSessionUploadFromStore,
+  SupabaseRemoteSessionClient,
+  type RemoteSessionDetailSnapshot,
+  type RemoteSessionListItem,
+  type RemoteSessionStatus,
+  type RemoteSessionUploadResult,
+} from "../core/remote-session-sync";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
 import { RemoteWatchManager } from "../core/remote-watch";
 import { SessionStore, type SkillSyncBinding, type TraceEventQueryOptions } from "../core/session-store";
@@ -109,6 +120,7 @@ import type {
   MigrationAgent,
   SearchOptions,
   SessionEnvironment,
+  SessionMigrationResult,
   SessionSearchResult,
   SessionSource,
   SessionStatsOptions,
@@ -317,6 +329,82 @@ function persistSkillSyncBinding(
   const binding: SkillSyncBinding = { localSkillPath, remoteSkillId, remoteUpdatedAt, remoteVersion, lastSyncedAt: Date.now(), direction };
   store.upsertSkillSyncBinding(binding);
   return binding;
+}
+
+function createRemoteSessionClient(): SupabaseRemoteSessionClient {
+  const settings = getSettings();
+  if (!settings.remoteSyncEnabled || !settings.remoteSyncSupabaseUrl || !settings.remoteSyncSupabaseAnonKey) {
+    throw new Error("Supabase remote session sync is not configured.");
+  }
+  return new SupabaseRemoteSessionClient({
+    url: settings.remoteSyncSupabaseUrl,
+    anonKey: settings.remoteSyncSupabaseAnonKey,
+  });
+}
+
+async function getRemoteSessionStatus(): Promise<RemoteSessionStatus> {
+  const setupSql = buildRemoteSessionSetupSql();
+  const settings = getSettings();
+  if (!settings.remoteSyncEnabled || !settings.remoteSyncSupabaseUrl || !settings.remoteSyncSupabaseAnonKey) {
+    return {
+      kind: "unconfigured",
+      setupSql,
+      message: "Configure Supabase URL and anon key in Settings to sync remote sessions.",
+    };
+  }
+  return createRemoteSessionClient().checkStatus();
+}
+
+async function uploadSessionToRemote(sessionKey: string): Promise<RemoteSessionUploadResult> {
+  const client = createRemoteSessionClient();
+  const { payload, detailJson, portableJson } = buildRemoteSessionUploadFromStore(store, sessionKey);
+  return client.uploadSession(payload, detailJson, portableJson);
+}
+
+function listRemoteSessions(query = ""): Promise<RemoteSessionListItem[]> {
+  return createRemoteSessionClient().listRemoteSessions(query);
+}
+
+function getRemoteSessionDetail(remoteId: string): Promise<RemoteSessionDetailSnapshot> {
+  return createRemoteSessionClient().getDetailSnapshot(remoteId);
+}
+
+async function restoreRemoteSession(
+  event: IpcMainInvokeEvent,
+  remoteId: string,
+  target: MigrationAgent,
+  localProjectPath: string,
+): Promise<SessionMigrationResult> {
+  const client = createRemoteSessionClient();
+  const portable = await client.getPortableSession(remoteId);
+  const endpoint = await resolveSummaryEndpointFromSettings();
+  const compressor = endpoint ? createMigrationCompressor(endpoint) : null;
+  return restoreRemotePortableSession({
+    remoteId,
+    portable,
+    target,
+    localProjectPath,
+    deps: {
+      inspectCli: (migrationTarget) => inspectMigrationCli(migrationTarget, getSettings()),
+      prepare: (session) => applyMigrationLengthPolicy(session, compressor),
+      write: (migrationTarget, session) => writeMigratedSession({ target: migrationTarget, session }),
+      record: (record) => store.recordSessionMigration(record),
+      refreshIndex: async (migrationTarget, writtenFilePath) => {
+        const status = indexMigratedSessionFile(store, migrationTarget, writtenFilePath);
+        indexStatus = status;
+        mainWindow?.webContents.send("index-status", indexStatus);
+      },
+      launch: (migrationTarget, targetSessionId, projectPath) =>
+        openMigrationResumeInTerminal(migrationTarget, targetSessionId, projectPath, getSettings()),
+      resumeCommand: migrationResumeDisplayCommand,
+      fallbackResumeCommand: fallbackMigrationResumeDisplayCommand,
+      onProgress: (progress) => event.sender.send("session:migration-progress", progress),
+      idFactory: () => randomUUID(),
+      now: () => Date.now(),
+      projectPathExists: pathExists,
+      projectPathIsDirectory: pathIsDirectory,
+    },
+  });
 }
 
 function findInstalledSkillByPath(skillPath: string): InstalledSkill {
@@ -668,6 +756,16 @@ async function chooseMarkdownExportPath(defaultFileName: string): Promise<string
   const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return null;
   return path.extname(result.filePath) ? result.filePath : `${result.filePath}.md`;
+}
+
+async function chooseLocalProjectDirectory(): Promise<string | null> {
+  const options: Electron.OpenDialogOptions = {
+    title: "Choose local project directory",
+    properties: ["openDirectory", "createDirectory"],
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
 }
 
 function getPreferredWindowBounds(): { width: number; height: number; x: number; y: number } {
@@ -1467,6 +1565,18 @@ function registerIpc(): void {
   ipcMain.handle("skills:sync-copy-setup-sql", () => {
     clipboard.writeText(buildSkillSyncSetupSql());
   });
+  ipcMain.handle("remote-session:status", () => getRemoteSessionStatus());
+  ipcMain.handle("remote-session:copy-setup-sql", () => {
+    clipboard.writeText(buildRemoteSessionSetupSql());
+  });
+  ipcMain.handle("remote-session:upload", (_event, sessionKey: string) => uploadSessionToRemote(sessionKey));
+  ipcMain.handle("remote-session:list", (_event, query?: string) => listRemoteSessions(query ?? ""));
+  ipcMain.handle("remote-session:detail", (_event, remoteId: string) => getRemoteSessionDetail(remoteId));
+  ipcMain.handle("remote-session:choose-project", () => chooseLocalProjectDirectory());
+  ipcMain.handle("remote-session:restore", (event, remoteId: string, target: MigrationAgent, localProjectPath: string) =>
+    restoreRemoteSession(event, remoteId, target, localProjectPath),
+  );
+  ipcMain.handle("remote-session:delete", (_event, remoteId: string) => createRemoteSessionClient().deleteRemoteSession(remoteId));
   ipcMain.handle("skills:copy-path", (_event, skillPath: string) => {
     clipboard.writeText(skillPath);
   });

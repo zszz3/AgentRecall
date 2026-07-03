@@ -7,6 +7,12 @@ import type { ApplyCodexProfileResult } from "../core/codex-profile";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
 import type { RemoteHealthReport } from "../core/remote-health";
+import type {
+  RemoteSessionDetailSnapshot,
+  RemoteSessionListItem,
+  RemoteSessionStatus,
+  RemoteSessionUploadResult,
+} from "../core/remote-session-sync";
 import type { ResumeRouteResult } from "../core/resume-router";
 import type { TraceEventQueryOptions } from "../core/session-store";
 import type { RemoteSkill, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
@@ -94,6 +100,15 @@ const api = {
   installSyncedSkill: (remoteSkillId: string): Promise<SkillSyncInstallResult> => ipcRenderer.invoke("skills:sync-install", remoteSkillId),
   getSyncedSkillVersion: (remoteSkillId: string): Promise<RemoteSkill> => ipcRenderer.invoke("skills:sync-get-version", remoteSkillId),
   copySkillSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("skills:sync-copy-setup-sql"),
+  getRemoteSessionStatus: (): Promise<RemoteSessionStatus> => ipcRenderer.invoke("remote-session:status"),
+  copyRemoteSessionSetupSql: (): Promise<void> => ipcRenderer.invoke("remote-session:copy-setup-sql"),
+  uploadRemoteSession: (sessionKey: string): Promise<RemoteSessionUploadResult> => ipcRenderer.invoke("remote-session:upload", sessionKey),
+  listRemoteSessions: (query?: string): Promise<RemoteSessionListItem[]> => ipcRenderer.invoke("remote-session:list", query),
+  getRemoteSessionDetail: (remoteId: string): Promise<RemoteSessionDetailSnapshot> => ipcRenderer.invoke("remote-session:detail", remoteId),
+  chooseRemoteRestoreProject: (): Promise<string | null> => ipcRenderer.invoke("remote-session:choose-project"),
+  restoreRemoteSession: (remoteId: string, target: MigrationAgent, localProjectPath: string): Promise<SessionMigrationResult> =>
+    ipcRenderer.invoke("remote-session:restore", remoteId, target, localProjectPath),
+  deleteRemoteSession: (remoteId: string): Promise<boolean> => ipcRenderer.invoke("remote-session:delete", remoteId),
   copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
   revealSkill: (targetPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", targetPath),
   deleteSkill: (skillPath: string): Promise<DeleteInstalledSkillResult> => ipcRenderer.invoke("skills:delete", skillPath),

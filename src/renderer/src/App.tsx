@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
+  Cloud,
   Code2,
   Copy,
   Download,
@@ -46,6 +47,7 @@ import { formatRelativeTime } from "../../core/format-session";
 import { QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { RemoteHealthReport } from "../../core/remote-health";
+import type { RemoteSessionDetailSnapshot } from "../../core/remote-session-sync";
 import type { TraceEventQueryOptions } from "../../core/session-store";
 import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
@@ -105,6 +107,7 @@ import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./co
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { SkillsDialog } from "./components/skills-dialog";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
+import { RemoteSessionsDialog } from "./components/remote-sessions-dialog";
 import { useClampedContextMenuStyle } from "./context-menu-position";
 import {
   SOURCE_LABEL,
@@ -401,6 +404,7 @@ export function App(): ReactElement {
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionSearchResult | null>(null);
+  const [remoteDetail, setRemoteDetail] = useState<{ snapshot: RemoteSessionDetailSnapshot; query: string } | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [messageOffset, setMessageOffset] = useState(0);
   const [traceEvents, setTraceEvents] = useState<SessionTraceEvent[]>([]);
@@ -420,6 +424,7 @@ export function App(): ReactElement {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
+  const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
   const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
   const [skillSyncSnapshot, setSkillSyncSnapshot] = useState<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -881,14 +886,16 @@ export function App(): ReactElement {
         else if (apiConfigOpen) setApiConfigOpen(false);
         else if (aiAssistantOpen) setAiAssistantOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
+        else if (remoteSessionsOpen) setRemoteSessionsOpen(false);
         else if (detail) closeDetail();
+        else if (remoteDetail) setRemoteDetail(null);
         else return;
         event.preventDefault();
         return;
       }
 
       // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || skillsOpen || apiConfigOpen || settingsOpen || sshDialogOpen) return;
+      if (detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
@@ -928,7 +935,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -936,9 +943,9 @@ export function App(): ReactElement {
   }, [selectedKey]);
 
   useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen));
+    document.body.classList.toggle("overlay-open", Boolean(detail || remoteDetail || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen));
     return () => document.body.classList.remove("overlay-open");
-  }, [detail, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen]);
+  }, [detail, remoteDetail, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen]);
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -998,6 +1005,7 @@ export function App(): ReactElement {
   async function openDetail(session: SessionSearchResult): Promise<void> {
     const requestId = ++detailLoadSeqRef.current;
     setContextMenu(null);
+    setRemoteDetail(null);
     setDetail(session);
     setMessages([]);
     setMessageOffset(0);
@@ -1039,6 +1047,17 @@ export function App(): ReactElement {
     setMessageOffset(0);
     setTraceEvents([]);
     setMessagesLoading(false);
+  }
+
+  function openRemoteDetail(snapshot: RemoteSessionDetailSnapshot, detailQuery: string): void {
+    detailLoadSeqRef.current++;
+    setDetail(null);
+    setMessages([]);
+    setMessageOffset(0);
+    setTraceEvents([]);
+    setMessagesLoading(false);
+    setRemoteSessionsOpen(false);
+    setRemoteDetail({ snapshot, query: detailQuery });
   }
 
   async function loadMoreMessages(): Promise<void> {
@@ -1202,6 +1221,18 @@ export function App(): ReactElement {
     } catch (error) {
       setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  async function uploadRemoteSession(session: SessionSearchResult): Promise<void> {
+    await runAction(
+      t("Uploading remote session", "正在上传远程会话"),
+      () => window.sessionSearch.uploadRemoteSession(session.sessionKey),
+      (result) => {
+        if (result.status === "skipped") return t("Remote session is already up to date.", "远程会话已是最新。");
+        if (result.status === "updated") return t("Remote session updated.", "远程会话已更新。");
+        return t("Remote session uploaded.", "远程会话已上传。");
+      },
+    );
   }
 
   async function exportMarkdown(sessionKey: string): Promise<void> {
@@ -1723,6 +1754,7 @@ export function App(): ReactElement {
                 setSettingsOpen(false);
                 setApiConfigOpen(false);
                 setSkillsOpen(false);
+                setRemoteSessionsOpen(false);
                 setAiAssistantOpen(true);
               }}
               title={t("AI session finder", "AI 找会话")}
@@ -1735,6 +1767,7 @@ export function App(): ReactElement {
               onClick={() => {
                 setSettingsOpen(false);
                 setApiConfigOpen(false);
+                setRemoteSessionsOpen(false);
                 setSkillsOpen(true);
               }}
               title={t("Skills", "Skills 管理")}
@@ -1743,10 +1776,24 @@ export function App(): ReactElement {
               <PackageSearch size={15} />
             </button>
             <button
+              className={`icon-button toolbar-icon-button ${remoteSessionsOpen ? "active" : ""}`}
+              onClick={() => {
+                setSettingsOpen(false);
+                setApiConfigOpen(false);
+                setSkillsOpen(false);
+                setRemoteSessionsOpen(true);
+              }}
+              title={t("Remote sessions", "远程会话")}
+              aria-label={t("Remote sessions", "远程会话")}
+            >
+              <Cloud size={15} />
+            </button>
+            <button
               className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
               onClick={() => {
                 setSkillsOpen(false);
                 setSettingsOpen(false);
+                setRemoteSessionsOpen(false);
                 setApiConfigOpen(true);
               }}
               title={t("API configuration", "API 配置")}
@@ -1759,6 +1806,7 @@ export function App(): ReactElement {
               onClick={() => {
                 setSkillsOpen(false);
                 setApiConfigOpen(false);
+                setRemoteSessionsOpen(false);
                 setSettingsOpen(true);
               }}
               title={t("Settings", "设置")}
@@ -1840,6 +1888,7 @@ export function App(): ReactElement {
             void runAction(t("Opening iTerm", "正在打开 iTerm"), () => window.sessionSearch.resumeSessionInIterm(detail.sessionKey), t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"))
           }
           onMigrate={() => beginMigrate(detail)}
+          onUploadRemote={() => void uploadRemoteSession(detail)}
           onCopyResume={() =>
             void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(detail.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
           }
@@ -1858,6 +1907,44 @@ export function App(): ReactElement {
               `${FILE_MANAGER_LABEL} opened.`,
             )
           }
+        />
+      ) : null}
+
+      {remoteDetail ? (
+        <DetailPanel
+          session={remoteDetail.snapshot.session}
+          messages={remoteDetail.snapshot.messages}
+          traceEvents={remoteDetail.snapshot.traceEvents}
+          loading={false}
+          actionStatus={null}
+          query={remoteDetail.query}
+          liveState="closed"
+          language={language}
+          messagePageSize={MESSAGE_PAGE_SIZE}
+          olderMessageCount={0}
+          revealLabel={FILE_MANAGER_LABEL}
+          showItermAction={false}
+          onClose={() => setRemoteDetail(null)}
+          onShowMore={() => undefined}
+          onRename={() => undefined}
+          onAddTag={() => undefined}
+          onRemoveTag={() => undefined}
+          onFavorite={() => undefined}
+          onSummarize={() => undefined}
+          summarizing={false}
+          canResume={false}
+          canMigrate={false}
+          migrationTitle={t("Use Restore from the remote session list.", "请从远程会话列表点击恢复。")}
+          onResume={() => undefined}
+          onResumeIterm={() => undefined}
+          onMigrate={() => undefined}
+          onCopyResume={() => undefined}
+          onCopyMarkdown={() => undefined}
+          onExportMarkdown={() => undefined}
+          onCopyPlain={() => undefined}
+          onDelete={() => undefined}
+          onReveal={() => undefined}
+          readOnly
         />
       ) : null}
 
@@ -2006,6 +2093,10 @@ export function App(): ReactElement {
             setSettingsOpen(false);
             setApiConfigOpen(true);
           }}
+          onOpenRemoteSessions={() => {
+            setSettingsOpen(false);
+            setRemoteSessionsOpen(true);
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
@@ -2042,6 +2133,18 @@ export function App(): ReactElement {
           }
           onDelete={(skill) => deleteSkill(skill)}
           onClose={() => setSkillsOpen(false)}
+        />
+      ) : null}
+
+      {remoteSessionsOpen ? (
+        <RemoteSessionsDialog
+          language={language}
+          onRestored={(result) => {
+            if (!result.launched) setActionStatus({ kind: "error", message: result.warning || result.resumeCommand });
+            void Promise.all([load(), loadSidebarMetadata()]);
+          }}
+          onOpenDetail={openRemoteDetail}
+          onClose={() => setRemoteSessionsOpen(false)}
         />
       ) : null}
 
@@ -2436,6 +2539,7 @@ function SettingsDialog({
   onDeleteEnvironment,
   onAddSsh,
   onOpenApiConfig,
+  onOpenRemoteSessions,
   onClose,
 }: {
   settings: AppSettings | null;
@@ -2458,6 +2562,7 @@ function SettingsDialog({
   onDeleteEnvironment: (environment: SessionEnvironment) => void;
   onAddSsh: () => void;
   onOpenApiConfig: () => void;
+  onOpenRemoteSessions: () => void;
   onClose: () => void;
 }): ReactElement {
   const defaultTerminal = settings?.defaultTerminal ?? (RUNTIME_PLATFORM === "win32" ? "WindowsTerminal" : "Terminal");
@@ -2515,7 +2620,7 @@ function SettingsDialog({
     }
   }
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "connections" | "sources" | "usage" | "ai" | "skills" | "appearance">("terminal");
+  const [activeSection, setActiveSection] = useState<"terminal" | "shortcut" | "connections" | "sources" | "usage" | "ai" | "remote" | "skills" | "appearance">("terminal");
 
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -2551,6 +2656,10 @@ function SettingsDialog({
             <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
               <Sparkles size={15} />
               <span>{l("AI", "AI")}</span>
+            </button>
+            <button className={activeSection === "remote" ? "active" : ""} onClick={() => setActiveSection("remote")}>
+              <Cloud size={15} />
+              <span>{l("Remote sync", "远程同步")}</span>
             </button>
             <button className={activeSection === "skills" ? "active" : ""} onClick={() => setActiveSection("skills")}>
               <PackageSearch size={15} />
@@ -2976,6 +3085,67 @@ function SettingsDialog({
                     checked={Boolean(mcpEnabled)}
                     disabled={mcpEnabled === null || mcpBusy}
                     onChange={(event) => void toggleMcp(event.currentTarget.checked)}
+                  />
+                </label>
+              </section>
+            ) : null}
+            {activeSection === "remote" ? (
+              <section className="settings-pane">
+                <header className="settings-pane-head settings-pane-head-row">
+                  <div>
+                    <h3>{l("Supabase remote sessions", "Supabase 远程会话")}</h3>
+                    <p>
+                      {l(
+                        "Use your own single-user Supabase project to upload sessions, search them on another device, view details, and restore them to Claude Code / Codex / CodeBuddy.",
+                        "使用你自己的单人 Supabase 项目上传会话，在另一台设备搜索、查看详情，并恢复到 Claude Code / Codex / CodeBuddy。",
+                      )}
+                    </p>
+                  </div>
+                  <button type="button" className="settings-action-button" onClick={onOpenRemoteSessions}>
+                    {l("Remote Sessions", "远程会话")}
+                  </button>
+                </header>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Enable remote session sync", "启用远程会话同步")}</span>
+                    <span className="settings-field-sub">
+                      {l("Manual upload and restore in this version. Automatic background sync comes later.", "当前版本为手动上传和恢复；后台自动同步后续再做。")}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.remoteSyncEnabled)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ remoteSyncEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field remote-sync-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">Supabase URL</span>
+                    <span className="settings-field-sub">https://your-project.supabase.co</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings?.remoteSyncSupabaseUrl ?? ""}
+                    disabled={!settings || saving}
+                    placeholder="https://your-project.supabase.co"
+                    onChange={(event) => onSettingsChange({ remoteSyncSupabaseUrl: event.currentTarget.value })}
+                  />
+                </label>
+                <label className="settings-field remote-sync-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">anon key</span>
+                    <span className="settings-field-sub">
+                      {l("Stored locally. Do not commit this value to the repository.", "保存在本地，请不要提交到仓库。")}
+                    </span>
+                  </div>
+                  <input
+                    type="password"
+                    value={settings?.remoteSyncSupabaseAnonKey ?? ""}
+                    disabled={!settings || saving}
+                    placeholder="eyJhbGciOi..."
+                    onChange={(event) => onSettingsChange({ remoteSyncSupabaseAnonKey: event.currentTarget.value })}
                   />
                 </label>
               </section>
