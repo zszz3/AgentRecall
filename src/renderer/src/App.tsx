@@ -87,6 +87,7 @@ import {
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
+import { loadSkillsPanelData } from "./skills-load";
 import type {
   ActionStatus,
   ContextMenuState,
@@ -423,6 +424,7 @@ export function App(): ReactElement {
   const [skillSyncSnapshot, setSkillSyncSnapshot] = useState<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
+  const skillSyncSnapshotRef = useRef<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [environmentHealthReports, setEnvironmentHealthReports] = useState<Record<string, RemoteHealthReport>>({});
@@ -563,14 +565,23 @@ export function App(): ReactElement {
           usageError = error;
         }
       }
-      const [nextSkills, nextSkillSync] = await Promise.all([
-        window.sessionSearch.listSkills(),
-        window.sessionSearch.getSkillSyncSnapshot(),
-      ]);
+      const {
+        installedSkills: nextSkills,
+        skillSyncSnapshot: nextSkillSync,
+        syncError,
+      } = await loadSkillsPanelData({
+        listSkills: () => window.sessionSearch.listSkills(),
+        getSkillSyncSnapshot: () => window.sessionSearch.getSkillSyncSnapshot(),
+        fallbackSyncSnapshot: skillSyncSnapshotRef.current,
+      });
       setInstalledSkills(nextSkills);
       setSkillSyncSnapshot(nextSkillSync);
       if (usageError) {
         if (!silent) setSkillsFeedback({ kind: "error", message: usageError instanceof Error ? usageError.message : String(usageError) });
+        return;
+      }
+      if (syncError) {
+        if (!silent) setSkillsFeedback({ kind: "error", message: syncError.message });
         return;
       }
       if (usageStatus && !silent) {
@@ -593,6 +604,10 @@ export function App(): ReactElement {
       setSkillsLoading(false);
     }
   }, [t]);
+
+  useEffect(() => {
+    skillSyncSnapshotRef.current = skillSyncSnapshot;
+  }, [skillSyncSnapshot]);
 
   const deleteSkill = useCallback(async (skill: InstalledSkill) => {
     setSkillsLoading(true);
