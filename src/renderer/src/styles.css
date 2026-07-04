@@ -3983,6 +3983,11 @@ body.overlay-open .sidebar {
   align-items: flex-end;
 }
 
+/* Queued turns (typed while a reply is in flight) read as pending, not yet sent. */
+.ai-message-queued {
+  opacity: 0.55;
+}
+
 .ai-message-bubble {
   max-width: 88%;
   padding: 10px 13px;

@@ -27,6 +27,10 @@ export function AiAssistantDialog({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  // User turns typed while a reply is in flight wait here, then get dispatched
+  // one at a time so the conversation stays strictly user→assistant→user→… and
+  // each request carries the full prior history.
+  const [queue, setQueue] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -34,7 +38,7 @@ export function AiAssistantDialog({
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, pending]);
+  }, [messages, queue, pending]);
 
   // Auto-grow the textarea so the send button stays bottom-aligned with it.
   useEffect(() => {
@@ -44,32 +48,49 @@ export function AiAssistantDialog({
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [input]);
 
-  const send = async (): Promise<void> => {
+  // Enqueue the current input, so the user can keep typing and submitting while a
+  // reply is in flight. Clears the box; the driver below sends it when ready.
+  const enqueue = (): void => {
     const text = input.trim();
-    if (!text || pending) return;
+    if (!text) return;
     setError(null);
-    const nextMessages: DisplayMessage[] = [...messages, { role: "user", content: text }];
-    setMessages(nextMessages);
+    setQueue((current) => [...current, text]);
     setInput("");
-    setPending(true);
-    try {
-      // Send full history (user + assistant text) so the model keeps context.
-      const history: AiChatMessage[] = nextMessages.map((message) => ({ role: message.role, content: message.content }));
-      const reply = await window.sessionSearch.askAiAssistant(history);
-      setMessages((current) => [...current, { role: "assistant", content: reply.reply, sessions: reply.sessions }]);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setPending(false);
-      // Return focus to the input so the user can immediately send the next message.
-      textareaRef.current?.focus();
-    }
   };
 
+  // Queue driver: whenever no request is in flight and a queued turn exists, move
+  // the oldest queued turn into the transcript and send the full history so the
+  // model keeps context and answers queued messages in order.
+  useEffect(() => {
+    if (pending || queue.length === 0) return;
+    const [text, ...rest] = queue;
+    const nextMessages: DisplayMessage[] = [...messages, { role: "user", content: text }];
+    setMessages(nextMessages);
+    setQueue(rest);
+    setPending(true);
+    const history: AiChatMessage[] = nextMessages.map((message) => ({ role: message.role, content: message.content }));
+
+    void (async () => {
+      try {
+        const reply = await window.sessionSearch.askAiAssistant(history);
+        setMessages((current) => [...current, { role: "assistant", content: reply.reply, sessions: reply.sessions }]);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        setPending(false);
+        // Return focus to the input so the user can immediately send the next message.
+        textareaRef.current?.focus();
+      }
+    })();
+  }, [messages, queue, pending]);
+
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    // While an IME is composing (e.g. picking a Chinese candidate), Enter confirms
+    // the candidate — it must not send. keyCode 229 covers older IME behavior.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void send();
+      enqueue();
     }
   };
 
@@ -157,6 +178,14 @@ export function AiAssistantDialog({
               </div>
             </div>
           ) : null}
+
+          {/* Turns typed while a reply is in flight, waiting their turn to send. */}
+          {queue.map((text, index) => (
+            <div key={`queued-${index}`} className="ai-message ai-message-user ai-message-queued">
+              <div className="ai-message-bubble">{text}</div>
+            </div>
+          ))}
+
           {error ? <div className="ai-assistant-error">{error}</div> : null}
         </div>
 
@@ -170,7 +199,7 @@ export function AiAssistantDialog({
             rows={1}
             autoFocus
           />
-          <button type="button" className="ai-assistant-send" onClick={() => void send()} disabled={pending || !input.trim()} aria-label={l("Send", "发送")}>
+          <button type="button" className="ai-assistant-send" onClick={enqueue} disabled={!input.trim()} aria-label={l("Send", "发送")}>
             <ArrowUp size={16} />
           </button>
         </div>
