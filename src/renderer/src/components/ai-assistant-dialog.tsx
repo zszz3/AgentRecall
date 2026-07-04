@@ -120,9 +120,8 @@ export function AiAssistantDialog({
 
           {messages.map((message, index) => (
             <div key={index} className={`ai-message ai-message-${message.role}`}>
-              <div className="ai-message-bubble">
-                {message.role === "assistant" ? <Markdown text={message.content} /> : message.content}
-              </div>
+              {/* Surface the matched sessions above the reply — the top card is
+                  the closest match, so it sits right under the user's question. */}
               {message.sessions && message.sessions.length > 0 ? (
                 <div className="ai-session-cards">
                   {message.sessions.map((session) => (
@@ -158,11 +157,13 @@ export function AiAssistantDialog({
                           <Markdown text={session.aiSummary} />
                         </div>
                       ) : null}
-                      <span className="ai-session-card-open">{l("Open session", "打开会话")} →</span>
                     </div>
                   ))}
                 </div>
               ) : null}
+              <div className="ai-message-bubble">
+                {message.role === "assistant" ? <Markdown text={message.content} /> : message.content}
+              </div>
             </div>
           ))}
 

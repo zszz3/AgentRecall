@@ -4139,19 +4139,6 @@ body.overlay-open .sidebar {
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
-.ai-session-card-open {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--accent);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.ai-session-card:hover .ai-session-card-open,
-.ai-session-card:focus-visible .ai-session-card-open {
-  opacity: 1;
-}
-
 .ai-session-card-title {
   font-weight: 600;
   font-size: 13px;
