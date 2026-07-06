@@ -3056,6 +3056,21 @@ function SettingsDialog({
                     onChange={(event) => onSettingsChange({ summaryMaxAgeDays: Number(event.currentTarget.value) })}
                   />
                 </label>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Migration compression concurrency", "迁移压缩并发度")}</span>
+                    <span className="settings-field-sub">{l("Max chunk summaries run in parallel when compressing a long session for migration. Lower it if you hit provider rate limits.", "迁移压缩长会话时分片摘要的最大并行数。遇到 provider 限流就调低。")}</span>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={32}
+                    className="settings-number"
+                    value={settings?.compressionConcurrency ?? 8}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ compressionConcurrency: Number(event.currentTarget.value) })}
+                  />
+                </label>
                 <div className="settings-field">
                   <div className="settings-field-text">
                     <span className="settings-field-title">{l("Backfill missing summaries now", "立即补全缺失摘要")}</span>

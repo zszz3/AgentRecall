@@ -379,8 +379,9 @@ async function restoreRemoteSession(
   const client = createRemoteSessionClient();
   const portable = await client.getPortableSession(remoteId);
   // 没配自定义摘要 endpoint 时回退本地 Codex CLI(缺失则再退 Claude),让迁移仍走 AI 压缩而非直接本地截断——与 AI 助手一致。
-  const endpoint = (await resolveSummaryEndpointFromSettings()) ?? buildCodexExecEndpoint(await getHydratedSettings());
-  const compressor = endpoint ? createMigrationCompressor(endpoint) : null;
+  const settings = await getHydratedSettings();
+  const endpoint = (await resolveSummaryEndpointFromSettings()) ?? buildCodexExecEndpoint(settings);
+  const compressor = endpoint ? createMigrationCompressor(endpoint, undefined, settings.compressionConcurrency) : null;
   return restoreRemotePortableSession({
     remoteId,
     portable,
@@ -1643,8 +1644,9 @@ function registerIpc(): void {
     if (!session) throw new Error("Session not found.");
 
     // 没配自定义摘要 endpoint 时回退本地 Codex CLI(缺失则再退 Claude),让迁移仍走 AI 压缩而非直接本地截断——与 AI 助手一致。
-    const endpoint = (await resolveSummaryEndpointFromSettings()) ?? buildCodexExecEndpoint(await getHydratedSettings());
-    const compressor = endpoint ? createMigrationCompressor(endpoint) : null;
+    const settings = await getHydratedSettings();
+    const endpoint = (await resolveSummaryEndpointFromSettings()) ?? buildCodexExecEndpoint(settings);
+    const compressor = endpoint ? createMigrationCompressor(endpoint, undefined, settings.compressionConcurrency) : null;
     const result = await migrateSession({
       source: session,
       messages: store.getAllMessages(sessionKey),

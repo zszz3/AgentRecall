@@ -122,19 +122,17 @@ export function estimatePortableSessionTokens(session: PortableSession): number 
 }
 
 // Map a compression event to a 0-100 percent. Total work units =
-// totalChunks (chunk summaries) + 1 (final handoff). A "chunk" event fires
-// after chunk `chunkIndex` is summarized (done = chunkIndex + 1); a "handoff"
-// event fires once the final handoff call begins (all chunks done, handoff in
-// flight, so done = totalChunks — the bar tops just below 100% until the
-// compressor returns and the orchestrator moves to the "writing" stage).
+// totalChunks (chunk summaries) + 1 (final handoff). `completed` counts chunk
+// summaries done (monotonic, order-independent — chunks may run concurrently),
+// so done = completed; the handoff is the +1th unit and tops the bar just below
+// 100% (completed = totalChunks) until the orchestrator moves to "writing".
 //
 // Defined here (not in session-migration-compression.ts) so session-migration
 // can stay a type-only importer of that module: a runtime import would drag
 // session-summarizer (and node:child_process) into the renderer bundle.
 export function migrationCompressionPercent(event: MigrationCompressionEvent): number {
   const totalUnits = event.totalChunks + 1;
-  const done = event.phase === "handoff" ? event.totalChunks : event.chunkIndex + 1;
-  return Math.max(0, Math.min(100, Math.round((done / totalUnits) * 100)));
+  return Math.max(0, Math.min(100, Math.round((event.completed / totalUnits) * 100)));
 }
 
 export async function migrateSession({

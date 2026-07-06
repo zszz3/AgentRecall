@@ -127,8 +127,8 @@ function compressionDetailText(
   const l = (en: string, zh: string) => localize(language, en, zh);
   if (compression.phase === "chunk") {
     return l(
-      `Chunk ${compression.chunkIndex + 1}/${compression.totalChunks}`,
-      `压缩分片 ${compression.chunkIndex + 1}/${compression.totalChunks}`,
+      `Summarized ${compression.completed}/${compression.totalChunks} chunks`,
+      `已完成 ${compression.completed}/${compression.totalChunks} 个分片`,
     );
   }
   return l("Generating handoff summary...", "生成交接摘要...");

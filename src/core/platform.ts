@@ -73,6 +73,7 @@ export interface AppSettings {
   notifyMinDurationSeconds: number;
   summaryAutoBackfill: boolean;
   summaryMaxAgeDays: number;
+  compressionConcurrency: number;
   summarySource: "codex" | "claude" | "custom";
   sessionSearchMcpEnabled: boolean;
   skillSyncEnabled: boolean;
@@ -116,6 +117,7 @@ export const defaultSettings: AppSettings = {
   notifyMinDurationSeconds: 30,
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
+  compressionConcurrency: 8,
   summarySource: "codex",
   sessionSearchMcpEnabled: true,
   skillSyncEnabled: false,
@@ -137,6 +139,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     globalShortcut: normalizeGlobalShortcut(merged.globalShortcut),
     notifyMinDurationSeconds: normalizeNotifyDuration(merged.notifyMinDurationSeconds),
     summaryMaxAgeDays: normalizeSummaryMaxAgeDays(merged.summaryMaxAgeDays),
+    compressionConcurrency: normalizeCompressionConcurrency(merged.compressionConcurrency),
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
@@ -162,6 +165,11 @@ function normalizeNotifyDuration(value: number): number {
 function normalizeSummaryMaxAgeDays(value: number): number {
   if (!Number.isFinite(value) || value < 1) return defaultSettings.summaryMaxAgeDays;
   return Math.min(3650, Math.round(value));
+}
+
+function normalizeCompressionConcurrency(value: number): number {
+  if (!Number.isFinite(value) || value < 1) return defaultSettings.compressionConcurrency;
+  return Math.min(32, Math.round(value));
 }
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];

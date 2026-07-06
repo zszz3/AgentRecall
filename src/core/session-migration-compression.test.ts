@@ -6,6 +6,7 @@ import {
   applyMigrationLengthPolicy,
   buildLocalMigrationFallback,
   buildMigrationHandoffMessages,
+  COMPRESSION_CONCURRENCY,
   createMigrationCompressor,
   formatCompactSummary,
   parseMigrationHandoff,
@@ -125,8 +126,8 @@ describe("migration compression policy", () => {
     const session = portableWithContent("x".repeat(239_989));
     const compress = vi.fn(
       async (_session, onProgress?: (event: MigrationCompressionEvent) => void) => {
-        onProgress?.({ chunkIndex: 0, totalChunks: 2, phase: "chunk" });
-        onProgress?.({ chunkIndex: 1, totalChunks: 2, phase: "handoff" });
+        onProgress?.({ completed: 1, totalChunks: 2, phase: "chunk" });
+        onProgress?.({ completed: 2, totalChunks: 2, phase: "handoff" });
         return VALID_HANDOFF;
       },
     );
@@ -138,8 +139,8 @@ describe("migration compression policy", () => {
 
     expect(result.strategy).toBe("ai-compressed");
     expect(events).toEqual([
-      { chunkIndex: 0, totalChunks: 2, phase: "chunk" },
-      { chunkIndex: 1, totalChunks: 2, phase: "handoff" },
+      { completed: 1, totalChunks: 2, phase: "chunk" },
+      { completed: 2, totalChunks: 2, phase: "handoff" },
     ]);
   });
 
@@ -532,9 +533,9 @@ describe("migration handoff provider request", () => {
     const totalChunks = events[0].totalChunks;
     expect(totalChunks).toBeGreaterThan(1);
     expect(events.every((event) => event.totalChunks === totalChunks)).toBe(true);
-    // chunk events fire in increasing source order
-    const chunkIndexes = chunkEvents.map((event) => event.chunkIndex);
-    expect(chunkIndexes).toEqual([...chunkIndexes].sort((a, b) => a - b));
+    // completed counts 1..N monotonically (order-independent under concurrency)
+    const completedCounts = chunkEvents.map((event) => event.completed);
+    expect(completedCounts).toEqual(Array.from({ length: chunkEvents.length }, (_, i) => i + 1));
     // percent climbs monotonically across the reported events
     const percents = events.map((event) => migrationCompressionPercent(event));
     expect(percents).toEqual([...percents].sort((a, b) => a - b));
@@ -555,20 +556,80 @@ describe("migration handoff provider request", () => {
       events.push(event);
     });
 
-    expect(events).toEqual([{ chunkIndex: 0, totalChunks: 1, phase: "handoff" }]);
+    expect(events).toEqual([{ completed: 1, totalChunks: 1, phase: "handoff" }]);
+  });
+
+  it("summarizes chunks concurrently with bounded concurrency", async () => {
+    const endpoint = {
+      baseUrl: "https://provider.example/v1",
+      model: "model",
+      apiKey: "secret",
+      apiFormat: "openai_chat" as const,
+    };
+    const session = portable(
+      Array.from({ length: 80 }, (_, index) =>
+        message(`chunk-${index}-${"x".repeat(5_000)}`, index),
+      ),
+    );
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const chat = vi.fn(async (_endpoint, messages) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      if (messages[0].content.includes("分片摘要")) return "分片摘要内容";
+      return VALID_HANDOFF;
+    });
+
+    await createMigrationCompressor(endpoint, chat)(session);
+
+    // Concurrency actually happened (more than one chunk in flight at once)...
+    expect(maxInFlight).toBeGreaterThan(1);
+    // ...but never exceeded the configured bound.
+    expect(maxInFlight).toBeLessThanOrEqual(COMPRESSION_CONCURRENCY);
+  });
+
+  it("respects a custom concurrency bound", async () => {
+    const endpoint = {
+      baseUrl: "https://provider.example/v1",
+      model: "model",
+      apiKey: "secret",
+      apiFormat: "openai_chat" as const,
+    };
+    const session = portable(
+      Array.from({ length: 80 }, (_, index) =>
+        message(`chunk-${index}-${"x".repeat(5_000)}`, index),
+      ),
+    );
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const chat = vi.fn(async (_endpoint, messages) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      if (messages[0].content.includes("分片摘要")) return "分片摘要内容";
+      return VALID_HANDOFF;
+    });
+
+    await createMigrationCompressor(endpoint, chat, 2)(session);
+
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(2);
   });
 });
 
 describe("migrationCompressionPercent", () => {
   it("maps chunk events across (totalChunks + 1) units and tops below 100% on handoff", () => {
     // 3 chunks -> 4 units; handoff is the 3rd-done state (75%), not 100%.
-    expect(migrationCompressionPercent({ chunkIndex: 0, totalChunks: 3, phase: "chunk" })).toBe(25);
-    expect(migrationCompressionPercent({ chunkIndex: 1, totalChunks: 3, phase: "chunk" })).toBe(50);
-    expect(migrationCompressionPercent({ chunkIndex: 2, totalChunks: 3, phase: "chunk" })).toBe(75);
-    expect(migrationCompressionPercent({ chunkIndex: 2, totalChunks: 3, phase: "handoff" })).toBe(75);
+    expect(migrationCompressionPercent({ completed: 1, totalChunks: 3, phase: "chunk" })).toBe(25);
+    expect(migrationCompressionPercent({ completed: 2, totalChunks: 3, phase: "chunk" })).toBe(50);
+    expect(migrationCompressionPercent({ completed: 3, totalChunks: 3, phase: "chunk" })).toBe(75);
+    expect(migrationCompressionPercent({ completed: 3, totalChunks: 3, phase: "handoff" })).toBe(75);
   });
 
   it("reports 50% for a single-chunk handoff", () => {
-    expect(migrationCompressionPercent({ chunkIndex: 0, totalChunks: 1, phase: "handoff" })).toBe(50);
+    expect(migrationCompressionPercent({ completed: 1, totalChunks: 1, phase: "handoff" })).toBe(50);
   });
 });

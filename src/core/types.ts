@@ -67,9 +67,10 @@ export type SessionMigrationStage = "reading" | "compressing" | "writing" | "ind
 export type MigrationCompressionPhase = "chunk" | "handoff";
 
 export interface MigrationCompressionEvent {
-  // 0-based index of the chunk just summarized (chunk phase), or the last
-  // chunk index (handoff phase).
-  chunkIndex: number;
+  // Number of chunk summaries completed so far (0..totalChunks). Monotonic
+  // whether chunks are summarized sequentially or concurrently, so the percent
+  // bar never moves backwards. Reaches totalChunks when the final handoff begins.
+  completed: number;
   // Number of chunk-summary calls (>=1); the final handoff is the +1th unit.
   totalChunks: number;
   phase: MigrationCompressionPhase;

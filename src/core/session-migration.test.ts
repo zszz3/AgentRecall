@@ -457,9 +457,9 @@ describe("migrateSession", () => {
   it("lifts compression progress into percent-valued compressing events", async () => {
     const { deps, onProgress } = createDependencies();
     deps.prepare.mockImplementation(async (portable, onCompressionProgress) => {
-      onCompressionProgress?.({ chunkIndex: 0, totalChunks: 3, phase: "chunk" });
-      onCompressionProgress?.({ chunkIndex: 1, totalChunks: 3, phase: "chunk" });
-      onCompressionProgress?.({ chunkIndex: 2, totalChunks: 3, phase: "handoff" });
+      onCompressionProgress?.({ completed: 1, totalChunks: 3, phase: "chunk" });
+      onCompressionProgress?.({ completed: 2, totalChunks: 3, phase: "chunk" });
+      onCompressionProgress?.({ completed: 3, totalChunks: 3, phase: "handoff" });
       return { session: portable, strategy: "ai-compressed" };
     });
 
@@ -475,7 +475,7 @@ describe("migrateSession", () => {
       .filter((event) => event.stage === "compressing");
     expect(compressingEvents.map((event) => event.percent)).toEqual([0, 25, 50, 75]);
     expect(compressingEvents[1].compression).toEqual({
-      chunkIndex: 0,
+      completed: 1,
       totalChunks: 3,
       phase: "chunk",
     });

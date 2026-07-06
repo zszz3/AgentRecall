@@ -47,6 +47,10 @@ const SUMMARY_MIN_CHARACTERS = 500;
 const TRANSCRIPT_FRAGMENT_CHARACTERS = 8_000;
 const COMPRESSION_CHUNK_CHARACTERS = 45_000;
 const CHUNK_SUMMARY_MAX_CHARACTERS = 4_000;
+// Max chunk summaries run in parallel. Chunk summaries are independent (the
+// handoff that depends on all of them stays sequential after), so bounding
+// concurrency turns N sequential LLM calls into ceil(N / CONCURRENCY) batches.
+export const COMPRESSION_CONCURRENCY = 8;
 
 interface TranscriptFragment {
   text: string;
@@ -485,29 +489,62 @@ export function buildMigrationHandoffMessages(
   ];
 }
 
+// Run an async map over `items` with at most `concurrency` calls in flight.
+// Preserves input order in the result. A rejection propagates immediately
+// (in-flight calls keep running but are no longer awaited).
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workerCount = Math.min(concurrency, items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export function createMigrationCompressor(
   endpoint: SummaryEndpoint,
   chat: ChatCompletionFn = requestSummaryCompletion,
+  concurrency: number = COMPRESSION_CONCURRENCY,
 ): MigrationCompressFn {
   return async (session, onProgress) => {
     const chunks = transcriptChunks(session);
     const totalChunks = Math.max(1, chunks.length);
 
     if (chunks.length <= 1) {
-      onProgress?.({ chunkIndex: 0, totalChunks, phase: "handoff" });
+      onProgress?.({ completed: 1, totalChunks, phase: "handoff" });
       return chat(endpoint, buildMigrationHandoffMessages(session));
     }
 
-    const chunkSummaries: string[] = [];
-    for (let index = 0; index < chunks.length; index += 1) {
-      const summary = await chat(
-        endpoint,
-        buildMigrationChunkSummaryMessages(session, chunks[index], index, chunks.length),
-      );
-      chunkSummaries.push(safePrefix(summary.trim(), CHUNK_SUMMARY_MAX_CHARACTERS));
-      onProgress?.({ chunkIndex: index, totalChunks, phase: "chunk" });
-    }
-    onProgress?.({ chunkIndex: chunks.length - 1, totalChunks, phase: "handoff" });
+    // Chunk summaries are independent — run them concurrently (bounded) so an
+    // N-chunk session takes ceil(N/CONCURRENCY) batches instead of N sequential calls.
+    // `completed` advances as each finishes (order-independent, monotonic); the
+    // handoff still waits for all of them since it folds the summaries together.
+    let completed = 0;
+    const chunkSummaries = await mapWithConcurrency(
+      chunks,
+      concurrency,
+      async (chunk, index) => {
+        const summary = await chat(
+          endpoint,
+          buildMigrationChunkSummaryMessages(session, chunk, index, chunks.length),
+        );
+        completed += 1;
+        onProgress?.({ completed, totalChunks, phase: "chunk" });
+        return safePrefix(summary.trim(), CHUNK_SUMMARY_MAX_CHARACTERS);
+      },
+    );
+
+    onProgress?.({ completed: totalChunks, totalChunks, phase: "handoff" });
     return chat(endpoint, buildMigrationHandoffMessagesFromChunkSummaries(session, chunkSummaries));
   };
 }
