@@ -393,7 +393,7 @@ export function DetailPanel({
 
 const MESSAGE_TRUNCATE_LIMIT = 3000;
 
-function MessageBlock({ message, query, language }: { message: SessionMessage; query: string; language: LanguageMode }): ReactElement {
+function MessageBlock({ message, query: _query, language }: { message: SessionMessage; query: string; language: LanguageMode }): ReactElement {
   const truncated = message.content.length > MESSAGE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
   const content = useMemo(() => {
@@ -409,7 +409,7 @@ function MessageBlock({ message, query, language }: { message: SessionMessage; q
       </div>
       <pre>{content}</pre>
       {truncated ? (
-        <button className="expand-toggle" onClick={() => setExpanded((prev) => !prev)}>
+        <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full content", "展开全文")}
         </button>
@@ -451,7 +451,7 @@ function TraceEventBlock({ event, language }: { event: SessionTraceEvent; langua
       </div>
       <pre>{detail}</pre>
       {truncated ? (
-        <button className="expand-toggle" onClick={() => setExpanded((prev) => !prev)}>
+        <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full detail", "展开详情")}
         </button>
