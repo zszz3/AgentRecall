@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { portableSessionFrom } from "./session-migration";
+import { migrationAgentForSource } from "./session-migration";
 import type { SessionStore } from "./session-store";
 import type { MigrationAgent, PortableSession, SessionMessage, SessionSearchResult, SessionTraceEvent } from "./types";
 
 export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
 const REMOTE_SESSION_COLUMNS =
-  "id,source_session_key,source_agent,source_source,title,project_path,started_at,updated_at,content_hash,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
+  "id,source_session_key,source_agent,source_source,source_environment_id,source_environment_kind,source_environment_label,title,project_path,started_at,updated_at,content_hash,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 
 export interface RemoteSessionDetailSnapshot {
   schemaVersion: 1;
@@ -21,6 +21,9 @@ export interface RemoteSessionListItem {
   sourceSessionKey: string;
   sourceAgent: MigrationAgent;
   sourceSource: string;
+  sourceEnvironmentId: string;
+  sourceEnvironmentKind: string;
+  sourceEnvironmentLabel: string;
   title: string;
   projectPath: string;
   startedAt: string;
@@ -62,6 +65,9 @@ interface RemoteSessionRow {
   source_session_key: string;
   source_agent: string;
   source_source: string;
+  source_environment_id: string | null;
+  source_environment_kind: string | null;
+  source_environment_label: string | null;
   title: string;
   project_path: string;
   started_at: string;
@@ -85,6 +91,9 @@ interface RemoteSessionUploadPayload {
   source_session_key: string;
   source_agent: MigrationAgent;
   source_source: string;
+  source_environment_id: string;
+  source_environment_kind: string;
+  source_environment_label: string;
   title: string;
   project_path: string;
   started_at: string;
@@ -112,6 +121,9 @@ export function buildRemoteSessionSetupSql(tableName = REMOTE_SESSION_TABLE, buc
     "  source_session_key text not null,",
     "  source_agent text not null check (source_agent in ('claude', 'codex', 'codebuddy')),",
     "  source_source text not null,",
+    "  source_environment_id text not null default 'local',",
+    "  source_environment_kind text not null default 'local',",
+    "  source_environment_label text not null default 'Local',",
     "  title text not null,",
     "  project_path text not null,",
     "  started_at text not null,",
@@ -129,6 +141,10 @@ export function buildRemoteSessionSetupSql(tableName = REMOTE_SESSION_TABLE, buc
     "  created_at bigint not null,",
     "  synced_at bigint not null",
     ");",
+    "",
+    `alter table public.${tableName} add column if not exists source_environment_id text not null default 'local';`,
+    `alter table public.${tableName} add column if not exists source_environment_kind text not null default 'local';`,
+    `alter table public.${tableName} add column if not exists source_environment_label text not null default 'Local';`,
     "",
     `create unique index if not exists ${tableName}_content_hash_idx`,
     `  on public.${tableName} (content_hash);`,
@@ -224,6 +240,9 @@ export function buildRemoteSessionPayload(options: {
       source_session_key: options.session.sessionKey,
       source_agent: options.portable.sourceAgent,
       source_source: options.session.source,
+      source_environment_id: options.session.environmentId,
+      source_environment_kind: options.session.environmentKind,
+      source_environment_label: options.session.environmentLabel,
       title: options.session.displayTitle,
       project_path: options.session.projectPath,
       started_at: options.portable.startedAt,
@@ -253,10 +272,38 @@ export function buildRemoteSessionUploadFromStore(
   if (!session) throw new Error("Session not found.");
   const messages = store.getAllMessages(sessionKey);
   const traceEvents = store.getTraceEvents(sessionKey);
-  const portable = portableSessionFrom(session, messages);
+  const portable = remotePortableSessionFrom(session, messages);
   const detail = buildRemoteSessionSnapshot(session, messages, traceEvents, now);
   const { payload, detailJson, portableJson } = buildRemoteSessionPayload({ session, detail, portable, now });
   return { session, detail, portable, payload, detailJson, portableJson };
+}
+
+export function remotePortableSessionFrom(session: SessionSearchResult, messages: SessionMessage[]): PortableSession {
+  const sourceAgent = migrationAgentForSource(session.source);
+  if (!sourceAgent) {
+    throw new Error(`Session source ${session.source} cannot be saved remotely.`);
+  }
+  if (!session.projectPath.trim()) {
+    throw new Error("Session has no project path.");
+  }
+
+  const portableMessages = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message, index) => ({
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+      index,
+    }));
+
+  return {
+    sourceSessionKey: session.sessionKey,
+    sourceAgent,
+    title: session.displayTitle,
+    projectPath: session.projectPath,
+    startedAt: new Date(session.timestamp).toISOString(),
+    messages: portableMessages,
+  };
 }
 
 export function filterRemoteSessions(sessions: RemoteSessionListItem[], query: string): RemoteSessionListItem[] {
@@ -481,6 +528,9 @@ function fromRow(row: RemoteSessionRow): RemoteSessionListItem {
     sourceSessionKey: row.source_session_key,
     sourceAgent: parseMigrationAgent(row.source_agent),
     sourceSource: row.source_source,
+    sourceEnvironmentId: row.source_environment_id || "local",
+    sourceEnvironmentKind: row.source_environment_kind || "local",
+    sourceEnvironmentLabel: row.source_environment_label || "Local",
     title: row.title,
     projectPath: row.project_path,
     startedAt: row.started_at,

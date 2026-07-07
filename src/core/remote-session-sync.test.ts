@@ -3,6 +3,7 @@ import {
   buildRemoteSessionPayload,
   buildRemoteSessionSetupSql,
   buildRemoteSessionSnapshot,
+  buildRemoteSessionUploadFromStore,
   filterRemoteSessions,
   parseDetailSnapshot,
   parsePortableSession,
@@ -86,6 +87,35 @@ describe("remote session sync model", () => {
     expect(first.payload.search_text).toContain("Fixed the login bug");
   });
 
+  it("builds upload payloads for indexed SSH remote sessions", () => {
+    const remoteSession: SessionSearchResult = {
+      ...SESSION,
+      sessionKey: "codex:ssh:abc",
+      rawId: "ssh-abc",
+      filePath: "/home/dev/.codex/sessions/abc.jsonl",
+      projectPath: "/srv/repo",
+      environmentId: "ssh-dev",
+      environmentKind: "ssh",
+      environmentLabel: "SSH dev",
+    };
+    const store = {
+      getSession: () => remoteSession,
+      getAllMessages: () => MESSAGES,
+      getTraceEvents: () => [],
+    };
+
+    const { payload, portable } = buildRemoteSessionUploadFromStore(store, remoteSession.sessionKey, 12_000);
+
+    expect(portable).toMatchObject({
+      sourceSessionKey: "codex:ssh:abc",
+      sourceAgent: "codex",
+      projectPath: "/srv/repo",
+    });
+    expect(payload.source_environment_id).toBe("ssh-dev");
+    expect(payload.source_environment_kind).toBe("ssh");
+    expect(payload.source_environment_label).toBe("SSH dev");
+  });
+
   it("rounds timestamp fields for Supabase bigint columns", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000.9);
     const { payload } = buildRemoteSessionPayload({
@@ -119,6 +149,9 @@ describe("remote session sync model", () => {
         sourceSessionKey: "codex:1",
         sourceAgent: "codex" as const,
         sourceSource: "codex-cli",
+        sourceEnvironmentId: "local",
+        sourceEnvironmentKind: "local" as const,
+        sourceEnvironmentLabel: "Local",
         title: "Auth fix",
         projectPath: "/repo",
         startedAt: "2026-07-03T10:00:00.000Z",
