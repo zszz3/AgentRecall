@@ -182,7 +182,7 @@ function serializeCodeBuddy(
   return rows;
 }
 
-function targetFilePath(
+export function targetFilePath(
   target: MigrationAgent,
   projectPath: string,
   sessionId: string,

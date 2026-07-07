@@ -62,11 +62,11 @@ import {
 } from "../core/ai-assistant";
 import { applyMigrationLengthPolicy, createMigrationCompressor } from "../core/session-migration-compression";
 import { migrateSession } from "../core/session-migration";
-import { writeMigratedSession } from "../core/session-migration-writers";
+import { targetFilePath, writeMigratedSession } from "../core/session-migration-writers";
 import { writeDbPointer } from "../core/app-paths";
 import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
-import { fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
+import { buildRemoteSyncSshArgs, fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
 import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
 import { restoreRemotePortableSession } from "../core/remote-session-restore";
 import {
@@ -119,6 +119,7 @@ import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type {
   EnvironmentUpsertInput,
   MigrationAgent,
+  PortableSession,
   SearchOptions,
   SessionEnvironment,
   SessionMigrationResult,
@@ -406,6 +407,52 @@ async function restoreRemoteSession(
       now: () => Date.now(),
       projectPathExists: pathExists,
       projectPathIsDirectory: pathIsDirectory,
+    },
+  });
+}
+
+async function restoreRemoteSessionToSourceEnvironment(
+  event: IpcMainInvokeEvent,
+  remoteId: string,
+  target: MigrationAgent,
+): Promise<SessionMigrationResult> {
+  const client = createRemoteSessionClient();
+  const remoteSession = await client.getRemoteSession(remoteId);
+  if (remoteSession.sourceEnvironmentKind !== "ssh") {
+    throw new Error("This remote session was not saved from an SSH environment.");
+  }
+  const environment = store.getEnvironment(remoteSession.sourceEnvironmentId);
+  if (!environment || environment.kind !== "ssh") {
+    throw new Error("The SSH environment for this remote session is not configured on this machine.");
+  }
+
+  const portable = await client.getPortableSession(remoteId);
+  const settings = await getHydratedSettings();
+  const endpoint = (await resolveSummaryEndpointFromSettings()) ?? buildCodexExecEndpoint(settings);
+  const compressor = endpoint ? createMigrationCompressor(endpoint, undefined, settings.compressionConcurrency) : null;
+
+  return restoreRemotePortableSession({
+    remoteId,
+    portable,
+    target,
+    localProjectPath: portable.projectPath,
+    deps: {
+      inspectCli: async () => undefined,
+      prepare: (session, onProgress) => applyMigrationLengthPolicy(session, compressor, onProgress),
+      write: (migrationTarget, session) => writeMigratedSessionToSshEnvironment(environment, migrationTarget, session),
+      record: (record) => store.recordSessionMigration(record),
+      refreshIndex: async () => {
+        await syncRemoteEnvironment(store, environment);
+        mainWindow?.webContents.send("environments-updated", store.listEnvironments());
+      },
+      launch: async () => undefined,
+      resumeCommand: (migrationTarget, targetSessionId, projectPath) => remoteMigrationResumeDisplayCommand(environment, migrationTarget, targetSessionId, projectPath),
+      fallbackResumeCommand: (migrationTarget, targetSessionId, projectPath) => remoteMigrationResumeDisplayCommand(environment, migrationTarget, targetSessionId, projectPath),
+      onProgress: (progress) => event.sender.send("session:migration-progress", progress),
+      idFactory: () => randomUUID(),
+      now: () => Date.now(),
+      projectPathExists: (projectPath) => remotePathExists(environment, projectPath),
+      projectPathIsDirectory: (projectPath) => remotePathIsDirectory(environment, projectPath),
     },
   });
 }
@@ -1262,6 +1309,104 @@ function fallbackMigrationResumeDisplayCommand(target: MigrationAgent, sessionId
   return `cd ${quotePosixToken(projectPath)} && ${[binary, ...args].map(quotePosixToken).join(" ")}`;
 }
 
+function remoteMigrationResumeDisplayCommand(
+  environment: SessionEnvironment,
+  target: MigrationAgent,
+  sessionId: string,
+  projectPath: string,
+): string {
+  const remoteCommand = fallbackMigrationResumeDisplayCommand(target, sessionId, projectPath);
+  return ["ssh", ...buildRemoteSyncSshArgs(environment, remoteCommand).map(quotePosixToken)].join(" ");
+}
+
+async function writeMigratedSessionToSshEnvironment(
+  environment: SessionEnvironment,
+  target: MigrationAgent,
+  session: PortableSession,
+): Promise<{ sessionId: string; filePath: string }> {
+  const now = new Date();
+  const tempHome = await fs.mkdtemp(path.join(app.getPath("temp"), "agent-session-remote-restore-"));
+  try {
+    const written = await writeMigratedSession({ target, session, homeDir: tempHome, now });
+    const remoteHome = await remoteHomeDir(environment);
+    const remotePath = targetFilePath(target, session.projectPath, written.sessionId, remoteHome, now);
+    const content = await fs.readFile(written.filePath);
+    await runRemotePython(environment, REMOTE_WRITE_FILE_SCRIPT, {
+      path: remotePath,
+      contentBase64: content.toString("base64"),
+    });
+    return { sessionId: written.sessionId, filePath: remotePath };
+  } finally {
+    await fs.rm(tempHome, { recursive: true, force: true });
+  }
+}
+
+async function remoteHomeDir(environment: SessionEnvironment): Promise<string> {
+  const output = await runRemotePython(environment, "from pathlib import Path\nprint(Path.home())", {});
+  const home = output.trim();
+  if (!home) throw new Error("Could not resolve remote home directory.");
+  return home;
+}
+
+async function remotePathExists(environment: SessionEnvironment, targetPath: string): Promise<boolean> {
+  return (await runRemotePathCheck(environment, targetPath, "exists")) === "true";
+}
+
+async function remotePathIsDirectory(environment: SessionEnvironment, targetPath: string): Promise<boolean> {
+  return (await runRemotePathCheck(environment, targetPath, "is_dir")) === "true";
+}
+
+async function runRemotePathCheck(environment: SessionEnvironment, targetPath: string, check: "exists" | "is_dir"): Promise<string> {
+  const output = await runRemotePython(
+    environment,
+    [
+      "import json, sys",
+      "from pathlib import Path",
+      "payload = json.load(sys.stdin)",
+      "path = Path(payload['path'])",
+      "check = payload['check']",
+      "print('true' if (path.exists() if check == 'exists' else path.is_dir()) else 'false')",
+    ].join("\n"),
+    { path: targetPath, check },
+  );
+  return output.trim();
+}
+
+function runRemotePython(environment: SessionEnvironment, script: string, payload: unknown): Promise<string> {
+  const remoteCommand = buildPythonBase64Command(script);
+  return runSshWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
+}
+
+function runSshWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
+  const args = buildRemoteSyncSshArgs(environment, remoteCommand);
+  return new Promise((resolve, reject) => {
+    const child = execFile("ssh", args, { maxBuffer: 128 * 1024 * 1024, timeout: 90_000 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(stderr.trim() || error.message));
+      else resolve(stdout);
+    });
+    child.stdin?.end(input);
+  });
+}
+
+function buildPythonBase64Command(script: string): string {
+  const encoded = Buffer.from(script, "utf-8").toString("base64");
+  return `python3 -c 'import base64; exec(base64.b64decode("${encoded}").decode("utf-8"))'`;
+}
+
+const REMOTE_WRITE_FILE_SCRIPT = [
+  "import base64, json, os, sys, uuid",
+  "from pathlib import Path",
+  "payload = json.load(sys.stdin)",
+  "target = Path(payload['path'])",
+  "content = base64.b64decode(payload['contentBase64'])",
+  "target.parent.mkdir(parents=True, exist_ok=True)",
+  "tmp = target.with_name(target.name + '.tmp-' + uuid.uuid4().hex)",
+  "tmp.write_bytes(content)",
+  "os.chmod(tmp, 0o600)",
+  "os.replace(tmp, target)",
+  "print(str(target))",
+].join("\n");
+
 async function maybeAutoBackfillSummaries(): Promise<void> {
   if (summaryBackfillRunning) return;
   const settings = getSettings();
@@ -1579,6 +1724,9 @@ function registerIpc(): void {
   ipcMain.handle("remote-session:choose-project", () => chooseLocalProjectDirectory());
   ipcMain.handle("remote-session:restore", (event, remoteId: string, target: MigrationAgent, localProjectPath: string) =>
     restoreRemoteSession(event, remoteId, target, localProjectPath),
+  );
+  ipcMain.handle("remote-session:restore-to-source-environment", (event, remoteId: string, target: MigrationAgent) =>
+    restoreRemoteSessionToSourceEnvironment(event, remoteId, target),
   );
   ipcMain.handle("remote-session:delete", (_event, remoteId: string) => createRemoteSessionClient().deleteRemoteSession(remoteId));
   ipcMain.handle("skills:copy-path", (_event, skillPath: string) => {

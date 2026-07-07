@@ -195,6 +195,14 @@ describe("detail panel actions", () => {
     expect(mainHandlerSource("session:migrate")).toContain("fallbackMigrationResumeDisplayCommand");
   });
 
+  it("exposes visible session bulk remote upload and remote-environment restore actions", () => {
+    expect(appSource).toContain("uploadVisibleRemoteSessions");
+    expect(appSource).toContain("Save visible to remote");
+    expect(preloadSource).toContain("restoreRemoteSessionToSourceEnvironment");
+    expect(preloadSource).toContain("remote-session:restore-to-source-environment");
+    expect(mainSource).toContain('ipcMain.handle("remote-session:restore-to-source-environment"');
+  });
+
   it("preflights remote resume before opening terminals", () => {
     expect(mainSource).toContain("preflightRemoteSessionResume");
     expect(mainSource).toContain("ensureRemoteResumePreflight");

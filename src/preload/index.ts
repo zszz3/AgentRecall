@@ -108,6 +108,8 @@ const api = {
   chooseRemoteRestoreProject: (): Promise<string | null> => ipcRenderer.invoke("remote-session:choose-project"),
   restoreRemoteSession: (remoteId: string, target: MigrationAgent, localProjectPath: string): Promise<SessionMigrationResult> =>
     ipcRenderer.invoke("remote-session:restore", remoteId, target, localProjectPath),
+  restoreRemoteSessionToSourceEnvironment: (remoteId: string, target: MigrationAgent): Promise<SessionMigrationResult> =>
+    ipcRenderer.invoke("remote-session:restore-to-source-environment", remoteId, target),
   deleteRemoteSession: (remoteId: string): Promise<boolean> => ipcRenderer.invoke("remote-session:delete", remoteId),
   copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
   revealSkill: (targetPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", targetPath),

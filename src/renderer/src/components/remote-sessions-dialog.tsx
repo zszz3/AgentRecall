@@ -120,6 +120,20 @@ export function RemoteSessionsDialog({
     }
   }
 
+  async function restoreToSourceRemote(remote: RemoteSessionListItem): Promise<void> {
+    setRestoringId(remote.id);
+    setFeedback({ kind: "running", message: l("Restoring to source SSH environment...", "正在恢复到来源 SSH 环境...") });
+    try {
+      const result = await window.sessionSearch.restoreRemoteSessionToSourceEnvironment(remote.id, restoreTarget);
+      onRestored(result);
+      setFeedback({ kind: "success", message: l(`Restored to ${remote.sourceEnvironmentLabel}.`, `已恢复到 ${remote.sourceEnvironmentLabel}。`) });
+    } catch (error) {
+      setFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   async function deleteRemote(remote: RemoteSessionListItem): Promise<void> {
     setFeedback({ kind: "running", message: l("Deleting remote session...", "正在删除远程会话...") });
     try {
@@ -220,6 +234,12 @@ export function RemoteSessionsDialog({
                   <ArrowRightLeft size={14} />
                   {restoringId === remote.id ? l("Restoring...", "恢复中...") : l("Restore", "恢复")}
                 </button>
+                {remote.sourceEnvironmentKind === "ssh" ? (
+                  <button type="button" onClick={() => void restoreToSourceRemote(remote)} disabled={restoringId === remote.id} title={l("Restore to the original SSH environment", "恢复到原 SSH 环境")}>
+                    <ArrowRightLeft size={14} />
+                    {l("Restore SSH", "恢复 SSH")}
+                  </button>
+                ) : null}
                 <button type="button" className="icon-button danger" onClick={() => void deleteRemote(remote)} disabled={restoringId === remote.id} aria-label={l("Delete remote session", "删除远程会话")}>
                   <Trash2 size={14} />
                 </button>
