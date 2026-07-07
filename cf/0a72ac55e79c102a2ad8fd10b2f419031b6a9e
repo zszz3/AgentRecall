@@ -1,0 +1,23 @@
+src/core/remote-session-sync.test.ts
+  s_9162a3c246fe22::t_42411ddbf3b06d 6,90-118,152-154
+src/core/remote-session-sync.ts
+  s_9162a3c246fe22::t_2b47931b2b68bb 2,9,24-26,68-70,94-96,124-126,145-148,243-245,275,281-308,531-533
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "cf0a72ac55e79c102a2ad8fd10b2f419031b6a9e",
+  "prompts": {},
+  "sessions": {
+    "s_9162a3c246fe22": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1328-5d10-7f12-8516-f8a251b4c6f8",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
