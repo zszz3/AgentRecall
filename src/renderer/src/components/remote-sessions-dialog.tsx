@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, Cloud, CloudUpload, Database, FolderOpen, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, Cloud, CloudUpload, Copy, Eye, FolderOpen, RefreshCw, Search, Server, Trash2, X } from "lucide-react";
 import type { RemoteSessionDetailSnapshot, RemoteSessionListItem, RemoteSessionStatus } from "../../../core/remote-session-sync";
 import type { MigrationAgent, SessionMigrationResult } from "../../../core/types";
 import { formatRelativeTime } from "../../../core/format-session";
@@ -191,10 +191,6 @@ export function RemoteSessionsDialog({
             <CloudUpload size={14} />
             <span>{l(`Save visible (${visibleUploadCount})`, `保存当前可见（${visibleUploadCount}）`)}</span>
           </button>
-          <button type="button" className="settings-action-button" onClick={() => void copySetupSql()}>
-            <Database size={14} />
-            <span>{l("Copy SQL", "复制 SQL")}</span>
-          </button>
         </div>
         <div className="remote-restore-bar">
           <div className="remote-filter-group" role="group" aria-label={l("Restore target", "恢复目标")}>
@@ -219,6 +215,12 @@ export function RemoteSessionsDialog({
             <div className="remote-empty">
               <Cloud size={18} />
               <span>{status?.message ?? l("Remote sync is not configured.", "远程同步未配置。")}</span>
+              {status && status.kind !== "unconfigured" ? (
+                <button type="button" className="setup-copy-button" onClick={() => void copySetupSql()}>
+                  <Copy size={13} />
+                  <span>{l("Copy setup SQL", "复制初始化 SQL")}</span>
+                </button>
+              ) : null}
             </div>
           ) : null}
           {!loading && status?.kind === "ready" && filtered.length === 0 ? <div className="remote-empty">{l("No remote sessions found.", "没有找到远程会话。")}</div> : null}
@@ -245,20 +247,21 @@ export function RemoteSessionsDialog({
                 ) : null}
               </div>
               <div className="remote-session-actions">
-                <button type="button" onClick={() => void openDetail(remote)} disabled={detailLoadingId === remote.id || restoringId === remote.id}>
-                  {detailLoadingId === remote.id ? l("Loading...", "加载中...") : l("View", "查看")}
+                <button type="button" className="remote-session-action" onClick={() => void openDetail(remote)} disabled={detailLoadingId === remote.id || restoringId === remote.id}>
+                  <Eye size={14} />
+                  <span>{detailLoadingId === remote.id ? l("Loading...", "加载中...") : l("View", "查看")}</span>
                 </button>
-                <button type="button" onClick={() => void restore(remote)} disabled={restoringId === remote.id}>
+                <button type="button" className="remote-session-action" onClick={() => void restore(remote)} disabled={restoringId === remote.id}>
                   <ArrowRightLeft size={14} />
-                  {restoringId === remote.id ? l("Restoring...", "恢复中...") : l("Restore", "恢复")}
+                  <span>{restoringId === remote.id ? l("Restoring...", "恢复中...") : l("Restore", "恢复")}</span>
                 </button>
                 {remote.sourceEnvironmentKind === "ssh" ? (
-                  <button type="button" onClick={() => void restoreToSourceRemote(remote)} disabled={restoringId === remote.id} title={l("Restore to the original SSH environment", "恢复到原 SSH 环境")}>
-                    <ArrowRightLeft size={14} />
-                    {l("Restore SSH", "恢复 SSH")}
+                  <button type="button" className="remote-session-action" onClick={() => void restoreToSourceRemote(remote)} disabled={restoringId === remote.id} title={l("Restore to the original SSH environment", "恢复到原 SSH 环境")}>
+                    <Server size={14} />
+                    <span>{l("Restore SSH", "恢复 SSH")}</span>
                   </button>
                 ) : null}
-                <button type="button" className="icon-button danger" onClick={() => void deleteRemote(remote)} disabled={restoringId === remote.id} aria-label={l("Delete remote session", "删除远程会话")}>
+                <button type="button" className="remote-session-action icon-only danger" onClick={() => void deleteRemote(remote)} disabled={restoringId === remote.id} aria-label={l("Delete remote session", "删除远程会话")}>
                   <Trash2 size={14} />
                 </button>
               </div>

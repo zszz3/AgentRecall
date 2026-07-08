@@ -356,6 +356,7 @@ async function getRemoteSessionStatus(): Promise<RemoteSessionStatus> {
 
 async function uploadSessionToRemote(sessionKey: string): Promise<RemoteSessionUploadResult> {
   const client = createRemoteSessionClient();
+  await ensureRemoteSessionDetailsLoaded(sessionKey);
   const { payload, detailJson, portableJson } = buildRemoteSessionUploadFromStore(store, sessionKey);
   return client.uploadSession(payload, detailJson, portableJson);
 }

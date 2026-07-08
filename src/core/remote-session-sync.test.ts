@@ -175,23 +175,64 @@ describe("remote session sync model", () => {
     expect(filterRemoteSessions(sessions, "missing")).toHaveLength(0);
   });
 
-  it("reports the latest setup SQL when source environment columns are missing", async () => {
+  it("falls back to legacy remote session rows when source environment columns are missing", async () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
     const { payload, detailJson, portableJson } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     const missingColumn = {
       code: "PGRST204",
       message: "Could not find the 'source_environment_id' column of 'agent_session_remote_sessions' in the schema cache",
+    };
+    const legacyRow = {
+      id: payload.id,
+      source_session_key: payload.source_session_key,
+      source_agent: payload.source_agent,
+      source_source: payload.source_source,
+      title: payload.title,
+      project_path: payload.project_path,
+      started_at: payload.started_at,
+      updated_at: payload.updated_at,
+      content_hash: payload.content_hash,
+      message_count: payload.message_count,
+      trace_event_count: payload.trace_event_count,
+      ai_summary: payload.ai_summary,
+      tags: payload.tags,
+      search_text: payload.search_text,
+      detail_object_key: payload.detail_object_key,
+      portable_object_key: payload.portable_object_key,
+      detail_sha256: payload.detail_sha256,
+      portable_sha256: payload.portable_sha256,
+      created_at: payload.created_at,
+      synced_at: payload.synced_at,
     };
     const client = new SupabaseRemoteSessionClient({
       url: "https://example.supabase.co",
       anonKey: "anon",
       fetchImpl: async (url, init) => {
+        calls.push({
+          url: String(url),
+          method: init?.method ?? "GET",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
         if (String(url).includes("/storage/v1/object/")) return new Response("{}", { status: 200 });
-        if (init?.method === "POST") return new Response(JSON.stringify(missingColumn), { status: 400 });
+        if (init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          if ("source_environment_id" in body) return new Response(JSON.stringify(missingColumn), { status: 400 });
+          return new Response(JSON.stringify([legacyRow]), { status: 201 });
+        }
+        if (String(url).includes("source_environment_id")) return new Response(JSON.stringify(missingColumn), { status: 400 });
+        if (String(url).includes("select=id")) return new Response(JSON.stringify([]), { status: 200 });
         return new Response(JSON.stringify(missingColumn), { status: 400 });
       },
     });
 
-    await expect(client.uploadSession(payload, detailJson, portableJson)).rejects.toThrow(/latest Supabase remote sessions setup SQL/i);
+    const result = await client.uploadSession(payload, detailJson, portableJson);
+
+    expect(result.status).toBe("uploaded");
+    expect(result.remoteSession.sourceEnvironmentKind).toBe("local");
+    const postBodies = calls.filter((call) => call.method === "POST" && call.url.includes("/rest/v1/")).map((call) => call.body);
+    expect(postBodies).toHaveLength(2);
+    expect(postBodies[0]).toHaveProperty("source_environment_id", "local");
+    expect(postBodies[1]).not.toHaveProperty("source_environment_id");
   });
 });

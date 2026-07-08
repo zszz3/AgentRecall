@@ -641,7 +641,7 @@ function SkillSyncStatusPanel({
     <div className={`skill-sync-panel ${snapshot.status.kind}`}>
       <span>{snapshot.status.message}</span>
       {snapshot.status.kind === "missing-table" ? (
-        <button type="button" onClick={onCopySetupSql}>
+        <button type="button" className="setup-copy-button" onClick={onCopySetupSql}>
           <Copy size={14} />
           {l("Copy setup SQL", "复制初始化 SQL")}
         </button>

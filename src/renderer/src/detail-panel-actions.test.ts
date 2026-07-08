@@ -201,9 +201,20 @@ describe("detail panel actions", () => {
     expect(appSource).not.toContain("CloudUpload");
     expect(remoteSessionsDialogSource).toContain("onUploadVisible");
     expect(remoteSessionsDialogSource).toContain("Save visible");
+    expect(remoteSessionsDialogSource).not.toContain("Database");
+    expect(remoteSessionsDialogSource).toContain("setup-copy-button");
     expect(preloadSource).toContain("restoreRemoteSessionToSourceEnvironment");
     expect(preloadSource).toContain("remote-session:restore-to-source-environment");
     expect(mainSource).toContain('ipcMain.handle("remote-session:restore-to-source-environment"');
+  });
+
+  it("hydrates remote session details before uploading them to Supabase", () => {
+    const uploadFunction = mainSource.slice(mainSource.indexOf("async function uploadSessionToRemote"), mainSource.indexOf("function listRemoteSessions"));
+
+    expect(uploadFunction).toContain("await ensureRemoteSessionDetailsLoaded(sessionKey)");
+    expect(uploadFunction.indexOf("await ensureRemoteSessionDetailsLoaded(sessionKey)")).toBeLessThan(
+      uploadFunction.indexOf("buildRemoteSessionUploadFromStore"),
+    );
   });
 
   it("preflights remote resume before opening terminals", () => {

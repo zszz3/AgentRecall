@@ -4559,9 +4559,10 @@ body.overlay-open .sidebar {
   gap: 6px;
 }
 
-.remote-session-actions button:not(.icon-button) {
+.remote-session-action {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   height: 30px;
   padding: 0 10px;
@@ -4570,6 +4571,15 @@ body.overlay-open .sidebar {
   background: var(--panel-bg);
   color: var(--text);
   cursor: pointer;
+}
+
+.remote-session-action.icon-only {
+  width: 34px;
+  padding: 0;
+}
+
+.remote-session-action.danger {
+  color: var(--danger);
 }
 
 .remote-session-actions button:hover:not(:disabled) {
@@ -4590,6 +4600,26 @@ body.overlay-open .sidebar {
   color: var(--text-muted);
   font-size: 13px;
   text-align: center;
+}
+
+.setup-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--panel-bg);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.setup-copy-button:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 @media (max-width: 720px) {

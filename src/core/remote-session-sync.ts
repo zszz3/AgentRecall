@@ -7,6 +7,8 @@ export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
 const REMOTE_SESSION_COLUMNS =
   "id,source_session_key,source_agent,source_source,source_environment_id,source_environment_kind,source_environment_label,title,project_path,started_at,updated_at,content_hash,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
+const REMOTE_SESSION_LEGACY_COLUMNS =
+  "id,source_session_key,source_agent,source_source,title,project_path,started_at,updated_at,content_hash,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 
 export interface RemoteSessionDetailSnapshot {
   schemaVersion: 1;
@@ -306,6 +308,19 @@ export function remotePortableSessionFrom(session: SessionSearchResult, messages
   };
 }
 
+function legacyRemoteSessionPayload(payload: RemoteSessionUploadPayload): Omit<
+  RemoteSessionUploadPayload,
+  "source_environment_id" | "source_environment_kind" | "source_environment_label"
+> {
+  const {
+    source_environment_id: _sourceEnvironmentId,
+    source_environment_kind: _sourceEnvironmentKind,
+    source_environment_label: _sourceEnvironmentLabel,
+    ...legacy
+  } = payload;
+  return legacy;
+}
+
 export function filterRemoteSessions(sessions: RemoteSessionListItem[], query: string): RemoteSessionListItem[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return sessions;
@@ -349,34 +364,21 @@ export class SupabaseRemoteSessionClient {
       };
     }
     if (isMissingSchemaColumnError(body)) {
-      return { kind: "error", setupSql, message: latestRemoteSessionSetupSqlMessage(body) };
+      const legacyResponse = await this.restRequest(`/${REMOTE_SESSION_TABLE}?select=id&limit=1`, { method: "GET" });
+      if (legacyResponse.ok) return { kind: "ready", setupSql };
+      const legacyBody = await readResponseBody(legacyResponse);
+      return { kind: "error", setupSql, message: supabaseErrorMessage(legacyResponse.status, legacyBody) };
     }
     return { kind: "error", setupSql, message: supabaseErrorMessage(response.status, body) };
   }
 
   async listRemoteSessions(query = ""): Promise<RemoteSessionListItem[]> {
-    const response = await this.restRequest(
-      `/${REMOTE_SESSION_TABLE}?select=${REMOTE_SESSION_COLUMNS}&order=updated_at.desc`,
-      { method: "GET" },
-    );
-    const body = await readResponseBody(response);
-    if (!response.ok) {
-      if (isMissingSchemaColumnError(body)) throw new Error(latestRemoteSessionSetupSqlMessage(body));
-      throw new Error(supabaseErrorMessage(response.status, body));
-    }
+    const { body } = await this.selectRemoteSessionRows(`order=updated_at.desc`);
     return filterRemoteSessions(parseRows(body), query);
   }
 
   async getRemoteSession(remoteId: string): Promise<RemoteSessionListItem> {
-    const response = await this.restRequest(
-      `/${REMOTE_SESSION_TABLE}?id=eq.${encodeURIComponent(remoteId)}&select=${REMOTE_SESSION_COLUMNS}&limit=1`,
-      { method: "GET" },
-    );
-    const body = await readResponseBody(response);
-    if (!response.ok) {
-      if (isMissingSchemaColumnError(body)) throw new Error(latestRemoteSessionSetupSqlMessage(body));
-      throw new Error(supabaseErrorMessage(response.status, body));
-    }
+    const { body } = await this.selectRemoteSessionRows(`id=eq.${encodeURIComponent(remoteId)}&limit=1`);
     const [session] = parseRows(body);
     if (!session) throw new Error("Remote session was not found.");
     return session;
@@ -396,7 +398,9 @@ export class SupabaseRemoteSessionClient {
     });
     const body = await readResponseBody(response);
     if (!response.ok) {
-      if (isMissingSchemaColumnError(body)) throw new Error(latestRemoteSessionSetupSqlMessage(body));
+      if (isMissingSchemaColumnError(body)) {
+        return this.uploadLegacySession(payload, existing);
+      }
       throw new Error(supabaseErrorMessage(response.status, body));
     }
     const [remoteSession] = parseRows(body);
@@ -434,10 +438,43 @@ export class SupabaseRemoteSessionClient {
   private async getRemoteSessionOrNull(remoteId: string): Promise<RemoteSessionListItem | null> {
     try {
       return await this.getRemoteSession(remoteId);
-    } catch (error) {
-      if (error instanceof Error && /latest Supabase remote sessions setup SQL/i.test(error.message)) throw error;
+    } catch {
       return null;
     }
+  }
+
+  private async selectRemoteSessionRows(params: string): Promise<{ body: unknown }> {
+    const response = await this.restRequest(
+      `/${REMOTE_SESSION_TABLE}?select=${REMOTE_SESSION_COLUMNS}&${params}`,
+      { method: "GET" },
+    );
+    const body = await readResponseBody(response);
+    if (response.ok) return { body };
+    if (!isMissingSchemaColumnError(body)) throw new Error(supabaseErrorMessage(response.status, body));
+
+    const legacyResponse = await this.restRequest(
+      `/${REMOTE_SESSION_TABLE}?select=${REMOTE_SESSION_LEGACY_COLUMNS}&${params}`,
+      { method: "GET" },
+    );
+    const legacyBody = await readResponseBody(legacyResponse);
+    if (!legacyResponse.ok) throw new Error(supabaseErrorMessage(legacyResponse.status, legacyBody));
+    return { body: legacyBody };
+  }
+
+  private async uploadLegacySession(
+    payload: RemoteSessionUploadPayload,
+    existing: RemoteSessionListItem | null,
+  ): Promise<RemoteSessionUploadResult> {
+    const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?on_conflict=id`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(legacyRemoteSessionPayload(payload)),
+    });
+    const body = await readResponseBody(response);
+    if (!response.ok) throw new Error(supabaseErrorMessage(response.status, body));
+    const [remoteSession] = parseRows(body);
+    if (!remoteSession) throw new Error("Supabase did not return the uploaded remote session.");
+    return { status: existing ? "updated" : "uploaded", remoteSession };
   }
 
   private async restRequest(path: string, init: RequestInit): Promise<Response> {
