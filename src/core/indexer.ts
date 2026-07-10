@@ -179,10 +179,16 @@ export function indexMigratedSessionFile(
 
 function loadMigratedSessionFile(target: MigrationTarget, filePath: string): LoadedSession | null {
   const descriptor = migrationTargetDescriptor(target);
-  const rows = parseJsonlText(fs.readFileSync(filePath, "utf8"));
+  if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
+
+  let rows: unknown[];
+  try {
+    rows = parseJsonlText(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
   if (descriptor.family === "codex") {
     return loadCodexSessionRows(filePath, rows, { sourceOverride: descriptor.source });
   }
-  if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
   return loadClaudeCliSessionRows(filePath, rows, { source: descriptor.source });
 }

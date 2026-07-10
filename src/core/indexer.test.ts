@@ -145,6 +145,26 @@ describe("indexer", () => {
           source,
           sessionKey: `${target}:${written.sessionId}`,
         });
+        expect(store.searchSessions({ query: "migrated question", source, limit: 10 })).toMatchObject([
+          { sessionKey: `${target}:${written.sessionId}` },
+        ]);
+      } finally {
+        store.close();
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["claude", "codex", "codebuddy"] as const)(
+    "reports a stable domain error when a migrated %s session file is missing",
+    (target) => {
+      const store = createInMemoryStore();
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-session-search-index-missing-${target}-`));
+      const filePath = path.join(homeDir, "missing.jsonl");
+      try {
+        expect(() => indexMigratedSessionFile(store, target, filePath)).toThrow(
+          `Migrated ${target} session could not be loaded from ${filePath}.`,
+        );
       } finally {
         store.close();
         fs.rmSync(homeDir, { recursive: true, force: true });
