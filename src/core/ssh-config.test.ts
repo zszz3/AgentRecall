@@ -16,8 +16,8 @@ Host devbox
 Host *.internal
   User ignored
 
-Host review git.byted.org
-  HostName git.byted.org
+Host review git.example.com
+  HostName git.example.com
 `;
 
     expect(parseSshConfigHosts(config)).toEqual([
@@ -28,8 +28,8 @@ Host review git.byted.org
         port: 2222,
         identityFile: "~/.ssh/devbox",
       },
-      { alias: "review", hostName: "git.byted.org", user: null, port: null, identityFile: null },
-      { alias: "git.byted.org", hostName: "git.byted.org", user: null, port: null, identityFile: null },
+      { alias: "review", hostName: "git.example.com", user: null, port: null, identityFile: null },
+      { alias: "git.example.com", hostName: "git.example.com", user: null, port: null, identityFile: null },
     ]);
   });
 
