@@ -64,6 +64,12 @@ function withShell<T>(shell: string, fn: () => T | Promise<T>): T | Promise<T> {
 }
 
 describe("platform application resolution", () => {
+  it("hides subagent sessions by default and preserves the default for older saved settings", () => {
+    expect(defaultSettings.hideSubagentSessions).toBe(true);
+    const { hideSubagentSessions: _missingInOlderSettings, ...olderSettings } = defaultSettings;
+    expect(mergeAppSettings(defaultSettings, olderSettings).hideSubagentSessions).toBe(true);
+  });
+
   it("returns the first macOS application name that resolves", async () => {
     const calls: string[][] = [];
     const runner = async (_command: string, args: string[]) => {

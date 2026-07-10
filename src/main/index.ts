@@ -506,6 +506,18 @@ function getSettings(): AppSettings {
   };
 }
 
+function visibleSearchOptions(options: SearchOptions = {}): SearchOptions {
+  return { ...options, excludeSubagents: getSettings().hideSubagentSessions };
+}
+
+function visibleStatsOptions(options: SessionStatsOptions = {}): SessionStatsOptions {
+  return { ...options, excludeSubagents: getSettings().hideSubagentSessions };
+}
+
+function visibleProjectOptions(): { excludeSubagents: boolean } {
+  return { excludeSubagents: getSettings().hideSubagentSessions };
+}
+
 function pruneDisabledOptionalSources(settings: AppSettings): void {
   const disabledSources = OPTIONAL_SOURCE_SETTINGS.flatMap((item) => (settings[item.key] ? [] : item.sources));
   store.deleteSessionsBySource(disabledSources);
@@ -1445,8 +1457,8 @@ function stopAutoSkillUsageRefresh(): void {
 }
 
 function registerIpc(): void {
-  ipcMain.handle("search:sessions", (_event, options: SearchOptions) => store.searchSessions(options));
-  ipcMain.handle("search:session-page", (_event, options: SearchOptions) => store.searchSessionPage(options));
+  ipcMain.handle("search:sessions", (_event, options: SearchOptions) => store.searchSessions(visibleSearchOptions(options)));
+  ipcMain.handle("search:session-page", (_event, options: SearchOptions) => store.searchSessionPage(visibleSearchOptions(options)));
   ipcMain.handle("session:get", (_event, sessionKey: string) => {
     store.markOpened(sessionKey);
     return store.getSession(sessionKey);
@@ -1526,7 +1538,7 @@ function registerIpc(): void {
     // CLI write a grounded answer over the hits.
     if (isLocalCliEndpoint(endpoint)) {
       const search = async (query: string): Promise<FallbackSessionHit[]> => {
-        const sessions = store.searchSessions({ query, limit: 12 });
+        const sessions = store.searchSessions(visibleSearchOptions({ query, limit: 12 }));
         return sessions.map((session) => ({
           sessionKey: session.sessionKey,
           title: session.displayTitle,
@@ -1551,12 +1563,12 @@ function registerIpc(): void {
           const source = typeof args.source === "string" && args.source ? args.source : undefined;
           const projectPath = typeof args.project === "string" && args.project ? args.project : undefined;
           const limit = typeof args.limit === "number" ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 20;
-          const sessions = store.searchSessions({
+          const sessions = store.searchSessions(visibleSearchOptions({
             query,
             source: source as SearchOptions["source"],
             projectPath,
             limit,
-          });
+          }));
           return {
             result: sessions.map((session) => ({
               sessionKey: session.sessionKey,
@@ -1570,7 +1582,7 @@ function registerIpc(): void {
           };
         }
         case "list_projects": {
-          const projects = store.listProjects();
+          const projects = store.listProjects(visibleProjectOptions());
           return {
             result: projects.map((project) => ({ project: project.path, sessions: project.sessionCount })),
             sessionKeys: [],
@@ -1626,7 +1638,7 @@ function registerIpc(): void {
     settingsStore.set("sessionSearchMcpEnabled", enabled);
     return setup.status();
   });
-  ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(options));
+  ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(visibleStatsOptions(options)));
   ipcMain.handle("quota:get", () => {
     const settings = getSettings();
     return loadUsageQuotaSnapshot({
@@ -1635,7 +1647,7 @@ function registerIpc(): void {
     });
   });
   ipcMain.handle("tags:list", () => store.listTags());
-  ipcMain.handle("projects:list", () => store.listProjects());
+  ipcMain.handle("projects:list", () => store.listProjects(visibleProjectOptions()));
   ipcMain.handle("environments:list", () => store.listEnvironments());
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>

@@ -69,6 +69,7 @@ export interface AppSettings {
   includeTrae: boolean;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
+  hideSubagentSessions: boolean;
   summaryAutoBackfill: boolean;
   summaryMaxAgeDays: number;
   compressionConcurrency: number;
@@ -111,6 +112,7 @@ export const defaultSettings: AppSettings = {
   includeTrae: false,
   hideCodexQuota: false,
   hideClaudeQuota: false,
+  hideSubagentSessions: true,
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
