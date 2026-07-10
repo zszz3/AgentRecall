@@ -13,6 +13,7 @@ import {
   getResumeCommand,
   getResumeProcessSpec,
   inspectMigrationCli,
+  mergeProcessEnvOverrides,
   mergeAppSettings,
   normalizeApiConfig,
   normalizeClaudeApiConfig,
@@ -869,7 +870,7 @@ describe("migration cli process specs", () => {
         platform: "win32",
       }).displayCommand,
     ).toBe(
-      "$__assHadCodexHome = Test-Path Env:CODEX_HOME; $__assCodexHome = $env:CODEX_HOME; try { $env:CODEX_HOME = 'C:\\Users\\A User/.codex-internal'; cd 'C:\\repo & tools'; & 'C:\\Program Files\\Codex CLI\\codex.exe' resume 'id ''quoted''' } finally { if ($__assHadCodexHome) { $env:CODEX_HOME = $__assCodexHome } else { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } }",
+      "$__assHadCodexHome = Test-Path Env:CODEX_HOME; $__assCodexHome = $env:CODEX_HOME; try { $env:CODEX_HOME = 'C:\\Users\\A User\\.codex-internal'; cd 'C:\\repo & tools'; & 'C:\\Program Files\\Codex CLI\\codex.exe' resume 'id ''quoted''' } finally { if ($__assHadCodexHome) { $env:CODEX_HOME = $__assCodexHome } else { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } }",
     );
   });
 
@@ -886,7 +887,7 @@ describe("migration cli process specs", () => {
         platform: "win32",
       }).displayCommand,
     ).toBe(
-      'setlocal & set "CODEX_HOME=C:\\Users\\A User/.codex-internal" & cd /d "C:\\repo with spaces" && "C:\\Program Files\\Codex CLI\\codex.exe" resume "id & next" & endlocal',
+      'setlocal & set "CODEX_HOME=C:\\Users\\A User\\.codex-internal" & cd /d "C:\\repo with spaces" && "C:\\Program Files\\Codex CLI\\codex.exe" resume "id & next" & endlocal',
     );
   });
 
@@ -913,7 +914,7 @@ describe("migration cli process specs", () => {
       codexBinary: "C:\\Tools\\%PATH%\\!TEMP!\\codex ^ internal.exe",
     };
     const expectedScript =
-      "$ErrorActionPreference = 'Stop'; $env:CODEX_HOME = 'C:\\Users\\%PATH%\\!TEMP!/.codex-internal'; Set-Location -LiteralPath 'C:\\repo\\%PATH%\\!TEMP! | source'; & 'C:\\Tools\\%PATH%\\!TEMP!\\codex ^ internal.exe' resume 'id-%PATH%-!TEMP!-<next>'";
+      "$ErrorActionPreference = 'Stop'; $env:CODEX_HOME = 'C:\\Users\\%PATH%\\!TEMP!\\.codex-internal'; Set-Location -LiteralPath 'C:\\repo\\%PATH%\\!TEMP! | source'; & 'C:\\Tools\\%PATH%\\!TEMP!\\codex ^ internal.exe' resume 'id-%PATH%-!TEMP!-<next>'";
 
     expect(
       getMigrationResumeProcessSpec(
@@ -1020,6 +1021,18 @@ describe("migration cli process specs", () => {
     await expect(inspectMigrationCli("codex-internal", defaultSettings, async () => "codex-cli 0.141.0")).resolves.toBeUndefined();
   });
 
+  it.each([
+    ["codex", "codex 0.141.0junk"],
+    ["codex", "codex-cli 0.141.0-not-a-release"],
+    ["codex", "codex 0.141"],
+    ["tclaude", "@tencent/tclaude 0.0.9garbage\n@anthropic-ai/claude-code 2.1.154"],
+    ["tclaude", "@tencent/tclaude 0.0.9\n@anthropic-ai/claude-code 2.1.154-preview"],
+    ["claude-internal", "claude-internal: 1.1.9junk\nclaude: 2.1.154"],
+    ["claude-internal", "claude-internal: 1.1.9\nclaude: 2.1.154-preview"],
+  ] as const)("rejects non-release version text for %s", async (target, output) => {
+    await expect(inspectMigrationCli(target, defaultSettings, async () => output)).rejects.toThrow(/version/i);
+  });
+
   it("rejects a new wrapper with an old upstream and reports missing required lines", async () => {
     await expect(
       inspectMigrationCli("tclaude", defaultSettings, async () => [
@@ -1050,6 +1063,35 @@ describe("migration cli process specs", () => {
       { command: "codex", args: ["--version"], env: undefined },
     ]);
   });
+
+  it("uses Windows path semantics for the Codex Internal version environment", async () => {
+    const calls: Array<{ env?: Record<string, string> }> = [];
+    await inspectMigrationCli(
+      "codex-internal",
+      defaultSettings,
+      async (_command, _args, env) => {
+        calls.push({ env });
+        return "codex-cli 0.141.0";
+      },
+      { homeDir: "C:\\Users\\A User", platform: "win32" },
+    );
+    expect(calls).toEqual([{ env: { CODEX_HOME: "C:\\Users\\A User\\.codex-internal" } }]);
+  });
+
+  it("merges child process env overrides without dropping the parent environment", () => {
+    const previous = process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT;
+    process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT = "parent";
+    try {
+      const merged = mergeProcessEnvOverrides({ CODEX_HOME: "/custom/home" });
+      expect(merged.AGENT_SESSION_SEARCH_ENV_CONTRACT).toBe("parent");
+      expect(merged.CODEX_HOME).toBe("/custom/home");
+      expect(merged).not.toBe(process.env);
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT;
+      else process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT = previous;
+    }
+  });
+
 });
 
 describe("migration resume terminal launch", () => {

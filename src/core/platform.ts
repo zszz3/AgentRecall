@@ -38,6 +38,8 @@ export interface ResumeProcessSpec {
   command: string;
   args: string[];
   cwd?: string;
+  // Child-process environment overrides only. Execution boundaries must merge
+  // this map over process.env rather than treating it as a complete env.
   env?: Record<string, string>;
   displayCommand: string;
 }
@@ -252,23 +254,28 @@ function version(major: number, minor: number, patch: number): MigrationCliVersi
 }
 
 const MIGRATION_CLI_VERSION_RULES: Record<MigrationTarget, VersionRule[]> = {
-  claude: [{ label: "Claude Code", pattern: /^\s*v?(\d+\.\d+(?:\.\d+)?)\s+\(Claude Code\)\s*$/im, minimum: version(2, 1, 186) }],
-  codex: [{ label: "codex", pattern: /^\s*(?:codex(?:-cli)?|Codex(?: CLI)?)\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(0, 141, 0) }],
-  codebuddy: [{ label: "CodeBuddy", pattern: /^\s*v?(\d+\.\d+(?:\.\d+)?)\s*$/im, minimum: version(2, 109, 1) }],
+  claude: [{ label: "Claude Code", pattern: /^\s*v?(\d+\.\d+\.\d+)\s+\(Claude Code\)\s*$/im, minimum: version(2, 1, 186) }],
+  codex: [{ label: "codex", pattern: /^\s*(?:codex(?:-cli)?|Codex(?: CLI)?)\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 141, 0) }],
+  codebuddy: [{ label: "CodeBuddy", pattern: /^\s*v?(\d+\.\d+\.\d+)\s*$/im, minimum: version(2, 109, 1) }],
   tclaude: [
-    { label: "@tencent/tclaude", pattern: /^\s*@tencent\/tclaude\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(0, 0, 9) },
-    { label: "@anthropic-ai/claude-code", pattern: /^\s*@anthropic-ai\/claude-code\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(2, 1, 154) },
+    { label: "@tencent/tclaude", pattern: /^\s*@tencent\/tclaude\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 0, 9) },
+    { label: "@anthropic-ai/claude-code", pattern: /^\s*@anthropic-ai\/claude-code\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(2, 1, 154) },
   ],
   tcodex: [
-    { label: "@tencent/tcodex", pattern: /^\s*@tencent\/tcodex\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(0, 0, 13) },
-    { label: "@openai/codex", pattern: /^\s*@openai\/codex\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(0, 142, 4) },
+    { label: "@tencent/tcodex", pattern: /^\s*@tencent\/tcodex\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 0, 13) },
+    { label: "@openai/codex", pattern: /^\s*@openai\/codex\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 142, 4) },
   ],
   "claude-internal": [
-    { label: "claude-internal", pattern: /^\s*claude-internal\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(1, 1, 9) },
-    { label: "claude", pattern: /^\s*claude\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(2, 1, 154) },
+    { label: "claude-internal", pattern: /^\s*claude-internal\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(1, 1, 9) },
+    { label: "claude", pattern: /^\s*claude\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(2, 1, 154) },
   ],
-  "codex-internal": [{ label: "codex", pattern: /^\s*(?:codex(?:-cli)?|Codex(?: CLI)?)\s*:?[ \t]*v?(\d+\.\d+(?:\.\d+)?)/im, minimum: version(0, 141, 0) }],
+  "codex-internal": [{ label: "codex", pattern: /^\s*(?:codex(?:-cli)?|Codex(?: CLI)?)\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 141, 0) }],
 };
+
+function migrationCodexHome(homeDir: string, platform: NodeJS.Platform): string {
+  const platformPath = platform === "win32" ? path.win32 : path.posix;
+  return platformPath.join(homeDir, ".codex-internal");
+}
 
 function buildResumeProcessArgs(
   session: SessionSearchResult,
@@ -639,7 +646,7 @@ export function getMigrationResumeProcessSpec(
   const platform = options.platform ?? process.platform;
   const shell = localShellKind(platform, settings);
   const env = target === "codex-internal"
-    ? { CODEX_HOME: path.join(options.homeDir ?? homedir(), ".codex-internal") }
+    ? { CODEX_HOME: migrationCodexHome(options.homeDir ?? homedir(), platform) }
     : undefined;
   const spec = {
     command: migrationBinary(target, settings),
@@ -1032,9 +1039,15 @@ function runProcessIgnoringExit(command: string, args: string[]): Promise<void> 
 
 type CliVersionRunner = (command: string, args: string[], env?: Record<string, string>) => Promise<string>;
 
+// `ResumeProcessSpec.env` and version-runner env values are override maps, not
+// complete process environments. Keep the merge at the child execution edge.
+export function mergeProcessEnvOverrides(overrides?: Record<string, string>): NodeJS.ProcessEnv {
+  return { ...process.env, ...(overrides ?? {}) };
+}
+
 function runCliVersion(command: string, args: string[], env?: Record<string, string>): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { env: env ? { ...process.env, ...env } : process.env }, (error, stdout, stderr) => {
+    execFile(command, args, { env: mergeProcessEnvOverrides(env) }, (error, stdout, stderr) => {
       if (!error) {
         resolve(stdout);
         return;
@@ -1077,11 +1090,12 @@ export async function inspectMigrationCli(
   target: MigrationTarget,
   settings: AppSettings,
   runner: CliVersionRunner = runCliVersion,
-  options: { homeDir?: string } = {},
+  options: { homeDir?: string; platform?: NodeJS.Platform } = {},
 ): Promise<void> {
   const binary = migrationBinary(target, settings);
+  const platform = options.platform ?? process.platform;
   const env = target === "codex-internal"
-    ? { CODEX_HOME: path.join(options.homeDir ?? homedir(), ".codex-internal") }
+    ? { CODEX_HOME: migrationCodexHome(options.homeDir ?? homedir(), platform) }
     : undefined;
   let versionOutput: string;
   try {
