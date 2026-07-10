@@ -226,6 +226,17 @@ export interface SessionSearchResult extends IndexedSession {
   messageCount: number;
   aiSummary: string | null;
   aiSummaryStale: boolean;
+  matchHits?: SessionMatchHit[];
+  messageMatchCount?: number;
+  metadataMatch?: "title" | "project" | "summary" | null;
+}
+
+export interface SessionMatchHit {
+  messageIndex: number;
+  role: SessionMessage["role"];
+  timestamp: string;
+  snippet: string;
+  matchedTerms: string[];
 }
 
 export interface SessionSearchPage {

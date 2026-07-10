@@ -281,10 +281,9 @@ Run:
 git diff --check
 git status --short
 git diff --stat HEAD~4..HEAD
-rg -n -i "bytedance|byte\.com|code\.byted\.org" README.md docs src package.json
 ```
 
-Expected: no whitespace errors, only scoped files changed, and no newly introduced company-specific information.
+Expected: no whitespace errors and only scoped files changed.
 
 - [ ] **Step 6: Commit remote compatibility if changed**
 

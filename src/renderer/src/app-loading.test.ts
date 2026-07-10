@@ -12,6 +12,27 @@ function sourceBlock(startNeedle: string, endNeedles: string[]): string {
 }
 
 describe("app loading performance", () => {
+  it("runs and records searches only when Enter is pressed", () => {
+    const searchBox = sourceBlock("const SearchBox = forwardRef", ["export function App"]);
+    expect(searchBox).toContain("readSearchHistory(window.localStorage)");
+    expect(searchBox).toContain("recordSearch(window.localStorage");
+    expect(searchBox).toContain("deleteSearch(window.localStorage");
+    expect(searchBox).toContain("clearSearchHistory(window.localStorage)");
+    expect(searchBox).toContain("recent-search-dropdown");
+    expect(searchBox).toContain("onSearch(value)");
+    expect(searchBox).not.toContain("setTimeout");
+    expect(searchBox).not.toContain("SEARCH_DEBOUNCE_MS");
+    expect(searchBox).toContain("selectRecentSearch(query)");
+  });
+
+  it("fills recent searches without running them until Enter", () => {
+    const searchBox = sourceBlock("const SearchBox = forwardRef", ["export function App"]);
+    const selectRecent = searchBox.slice(searchBox.indexOf("function selectRecentSearch"), searchBox.indexOf("function runSearch"));
+    expect(selectRecent).toContain("setValue(query)");
+    expect(selectRecent).not.toContain("onSearch");
+    expect(selectRecent).not.toContain("recordSearch");
+  });
+
   it("keeps session search isolated from sidebar metadata and stats refreshes", () => {
     const loadSessionsBlock = sourceBlock("const load = useCallback(async () =>", [
       "const loadSidebarMetadata = useCallback",

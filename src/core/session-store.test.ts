@@ -64,6 +64,58 @@ const traceEvents: SessionTraceEvent[] = [
 ];
 
 describe("SessionStore", () => {
+  it("returns structured message hits and metadata-only match reasons", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex:conversation", rawId: "conversation", originalTitle: "Auth work", firstQuestion: "Auth work" }),
+      [
+        { role: "user", content: "Investigate login behavior", timestamp: "2026-06-01T10:00:00Z", index: 0 },
+        { role: "assistant", content: "The token expired yesterday", timestamp: "2026-06-01T10:01:00Z", index: 1 },
+        { role: "user", content: "Login should recover after expired credentials", timestamp: "2026-06-01T10:02:00Z", index: 2 },
+      ],
+    );
+    store.upsertIndexedSession(
+      sampleSession({ sessionKey: "codex:title", rawId: "title", originalTitle: "login expired metadata", firstQuestion: "other" }),
+      [{ role: "user", content: "unrelated conversation", timestamp: "2026-06-01T10:00:00Z", index: 0 }],
+    );
+
+    const results = store.searchSessions({ query: "login AND expired" });
+    const conversation = results.find((result) => result.sessionKey === "codex:conversation");
+    const title = results.find((result) => result.sessionKey === "codex:title");
+
+    expect(conversation).toMatchObject({ messageMatchCount: 3, metadataMatch: null });
+    expect(conversation?.matchHits).toEqual([
+      expect.objectContaining({ messageIndex: 0, role: "user", matchedTerms: ["login"] }),
+      expect.objectContaining({ messageIndex: 1, role: "assistant", matchedTerms: ["expired"] }),
+    ]);
+    expect(title).toMatchObject({ messageMatchCount: 0, matchHits: [], metadataMatch: "title" });
+    expect(store.searchSessions({ query: "" })[0]).toMatchObject({ messageMatchCount: 0, matchHits: [], metadataMatch: null });
+    store.close();
+  });
+
+  it("treats standalone explicit AND as the existing implicit AND operator", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["both", "login expired"],
+      ["login", "login only"],
+      ["expired", "expired only"],
+      ["android", "android client"],
+    ] as const;
+    for (const [id, content] of cases) {
+      store.upsertIndexedSession(
+        sampleSession({ sessionKey: `codex:${id}`, rawId: id, originalTitle: content, firstQuestion: content }),
+        [{ role: "user", content, timestamp: "2026-06-01T10:00:00Z", index: 0 }],
+      );
+    }
+
+    for (const query of ["login AND expired", "login and expired", "login expired"]) {
+      expect(store.searchSessions({ query }).map((item) => item.sessionKey)).toEqual(["codex:both"]);
+    }
+    expect(store.searchSessions({ query: "android" }).map((item) => item.sessionKey)).toEqual(["codex:android"]);
+    expect(store.searchSessionPage({ query: "AND" }).totalCount).toBe(4);
+    store.close();
+  });
+
   it("persists subagent relationships and excludes them consistently when requested", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession({ sessionKey: "codex:root", rawId: "root", isSubagent: false }), messages, [], []);

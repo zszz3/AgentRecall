@@ -18,6 +18,17 @@ function mainHandlerSource(channel: string): string {
 }
 
 describe("detail panel actions", () => {
+  it("loads a separate three-message context and highlights the exact search hit", () => {
+    const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
+    expect(openDetail).toContain("Math.max(0, matchHit.messageIndex - 1), 3");
+    expect(openDetail).toContain("setMatchedContextMessages(loadedMatchContext)");
+    expect(openDetail).toContain("setMatchedMessageIndex(matchHit?.messageIndex ?? null)");
+    expect(detailPanelSource).toContain("matchedContextMessages");
+    expect(detailPanelSource).toContain('target={message.index === matchedMessageIndex}');
+    expect(detailPanelSource).toContain("HighlightedSearchText");
+    expect(detailPanelSource).toContain('target ? "match-target"');
+  });
+
   it("keeps resume routed and removes standalone terminal focus from the detail panel", () => {
     const detailPanel = detailPanelSource;
 

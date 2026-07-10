@@ -4,7 +4,7 @@
 
 **Goal:** Add local recent-search history and make standalone case-insensitive `AND` equivalent to the existing implicit AND search.
 
-**Architecture:** A focused renderer helper owns history normalization and resilient localStorage access. `SearchBox` owns the dropdown and two-step Enter state, while `SessionStore` normalizes explicit AND before its existing FTS and fallback matching paths.
+**Architecture:** A focused renderer helper owns history normalization and resilient localStorage access. `SearchBox` keeps typing entirely local, runs and records a query only on Enter, while `SessionStore` normalizes explicit AND before its existing FTS and fallback matching paths.
 
 **Tech Stack:** TypeScript, React, SQLite FTS5, localStorage, Vitest
 
@@ -123,7 +123,7 @@ git add src/renderer/src/search-history.ts src/renderer/src/search-history.test.
 git commit -m "feat: store recent searches locally"
 ```
 
-### Task 3: Add the history dropdown and two-step Enter behavior
+### Task 3: Add the history dropdown and Enter-to-search behavior
 
 **Files:**
 - Modify: `src/renderer/src/App.tsx`
@@ -133,7 +133,7 @@ git commit -m "feat: store recent searches locally"
 
 - [ ] **Step 1: Add failing renderer contract tests**
 
-Assert `SearchBox` imports and uses `readSearchHistory`, `recordSearch`, `deleteSearch`, and `clearSearchHistory`; renders `recent-search-dropdown`, `recent-search-item`, and clear/delete actions; cancels the debounce and calls `onQueryChange(value)` on first Enter; calls `onSubmit()` only for the same submitted value or an empty input; and immediately commits a clicked history item.
+Assert `SearchBox` imports and uses `readSearchHistory`, `recordSearch`, `deleteSearch`, and `clearSearchHistory`; renders `recent-search-dropdown`, `recent-search-item`, and clear/delete actions; does not debounce or invoke the App while typing; and calls `onSearch(value)` plus `recordSearch` only from the Enter path.
 
 - [ ] **Step 2: Run renderer tests and verify failure**
 
@@ -148,25 +148,16 @@ Add local state:
 ```ts
 const [history, setHistory] = useState(() => readSearchHistory(window.localStorage));
 const [focused, setFocused] = useState(false);
-const [lastSubmitted, setLastSubmitted] = useState("");
 ```
 
-On typing, reset `lastSubmitted` when the trimmed value changes. On Enter:
+Run and record only on Enter:
 
 ```ts
-const trimmed = value.trim();
-if (!trimmed || trimmed === lastSubmitted) {
-  onSubmit();
-  return;
-}
-cancelPendingCommit();
-onQueryChange(value);
+onSearch(value);
 setHistory((current) => recordSearch(window.localStorage, current, value));
-setLastSubmitted(trimmed);
-setFocused(false);
 ```
 
-History selection sets the displayed value, commits immediately, records/moves it to the front, marks it submitted, and closes the dropdown. Use `onMouseDown={(event) => event.preventDefault()}` on the dropdown so its controls run before input blur.
+History selection only sets the displayed value and closes the dropdown. It does not search or record until Enter is pressed. Use `onMouseDown={(event) => event.preventDefault()}` on the dropdown so its controls run before input blur.
 
 - [ ] **Step 4: Add compact dropdown styles**
 
@@ -204,7 +195,6 @@ Run:
 git diff --check
 git status --short
 git diff --stat main...HEAD
-git diff --unified=0 main...HEAD | rg -i '^\+.*(bytedance|byte\.com|code\.byted\.org)' || true
 ```
 
-Expected: no whitespace errors, only scoped changes, and no newly introduced company information.
+Expected: no whitespace errors and only scoped changes.

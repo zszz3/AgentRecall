@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { defaultSettings } from "../../core/platform";
 import { projectSortTimestamp, sessionSortTimestamp, sourceFilterLabel, sourceFilters } from "./session-ui";
 
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
 describe("session source labels", () => {
+  it("renders structured message hits with role, count, highlighting, and a dedicated open action", () => {
+    const sessionRow = appSource.slice(appSource.indexOf("const SessionRow = memo"), appSource.indexOf("function ActionToast"));
+    expect(sessionRow).toContain("session.messageMatchCount");
+    expect(sessionRow).toContain("matchHits.map");
+    expect(sessionRow).toContain("HighlightedSearchText");
+    expect(sessionRow).toContain('hit.role === "user"');
+    expect(sessionRow).toContain("onOpenMatch(session, hit)");
+    expect(sessionRow).toContain("event.stopPropagation()");
+    expect(sessionRow).toContain("Matched session title");
+    expect(sessionRow).toContain("Matched project path");
+  });
+
   it("keeps Claude Code and Codex as the only first-party source filters", () => {
     const filters = sourceFilters(null);
     const labels = filters.map((filter) => sourceFilterLabel(filter, "en"));

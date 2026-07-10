@@ -4,6 +4,24 @@ import { describe, expect, it } from "vitest";
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("stylesheet theme contract", () => {
+  it("keeps structured search hits compact and highlighted with theme tokens", () => {
+    const hit = stylesheet.match(/\.search-match-hit\s*\{[^}]*\}/)?.[0] ?? "";
+    const snippet = stylesheet.match(/\.search-match-snippet\s*\{[^}]*\}/)?.[0] ?? "";
+    const target = stylesheet.match(/\.matched \.message\.match-target\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(hit).toMatch(/display:\s*grid/);
+    expect(snippet).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(target).toMatch(/border-color:\s*var\(--accent-line\)/);
+  });
+
+  it("anchors a bounded recent-search dropdown below the search box", () => {
+    const dropdown = stylesheet.match(/\.recent-search-dropdown\s*\{[^}]*\}/)?.[0] ?? "";
+    const list = stylesheet.match(/\.recent-search-list\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(dropdown).toMatch(/position:\s*absolute/);
+    expect(dropdown).toMatch(/top:\s*calc\(100% \+ 6px\)/);
+    expect(list).toMatch(/max-height:\s*280px/);
+    expect(list).toMatch(/overflow-y:\s*auto/);
+  });
+
   it("keeps theme differences in root tokens instead of component overrides", () => {
     expect(stylesheet).toMatch(/:root\s*\{/);
     expect(stylesheet).toMatch(/:root\[data-theme="dark"\]\s*\{/);

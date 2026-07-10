@@ -7,6 +7,7 @@ import { formatTokenCount } from "../format-count";
 import { localize, type LanguageMode } from "../language";
 import type { LiveSessionState } from "../live-filter";
 import type { ActionStatus } from "../app-types";
+import { HighlightedSearchText, searchHighlightTerms } from "../search-highlight";
 import {
   environmentBadgeLabel,
   environmentBadgeTitle,
@@ -90,6 +91,8 @@ function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all
 export function DetailPanel({
   session,
   messages,
+  matchedContextMessages,
+  matchedMessageIndex,
   traceEvents,
   loading,
   actionStatus,
@@ -125,6 +128,8 @@ export function DetailPanel({
 }: {
   session: SessionSearchResult;
   messages: SessionMessage[];
+  matchedContextMessages: SessionMessage[];
+  matchedMessageIndex: number | null;
   traceEvents: SessionTraceEvent[];
   loading: boolean;
   actionStatus: ActionStatus | null;
@@ -158,10 +163,7 @@ export function DetailPanel({
   onReveal: () => void;
   readOnly?: boolean;
 }): ReactElement {
-  const matchIndex = query
-    ? messages.findIndex((message) => message.content.toLowerCase().includes(query.toLowerCase()))
-    : -1;
-  const context = matchIndex >= 0 ? messages.slice(Math.max(0, matchIndex - 1), Math.min(messages.length, matchIndex + 2)) : [];
+  const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
   const l = (en: string, zh: string) => localize(language, en, zh);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -347,7 +349,14 @@ export function DetailPanel({
             <section className="matched">
               <h3>{l("Matched Context", "命中上下文")}</h3>
               {context.map((message) => (
-                <MessageBlock key={message.index} message={message} query={query} language={language} />
+                <MessageBlock
+                  key={message.index}
+                  message={message}
+                  query={query}
+                  language={language}
+                  highlight
+                  target={message.index === matchedMessageIndex}
+                />
               ))}
             </section>
           ) : null}
@@ -393,21 +402,34 @@ export function DetailPanel({
 
 const MESSAGE_TRUNCATE_LIMIT = 3000;
 
-function MessageBlock({ message, query: _query, language }: { message: SessionMessage; query: string; language: LanguageMode }): ReactElement {
+function MessageBlock({
+  message,
+  query,
+  language,
+  highlight = false,
+  target = false,
+}: {
+  message: SessionMessage;
+  query: string;
+  language: LanguageMode;
+  highlight?: boolean;
+  target?: boolean;
+}): ReactElement {
   const truncated = message.content.length > MESSAGE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
   const content = useMemo(() => {
     if (!truncated || expanded) return message.content;
     return `${message.content.slice(0, MESSAGE_TRUNCATE_LIMIT)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
   }, [message.content, truncated, expanded, language]);
+  const highlightTerms = useMemo(() => (highlight ? searchHighlightTerms(query) : []), [highlight, query]);
 
   return (
-    <div className={`message ${message.role}`}>
+    <div className={`message ${message.role} ${highlight ? "match-context" : ""} ${target ? "match-target" : ""}`} data-message-index={message.index}>
       <div className="message-head">
         <strong>{message.role === "user" ? localize(language, "User", "用户") : localize(language, "Assistant", "助手")}</strong>
         <span>{formatMessageTime(message.timestamp)}</span>
       </div>
-      <pre>{content}</pre>
+      <pre>{highlight ? <HighlightedSearchText text={content} terms={highlightTerms} /> : content}</pre>
       {truncated ? (
         <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}

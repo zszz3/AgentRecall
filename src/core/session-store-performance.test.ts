@@ -19,4 +19,11 @@ describe("SessionStore search performance", () => {
     expect(candidatesBlock).toContain("LIMIT ?");
     expect(candidatesBlock).toContain("ORDER BY pinned DESC");
   });
+
+  it("keeps FTS candidate lookup key-only instead of generating snippets for every match", () => {
+    const searchFtsBlock = sourceBlock("private searchFts(", "private getTagsForSession");
+
+    expect(searchFtsBlock).toContain("SELECT session_key");
+    expect(searchFtsBlock).not.toContain("snippet(session_fts");
+  });
 });

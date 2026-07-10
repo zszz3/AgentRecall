@@ -19,6 +19,7 @@ import type {
   SessionMigrationRecord,
   SessionEnvironment,
   SessionMessage,
+  SessionMatchHit,
   SessionSearchPage,
   SessionSearchResult,
   SessionStats,
@@ -1120,7 +1121,7 @@ export class SessionStore {
 
   searchSessionPage(options: SearchOptions = {}): SessionSearchPage {
     const limit = options.limit ?? 200;
-    const query = options.query?.trim() || "";
+    const query = normalizeExplicitAnd(options.query?.trim() || "");
     const ftsMatches = query ? this.searchFts(query) : new Map<string, string | null>();
     const rows = this.getCandidateRows(options, query, limit);
     const tagsBySession = this.getTagsForSessions(rows.map((row) => row.session_key));
@@ -1143,6 +1144,7 @@ export class SessionStore {
     );
     const totalCount = query ? sorted.length : this.countCandidateRows(options);
     const sessions = sorted.slice(0, limit);
+    if (query) this.attachSearchMatchDetails(sessions, query);
     return {
       sessions,
       totalCount,
@@ -1845,15 +1847,88 @@ export class SessionStore {
       const rows = this.db
         .prepare(
           `
-          SELECT session_key, snippet(session_fts, 3, '', '', '...', 18) AS snippet
+          SELECT session_key
           FROM session_fts
           WHERE session_fts MATCH ?
         `,
         )
-        .all(expression) as Array<{ session_key: string; snippet: string | null }>;
-      return new Map(rows.map((row) => [row.session_key, row.snippet]));
+        .all(expression) as Array<{ session_key: string }>;
+      return new Map(rows.map((row) => [row.session_key, null]));
     } catch {
       return new Map();
+    }
+  }
+
+  private attachSearchMatchDetails(sessions: SessionSearchResult[], query: string): void {
+    const terms = searchTerms(query);
+    if (sessions.length === 0 || terms.length === 0) return;
+    for (const session of sessions) {
+      session.matchHits = [];
+      session.messageMatchCount = 0;
+      session.metadataMatch = null;
+    }
+
+    try {
+      const sessionKeys = sessions.map((session) => session.sessionKey);
+      const keyPlaceholders = sessionKeys.map(() => "?").join(", ");
+      const termPredicates = terms.map(() => "lower(messages.content) LIKE ? ESCAPE '\\'").join(" OR ");
+      const rows = this.db
+        .prepare(
+          `
+          WITH matching AS (
+            SELECT session_key, message_index, role, content, timestamp
+            FROM messages
+            WHERE session_key IN (${keyPlaceholders})
+              AND (${termPredicates})
+          ), ranked AS (
+            SELECT *,
+              COUNT(*) OVER (PARTITION BY session_key) AS match_count,
+              ROW_NUMBER() OVER (PARTITION BY session_key ORDER BY message_index) AS match_rank
+            FROM matching
+          )
+          SELECT session_key, message_index, role, content, timestamp, match_count
+          FROM ranked
+          WHERE match_rank <= 2
+          ORDER BY session_key, message_index
+        `,
+        )
+        .all(...sessionKeys, ...terms.map((term) => `%${escapeLike(term)}%`)) as Array<{
+        session_key: string;
+        message_index: number;
+        role: SessionMessage["role"];
+        content: string;
+        timestamp: string;
+        match_count: number;
+      }>;
+      const sessionsByKey = new Map(sessions.map((session) => [session.sessionKey, session]));
+      for (const row of rows) {
+        const session = sessionsByKey.get(row.session_key);
+        if (!session) continue;
+        const matchedTerms = terms.filter((term) => row.content.toLocaleLowerCase().includes(term));
+        const hit: SessionMatchHit = {
+          messageIndex: row.message_index,
+          role: row.role,
+          timestamp: row.timestamp,
+          snippet: messageMatchSnippet(row.content, matchedTerms),
+          matchedTerms,
+        };
+        session.matchHits?.push(hit);
+        session.messageMatchCount = row.match_count;
+      }
+    } catch {
+      // Structured context is supplementary; never fail the primary search.
+    }
+
+    for (const session of sessions) {
+      session.matchSnippet ??= session.matchHits?.[0]?.snippet ?? null;
+      if ((session.messageMatchCount ?? 0) > 0) continue;
+      if (allTermsIn(`${session.displayTitle} ${session.originalTitle} ${session.firstQuestion}`, terms)) {
+        session.metadataMatch = "title";
+      } else if (allTermsIn(session.projectPath, terms)) {
+        session.metadataMatch = "project";
+      } else {
+        session.metadataMatch = "summary";
+      }
     }
   }
 
@@ -1940,6 +2015,9 @@ export class SessionStore {
       messageCount: row.message_count,
       aiSummary: row.ai_summary?.trim() || null,
       aiSummaryStale: Boolean(row.ai_summary) && row.file_mtime_ms > (row.ai_summary_basis ?? 0),
+      matchHits: [],
+      messageMatchCount: 0,
+      metadataMatch: null,
       isSubagent: row.is_subagent === 1,
       parentSessionId: row.parent_session_id,
     };
@@ -2146,6 +2224,38 @@ function buildFtsQuery(query: string): string {
     .filter(Boolean)
     .map((token) => `${token}*`)
     .join(" ");
+}
+
+function searchTerms(query: string): string[] {
+  const terms = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return [...new Set(terms.map((term) => term.toLocaleLowerCase()).filter((term) => term !== "and"))];
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function allTermsIn(value: string, terms: string[]): boolean {
+  const normalized = value.toLocaleLowerCase();
+  return terms.every((term) => normalized.includes(term));
+}
+
+function messageMatchSnippet(content: string, terms: string[]): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  const lower = normalized.toLocaleLowerCase();
+  const positions = terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0);
+  const firstMatch = positions.length > 0 ? Math.min(...positions) : 0;
+  const start = Math.max(0, firstMatch - 70);
+  const end = Math.min(normalized.length, firstMatch + 170);
+  return `${start > 0 ? "..." : ""}${normalized.slice(start, end)}${end < normalized.length ? "..." : ""}`;
+}
+
+function normalizeExplicitAnd(query: string): string {
+  return query
+    .split(/\s+/u)
+    .filter((token) => token.toLocaleLowerCase() !== "and")
+    .join(" ")
+    .trim();
 }
 
 function sessionSortSql(sortBy: SessionSortBy = "activity"): string {
