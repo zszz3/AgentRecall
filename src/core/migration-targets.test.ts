@@ -33,6 +33,29 @@ describe("migration target registry", () => {
 
   it("defines the three base migration targets", () => {
     expect(BASE_MIGRATION_TARGETS).toEqual(["claude", "codex", "codebuddy"]);
+    expect(MIGRATION_TARGETS.slice(0, 3)).toEqual([
+      {
+        id: "claude",
+        label: "Claude Code",
+        family: "claude",
+        source: "claude-cli",
+        enabledSetting: null,
+      },
+      {
+        id: "codex",
+        label: "Codex",
+        family: "codex",
+        source: "codex-cli",
+        enabledSetting: null,
+      },
+      {
+        id: "codebuddy",
+        label: "CodeBuddy",
+        family: "codebuddy",
+        source: "codebuddy-cli",
+        enabledSetting: null,
+      },
+    ]);
   });
 
   it("maps the four optional migration targets", () => {

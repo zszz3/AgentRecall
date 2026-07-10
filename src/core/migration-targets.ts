@@ -13,13 +13,19 @@ export interface MigrationTargetDescriptor {
   label: string;
   family: MigrationAgent;
   source: SessionSource;
-  enabledSetting?: OptionalMigrationTargetSetting;
+  enabledSetting: OptionalMigrationTargetSetting | null;
 }
 
 export const MIGRATION_TARGETS: readonly MigrationTargetDescriptor[] = [
-  { id: "claude", label: "Claude Code", family: "claude", source: "claude-cli" },
-  { id: "codex", label: "Codex", family: "codex", source: "codex-cli" },
-  { id: "codebuddy", label: "CodeBuddy", family: "codebuddy", source: "codebuddy-cli" },
+  { id: "claude", label: "Claude Code", family: "claude", source: "claude-cli", enabledSetting: null },
+  { id: "codex", label: "Codex", family: "codex", source: "codex-cli", enabledSetting: null },
+  {
+    id: "codebuddy",
+    label: "CodeBuddy",
+    family: "codebuddy",
+    source: "codebuddy-cli",
+    enabledSetting: null,
+  },
   {
     id: "tclaude",
     label: "TClaude",
