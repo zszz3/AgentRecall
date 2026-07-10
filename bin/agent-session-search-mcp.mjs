@@ -289,11 +289,10 @@ export async function migrateSession(db, { sessionKey, target } = {}) {
   if (!sessionKey || typeof sessionKey !== "string") {
     return { ok: false, error: "sessionKey is required." };
   }
-  const targets = ["claude", "codex", "codebuddy"];
-  if (!targets.includes(target)) {
-    return { ok: false, error: 'target must be one of "claude", "codex", "codebuddy".' };
-  }
   const bundle = await loadMigrationBundle();
+  if (!bundle.isMigrationTarget(target)) {
+    return { ok: false, error: `target must be one of ${bundle.MIGRATION_TARGET_IDS.map((value) => `"${value}"`).join(", ")}.` };
+  }
   const store = new bundle.SessionStore(db);
   try {
     const result = await bundle.migrateSessionForMcp(
@@ -304,6 +303,14 @@ export async function migrateSession(db, { sessionKey, target } = {}) {
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+// This is the same schema used by runServer's migrate_session registration.
+// Its values come from the bundled core registry, keeping the standalone MCP
+// boundary in lock-step with the typed migration facade.
+export async function migrationTargetSchema(zod) {
+  const bundle = await loadMigrationBundle();
+  return zod.enum(bundle.MIGRATION_TARGET_IDS);
 }
 
 function jsonContent(value) {
@@ -335,6 +342,7 @@ async function runServer() {
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
   const server = new McpServer({ name: "agent-session-search", version: "0.1.0" });
+  const migrateTargetSchema = await migrationTargetSchema(z);
 
   server.registerTool(
     "search_sessions",
@@ -454,10 +462,11 @@ async function runServer() {
         "典型场景：用户说「把这个会话迁移到 Claude/Codex/CodeBuddy」「把当前对话搬过去」「迁移会话」时调用此工具。" +
         "流程：先用 search_sessions 找到源会话的 sessionKey，再调用本工具传入 sessionKey 和 target。" +
         "迁移完成后返回 resumeCommand（如 cd /repo && claude --resume <id>），launched 恒为 false，需要用户自行在终端执行该命令。" +
+        "四个可选目标 tclaude、tcodex、claude-internal、codex-internal 必须先在 Settings > Optional sources 中启用。" +
         "仅支持本地会话（environmentKind=local），远程会话不可迁移。",
       inputSchema: {
         sessionKey: z.string().describe("要迁移的源会话 sessionKey，可通过 search_sessions 获取。"),
-        target: z.enum(["claude", "codex", "codebuddy"]).describe("目标 Agent：迁移到 claude（Claude Code）、codex（Codex）还是 codebuddy（CodeBuddy）。"),
+        target: migrateTargetSchema.describe("目标 Agent：claude、codex、codebuddy、tclaude、tcodex、claude-internal 或 codex-internal。四个可选目标需先在 Settings > Optional sources 启用。"),
       },
     },
     async (args) => {

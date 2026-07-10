@@ -10,7 +10,7 @@ import {
 import { createInMemoryStore } from "./session-store";
 import { loadCodexSessionFile, loadClaudeCliSessionRows, loadCodeBuddyCliSessionFile, parseJsonlText } from "./session-loader";
 import { defaultSettings } from "./platform";
-import type { IndexedSession, MigrationAgent, SessionMessage, SessionMigrationStrategy } from "./types";
+import type { IndexedSession, MigrationTarget, SessionMessage, SessionMigrationStrategy, SessionSource } from "./types";
 
 function makeProjectDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-project-"));
@@ -47,17 +47,35 @@ function seedLocalSession(
 
 const noOpInspect = async () => undefined;
 
+const allMigrationTargetsEnabled = {
+  ...defaultSettings,
+  includeTclaude: true,
+  includeTcodex: true,
+  includeClaudeInternal: true,
+  includeCodexInternal: true,
+};
+
+const targetSources: Record<MigrationTarget, SessionSource> = {
+  claude: "claude-cli",
+  codex: "codex-cli",
+  codebuddy: "codebuddy-cli",
+  tclaude: "tclaude-cli",
+  tcodex: "tcodex-cli",
+  "claude-internal": "claude-internal",
+  "codex-internal": "codex-internal",
+};
+
 describe("migrateSessionForMcp — happy path", () => {
-  it.each(["claude", "codex", "codebuddy"] as const)(
+  it.each(Object.keys(targetSources) as MigrationTarget[])(
     "migrates a local session to %s, writes a loadable file, indexes it, and returns launched=false",
-    async (target: MigrationAgent) => {
+    async (target) => {
       const store = createInMemoryStore();
       const { sessionKey, projectPath } = seedLocalSession(store);
       const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-home-"));
       try {
         const result = await migrateSessionForMcp(
           { sessionKey, target },
-          { store, settings: defaultSettings, inspectCli: noOpInspect, homeDir },
+          { store, settings: allMigrationTargetsEnabled, inspectCli: noOpInspect, homeDir },
         );
 
         // launched must always be false: the MCP server never opens a terminal.
@@ -72,9 +90,9 @@ describe("migrateSessionForMcp — happy path", () => {
 
         // The target file must be readable by the existing loaders.
         const loaded =
-          target === "codex"
+          targetSources[target] === "codex-cli" || targetSources[target] === "tcodex-cli" || targetSources[target] === "codex-internal"
             ? loadCodexSessionFile(result.targetFilePath)
-            : target === "claude"
+            : targetSources[target] === "claude-cli" || targetSources[target] === "tclaude-cli" || targetSources[target] === "claude-internal"
               ? loadClaudeCliSessionRows(result.targetFilePath, parseJsonlText(fs.readFileSync(result.targetFilePath, "utf8")))
               : loadCodeBuddyCliSessionFile(result.targetFilePath);
         expect(loaded?.messages.length).toBeGreaterThan(0);
@@ -82,12 +100,69 @@ describe("migrateSessionForMcp — happy path", () => {
         // The migrated session is immediately searchable in the DB.
         const found = store.getSession(`${target}:${result.targetSessionId}`);
         expect(found).not.toBeNull();
-        expect(found?.source).toBe(target === "codex" ? "codex-cli" : target === "claude" ? "claude-cli" : "codebuddy-cli");
+        expect(found?.source).toBe(targetSources[target]);
       } finally {
+        store.close();
         fs.rmSync(homeDir, { recursive: true, force: true });
+        fs.rmSync(projectPath, { recursive: true, force: true });
       }
     },
   );
+
+  it("migrates a TClaude source to Codex Internal with a scoped safe resume command", async () => {
+    const store = createInMemoryStore();
+    const projectPath = makeProjectDir();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-home-"));
+    const { sessionKey } = seedLocalSession(store, {
+      sessionKey: "tclaude:source-1",
+      rawId: "source-1",
+      source: "tclaude-cli",
+      projectPath,
+    });
+    try {
+      const result = await migrateSessionForMcp(
+        { sessionKey, target: "codex-internal" },
+        { store, settings: allMigrationTargetsEnabled, inspectCli: noOpInspect, homeDir },
+      );
+
+      expect(result).toMatchObject({ target: "codex-internal", launched: false, indexed: true });
+      expect(result.targetFilePath).toContain(path.join(homeDir, ".codex-internal"));
+      const indexed = store.getSession(`codex-internal:${result.targetSessionId}`);
+      expect(indexed?.source).toBe("codex-internal");
+      expect(store.listSessionMigrations(sessionKey)[0]).toMatchObject({
+        sourceAgent: "claude",
+        targetAgent: "codex-internal",
+      });
+      expect(result.resumeCommand).toContain(`CODEX_HOME=${path.join(homeDir, ".codex-internal")}`);
+      expect(result.resumeCommand).toContain(result.targetSessionId);
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a disabled optional target before CLI inspection or file writes", async () => {
+    const store = createInMemoryStore();
+    const { sessionKey, projectPath } = seedLocalSession(store);
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-home-"));
+    const inspectCli = vi.fn(noOpInspect);
+    try {
+      await expect(
+        migrateSessionForMcp(
+          { sessionKey, target: "tcodex" },
+          { store, settings: defaultSettings, inspectCli, homeDir },
+        ),
+      ).rejects.toThrow("TCodex migration target is disabled in Settings.");
+      expect(inspectCli).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(homeDir, ".tcodex"))).toBe(false);
+      expect(store.listSessionMigrations(sessionKey)).toEqual([]);
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
+  });
 
   it("records a session_migrations row", async () => {
     const store = createInMemoryStore();

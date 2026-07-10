@@ -12,3 +12,17 @@ export {
   type McpMigrationResult,
   type McpMigrateSessionInput,
 } from "../core/mcp-migration";
+export {
+  MIGRATION_TARGET_IDS,
+  MIGRATION_TARGETS,
+  assertMigrationTargetEnabled,
+  isMigrationTarget,
+  migrationTargetDescriptor,
+} from "../core/migration-targets";
+export {
+  getMigrationResumeProcessSpec,
+  getSafeMigrationResumeCommand,
+  inspectMigrationCli,
+  type AppSettings,
+} from "../core/platform";
+export type { MigrationTarget } from "../core/types";

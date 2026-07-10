@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import {
-  getMigrationResumeProcessSpec,
+  getSafeMigrationResumeCommand,
   inspectMigrationCli,
   type AppSettings,
 } from "./platform";
+import { assertMigrationTargetEnabled, isMigrationTarget } from "./migration-targets";
 import {
   hydrateMcpSummaryApiKey,
   readMcpAppSettings,
@@ -20,7 +21,7 @@ import { indexMigratedSessionFile } from "./indexer";
 import { resolveSummaryEndpointFromSettings } from "./summary-endpoint";
 import type { SessionStore } from "./session-store";
 import type {
-  MigrationAgent,
+  MigrationTarget,
   SessionMessage,
   SessionMigrationRecord,
   SessionMigrationResult,
@@ -29,13 +30,13 @@ import type {
 
 export interface McpMigrateSessionInput {
   sessionKey: string;
-  target: MigrationAgent;
+  target: MigrationTarget;
 }
 
 export interface McpMigrationDeps {
   store: SessionStore;
   settings?: AppSettings;
-  inspectCli?: (target: MigrationAgent, settings: AppSettings) => Promise<void> | void;
+  inspectCli?: (target: MigrationTarget, settings: AppSettings) => Promise<void> | void;
   now?: () => number;
   idFactory?: () => string;
   // Override the home directory used when writing the target session file, so
@@ -51,7 +52,7 @@ export interface McpMigrationDeps {
 // caller gets the exact `resumeCommand` to run themselves. This mirrors the
 // desktop migration result shape so clients can treat both uniformly.
 export interface McpMigrationResult {
-  target: MigrationAgent;
+  target: MigrationTarget;
   targetSessionId: string;
   targetFilePath: string;
   strategy: SessionMigrationResult["strategy"];
@@ -106,31 +107,15 @@ function pathIsDirectory(targetPath: string): boolean {
 }
 
 function buildResumeCommand(
-  target: MigrationAgent,
+  target: MigrationTarget,
   sessionId: string,
   projectPath: string,
   settings: AppSettings,
+  homeDir?: string,
 ): string {
-  try {
-    return getMigrationResumeProcessSpec(target, sessionId, projectPath, settings).displayCommand;
-  } catch {
-    return fallbackResumeCommand(target, sessionId, projectPath, settings);
-  }
-}
-
-function fallbackResumeCommand(
-  target: MigrationAgent,
-  sessionId: string,
-  projectPath: string,
-  settings: AppSettings,
-): string {
-  const binary = target === "claude" ? settings.claudeBinary : target === "codex" ? settings.codexBinary : settings.codeBuddyBinary;
-  const args = target === "codex" ? ["resume", sessionId] : ["--resume", sessionId];
-  return `cd ${quotePosix(projectPath)} && ${[binary, ...args].map(quotePosix).join(" ")}`;
-}
-
-function quotePosix(value: string): string {
-  return /^[A-Za-z0-9_\-./]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+  return getSafeMigrationResumeCommand(target, sessionId, projectPath, settings, {
+    ...(homeDir ? { homeDir } : {}),
+  });
 }
 
 // Returns the temporary-session cleaner used by the MCP migration endpoint.
@@ -152,7 +137,11 @@ export async function migrateSessionForMcp(
 ): Promise<McpMigrationResult> {
   const { store } = deps;
   const settings = deps.settings ?? loadMcpAppSettings(store);
+  if (!isMigrationTarget(input.target)) {
+    throw new Error(`Migration target ${String(input.target)} is not supported.`);
+  }
   const target = input.target;
+  assertMigrationTargetEnabled(target, settings);
 
   // Load + validate before touching the CLI or any AI provider.
   const { source, messages } = loadMcpSourceSession(store, input.sessionKey);
@@ -165,7 +154,9 @@ export async function migrateSessionForMcp(
     throw new Error(`Session project path is not a directory: ${portable.projectPath}`);
   }
 
-  const inspect = deps.inspectCli ?? ((t, s) => inspectMigrationCli(t, s));
+  const inspect = deps.inspectCli ?? ((t, s) => inspectMigrationCli(t, s, undefined, {
+    ...(deps.homeDir ? { homeDir: deps.homeDir } : {}),
+  }));
   await inspect(target, settings);
 
   // Build the compressor: prefer the configured custom endpoint, otherwise fall
@@ -218,6 +209,7 @@ export async function migrateSessionForMcp(
     written.sessionId,
     prepared.session.projectPath,
     settings,
+    deps.homeDir,
   );
 
   return {
@@ -231,4 +223,3 @@ export async function migrateSessionForMcp(
     ...(warnings.length > 0 ? { warning: warnings.join("\n") } : {}),
   };
 }
-

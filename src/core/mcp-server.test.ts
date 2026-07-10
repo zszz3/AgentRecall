@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { SessionStore } from "./session-store";
 import type { IndexedSession, SessionMessage } from "./types";
 // The MCP server runs standalone; we exercise its SDK-free query functions here.
@@ -249,6 +250,30 @@ describe("MCP migrate_session tool", () => {
     launched?: boolean;
   };
   const migrateSession = mcp.migrateSession as (db: Db, args: Record<string, unknown>) => Promise<MigrationResult>;
+  const migrationTargetSchema = mcp.migrationTargetSchema as (zod: typeof z) => Promise<ReturnType<typeof z.enum>>;
+
+  it("uses the seven-target schema for the real migrate_session tool contract", async () => {
+    const schema = await migrationTargetSchema(z);
+    expect(schema.parse("tclaude")).toBe("tclaude");
+    expect(() => schema.parse("gemini")).toThrow();
+    expect(schema.options).toEqual([
+      "claude",
+      "codex",
+      "codebuddy",
+      "tclaude",
+      "tcodex",
+      "claude-internal",
+      "codex-internal",
+    ]);
+  });
+
+  it("accepts tclaude at the handler boundary and reaches the core migration facade", async () => {
+    const { db } = seedStore();
+    const result = await migrateSession(db, { sessionKey: "codex:abc", target: "tclaude" });
+    expect(result.ok).toBe(false);
+    expect(result.error).not.toContain("target must be one of");
+    expect(result.error).toContain("project path does not exist");
+  });
 
   it("rejects a missing sessionKey before touching the bundle", async () => {
     const { db } = seedStore();
