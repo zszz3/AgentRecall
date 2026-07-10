@@ -484,6 +484,19 @@ const settingsStore = new Store<AppSettings>({
   defaults: defaultSettings,
 });
 
+type SavedWindowState = {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  isMaximized?: boolean;
+};
+
+const windowStateStore = new Store<SavedWindowState>({
+  name: "window-state",
+  defaults: { width: 0, height: 0 },
+});
+
 function getSettings(): AppSettings {
   const settings = mergeAppSettings(defaultSettings, settingsStore.store);
   return {
@@ -814,13 +827,16 @@ async function chooseLocalProjectDirectory(): Promise<string | null> {
   return result.filePaths[0] ?? null;
 }
 
+const DEFAULT_WINDOW_WIDTH = 1280;
+const DEFAULT_WINDOW_HEIGHT = 820;
+const MIN_WINDOW_WIDTH = 860;
+const MIN_WINDOW_HEIGHT = 560;
+
 function getPreferredWindowBounds(): { width: number; height: number; x: number; y: number } {
-  const defaultWidth = 1280;
-  const defaultHeight = 820;
   const cursorPoint = screen.getCursorScreenPoint();
   const { workArea } = screen.getDisplayNearestPoint(cursorPoint);
-  const width = Math.min(defaultWidth, workArea.width);
-  const height = Math.min(defaultHeight, workArea.height);
+  const width = Math.min(DEFAULT_WINDOW_WIDTH, workArea.width);
+  const height = Math.min(DEFAULT_WINDOW_HEIGHT, workArea.height);
 
   return {
     width,
@@ -830,13 +846,52 @@ function getPreferredWindowBounds(): { width: number; height: number; x: number;
   };
 }
 
+function getRestoredWindowBounds(): { width: number; height: number; x: number; y: number } {
+  const saved = windowStateStore.store;
+  if (saved.width >= MIN_WINDOW_WIDTH && saved.height >= MIN_WINDOW_HEIGHT) {
+    const { workArea } = screen.getDisplayMatching({
+      x: saved.x ?? 0,
+      y: saved.y ?? 0,
+      width: saved.width,
+      height: saved.height,
+    });
+    if (
+      saved.x !== undefined &&
+      saved.y !== undefined &&
+      saved.x + saved.width > workArea.x &&
+      saved.y + saved.height > workArea.y &&
+      saved.x < workArea.x + workArea.width &&
+      saved.y < workArea.y + workArea.height
+    ) {
+      return { width: saved.width, height: saved.height, x: saved.x, y: saved.y };
+    }
+  }
+  return getPreferredWindowBounds();
+}
+
+function persistWindowState(): void {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized() || mainWindow.isFullScreen()) {
+    windowStateStore.set("isMaximized", true);
+    return;
+  }
+  const bounds = mainWindow.getBounds();
+  windowStateStore.set({
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    isMaximized: false,
+  });
+}
+
 function createWindow(): void {
   const preloadPath = path.join(__dirname, "../preload/index.mjs");
-  const initialBounds = getPreferredWindowBounds();
+  const initialBounds = getRestoredWindowBounds();
   mainWindow = new BrowserWindow({
     ...initialBounds,
-    minWidth: 860,
-    minHeight: 560,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: PRODUCT_NAME,
     show: false,
     ...(process.platform === "darwin"
@@ -851,6 +906,10 @@ function createWindow(): void {
     },
   });
 
+  if (windowStateStore.get("isMaximized") === true) {
+    mainWindow.maximize();
+  }
+
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error("[renderer] did-fail-load", { errorCode, errorDescription, validatedURL });
   });
@@ -864,6 +923,10 @@ function createWindow(): void {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+  mainWindow.on("resize", persistWindowState);
+  mainWindow.on("move", persistWindowState);
+  mainWindow.on("maximize", persistWindowState);
+  mainWindow.on("unmaximize", persistWindowState);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -883,7 +946,6 @@ function toggleWindow(): void {
 function showWindow(): void {
   if (!mainWindow) createWindow();
   if (!mainWindow) return;
-  mainWindow.setBounds(getPreferredWindowBounds(), false);
   mainWindow.show();
   mainWindow.focus();
   mainWindow.webContents.send("focus-search");
