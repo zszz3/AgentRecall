@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title description" viewBox="0 0 900 480">
+  <title id="title">Agent-Session-Search Star History</title>
+  <desc id="description">Cumulative GitHub stars from June 1 to July 10, 2026, reaching 126 stars.</desc>
+  <defs>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#54aeff" stop-opacity="0.36" />
+      <stop offset="100%" stop-color="#54aeff" stop-opacity="0.03" />
+    </linearGradient>
+  </defs>
+
+  <rect fill="#ffffff" width="900" height="480" rx="12" />
+  <text fill="#1f2328" x="72" y="42" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22" font-weight="600">Star History</text>
+  <text fill="#57606a" x="840" y="42" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Updated Jul 10, 2026</text>
+
+  <g fill="none" stroke="#d8dee4" stroke-width="1">
+    <path d="M72 400H840" />
+    <path d="M72 335.4H840" />
+    <path d="M72 270.8H840" />
+    <path d="M72 206.2H840" />
+    <path d="M72 141.5H840" />
+    <path d="M72 76.9H840" />
+  </g>
+
+  <g fill="#57606a" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">
+    <text x="58" y="404" text-anchor="end">0</text>
+    <text x="58" y="339.4" text-anchor="end">25</text>
+    <text x="58" y="274.8" text-anchor="end">50</text>
+    <text x="58" y="210.2" text-anchor="end">75</text>
+    <text x="58" y="145.5" text-anchor="end">100</text>
+    <text x="58" y="80.9" text-anchor="end">125</text>
+    <text x="72" y="429" text-anchor="middle">Jun 1</text>
+    <text x="249.2" y="429" text-anchor="middle">Jun 10</text>
+    <text x="446.2" y="429" text-anchor="middle">Jun 20</text>
+    <text x="643.1" y="429" text-anchor="middle">Jun 30</text>
+    <text x="840" y="429" text-anchor="middle">Jul 10</text>
+  </g>
+
+  <path fill="url(#area)" d="M72 389.7 L91.7 387.1 L111.4 338 L131.1 288.9 L150.8 281.1 L170.5 275.9 L190.2 270.8 L209.8 270.8 L229.5 268.2 L249.2 263 L268.9 252.7 L288.6 244.9 L308.3 244.9 L328 237.2 L347.7 229.4 L367.4 229.4 L387.1 226.8 L406.8 224.2 L426.5 224.2 L446.2 221.7 L465.8 216.5 L485.5 216.5 L505.2 213.9 L524.9 213.9 L544.6 211.3 L564.3 195.8 L584 195.8 L603.7 182.9 L623.4 162.2 L643.1 157 L662.8 149.3 L682.5 136.4 L702.2 131.2 L721.8 128.6 L741.5 128.6 L761.2 128.6 L780.9 123.4 L800.6 110.5 L820.3 84.7 L840 74.3 L840 400 L72 400 Z" />
+  <polyline fill="none" stroke="#0969da" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="72,389.7 91.7,387.1 111.4,338 131.1,288.9 150.8,281.1 170.5,275.9 190.2,270.8 209.8,270.8 229.5,268.2 249.2,263 268.9,252.7 288.6,244.9 308.3,244.9 328,237.2 347.7,229.4 367.4,229.4 387.1,226.8 406.8,224.2 426.5,224.2 446.2,221.7 465.8,216.5 485.5,216.5 505.2,213.9 524.9,213.9 544.6,211.3 564.3,195.8 584,195.8 603.7,182.9 623.4,162.2 643.1,157 662.8,149.3 682.5,136.4 702.2,131.2 721.8,128.6 741.5,128.6 761.2,128.6 780.9,123.4 800.6,110.5 820.3,84.7 840,74.3" />
+  <circle fill="#0969da" stroke="#ffffff" cx="840" cy="74.3" r="5" stroke-width="2" />
+  <text fill="#1f2328" x="828" y="65" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="600">126</text>
+</svg>

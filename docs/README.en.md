@@ -241,9 +241,5 @@ npm run build
 ## Star History
 
 <a href="https://www.star-history.com/?repos=zszz3%2Fagent-session-search&type=date&legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=zszz3/agent-session-search&type=date&legend=top-left" />
-  </picture>
+  <img src="../assets/star-history.svg" alt="Agent-Session-Search Star History Chart" width="900" />
 </a>
