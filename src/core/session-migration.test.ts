@@ -222,6 +222,15 @@ describe("session migration model", () => {
     expect(targets).toEqual(["claude", "codex", "codebuddy"]);
   });
 
+  it("preserves the narrow element type of explicitly enabled targets", () => {
+    const targets: Array<"tclaude" | "tcodex"> = supportedMigrationTargets(
+      "claude-cli",
+      ["tclaude", "tcodex"] as const,
+    );
+
+    expect(targets).toEqual(["tclaude", "tcodex"]);
+  });
+
   it("returns no migration targets for an unsupported source", () => {
     expect(supportedMigrationTargets("hermes")).toEqual([]);
     expect(supportedMigrationTargets("hermes", ["tclaude", "tcodex"] as const)).toEqual([]);
