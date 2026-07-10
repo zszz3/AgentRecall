@@ -66,7 +66,6 @@ import type {
   SessionMigrationResult,
   SessionMessage,
   SessionSearchResult,
-  SessionSortBy,
   SessionStats,
   SessionStatsPeriod,
   SessionTraceEvent,
@@ -124,7 +123,6 @@ import {
   remoteMigrationTitle,
   remoteRevealTitle,
   resumeRouteMessage,
-  sessionSortOptions,
   sessionSortTimestamp,
   sourceFilterLabel,
   sourceFilters,
@@ -252,11 +250,6 @@ function mergeTraceEventsByIndex(current: SessionTraceEvent[], next: SessionTrac
   const byIndex = new Map(current.map((event) => [event.index, event]));
   for (const event of next) byIndex.set(event.index, event);
   return [...byIndex.values()].sort((a, b) => a.index - b.index);
-}
-
-function sortLabel(value: SessionSortBy, language: LanguageMode): string {
-  if (value === "created") return localize(language, "Created", "创建时间");
-  return localize(language, "Recent conversation", "最近对话");
 }
 
 function environmentStatus(environment: SessionEnvironment): EnvironmentSyncState | "local" {
@@ -400,7 +393,6 @@ export function App(): ReactElement {
   const [projectPath, setProjectPath] = useState<string | undefined>();
   const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<ViewMode>("default");
-  const [sortBy, setSortBy] = useState<SessionSortBy>("activity");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
@@ -472,8 +464,8 @@ export function App(): ReactElement {
   const searchRef = useRef<HTMLInputElement>(null);
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const searchScopeKey = useMemo(
-    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, sortBy, dateRange, liveStatus]),
-    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy, dateRange, liveStatus],
+    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, dateRange, liveStatus]),
+    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, liveStatus],
   );
   const liveSessionKeys = useMemo(
     () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
@@ -493,7 +485,7 @@ export function App(): ReactElement {
       projectPath: searchScope.projectPath,
       environmentId: searchScope.environmentId,
       visibility,
-      sortBy,
+      sortBy: "activity",
       dateFrom,
       dateTo,
       limit: sessionLimit,
@@ -514,7 +506,7 @@ export function App(): ReactElement {
         current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
       );
     });
-  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, sortBy, dateRange, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
+  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
@@ -1791,7 +1783,7 @@ export function App(): ReactElement {
                   >
                     <Folder size={13} />
                     <span>{project.label}</span>
-                    <em>{formatRelativeTime(projectSortTimestamp(project, sortBy))}</em>
+                    <em>{formatRelativeTime(projectSortTimestamp(project))}</em>
                   </button>
                 ))}
               </div>
@@ -1876,16 +1868,6 @@ export function App(): ReactElement {
                 </button>
               ))}
             </div>
-            <label className="sort-menu">
-              <span>{t("Sort", "排序")}</span>
-              <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SessionSortBy)}>
-                {sessionSortOptions().map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {sortLabel(option.value, language)}
-                  </option>
-                ))}
-              </select>
-            </label>
             <div className="date-filter" role="group" aria-label={t("Session time range", "会话时间范围")}>
               <CalendarDays size={14} aria-hidden="true" />
               {DATE_RANGE_OPTIONS.map((option) => (
@@ -1985,7 +1967,6 @@ export function App(): ReactElement {
               session={session}
               selected={selected?.sessionKey === session.sessionKey}
               liveState={getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
-              sortBy={sortBy}
               language={language}
               onSelect={handleRowSelect}
               onOpen={handleRowOpen}
@@ -2428,7 +2409,6 @@ const SessionRow = memo(function SessionRow({
   session,
   selected,
   liveState,
-  sortBy,
   language,
   onSelect,
   onOpen,
@@ -2439,7 +2419,6 @@ const SessionRow = memo(function SessionRow({
   session: SessionSearchResult;
   selected: boolean;
   liveState: LiveSessionState;
-  sortBy: SessionSortBy;
   language: LanguageMode;
   onSelect: (sessionKey: string) => void;
   onOpen: (session: SessionSearchResult) => void;
@@ -2497,7 +2476,7 @@ const SessionRow = memo(function SessionRow({
             {environmentBadgeLabel(session, language)}
           </span>
           <span>{session.projectPath || l("No project path", "无项目路径")}</span>
-          <span>{formatRelativeTime(sessionSortTimestamp(session, sortBy))}</span>
+          <span>{formatRelativeTime(sessionSortTimestamp(session))}</span>
           <span>{l(`${session.messageCount} messages`, `${session.messageCount} 条消息`)}</span>
           <span>{l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}</span>
         </div>

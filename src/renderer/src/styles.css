@@ -1243,41 +1243,6 @@ select:focus-visible {
   color: var(--accent-bright);
 }
 
-.sort-menu {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 38px;
-  flex: 0 0 auto;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--panel-bg);
-  color: var(--text-muted);
-  font-size: 12px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.sort-menu:focus-within {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-}
-
-.sort-menu select {
-  min-width: 106px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.sort-menu select option {
-  background: var(--panel-bg);
-  color: var(--text);
-}
-
 .chip {
   display: inline-flex;
   align-items: center;

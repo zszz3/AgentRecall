@@ -22,13 +22,13 @@
 - Modify: `src/renderer/src/styles.css`
 - Modify: `src/renderer/src/style-contract.test.ts`
 
-- [ ] **Step 1: Apply the existing tested feature commit**
+- [x] **Step 1: Apply the existing tested feature commit**
 
 Run: `git cherry-pick ec23bb7`
 
 Expected: Git applies cleanly or reports conflicts only in files changed on `main`; preserve the latest main behavior while retaining `dateFrom`, `dateTo`, `DATE_RANGE_OPTIONS`, and `.date-filter` changes.
 
-- [ ] **Step 2: Run the focused feature tests**
+- [x] **Step 2: Run the focused feature tests**
 
 Run: `npx vitest run src/renderer/src/date-range.test.ts src/core/session-store.test.ts src/renderer/src/style-contract.test.ts`
 
@@ -44,7 +44,7 @@ Expected: all selected test files pass.
 - Modify: `src/renderer/src/styles.css`
 - Modify: `src/renderer/src/style-contract.test.ts`
 
-- [ ] **Step 1: Add a failing renderer contract test**
+- [x] **Step 1: Add a failing renderer contract test**
 
 Create a test that reads `App.tsx` and `styles.css`, then asserts:
 
@@ -56,19 +56,19 @@ expect(appSource).not.toContain("setSortBy");
 expect(stylesheet).not.toMatch(/\.sort-menu/);
 ```
 
-- [ ] **Step 2: Verify the contract test fails for the existing sort control**
+- [x] **Step 2: Verify the contract test fails for the existing sort control**
 
 Run: `npx vitest run src/renderer/src/session-filter-contract.test.ts`
 
 Expected: FAIL because `App.tsx` and `styles.css` still contain `sort-menu`.
 
-- [ ] **Step 3: Remove selectable sorting while preserving activity order**
+- [x] **Step 3: Remove selectable sorting while preserving activity order**
 
 In `App.tsx`, remove `sortBy` state, `sortLabel`, `sessionSortOptions`, the sort `<label>`, and all dependencies on mutable sorting. Set search requests to `sortBy: "activity"`; call `projectSortTimestamp(project, "activity")` and `sessionSortTimestamp(session, "activity")` so displayed times remain latest activity.
 
 Remove `sessionSortOptions` and its option-label tests, while keeping timestamp helpers used by project/session rows. Remove all `.sort-menu` CSS blocks and adjust the toolbar contract to the date filter width introduced by Task 1.
 
-- [ ] **Step 4: Verify renderer tests pass**
+- [x] **Step 4: Verify renderer tests pass**
 
 Run: `npx vitest run src/renderer/src/session-filter-contract.test.ts src/renderer/src/session-ui.test.ts src/renderer/src/style-contract.test.ts`
 
@@ -81,21 +81,21 @@ Expected: all selected test files pass.
 - Modify: `docs/README.en.md`
 - Modify: `src/core/readme-assets.test.ts`
 
-- [ ] **Step 1: Add a failing README behavior assertion**
+- [x] **Step 1: Add a failing README behavior assertion**
 
 Extend `src/core/readme-assets.test.ts` to require the Chinese README to mention `7 天、30 天或 90 天` and the English README to mention `7, 30, or 90 days`.
 
-- [ ] **Step 2: Verify the README assertion fails**
+- [x] **Step 2: Verify the README assertion fails**
 
 Run: `npx vitest run src/core/readme-assets.test.ts`
 
 Expected: FAIL because the feature is not documented.
 
-- [ ] **Step 3: Document the time filter in both feature summaries**
+- [x] **Step 3: Document the time filter in both feature summaries**
 
 Add concise text to the unified session-search bullet: users can filter sessions from all time or the last 7, 30, or 90 days, with newest activity shown first. Do not mention the removed sort selector.
 
-- [ ] **Step 4: Verify the README assertion passes**
+- [x] **Step 4: Verify the README assertion passes**
 
 Run: `npx vitest run src/core/readme-assets.test.ts`
 
@@ -106,17 +106,17 @@ Expected: PASS.
 **Files:**
 - Verify all changed files
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run: `npm test && npm run build && git diff --check`
 
 Expected: all Vitest files pass, the Electron build exits successfully, and no whitespace errors are reported.
 
-- [ ] **Step 2: Audit the final diff**
+- [x] **Step 2: Audit the final diff**
 
 Confirm no company domains, local user paths, credentials, remote Star History image URLs, or unrelated changes were introduced.
 
-- [ ] **Step 3: Commit the implementation**
+- [x] **Step 3: Commit the implementation**
 
 Run: `git add README.md docs/README.en.md src/core src/renderer docs/superpowers && git commit -m "feat: add session time range filter"`
 
