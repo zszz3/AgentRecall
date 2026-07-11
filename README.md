@@ -30,7 +30,7 @@
 - **AI / Agent 辅助检索历史会话**：
   可以使用 AI 摘要增强历史会话检索，也支持自然语言找会话；同时开放 MCP 能力,让 Claude Code / Codex / CodeBuddy 可以在对话里直接搜索、读取历史会话,并对会话打标签、收藏、设置可见性。
 - **跨 Agent 迁移会话**：
-  支持把 Claude Code、Codex、CodeBuddy、TClaude、TCodex、Claude Code Internal 和 Codex Internal 的本地会话迁移到任一上述本地 Agent，并在迁移后继续工作。四个扩展 CLI 的迁移按钮仅在 Settings -> Optional sources 中启用对应开关后显示，同一开关也会启用索引。迁移仅支持本地会话；远程恢复目标仍为 Claude Code、Codex 和 CodeBuddy。
+  支持把 Claude Code、Codex、CodeBuddy、TClaude、TCodex、Claude Code Internal 和 Codex Internal 的本地会话迁移到任一上述本地 Agent，并在迁移后继续工作。四个扩展 CLI 的迁移按钮仅在 Settings -> Optional sources 中启用对应开关后显示，同一开关也会启用索引。迁移仅支持本地会话；远程恢复目标仍为 Claude Code、Codex 和 CodeBuddy。原会话不会改变，迁移会创建新的目标会话且仅携带 user / assistant 消息；超过 60k token 会尝试压缩，provider 不可用时本地截断。
 - **远程保存和跨设备恢复会话**：
   支持使用自己的 Supabase 项目手动上传会话快照，在另一台设备搜索远程会话、查看完整详情，并恢复到 Claude Code / Codex / CodeBuddy 中继续工作。
 - **统一查看 Agent 用量和额度**：
@@ -48,6 +48,8 @@
 | Claude Desktop app | `~/Library/Application Support/Claude/claude-code-sessions/**/local_*.json`，以及 Claude Code 项目日志 |
 | TClaude CLI | 可在设置中开启，读取 `~/.tclaude/projects/*/*.jsonl`（Claude Code 分支，格式一致），支持 Resume |
 | TCodex CLI | 可在设置中开启，读取 `~/.tcodex/sessions/**/*.jsonl`（Codex 分支，格式一致），支持 Resume |
+| Claude Code Internal | 可在设置中开启，读取 `~/.claude-internal/projects/*/*.jsonl` |
+| Codex Internal | 可在设置中开启，读取 `~/.codex-internal/sessions/**/*.jsonl` |
 | CodeBuddy CLI | 可在设置中开启，读取 `~/.codebuddy/projects/**/*.jsonl` |
 | OpenClaw | 可在设置中开启，读取 `~/.openclaw/agents/*/sessions/*.jsonl`，兼容 `~/.clawdbot/agents/*/sessions/*.jsonl`，排除 `*.trajectory.jsonl` |
 | Hermes | 可在设置中开启，读取 `~/.hermes/state.db` |
@@ -58,7 +60,7 @@
 
 当 `~/.codex/session_index.jsonl` 存在时，应用会读取 Codex 的标题元数据。没有上游标题时，会使用第一个有效用户问题作为默认标题。
 
-CodeBuddy CLI、TClaude、TCodex、OpenClaw、Hermes、OpenCode、Cursor Agent 和 Trae 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地只读索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令）。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 额外支持打开状态检测。
+CodeBuddy CLI、TClaude、TCodex、Claude Code Internal、Codex Internal、OpenClaw、Hermes、OpenCode、Cursor Agent 和 Trae 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地只读索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令）。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 额外支持打开状态检测。
 
 ## 远程会话同步
 

@@ -30,7 +30,7 @@
 - **AI / Agent-assisted session retrieval**:
   Use AI summaries to improve history search, ask for sessions in natural language, and expose MCP capabilities so Claude Code / Codex / CodeBuddy can search, read, tag, favorite, and set the visibility of session history directly in chat.
 - **Cross-agent session migration**:
-  Migrate local sessions from Claude Code, Codex, CodeBuddy, TClaude, TCodex, Claude Code Internal, or Codex Internal into any of those local agents and continue working. Migration buttons for the four extended CLIs appear only when their corresponding switches are enabled under Settings -> Optional sources; the same switches also enable indexing. Migration is local-only; remote restore targets remain Claude Code, Codex, and CodeBuddy.
+  Migrate local sessions from Claude Code, Codex, CodeBuddy, TClaude, TCodex, Claude Code Internal, or Codex Internal into any of those local agents and continue working. Migration buttons for the four extended CLIs appear only when their corresponding switches are enabled under Settings -> Optional sources; the same switches also enable indexing. Migration is local-only; remote restore targets remain Claude Code, Codex, and CodeBuddy. The original session is unchanged; migration creates a new target session containing only user / assistant messages. Sessions over 60k tokens are compressed when possible and locally truncated if the provider is unavailable.
 - **Remote session storage and cross-device restore**:
   Upload session snapshots manually to your own Supabase project, search and inspect them on another device, and restore them into Claude Code / Codex / CodeBuddy.
 - **Unified agent usage and quota view**:
@@ -48,6 +48,8 @@
 | Claude Desktop app | `~/Library/Application Support/Claude/claude-code-sessions/**/local_*.json` plus Claude Code project logs |
 | TClaude CLI | Optional in settings; reads `~/.tclaude/projects/*/*.jsonl` (a Claude Code fork sharing the same format); supports Resume |
 | TCodex CLI | Optional in settings; reads `~/.tcodex/sessions/**/*.jsonl` (a Codex fork sharing the same format); supports Resume |
+| Claude Code Internal | Optional in settings; reads `~/.claude-internal/projects/*/*.jsonl` |
+| Codex Internal | Optional in settings; reads `~/.codex-internal/sessions/**/*.jsonl` |
 | CodeBuddy CLI | Optional in settings; reads `~/.codebuddy/projects/**/*.jsonl` |
 | OpenClaw | Optional in settings; reads `~/.openclaw/agents/*/sessions/*.jsonl`, legacy `~/.clawdbot/agents/*/sessions/*.jsonl`, excluding `*.trajectory.jsonl` |
 | Hermes | Optional in settings; reads `~/.hermes/state.db` |
@@ -58,7 +60,7 @@
 
 Codex title metadata is read from `~/.codex/session_index.jsonl` when that file exists. If no upstream title is available, the app uses the first meaningful user question as the default title.
 
-CodeBuddy CLI, TClaude, TCodex, OpenClaw, Hermes, OpenCode, Cursor Agent, and Trae are off by default and can be selected from Settings -> Optional sources. Once enabled, they support local read-only indexing, search, details, and source filtering. Because TClaude / TCodex share the Claude Code / Codex formats, they additionally support Resume and one-click launch (invoking the `tclaude` / `tcodex` commands respectively). For the other sources, Resume, SSH remote sync, and provider-specific usage stats are intentionally separate follow-up work. Trae also supports open-state detection.
+CodeBuddy CLI, TClaude, TCodex, Claude Code Internal, Codex Internal, OpenClaw, Hermes, OpenCode, Cursor Agent, and Trae are off by default and can be selected from Settings -> Optional sources. Once enabled, they support local read-only indexing, search, details, and source filtering. Because TClaude / TCodex share the Claude Code / Codex formats, they additionally support Resume and one-click launch (invoking the `tclaude` / `tcodex` commands respectively). For the other sources, Resume, SSH remote sync, and provider-specific usage stats are intentionally separate follow-up work. Trae also supports open-state detection.
 
 ## Remote Session Sync
 
