@@ -402,7 +402,6 @@ const SearchBox = forwardRef<
           }
         }}
         placeholder={placeholder}
-        autoFocus
       />
       <span className="kbd-hint" title={placeholder}>Enter</span>
       <span className="kbd-hint" title="Resume selected session in the default terminal">

@@ -35,6 +35,12 @@ describe("app loading performance", () => {
     expect(selectRecent).not.toContain("recordSearch");
   });
 
+  it("does not focus the main search input on startup", () => {
+    const searchBox = sourceBlock("const SearchBox = forwardRef", ["export function App"]);
+    expect(searchBox).not.toContain("autoFocus");
+    expect(appSource).toContain("searchRef.current?.focus()");
+  });
+
   it("keeps session search isolated from sidebar metadata and stats refreshes", () => {
     const loadSessionsBlock = sourceBlock("const load = useCallback(async () =>", [
       "const loadSidebarMetadata = useCallback",
