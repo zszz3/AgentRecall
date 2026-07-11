@@ -12,5 +12,6 @@ Replace the verbose cross-Agent migration overview in the Chinese and English RE
 ## Constraints
 
 - Change only the migration overview line in `README.md` and `docs/README.en.md`.
-- Keep the existing source table and detailed migration notes unchanged.
+- Keep the existing source table and Optional source notes unchanged.
+- Intentionally remove the long-session compression and data-retention detail from this feature overview so the bullet stays concise.
 - Do not change product behavior, tests, or generated artifacts.
