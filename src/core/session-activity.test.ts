@@ -132,6 +132,54 @@ describe("live session detection", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("keeps concurrent Claude sessions in the same cwd uniquely mapped", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-claude-concurrent-"));
+    const home = path.join(root, "home");
+    const cwd = path.join(root, "work app");
+    const projectDir = path.join(home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9-]/g, "-"));
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    const sessionTimes = [
+      ["claude-plain-one", "2026-07-09T23:01:00Z"],
+      ["claude-plain-two", "2026-07-09T23:06:00Z"],
+      ["claude-resumed", "2026-07-09T23:10:00Z"],
+    ] as const;
+    for (const [rawId, timestamp] of sessionTimes) {
+      const filePath = path.join(projectDir, `${rawId}.jsonl`);
+      fs.writeFileSync(filePath, `{"type":"mode","sessionId":"${rawId}"}\n`);
+      fs.utimesSync(filePath, new Date(timestamp), new Date(timestamp));
+    }
+
+    const snapshot = await loadLiveSessionSnapshot({
+      platform: "darwin",
+      homeDir: home,
+      runner: async (command, args) => {
+        if (command === "/bin/ps" && args[0] === "-axo") {
+          return [
+            "501 /opt/homebrew/bin/claude --resume claude-resumed",
+            "502 /opt/homebrew/bin/claude",
+            "503 /opt/homebrew/bin/claude",
+          ].join("\n");
+        }
+        if (command === "/bin/ps" && args.join(" ") === "-o lstart= -p 502") return "Thu Jul  9 23:00:00 2026";
+        if (command === "/bin/ps" && args.join(" ") === "-o lstart= -p 503") return "Thu Jul  9 23:05:00 2026";
+        if (command === "lsof") {
+          return `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nclaude 500 user cwd DIR 1,4 0 1 ${cwd}\n`;
+        }
+        return "";
+      },
+    });
+
+    expect(snapshot.sessions).toHaveLength(3);
+    expect(snapshot.sessions.map((session) => session.rawId).sort()).toEqual([
+      "claude-plain-one",
+      "claude-plain-two",
+      "claude-resumed",
+    ]);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   it("does not inspect Codex Desktop app helper processes as CLI sessions", async () => {
     let lsofCalls = 0;
     const snapshot = await loadLiveSessionSnapshot({

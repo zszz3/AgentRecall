@@ -18,6 +18,19 @@ interface ProcessEntry {
   command: string;
 }
 
+interface ClaudeSessionCandidate {
+  filePath: string;
+  rawId: string;
+  createdAtMs: number;
+  modifiedAtMs: number;
+}
+
+interface PendingClaudeProcess {
+  pid: number;
+  cwd: string;
+  startedAtMs: number | null;
+}
+
 export interface LoadLiveSessionOptions {
   platform?: NodeJS.Platform;
   runner?: ProcessListRunner;
@@ -131,11 +144,78 @@ async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRu
 }
 
 async function loadPlainClaudeSessionFiles(lines: string[], runner: ProcessListRunner, homeDir = os.homedir()): Promise<Map<number, string>> {
-  return loadPlainSessionFiles(lines, runner, isPlainClaudeCommand, extractClaudeSessionFile, async (pid, lsofOutput) => {
-    const cwd = extractProcessCwd(lsofOutput);
-    if (!cwd) return null;
-    return findLatestClaudeSessionFileForCwd(homeDir, cwd, await loadProcessStartedAtMs(pid, runner));
-  });
+  const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
+  const plainPids = entries.filter((entry) => isPlainClaudeCommand(splitCommandLine(entry.command))).map((entry) => entry.pid);
+  const claimedRawIds = new Set(
+    entries
+      .map((entry) => detectResumeCommand(splitCommandLine(entry.command)))
+      .filter((command): command is { family: LiveSessionFamily; rawId: string } => command?.family === "claude")
+      .map((command) => command.rawId),
+  );
+  const sessionFiles = new Map<number, string>();
+  const pending: PendingClaudeProcess[] = [];
+
+  const inspections = await Promise.all(
+    plainPids.map(async (pid) => {
+      try {
+        const lsofOutput = await runner("lsof", ["-p", String(pid)]);
+        const sessionFile = extractClaudeSessionFile(lsofOutput);
+        if (sessionFile) return { pid, sessionFile, cwd: null, startedAtMs: null };
+        const cwd = extractProcessCwd(lsofOutput);
+        if (!cwd) return null;
+        return { pid, sessionFile: null, cwd, startedAtMs: await loadProcessStartedAtMs(pid, runner) };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  for (const inspection of inspections) {
+    if (!inspection) continue;
+    if (inspection.sessionFile) {
+      sessionFiles.set(inspection.pid, inspection.sessionFile);
+      const rawId = extractClaudeSessionId(inspection.sessionFile);
+      if (rawId) claimedRawIds.add(rawId);
+    } else if (inspection.cwd) {
+      pending.push({ pid: inspection.pid, cwd: inspection.cwd, startedAtMs: inspection.startedAtMs });
+    }
+  }
+
+  const candidatesByCwd = new Map<string, ClaudeSessionCandidate[]>();
+  for (const process of pending) {
+    if (!candidatesByCwd.has(process.cwd)) candidatesByCwd.set(process.cwd, listClaudeSessionCandidates(homeDir, process.cwd));
+  }
+
+  const matches = pending.flatMap((process) =>
+    (candidatesByCwd.get(process.cwd) ?? [])
+      .filter((candidate) => !claimedRawIds.has(candidate.rawId))
+      .filter(
+        (candidate) =>
+          process.startedAtMs === null ||
+          candidate.createdAtMs >= process.startedAtMs - CLAUDE_SESSION_START_SKEW_MS ||
+          candidate.modifiedAtMs >= process.startedAtMs - CLAUDE_SESSION_START_SKEW_MS,
+      )
+      .map((candidate) => {
+        const createdForProcess =
+          process.startedAtMs === null || candidate.createdAtMs >= process.startedAtMs - CLAUDE_SESSION_START_SKEW_MS;
+        const distanceMs =
+          process.startedAtMs === null
+            ? -candidate.modifiedAtMs
+            : Math.abs((createdForProcess ? candidate.createdAtMs : candidate.modifiedAtMs) - process.startedAtMs);
+        return { process, candidate, fallbackRank: createdForProcess ? 0 : 1, distanceMs };
+      }),
+  );
+  matches.sort((left, right) => left.fallbackRank - right.fallbackRank || left.distanceMs - right.distanceMs);
+
+  const assignedPids = new Set<number>();
+  for (const match of matches) {
+    if (assignedPids.has(match.process.pid) || claimedRawIds.has(match.candidate.rawId)) continue;
+    sessionFiles.set(match.process.pid, match.candidate.filePath);
+    assignedPids.add(match.process.pid);
+    claimedRawIds.add(match.candidate.rawId);
+  }
+
+  return sessionFiles;
 }
 
 async function loadPlainSessionFiles(
@@ -173,23 +253,29 @@ async function loadProcessStartedAtMs(pid: number, runner: ProcessListRunner): P
   }
 }
 
-function findLatestClaudeSessionFileForCwd(homeDir: string, cwd: string, processStartedAtMs: number | null): string | null {
+function listClaudeSessionCandidates(homeDir: string, cwd: string): ClaudeSessionCandidate[] {
   const projectDir = path.join(homeDir, ".claude", "projects", encodeClaudeProjectDir(cwd));
-  let newest: { filePath: string; mtimeMs: number } | null = null;
+  const candidates: ClaudeSessionCandidate[] = [];
 
   try {
     for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
       const filePath = path.join(projectDir, entry.name);
       const stat = fs.statSync(filePath);
-      if (processStartedAtMs !== null && stat.mtimeMs < processStartedAtMs - CLAUDE_SESSION_START_SKEW_MS) continue;
-      if (!newest || stat.mtimeMs > newest.mtimeMs) newest = { filePath, mtimeMs: stat.mtimeMs };
+      const rawId = extractClaudeSessionId(filePath);
+      if (!rawId) continue;
+      candidates.push({
+        filePath,
+        rawId,
+        createdAtMs: stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs,
+        modifiedAtMs: stat.mtimeMs,
+      });
     }
   } catch {
-    return null;
+    return [];
   }
 
-  return newest?.filePath ?? null;
+  return candidates;
 }
 
 function encodeClaudeProjectDir(cwd: string): string {
