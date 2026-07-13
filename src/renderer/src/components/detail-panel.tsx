@@ -215,7 +215,7 @@ export function DetailPanel({
   const panelSearchMatchIndices = useMemo(() => {
     if (panelSearchTerms.length === 0) return [] as number[];
     const indices: number[] = [];
-    for (const item of timelineItems) {
+    for (const item of visibleTimelineItems) {
       if (item.kind === "message") {
         const lower = item.message.content.toLocaleLowerCase();
         if (panelSearchTerms.some((term) => lower.includes(term))) {
@@ -224,7 +224,7 @@ export function DetailPanel({
       }
     }
     return indices;
-  }, [timelineItems, panelSearchTerms]);
+  }, [visibleTimelineItems, panelSearchTerms]);
 
   useEffect(() => {
     if (panelSearchOpen && panelSearchInputRef.current) {
@@ -238,10 +238,9 @@ export function DetailPanel({
       setCurrentMatchIndex(0);
       return;
     }
-    if (currentMatchIndex >= panelSearchMatchIndices.length) {
-      setCurrentMatchIndex(0);
-    }
-  }, [panelSearchMatchIndices, currentMatchIndex]);
+    setCurrentMatchIndex(0);
+    requestAnimationFrame(() => scrollToPanelMatch(0));
+  }, [panelSearchMatchIndices]);
 
   const scrollToPanelMatch = (index: number) => {
     const el = bodyRef.current;
@@ -337,7 +336,7 @@ export function DetailPanel({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelSearchOpen, panelSearchMatchIndices]);
+  }, [panelSearchOpen]);
 
   return (
     <div className="detail-backdrop" onClick={onClose}>
