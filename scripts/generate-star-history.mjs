@@ -7,14 +7,6 @@ const SVG_WIDTH = 900
 const SVG_HEIGHT = 480
 const PLOT = { left: 72, right: 840, top: 76, bottom: 400 }
 
-function utcDateKey(value) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid Stargazer timestamp: ${value}`)
-  }
-  return date.toISOString().slice(0, 10)
-}
-
 function formatDate(dateKey) {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -61,75 +53,112 @@ function displayName(repository) {
     .join('-')
 }
 
-export function buildDailySeries(starredAtValues) {
-  if (starredAtValues.length === 0) return []
-
-  const starsByDay = new Map()
-  for (const starredAt of starredAtValues) {
-    const day = utcDateKey(starredAt)
-    starsByDay.set(day, (starsByDay.get(day) ?? 0) + 1)
-  }
-
-  const days = [...starsByDay.keys()].sort()
-  const start = Date.parse(`${days[0]}T00:00:00Z`)
-  const end = Date.parse(`${days.at(-1)}T00:00:00Z`)
-  const series = []
-  let cumulative = 0
-
-  for (let timestamp = start; timestamp <= end; timestamp += DAY_MS) {
-    const date = new Date(timestamp).toISOString().slice(0, 10)
-    cumulative += starsByDay.get(date) ?? 0
-    series.push({ date, count: cumulative })
-  }
-
-  return series
-}
-
-export async function fetchStargazers({ repository, token, fetchImpl = fetch }) {
+function repositoryParts(repository) {
   const [owner, repo, ...extra] = repository.split('/')
   if (!owner || !repo || extra.length > 0) {
     throw new Error(`GITHUB_REPOSITORY must use owner/repo format, received: ${repository}`)
   }
+  return { owner, repo }
+}
+
+function isUtcDateKey(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const timestamp = Date.parse(`${value}T00:00:00Z`)
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value
+}
+
+export async function fetchStarCount({ repository, token, fetchImpl = fetch }) {
+  const { owner, repo } = repositoryParts(repository)
   if (!token) {
-    throw new Error('GITHUB_TOKEN is required to read Stargazer timestamps')
+    throw new Error('GITHUB_TOKEN is required to read repository metadata')
   }
 
-  const timestamps = []
-  for (let page = 1; ; page += 1) {
-    const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/stargazers?per_page=100&page=${page}`
-    const response = await fetchImpl(url, {
+  const response = await fetchImpl(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    {
       headers: {
-        accept: 'application/vnd.github.star+json',
+        accept: 'application/vnd.github+json',
         authorization: `Bearer ${token}`,
         'x-github-api-version': '2022-11-28',
         'user-agent': 'agent-session-search-star-history'
       }
-    })
+    }
+  )
 
-    if (!response.ok) {
-      const body = await response.text()
-      throw new Error(`GitHub Stargazers request failed (${response.status}): ${body.slice(0, 300)}`)
-    }
-
-    let entries
-    try {
-      entries = await response.json()
-    } catch (error) {
-      throw new Error(`Invalid GitHub Stargazers response for ${repository} page ${page}: response is not valid JSON`, { cause: error })
-    }
-    if (!Array.isArray(entries)) {
-      throw new Error(`Invalid GitHub Stargazers response for ${repository} page ${page}: expected an array`)
-    }
-    for (const entry of entries) {
-      if (!entry || typeof entry.starred_at !== 'string') {
-        throw new Error(`Invalid GitHub Stargazers response for ${repository} page ${page}: missing starred_at timestamp`)
-      }
-      timestamps.push(entry.starred_at)
-    }
-    if (entries.length < 100) break
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`GitHub repository metadata request failed (${response.status}): ${body.slice(0, 300)}`)
   }
 
-  return timestamps
+  let metadata
+  try {
+    metadata = await response.json()
+  } catch (error) {
+    throw new Error(`Invalid GitHub repository metadata response for ${repository}: response is not valid JSON`, { cause: error })
+  }
+  if (!Number.isInteger(metadata?.stargazers_count) || metadata.stargazers_count < 0) {
+    throw new Error(`Invalid GitHub repository metadata response for ${repository}: invalid stargazers_count`)
+  }
+  return metadata.stargazers_count
+}
+
+export function parseStarHistoryData(value, repository) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid Star History data: expected an object')
+  }
+  if (value.repository !== repository) {
+    throw new Error(`Invalid Star History data: repository mismatch, expected ${repository}`)
+  }
+  if (!Array.isArray(value.snapshots)) {
+    throw new Error('Invalid Star History data: snapshots must be an array')
+  }
+
+  let previousDate = null
+  const snapshots = value.snapshots.map((snapshot, index) => {
+    if (!snapshot || typeof snapshot !== 'object' || !isUtcDateKey(snapshot.date)) {
+      throw new Error(`Invalid Star History data: snapshot ${index} has an invalid date`)
+    }
+    if (previousDate !== null && snapshot.date <= previousDate) {
+      throw new Error('Invalid Star History data: snapshot dates must be strictly increasing')
+    }
+    if (!Number.isInteger(snapshot.count) || snapshot.count < 0) {
+      throw new Error(`Invalid Star History data: snapshot ${index} count must be a non-negative integer`)
+    }
+    previousDate = snapshot.date
+    return { date: snapshot.date, count: snapshot.count }
+  })
+
+  return { repository, snapshots }
+}
+
+export function updateDailySnapshots(snapshots, date, count) {
+  if (!isUtcDateKey(date)) {
+    throw new Error(`Invalid snapshot date: ${date}`)
+  }
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error(`Invalid snapshot count: ${count}`)
+  }
+  if (snapshots.length === 0) {
+    return [{ date, count }]
+  }
+
+  const next = snapshots.map((snapshot) => ({ ...snapshot }))
+  const last = next.at(-1)
+  if (date < last.date) {
+    throw new Error(`Snapshot date ${date} is earlier than existing history ending ${last.date}`)
+  }
+  if (date === last.date) {
+    next[next.length - 1] = { date, count }
+    return next
+  }
+
+  for (let timestamp = Date.parse(`${last.date}T00:00:00Z`) + DAY_MS; ; timestamp += DAY_MS) {
+    const missingDate = new Date(timestamp).toISOString().slice(0, 10)
+    if (missingDate >= date) break
+    next.push({ date: missingDate, count: last.count })
+  }
+  next.push({ date, count })
+  return next
 }
 
 export function renderStarHistorySvg({ repository, series }) {
@@ -138,7 +167,7 @@ export function renderStarHistorySvg({ repository, series }) {
   const finalCount = finalPoint?.count ?? 0
   const updatedLabel = finalPoint ? formatDate(finalPoint.date) : 'No stars yet'
   const description = finalPoint
-    ? `Cumulative GitHub stars from ${formatDate(series[0].date)} to ${updatedLabel}, reaching ${finalCount} stars.`
+    ? `GitHub star count history from ${formatDate(series[0].date)} to ${updatedLabel}, reaching ${finalCount} stars.`
     : 'No GitHub stars have been recorded yet.'
 
   const plotWidth = PLOT.right - PLOT.left
@@ -196,6 +225,54 @@ ${series.length === 0 ? '  <text fill="#57606a" x="456" y="240" text-anchor="mid
 `
 }
 
+async function readOptional(filePath) {
+  try {
+    return await readFile(filePath, 'utf8')
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+export async function generateStarHistory({
+  repository,
+  token,
+  dataPath,
+  outputPath,
+  now = new Date(),
+  fetchImpl = fetch
+}) {
+  const currentData = await readFile(dataPath, 'utf8')
+  let parsed
+  try {
+    parsed = JSON.parse(currentData)
+  } catch (error) {
+    throw new Error(`Invalid Star History JSON at ${dataPath}`, { cause: error })
+  }
+
+  const data = parseStarHistoryData(parsed, repository)
+  const count = await fetchStarCount({ repository, token, fetchImpl })
+  const date = now.toISOString().slice(0, 10)
+  const snapshots = updateDailySnapshots(data.snapshots, date, count)
+  const nextData = { repository, snapshots }
+  const nextJson = `${JSON.stringify(nextData, null, 2)}\n`
+  const nextSvg = renderStarHistorySvg({ repository, series: snapshots })
+  const currentSvg = await readOptional(outputPath)
+  let changed = false
+
+  if (currentData !== nextJson) {
+    await mkdir(path.dirname(dataPath), { recursive: true })
+    await writeFile(dataPath, nextJson, 'utf8')
+    changed = true
+  }
+  if (currentSvg !== nextSvg) {
+    await mkdir(path.dirname(outputPath), { recursive: true })
+    await writeFile(outputPath, nextSvg, 'utf8')
+    changed = true
+  }
+  return changed
+}
+
 export async function main() {
   const repository = process.env.GITHUB_REPOSITORY
   const token = process.env.GITHUB_TOKEN
@@ -203,26 +280,11 @@ export async function main() {
     throw new Error('GITHUB_REPOSITORY is required')
   }
 
-  const timestamps = await fetchStargazers({ repository, token })
-  const svg = renderStarHistorySvg({ repository, series: buildDailySeries(timestamps) })
-  const defaultOutput = fileURLToPath(new URL('../assets/star-history.svg', import.meta.url))
-  const outputPath = path.resolve(process.env.STAR_HISTORY_OUTPUT ?? defaultOutput)
-  let current = null
-  try {
-    current = await readFile(outputPath, 'utf8')
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error
-  }
-
-  if (current === svg) {
-    console.log(`Star history is unchanged: ${outputPath}`)
-    return false
-  }
-
-  await mkdir(path.dirname(outputPath), { recursive: true })
-  await writeFile(outputPath, svg, 'utf8')
-  console.log(`Updated ${outputPath} with ${timestamps.length} stars`)
-  return true
+  const dataPath = path.resolve(process.env.STAR_HISTORY_DATA ?? fileURLToPath(new URL('../assets/star-history-data.json', import.meta.url)))
+  const outputPath = path.resolve(process.env.STAR_HISTORY_OUTPUT ?? fileURLToPath(new URL('../assets/star-history.svg', import.meta.url)))
+  const changed = await generateStarHistory({ repository, token, dataPath, outputPath })
+  console.log(changed ? `Updated Star History artifacts: ${dataPath}, ${outputPath}` : 'Star History is unchanged.')
+  return changed
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null

@@ -2,7 +2,7 @@ name: Update Star History
 
 on:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '7 */3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -31,12 +31,12 @@ jobs:
 
       - name: Commit updated chart
         run: |
-          if git diff --quiet -- assets/star-history.svg; then
+          if git diff --quiet -- assets/star-history-data.json assets/star-history.svg; then
             echo "Star History has not changed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add assets/star-history.svg
+          git add assets/star-history-data.json assets/star-history.svg
           git commit -m "docs: update star history"
           git push
