@@ -22,17 +22,29 @@ async function scheduleUpdate(manifest, { stopApp }) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-session-search-apply-"));
   const manifestPath = path.join(directory, "update.json");
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  const args = [path.join(__dirname, "apply-update.cjs"), "--manifest", manifestPath, "--wait-pid", String(process.pid)];
+  const args = [path.join(__dirname, "apply-update.cjs"), "--manifest", manifestPath];
   if (stopApp) args.push("--stop-app");
-  const child = spawn(process.execPath, args, { detached: true, stdio: "inherit", env: process.env });
-  child.unref();
+  const child = spawn(process.execPath, args, { stdio: "inherit", env: process.env });
+  const exitCode = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (signal) reject(new Error(`更新进程被信号 ${signal} 中止。`));
+      else resolve(code ?? 1);
+    });
+  }).catch(async (error) => {
+    await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  });
+  if (exitCode !== 0) throw new Error("更新未完成，请查看上方错误信息。");
 }
 
 function launchApp() {
   // The `electron` dependency resolves to the path of the Electron executable.
   const electronPath = require("electron");
   const appEntry = path.join(__dirname, "..", "out", "main", "index.js");
-  const child = spawn(electronPath, [appEntry], { detached: true, stdio: "ignore" });
+  const environment = { ...process.env };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  const child = spawn(electronPath, [appEntry], { detached: true, stdio: "ignore", env: environment });
   child.on("error", (error) => {
     console.error("Failed to launch Agent-Session-Search:", error.message);
     process.exitCode = 1;

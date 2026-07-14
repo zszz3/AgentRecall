@@ -184,6 +184,7 @@ const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
 interface UpdateClientModule {
   checkForUpdate(options?: { currentVersion?: string; force?: boolean }): Promise<AppUpdateStatus>;
   clearAppProcess(pid?: number): Promise<void>;
+  clearInstallStatus(): Promise<void>;
   currentVersion(): string;
   parseUpdateManifest(value: unknown): AppUpdateManifest;
   readInstallStatus(): Promise<{ status?: string; version?: string; error?: string | null } | null>;
@@ -507,6 +508,7 @@ let codexChatProxy: CodexChatProxy | null = null;
 let codexChatProxySignature: string | null = null;
 let appUpdateStatus: AppUpdateStatus | null = null;
 let activeAppUpdateCheck: Promise<AppUpdateStatus> | null = null;
+let previousUpdateResultShown = false;
 const remoteDetailLoads = new Map<string, Promise<void>>();
 
 const settingsStore = new Store<AppSettings>({
@@ -594,6 +596,33 @@ async function startAppUpdate(): Promise<AppUpdateInstallResult> {
   child.unref();
   setTimeout(() => app.quit(), 100);
   return { started: true, version: manifest.version };
+}
+
+async function showPreviousUpdateResult(): Promise<void> {
+  if (previousUpdateResultShown) return;
+  const client = loadUpdateClient();
+  const status = await client.readInstallStatus().catch(() => null);
+  const current = client.currentVersion();
+  const installed = status?.status === "installed" && status.version === current;
+  const failed = status?.status === "error" && Boolean(status.error);
+  if (!installed && !failed) return;
+  previousUpdateResultShown = true;
+  const options = installed
+    ? {
+        type: "info" as const,
+        title: "更新完成",
+        message: `Agent-Session-Search v${current} 已安装完成。`,
+        detail: "应用已经使用新版本重新启动。",
+      }
+    : {
+        type: "error" as const,
+        title: "更新失败",
+        message: "Agent-Session-Search 未能完成更新。",
+        detail: String(status?.error || "未知错误"),
+      };
+  if (mainWindow) await dialog.showMessageBox(mainWindow, options);
+  else await dialog.showMessageBox(options);
+  await client.clearInstallStatus().catch(() => undefined);
 }
 
 function visibleSearchOptions(options: SearchOptions = {}): SearchOptions {
@@ -1960,6 +1989,7 @@ app.whenReady().then(() => {
   createApplicationMenu();
   createWindow();
   createTray();
+  void showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;
   if (!registerAppGlobalShortcut(shortcut)) {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);

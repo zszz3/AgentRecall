@@ -14,7 +14,8 @@ const GITHUB_REPOSITORY = "zszz3/agent-session-search";
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
 const UPDATE_ASSET_NAME = "update.json";
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const UPDATE_REQUEST_TIMEOUT_MS = 2_000;
+const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
+const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
 
 function packageRoot() {
   return path.resolve(__dirname, "..");
@@ -44,8 +45,46 @@ function installStatusPath(homeDir = os.homedir()) {
   return path.join(stateDirectory(homeDir), "update-install-status.json");
 }
 
+function updateLockPath(homeDir = os.homedir()) {
+  return path.join(stateDirectory(homeDir), "update-install.lock");
+}
+
 async function readInstallStatus(options = {}) {
   return readJson(options.statusPath || installStatusPath(options.homeDir));
+}
+
+async function clearInstallStatus(options = {}) {
+  await fsp.rm(options.statusPath || installStatusPath(options.homeDir), { force: true });
+}
+
+async function acquireUpdateLock(options = {}) {
+  const filePath = options.lockPath || updateLockPath(options.homeDir);
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await fsp.open(filePath, "wx");
+      await handle.writeFile(`${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`, "utf8");
+      await handle.close();
+      return {
+        path: filePath,
+        release: async () => {
+          const current = await readJson(filePath);
+          if (Number(current?.pid) === process.pid) await fsp.rm(filePath, { force: true });
+        },
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const current = await readJson(filePath);
+      const ownerPid = Number(current?.pid);
+      if (Number.isInteger(ownerPid) && ownerPid > 0 && isProcessRunning(ownerPid)) {
+        const lockError = new Error("另一个更新正在安装，请等待完成后再试。");
+        lockError.code = "UPDATE_IN_PROGRESS";
+        throw lockError;
+      }
+      await fsp.rm(filePath, { force: true });
+    }
+  }
+  throw new Error("无法获取更新安装锁。");
 }
 
 function updatePreferencePath(homeDir = os.homedir()) {
@@ -190,9 +229,16 @@ async function snoozeUpdatePrompt(version, options = {}) {
 
 async function fetchWithTimeout(fetchImpl, url, init, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
     return await fetchImpl(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new Error(`The GitHub request timed out after ${timeoutMs} ms.`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -215,6 +261,13 @@ async function installUpdate(manifest, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const tempDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-session-search-update-"));
   const archivePath = path.join(tempDirectory, parsed.package.name);
+  const statusPath = options.statusPath || installStatusPath(options.homeDir);
+  await writeJsonAtomic(statusPath, {
+    status: "installing",
+    version: parsed.version,
+    updatedAt: Date.now(),
+    error: null,
+  });
   try {
     const response = await fetchWithTimeout(fetchImpl, parsed.package.url, { headers: { "User-Agent": "agent-session-search-updater" } }, options.timeoutMs ?? 120_000);
     if (!response.ok) throw new Error(`Update package download failed (${response.status}).`);
@@ -223,13 +276,33 @@ async function installUpdate(manifest, options = {}) {
     if (checksum !== parsed.package.sha256) throw new Error("Update package checksum mismatch.");
     await fsp.writeFile(archivePath, bytes);
     const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-    await execFileAsync(npmCommand, ["install", "-g", archivePath], {
-      shell: process.platform === "win32",
-      timeout: options.installTimeoutMs ?? 10 * 60_000,
-      maxBuffer: 16 * 1024 * 1024,
-      env: process.env,
-    });
-    await writeJsonAtomic(options.statusPath || installStatusPath(options.homeDir), {
+    const registry = options.registry || process.env.AGENT_SESSION_SEARCH_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
+    const installEnvironment = { ...process.env };
+    delete installEnvironment.ELECTRON_RUN_AS_NODE;
+    try {
+      await (options.execFileImpl || execFileAsync)(npmCommand, [
+        "install",
+        "-g",
+        archivePath,
+        "--registry",
+        registry,
+        "--no-audit",
+        "--no-fund",
+        "--fetch-retries",
+        "2",
+        "--fetch-timeout",
+        "30000",
+      ], {
+        shell: process.platform === "win32",
+        timeout: options.installTimeoutMs ?? 10 * 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: installEnvironment,
+      });
+    } catch (error) {
+      const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();
+      throw new Error(`npm 安装失败：${detail}`);
+    }
+    await writeJsonAtomic(statusPath, {
       status: "installed",
       version: parsed.version,
       updatedAt: Date.now(),
@@ -237,7 +310,7 @@ async function installUpdate(manifest, options = {}) {
     });
     return parsed.version;
   } catch (error) {
-    await writeJsonAtomic(options.statusPath || installStatusPath(options.homeDir), {
+    await writeJsonAtomic(statusPath, {
       status: "error",
       version: parsed.version,
       updatedAt: Date.now(),
@@ -300,14 +373,17 @@ function globalCommandPath() {
 
 function launchInstalledApp(options = {}) {
   const command = options.command || globalCommandPath();
-  const child = spawn(command, options.args || ["--no-update-check"], {
+  const environment = { ...process.env, ...options.env, AGENT_SESSION_SEARCH_NO_UPDATE_CHECK: "1" };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  const child = (options.spawnImpl || spawn)(command, options.args || ["--no-update-check"], {
     detached: true,
     stdio: "ignore",
     shell: false,
     ...(process.platform === "win32" ? { shell: true } : {}),
-    env: { ...process.env, AGENT_SESSION_SEARCH_NO_UPDATE_CHECK: "1" },
+    env: environment,
   });
   child.unref();
+  return child;
 }
 
 async function readJson(filePath) {
@@ -328,13 +404,16 @@ async function writeJsonAtomic(filePath, value) {
 }
 
 module.exports = {
+  DEFAULT_NPM_REGISTRY,
   GITHUB_REPOSITORY,
   LATEST_RELEASE_API,
   UPDATE_CACHE_TTL_MS,
   UPDATE_REQUEST_TIMEOUT_MS,
+  acquireUpdateLock,
   appProcessPath,
   checkForUpdate,
   clearAppProcess,
+  clearInstallStatus,
   compareVersions,
   currentVersion,
   defaultCachePath,
@@ -349,6 +428,7 @@ module.exports = {
   snoozeUpdatePrompt,
   stateDirectory,
   stopRunningApp,
+  updateLockPath,
   updatePreferencePath,
   waitForProcessExit,
   writeAppProcess,

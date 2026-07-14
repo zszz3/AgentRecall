@@ -19,4 +19,12 @@ describe("application update IPC", () => {
     expect(mainSource).toContain("APPLY_UPDATE_PATH");
     expect(mainSource).toContain("setTimeout(() => app.quit(), 100)");
   });
+
+  it("shows and clears the previous installation result after relaunch", () => {
+    expect(mainSource).toContain("showPreviousUpdateResult");
+    expect(mainSource).toContain('title: "更新完成"');
+    expect(mainSource).toContain('title: "更新失败"');
+    expect(mainSource).toContain("clearInstallStatus");
+    expect(mainSource).toContain("dialog.showMessageBox");
+  });
 });

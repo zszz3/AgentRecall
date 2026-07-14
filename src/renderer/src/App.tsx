@@ -43,6 +43,7 @@ import {
   Tag,
   Terminal as TerminalIcon,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
@@ -2945,6 +2946,29 @@ function UpdateBrandMark(): ReactElement {
   );
 }
 
+function UpdateReleaseSection({
+  kind,
+  title,
+  items,
+}: {
+  kind: "features" | "fixes";
+  title: string;
+  items: string[];
+}): ReactElement | null {
+  if (items.length === 0) return null;
+  return (
+    <section className={`update-release-section ${kind}`}>
+      <div className="update-release-section-title">
+        <span className="update-release-section-icon" aria-hidden="true">
+          {kind === "features" ? <Sparkles size={15} /> : <Wrench size={15} />}
+        </span>
+        <strong>{title}</strong>
+      </div>
+      <ul>{items.map((item) => <li key={`${kind}:${item}`}>{item}</li>)}</ul>
+    </section>
+  );
+}
+
 function SettingsDialog({
   initialSection,
   settings,
@@ -3060,6 +3084,17 @@ function SettingsDialog({
   }
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+  const settingsContentRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const content = settingsContentRef.current;
+    if (!content) return;
+    content.scrollTop = 0;
+    const frame = window.requestAnimationFrame(() => {
+      content.scrollTop = 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSection, appUpdateStatus?.manifest?.version, appUpdateStatus?.updateAvailable]);
 
   return (
     <div className="dialog-backdrop" onMouseDown={onClose}>
@@ -3114,7 +3149,7 @@ function SettingsDialog({
               {appUpdateStatus?.updateAvailable ? <span className="settings-update-dot" aria-hidden="true" /> : null}
             </button>
           </nav>
-          <div className="settings-content">
+          <div ref={settingsContentRef} className="settings-content">
             {activeSection === "terminal" ? (
               <section className="settings-pane">
                 <header className="settings-pane-head">
@@ -3718,32 +3753,46 @@ function SettingsDialog({
                 </div>
 
                 {appUpdateStatus?.updateAvailable && appUpdateStatus.manifest ? (
-                  <>
-                    <div className="update-version-pill">
-                      <span>v{appUpdateStatus.currentVersion}</span>
-                      <span aria-hidden="true">→</span>
-                      <strong>v{appUpdateStatus.manifest.version}</strong>
+                  <div className="update-available-card">
+                    <div className="update-available-head">
+                      <div className="update-available-copy">
+                        <span>{l("Update available", "发现新版本")}</span>
+                        <div className="update-version-route" aria-label={l(`Version ${appUpdateStatus.currentVersion} to ${appUpdateStatus.manifest.version}`, `版本 ${appUpdateStatus.currentVersion} 更新至 ${appUpdateStatus.manifest.version}`)}>
+                          <span>v{appUpdateStatus.currentVersion}</span>
+                          <ChevronRight size={18} aria-hidden="true" />
+                          <strong>v{appUpdateStatus.manifest.version}</strong>
+                          <span className="update-new-badge">{l("NEW", "可更新")}</span>
+                        </div>
+                      </div>
+                      <span className="update-available-icon" aria-hidden="true">
+                        <Sparkles size={22} />
+                      </span>
                     </div>
                     <div className="update-release-card">
-                      <h4>{appUpdateStatus.manifest.title}</h4>
-                      {appUpdateStatus.manifest.notes.features.length > 0 ? (
-                        <div>
-                          <strong>{l("New features", "新增功能")}</strong>
-                          <ul>{appUpdateStatus.manifest.notes.features.map((item) => <li key={`feature:${item}`}>{item}</li>)}</ul>
-                        </div>
-                      ) : null}
-                      {appUpdateStatus.manifest.notes.fixes.length > 0 ? (
-                        <div>
-                          <strong>{l("Bug fixes", "Bug 修复")}</strong>
-                          <ul>{appUpdateStatus.manifest.notes.fixes.map((item) => <li key={`fix:${item}`}>{item}</li>)}</ul>
-                        </div>
-                      ) : null}
+                      <UpdateReleaseSection kind="features" title={l("New features", "新增功能")} items={appUpdateStatus.manifest.notes.features} />
+                      <UpdateReleaseSection kind="fixes" title={l("Fixes", "问题修复")} items={appUpdateStatus.manifest.notes.fixes} />
                     </div>
-                    <button type="button" className="update-primary-button" disabled={appUpdateBusy} onClick={onInstallAppUpdate}>
-                      {appUpdateBusy ? l("Preparing update...", "正在准备更新...") : l("Update now", "立即更新")}
-                    </button>
-                    {appUpdateError || appUpdateStatus.error ? <div className="update-current-state error">{appUpdateError || appUpdateStatus.error}</div> : null}
-                  </>
+                    <div className="update-card-footer">
+                      <span>{l("The App will reopen automatically after updating.", "更新完成后会自动重新打开应用。")}</span>
+                      <div className="update-card-actions">
+                        <button
+                          type="button"
+                          className="update-refresh-button"
+                          disabled={appUpdateBusy}
+                          onClick={onCheckAppUpdate}
+                          aria-label={l("Check again", "重新检查更新")}
+                          title={l("Check again", "重新检查更新")}
+                        >
+                          <RefreshCw size={15} className={appUpdateBusy ? "spin" : ""} />
+                        </button>
+                        <button type="button" className="update-primary-button" disabled={appUpdateBusy} onClick={onInstallAppUpdate}>
+                          <Download size={15} aria-hidden="true" />
+                          {appUpdateBusy ? l("Preparing...", "准备中...") : l("Update now", "立即更新")}
+                        </button>
+                      </div>
+                    </div>
+                    {appUpdateError || appUpdateStatus.error ? <div className="update-card-error">{appUpdateError || appUpdateStatus.error}</div> : null}
+                  </div>
                 ) : (
                   <div
                     className={`update-current-state ${
@@ -3766,16 +3815,18 @@ function SettingsDialog({
                   </div>
                 )}
 
-                <div className="update-about-actions">
-                  <button type="button" className="settings-action-button" disabled={appUpdateBusy} onClick={onCheckAppUpdate}>
-                    <RefreshCw size={14} className={appUpdateBusy ? "spin" : ""} />
-                    {l("Check for updates", "检查更新")}
-                  </button>
-                </div>
+                {!appUpdateStatus?.updateAvailable ? (
+                  <div className="update-about-actions">
+                    <button type="button" className="settings-action-button" disabled={appUpdateBusy} onClick={onCheckAppUpdate}>
+                      <RefreshCw size={14} className={appUpdateBusy ? "spin" : ""} />
+                      {l("Check for updates", "检查更新")}
+                    </button>
+                  </div>
+                ) : null}
                 <label className="settings-field settings-toggle update-auto-check">
                   <div className="settings-field-text">
                     <span className="settings-field-title">{l("Automatically check for updates", "自动检查更新")}</span>
-                    <span className="settings-field-sub">{l("The terminal and App share one daily GitHub check.", "终端与 App 共用每天一次的 GitHub 检查结果。")}</span>
+                    <span className="settings-field-sub">{l("The terminal and App check for a new version once a day.", "终端与 App 每天自动检查一次新版本。")}</span>
                   </div>
                   <input
                     type="checkbox"

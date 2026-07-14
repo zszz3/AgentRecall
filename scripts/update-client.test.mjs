@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,13 +8,21 @@ import { test } from "node:test";
 
 const require = createRequire(import.meta.url);
 const {
+  DEFAULT_NPM_REGISTRY,
+  UPDATE_REQUEST_TIMEOUT_MS,
+  acquireUpdateLock,
   checkForUpdate,
   compareVersions,
   formatUpdateNotice,
   installUpdate,
+  launchInstalledApp,
   parseUpdateManifest,
   snoozeUpdatePrompt,
 } = require("../bin/update-client.cjs");
+
+test("allows enough time for a normal GitHub release check", () => {
+  assert.equal(UPDATE_REQUEST_TIMEOUT_MS, 5_000);
+});
 
 function manifest(version = "0.2.0") {
   return {
@@ -101,4 +110,77 @@ test("checks GitHub latest release and formats the same notes for terminal outpu
   assert.equal(result.manifest.version, "0.2.0");
   assert.match(formatUpdateNotice(result), /新增功能：[\s\S]*Bug 修复：/);
   assert.equal(requests.length, 2);
+});
+
+test("reports a clear error when the GitHub release check times out", async () => {
+  const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-timeout-"));
+  const fetchImpl = async (_url, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+  });
+  const result = await checkForUpdate({
+    currentVersion: "0.1.0",
+    cachePath: path.join(cacheDirectory, "update-check.json"),
+    fetchImpl,
+    force: true,
+    timeoutMs: 5,
+  });
+  assert.equal(result.updateAvailable, false);
+  assert.equal(result.error, "The GitHub request timed out after 5 ms.");
+});
+
+test("serializes update installers with a recoverable process lock", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-session-update-lock-"));
+  const lockPath = path.join(directory, "install.lock");
+  const first = await acquireUpdateLock({ lockPath });
+  await assert.rejects(acquireUpdateLock({ lockPath }), /另一个更新正在安装/);
+  await first.release();
+  const second = await acquireUpdateLock({ lockPath });
+  await second.release();
+});
+
+test("installs through the public registry and records a completed status", async () => {
+  const bytes = Buffer.from("verified update archive");
+  const value = manifest();
+  value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-session-update-install-"));
+  const statusPath = path.join(directory, "status.json");
+  let invocation = null;
+  await installUpdate(value, {
+    fetchImpl: async () => new Response(bytes, { status: 200 }),
+    statusPath,
+    execFileImpl: async (command, args, options) => {
+      invocation = { command, args, options };
+      return { stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(invocation.args[invocation.args.indexOf("--registry") + 1], DEFAULT_NPM_REGISTRY);
+  assert.equal("ELECTRON_RUN_AS_NODE" in invocation.options.env, false);
+  assert.deepEqual(JSON.parse(await readFile(statusPath, "utf8")), {
+    status: "installed",
+    version: "0.2.0",
+    updatedAt: JSON.parse(await readFile(statusPath, "utf8")).updatedAt,
+    error: null,
+  });
+});
+
+test("relaunches without Electron's Node-mode environment", () => {
+  let launchOptions = null;
+  launchInstalledApp({
+    command: "/tmp/agent-session-search",
+    env: { ELECTRON_RUN_AS_NODE: "1" },
+    spawnImpl: (_command, _args, options) => {
+      launchOptions = options;
+      return { unref() {} };
+    },
+  });
+  assert.equal("ELECTRON_RUN_AS_NODE" in launchOptions.env, false);
+  assert.equal(launchOptions.env.AGENT_SESSION_SEARCH_NO_UPDATE_CHECK, "1");
+});
+
+test("keeps the terminal attached until the updater reports an exit status", async () => {
+  const launcher = await readFile(new URL("../bin/agent-session-search.cjs", import.meta.url), "utf8");
+  assert.match(launcher, /child\.once\("exit"/);
+  assert.doesNotMatch(launcher, /detached:\s*true,\s*stdio:\s*"inherit"/);
+  assert.doesNotMatch(launcher, /"--wait-pid",\s*String\(process\.pid\)/);
+  assert.match(launcher, /delete environment\.ELECTRON_RUN_AS_NODE/);
 });
