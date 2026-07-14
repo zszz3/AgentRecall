@@ -8,6 +8,7 @@ import {
   Menu,
   nativeImage,
   screen,
+  shell,
   Tray,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
@@ -182,10 +183,12 @@ function loadMcpSetup(): McpSetup {
 const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
 const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
 interface UpdateClientModule {
+  LATEST_RELEASE_URL: string;
   checkForUpdate(options?: { currentVersion?: string; force?: boolean }): Promise<AppUpdateStatus>;
   clearAppProcess(pid?: number): Promise<void>;
   clearInstallStatus(): Promise<void>;
   currentVersion(): string;
+  manualInstallCommand(): string;
   parseUpdateManifest(value: unknown): AppUpdateManifest;
   readInstallStatus(): Promise<{ status?: string; version?: string; error?: string | null } | null>;
   writeAppProcess(pid?: number): Promise<string>;
@@ -607,21 +610,33 @@ async function showPreviousUpdateResult(): Promise<void> {
   const failed = status?.status === "error" && Boolean(status.error);
   if (!installed && !failed) return;
   previousUpdateResultShown = true;
-  const options = installed
-    ? {
-        type: "info" as const,
-        title: "更新完成",
-        message: `Agent-Session-Search v${current} 已安装完成。`,
-        detail: "应用已经使用新版本重新启动。",
-      }
-    : {
-        type: "error" as const,
-        title: "更新失败",
-        message: "Agent-Session-Search 未能完成更新。",
-        detail: String(status?.error || "未知错误"),
-      };
-  if (mainWindow) await dialog.showMessageBox(mainWindow, options);
-  else await dialog.showMessageBox(options);
+  if (installed) {
+    const options = {
+      type: "info" as const,
+      title: "更新完成",
+      message: `Agent-Session-Search v${current} 已安装完成。`,
+      detail: "应用已经使用新版本重新启动。",
+    };
+    if (mainWindow) await dialog.showMessageBox(mainWindow, options);
+    else await dialog.showMessageBox(options);
+  } else {
+    const command = client.manualInstallCommand();
+    const options = {
+      type: "error" as const,
+      title: "更新失败",
+      message: "自动更新未能完成，可以手动安装最新版本。",
+      detail: `${String(status?.error || "未知错误")}\n\n可以复制命令手动覆盖安装，或打开 GitHub Release 页面下载：\n${command}`,
+      buttons: ["复制安装命令", "打开 Release 页面", "稍后处理"],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    };
+    const result = mainWindow
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options);
+    if (result.response === 0) clipboard.writeText(command);
+    if (result.response === 1) await shell.openExternal(client.LATEST_RELEASE_URL);
+  }
   await client.clearInstallStatus().catch(() => undefined);
 }
 
@@ -1849,6 +1864,11 @@ function registerIpc(): void {
     restoreRemoteSessionToSourceEnvironment(event, remoteId, target),
   );
   ipcMain.handle("remote-session:delete", (_event, remoteId: string) => createRemoteSessionClient().deleteRemoteSession(remoteId));
+  ipcMain.handle("remote-session:delete-many", (_event, remoteIds: unknown) =>
+    createRemoteSessionClient().deleteRemoteSessions(
+      Array.isArray(remoteIds) ? remoteIds.filter((id): id is string => typeof id === "string") : [],
+    ),
+  );
   ipcMain.handle("skills:copy-path", (_event, skillPath: string) => {
     clipboard.writeText(skillPath);
   });

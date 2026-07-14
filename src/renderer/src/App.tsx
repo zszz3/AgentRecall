@@ -773,11 +773,11 @@ export function App(): ReactElement {
   );
 
   const uploadSelectedSkillsToSync = useCallback(
-    async (skills: InstalledSkill[]): Promise<void> => {
+    async (skills: InstalledSkill[]): Promise<{ remainingSkillIds: string[] }> => {
       const uploadable = skills.filter((skill) => skill.source !== "codex-system");
       if (uploadable.length === 0) {
         setSkillsFeedback({ kind: "error", message: t("No selected non-system skills to upload.", "没有选中可上传的非系统 Skill。") });
-        return;
+        return { remainingSkillIds: [] };
       }
 
       setSkillsLoading(true);
@@ -786,26 +786,40 @@ export function App(): ReactElement {
       let skipped = 0;
       let conflicts = 0;
       let failed = 0;
+      const remainingSkillIds: string[] = [];
+      const failureDetails: string[] = [];
       try {
         for (const skill of uploadable) {
           try {
             const result = await window.sessionSearch.uploadSkillToSync(skill.path, false);
             if (result.status === "uploaded") uploaded += 1;
             else if (result.status === "skipped") skipped += 1;
-            else conflicts += 1;
-          } catch {
+            else {
+              conflicts += 1;
+              remainingSkillIds.push(skill.id);
+              failureDetails.push(t(`${skill.name}: confirm before replacing the existing remote source.`, `${skill.name}：需要确认是否替换现有远程来源。`));
+            }
+          } catch (error) {
             failed += 1;
+            remainingSkillIds.push(skill.id);
+            failureDetails.push(`${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
         await loadSkills({ silent: true });
-        const message = t(
+        const summary = t(
           `Selected skills upload finished: ${uploaded} uploaded, ${skipped} skipped, ${conflicts} need confirmation, ${failed} failed.`,
           `选中 Skills 上传完成：${uploaded} 个已上传，${skipped} 个已跳过，${conflicts} 个需要确认，${failed} 个失败。`,
         );
-        setSkillsFeedback({ kind: failed > 0 ? "error" : "success", message });
+        const shownFailures = failureDetails.slice(0, 3).join(" · ");
+        const hiddenFailureCount = Math.max(0, failureDetails.length - 3);
+        const message = shownFailures
+          ? `${summary} ${t("Details", "详情")}：${shownFailures}${hiddenFailureCount ? t(` · ${hiddenFailureCount} more`, ` · 另有 ${hiddenFailureCount} 个`) : ""}`
+          : summary;
+        setSkillsFeedback({ kind: failed > 0 || conflicts > 0 ? "error" : "success", message });
         window.setTimeout(() => {
           setSkillsFeedback((current) => (current?.message === message ? null : current));
         }, 4200);
+        return { remainingSkillIds };
       } finally {
         setSkillsLoading(false);
       }

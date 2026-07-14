@@ -10,6 +10,7 @@ import type { IndexStatus } from "../core/indexer";
 import type { RemoteHealthReport } from "../core/remote-health";
 import type {
   RemoteSessionDetailSnapshot,
+  RemoteSessionDeleteResult,
   RemoteSessionListItem,
   RemoteSessionStatus,
   RemoteSessionUploadResult,
@@ -119,6 +120,7 @@ const api = {
   restoreRemoteSessionToSourceEnvironment: (remoteId: string, target: MigrationAgent): Promise<SessionMigrationResult> =>
     ipcRenderer.invoke("remote-session:restore-to-source-environment", remoteId, target),
   deleteRemoteSession: (remoteId: string): Promise<boolean> => ipcRenderer.invoke("remote-session:delete", remoteId),
+  deleteRemoteSessions: (remoteIds: string[]): Promise<RemoteSessionDeleteResult> => ipcRenderer.invoke("remote-session:delete-many", remoteIds),
   copySkillPath: (skillPath: string): Promise<void> => ipcRenderer.invoke("skills:copy-path", skillPath),
   revealSkill: (targetPath: string): Promise<void> => ipcRenderer.invoke("skills:reveal", targetPath),
   deleteSkill: (skillPath: string): Promise<DeleteInstalledSkillResult> => ipcRenderer.invoke("skills:delete", skillPath),

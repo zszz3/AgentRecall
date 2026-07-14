@@ -12,6 +12,8 @@ const { promisify } = require("node:util");
 const execFileAsync = promisify(execFile);
 const GITHUB_REPOSITORY = "zszz3/agent-session-search";
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
+const LATEST_RELEASE_URL = `https://github.com/${GITHUB_REPOSITORY}/releases/latest`;
+const LATEST_PACKAGE_URL = `${LATEST_RELEASE_URL}/download/agent-session-search.tgz`;
 const UPDATE_ASSET_NAME = "update.json";
 const LATEST_UPDATE_MANIFEST_URL = `https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${UPDATE_ASSET_NAME}`;
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -48,6 +50,32 @@ function installStatusPath(homeDir = os.homedir()) {
 
 function updateLockPath(homeDir = os.homedir()) {
   return path.join(stateDirectory(homeDir), "update-install.lock");
+}
+
+function electronRuntimeLockPath(homeDir = os.homedir()) {
+  return path.join(stateDirectory(homeDir), "electron-runtime.lock");
+}
+
+async function waitForUpdateCompletion(options = {}) {
+  const filePath = options.lockPath || updateLockPath(options.homeDir);
+  const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
+  let waiting = false;
+  while (Date.now() < deadline) {
+    const current = await readJson(filePath);
+    if (!current) return waiting;
+    const ownerPid = Number(current.pid);
+    if (!Number.isInteger(ownerPid) || ownerPid <= 0 || !isProcessRunning(ownerPid)) {
+      await fsp.rm(filePath, { force: true }).catch(() => undefined);
+      return waiting;
+    }
+    if (ownerPid === (options.currentPid ?? process.pid)) return waiting;
+    if (!waiting) {
+      waiting = true;
+      options.onWait?.();
+    }
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 200));
+  }
+  throw new Error(options.timeoutMessage || "等待正在进行的更新完成超时，请稍后重试。");
 }
 
 async function readInstallStatus(options = {}) {
@@ -278,6 +306,70 @@ function formatUpdateNotice(result) {
   return lines.join("\n").trimEnd();
 }
 
+function manualInstallCommand() {
+  return `npm install -g ${LATEST_PACKAGE_URL}`;
+}
+
+function formatManualUpdateFallback() {
+  return [
+    "自动更新未完成。你可以手动安装最新 Release：",
+    manualInstallCommand(),
+    `Release 页面：${LATEST_RELEASE_URL}`,
+  ].join("\n");
+}
+
+function showNativeUpdateFailure(errorMessage, options = {}) {
+  const platform = options.platform || process.platform;
+  const run = options.execFileSyncImpl || execFileSync;
+  const spawnImpl = options.spawnImpl || spawn;
+  const command = manualInstallCommand();
+  const environment = {
+    ...process.env,
+    ...options.env,
+    AGENT_SESSION_SEARCH_UPDATE_ERROR: String(errorMessage || "未知错误").slice(0, 2_000),
+    AGENT_SESSION_SEARCH_UPDATE_COMMAND: command,
+    AGENT_SESSION_SEARCH_UPDATE_RELEASE_URL: LATEST_RELEASE_URL,
+  };
+
+  try {
+    if (platform === "darwin") {
+      const script = [
+        'set errorDetail to system attribute "AGENT_SESSION_SEARCH_UPDATE_ERROR"',
+        'set installCommand to system attribute "AGENT_SESSION_SEARCH_UPDATE_COMMAND"',
+        'set dialogText to "自动更新未能完成，应用会尝试继续启动已安装的版本。" & return & return & "原因：" & errorDetail & return & return & "你可以复制命令手动覆盖安装，或打开 GitHub Release 页面。" & return & installCommand',
+        'display dialog dialogText with title "Agent-Session-Search 更新失败" buttons {"稍后处理", "打开 Release 页面", "复制安装命令"} default button "复制安装命令" with icon caution',
+      ].join("\n");
+      const output = String(run("osascript", ["-e", script], { encoding: "utf8", env: environment }) || "");
+      if (output.includes("复制安装命令")) {
+        run("pbcopy", [], { input: `${command}\n`, encoding: "utf8", env: environment });
+      } else if (output.includes("打开 Release 页面")) {
+        const child = spawnImpl("open", [LATEST_RELEASE_URL], { detached: true, stdio: "ignore", env: environment });
+        child.unref();
+      }
+      return true;
+    }
+
+    if (platform === "win32") {
+      const script = [
+        "Add-Type -AssemblyName PresentationFramework",
+        '$text = "自动更新未能完成，应用会尝试继续启动已安装的版本。`n`n原因：$env:AGENT_SESSION_SEARCH_UPDATE_ERROR`n`n选择“是”复制安装命令，选择“否”打开 GitHub Release 页面。"',
+        '$choice = [System.Windows.MessageBox]::Show($text, "Agent-Session-Search 更新失败", "YesNoCancel", "Error")',
+        'if ($choice -eq "Yes") { Set-Clipboard -Value $env:AGENT_SESSION_SEARCH_UPDATE_COMMAND }',
+        'elseif ($choice -eq "No") { Start-Process $env:AGENT_SESSION_SEARCH_UPDATE_RELEASE_URL }',
+      ].join("; ");
+      run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+        encoding: "utf8",
+        env: environment,
+        windowsHide: true,
+      });
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 async function installUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -324,6 +416,11 @@ async function installUpdate(manifest, options = {}) {
       const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();
       throw new Error(`npm 安装失败：${detail}`);
     }
+    await (options.ensureElectronImpl || ensureInstalledElectron)({
+      npmCommand,
+      env: installEnvironment,
+      timeoutMs: options.electronInstallTimeoutMs,
+    });
     await writeJsonAtomic(statusPath, {
       status: "installed",
       version: parsed.version,
@@ -341,6 +438,112 @@ async function installUpdate(manifest, options = {}) {
     throw error;
   } finally {
     await fsp.rm(tempDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function globalPackageRoot(options = {}) {
+  const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
+  const npmRoot = (options.execFileSyncImpl || execFileSync)(npmCommand, ["root", "-g"], {
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  }).trim();
+  if (!npmRoot) throw new Error("无法确定 npm 全局安装目录。");
+  return path.join(npmRoot, "agent-session-search");
+}
+
+async function ensureInstalledElectron(options = {}) {
+  const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
+  const electronModulePath = path.join(packagePath, "node_modules", "electron");
+  const installScript = path.join(electronModulePath, "install.js");
+  const environment = { ...process.env, ...options.env };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  const run = options.execFileImpl || execFileAsync;
+  const timeout = options.timeoutMs ?? 5 * 60_000;
+  const validationScript = [
+    'const fs = require("node:fs");',
+    `const electronPath = require(${JSON.stringify(electronModulePath)});`,
+    'if (!fs.existsSync(electronPath)) throw new Error(`Electron executable is missing: ${electronPath}`);',
+  ].join(" ");
+  const validate = () => run(process.execPath, ["-e", validationScript], {
+    env: environment,
+    timeout,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+
+  try {
+    await validate();
+    if (!isElectronRuntimeReady(packagePath)) throw new Error("Electron runtime files are incomplete.");
+    return;
+  } catch {
+    if (isElectronRuntimeReady(packagePath)) return;
+    await fsp.rm(path.join(electronModulePath, "dist"), { recursive: true, force: true });
+    await fsp.rm(path.join(electronModulePath, "path.txt"), { force: true });
+  }
+
+  try {
+    await run(process.execPath, [installScript], {
+      cwd: electronModulePath,
+      env: environment,
+      timeout,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    await validate();
+    if (!isElectronRuntimeReady(packagePath)) throw new Error("Electron runtime files are incomplete after reinstall.");
+  } catch (error) {
+    const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();
+    throw new Error(`Electron 运行时安装失败：${detail}`);
+  }
+}
+
+function isElectronRuntimeReady(packagePath = packageRoot()) {
+  const electronModulePath = path.join(packagePath, "node_modules", "electron");
+  try {
+    const relativeExecutable = fs.readFileSync(path.join(electronModulePath, "path.txt"), "utf8").trim();
+    if (!relativeExecutable) return false;
+    const distPath = path.join(electronModulePath, "dist");
+    const defaultAppPath = process.platform === "darwin"
+      ? path.join(distPath, "Electron.app", "Contents", "Resources", "default_app.asar")
+      : path.join(distPath, "resources", "default_app.asar");
+    return (
+      fs.existsSync(path.join(distPath, relativeExecutable)) &&
+      fs.existsSync(path.join(distPath, "version")) &&
+      fs.existsSync(defaultAppPath)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function ensureElectronRuntimeForLaunch(options = {}) {
+  const lockPath = options.lockPath || electronRuntimeLockPath(options.homeDir);
+  let lock = null;
+  for (let attempt = 0; attempt < 3 && !lock; attempt += 1) {
+    await waitForUpdateCompletion({
+      lockPath,
+      timeoutMs: options.timeoutMs,
+      pollMs: options.pollMs,
+      currentPid: options.currentPid,
+      onWait: options.onWait,
+      timeoutMessage: "等待 Electron 运行时安装完成超时，请稍后重试。",
+    });
+    try {
+      lock = await acquireUpdateLock({ lockPath });
+    } catch (error) {
+      if (error?.code !== "UPDATE_IN_PROGRESS" || attempt === 2) throw error;
+    }
+  }
+  if (!lock) throw new Error("无法获取 Electron 运行时安装锁。");
+  try {
+    const packagePath = options.packagePath || packageRoot();
+    if (isElectronRuntimeReady(packagePath)) return;
+    await (options.ensureElectronImpl || ensureInstalledElectron)({
+      packagePath,
+      timeoutMs: options.timeoutMs,
+      execFileImpl: options.execFileImpl,
+      env: options.env,
+    });
+  } finally {
+    await lock.release().catch(() => undefined);
   }
 }
 
@@ -429,6 +632,8 @@ module.exports = {
   DEFAULT_NPM_REGISTRY,
   GITHUB_REPOSITORY,
   LATEST_RELEASE_API,
+  LATEST_PACKAGE_URL,
+  LATEST_RELEASE_URL,
   UPDATE_CACHE_TTL_MS,
   UPDATE_REQUEST_TIMEOUT_MS,
   acquireUpdateLock,
@@ -439,19 +644,28 @@ module.exports = {
   compareVersions,
   currentVersion,
   defaultCachePath,
+  electronRuntimeLockPath,
+  ensureElectronRuntimeForLaunch,
+  ensureInstalledElectron,
+  formatManualUpdateFallback,
   formatUpdateNotice,
+  globalPackageRoot,
   globalCommandPath,
   installStatusPath,
   installUpdate,
+  isElectronRuntimeReady,
   launchInstalledApp,
+  manualInstallCommand,
   parseUpdateManifest,
   readUpdatePreference,
   readInstallStatus,
   snoozeUpdatePrompt,
+  showNativeUpdateFailure,
   stateDirectory,
   stopRunningApp,
   updateLockPath,
   updatePreferencePath,
+  waitForUpdateCompletion,
   waitForProcessExit,
   writeAppProcess,
   writeJsonAtomic,

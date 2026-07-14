@@ -2,17 +2,14 @@
 
 ## 安装并使用（给使用者）
 
-进入仓库目录后，先确认 Node.js 22 可用，再安装依赖、构建并注册全局命令：
+先确认 Node.js 22.13+ 和 npm 可用，然后直接安装 GitHub 最新 Release：
 
 ```bash
-nvm install 22
-nvm use 22
-npm ci
-npm run build
-npm install -g .
+npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+agent-session-search
 ```
 
-如果你不用 nvm，只要本机 `node --version` 是 22.13 或更高版本，可以直接从 `npm ci` 开始执行。
+该方式不会克隆仓库，也不需要在本机执行构建。npm 会把编译后的应用安装到当前 Node.js 的全局目录，并下载当前操作系统对应的 Electron 运行时。
 
 装好后，在任意终端运行即可启动：
 
@@ -47,16 +44,15 @@ nvm alias default 22
 
 如果你不用 nvm，而是系统里直接安装了 Node.js 22.13+，后续启动也不需要任何 nvm 命令。
 
-> ⚠️ **请勿删除或移动这个仓库目录。** `npm install -g .` 注册的全局命令是一个指向本仓库的符号链接（npm 对本地目录安装的默认行为），它在运行时会从仓库内的 `node_modules` 加载 Electron 与构建产物 `out/`。如果之后删除、改名或移动了仓库，全局 `agent-session-search` 命令会因为链接失效而无法启动。需要换位置时，请在新位置重新执行一次安装命令。
+正式版安装在 npm 全局目录中，不依赖本地仓库。切换 nvm Node 版本后如果命令消失，请切回安装时的 Node 版本，或在新的 Node 版本下重新执行安装命令。
 
 ### Windows
 
-先安装 Node.js 22.13+（从 <https://nodejs.org> 下载 LTS 安装包，或使用 nvm-windows）。确认 `node --version` ≥ 22.13 后，在仓库目录里用 PowerShell 执行：
+先安装 Node.js 22.13+（从 <https://nodejs.org> 下载 LTS 安装包，或使用 nvm-windows）。确认 `node --version` ≥ 22.13 后，在 PowerShell 执行：
 
 ```powershell
-npm ci
-npm run build
-npm install -g .
+npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+agent-session-search
 ```
 
 装好后在任意终端运行 `agent-session-search` 即可启动。应用常驻后台（系统托盘有图标），默认按 **Ctrl + Alt + Space** 唤起搜索窗口（Windows 下 `Alt+Space` 被系统窗口菜单占用，故默认用 `Ctrl+Alt+Space`）；可在 Settings 里修改或关闭。
@@ -69,7 +65,7 @@ Resume 会在所选终端里打开恢复命令；设置中可选 **Windows Termi
 $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 ```
 
-> ⚠️ 同样**请勿删除或移动仓库目录**：`npm install -g .` 在 Windows 上注册的全局命令是指向本仓库的 junction，移动或删除后命令会失效。
+正式版同样安装到 npm 全局目录，不依赖仓库路径。
 
 ### 要求
 
@@ -98,7 +94,15 @@ agent-session-search --check-update
 agent-session-search --update
 ```
 
-App 内可在 **Settings → About（设置 → 关于）** 检查并安装更新。更新包会先校验 SHA-256，安装失败时保留当前可运行版本。
+App 内可在 **Settings → About（设置 → 关于）** 检查并安装更新。更新包会先校验 SHA-256；安装失败时，外部更新进程会尝试重新打开已经安装的版本，并通过不依赖 Electron 的系统提示框提供“复制安装命令”和“打开 Release 页面”两个兜底入口。终端更新失败时也会直接打印手动安装命令。
+
+手动覆盖安装始终使用同一个稳定链接：
+
+```bash
+npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+```
+
+注意：更新器随应用版本一起发布。已经安装的旧版本无法提前获得新版本中的兜底逻辑；如果某个旧版本自身的自动更新失败，请直接执行上面的命令覆盖安装。
 
 如果正在使用源码开发目录且希望手动同步 `main`，仍可执行：
 

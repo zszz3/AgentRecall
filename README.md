@@ -19,6 +19,43 @@
   <img src="./assets/show.png" alt="Agent-Session-Search 界面预览" width="860">
 </p>
 
+## 快速开始
+
+### 普通用户：安装正式版
+
+准备好 **Node.js 22.13 或更高版本**（自带 npm），然后在终端安装 GitHub 最新 Release：
+
+```bash
+npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+agent-session-search
+```
+
+这条命令安装的是 Release 中已经编译好的应用，不需要克隆仓库，也不需要执行 `npm run build`。应用会安装到当前 Node.js 的全局 npm 目录，首次启动时会准备当前系统对应的 Electron 运行时；它与本地源码开发目录相互独立，不会覆盖你的代码修改。
+
+| 系统 | 启动命令 | 默认唤起快捷键 |
+| --- | --- | --- |
+| macOS | `agent-session-search` | `⌥ Option + Space` |
+| Windows | `agent-session-search` | `Ctrl + Alt + Space` |
+
+应用启动后会常驻菜单栏或系统托盘。设置可通过界面入口打开，macOS 也可以使用 `Cmd+,`；全局快捷键、主题和界面语言都可以在设置中修改。
+
+日常使用只需要再次运行 `agent-session-search`。终端每天最多检查一次 GitHub Release；发现新版本时会先展示新增功能和问题修复，再由你决定是否安装。也可以主动执行：
+
+```bash
+agent-session-search --check-update
+agent-session-search --update
+```
+
+App 内的 **设置 → 关于** 也可以检查并安装更新。如果自动更新失败，更新进程会尝试重新打开已经安装的版本，并通过系统提示框提供 Release 下载页和下面这条手动覆盖安装命令：
+
+```bash
+npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+```
+
+如果终端提示 `agent-session-search: command not found`，请确认当前 shell 使用的是安装时的 Node.js 版本。nvm 用户可以执行 `nvm use 22`，或用 `nvm alias default 22` 把 Node 22 设为默认版本。
+
+完整的安装、网络镜像、SSH 依赖、更新和卸载说明见 [Install.md](./Install.md)。
+
 ## 功能
 
 ### 核心功能
@@ -153,108 +190,38 @@ CodeBuddy CLI、TClaude、TCodex、Claude Code Internal、Codex Internal、OpenC
 
 当前 Supabase 同步按个人项目设计，不会自动创建表，也不会使用 service role key。应用只保存 Project URL 和 anon key 到本地设置，并通过 Supabase REST API 访问 `agent_session_search_skills` 表。初始化 SQL 会为 anon role 创建可读写策略，适合个人私有项目或仅自己掌握 URL/key 的项目；如果要多人共享或公开分发，请先按自己的 Supabase 安全模型调整 RLS policy。
 
-## 安装使用
+## 开发者本地运行
 
-### macOS
-
-要求 Node.js 22.13+（含 npm）。
-
-#### 一键启动（推荐）
-
-进入仓库目录后，直接运行：
+开发环境需要 macOS 或 Windows、Git、Node.js 22.13+ 和 npm。首次准备仓库：
 
 ```bash
-sh start.sh
-```
-
-脚本会自动检查环境并补齐缺失的部分：
-
-1. 检查 Node.js ≥ 22.13，未满足时自动通过 nvm 安装 Node 22
-2. 检查依赖，缺失时执行 `npm ci`
-3. 检查构建产物，缺失时执行 `npm run build`
-4. 检查全局命令，未注册时执行 `npm install -g .`
-5. 关闭已有实例并启动全新应用
-
-所有步骤幂等，已满足的会跳过，重复运行安全。
-
-#### 手动安装
-
-如果你希望手动控制每一步，也可以执行：
-
-```bash
-nvm install 22 && nvm use 22 && npm ci && npm run build && npm install -g .
-```
-
-如果你不用 nvm，只要本机 `node --version` 是 22.13 或更高版本，可以直接从 `npm ci` 开始执行。
-
-装好后，在任意终端运行 `agent-session-search` 即可启动。应用常驻后台（菜单栏有图标），默认按 **⌥ Option + Space** 唤起搜索窗口；如果和 Raycast 等工具冲突，可以在 Settings 里修改或关闭全局快捷键。应用使用单实例锁，重复启动时会自动唤起已有窗口而非开启新实例。
-
-Settings 也可以通过 `Cmd+,` 打开；在 Appearance 里可以切换明暗主题和 English / 中文界面。
-
-后续日常启动不需要重新执行安装命令，也不需要重新 build，直接运行：
-
-```bash
-agent-session-search
-```
-
-终端会自动检查最新 GitHub Release。发现新版本时会展示本次“新增功能 / Bug 修复”，并询问是否立即更新；选择暂不更新会继续启动当前版本。App 内也可以通过 **Settings → About（设置 → 关于）** 查看版本、更新说明并点击“立即更新”。
-
-如果新终端提示 `agent-session-search: command not found`，通常是因为全局命令安装在 nvm 的 Node 22 目录下，但当前 shell 没有选中 Node 22。可以先运行：
-
-```bash
-nvm use 22
-agent-session-search
-```
-
-也可以一次性设置默认 Node 版本，之后新终端就不需要手动 `nvm use 22`：
-
-```bash
-nvm alias default 22
-```
-
-### Windows
-
-确认 Node.js 22.13+ 后，在仓库目录里用 PowerShell 执行：
-
-```powershell
-npm ci && npm run build && npm install -g .
-```
-
-装好后，在任意终端运行 `agent-session-search` 即可启动。应用常驻后台（任务栏/托盘有图标），默认按 **Ctrl + Alt + Space** 唤起搜索窗口。
-
-更新、卸载、从源码克隆、网络镜像等详情见 [Install.md](./Install.md)。
-
-## 开发环境
-
-要求：
-
-- macOS 或 Windows
-- Node.js 22.13 或更高版本
-- npm
-
-安装依赖：
-
-```bash
-npm install
-```
-
-运行测试：
-
-```bash
-npm test
-```
-
-启动开发版桌面应用：
-
-```bash
+git clone https://github.com/zszz3/agent-session-search.git
+cd agent-session-search
+npm ci
 npm run dev
 ```
 
-构建应用：
+`npm run dev` 会启动 Electron 开发版并监听源码变化。开发版直接使用当前仓库文件，不会读取或覆盖全局安装的正式版；两者的代码位置彼此独立。
+
+常用开发命令：
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 启动本地开发版 |
+| `npm test` | 运行全部自动化测试 |
+| `npm run typecheck` | 检查主进程和渲染进程 TypeScript 类型 |
+| `npm run build` | 生成生产构建到 `out/` |
+| `npm run release-note:check` | 检查当前开发分支的用户更新说明 |
+
+需要用全局命令测试当前源码时，先完成构建，再安装当前目录：
 
 ```bash
 npm run build
+npm install -g .
+agent-session-search --no-update-check
 ```
+
+这只适合开发验证。普通用户应始终使用上方的 Release 链接安装。更完整的环境检查和故障排查见 [Install.md](./Install.md)。
 
 ## 仓库文档
 

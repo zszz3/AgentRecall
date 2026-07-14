@@ -40,7 +40,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "electron": "^42.3.0",
+    "electron": "42.3.0",
     "electron-store": "^10.0.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

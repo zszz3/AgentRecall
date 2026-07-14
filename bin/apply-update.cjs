@@ -5,8 +5,11 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const {
   acquireUpdateLock,
+  clearInstallStatus,
+  formatManualUpdateFallback,
   installUpdate,
   launchInstalledApp,
+  showNativeUpdateFailure,
   stopRunningApp,
   waitForProcessExit,
 } = require("./update-client.cjs");
@@ -36,9 +39,15 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`Agent-Session-Search 更新失败：${error instanceof Error ? error.message : String(error)}\n`);
-  if (error?.code !== "UPDATE_IN_PROGRESS") {
+main().catch(async (error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const updateInProgress = error?.code === "UPDATE_IN_PROGRESS";
+  process.stderr.write(
+    `Agent-Session-Search 更新失败：${message}${updateInProgress ? "" : `\n\n${formatManualUpdateFallback()}`}\n`,
+  );
+  if (!updateInProgress) {
+    const fallbackShown = showNativeUpdateFailure(message);
+    if (fallbackShown) await clearInstallStatus().catch(() => undefined);
     try { launchInstalledApp(); } catch { /* Keep the recorded error for the next manual launch. */ }
   }
   process.exitCode = 1;

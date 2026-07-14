@@ -36,7 +36,7 @@ export function SkillsDialog({
   revealLabel: string;
   onRefresh: () => void;
   onUpload: (skill: InstalledSkill, force?: boolean) => Promise<SkillSyncUploadOutcome | null>;
-  onUploadSelected: (skills: InstalledSkill[]) => Promise<void>;
+  onUploadSelected: (skills: InstalledSkill[]) => Promise<{ remainingSkillIds: string[] }>;
   onInstallRemote: (remoteSkillId: string) => Promise<void>;
   onFetchVersion: (remoteSkillId: string) => Promise<RemoteSkill>;
   onRefreshRemote: () => void;
@@ -214,6 +214,11 @@ export function SkillsDialog({
     });
   };
 
+  const uploadSelected = async () => {
+    const result = await onUploadSelected(selectedUploadableSkills);
+    setSelectedSkillIds(new Set(result.remainingSkillIds));
+  };
+
   const confirmUpload = async () => {
     if (!uploadConfirm) return;
     const { skill } = uploadConfirm;
@@ -286,7 +291,7 @@ export function SkillsDialog({
             <button
               type="button"
               className="settings-action-button"
-              onClick={() => void onUploadSelected(selectedUploadableSkills)}
+              onClick={() => void uploadSelected()}
               disabled={!syncReady || loading || selectedUploadableSkills.length === 0}
               title={!syncReady ? syncDisabledTitle(syncSnapshot, language) : l("Upload selected non-system skills", "上传选中的非系统 Skills")}
             >

@@ -13,9 +13,11 @@ const readline = require("node:readline/promises");
 const {
   checkForUpdate,
   currentVersion,
+  ensureElectronRuntimeForLaunch,
   formatUpdateNotice,
   readUpdatePreference,
   snoozeUpdatePrompt,
+  waitForUpdateCompletion,
 } = require("./update-client.cjs");
 
 async function scheduleUpdate(manifest, { stopApp }) {
@@ -99,6 +101,17 @@ async function main() {
     await snoozeUpdatePrompt(result.manifest.version);
   }
 
+  await waitForUpdateCompletion({
+    onWait: () => {
+      if (process.stdout.isTTY) process.stdout.write("正在等待自动更新完成...\n");
+    },
+  });
+  await ensureElectronRuntimeForLaunch({
+    packagePath: path.resolve(__dirname, ".."),
+    onWait: () => {
+      if (process.stdout.isTTY) process.stdout.write("正在等待 Electron 运行时准备完成...\n");
+    },
+  });
   launchApp();
 }
 

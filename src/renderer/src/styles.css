@@ -5248,19 +5248,31 @@ body.overlay-open .sidebar {
 .remote-sessions-dialog {
   width: min(980px, calc(100vw - 48px));
   max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
 }
 
-.remote-sessions-toolbar,
-.remote-restore-bar {
+.remote-sessions-title {
+  gap: 10px;
+}
+
+.remote-sessions-count {
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-sessions-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-}
-
-.remote-sessions-toolbar {
   flex-wrap: wrap;
+  background: var(--panel-subtle);
 }
 
 .remote-search {
@@ -5312,25 +5324,6 @@ body.overlay-open .sidebar {
   box-shadow: none;
 }
 
-.remote-restore-bar {
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-
-.remote-filter-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.remote-filter-group > span {
-  flex: 0 0 auto;
-}
-
 .remote-targets {
   display: inline-flex;
   align-items: center;
@@ -5361,23 +5354,136 @@ body.overlay-open .sidebar {
   padding: 0 8px;
 }
 
+.remote-toolbar-icon,
+.remote-local-save,
+.remote-bulk-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 620;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.remote-toolbar-icon {
+  width: 38px;
+  padding: 0;
+}
+
+.remote-local-save {
+  padding: 0 11px;
+  color: var(--accent);
+}
+
+.remote-toolbar-icon:hover:not(:disabled),
+.remote-local-save:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.remote-toolbar-icon:disabled,
+.remote-local-save:disabled,
+.remote-bulk-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.remote-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+.remote-select-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.remote-select-visible input,
+.remote-session-select input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.remote-select-visible input:disabled {
+  cursor: not-allowed;
+}
+
+.remote-selection-summary {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.remote-bulk-delete {
+  height: 32px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
+  color: var(--danger);
+}
+
+.remote-bulk-delete:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel-bg));
+}
+
 .remote-session-list {
   min-height: 260px;
   max-height: 500px;
   overflow: auto;
-  padding: 10px;
+  padding: 8px 10px 12px;
+  background: var(--panel-subtle);
 }
 
 .remote-session-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 12px 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--panel-bg);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.remote-session-row:last-child {
-  border-bottom: 0;
+.remote-session-row:hover {
+  border-color: var(--border);
+  background: var(--panel-hover);
+}
+
+.remote-session-row.selected {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.remote-session-select {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  cursor: pointer;
 }
 
 .remote-session-main {
@@ -5405,6 +5511,13 @@ body.overlay-open .sidebar {
   display: flex;
   align-items: center;
   gap: 6px;
+  opacity: 0.88;
+  transition: opacity 0.15s ease;
+}
+
+.remote-session-row:hover .remote-session-actions,
+.remote-session-row.selected .remote-session-actions {
+  opacity: 1;
 }
 
 .remote-session-action {
@@ -5416,9 +5529,22 @@ body.overlay-open .sidebar {
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--panel-bg);
-  color: var(--text);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 610;
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.remote-session-action.subtle {
+  border-color: transparent;
+}
+
+.remote-session-action.primary {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .remote-session-action.icon-only {
@@ -5427,16 +5553,117 @@ body.overlay-open .sidebar {
 }
 
 .remote-session-action.danger {
+  border-color: transparent;
   color: var(--danger);
 }
 
 .remote-session-actions button:hover:not(:disabled) {
   border-color: var(--border-strong);
+  background: var(--panel-bg);
+  color: var(--text);
 }
 
 .remote-session-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.remote-restore-dialog,
+.delete-remote-sessions-dialog {
+  width: min(460px, calc(100vw - 32px));
+  padding: 14px;
+}
+
+.remote-restore-dialog .dialog-title,
+.delete-remote-sessions-dialog .dialog-title {
+  margin-bottom: 10px;
+}
+
+.remote-restore-session-title {
+  overflow: hidden;
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-restore-field {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.remote-restore-field.destination strong {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-project-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.remote-project-picker span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-delete-preview {
+  display: grid;
+  gap: 5px;
+  max-height: 128px;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.remote-delete-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-remote-sessions-dialog .dialog-copy {
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+
+@media (max-width: 820px) {
+  .remote-search {
+    flex-basis: 100%;
+  }
+
+  .remote-session-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .remote-session-actions {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
 }
 
 .remote-empty {

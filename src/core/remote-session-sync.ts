@@ -55,6 +55,18 @@ export type RemoteSessionUploadResult =
   | { status: "updated"; remoteSession: RemoteSessionListItem }
   | { status: "skipped"; remoteSession: RemoteSessionListItem };
 
+export interface RemoteSessionDeleteFailure {
+  id: string;
+  message: string;
+}
+
+export interface RemoteSessionDeleteResult {
+  requested: number;
+  deletedIds: string[];
+  missingIds: string[];
+  failures: RemoteSessionDeleteFailure[];
+}
+
 export interface RemoteSessionClientOptions {
   url: string;
   anonKey: string;
@@ -430,16 +442,45 @@ export class SupabaseRemoteSessionClient {
   }
 
   async deleteRemoteSession(remoteId: string): Promise<boolean> {
-    const remote = await this.getRemoteSession(remoteId).catch(() => null);
-    if (!remote) return false;
+    let remote: RemoteSessionListItem;
+    try {
+      remote = await this.getRemoteSession(remoteId);
+    } catch (error) {
+      if (error instanceof Error && error.message === "Remote session was not found.") return false;
+      throw error;
+    }
+    const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?id=eq.${encodeURIComponent(remoteId)}`, { method: "DELETE" });
+    const body = await readResponseBody(response);
+    if (!response.ok) throw new Error(supabaseErrorMessage(response.status, body));
     await Promise.allSettled([
       this.deleteStorageObject(remote.detailObjectKey),
       this.deleteStorageObject(remote.portableObjectKey),
     ]);
-    const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?id=eq.${encodeURIComponent(remoteId)}`, { method: "DELETE" });
-    const body = await readResponseBody(response);
-    if (!response.ok) throw new Error(supabaseErrorMessage(response.status, body));
     return true;
+  }
+
+  async deleteRemoteSessions(remoteIds: string[]): Promise<RemoteSessionDeleteResult> {
+    const ids = [...new Set(remoteIds.map((id) => id.trim()).filter(Boolean))];
+    const outcomes = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const deleted = await this.deleteRemoteSession(id);
+          return deleted ? ({ kind: "deleted", id } as const) : ({ kind: "missing", id } as const);
+        } catch (error) {
+          return {
+            kind: "failed",
+            id,
+            message: error instanceof Error ? error.message : String(error),
+          } as const;
+        }
+      }),
+    );
+    return {
+      requested: ids.length,
+      deletedIds: outcomes.flatMap((outcome) => (outcome.kind === "deleted" ? [outcome.id] : [])),
+      missingIds: outcomes.flatMap((outcome) => (outcome.kind === "missing" ? [outcome.id] : [])),
+      failures: outcomes.flatMap((outcome) => (outcome.kind === "failed" ? [{ id: outcome.id, message: outcome.message }] : [])),
+    };
   }
 
   private async getRemoteSessionOrNull(remoteId: string): Promise<RemoteSessionListItem | null> {

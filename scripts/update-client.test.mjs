@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,11 +13,18 @@ const {
   acquireUpdateLock,
   checkForUpdate,
   compareVersions,
+  ensureElectronRuntimeForLaunch,
+  ensureInstalledElectron,
+  formatManualUpdateFallback,
   formatUpdateNotice,
   installUpdate,
+  isElectronRuntimeReady,
   launchInstalledApp,
+  manualInstallCommand,
   parseUpdateManifest,
+  showNativeUpdateFailure,
   snoozeUpdatePrompt,
+  waitForUpdateCompletion,
 } = require("../bin/update-client.cjs");
 
 test("allows enough time for a normal GitHub release check", () => {
@@ -140,6 +147,51 @@ test("falls back to the direct latest manifest when the GitHub release API fails
   ]);
 });
 
+test("provides an actionable manual fallback when automatic installation fails", () => {
+  const command = manualInstallCommand();
+  assert.equal(
+    command,
+    "npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz",
+  );
+  const message = formatManualUpdateFallback();
+  assert.match(message, /自动更新未完成/);
+  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/agent-session-search\/releases\/latest\/download\/agent-session-search\.tgz/);
+  assert.match(message, /https:\/\/github\.com\/zszz3\/agent-session-search\/releases\/latest/);
+});
+
+test("shows a macOS-native fallback without requiring Electron", () => {
+  const calls = [];
+  const shown = showNativeUpdateFailure("Electron download failed", {
+    platform: "darwin",
+    execFileSyncImpl: (command, args, options) => {
+      calls.push({ command, args, options });
+      return command === "osascript" ? "button returned:复制安装命令\n" : "";
+    },
+  });
+  assert.equal(shown, true);
+  assert.equal(calls[0].command, "osascript");
+  assert.equal(calls[0].options.env.AGENT_SESSION_SEARCH_UPDATE_ERROR, "Electron download failed");
+  assert.equal(calls[1].command, "pbcopy");
+  assert.match(calls[1].options.input, /npm install -g .*agent-session-search\.tgz/);
+});
+
+test("shows a Windows-native fallback without requiring Electron", () => {
+  let invocation = null;
+  const shown = showNativeUpdateFailure("npm install failed", {
+    platform: "win32",
+    execFileSyncImpl: (command, args, options) => {
+      invocation = { command, args, options };
+      return "";
+    },
+  });
+  assert.equal(shown, true);
+  assert.equal(invocation.command, "powershell.exe");
+  assert.ok(invocation.args.includes("-NonInteractive"));
+  assert.match(invocation.args.at(-1), /Set-Clipboard/);
+  assert.match(invocation.args.at(-1), /Start-Process/);
+  assert.equal(invocation.options.env.AGENT_SESSION_SEARCH_UPDATE_ERROR, "npm install failed");
+});
+
 test("reports a clear error when the GitHub release check times out", async () => {
   const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-timeout-"));
   const fetchImpl = async (_url, init) => new Promise((_resolve, reject) => {
@@ -166,6 +218,14 @@ test("serializes update installers with a recoverable process lock", async () =>
   await second.release();
 });
 
+test("waits for an active update lock before launching the application", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-session-update-wait-"));
+  const lockPath = path.join(directory, "install.lock");
+  const lock = await acquireUpdateLock({ lockPath });
+  setTimeout(() => void lock.release(), 20);
+  assert.equal(await waitForUpdateCompletion({ lockPath, currentPid: -1, pollMs: 5, timeoutMs: 1_000 }), true);
+});
+
 test("installs through the public registry and records a completed status", async () => {
   const bytes = Buffer.from("verified update archive");
   const value = manifest();
@@ -173,6 +233,7 @@ test("installs through the public registry and records a completed status", asyn
   const directory = await mkdtemp(path.join(tmpdir(), "agent-session-update-install-"));
   const statusPath = path.join(directory, "status.json");
   let invocation = null;
+  let electronChecked = false;
   await installUpdate(value, {
     fetchImpl: async () => new Response(bytes, { status: 200 }),
     statusPath,
@@ -180,15 +241,74 @@ test("installs through the public registry and records a completed status", asyn
       invocation = { command, args, options };
       return { stdout: "", stderr: "" };
     },
+    ensureElectronImpl: async ({ env }) => {
+      electronChecked = true;
+      assert.equal("ELECTRON_RUN_AS_NODE" in env, false);
+    },
   });
   assert.equal(invocation.args[invocation.args.indexOf("--registry") + 1], DEFAULT_NPM_REGISTRY);
   assert.equal("ELECTRON_RUN_AS_NODE" in invocation.options.env, false);
+  assert.equal(electronChecked, true);
   assert.deepEqual(JSON.parse(await readFile(statusPath, "utf8")), {
     status: "installed",
     version: "0.2.0",
     updatedAt: JSON.parse(await readFile(statusPath, "utf8")).updatedAt,
     error: null,
   });
+});
+
+test("repairs an incomplete Electron runtime before reporting update success", async () => {
+  const packagePath = await mkdtemp(path.join(tmpdir(), "agent-session-electron-repair-"));
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  await mkdir(electronPath, { recursive: true });
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `const path = require("node:path"); module.exports = path.join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(electronPath, "install.js"),
+    [
+      'const fs = require("node:fs"); const path = require("node:path");',
+      `const executable = path.join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});`,
+      `const defaultApp = path.join(__dirname, "dist", ${JSON.stringify(relativeDefaultApp)});`,
+      'fs.mkdirSync(path.dirname(executable), { recursive: true }); fs.writeFileSync(executable, "ok");',
+      'fs.mkdirSync(path.dirname(defaultApp), { recursive: true }); fs.writeFileSync(defaultApp, "ok");',
+      'fs.writeFileSync(path.join(__dirname, "dist", "version"), "42.3.0");',
+      `fs.writeFileSync(path.join(__dirname, "path.txt"), ${JSON.stringify(relativeExecutable)});`,
+    ].join(" "),
+    "utf8",
+  );
+
+  await ensureInstalledElectron({ packagePath, timeoutMs: 5_000 });
+  assert.equal(await readFile(path.join(electronPath, "dist", relativeExecutable), "utf8"), "ok");
+  assert.equal(isElectronRuntimeReady(packagePath), true);
+});
+
+test("serializes concurrent first-launch Electron preparation", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-session-electron-lock-"));
+  const lockPath = path.join(directory, "electron.lock");
+  let active = 0;
+  let maxActive = 0;
+  const ensureElectronImpl = async () => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    active -= 1;
+  };
+  await Promise.all([
+    ensureElectronRuntimeForLaunch({ lockPath, packagePath: directory, ensureElectronImpl, pollMs: 5, timeoutMs: 1_000, currentPid: -1 }),
+    ensureElectronRuntimeForLaunch({ lockPath, packagePath: directory, ensureElectronImpl, pollMs: 5, timeoutMs: 1_000, currentPid: -1 }),
+  ]);
+  assert.equal(maxActive, 1);
 });
 
 test("relaunches without Electron's Node-mode environment", () => {
@@ -211,4 +331,11 @@ test("keeps the terminal attached until the updater reports an exit status", asy
   assert.doesNotMatch(launcher, /detached:\s*true,\s*stdio:\s*"inherit"/);
   assert.doesNotMatch(launcher, /"--wait-pid",\s*String\(process\.pid\)/);
   assert.match(launcher, /delete environment\.ELECTRON_RUN_AS_NODE/);
+  assert.match(launcher, /waitForUpdateCompletion/);
+  assert.match(launcher, /ensureElectronRuntimeForLaunch/);
+});
+
+test("pins the Electron runtime used by CI and global installs", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.dependencies.electron, "42.3.0");
 });

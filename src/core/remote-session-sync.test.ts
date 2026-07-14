@@ -188,6 +188,54 @@ describe("remote session sync model", () => {
     expect(filterRemoteSessions(sessions, "missing")).toHaveLength(0);
   });
 
+  it("deletes selected remote rows before cleaning their storage objects", async () => {
+    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
+    const { payload } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
+    const calls: string[] = [];
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url, init) => {
+        const method = init?.method ?? "GET";
+        if (String(url).includes("/storage/v1/object/")) {
+          calls.push(`storage-${method}`);
+          return new Response("{}", { status: 200 });
+        }
+        if (method === "DELETE") {
+          calls.push("row-DELETE");
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        calls.push("row-GET");
+        return new Response(JSON.stringify([payload]), { status: 200 });
+      },
+    });
+
+    await expect(client.deleteRemoteSessions([payload.id, payload.id])).resolves.toEqual({
+      requested: 1,
+      deletedIds: [payload.id],
+      missingIds: [],
+      failures: [],
+    });
+    expect(calls[0]).toBe("row-GET");
+    expect(calls[1]).toBe("row-DELETE");
+    expect(calls.slice(2).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
+  });
+
+  it("keeps a selected session as failed when its delete preflight cannot reach Supabase", async () => {
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async () => new Response(JSON.stringify({ message: "network unavailable" }), { status: 503 }),
+    });
+
+    await expect(client.deleteRemoteSessions(["remote-1"])).resolves.toEqual({
+      requested: 1,
+      deletedIds: [],
+      missingIds: [],
+      failures: [{ id: "remote-1", message: "network unavailable" }],
+    });
+  });
+
   it("falls back to legacy remote session rows when source environment columns are missing", async () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
     const { payload, detailJson, portableJson } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });

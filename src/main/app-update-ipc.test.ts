@@ -26,5 +26,9 @@ describe("application update IPC", () => {
     expect(mainSource).toContain('title: "更新失败"');
     expect(mainSource).toContain("clearInstallStatus");
     expect(mainSource).toContain("dialog.showMessageBox");
+    expect(mainSource).toContain("可以手动安装最新版本");
+    expect(mainSource).toContain("manualInstallCommand");
+    expect(mainSource).toContain("复制安装命令");
+    expect(mainSource).toContain("shell.openExternal(client.LATEST_RELEASE_URL)");
   });
 });

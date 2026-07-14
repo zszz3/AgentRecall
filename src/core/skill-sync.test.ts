@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 import {
   AGENT_SESSION_SEARCH_SKILLS_TABLE,
   SkillVersionConflictError,
@@ -195,17 +196,23 @@ describe("skill sync", () => {
     };
     const { base } = buildSkillVersionBasePayload(localSkill());
     base.metadata = { ...base.metadata, skillFiles: [largeFile] };
-    const calls: Array<{ url: string; method: string; body?: string }> = [];
+    const calls: Array<{ url: string; method: string; body?: Buffer }> = [];
     const client = new SupabaseSkillSyncClient({
       url: "https://example.supabase.co",
       anonKey: "anon",
       fetchImpl: async (url, init) => {
-        calls.push({ url: String(url), method: init?.method ?? "GET", body: typeof init?.body === "string" ? init.body : undefined });
-        if (String(url).includes("/storage/v1/object/")) return new Response("{}", { status: 200 });
+        if (String(url).includes("/storage/v1/object/")) {
+          expect(init?.body).toBeInstanceOf(ArrayBuffer);
+          calls.push({ url: String(url), method: init?.method ?? "GET", body: Buffer.from(init?.body as ArrayBuffer) });
+          return new Response("{}", { status: 200 });
+        }
+        calls.push({ url: String(url), method: init?.method ?? "GET" });
         const body = JSON.parse(String(init?.body));
         expect(body.metadata.skillFiles).toEqual([]);
-        expect(body.metadata.skillFilesObjectKey).toMatch(/^skills\/[0-9a-f]{64}\/v2\/files\.json$/);
+        expect(body.metadata.skillFilesObjectKey).toMatch(/^skills\/[0-9a-f]{64}\/v2\/files\.json\.gz$/);
         expect(body.metadata.skillFilesSha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(body.metadata.skillFilesEncoding).toBe("gzip-json-v1");
+        expect(body.metadata.skillFilesCompressedBytes).toBeLessThan(body.metadata.skillFilesBytes);
         return new Response(JSON.stringify([{ ...body, id: "remote-large", created_at: "x", updated_at: "y" }]), { status: 201 });
       },
     });
@@ -214,8 +221,30 @@ describe("skill sync", () => {
 
     expect(result.id).toBe("remote-large");
     expect(calls[0].url).toContain("/storage/v1/object/agent-session-skills/skills/");
-    expect(calls[0].body).toContain("references/large.md");
+    expect(gunzipSync(calls[0].body as Buffer).toString("utf8")).toContain("references/large.md");
     expect(calls.some((call) => call.url.includes(`/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}`))).toBe(true);
+  });
+
+  it("hydrates gzip-compressed skill bundles", async () => {
+    const files = [{ relativePath: "references/guide.md", contentBase64: Buffer.from("guide").toString("base64"), mode: 0o644 }];
+    const filesJson = JSON.stringify({ schemaVersion: 1, files });
+    const compressed = gzipSync(filesJson);
+    const metadata = {
+      skillFiles: [],
+      skillFilesObjectKey: "skills/fp/v2/files.json.gz",
+      skillFilesEncoding: "gzip-json-v1",
+      skillFilesSha256: createHash("sha256").update(filesJson).digest("hex"),
+    };
+    const client = new SupabaseSkillSyncClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url) => {
+        if (String(url).includes("/storage/v1/object/")) return new Response(compressed, { status: 200 });
+        return new Response(JSON.stringify([versionRow({ markdown: "# Review", metadata })]), { status: 200 });
+      },
+    });
+
+    await expect(client.getRemoteSkill("remote-1")).resolves.toMatchObject({ metadata: { skillFiles: files } });
   });
 
   it("retries a version insert with a fresh number after a unique conflict", async () => {

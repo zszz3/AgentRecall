@@ -134,37 +134,16 @@ Supabase sync is designed for personal projects. It does not create tables autom
 
 ## Installation
 
-### macOS
+### Regular users
 
-Requires Node.js 22.13+ (with npm).
-
-#### One-command start (recommended)
-
-From the repository root, run:
+Install Node.js 22.13 or newer, then install the latest GitHub Release from a terminal. The same command works in macOS terminals and Windows PowerShell:
 
 ```bash
-sh start.sh
+npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+agent-session-search
 ```
 
-The script checks the environment and fills in anything missing:
-
-1. Checks for Node.js 22.13 or newer and installs Node 22 through nvm when needed
-2. Runs `npm ci` when dependencies are missing
-3. Runs `npm run build` when build output is missing
-4. Runs `npm install -g .` when the global command is not registered
-5. Stops an existing instance and launches a fresh app instance
-
-The steps are idempotent, so requirements that are already satisfied are skipped and the script is safe to run again.
-
-#### Manual installation
-
-If you prefer to control each step manually, run:
-
-```bash
-nvm install 22 && nvm use 22 && npm ci && npm run build && npm install -g .
-```
-
-If you do not use nvm, make sure `node --version` is 22.13 or newer, then start from `npm ci`.
+The first installation downloads the Electron runtime for the current operating system. See the Development Setup section and [Install.md](../Install.md) for source-based installation.
 
 Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings. The app uses a single-instance lock, so launching it again focuses the existing window instead of opening another instance.
 
@@ -191,17 +170,9 @@ nvm alias default 22
 
 If you do not use nvm and have Node.js 22.13+ installed system-wide, daily startup does not need any nvm command.
 
-The terminal checks the latest GitHub Release automatically. When an update is available, it shows the release's new features and bug fixes and asks whether to install it. The same version, release notes, and **Update now** action are available under **Settings → About**. Use `agent-session-search --check-update` to check without launching the App or `agent-session-search --update` to install immediately.
+The terminal checks the latest GitHub Release automatically. When an update is available, it shows the release's new features and bug fixes and asks whether to install it. The same version, release notes, and **Update now** action are available under **Settings → About**. Use `agent-session-search --check-update` to check without launching the App or `agent-session-search --update` to install immediately. If an automatic update fails, the external updater attempts to reopen the installed version and uses an operating-system dialog to offer actions for copying the manual installation command or opening the latest Release page.
 
-### Windows
-
-With Node.js 22.13+ installed, run this from the repository root in PowerShell:
-
-```powershell
-npm ci && npm run build && npm install -g .
-```
-
-Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a taskbar/tray icon); press **Ctrl + Alt + Space** by default to open the search window.
+On macOS, press **⌥ Option + Space** by default to open the search window. On Windows, use **Ctrl + Alt + Space**. Both shortcuts can be changed in Settings.
 
 See [Install.md](../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.
 
@@ -213,28 +184,22 @@ Requirements:
 - Node.js 22.13 or newer
 - npm
 
-Install dependencies:
+Clone the repository, install exactly the locked dependencies, and start the development app:
 
 ```bash
-npm install
-```
-
-Run tests:
-
-```bash
-npm test
-```
-
-Start the desktop app in development mode:
-
-```bash
+git clone https://github.com/zszz3/agent-session-search.git
+cd agent-session-search
+npm ci
 npm run dev
 ```
 
-Build the app bundle output:
+The development app uses files from the current checkout and is independent of a globally installed Release. Useful verification commands are:
 
 ```bash
+npm test
+npm run typecheck
 npm run build
+npm run release-note:check
 ```
 
 ## Repository Notes

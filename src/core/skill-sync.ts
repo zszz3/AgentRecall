@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { SkillSyncBinding } from "./session-store";
 import type { InstalledSkill } from "./skill-manager";
 
@@ -9,6 +10,8 @@ export const AGENT_SESSION_SKILLS_BUCKET = "agent-session-skills";
 const REMOTE_SKILL_VERSION_COLUMNS =
   "id,name,description,agent,source,local_fingerprint,content_hash,uploaded_from_path,version,created_at,updated_at";
 const SKILL_FILES_STORAGE_THRESHOLD_BYTES = 512 * 1024;
+const DEFAULT_SKILL_STORAGE_TIMEOUT_MS = 120_000;
+const GZIP_SKILL_FILES_ENCODING = "gzip-json-v1";
 
 // Full row (markdown + bundled files) fetched on demand for preview/install.
 export interface RemoteSkill {
@@ -102,6 +105,7 @@ export interface SupabaseSkillSyncClientOptions {
   anonKey: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  storageTimeoutMs?: number;
 }
 
 export type SkillVersionBasePayload = Omit<SupabaseSkillRow, "id" | "created_at" | "updated_at" | "version">;
@@ -272,12 +276,15 @@ export class SupabaseSkillSyncClient {
   private readonly anonKey: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly storageTimeoutMs: number;
 
   constructor(options: SupabaseSkillSyncClientOptions) {
     this.baseUrl = normalizeSupabaseUrl(options.url);
     this.anonKey = options.anonKey.trim();
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_SKILL_SYNC_TIMEOUT_MS;
+    this.storageTimeoutMs =
+      options.storageTimeoutMs && options.storageTimeoutMs > 0 ? options.storageTimeoutMs : DEFAULT_SKILL_STORAGE_TIMEOUT_MS;
     if (!this.baseUrl) throw new Error("Supabase URL is required.");
     if (!this.anonKey) throw new Error("Supabase anon key is required.");
   }
@@ -338,6 +345,7 @@ export class SupabaseSkillSyncClient {
     });
     const body = await readResponseBody(response);
     if (!response.ok) {
+      await this.deletePreparedSkillFiles(prepared);
       if (isUniqueViolation(response.status, body)) throw new SkillVersionConflictError();
       throw new Error(supabaseErrorMessage(response.status, body));
     }
@@ -362,9 +370,9 @@ export class SupabaseSkillSyncClient {
     throw new SkillVersionConflictError();
   }
 
-  private async request(path: string, init: RequestInit): Promise<Response> {
+  private async request(path: string, init: RequestInit, timeoutMs = this.timeoutMs): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const url = path.startsWith("/storage/v1/") ? `${this.baseUrl}${path}` : `${this.baseUrl}/rest/v1${path}`;
       return await this.fetchImpl(url, {
@@ -379,7 +387,7 @@ export class SupabaseSkillSyncClient {
       });
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error(`Supabase request timed out after ${Math.round(this.timeoutMs / 1000)}s.`);
+        throw new Error(`Supabase request timed out after ${Math.round(timeoutMs / 1000)}s.`);
       }
       throw error;
     } finally {
@@ -393,8 +401,9 @@ export class SupabaseSkillSyncClient {
     const filesJson = stableJson({ schemaVersion: 1, files } satisfies SkillFilesSnapshot);
     if (Buffer.byteLength(filesJson, "utf8") <= SKILL_FILES_STORAGE_THRESHOLD_BYTES) return base;
 
-    const objectKey = `skills/${base.local_fingerprint}/v${version}/files.json`;
-    await this.uploadStorageObject(objectKey, filesJson);
+    const compressed = gzipSync(Buffer.from(filesJson, "utf8"), { level: 9 });
+    const objectKey = `skills/${base.local_fingerprint}/v${version}/files.json.gz`;
+    await this.uploadStorageObject(objectKey, Uint8Array.from(compressed).buffer);
     return {
       ...base,
       metadata: {
@@ -402,8 +411,10 @@ export class SupabaseSkillSyncClient {
         skillFiles: [],
         skillFilesObjectKey: objectKey,
         skillFilesSha256: sha256(filesJson),
+        skillFilesEncoding: GZIP_SKILL_FILES_ENCODING,
         skillFilesCount: files.length,
         skillFilesBytes: Buffer.byteLength(filesJson, "utf8"),
+        skillFilesCompressedBytes: compressed.byteLength,
       },
     };
   }
@@ -412,7 +423,12 @@ export class SupabaseSkillSyncClient {
     if (skillSyncFilesFromMetadata(skill.metadata).length > 0) return skill;
     const objectKey = skill.metadata.skillFilesObjectKey;
     if (typeof objectKey !== "string" || !objectKey.trim()) return skill;
-    const filesJson = await this.downloadStorageObject(objectKey);
+    const stored = await this.downloadStorageObject(objectKey);
+    const encoding = skill.metadata.skillFilesEncoding;
+    const filesJson =
+      encoding === GZIP_SKILL_FILES_ENCODING || objectKey.endsWith(".gz")
+        ? gunzipSkillFiles(stored)
+        : stored.toString("utf8");
     const expectedSha = skill.metadata.skillFilesSha256;
     if (typeof expectedSha === "string" && expectedSha && sha256(filesJson) !== expectedSha) {
       throw new Error("Remote skill files checksum mismatch.");
@@ -427,11 +443,11 @@ export class SupabaseSkillSyncClient {
     };
   }
 
-  private async uploadStorageObject(key: string, body: string): Promise<void> {
+  private async uploadStorageObject(key: string, body: ArrayBuffer): Promise<void> {
     const response = await this.storageRequest(key, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "application/gzip",
         "Cache-Control": "no-cache",
         "x-upsert": "true",
       },
@@ -441,11 +457,11 @@ export class SupabaseSkillSyncClient {
     if (!response.ok) throw new Error(skillSyncStorageErrorMessage(response.status, responseBody));
   }
 
-  private async downloadStorageObject(key: string): Promise<string> {
+  private async downloadStorageObject(key: string): Promise<Buffer> {
     const response = await this.storageRequest(key, { method: "GET" });
-    const text = await response.text();
-    if (!response.ok) throw new Error(skillSyncStorageErrorMessage(response.status, text));
-    return text;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) throw new Error(skillSyncStorageErrorMessage(response.status, bytes.toString("utf8")));
+    return bytes;
   }
 
   private async storageRequest(path: string, init: RequestInit): Promise<Response> {
@@ -456,7 +472,26 @@ export class SupabaseSkillSyncClient {
         Authorization: `Bearer ${this.anonKey}`,
         ...(init.headers ?? {}),
       },
-    });
+    }, this.storageTimeoutMs);
+  }
+
+  private async deletePreparedSkillFiles(payload: SkillVersionBasePayload): Promise<void> {
+    const objectKey = payload.metadata?.skillFilesObjectKey;
+    if (typeof objectKey !== "string" || !objectKey) return;
+    try {
+      const response = await this.storageRequest(objectKey, { method: "DELETE" });
+      if (!response.ok && response.status !== 404) await response.arrayBuffer();
+    } catch {
+      // The database write already failed. Cleanup is best-effort and must not hide that error.
+    }
+  }
+}
+
+function gunzipSkillFiles(bytes: Buffer): string {
+  try {
+    return gunzipSync(bytes).toString("utf8");
+  } catch {
+    throw new Error("Remote compressed skill files snapshot is invalid.");
   }
 }
 

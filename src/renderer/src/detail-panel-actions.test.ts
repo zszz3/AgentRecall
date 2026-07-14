@@ -265,12 +265,18 @@ describe("detail panel actions", () => {
     expect(appSource).toContain("uploadVisibleRemoteSessions");
     expect(appSource).not.toContain("CloudUpload");
     expect(remoteSessionsDialogSource).toContain("onUploadVisible");
-    expect(remoteSessionsDialogSource).toContain("Save visible");
+    expect(remoteSessionsDialogSource).toContain("Save local results");
+    expect(remoteSessionsDialogSource).toContain("selectedIds");
+    expect(remoteSessionsDialogSource).toContain("Select visible");
+    expect(remoteSessionsDialogSource).toContain("Delete selected");
+    expect(remoteSessionsDialogSource).toContain("deleteRemoteSessions");
     expect(remoteSessionsDialogSource).not.toContain("Database");
     expect(remoteSessionsDialogSource).toContain("setup-copy-button");
     expect(preloadSource).toContain("restoreRemoteSessionToSourceEnvironment");
     expect(preloadSource).toContain("remote-session:restore-to-source-environment");
+    expect(preloadSource).toContain("remote-session:delete-many");
     expect(mainSource).toContain('ipcMain.handle("remote-session:restore-to-source-environment"');
+    expect(mainSource).toContain('ipcMain.handle("remote-session:delete-many"');
   });
 
   it("hydrates remote session details before uploading them to Supabase", () => {

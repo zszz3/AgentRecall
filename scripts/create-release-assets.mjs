@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { readReleaseNote, renderReleaseNotes } from "./release-notes.mjs";
 
+export const LATEST_PACKAGE_NAME = "agent-session-search.tgz";
+
 export async function createReleaseAssets({
   notePath,
   version,
@@ -24,6 +26,7 @@ export async function createReleaseAssets({
   const releaseBaseUrl = `https://github.com/${repository}/releases`;
   const assetBaseUrl = `${releaseBaseUrl}/download/${tag}`;
   const checksumName = `${packageName}.sha256`;
+  const latestChecksumName = `${LATEST_PACKAGE_NAME}.sha256`;
   const manifest = {
     schemaVersion: 1,
     version,
@@ -45,6 +48,8 @@ export async function createReleaseAssets({
 
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all([
+    writeFile(path.join(outputDirectory, LATEST_PACKAGE_NAME), packageBytes),
+    writeFile(path.join(outputDirectory, latestChecksumName), `${sha256}  ${LATEST_PACKAGE_NAME}\n`, "utf8"),
     writeFile(path.join(outputDirectory, checksumName), `${sha256}  ${packageName}\n`, "utf8"),
     writeFile(path.join(outputDirectory, "update.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
     writeFile(path.join(outputDirectory, "release-notes.md"), renderReleaseNotes(note), "utf8"),

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { createReleaseAssets } from "./create-release-assets.mjs";
+import { createReleaseAssets, LATEST_PACKAGE_NAME } from "./create-release-assets.mjs";
 
 test("creates a structured update manifest, checksum, and release notes from one source", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agent-session-release-"));
@@ -28,5 +28,7 @@ test("creates a structured update manifest, checksum, and release notes from one
   assert.match(manifest.package.url, /releases\/download\/v0\.2\.0\/agent-session-search-0\.2\.0\.tgz$/);
   assert.equal(JSON.parse(await readFile(path.join(outputDirectory, "update.json"), "utf8")).package.sha256, manifest.package.sha256);
   assert.match(await readFile(path.join(outputDirectory, `${manifest.package.name}.sha256`), "utf8"), new RegExp(`^${manifest.package.sha256}`));
+  assert.equal(await readFile(path.join(outputDirectory, LATEST_PACKAGE_NAME), "utf8"), "package bytes");
+  assert.match(await readFile(path.join(outputDirectory, `${LATEST_PACKAGE_NAME}.sha256`), "utf8"), new RegExp(`^${manifest.package.sha256}`));
   assert.match(await readFile(path.join(outputDirectory, "release-notes.md"), "utf8"), /# 自动更新/);
 });
