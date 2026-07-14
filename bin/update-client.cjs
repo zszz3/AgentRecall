@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 const GITHUB_REPOSITORY = "zszz3/agent-session-search";
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
 const UPDATE_ASSET_NAME = "update.json";
+const LATEST_UPDATE_MANIFEST_URL = `https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${UPDATE_ASSET_NAME}`;
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
@@ -172,29 +173,50 @@ async function checkForUpdate(options = {}) {
       "X-GitHub-Api-Version": "2022-11-28",
     };
     if (cached?.etag) headers["If-None-Match"] = cached.etag;
-    const releaseResponse = await fetchWithTimeout(fetchImpl, LATEST_RELEASE_API, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
-    if (releaseResponse.status === 304 && cached) {
-      await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
-      return updateResult(version, cached.manifest || null, now, false, null, cached);
+    let manifestResponse;
+    let releaseTag = null;
+    let etag = null;
+    try {
+      const releaseResponse = await fetchWithTimeout(fetchImpl, LATEST_RELEASE_API, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+      if (releaseResponse.status === 304 && cached) {
+        await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
+        return updateResult(version, cached.manifest || null, now, false, null, cached);
+      }
+      if (releaseResponse.status === 404) {
+        await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
+        return updateResult(version, null, now, false, null, null);
+      }
+      if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
+      const release = await releaseResponse.json();
+      const asset = Array.isArray(release.assets) ? release.assets.find((item) => item?.name === UPDATE_ASSET_NAME) : null;
+      if (!asset?.browser_download_url) throw new Error("Latest GitHub Release does not contain update.json.");
+      manifestResponse = await fetchWithTimeout(fetchImpl, asset.browser_download_url, {
+        headers: { "User-Agent": "agent-session-search-updater" },
+      }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+      if (!manifestResponse.ok) throw new Error(`Update manifest download failed (${manifestResponse.status}).`);
+      releaseTag = typeof release.tag_name === "string" ? release.tag_name : null;
+      etag = releaseResponse.headers.get("etag");
+    } catch (releaseError) {
+      try {
+        manifestResponse = await fetchWithTimeout(fetchImpl, LATEST_UPDATE_MANIFEST_URL, {
+          headers: { "User-Agent": "agent-session-search-updater", ...(cached?.etag ? { "If-None-Match": cached.etag } : {}) },
+        }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+        if (manifestResponse.status === 304 && cached) {
+          await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
+          return updateResult(version, cached.manifest || null, now, false, null, cached);
+        }
+        if (!manifestResponse.ok) throw new Error(`Direct update manifest download failed (${manifestResponse.status}).`);
+        etag = manifestResponse.headers.get("etag");
+      } catch {
+        throw releaseError;
+      }
     }
-    if (releaseResponse.status === 404) {
-      await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
-      return updateResult(version, null, now, false, null, null);
-    }
-    if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
-    const release = await releaseResponse.json();
-    const asset = Array.isArray(release.assets) ? release.assets.find((item) => item?.name === UPDATE_ASSET_NAME) : null;
-    if (!asset?.browser_download_url) throw new Error("Latest GitHub Release does not contain update.json.");
-    const manifestResponse = await fetchWithTimeout(fetchImpl, asset.browser_download_url, {
-      headers: { "User-Agent": "agent-session-search-updater" },
-    }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
-    if (!manifestResponse.ok) throw new Error(`Update manifest download failed (${manifestResponse.status}).`);
     const manifest = parseUpdateManifest(await manifestResponse.json());
-    if (typeof release.tag_name === "string" && release.tag_name !== manifest.tag) throw new Error("GitHub Release tag does not match update.json.");
+    if (releaseTag && releaseTag !== manifest.tag) throw new Error("GitHub Release tag does not match update.json.");
     const sameSnoozedVersion = cached?.snoozedVersion === manifest.version;
     const cache = {
       checkedAt: now,
-      etag: releaseResponse.headers.get("etag"),
+      etag,
       manifest,
       snoozedVersion: sameSnoozedVersion ? cached.snoozedVersion : null,
       snoozedUntil: sameSnoozedVersion ? cached.snoozedUntil : 0,

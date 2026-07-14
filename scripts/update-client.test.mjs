@@ -112,6 +112,34 @@ test("checks GitHub latest release and formats the same notes for terminal outpu
   assert.equal(requests.length, 2);
 });
 
+test("falls back to the direct latest manifest when the GitHub release API fails", async () => {
+  const value = manifest();
+  const requests = [];
+  const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-fallback-"));
+  const fetchImpl = async (url) => {
+    requests.push(String(url));
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 });
+    }
+    return new Response(JSON.stringify(value), { status: 200, headers: { etag: '"manifest-etag"' } });
+  };
+
+  const result = await checkForUpdate({
+    currentVersion: "0.1.0",
+    cachePath: path.join(cacheDirectory, "update-check.json"),
+    fetchImpl,
+    force: true,
+    now: 123,
+  });
+
+  assert.equal(result.updateAvailable, true);
+  assert.equal(result.error, null);
+  assert.deepEqual(requests, [
+    "https://api.github.com/repos/zszz3/agent-session-search/releases/latest",
+    "https://github.com/zszz3/agent-session-search/releases/latest/download/update.json",
+  ]);
+});
+
 test("reports a clear error when the GitHub release check times out", async () => {
   const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-timeout-"));
   const fetchImpl = async (_url, init) => new Promise((_resolve, reject) => {
