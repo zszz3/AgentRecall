@@ -16,6 +16,10 @@ import {
 import type { RemoteSessionFilePayload } from "./remote-session-loader";
 import type { SessionSearchResult } from "./types";
 
+function decodeCollectorScript(command: string): string {
+  return Buffer.from(command.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64").toString("utf-8");
+}
+
 function upsertSshEnvironment(store: ReturnType<typeof createInMemoryStore>) {
   return store.upsertEnvironment({
     id: "ssh-devbox",
@@ -46,6 +50,165 @@ function validCodexPayload(rawId = "remote-codex"): RemoteSessionFilePayload {
 }
 
 describe("remote sync", () => {
+  it("collects summaries from all five CLI sources and keeps same raw IDs isolated by source", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-five-sources-"));
+    const writeJsonl = (filePath: string, rows: unknown[]) => {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join("\n"), "utf8");
+    };
+    const codexRows = (rawId: string) => [
+      { type: "session_meta", timestamp: "2026-07-15T10:00:00Z", payload: { id: rawId, cwd: "/repo" } },
+      { type: "response_item", timestamp: "2026-07-15T10:00:01Z", payload: { type: "message", role: "user", content: [{ type: "input_text", text: `question ${rawId}` }] } },
+    ];
+    const claudeRows = (rawId: string) => [
+      { type: "user", uuid: `${rawId}-user`, sessionId: rawId, cwd: "/repo", timestamp: "2026-07-15T10:00:00Z", message: { content: [{ type: "text", text: `question ${rawId}` }] } },
+    ];
+    try {
+      writeJsonl(path.join(tempHome, ".codex", "sessions", "claude", "codex.jsonl"), codexRows("codex-1"));
+      writeJsonl(path.join(tempHome, ".claude", "projects", "repo", "claude-1.jsonl"), claudeRows("claude-1"));
+      writeJsonl(path.join(tempHome, ".tclaude", "projects", "repo", "tclaude-1.jsonl"), claudeRows("tclaude-1"));
+      writeJsonl(path.join(tempHome, ".tcodex", "sessions", "tcodex.jsonl"), codexRows("tcodex-1"));
+      writeJsonl(path.join(tempHome, ".codebuddy", "projects", "repo", "codebuddy.jsonl"), [
+        { type: "ai-title", aiTitle: "CodeBuddy title", sessionId: "codebuddy-1", cwd: "/repo", timestamp: 1_752_573_600_000 },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "CodeBuddy question" }], sessionId: "codebuddy-1", cwd: "/repo", timestamp: 1_752_573_601_000 },
+        {
+          id: "codebuddy-assistant",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "CodeBuddy answer" }],
+          timestamp: 1_752_573_602_000,
+          providerData: {
+            usage: {
+              inputTokens: 100,
+              outputTokens: 40,
+              inputTokensDetails: [{ cached_tokens: 20 }],
+              outputTokensDetails: [{ reasoning_tokens: 10 }],
+              totalTokens: 140,
+            },
+          },
+        },
+      ]);
+      writeJsonl(path.join(tempHome, ".claude", "projects", "repo", "same-id.jsonl"), claudeRows("same-id"));
+      writeJsonl(path.join(tempHome, ".tclaude", "projects", "repo", "same-id.jsonl"), claudeRows("same-id"));
+
+      let collectorCommand = "";
+      await syncRemoteEnvironment(store, environment, {
+        enabledOptionalSources: ["tclaude-cli", "tcodex-cli", "codebuddy-cli"],
+        runSsh: async (_environment, remoteCommand) => {
+          collectorCommand = remoteCommand;
+          return execFileSync("python3", ["-c", decodeCollectorScript(remoteCommand)], {
+            encoding: "utf8",
+            env: { ...process.env, HOME: tempHome },
+          });
+        },
+      });
+
+      const summaries = execFileSync("python3", ["-c", decodeCollectorScript(collectorCommand)], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: tempHome },
+      }).trim().split(/\r?\n/).map((line) => JSON.parse(line) as { source?: string; rawId: string });
+      expect(summaries.map((item) => [item.source, item.rawId])).toEqual(expect.arrayContaining([
+        ["claude-cli", "claude-1"],
+        ["codex-cli", "codex-1"],
+        ["tclaude-cli", "tclaude-1"],
+        ["tcodex-cli", "tcodex-1"],
+        ["codebuddy-cli", "codebuddy-1"],
+      ]));
+      expect(store.getSession("ssh:ssh-devbox:claude-cli:same-id")).not.toBeNull();
+      expect(store.getSession("ssh:ssh-devbox:tclaude-cli:same-id")).not.toBeNull();
+      expect(store.getSession("ssh:ssh-devbox:codebuddy-cli:codebuddy-1")?.tokenUsage).toEqual({
+        inputTokens: 80,
+        outputTokens: 30,
+        cachedInputTokens: 20,
+        reasoningOutputTokens: 10,
+        totalTokens: 140,
+      });
+    } finally {
+      store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("gates optional remote summaries and collector descriptors by the current source settings", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const summary = `${JSON.stringify({
+      kind: "claude-project",
+      source: "tclaude-cli",
+      path: "/home/me/.tclaude/projects/repo/tclaude.jsonl",
+      mtimeMs: 100,
+      size: 10,
+      rawId: "optional-tclaude",
+      projectPath: "/repo",
+      timestamp: 100,
+      originalTitle: "TClaude",
+      firstQuestion: "question",
+      messageCount: 1,
+    })}\n`;
+    let disabledScript = "";
+    await syncRemoteEnvironment(store, environment, {
+      enabledOptionalSources: [],
+      runSsh: async (_environment, command) => {
+        disabledScript = decodeCollectorScript(command);
+        return summary;
+      },
+    });
+    expect(store.getSession("ssh:ssh-devbox:tclaude-cli:optional-tclaude")).toBeNull();
+    expect(disabledScript).not.toContain('"tclaude-cli", home / ".tclaude"');
+
+    let enabledScript = "";
+    await syncRemoteEnvironment(store, environment, {
+      enabledOptionalSources: ["tclaude-cli"],
+      runSsh: async (_environment, command) => {
+        enabledScript = decodeCollectorScript(command);
+        return summary;
+      },
+    });
+    expect(store.getSession("ssh:ssh-devbox:tclaude-cli:optional-tclaude")).not.toBeNull();
+    expect(enabledScript).toContain('"tclaude-cli", home / ".tclaude"');
+    store.close();
+  });
+
+  it("limits the merged remote collector result to 2500 files across all enabled sources", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-limit-"));
+    try {
+      for (const [root, prefix, count] of [
+        [path.join(tempHome, ".codex", "sessions"), "codex", 1251],
+        [path.join(tempHome, ".tcodex", "sessions"), "tcodex", 1250],
+      ] as const) {
+        fs.mkdirSync(root, { recursive: true });
+        for (let index = 0; index < count; index += 1) {
+          fs.writeFileSync(path.join(root, `${prefix}-${index}.jsonl`), JSON.stringify({
+            type: "session_meta",
+            timestamp: "2026-07-15T10:00:00Z",
+            payload: { id: `${prefix}-${index}`, cwd: "/repo" },
+          }));
+        }
+      }
+      let collectorScript = "";
+      await syncRemoteEnvironment(store, environment, {
+        enabledOptionalSources: ["tcodex-cli"],
+        runSsh: async (_environment, command) => {
+          collectorScript = decodeCollectorScript(command);
+          return "";
+        },
+      });
+      const output = execFileSync("python3", ["-c", collectorScript], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: tempHome },
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      expect(output.trim().split(/\r?\n/)).toHaveLength(2500);
+    } finally {
+      store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("indexes remote sessions returned by the ssh runner and updates sync status", async () => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);
@@ -57,7 +220,7 @@ describe("remote sync", () => {
 
     expect(status.indexed).toBe(1);
     expect(store.searchSessions({ environmentId: "ssh-devbox" }).map((session) => session.sessionKey)).toEqual([
-      "ssh:ssh-devbox:codex:remote-codex",
+      "ssh:ssh-devbox:codex-cli:remote-codex",
     ]);
     expect(store.getEnvironment("ssh-devbox")).toMatchObject({ syncState: "watching", lastError: null });
   });
@@ -83,7 +246,7 @@ describe("remote sync", () => {
       runSsh: async () => output,
     });
 
-    const session = store.getSession("ssh:ssh-devbox:codex:remote-codex-summary");
+    const session = store.getSession("ssh:ssh-devbox:codex-cli:remote-codex-summary");
     expect(status.indexed).toBe(1);
     expect(session).toMatchObject({
       originalTitle: "Remote Summary",
@@ -93,7 +256,7 @@ describe("remote sync", () => {
       projectPath: "/repo",
       fileSize: 2048,
     });
-    expect(store.getMessages("ssh:ssh-devbox:codex:remote-codex-summary")).toEqual([]);
+    expect(store.getMessages("ssh:ssh-devbox:codex-cli:remote-codex-summary")).toEqual([]);
   });
 
   it("stores token usage carried by lightweight remote summaries", async () => {
@@ -116,7 +279,7 @@ describe("remote sync", () => {
 
     await syncRemoteEnvironment(store, environment, { runSsh: async () => output });
 
-    expect(store.getSession("ssh:ssh-devbox:codex:remote-codex-tokens")?.tokenUsage).toEqual({
+    expect(store.getSession("ssh:ssh-devbox:codex-cli:remote-codex-tokens")?.tokenUsage).toEqual({
       inputTokens: 100,
       outputTokens: 40,
       cachedInputTokens: 10,
@@ -539,7 +702,7 @@ describe("remote sync", () => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);
     const session = {
-      sessionKey: "ssh:ssh-devbox:codex:remote-codex-summary",
+      sessionKey: "ssh:ssh-devbox:codex-cli:remote-codex-summary",
       rawId: "remote-codex-summary",
       source: "codex-cli",
       filePath: "/home/me/.codex/sessions/rollout.jsonl",
@@ -586,6 +749,40 @@ describe("remote sync", () => {
       { index: 10, role: "user", content: "older prompt", timestamp: "2026-06-04T10:10:00Z" },
       { index: 11, role: "assistant", content: "older answer", timestamp: "2026-06-04T10:11:00Z" },
     ]);
+  });
+
+  it("pages CodeBuddy messages with the shared remote parser", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-codebuddy-page-"));
+    const filePath = path.join(tempDir, "codebuddy.jsonl");
+    try {
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: "ai-title", aiTitle: "title", sessionId: "codebuddy-page" }),
+        JSON.stringify({ type: "message", role: "user", content: [{ type: "input_text", text: "question" }], timestamp: "2026-07-15T10:00:00Z" }),
+        JSON.stringify({ type: "message", role: "assistant", content: [{ type: "output_text", text: "answer" }], timestamp: "2026-07-15T10:00:01Z" }),
+      ].join("\n"));
+      const messages = await fetchRemoteSessionMessagePage(
+        environment,
+        { source: "codebuddy-cli", filePath } as SessionSearchResult,
+        0,
+        10,
+        {
+          runSsh: async (_environment, command) => {
+            const script = decodeCollectorScript(command);
+            expect(script).toContain('"kind":"codebuddy"');
+            return execFileSync("python3", ["-c", script], { encoding: "utf8" });
+          },
+        },
+      );
+      expect(messages).toEqual([
+        { index: 0, role: "user", content: "question", timestamp: "2026-07-15T10:00:00Z" },
+        { index: 1, role: "assistant", content: "answer", timestamp: "2026-07-15T10:00:01Z" },
+      ]);
+    } finally {
+      store.close();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects invalid remote payload protocol output and records sync error", async () => {
@@ -638,7 +835,7 @@ describe("remote sync", () => {
     ).rejects.toThrow("Permission denied");
     expect(store.getEnvironment("ssh-devbox")).toMatchObject({ syncState: "error", lastError: "Permission denied" });
     expect(store.searchSessions({ environmentId: "ssh-devbox" }).map((session) => session.sessionKey)).toEqual([
-      "ssh:ssh-devbox:codex:seeded-codex",
+      "ssh:ssh-devbox:codex-cli:seeded-codex",
     ]);
   });
 
@@ -757,6 +954,27 @@ describe("remote sync", () => {
     expect(capturedCommand).not.toContain("/home/me/private sessions");
     expect(payload.kind).toBe("codex-session");
     expect(payload.content).toContain("on-demand-codex");
+  });
+
+  it("fetches CodeBuddy remote files with their source-specific payload kind", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-codebuddy-file-"));
+    const filePath = path.join(tempDir, "codebuddy.jsonl");
+    fs.writeFileSync(filePath, JSON.stringify({ type: "message", role: "user", content: "question" }));
+    try {
+      const payload = await fetchRemoteSessionFilePayload(
+        environment,
+        { source: "codebuddy-cli", filePath } as SessionSearchResult,
+        {
+          runSsh: async (_environment, command) => execFileSync("python3", ["-c", decodeCollectorScript(command)], { encoding: "utf8" }),
+        },
+      );
+      expect(payload).toMatchObject({ kind: "codebuddy-project", source: "codebuddy-cli", path: filePath });
+    } finally {
+      store.close();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("summarizes failed remote protocol stdout instead of leaking session JSON", () => {

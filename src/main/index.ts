@@ -474,7 +474,9 @@ async function restoreRemoteSessionToSourceEnvironment(
       write: (migrationTarget, session) => writeMigratedSessionToSshEnvironment(environment, migrationTarget, session),
       record: (record) => store.recordSessionMigration(record),
       refreshIndex: async () => {
-        await syncRemoteEnvironment(store, environment);
+        await syncRemoteEnvironment(store, environment, {
+          enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
+        });
         mainWindow?.webContents.send("environments-updated", store.listEnvironments());
       },
       launch: async () => undefined,
@@ -670,6 +672,14 @@ function visibleProjectOptions(): { excludeSubagents: boolean } {
 function pruneDisabledOptionalSources(settings: AppSettings): void {
   const disabledSources = OPTIONAL_SOURCE_SETTINGS.flatMap((item) => (settings[item.key] ? [] : item.sources));
   store.deleteSessionsBySource(disabledSources);
+}
+
+function enabledRemoteOptionalSources(settings: AppSettings): SessionSource[] {
+  return [
+    ...(settings.includeTclaude ? ["tclaude-cli" as const] : []),
+    ...(settings.includeTcodex ? ["tcodex-cli" as const] : []),
+    ...(settings.includeCodeBuddyCli ? ["codebuddy-cli" as const] : []),
+  ];
 }
 
 async function getHydratedSettings(): Promise<AppSettings> {
@@ -1265,7 +1275,10 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
   if (!remoteEnvironmentLifecycle) {
     remoteEnvironmentLifecycle = new RemoteEnvironmentLifecycle({
       store,
-      syncEnvironment: (environment) => syncRemoteEnvironment(store, environment).then(() => undefined),
+      syncEnvironment: (environment) =>
+        syncRemoteEnvironment(store, environment, {
+          enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
+        }).then(() => undefined),
       watchManager: ensureRemoteWatchManager(),
       onEnvironmentsUpdated: () => emitEnvironmentsUpdated(),
     });
