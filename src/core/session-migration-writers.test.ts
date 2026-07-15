@@ -233,6 +233,7 @@ describe("writeMigratedSession", () => {
         title: portable().title,
         originator: "agent-session-search",
         cli_version: "migration",
+        model_provider: "openai",
       },
     });
     expect(rows.slice(1).map((row) => row.payload.content[0].type)).toEqual([
@@ -243,6 +244,28 @@ describe("writeMigratedSession", () => {
     expectRoundTrip("codex", "codex-cli", result.sessionId, result.filePath, rows);
 
     fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ["codex", "openai"],
+    ["tcodex", "tencent"],
+    ["codex-internal", "codebuddy"],
+  ] as const)("writes the resumable $target model provider", async (target, modelProvider) => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `migration-writer-provider-${target}-`));
+    try {
+      const result = await writeMigratedSession({
+        target,
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory([SESSION_ID]),
+      });
+
+      const rows = readRows(result.filePath);
+      expect(rows[0]?.payload?.model_provider).toBe(modelProvider);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("writes native Claude rows with a unique UUID parent chain and embedded title", async () => {

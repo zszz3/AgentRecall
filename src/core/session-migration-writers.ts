@@ -74,12 +74,12 @@ function serializeSession(
 ): unknown[] {
   if (target === "cursor") return serializeCursor(session);
   const family = migrationTargetDescriptor(target).family;
-  if (family === "codex") return serializeCodex(session, sessionId);
+  if (family === "codex") return serializeCodex(session, sessionId, codexModelProvider(target));
   if (family === "claude") return serializeClaude(session, sessionId, createId);
   return serializeCodeBuddy(session, sessionId, createId);
 }
 
-function serializeCodex(session: PortableSession, sessionId: string): unknown[] {
+function serializeCodex(session: PortableSession, sessionId: string, modelProvider: string): unknown[] {
   return [
     {
       type: "session_meta",
@@ -91,6 +91,7 @@ function serializeCodex(session: PortableSession, sessionId: string): unknown[] 
         title: session.title,
         originator: "agent-session-search",
         cli_version: "migration",
+        model_provider: modelProvider,
       },
     },
     ...session.messages.map((message) => ({
@@ -106,6 +107,12 @@ function serializeCodex(session: PortableSession, sessionId: string): unknown[] 
       },
     })),
   ];
+}
+
+function codexModelProvider(target: MigrationTarget): string {
+  if (target === "tcodex") return "tencent";
+  if (target === "codex-internal") return "codebuddy";
+  return "openai";
 }
 
 function serializeClaude(
