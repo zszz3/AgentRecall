@@ -485,7 +485,7 @@ test("uses a stable Node executable for Electron runtime checks after npm replac
       execFileImpl: async (command, args, options) => {
         commands.push({ command, args, options });
         if (command === stableNodePath) {
-          return { stdout: path.join(electronPath, "dist", "Electron.app", "Contents", "MacOS", "Electron"), stderr: "" };
+          return { stdout: path.join(electronPath, "dist", relativeExecutable), stderr: "" };
         }
         return { stdout: "v42.3.0\n", stderr: "" };
       },
@@ -496,7 +496,7 @@ test("uses a stable Node executable for Electron runtime checks after npm replac
 
   assert.deepEqual(commands.map((call) => call.command), [
     stableNodePath,
-    path.join(electronPath, "dist", "Electron.app", "Contents", "MacOS", "Electron"),
+    path.join(electronPath, "dist", relativeExecutable),
   ]);
   assert.equal(commands[0].options.env.ELECTRON_RUN_AS_NODE, "1");
 });

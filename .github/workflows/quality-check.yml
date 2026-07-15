@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
@@ -34,11 +34,19 @@ jobs:
       - name: Validate release note
         run: node scripts/release-notes.mjs check-range "origin/${{ github.base_ref }}" HEAD
 
-      - name: Test, typecheck, and build
-        run: |
-          npm test
-          npm run typecheck
-          npm run build
+      - name: Test
+        if: runner.os != 'Windows'
+        run: npm test
+
+      - name: Test update and install scripts (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
 
       - name: Smoke-test packaged install
         run: npm run package:smoke

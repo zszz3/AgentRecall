@@ -51,9 +51,15 @@ test("finds only newly added non-template release notes", () => {
 
 test("workflows require branch notes and publish only main commits associated with merged MRs", async () => {
   const noteWorkflow = await readFile(".github/workflows/release-note-check.yml", "utf8");
+  const qualityWorkflow = await readFile(".github/workflows/quality-check.yml", "utf8");
   const releaseWorkflow = await readFile(".github/workflows/release.yml", "utf8");
   assert.match(noteWorkflow, /pull_request:/);
   assert.match(noteWorkflow, /release-notes\.mjs check-range/);
+  assert.match(qualityWorkflow, /os:\s*\[ubuntu-latest, macos-latest, windows-latest\]/);
+  assert.match(qualityWorkflow, /- name: Test\s+if: runner\.os != 'Windows'\s+run: npm test/);
+  assert.match(qualityWorkflow, /- name: Test update and install scripts \(Windows\)\s+if: runner\.os == 'Windows'\s+run: npm run test:scripts/);
+  assert.match(qualityWorkflow, /- name: Typecheck\s+run: npm run typecheck/);
+  assert.match(qualityWorkflow, /- name: Build\s+run: npm run build/);
   assert.match(releaseWorkflow, /push:[\s\S]*branches:[\s\S]*- main/);
   assert.match(releaseWorkflow, /commits\/\$\{MERGED_SHA\}\/pulls/);
   assert.match(releaseWorkflow, /not associated with a merged MR; skipping application release/);

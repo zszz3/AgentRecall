@@ -32,7 +32,7 @@ test("launcher detects installed and local app instances", () => {
 });
 
 test("launcher exits with the final app launch status", () => {
-  assert.match(source, /launch_agent_session_search\nexit \$\?/);
+  assert.match(source, /launch_agent_session_search\r?\nexit \$\?/);
 });
 
 test("local mode keeps normal focus and restart behavior", () => {
