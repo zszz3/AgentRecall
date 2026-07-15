@@ -1,11 +1,32 @@
 import * as path from "node:path";
-import { loadClaudeCliSessionRows, loadCodeWizSessions, loadCodexSessionRows, parseCodexSessionMetaLine, parseJsonlText } from "./session-loader";
-import type { ClaudeConversationLine, CodexConversationLine, LoadedSession, SessionEnvironment, SessionSearchResult } from "./types";
+import {
+  loadClaudeCliSessionRows,
+  loadCodeBuddyCliSessionRows,
+  loadCodeWizSessions,
+  loadCodexSessionRows,
+  parseCodexSessionMetaLine,
+  parseJsonlText,
+} from "./session-loader";
+import type {
+  ClaudeConversationLine,
+  CodexConversationLine,
+  LoadedSession,
+  SessionEnvironment,
+  SessionSearchResult,
+  SessionSource,
+} from "./types";
 
-export type RemoteSessionFileKind = "codex-session" | "codex-index" | "claude-project" | "claude-session-index" | "codewiz-session";
+export type RemoteSessionFileKind =
+  | "codex-session"
+  | "codex-index"
+  | "claude-project"
+  | "claude-session-index"
+  | "codebuddy-project"
+  | "codewiz-session";
 
 export interface RemoteSessionFilePayload {
   kind: RemoteSessionFileKind;
+  source?: SessionSource;
   path: string;
   mtimeMs: number;
   size: number;
@@ -19,17 +40,19 @@ export function loadRemoteSessionPayloads(environment: SessionEnvironment, paylo
 
   for (const payload of payloads) {
     if (payload.kind === "codex-session") {
+      const source = payloadSource(payload);
       const rows = parseJsonlText(payload.content);
       const meta = rows.length > 0 ? parseCodexSessionMetaLine(rows[0] as CodexConversationLine) : null;
       const indexedTitle = meta ? codexTitleMap.get(meta.id) : undefined;
       const candidate = loadCodexSessionRows(payload.path, rows, {
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
-        sourceOverride: "codex-cli",
+        sourceOverride: source,
         title: indexedTitle?.title,
         updatedAt: indexedTitle?.updatedAt,
       });
-      if (candidate) loaded.push(scopeRemoteSession(candidate, environment, "codex"));
+      if (candidate) loaded.push(scopeRemoteSession(candidate, environment, source));
     } else if (payload.kind === "claude-project") {
+      const source = payloadSource(payload);
       const rows = parseJsonlText(payload.content);
       const relation = claudeRemoteRelation(payload.path, rows);
       const rawId = relation.agentId || path.basename(payload.path, ".jsonl");
@@ -41,8 +64,16 @@ export function loadRemoteSessionPayloads(environment: SessionEnvironment, paylo
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
         isSubagent: relation.isSubagent,
         parentSessionId: relation.parentSessionId,
+        source,
       });
-      if (candidate) loaded.push(scopeRemoteSession(candidate, environment, "claude"));
+      if (candidate) loaded.push(scopeRemoteSession(candidate, environment, source));
+    } else if (payload.kind === "codebuddy-project") {
+      const source = payloadSource(payload);
+      const candidate = loadCodeBuddyCliSessionRows(payload.path, parseJsonlText(payload.content), {
+        mtimeMs: payload.mtimeMs,
+        size: payload.size,
+      });
+      if (candidate) loaded.push(scopeRemoteSession(candidate, environment, source));
     }
   }
 
@@ -55,15 +86,17 @@ export function loadRemoteSessionDetailPayload(
   summary: SessionSearchResult,
 ): LoadedSession | null {
   if (payload.kind === "codex-session") {
+    const source = payloadSource(payload);
     const candidate = loadCodexSessionRows(payload.path, parseJsonlText(payload.content), {
       stat: { mtimeMs: payload.mtimeMs, size: payload.size },
-      sourceOverride: "codex-cli",
+      sourceOverride: source,
       title: summary.originalTitle,
     });
-    return candidate ? scopeRemoteSession(candidate, environment, "codex") : null;
+    return candidate ? scopeRemoteSession(candidate, environment, source) : null;
   }
 
   if (payload.kind === "claude-project") {
+    const source = payloadSource(payload);
     const rawId = path.basename(payload.path, ".jsonl");
     const candidate = loadClaudeCliSessionRows(payload.path, parseJsonlText(payload.content), {
       rawId,
@@ -72,8 +105,18 @@ export function loadRemoteSessionDetailPayload(
       stat: { mtimeMs: payload.mtimeMs, size: payload.size },
       isSubagent: summary.isSubagent,
       parentSessionId: summary.parentSessionId,
+      source,
     });
-    return candidate ? scopeRemoteSession(candidate, environment, "claude") : null;
+    return candidate ? scopeRemoteSession(candidate, environment, source) : null;
+  }
+
+  if (payload.kind === "codebuddy-project") {
+    const source = payloadSource(payload);
+    const candidate = loadCodeBuddyCliSessionRows(payload.path, parseJsonlText(payload.content), {
+      mtimeMs: payload.mtimeMs,
+      size: payload.size,
+    });
+    return candidate ? scopeRemoteSession(candidate, environment, source) : null;
   }
 
   if (payload.kind === "codewiz-session") {
@@ -107,12 +150,19 @@ function claudeRemoteRelation(
   };
 }
 
-function scopeRemoteSession(loaded: LoadedSession, environment: SessionEnvironment, family: "codex" | "claude" | "codewiz"): LoadedSession {
+function payloadSource(payload: RemoteSessionFilePayload): SessionSource {
+  if (payload.source) return payload.source;
+  if (payload.kind === "codex-session") return "codex-cli";
+  if (payload.kind === "codebuddy-project") return "codebuddy-cli";
+  return "claude-cli";
+}
+
+function scopeRemoteSession(loaded: LoadedSession, environment: SessionEnvironment, source: SessionSource | "codewiz"): LoadedSession {
   return {
     ...loaded,
     session: {
       ...loaded.session,
-      sessionKey: `ssh:${environment.id}:${family}:${loaded.session.rawId}`,
+      sessionKey: `ssh:${environment.id}:${source}:${loaded.session.rawId}`,
       environmentId: environment.id,
       environmentKind: environment.kind,
       environmentLabel: environment.label,

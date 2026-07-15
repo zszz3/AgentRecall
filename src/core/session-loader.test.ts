@@ -6,6 +6,7 @@ import {
   loadClaudeCliSessionRows,
   loadClaudeCliSessions,
   loadCodeBuddyCliSessionFile,
+  loadCodeBuddyCliSessionRows,
   loadCodeBuddyCliSessions,
   loadCodexSessionFile,
   loadCodexSessionsIterator,
@@ -887,6 +888,33 @@ describe("Claude session loading", () => {
 });
 
 describe("CodeBuddy session loading", () => {
+  it("loads CodeBuddy rows without a temporary file", () => {
+    const rows = [
+      { type: "ai-title", aiTitle: "远程 CodeBuddy", sessionId: "cb-remote", cwd: "/repo" },
+      {
+        id: "user-1",
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "远程问题" }],
+        sessionId: "cb-remote",
+        cwd: "/repo",
+        timestamp: 1_780_000_000_000,
+      },
+    ];
+    const loaded = loadCodeBuddyCliSessionRows(
+      "/home/me/.codebuddy/projects/repo/cb-remote.jsonl",
+      rows,
+      { mtimeMs: 1_780_000_000_000, size: 100 },
+    );
+
+    expect(loaded?.session).toMatchObject({
+      rawId: "cb-remote",
+      source: "codebuddy-cli",
+      originalTitle: "远程 CodeBuddy",
+      projectPath: "/repo",
+    });
+  });
+
   it("loads one CodeBuddy CLI jsonl file with the same behavior as the iterator", () => {
     const codeBuddyDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codebuddy-file-"));
     const filePath = path.join(codeBuddyDir, "codebuddy-file.jsonl");

@@ -1092,8 +1092,11 @@ export function loadCodeBuddyCliSessions(codeBuddyDir = path.join(os.homedir(), 
   return [...loadCodeBuddyCliSessionsIterator(codeBuddyDir)];
 }
 
-export function loadCodeBuddyCliSessionFile(filePath: string, stat?: VirtualSessionFileStat): LoadedSession | null {
-  const rows = readJsonl(filePath);
+export function loadCodeBuddyCliSessionRows(
+  filePath: string,
+  rows: unknown[],
+  stat: VirtualSessionFileStat,
+): LoadedSession | null {
   if (rows.length === 0) return null;
 
   const fallbackRawId = path.basename(filePath, ".jsonl");
@@ -1101,9 +1104,7 @@ export function loadCodeBuddyCliSessionFile(filePath: string, stat?: VirtualSess
   const messages = extractMessages(rows, "codebuddy");
   const tokenEvents = extractCodeBuddyTokenEvents(rows);
   const traceEvents = extractTraceEvents(rows, "codebuddy");
-  const tokenUsage = tokenUsageFromEvents(tokenEvents);
   const question = firstQuestion(messages);
-  const aiTitle = firstAiTitle(rows);
 
   return {
     session: createIndexedSession({
@@ -1112,16 +1113,20 @@ export function loadCodeBuddyCliSessionFile(filePath: string, stat?: VirtualSess
       source: "codebuddy-cli",
       projectPath: meta.projectPath,
       filePath,
-      originalTitle: aiTitle || cleanTitle(question) || "Untitled Session",
+      originalTitle: firstAiTitle(rows) || cleanTitle(question) || "Untitled Session",
       firstQuestion: cleanTitle(question),
       timestamp: meta.timestamp,
-      tokenUsage,
+      tokenUsage: tokenUsageFromEvents(tokenEvents),
       stat,
     }),
     messages,
     tokenEvents,
     traceEvents,
   };
+}
+
+export function loadCodeBuddyCliSessionFile(filePath: string, stat = safeStat(filePath)): LoadedSession | null {
+  return loadCodeBuddyCliSessionRows(filePath, readJsonl(filePath), stat);
 }
 
 export function* loadCodeBuddyCliSessionsIterator(
