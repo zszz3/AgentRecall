@@ -471,6 +471,7 @@ export function App(): ReactElement {
   const [visibility, setVisibility] = useState<ViewMode>("default");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
+  const [hoveredScopeFilter, setHoveredScopeFilter] = useState<string | null>(null);
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
   const [sessionTotalCount, setSessionTotalCount] = useState(0);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
@@ -1182,42 +1183,58 @@ export function App(): ReactElement {
     [projects, projectPath, projectEnvironmentId],
   );
   const sidebarTree = useMemo(() => {
-    // Merge by project path so the same project on local + SSH appears once.
-    // Tags are the union of all environments for that path, deduplicated.
-    const tagSetByPath = new Map<string, Set<string>>();
+    // Build env → project → tag tree. Tags are scoped per environment+project
+    // so the same branch name on different environments shows separately.
+    const tagMap = new Map<string, string[]>();
     for (const entry of projectTags) {
-      let set = tagSetByPath.get(entry.projectPath);
-      if (!set) {
-        set = new Set<string>();
-        tagSetByPath.set(entry.projectPath, set);
-      }
-      for (const tagName of entry.tags) set.add(tagName);
+      tagMap.set(`${entry.environmentId}\0${entry.projectPath}`, entry.tags);
     }
-    const byPath = new Map<string, { path: string; label: string; tags: string[]; environmentIds: string[]; lastActivityAt: number }>();
+    const groups = new Map<string, { environment: SessionEnvironment | null; projects: Array<ProjectSummary & { tags: string[] }> }>();
     for (const project of projects) {
-      const existing = byPath.get(project.path);
-      const tags = [...(tagSetByPath.get(project.path) ?? [])].sort((a, b) => a.localeCompare(b));
-      if (existing) {
-        existing.environmentIds.push(project.environmentId);
-        if (project.lastActivityAt > existing.lastActivityAt) existing.lastActivityAt = project.lastActivityAt;
-      } else {
-        byPath.set(project.path, {
-          path: project.path,
-          label: project.label,
-          tags,
-          environmentIds: [project.environmentId],
-          lastActivityAt: project.lastActivityAt,
-        });
-      }
+      const environment = environments.find((env) => env.id === project.environmentId) ?? null;
+      const key = project.environmentId;
+      const projectTagsList = tagMap.get(`${project.environmentId}\0${project.path}`) ?? [];
+      const group = groups.get(key);
+      if (group) group.projects.push({ ...project, tags: projectTagsList });
+      else groups.set(key, { environment, projects: [{ ...project, tags: projectTagsList }] });
     }
-    return [...byPath.values()].sort(
-      (a, b) => b.lastActivityAt - a.lastActivityAt || a.label.localeCompare(b.label),
+    return [...groups.values()].sort(
+      (a, b) =>
+        (a.environment ? 0 : 1) - (b.environment ? 0 : 1) ||
+        (a.environment?.label ?? "").localeCompare(b.environment?.label ?? ""),
     );
-  }, [projects, projectTags]);
+  }, [projects, environments, projectTags]);
   const selectedEnvironment = useMemo(
     () => (environmentId === "all" ? null : environments.find((environment) => environment.id === environmentId) ?? null),
     [environmentId, environments],
   );
+  const activeScopeFilters = [
+    selectedEnvironment
+      ? {
+          key: "environment",
+          label: selectedEnvironment.label,
+          title: environmentTarget(selectedEnvironment, language),
+          onClear: clearEnvironmentScopeFilter,
+        }
+      : null,
+    selectedProject
+      ? {
+          key: "project",
+          label: selectedProject.label,
+          title: selectedProject.path,
+          onClear: clearProjectScopeFilter,
+        }
+      : null,
+    tag
+      ? {
+          key: "tag",
+          label: displayTagName(tag),
+          prefix: isBranchTag(tag) ? <GitBranch size={12} /> : "#",
+          title: displayTagName(tag),
+          onClear: () => setTag(undefined),
+        }
+      : null,
+  ].filter((filter): filter is NonNullable<typeof filter> => filter !== null);
   const searchPlaceholder = projectPath
     ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
     : tag
@@ -1239,6 +1256,17 @@ export function App(): ReactElement {
     setProjectEnvironmentId(undefined);
     projectPathRef.current = undefined;
     projectEnvironmentIdRef.current = undefined;
+  }
+
+  function clearProjectScopeFilter(): void {
+    clearProjectFilter();
+    setTag(undefined);
+  }
+
+  function clearEnvironmentScopeFilter(): void {
+    selectEnvironment("all");
+    clearProjectFilter();
+    setTag(undefined);
   }
 
   function selectEnvironment(nextEnvironmentId: string | "all"): void {
@@ -1905,106 +1933,113 @@ export function App(): ReactElement {
 
         <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
         {sidebarSections.environments ? (
-          <nav className="environment-list">
-            <button className={environmentId === "all" ? "active" : ""} onClick={() => selectEnvironment("all")}>
-              {t("All Environments", "全部环境")}
-            </button>
-            {environments.map((environment) => (
-              <button
-                key={environment.id}
-                className={`environment-row ${environmentId === environment.id ? "active" : ""} ${environmentStatus(environment)}`}
-                onClick={() => selectEnvironment(environment.id)}
-                title={environmentTarget(environment, language)}
-              >
-                {environment.kind === "local" ? <Laptop size={13} /> : <Server size={13} />}
-                <span>{environment.label}</span>
-                <em>{environmentStatusLabel(environment, language)}</em>
-              </button>
-            ))}
-          </nav>
-        ) : null}
-
-        <SidebarSectionHeader title={t("Projects", "项目")} expanded={sidebarSections.projects} onToggle={() => toggleSidebarSectionById("projects")} />
-        {sidebarSections.projects ? (
           <nav className="sidebar-tree">
-           <button
-             className={`tree-row tree-root ${!projectPath && !tag ? "active" : ""}`}
+            <button
+              className={`tree-row tree-root ${environmentId === "all" && !projectPath && !tag ? "active" : ""}`}
               onClick={() => { selectEnvironment("all"); clearProjectFilter(); setTag(undefined); }}
-           >
+            >
               <span>{t("All Sessions", "全部会话")}</span>
             </button>
-           {sidebarTree.map((project) => {
-             const projectKey = project.path;
-              const projExpanded = collapsedTreeProjects.has(projectKey);
-              const projCollapsed = !projExpanded;
-              const projActive = projectPath === project.path && !tag;
+            {sidebarTree.map((group) => {
+              const groupId = group.projects[0]?.environmentId ?? "unknown";
+              const envCollapsed = collapsedProjectGroups.has(groupId);
+              const envActive = environmentId === groupId && !projectPath && !tag;
               return (
-                <div key={projectKey} className="tree-group">
-                  <div className="tree-row tree-proj-row">
-                    {project.tags.length > 0 ? (
-                      <button
-                        className="tree-chevron"
-                        onClick={() => toggleTreeProject(projectKey)}
-                        aria-expanded={projExpanded}
-                        aria-label={projCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
-                      >
-                        {projCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                      </button>
-                    ) : (
-                      <span className="tree-chevron-spacer" />
-                    )}
+                <div key={groupId} className="tree-group">
+                  <div className="tree-row tree-env-row">
                     <button
-                      className={`tree-label ${projActive ? "active" : ""}`}
-                     onClick={() => {
-                       setProjectPath(project.path);
-                       setProjectEnvironmentId(undefined);
-                        setTag(undefined);
-                       projectPathRef.current = project.path;
-                       projectEnvironmentIdRef.current = undefined;
-                     }}
-                      title={project.path}
+                      className="tree-chevron"
+                      onClick={() => toggleProjectGroup(groupId)}
+                      aria-expanded={!envCollapsed}
+                      aria-label={envCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
                     >
-                      <Folder size={13} />
-                      <span>{project.label}</span>
-                      <em>{formatRelativeTime(project.lastActivityAt)}</em>
+                      {envCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    <button
+                      className={`tree-label ${envActive ? "active" : ""}`}
+                      onClick={() => { selectEnvironment(groupId); clearProjectFilter(); setTag(undefined); }}
+                      title={group.environment ? environmentTarget(group.environment, language) : t("Unknown", "未知")}
+                    >
+                      {group.environment?.kind === "local" ? <Laptop size={13} /> : <Server size={13} />}
+                      <span>{group.environment?.label ?? t("Unknown", "未知")}</span>
+                      <em className="tree-count">{group.projects.length}</em>
                     </button>
                   </div>
-                  {!projCollapsed && project.tags.map((tagName) => (
-                    <div
-                      key={tagName}
-                      className={`tree-row tree-tag-row ${tag === tagName && projectPath === project.path ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
-                    >
-                     <button
-                       className="tree-label"
-                        onClick={() => {
-                          if (tag === tagName) {
-                            setTag(undefined);
-                          } else {
-                            setTag(tagName);
-                            setProjectPath(project.path);
-                            setProjectEnvironmentId(undefined);
-                            projectPathRef.current = project.path;
-                            projectEnvironmentIdRef.current = undefined;
-                          }
-                        }}
-                       title={t(`Filter by ${displayTagName(tagName)}`, `按 ${displayTagName(tagName)} 过滤`)}
-                    >
-                       {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
-                       <span>{displayTagName(tagName)}</span>
-                     </button>
-                     <button
-                       className="tag-delete"
-                       onClick={(event) => {
-                         event.stopPropagation();
-                         setDeleteTagName(tagName);
-                       }}
-                        title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                        aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                     >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
+                  {!envCollapsed && group.projects.map((project) => {
+                    const projectKey = `${project.environmentId}:${project.path}`;
+                    const projExpanded = collapsedTreeProjects.has(projectKey);
+                    const projCollapsed = !projExpanded;
+                    const projActive = projectPath === project.path && projectEnvironmentId === project.environmentId && !tag;
+                    return (
+                      <div key={projectKey} className="tree-group">
+                        <div className="tree-row tree-proj-row">
+                          {project.tags.length > 0 ? (
+                            <button
+                              className="tree-chevron"
+                              onClick={() => toggleTreeProject(projectKey)}
+                              aria-expanded={projExpanded}
+                              aria-label={projCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
+                            >
+                              {projCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                            </button>
+                          ) : (
+                            <span className="tree-chevron-spacer" />
+                          )}
+                          <button
+                            className={`tree-label ${projActive ? "active" : ""}`}
+                            onClick={() => {
+                              setProjectPath(project.path);
+                              setProjectEnvironmentId(project.environmentId);
+                              projectPathRef.current = project.path;
+                              projectEnvironmentIdRef.current = project.environmentId;
+                              setTag(undefined);
+                            }}
+                            title={project.path}
+                          >
+                            <Folder size={13} />
+                            <span>{project.label}</span>
+                            <em>{formatRelativeTime(projectSortTimestamp(project))}</em>
+                          </button>
+                        </div>
+                        {!projCollapsed && project.tags.map((tagName) => (
+                          <div
+                            key={tagName}
+                            className={`tree-row tree-tag-row ${tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
+                          >
+                            <button
+                              className="tree-label"
+                              onClick={() => {
+                                if (tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId) {
+                                  setTag(undefined);
+                                } else {
+                                  setTag(tagName);
+                                  setProjectPath(project.path);
+                                  setProjectEnvironmentId(project.environmentId);
+                                  projectPathRef.current = project.path;
+                                  projectEnvironmentIdRef.current = project.environmentId;
+                                }
+                              }}
+                              title={t(`Filter by ${displayTagName(tagName)}`, `按 ${displayTagName(tagName)} 过滤`)}
+                            >
+                              {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
+                              <span>{displayTagName(tagName)}</span>
+                            </button>
+                            <button
+                              className="tag-delete"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setDeleteTagName(tagName);
+                              }}
+                              title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
+                              aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -2055,27 +2090,32 @@ export function App(): ReactElement {
             onSearch={setQuery}
           />
           <div className="toolbar-filters">
-            {selectedProject ? (
-              <button
-                className="chip clear"
-                onClick={clearProjectFilter}
-                title={selectedProject.path}
-              >
-                <span>{selectedProject.label}</span>
-                <span aria-hidden="true">×</span>
-              </button>
-            ) : null}
-            {selectedEnvironment ? (
-              <button className="chip clear" onClick={() => selectEnvironment("all")} title={environmentTarget(selectedEnvironment, language)}>
-                <span>{selectedEnvironment.label}</span>
-                <span aria-hidden="true">×</span>
-              </button>
-            ) : null}
-            {tag ? (
-             <button className="chip clear" onClick={() => setTag(undefined)}>
-                <span>{isBranchTag(tag) ? <GitBranch size={12} /> : "#"}{displayTagName(tag)}</span>
-               <span aria-hidden="true">×</span>
-             </button>
+            {activeScopeFilters.length ? (
+              <div className="scope-filter" data-count={activeScopeFilters.length} aria-label={t("Active search scope", "当前搜索范围")}>
+                {activeScopeFilters.map((filter) => (
+                  <button
+                    key={filter.key}
+                    className="scope-filter-chip"
+                    onClick={filter.onClear}
+                    onMouseEnter={() => setHoveredScopeFilter(filter.key)}
+                    onMouseLeave={() => setHoveredScopeFilter((current) => (current === filter.key ? null : current))}
+                    onFocus={() => setHoveredScopeFilter(filter.key)}
+                    onBlur={() => setHoveredScopeFilter((current) => (current === filter.key ? null : current))}
+                    aria-describedby={hoveredScopeFilter === filter.key ? "scope-filter-tooltip" : undefined}
+                  >
+                    <span className="scope-filter-label">
+                      {filter.prefix ? <span className="scope-filter-prefix">{filter.prefix}</span> : null}
+                      <span>{filter.label}</span>
+                    </span>
+                    <span className="scope-filter-clear" aria-hidden="true">×</span>
+                  </button>
+                ))}
+                {hoveredScopeFilter ? (
+                  <div id="scope-filter-tooltip" className="scope-filter-tooltip" role="tooltip">
+                    {activeScopeFilters.find((filter) => filter.key === hoveredScopeFilter)?.title}
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             <div className="live-filter" role="group" aria-label="Live session status">
               {LIVE_STATUS_FILTERS.map((option) => (
