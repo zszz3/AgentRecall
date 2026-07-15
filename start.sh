@@ -4,7 +4,8 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────
 # Agent-Session-Search — smart launcher for macOS
 #
-# Usage:  bash start.sh  (or: ./start.sh)
+# Usage:  bash start.sh          # normal launch, may offer release updates
+#         bash start.sh local    # launch this checkout, no release update prompt
 #
 # • Checks environment & installs missing pieces (first run only)
 # • Skips rebuild when source hasn't changed since last build
@@ -15,6 +16,25 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
+
+LAUNCH_MODE="${1:-}"
+case "$LAUNCH_MODE" in
+  "") LOCAL_MODE=false ;;
+  local|--local) LOCAL_MODE=true ;;
+  -h|--help)
+    cat <<'EOF'
+Usage:
+  sh start.sh          Launch normally through the global command.
+  sh start.sh local    Launch this checkout's build and disable release updates.
+EOF
+    exit 0
+    ;;
+  *)
+    echo "Unknown argument: $LAUNCH_MODE" >&2
+    echo "Use: sh start.sh [local]" >&2
+    exit 1
+    ;;
+esac
 
 # Colours -------------------------------------------------------
 if [ -t 1 ]; then
@@ -29,7 +49,12 @@ ok()    { printf "${C_GREEN}✓ %s${C_RESET}\n" "$*"; }
 warn()  { printf "${C_YELLOW}⚠ %s${C_RESET}\n" "$*"; }
 fail()  { printf "${C_RED}✗ %s${C_RESET}\n" "$*" >&2; exit 1; }
 
-echo -e "${C_BOLD}Agent-Session-Search launcher${C_RESET}"
+printf "%b\n" "${C_BOLD}Agent-Session-Search launcher${C_RESET}"
+if [ "$LOCAL_MODE" = true ]; then
+  echo "Mode: local checkout (release update prompt disabled)"
+else
+  echo "Mode: normal global launch"
+fi
 echo ""
 
 # ── 1. Node.js ≥ 22.13 ─────────────────────────────────────────
@@ -133,8 +158,14 @@ fi
 # last global install), re-run npm install -g . to refresh the symlinks.
 GLOBAL_PREFIX="$(npm prefix -g 2>/dev/null)"
 GLOBAL_BIN="$GLOBAL_PREFIX/bin/agent-session-search"
+LOCAL_BIN="$ROOT_DIR/bin/agent-session-search.cjs"
 all_bins_linked=true
 if [ -x "$GLOBAL_BIN" ]; then
+  linked_target="$(node -e 'const fs=require("fs"), path=require("path"); try { process.stdout.write(fs.realpathSync(process.argv[1])); } catch { process.stdout.write(""); }' "$GLOBAL_BIN")"
+  local_target="$(node -e 'const fs=require("fs"), path=require("path"); try { process.stdout.write(fs.realpathSync(process.argv[1])); } catch { process.stdout.write(""); }' "$LOCAL_BIN")"
+  if [ "$linked_target" != "$local_target" ]; then
+    all_bins_linked=false
+  fi
   for bin_name in \
     agent-session-search \
     agent-session-search-claude-statusline \
@@ -159,6 +190,22 @@ else
   npm install -g . || fail "npm install -g . failed"
   ok "Global command registered"
 fi
+
+if [ "$LOCAL_MODE" = true ]; then
+  LAUNCH_BIN="$LOCAL_BIN"
+  LAUNCH_NO_UPDATE=true
+else
+  LAUNCH_BIN="agent-session-search"
+  LAUNCH_NO_UPDATE=false
+fi
+
+launch_agent_session_search() {
+  if [ "$LAUNCH_NO_UPDATE" = true ]; then
+    AGENT_SESSION_SEARCH_NO_UPDATE_CHECK=1 "$LAUNCH_BIN" --no-update-check "$@"
+  else
+    "$LAUNCH_BIN" "$@"
+  fi
+}
 
 # ── 6. register MCP server (skip if already registered) ────────
 SETUP_MCP="$(npm prefix -g 2>/dev/null)/bin/agent-session-search-setup-mcp"
@@ -189,31 +236,70 @@ fi
 # Helper sub-processes contain "--type=" in their command line, so we
 # exclude those to avoid false positives.
 ELECTRON_PATTERN="$ROOT_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+APP_PROCESS_FILE="$HOME/.agent-session-search/app-process.json"
+USER_DATA_PATTERN="$HOME/Library/Application Support/Agent-Session-Search"
+
+is_main_process_command() {
+  case "$1" in
+    *"--type="*) return 1 ;;
+    *"agent-session-search-mcp"*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+is_pid_running() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null
+}
+
+app_process_file_pid() {
+  [ -f "$APP_PROCESS_FILE" ] || return 0
+  node -e 'try { const entry = require(process.argv[1]); const pid = Number(entry && entry.pid); if (Number.isInteger(pid) && pid > 0) process.stdout.write(String(pid)); } catch {}' "$APP_PROCESS_FILE" 2>/dev/null || true
+}
+
+append_main_process_pid() {
+  local pid command
+  pid="$1"
+  [ -n "$pid" ] || return 0
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  if is_main_process_command "$command"; then
+    printf '%s\n' "$pid"
+  fi
+}
 
 app_is_running() {
-  pgrep -f "$ELECTRON_PATTERN" 2>/dev/null | while read -r pid; do
-    if ! ps -p "$pid" -o command= 2>/dev/null | grep -q -- "--type="; then
-      echo "$pid"
-      return 0
-    fi
+  local state_pid pid
+  state_pid="$(app_process_file_pid)"
+  if is_pid_running "$state_pid"; then
+    append_main_process_pid "$state_pid"
+  fi
+
+  for pid in $(pgrep -f "$ELECTRON_PATTERN" 2>/dev/null || true); do
+    append_main_process_pid "$pid"
   done
-  return 1
+
+  for pid in $(pgrep -f "$USER_DATA_PATTERN" 2>/dev/null || true); do
+    append_main_process_pid "$pid"
+  done
 }
 
 APP_PID=$(app_is_running || true)
 APP_RUNNING=false
 [ -n "$APP_PID" ] && APP_RUNNING=true
 
-if [ "$APP_RUNNING" = true ] && [ "$build_needed" = false ]; then
+if [ "$APP_RUNNING" = true ] && [ "$build_needed" = false ] && [ "$LOCAL_MODE" = false ]; then
   # App is running and code is unchanged — just focus it.
   ok "App is already running — focusing existing window"
   echo ""
-  agent-session-search 2>/dev/null || true
+  launch_agent_session_search 2>/dev/null || true
   exit 0
 fi
 
 if [ "$APP_RUNNING" = true ]; then
-  info "Existing instance found — closing it to apply updates …"
+  if [ "$LOCAL_MODE" = true ]; then
+    info "Existing instance found — closing it to launch the local checkout …"
+  else
+    info "Existing instance found — closing it to apply updates …"
+  fi
   for pid in $APP_PID; do
     kill "$pid" 2>/dev/null || true
   done
@@ -226,6 +312,7 @@ fi
 
 echo ""
 info "Launching Agent-Session-Search …"
-echo -e "    ${C_DIM}(The app runs in the menu bar — press Option+Space to show the window)${C_RESET}"
+printf "    %b\n" "${C_DIM}(The app runs in the menu bar — press Option+Space to show the window)${C_RESET}"
 echo ""
-exec agent-session-search
+launch_agent_session_search
+exit $?

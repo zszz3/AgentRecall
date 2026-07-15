@@ -11,6 +11,7 @@ import { createInMemoryStore } from "./session-store";
 import {
   loadClaudeCliSessionRows,
   loadCodeBuddyCliSessionFile,
+  loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
   parseJsonlText,
@@ -59,6 +60,7 @@ function loadMigratedSessionFileForTest(target: MigrationTarget, filePath: strin
 
   const descriptor = migrationTargetDescriptor(target);
   if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
+  if (descriptor.family === "codewiz") return loadCodeWizSessions(path.dirname(filePath)).find((item) => item.session.rawId === path.basename(filePath, ".jsonl")) ?? loadCodeWizSessions(path.dirname(filePath))[0] ?? null;
 
   const rows = parseJsonlText(fs.readFileSync(filePath, "utf8"));
   if (descriptor.family === "codex") {
@@ -81,6 +83,7 @@ const targetSources: Record<MigrationTarget, SessionSource> = {
   claude: "claude-cli",
   codex: "codex-cli",
   codebuddy: "codebuddy-cli",
+  codewiz: "codewiz-cli",
   cursor: "cursor-agent",
   tclaude: "tclaude-cli",
   tcodex: "tcodex-cli",

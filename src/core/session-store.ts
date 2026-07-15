@@ -50,6 +50,7 @@ const LIVE_SESSION_KEY_SQL = `
     WHEN source = 'tclaude-cli' THEN 'tclaude:' || raw_id
     WHEN source = 'tcodex-cli' THEN 'tcodex:' || raw_id
     WHEN source = 'codebuddy-cli' THEN 'codebuddy:' || raw_id
+    WHEN source = 'codewiz-cli' THEN 'codewiz:' || raw_id
     WHEN source = 'trae' THEN 'trae:' || raw_id
     ELSE NULL
   END
@@ -2424,6 +2425,11 @@ function sessionSortSql(sortBy: SessionSortBy = "activity"): string {
 function sessionActivitySql(sessionTable: string): string {
   return `
     COALESCE(
+      (
+        SELECT MAX(message_events.timestamp)
+        FROM message_events
+        WHERE message_events.session_key = ${sessionTable}.session_key
+      ),
       (
         SELECT MAX(CAST(strftime('%s', messages.timestamp) AS INTEGER) * 1000)
         FROM messages

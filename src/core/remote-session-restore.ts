@@ -36,7 +36,7 @@ export interface RestoreRemoteSessionOptions {
   deps: RemoteSessionRestoreDependencies;
 }
 
-const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "cursor"];
+const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
 
 export async function restoreRemotePortableSession({
   remoteId,

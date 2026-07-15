@@ -8,7 +8,7 @@ import { localize, type LanguageMode } from "../language";
 import { migrationAgentLabel, SOURCE_LABEL, sourceUiFamily } from "../session-ui";
 import type { ActionStatus } from "../app-types";
 
-const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "cursor"];
+const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
 type RemoteSourceFilter = "all" | MigrationAgent;
 type RestoreDestination = "local" | "source";
 const SOURCE_FILTERS: RemoteSourceFilter[] = ["all", ...RESTORE_TARGETS];

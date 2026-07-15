@@ -479,6 +479,18 @@ describe("API settings", () => {
     ).toMatchObject({ customApiKey: "" });
   });
 
+  it("preserves disabled optional internal sources", () => {
+    expect(
+      mergeAppSettings(
+        { ...defaultSettings, includeClaudeInternal: true, includeCodexInternal: true },
+        { includeClaudeInternal: false, includeCodexInternal: false },
+      ),
+    ).toMatchObject({
+      includeClaudeInternal: false,
+      includeCodexInternal: false,
+    });
+  });
+
   it("does not auto-fill API keys from profile defaults when the user has not saved one in the app", () => {
     expect(
       mergeApiConfigWithProfileDefaults(

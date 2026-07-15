@@ -126,9 +126,9 @@ describe("session source labels", () => {
   });
 
   it("derives migration targets from enabled settings in registry order", () => {
-    expect(migrationTargetsForSource("claude-cli", defaultSettings)).toEqual(["claude", "codex", "codebuddy", "cursor"]);
+    expect(migrationTargetsForSource("claude-cli", defaultSettings)).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor"]);
     expect(migrationTargetsForSource("claude-cli", { ...defaultSettings, includeTcodex: true })).toEqual([
-      "claude", "codex", "codebuddy", "cursor", "tcodex",
+      "claude", "codex", "codebuddy", "codewiz", "cursor", "tcodex",
     ]);
     expect(migrationTargetsForSource("claude-cli", {
       ...defaultSettings,
@@ -136,7 +136,7 @@ describe("session source labels", () => {
       includeTcodex: true,
       includeClaudeInternal: true,
       includeCodexInternal: true,
-    })).toEqual(["claude", "codex", "codebuddy", "cursor", "tclaude", "tcodex", "claude-internal", "codex-internal"]);
+    })).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor", "tclaude", "tcodex", "claude-internal", "codex-internal"]);
     expect(migrationTargetsForSource("hermes", defaultSettings)).toEqual([]);
   });
 
@@ -155,7 +155,7 @@ describe("session source labels", () => {
     expect(migrationTargetsForSession(remote, settings)).toEqual([]);
     expect(migrationTargetsForSession(importedLocal, settings)).toEqual([]);
     expect(migrationTargetsForSession(local, settings)).toEqual([
-      "claude", "codex", "codebuddy", "cursor", "tclaude", "tcodex", "claude-internal", "codex-internal",
+      "claude", "codex", "codebuddy", "codewiz", "cursor", "tclaude", "tcodex", "claude-internal", "codex-internal",
     ]);
   });
 

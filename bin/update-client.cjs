@@ -191,7 +191,7 @@ async function checkForUpdate(options = {}) {
   const cached = await readJson(cachePath);
 
   if (!options.force && cached && Number.isFinite(cached.checkedAt) && now - cached.checkedAt < ttlMs) {
-    return updateResult(version, cached.manifest || null, cached.checkedAt, true, null, cached);
+    return updateResult(version, cached.manifest || null, cached.checkedAt, true, null, cached, options);
   }
 
   try {
@@ -208,11 +208,11 @@ async function checkForUpdate(options = {}) {
       const releaseResponse = await fetchWithTimeout(fetchImpl, LATEST_RELEASE_API, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
       if (releaseResponse.status === 304 && cached) {
         await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
-        return updateResult(version, cached.manifest || null, now, false, null, cached);
+        return updateResult(version, cached.manifest || null, now, false, null, cached, options);
       }
       if (releaseResponse.status === 404) {
         await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
-        return updateResult(version, null, now, false, null, null);
+        return updateResult(version, null, now, false, null, null, options);
       }
       if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
       const release = await releaseResponse.json();
@@ -231,7 +231,7 @@ async function checkForUpdate(options = {}) {
         }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
         if (manifestResponse.status === 304 && cached) {
           await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
-          return updateResult(version, cached.manifest || null, now, false, null, cached);
+          return updateResult(version, cached.manifest || null, now, false, null, cached, options);
         }
         if (!manifestResponse.ok) throw new Error(`Direct update manifest download failed (${manifestResponse.status}).`);
         etag = manifestResponse.headers.get("etag");
@@ -242,29 +242,33 @@ async function checkForUpdate(options = {}) {
     const manifest = parseUpdateManifest(await manifestResponse.json());
     if (releaseTag && releaseTag !== manifest.tag) throw new Error("GitHub Release tag does not match update.json.");
     const sameSnoozedVersion = cached?.snoozedVersion === manifest.version;
+    const sameSkippedVersion = cached?.skippedVersion === manifest.version;
     const cache = {
       checkedAt: now,
       etag,
       manifest,
       snoozedVersion: sameSnoozedVersion ? cached.snoozedVersion : null,
       snoozedUntil: sameSnoozedVersion ? cached.snoozedUntil : 0,
+      skippedVersion: sameSkippedVersion ? cached.skippedVersion : null,
     };
     await writeJsonAtomic(cachePath, cache);
-    return updateResult(version, manifest, now, false, null, cache);
+    return updateResult(version, manifest, now, false, null, cache, options);
   } catch (error) {
-    return updateResult(version, cached?.manifest || null, cached?.checkedAt || 0, Boolean(cached), error instanceof Error ? error.message : String(error), cached);
+    return updateResult(version, cached?.manifest || null, cached?.checkedAt || 0, Boolean(cached), error instanceof Error ? error.message : String(error), cached, options);
   }
 }
 
-function updateResult(version, manifest, checkedAt, fromCache, error, cache = null) {
+function updateResult(version, manifest, checkedAt, fromCache, error, cache = null, options = {}) {
   let updateAvailable = false;
   try {
     updateAvailable = Boolean(manifest && compareVersions(version, manifest.version) < 0);
   } catch {
     updateAvailable = false;
   }
-  const promptSnoozed = Boolean(updateAvailable && manifest && cache?.snoozedVersion === manifest.version && Number(cache.snoozedUntil) > Date.now());
-  return { currentVersion: version, checkedAt, fromCache, updateAvailable, promptSnoozed, manifest, error };
+  const showSkipped = options.showSkipped === true || options.force === true;
+  const promptSnoozed = !showSkipped && Boolean(updateAvailable && manifest && cache?.snoozedVersion === manifest.version && Number(cache.snoozedUntil) > Date.now());
+  const updateSkipped = !showSkipped && Boolean(updateAvailable && manifest && cache?.skippedVersion === manifest.version);
+  return { currentVersion: version, checkedAt, fromCache, updateAvailable, updateSkipped, promptSnoozed, manifest, error };
 }
 
 async function snoozeUpdatePrompt(version, options = {}) {
@@ -274,6 +278,17 @@ async function snoozeUpdatePrompt(version, options = {}) {
     ...cache,
     snoozedVersion: version,
     snoozedUntil: (options.now || Date.now()) + (options.durationMs ?? UPDATE_CACHE_TTL_MS),
+  });
+}
+
+async function skipUpdateVersion(version, options = {}) {
+  const cachePath = options.cachePath || defaultCachePath(options.homeDir);
+  const cache = (await readJson(cachePath)) || {};
+  await writeJsonAtomic(cachePath, {
+    ...cache,
+    skippedVersion: version,
+    snoozedVersion: cache.snoozedVersion === version ? null : cache.snoozedVersion,
+    snoozedUntil: cache.snoozedVersion === version ? 0 : cache.snoozedUntil,
   });
 }
 
@@ -659,6 +674,7 @@ module.exports = {
   parseUpdateManifest,
   readUpdatePreference,
   readInstallStatus,
+  skipUpdateVersion,
   snoozeUpdatePrompt,
   showNativeUpdateFailure,
   stateDirectory,

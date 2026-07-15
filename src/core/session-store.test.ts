@@ -1170,6 +1170,42 @@ describe("SessionStore", () => {
     expect(results[1].lastActivityAt).toBe(Date.parse("2026-06-02T10:00:00Z"));
   });
 
+  it("sorts summary-only sessions by remote message events before shared database mtime", () => {
+    const store = createInMemoryStore();
+    const sharedDatabaseMtime = Date.parse("2026-07-15T03:38:18Z");
+    store.upsertIndexedSessionSummary(
+      sampleSession({
+        sessionKey: "codewiz:old",
+        rawId: "old",
+        source: "codewiz-cli",
+        timestamp: Date.parse("2026-06-01T10:00:00Z"),
+        fileMtimeMs: sharedDatabaseMtime,
+      }),
+      1,
+      [],
+      [{ index: 0, timestamp: Date.parse("2026-06-01T10:01:00Z") }],
+    );
+    store.upsertIndexedSessionSummary(
+      sampleSession({
+        sessionKey: "codewiz:recent",
+        rawId: "recent",
+        source: "codewiz-cli",
+        timestamp: Date.parse("2026-06-02T10:00:00Z"),
+        fileMtimeMs: sharedDatabaseMtime,
+      }),
+      1,
+      [],
+      [{ index: 0, timestamp: Date.parse("2026-06-02T10:01:00Z") }],
+    );
+
+    const results = store.searchSessions({ source: "codewiz-cli", sortBy: "activity" });
+    expect(results.map((session) => session.sessionKey)).toEqual(["codewiz:recent", "codewiz:old"]);
+    expect(results.map((session) => session.lastActivityAt)).toEqual([
+      Date.parse("2026-06-02T10:01:00Z"),
+      Date.parse("2026-06-01T10:01:00Z"),
+    ]);
+  });
+
   it("filters sessions by activity date range", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(

@@ -61,6 +61,7 @@ export interface AppSettings {
   claudeBinary: string;
   codexBinary: string;
   codeBuddyBinary: string;
+  codeWizBinary: string;
   cursorBinary: string;
   tclaudeBinary: string;
   tcodexBinary: string;
@@ -70,6 +71,7 @@ export interface AppSettings {
   includeTclaude: boolean;
   includeTcodex: boolean;
   includeCodeBuddyCli: boolean;
+  includeCodeWizCli: boolean;
   includeOpenClaw: boolean;
   includeHermes: boolean;
   includeOpenCode: boolean;
@@ -107,6 +109,7 @@ export const defaultSettings: AppSettings = {
   claudeBinary: "claude",
   codexBinary: "codex",
   codeBuddyBinary: "codebuddy",
+  codeWizBinary: "codewiz",
   cursorBinary: "cursor-agent",
   tclaudeBinary: "tclaude",
   tcodexBinary: "tcodex",
@@ -116,6 +119,7 @@ export const defaultSettings: AppSettings = {
   includeTclaude: false,
   includeTcodex: false,
   includeCodeBuddyCli: false,
+  includeCodeWizCli: false,
   includeOpenClaw: false,
   includeHermes: false,
   includeOpenCode: false,
@@ -179,7 +183,7 @@ function normalizeCompressionConcurrency(value: number): number {
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
 
-type SourceFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
+type SourceFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
 
 function sourceDisplayName(source: SessionSource): string {
   if (source === "opencode-cli") return "OpenCode";
@@ -190,6 +194,7 @@ function sourceDisplayName(source: SessionSource): string {
   if (source === "tclaude-cli") return "TClaude";
   if (source === "tcodex-cli") return "TCodex";
   if (source === "codebuddy-cli") return "CodeBuddy";
+  if (source === "codewiz-cli") return "CodeWiz";
   if (source.startsWith("claude")) return "Claude";
   return "Codex";
 }
@@ -198,6 +203,7 @@ export function sourceFamily(source: SessionSource): SourceFamily {
   if (source === "tclaude-cli") return "tclaude";
   if (source === "tcodex-cli") return "tcodex";
   if (source === "codebuddy-cli") return "codebuddy";
+  if (source === "codewiz-cli") return "codewiz";
   if (source === "openclaw") return "openclaw";
   if (source === "hermes") return "hermes";
   if (source === "opencode-cli") return "opencode";
@@ -212,6 +218,7 @@ export function migrationBinary(target: MigrationTarget, settings: AppSettings):
   if (target === "tcodex") return settings.tcodexBinary;
   if (target === "claude-internal") return settings.claudeInternalBinary;
   if (target === "codebuddy") return settings.codeBuddyBinary;
+  if (target === "codewiz") return settings.codeWizBinary;
   if (target === "cursor") return settings.cursorBinary;
   return settings.codexBinary;
 }
@@ -223,6 +230,7 @@ function migrationTargetDisplayName(target: MigrationTarget): string {
   if (target === "claude-internal") return "Claude Internal";
   if (target === "codex-internal") return "Codex Internal";
   if (target === "codebuddy") return "CodeBuddy";
+  if (target === "codewiz") return "CodeWiz";
   if (target === "cursor") return "Cursor";
   return "Codex";
 }
@@ -230,6 +238,8 @@ function migrationTargetDisplayName(target: MigrationTarget): string {
 function migrationResumeArgs(target: MigrationTarget, sessionId: string): string[] {
   return target === "codex" || target === "tcodex" || target === "codex-internal"
     ? ["resume", sessionId]
+    : target === "codewiz"
+      ? ["--session", sessionId]
     : ["--resume", sessionId];
 }
 
@@ -265,6 +275,7 @@ const MIGRATION_CLI_VERSION_RULES: Record<MigrationTarget, VersionRule[]> = {
   claude: [{ label: "Claude Code", pattern: /^\s*v?(\d+\.\d+\.\d+)\s+\(Claude Code\)\s*$/im, minimum: version(2, 1, 186) }],
   codex: [{ label: "codex", pattern: /^\s*(?:codex(?:-cli)?|Codex(?: CLI)?)\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 141, 0) }],
   codebuddy: [{ label: "CodeBuddy", pattern: /^\s*v?(\d+\.\d+\.\d+)\s*$/im, minimum: version(2, 109, 1) }],
+  codewiz: [{ label: "CodeWiz", pattern: /^\s*v?(\d+\.\d+\.\d+)\s*$/im, minimum: version(0, 1, 0) }],
   cursor: [{ label: "cursor-agent", pattern: /(\d+\.\d+\.\d+[-\w]*|\d{4}\.\d+\.\d+)/i, minimum: version(0, 0, 0) }],
   tclaude: [
     { label: "@tencent/tclaude", pattern: /^\s*@tencent\/tclaude\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 0, 9) },
@@ -294,6 +305,7 @@ function migrationTargetForResumeSource(source: SessionSource): MigrationTarget 
   if (source === "tclaude-cli") return "tclaude";
   if (source === "tcodex-cli") return "tcodex";
   if (source === "codebuddy-cli") return "codebuddy";
+  if (source === "codewiz-cli") return "codewiz";
   if (source === "cursor-agent") return "cursor";
   return null;
 }

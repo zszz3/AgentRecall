@@ -50,6 +50,9 @@
   --codebuddy: #6d5dfc;
   --codebuddy-badge-bg: #eef0ff;
   --codebuddy-badge-text: #4f46e5;
+  --codewiz: #ff2442;
+  --codewiz-badge-bg: #fff0f2;
+  --codewiz-badge-text: #b42335;
 
   --tag-bg: #f1f5f9;
   --tag-text: #475569;
@@ -126,6 +129,9 @@
   --codebuddy: #a78bfa;
   --codebuddy-badge-bg: rgba(129, 112, 255, 0.18);
   --codebuddy-badge-text: #c4b5fd;
+  --codewiz: #ff5a6f;
+  --codewiz-badge-bg: rgba(255, 90, 111, 0.16);
+  --codewiz-badge-text: #ff8d9d;
 
   --tag-bg: rgba(255, 255, 255, 0.05);
   --tag-text: #c9ced6;
@@ -1995,6 +2001,11 @@ select:focus-visible {
   color: var(--codebuddy-badge-text);
 }
 
+.source-badge.codewiz {
+  background: var(--codewiz-badge-bg);
+  color: var(--codewiz-badge-text);
+}
+
 .source-badge.other {
   background: var(--panel-subtle);
   color: var(--text-muted);
@@ -3750,6 +3761,8 @@ select:focus-visible {
 .update-card-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   flex: 0 0 auto;
 }
@@ -3767,6 +3780,25 @@ select:focus-visible {
 }
 
 .update-refresh-button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--accent-bright);
+}
+
+.update-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.update-secondary-button:hover:not(:disabled) {
   border-color: var(--accent-line);
   color: var(--accent-bright);
 }
@@ -3877,7 +3909,7 @@ select:focus-visible {
 }
 
 .update-auto-check {
-  width: min(100%, 520px);
+  width: min(100%, 560px);
   border-radius: 14px;
 }
 

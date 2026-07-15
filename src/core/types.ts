@@ -8,12 +8,13 @@ export type SessionSource =
   | "tclaude-cli"
   | "tcodex-cli"
   | "codebuddy-cli"
+  | "codewiz-cli"
   | "openclaw"
   | "hermes"
   | "opencode-cli"
   | "cursor-agent"
   | "trae";
-export type SessionFormat = "claude" | "codex" | "codebuddy" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
+export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
 export type SessionSortBy = "activity" | "created";
 export type EnvironmentKind = "local" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";
@@ -62,7 +63,7 @@ export interface SessionMessageEvent {
   timestamp: number;
 }
 
-export type MigrationAgent = "claude" | "codex" | "codebuddy" | "cursor";
+export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor";
 export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex" | "claude-internal" | "codex-internal";
 export type SessionMigrationStrategy = "complete" | "ai-compressed" | "locally-truncated";
 export type SessionMigrationStage = "reading" | "compressing" | "writing" | "indexing" | "launching";
@@ -320,7 +321,7 @@ export interface UsageQuotaSnapshot {
   providers: UsageQuotaCard[];
 }
 
-export type LiveSessionFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "trae";
+export type LiveSessionFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "trae";
 
 export interface LiveSession {
   family: LiveSessionFamily;

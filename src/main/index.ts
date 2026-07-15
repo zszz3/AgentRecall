@@ -143,12 +143,13 @@ const PRODUCT_NAME = "Agent-Session-Search";
 const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
 type ApiProviderKeyTarget = "codex" | "claude" | "summary";
 
-const OPTIONAL_SOURCE_SETTINGS: Array<{ key: keyof Pick<AppSettings, "includeClaudeInternal" | "includeCodexInternal" | "includeTclaude" | "includeTcodex" | "includeCodeBuddyCli" | "includeOpenClaw" | "includeHermes" | "includeOpenCode" | "includeCursorAgent" | "includeTrae">; sources: SessionSource[] }> = [
+const OPTIONAL_SOURCE_SETTINGS: Array<{ key: keyof Pick<AppSettings, "includeClaudeInternal" | "includeCodexInternal" | "includeTclaude" | "includeTcodex" | "includeCodeBuddyCli" | "includeCodeWizCli" | "includeOpenClaw" | "includeHermes" | "includeOpenCode" | "includeCursorAgent" | "includeTrae">; sources: SessionSource[] }> = [
   { key: "includeClaudeInternal", sources: ["claude-internal"] },
   { key: "includeCodexInternal", sources: ["codex-internal"] },
   { key: "includeTclaude", sources: ["tclaude-cli"] },
   { key: "includeTcodex", sources: ["tcodex-cli"] },
   { key: "includeCodeBuddyCli", sources: ["codebuddy-cli"] },
+  { key: "includeCodeWizCli", sources: ["codewiz-cli"] },
   { key: "includeOpenClaw", sources: ["openclaw"] },
   { key: "includeHermes", sources: ["hermes"] },
   { key: "includeOpenCode", sources: ["opencode-cli"] },
@@ -184,13 +185,15 @@ const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
 const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
 interface UpdateClientModule {
   LATEST_RELEASE_URL: string;
-  checkForUpdate(options?: { currentVersion?: string; force?: boolean }): Promise<AppUpdateStatus>;
+  checkForUpdate(options?: { currentVersion?: string; force?: boolean; showSkipped?: boolean }): Promise<AppUpdateStatus>;
   clearAppProcess(pid?: number): Promise<void>;
   clearInstallStatus(): Promise<void>;
   currentVersion(): string;
   manualInstallCommand(): string;
   parseUpdateManifest(value: unknown): AppUpdateManifest;
   readInstallStatus(): Promise<{ status?: string; version?: string; error?: string | null } | null>;
+  skipUpdateVersion(version: string): Promise<void>;
+  snoozeUpdatePrompt(version: string): Promise<void>;
   writeAppProcess(pid?: number): Promise<string>;
   writeUpdatePreference(enabled: boolean): Promise<void>;
 }
@@ -601,6 +604,18 @@ async function startAppUpdate(): Promise<AppUpdateInstallResult> {
   return { started: true, version: manifest.version };
 }
 
+async function skipCurrentAppUpdate(untilNextVersion: boolean): Promise<AppUpdateStatus> {
+  const status = appUpdateStatus?.updateAvailable ? appUpdateStatus : await getAppUpdateStatus(false);
+  const version = status.manifest?.version;
+  if (!status.updateAvailable || !version) return status;
+  if (untilNextVersion) await loadUpdateClient().skipUpdateVersion(version);
+  else await loadUpdateClient().snoozeUpdatePrompt(version);
+  const nextStatus = await refreshAppUpdateStatus(false);
+  appUpdateStatus = nextStatus;
+  mainWindow?.webContents.send("app-update:status", nextStatus);
+  return nextStatus;
+}
+
 async function showPreviousUpdateResult(): Promise<void> {
   if (previousUpdateResultShown) return;
   const client = loadUpdateClient();
@@ -935,6 +950,7 @@ async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<voi
   const load = (async () => {
     const latest = store.getSession(sessionKey);
     if (!latest || isLocalSessionEnvironment(latest)) return;
+    if (latest.source === "codewiz-cli") return;
     const environment = store.getEnvironment(latest.environmentId);
     if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
     const payload = await fetchRemoteSessionFilePayload(environment, latest);
@@ -1273,6 +1289,7 @@ async function runIndexSync(): Promise<IndexStatus> {
       includeTclaude: settings.includeTclaude,
       includeTcodex: settings.includeTcodex,
       includeCodeBuddyCli: settings.includeCodeBuddyCli,
+      includeCodeWizCli: settings.includeCodeWizCli,
       includeOpenClaw: settings.includeOpenClaw,
       includeHermes: settings.includeHermes,
       includeOpenCode: settings.includeOpenCode,
@@ -1812,6 +1829,7 @@ function registerIpc(): void {
   ipcMain.handle("index:status", () => indexStatus);
   ipcMain.handle("app-update:get-status", (_event, force?: boolean) => getAppUpdateStatus(Boolean(force)));
   ipcMain.handle("app-update:install", () => startAppUpdate());
+  ipcMain.handle("app-update:skip", (_event, untilNextVersion?: boolean) => skipCurrentAppUpdate(Boolean(untilNextVersion)));
   ipcMain.handle("settings:get", () => getHydratedSettings());
   ipcMain.handle("codex-profile:apply", (_event, apiConfig: Partial<ApiConfig>) => applyCodexApiConfigWithProxy(apiConfig));
   ipcMain.handle("claude-profile:apply", (_event, apiConfig: Partial<ClaudeApiConfig>) => applyClaudeApiConfig({ apiConfig }));

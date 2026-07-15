@@ -23,6 +23,7 @@ const {
   manualInstallCommand,
   parseUpdateManifest,
   showNativeUpdateFailure,
+  skipUpdateVersion,
   snoozeUpdatePrompt,
   waitForUpdateCompletion,
 } = require("../bin/update-client.cjs");
@@ -72,6 +73,39 @@ test("snoozes the terminal prompt for the same cached version", async () => {
   const cached = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, now: now + 1 });
   assert.equal(cached.updateAvailable, true);
   assert.equal(cached.promptSnoozed, true);
+});
+
+test("skips the same update version until a newer version is released", async () => {
+  const cacheDirectory = await mkdtemp(path.join(tmpdir(), "agent-session-update-skip-version-"));
+  const cachePath = path.join(cacheDirectory, "update-check.json");
+  const firstManifest = manifest("0.2.0");
+  const nextManifest = manifest("0.3.0");
+  let value = firstManifest;
+  const fetchImpl = async (url) => String(url).includes("api.github.com")
+    ? new Response(JSON.stringify({ tag_name: `v${value.version}`, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] }), { status: 200 })
+    : new Response(JSON.stringify(value), { status: 200 });
+
+  await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 1 });
+  await skipUpdateVersion("0.2.0", { cachePath });
+  const skipped = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, now: 2 });
+  assert.equal(skipped.updateAvailable, true);
+  assert.equal(skipped.updateSkipped, true);
+
+  const forced = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 2 });
+  assert.equal(forced.updateAvailable, true);
+  assert.equal(forced.updateSkipped, false);
+
+  value = nextManifest;
+  const newer = await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 3 });
+  assert.equal(newer.updateAvailable, true);
+  assert.equal(newer.updateSkipped, false);
+  assert.equal(newer.manifest.version, "0.3.0");
+});
+
+test("terminal launcher does not prompt again for a skipped update version", async () => {
+  const launcherSource = await readFile(new URL("../bin/agent-session-search.cjs", import.meta.url), "utf8");
+  assert.match(launcherSource, /!result\.updateSkipped && !result\.promptSnoozed/);
+  assert.match(launcherSource, /\[1\] 更新\s+\[2\] 跳过\s+\[3\] 跳过，直至下个版本/);
 });
 
 test("refuses to install an update whose package checksum does not match", async () => {

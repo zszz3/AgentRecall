@@ -24,7 +24,7 @@ export interface RemoteSyncOptions {
 }
 
 export interface RemoteSessionSummaryPayload {
-  kind: "codex-session" | "claude-project";
+  kind: "codex-session" | "claude-project" | "codewiz-session";
   path: string;
   mtimeMs: number;
   size: number;
@@ -309,8 +309,8 @@ export async function syncRemoteEnvironment(
 }
 
 function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary: RemoteSessionSummaryPayload): IndexedSession {
-  const family = summary.kind === "codex-session" ? "codex" : "claude";
-  const source: SessionSource = summary.kind === "codex-session" ? "codex-cli" : "claude-cli";
+  const family = summary.kind === "codex-session" ? "codex" : summary.kind === "codewiz-session" ? "codewiz" : "claude";
+  const source: SessionSource = summary.kind === "codex-session" ? "codex-cli" : summary.kind === "codewiz-session" ? "codewiz-cli" : "claude-cli";
   return {
     sessionKey: `ssh:${environment.id}:${family}:${summary.rawId}`,
     rawId: summary.rawId,
@@ -400,7 +400,9 @@ export async function fetchRemoteSessionFilePayload(
   const runSsh = options.runSsh ?? runSystemSsh;
   const output = await runSsh(environment, buildRemoteFileFetchCommand(session.filePath));
   const payloads = decodeRemotePayload(output);
-  const expectedKind = session.source === "codex-cli" || session.source === "codex-app" || session.source === "codex-internal" ? "codex-session" : "claude-project";
+  const expectedKind = session.source === "codewiz-cli"
+    ? "codewiz-session"
+    : session.source === "codex-cli" || session.source === "codex-app" || session.source === "codex-internal" ? "codex-session" : "claude-project";
   const payload = payloads.find((item) => item.path === session.filePath && item.kind === expectedKind) ?? payloads[0];
   if (!payload) throw new Error("Remote session file fetch returned no payload.");
   return payload;
@@ -438,9 +440,11 @@ print(json.dumps({
 }
 
 function buildRemoteMessagePageCommand(session: SessionSearchResult, offset: number, limit: number): string {
+  const [dbPath, codeWizSessionId] = session.source === "codewiz-cli" ? session.filePath.split("#", 2) : [session.filePath, ""];
   const request = {
-    path: session.filePath,
-    kind: session.source.startsWith("claude") ? "claude" : "codex",
+    path: dbPath,
+    codeWizSessionId,
+    kind: session.source === "codewiz-cli" ? "codewiz" : session.source.startsWith("claude") ? "claude" : "codex",
     offset: Math.max(0, Math.floor(offset)),
     limit: Math.max(0, Math.min(500, Math.floor(limit))),
   };
@@ -448,33 +452,80 @@ function buildRemoteMessagePageCommand(session: SessionSearchResult, offset: num
 request = __REQUEST_JSON__
 path = Path(request["path"])
 kind = request["kind"]
+codewiz_session_id = request.get("codeWizSessionId", "")
 offset = int(request["offset"])
 limit = int(request["limit"])
 end = offset + limit
 
 messages = []
 message_index = 0
-with path.open("r", encoding="utf-8", errors="replace") as handle:
-  for line in handle:
-    if limit <= 0:
-      break
+if kind == "codewiz":
+  import sqlite3
+  def text_from_codewiz_part(data):
+    if not isinstance(data, dict):
+      return ""
+    return data.get("text") if isinstance(data.get("text"), str) else ""
+  def parse_codewiz_row(row):
     try:
-      row = json.loads(line)
+      message_data = json.loads(row[3] or "{}")
     except Exception:
-      continue
-    parsed = parse_message(row, kind)
-    if not parsed:
-      continue
-    if message_index >= offset and message_index < end:
-      messages.append({
-        "index": message_index,
-        "role": parsed["role"],
-        "content": parsed["content"],
-        "timestamp": parsed["timestamp"],
-      })
-    message_index += 1
-    if message_index >= end:
-      break
+      message_data = {}
+    try:
+      part_data = json.loads(row[6] or "{}")
+    except Exception:
+      part_data = {}
+    role = message_data.get("role") if isinstance(message_data, dict) else None
+    if role not in {"user", "assistant"}:
+      return None
+    content = text_from_codewiz_part(part_data)
+    if not content or (role == "user" and not meaningful_user(content)):
+      return None
+    return {"role": role, "content": content, "timestamp": row[5] if isinstance(row[5], (int, float)) else row[1]}
+  db = sqlite3.connect(str(path))
+  try:
+    rows = db.execute("""
+      SELECT message.id, message.time_created, message.time_updated, message.data AS message_data,
+        part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
+      FROM message
+      LEFT JOIN part ON part.message_id = message.id
+      WHERE message.session_id = ?
+      ORDER BY message.time_created, part.time_created, part.id
+    """, (codewiz_session_id,)).fetchall()
+    for row in rows:
+      if limit <= 0:
+        break
+      parsed = parse_codewiz_row(row)
+      if not parsed:
+        continue
+      if message_index >= offset and message_index < end:
+        messages.append({"index": message_index, "role": parsed["role"], "content": parsed["content"], "timestamp": parsed["timestamp"]})
+      message_index += 1
+      if message_index >= end:
+        break
+  finally:
+    db.close()
+else:
+  with path.open("r", encoding="utf-8", errors="replace") as handle:
+    for line in handle:
+      if limit <= 0:
+        break
+      try:
+        row = json.loads(line)
+      except Exception:
+        continue
+      parsed = parse_message(row, kind)
+      if not parsed:
+        continue
+      if message_index >= offset and message_index < end:
+        messages.append({
+          "index": message_index,
+          "role": parsed["role"],
+          "content": parsed["content"],
+          "timestamp": parsed["timestamp"],
+        })
+      message_index += 1
+      if message_index >= end:
+        break
 
 print(json.dumps({"messages": messages}, ensure_ascii=False))`.replace("__REQUEST_JSON__", () => JSON.stringify(request));
   const script = `import json\nfrom pathlib import Path\n${REMOTE_MESSAGE_PARSER_PY}\n${body}`;
@@ -519,7 +570,7 @@ export function formatRemoteSyncProcessError(error: unknown, stdout: string, std
 }
 
 function looksLikeRemotePayload(output: string): boolean {
-  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index)"/.test(output);
+  return /^\s*\{"kind":\s*"(?:codex-session|codex-index|claude-project|claude-session-index|codewiz-session)"/.test(output);
 }
 
 function truncateRemoteError(value: string, maxChars = 1200): string {
@@ -541,6 +592,7 @@ const REMOTE_SESSION_FILE_KINDS = new Set<RemoteSessionFilePayload["kind"]>([
   "codex-index",
   "claude-project",
   "claude-session-index",
+  "codewiz-session",
 ]);
 
 const REMOTE_SYNC_SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
@@ -585,7 +637,7 @@ function parseRemoteSummaryRecord(
   lineNumber: number,
   kind: RemoteSessionSummaryPayload["kind"],
 ): RemoteSessionSummaryPayload {
-  if (kind !== "codex-session" && kind !== "claude-project") {
+  if (kind !== "codex-session" && kind !== "claude-project" && kind !== "codewiz-session") {
     throw new Error(`Invalid remote payload at line ${lineNumber}: summaries must be session files`);
   }
   const rawId = stringField(parsed, "rawId");
@@ -704,6 +756,7 @@ function isCanonicalBase64(value: string): boolean {
 }
 
 const REMOTE_COLLECTOR_SCRIPT = String.raw`import json
+import sqlite3
 from pathlib import Path
 
 MAX_SESSION_FILES = 2500
@@ -871,6 +924,94 @@ def emit_claude_summary(path, stat, index):
     "tokenEvents": finalize_claude_events(token_state),
   })
 
+def text_from_codewiz_part(data):
+  if not isinstance(data, dict):
+    return ""
+  if isinstance(data.get("text"), str):
+    return data.get("text")
+  return ""
+
+def codewiz_message_rows(db, session_id):
+  try:
+    return db.execute("""
+      SELECT message.id, message.time_created, message.time_updated, message.data AS message_data,
+        part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
+      FROM message
+      LEFT JOIN part ON part.message_id = message.id
+      WHERE message.session_id = ?
+      ORDER BY message.time_created, part.time_created, part.id
+    """, (session_id,)).fetchall()
+  except Exception:
+    return []
+
+def parse_codewiz_row(row):
+  try:
+    message_data = json.loads(row[3] or "{}")
+  except Exception:
+    message_data = {}
+  try:
+    part_data = json.loads(row[6] or "{}")
+  except Exception:
+    part_data = {}
+  role = message_data.get("role") if isinstance(message_data, dict) else None
+  if role not in {"user", "assistant"}:
+    return None
+  content = text_from_codewiz_part(part_data)
+  if not content or (role == "user" and not meaningful_user(content)):
+    return None
+  return {"role": role, "content": content, "timestamp": row[5] if isinstance(row[5], (int, float)) else row[1]}
+
+def codewiz_token_usage(session):
+  return _tok_create(
+    session["tokens_input"] if "tokens_input" in session.keys() and session["tokens_input"] else 0,
+    session["tokens_output"] if "tokens_output" in session.keys() and session["tokens_output"] else 0,
+    (session["tokens_cache_read"] if "tokens_cache_read" in session.keys() and session["tokens_cache_read"] else 0) + (session["tokens_cache_write"] if "tokens_cache_write" in session.keys() and session["tokens_cache_write"] else 0),
+    session["tokens_reasoning"] if "tokens_reasoning" in session.keys() and session["tokens_reasoning"] else 0,
+  )
+
+def emit_codewiz_summaries(db_path, stat):
+  try:
+    db = sqlite3.connect(str(db_path))
+    db.row_factory = sqlite3.Row
+    sessions = db.execute("SELECT * FROM session ORDER BY time_updated DESC LIMIT ?", (MAX_SESSION_FILES,)).fetchall()
+  except Exception:
+    return
+  try:
+    for session in sessions:
+      raw_id = session["id"]
+      first_question = ""
+      message_count = 0
+      message_events = []
+      for row in codewiz_message_rows(db, raw_id):
+        parsed = parse_codewiz_row(row)
+        if not parsed:
+          continue
+        message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
+        message_count += 1
+        if parsed["role"] == "user" and not first_question:
+          first_question = parsed["content"]
+      emit({
+        "kind": "codewiz-session",
+        "path": "%s#%s" % (str(db_path), raw_id),
+        "mtimeMs": int(stat.st_mtime * 1000),
+        "size": stat.st_size,
+        "rawId": raw_id,
+        "projectPath": session["directory"] if isinstance(session["directory"], str) else "",
+        "timestamp": session["time_updated"] or session["time_created"] or int(stat.st_mtime * 1000),
+        "originalTitle": session["title"] or title_from(first_question) or raw_id,
+        "firstQuestion": first_question,
+        "messageCount": message_count,
+        "messageEvents": message_events,
+        "gitBranch": "",
+        "tokenUsage": codewiz_token_usage(session),
+        "tokenEvents": [],
+      })
+  finally:
+    try:
+      db.close()
+    except Exception:
+      pass
+
 candidates = []
 for kind, root, pattern in [
   ("codex-session", home / ".codex" / "sessions", "*.jsonl"),
@@ -888,6 +1029,12 @@ for kind, root, pattern in [
 
 codex_titles = load_codex_titles()
 claude_index = load_claude_index()
+codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
+try:
+  if codewiz_db.exists():
+    emit_codewiz_summaries(codewiz_db, codewiz_db.stat())
+except Exception:
+  pass
 for _mtime, kind, path, _size in sorted(candidates, key=lambda item: item[0], reverse=True)[:MAX_SESSION_FILES]:
   try:
     stat = path.stat()

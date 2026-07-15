@@ -15,6 +15,8 @@ export function liveSessionKeyForSession(session: LiveFilterableSession): string
       ? "codex"
       : session.source === "codebuddy-cli"
         ? "codebuddy"
+        : session.source === "codewiz-cli"
+          ? "codewiz"
         : session.source === "trae"
           ? "trae"
           : null;

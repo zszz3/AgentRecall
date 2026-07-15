@@ -10,6 +10,7 @@ const SOURCE_LABEL: Record<string, string> = {
   "tclaude-cli": "TClaude",
   "tcodex-cli": "TCodex",
   "codebuddy-cli": "CodeBuddy CLI",
+  "codewiz-cli": "CodeWiz",
   openclaw: "OpenClaw",
   hermes: "Hermes",
   "opencode-cli": "OpenCode",

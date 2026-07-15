@@ -1,8 +1,8 @@
 import * as path from "node:path";
-import { loadClaudeCliSessionRows, loadCodexSessionRows, parseCodexSessionMetaLine, parseJsonlText } from "./session-loader";
+import { loadClaudeCliSessionRows, loadCodeWizSessions, loadCodexSessionRows, parseCodexSessionMetaLine, parseJsonlText } from "./session-loader";
 import type { ClaudeConversationLine, CodexConversationLine, LoadedSession, SessionEnvironment, SessionSearchResult } from "./types";
 
-export type RemoteSessionFileKind = "codex-session" | "codex-index" | "claude-project" | "claude-session-index";
+export type RemoteSessionFileKind = "codex-session" | "codex-index" | "claude-project" | "claude-session-index" | "codewiz-session";
 
 export interface RemoteSessionFilePayload {
   kind: RemoteSessionFileKind;
@@ -76,6 +76,12 @@ export function loadRemoteSessionDetailPayload(
     return candidate ? scopeRemoteSession(candidate, environment, "claude") : null;
   }
 
+  if (payload.kind === "codewiz-session") {
+    const [dbPath, sessionId] = payload.path.split("#", 2);
+    const candidate = loadCodeWizSessions(path.dirname(dbPath)).find((item) => item.session.rawId === sessionId);
+    return candidate ? scopeRemoteSession(candidate, environment, "codewiz") : null;
+  }
+
   return null;
 }
 
@@ -101,7 +107,7 @@ function claudeRemoteRelation(
   };
 }
 
-function scopeRemoteSession(loaded: LoadedSession, environment: SessionEnvironment, family: "codex" | "claude"): LoadedSession {
+function scopeRemoteSession(loaded: LoadedSession, environment: SessionEnvironment, family: "codex" | "claude" | "codewiz"): LoadedSession {
   return {
     ...loaded,
     session: {

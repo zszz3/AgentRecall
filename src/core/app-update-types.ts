@@ -22,6 +22,8 @@ export interface AppUpdateStatus {
   checkedAt: number;
   fromCache: boolean;
   updateAvailable: boolean;
+  updateSkipped?: boolean;
+  promptSnoozed?: boolean;
   manifest: AppUpdateManifest | null;
   error: string | null;
 }

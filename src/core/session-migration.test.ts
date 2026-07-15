@@ -221,7 +221,7 @@ describe("session migration model", () => {
   it("returns the base migration targets when enabled targets are omitted", () => {
     const targets: MigrationAgent[] = supportedMigrationTargets("claude-cli");
 
-    expect(targets).toEqual(["claude", "codex", "codebuddy", "cursor"]);
+    expect(targets).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor"]);
   });
 
   it("preserves the narrow element type of explicitly enabled targets", () => {

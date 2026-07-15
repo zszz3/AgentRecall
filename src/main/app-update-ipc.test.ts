@@ -6,12 +6,16 @@ const preloadSource = readFileSync(new URL("../preload/index.ts", import.meta.ur
 
 describe("application update IPC", () => {
   it("exposes shared update status and installation through main and preload", () => {
-    for (const channel of ["app-update:get-status", "app-update:install"]) {
+    for (const channel of ["app-update:get-status", "app-update:install", "app-update:skip"]) {
       expect(mainSource).toContain(`ipcMain.handle("${channel}"`);
       expect(preloadSource).toContain(`ipcRenderer.invoke("${channel}"`);
     }
     expect(mainSource).toContain('webContents.send("app-update:status"');
     expect(preloadSource).toContain('ipcRenderer.on("app-update:status"');
+    expect(mainSource).toContain("skipCurrentAppUpdate");
+    expect(mainSource).toContain("skipUpdateVersion");
+    expect(mainSource).toContain("snoozeUpdatePrompt");
+    expect(mainSource).toContain("refreshAppUpdateStatus(false)");
   });
 
   it("runs the installer outside Electron before quitting the current app", () => {

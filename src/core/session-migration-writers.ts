@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { cleanTitle, extractCursorUserQuery } from "./format-adapters";
@@ -7,6 +8,7 @@ import {
   encodeCursorWorkspaceSlug,
   loadClaudeCliSessionRows,
   loadCodeBuddyCliSessionFile,
+  loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
   parseCursorTranscriptPath,
@@ -14,6 +16,9 @@ import {
 } from "./session-loader";
 import { migrationTargetDescriptor } from "./migration-targets";
 import type { LoadedSession, MigrationTarget, PortableSession } from "./types";
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
 
 export interface WriteMigratedSessionOptions {
   target: MigrationTarget;
@@ -40,6 +45,9 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
   const now = options.now ?? new Date();
   const createId = options.idFactory ?? (() => crypto.randomUUID());
   const sessionId = nextUniqueUuid(createId, new Set());
+  if (options.target === "codewiz") {
+    return writeMigratedCodeWizSession({ ...options, homeDir, now, idFactory: createId }, sessionId);
+  }
   const filePath = targetFilePath(options.target, options.session.projectPath, sessionId, homeDir, now);
   const rows = serializeSession(options.target, options.session, sessionId, createId);
   const tempPath = `${filePath}.tmp-${crypto.randomUUID()}`;
@@ -64,6 +72,30 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
     await fs.promises.rm(tempPath, { force: true });
     throw error;
   }
+}
+
+async function writeMigratedCodeWizSession(
+  options: WriteMigratedSessionOptions & { homeDir: string; now: Date; idFactory: () => string },
+  sessionId: string,
+): Promise<WrittenMigratedSession> {
+  const dbPath = targetFilePath("codewiz", options.session.projectPath, sessionId, options.homeDir, options.now);
+  await fs.promises.mkdir(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  try {
+    ensureCodeWizSchema(db);
+    insertCodeWizSession(db, options.session, sessionId, options.idFactory, options.now);
+  } finally {
+    db.close();
+  }
+
+  const loaded = loadWrittenSession("codewiz", dbPath, sessionId, options.session);
+  validateRoundTrip(loaded, "codewiz", sessionId, options.session);
+  if (options.validate) {
+    const additionallyLoaded = await options.validate(dbPath);
+    validateRoundTrip(additionallyLoaded, "codewiz", sessionId, options.session);
+  }
+  await fs.promises.chmod(dbPath, 0o600);
+  return { sessionId, filePath: dbPath };
 }
 
 function serializeSession(
@@ -196,6 +228,143 @@ function serializeCodeBuddy(
   return rows;
 }
 
+function ensureCodeWizSchema(db: import("node:sqlite").DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project (
+      id text PRIMARY KEY,
+      worktree text NOT NULL,
+      vcs text,
+      name text,
+      icon_url text,
+      icon_color text,
+      time_created integer NOT NULL,
+      time_updated integer NOT NULL,
+      time_initialized integer,
+      sandboxes text NOT NULL,
+      commands text
+    );
+    CREATE TABLE IF NOT EXISTS session (
+      id text PRIMARY KEY,
+      project_id text NOT NULL,
+      parent_id text,
+      slug text NOT NULL,
+      directory text NOT NULL,
+      title text NOT NULL,
+      version text NOT NULL,
+      share_url text,
+      summary_additions integer,
+      summary_deletions integer,
+      summary_files integer,
+      summary_diffs text,
+      revert text,
+      permission text,
+      time_created integer NOT NULL,
+      time_updated integer NOT NULL,
+      time_compacting integer,
+      time_archived integer,
+      workspace_id text
+    );
+    CREATE TABLE IF NOT EXISTS message (
+      id text PRIMARY KEY,
+      session_id text NOT NULL,
+      time_created integer NOT NULL,
+      time_updated integer NOT NULL,
+      data text NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS part (
+      id text PRIMARY KEY,
+      message_id text NOT NULL,
+      session_id text NOT NULL,
+      time_created integer NOT NULL,
+      time_updated integer NOT NULL,
+      data text NOT NULL
+    );
+  `);
+}
+
+function insertCodeWizSession(
+  db: import("node:sqlite").DatabaseSync,
+  session: PortableSession,
+  sessionId: string,
+  createId: () => string,
+  now: Date,
+): void {
+  const nowMs = now.getTime();
+  const projectId = crypto.createHash("sha1").update(session.projectPath || "/").digest("hex");
+  const insertProject = db.prepare(`
+    INSERT OR IGNORE INTO project (id, worktree, vcs, name, icon_url, icon_color, time_created, time_updated, time_initialized, sandboxes, commands)
+    VALUES (?, ?, NULL, NULL, NULL, NULL, ?, ?, NULL, '[]', NULL)
+  `);
+  const insertSession = db.prepare(`
+    INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id)
+    VALUES (?, ?, NULL, ?, ?, ?, 'migration', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL, NULL, NULL)
+  `);
+  const insertMessage = db.prepare(`
+    INSERT INTO message (id, session_id, time_created, time_updated, data)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const insertPart = db.prepare(`
+    INSERT INTO part (id, message_id, session_id, time_created, time_updated, data)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    insertProject.run(projectId, session.projectPath || "/", nowMs, nowMs);
+    insertSession.run(
+      sessionId,
+      projectId,
+      slugFromTitle(session.title || sessionId),
+      session.projectPath,
+      session.title || sessionId,
+      timestampMs(session.startedAt) || nowMs,
+      nowMs,
+    );
+    let parentId: string | null = null;
+    const usedIds = new Set<string>([sessionId]);
+    for (const message of session.messages) {
+      const messageId = `msg_${nextUniqueUuid(createId, usedIds).replace(/-/g, "")}`;
+      const partId = `prt_${nextUniqueUuid(createId, usedIds).replace(/-/g, "")}`;
+      const messageTime = timestampMs(message.timestamp) || nowMs;
+      insertMessage.run(
+        messageId,
+        sessionId,
+        messageTime,
+        messageTime,
+        JSON.stringify({
+          role: message.role,
+          time: { created: messageTime, ...(message.role === "assistant" ? { completed: messageTime } : {}) },
+          ...(parentId ? { parentID: parentId } : {}),
+          modelID: "session-migration",
+          providerID: "codewiz",
+          mode: "build",
+          agent: "build",
+          path: { cwd: session.projectPath, root: session.projectPath },
+          cost: 0,
+          tokens: { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      );
+      insertPart.run(
+        partId,
+        messageId,
+        sessionId,
+        messageTime,
+        messageTime,
+        JSON.stringify({ type: "text", text: message.content }),
+      );
+      parentId = messageId;
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function slugFromTitle(title: string): string {
+  return cleanTitle(title).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "migrated-session";
+}
+
 function normalizeCursorMigrationContent(content: string, role: "user" | "assistant"): string {
   return role === "user" ? extractCursorUserQuery(content) : content;
 }
@@ -228,6 +397,7 @@ export function targetFilePath(
   now: Date,
 ): string {
   const family = migrationTargetDescriptor(target).family;
+  if (family === "codewiz") return path.join(homeDir, ".local", "share", "codewiz", "opencode.db");
   const root = TARGET_ROOTS[target];
   if (family === "codex") {
     const year = String(now.getUTCFullYear()).padStart(4, "0");
@@ -265,6 +435,7 @@ const TARGET_ROOTS: Record<MigrationTarget, string> = {
   tcodex: ".tcodex",
   "codex-internal": ".codex-internal",
   codebuddy: ".codebuddy",
+  codewiz: path.join(".local", "share", "codewiz"),
   cursor: ".cursor",
 };
 
@@ -497,6 +668,9 @@ function loadWrittenSession(
   }
 
   const descriptor = migrationTargetDescriptor(target);
+  if (descriptor.family === "codewiz") {
+    return loadCodeWizSessions(path.dirname(filePath)).find((item) => item.session.rawId === sessionId) ?? null;
+  }
   const rows = parseJsonlText(fs.readFileSync(filePath, "utf8"));
   if (descriptor.family === "codex") {
     return loadCodexSessionRows(filePath, rows, { sourceOverride: descriptor.source });
@@ -523,7 +697,7 @@ function validateRoundTrip(
       const expectedContent = target === "cursor"
         ? normalizeCursorMigrationContent(expected.content, expected.role)
         : expected.content;
-      const timestampMatches = descriptor.family === "codebuddy"
+      const timestampMatches = descriptor.family === "codebuddy" || descriptor.family === "codewiz"
         ? new Date(message.timestamp).getTime() === new Date(expected.timestamp).getTime()
         : target === "cursor"
           ? true

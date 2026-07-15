@@ -175,7 +175,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
 
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
 type SettingsSection = "terminal" | "shortcut" | "connections" | "sources" | "usage" | "ai" | "remote" | "skills" | "appearance" | "about";
-type PendingSourceKey = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
+type PendingSourceKey = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
 type OptionalSourceSettingKey = keyof Pick<
   AppSettings,
   | "includeClaudeInternal"
@@ -183,6 +183,7 @@ type OptionalSourceSettingKey = keyof Pick<
   | "includeTclaude"
   | "includeTcodex"
   | "includeCodeBuddyCli"
+  | "includeCodeWizCli"
   | "includeOpenClaw"
   | "includeHermes"
   | "includeOpenCode"
@@ -196,6 +197,7 @@ const OPTIONAL_SOURCE_SETTINGS: Array<{ key: OptionalSourceSettingKey; pendingKe
   { key: "includeTclaude", pendingKey: "tclaude", filter: "tclaude-cli" },
   { key: "includeTcodex", pendingKey: "tcodex", filter: "tcodex-cli" },
   { key: "includeCodeBuddyCli", pendingKey: "codebuddy", filter: "codebuddy-cli" },
+  { key: "includeCodeWizCli", pendingKey: "codewiz", filter: "codewiz-cli" },
   { key: "includeOpenClaw", pendingKey: "openclaw", filter: "openclaw" },
   { key: "includeHermes", pendingKey: "hermes", filter: "hermes" },
   { key: "includeOpenCode", pendingKey: "opencode", filter: "opencode-cli" },
@@ -513,6 +515,7 @@ export function App(): ReactElement {
   const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [appUpdateBusy, setAppUpdateBusy] = useState(false);
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
+  const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
@@ -535,6 +538,7 @@ export function App(): ReactElement {
     tclaude: false,
     tcodex: false,
     codebuddy: false,
+    codewiz: false,
     openclaw: false,
     hermes: false,
     opencode: false,
@@ -1169,6 +1173,7 @@ export function App(): ReactElement {
       includeTclaude: appSettings.includeTclaude && !pendingPersonalSources.tclaude,
       includeTcodex: appSettings.includeTcodex && !pendingPersonalSources.tcodex,
       includeCodeBuddyCli: appSettings.includeCodeBuddyCli && !pendingPersonalSources.codebuddy,
+      includeCodeWizCli: appSettings.includeCodeWizCli && !pendingPersonalSources.codewiz,
       includeOpenClaw: appSettings.includeOpenClaw && !pendingPersonalSources.openclaw,
       includeHermes: appSettings.includeHermes && !pendingPersonalSources.hermes,
       includeOpenCode: appSettings.includeOpenCode && !pendingPersonalSources.opencode,
@@ -1661,6 +1666,18 @@ export function App(): ReactElement {
       await window.sessionSearch.installAppUpdate();
     } catch (error) {
       setAppUpdateError(error instanceof Error ? error.message : String(error));
+      setAppUpdateBusy(false);
+    }
+  }
+
+  async function skipAppUpdate(untilNextVersion: boolean): Promise<void> {
+    setAppUpdateBusy(true);
+    setAppUpdateError(null);
+    try {
+      setAppUpdateStatus(await window.sessionSearch.skipAppUpdate(untilNextVersion));
+    } catch (error) {
+      setAppUpdateError(error instanceof Error ? error.message : String(error));
+    } finally {
       setAppUpdateBusy(false);
     }
   }
@@ -2198,19 +2215,19 @@ export function App(): ReactElement {
               <KeyRound size={15} />
             </button>
             <button
-              className={`icon-button toolbar-icon-button ${appUpdateStatus?.updateAvailable ? "update-available" : ""}`}
+              className={`icon-button toolbar-icon-button ${shouldSignalAppUpdate ? "update-available" : ""}`}
               onClick={() => {
                 setSkillsOpen(false);
                 setApiConfigOpen(false);
                 setRemoteSessionsOpen(false);
-                setSettingsInitialSection(appUpdateStatus?.updateAvailable ? "about" : "terminal");
+                setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
                 setSettingsOpen(true);
               }}
-              title={appUpdateStatus?.updateAvailable ? t("Update available", "有新版本可用") : t("Settings", "设置")}
-              aria-label={appUpdateStatus?.updateAvailable ? t("Update available", "有新版本可用") : t("Settings", "设置")}
+              title={shouldSignalAppUpdate ? t("Update available", "有新版本可用") : t("Settings", "设置")}
+              aria-label={shouldSignalAppUpdate ? t("Update available", "有新版本可用") : t("Settings", "设置")}
             >
               <Settings size={15} />
-              {appUpdateStatus?.updateAvailable ? <span className="update-indicator" aria-hidden="true" /> : null}
+              {shouldSignalAppUpdate ? <span className="update-indicator" aria-hidden="true" /> : null}
             </button>
           </div>
         </header>
@@ -2488,6 +2505,7 @@ export function App(): ReactElement {
           onSettingsChange={(next) => void updateSettings(next)}
           onCheckAppUpdate={() => void checkAppUpdate()}
           onInstallAppUpdate={() => void installAppUpdate()}
+          onSkipAppUpdate={(untilNextVersion) => void skipAppUpdate(untilNextVersion)}
           onThemeChange={setTheme}
           onLanguageChange={setLanguage}
           onDefaultTerminalChange={(terminal) => void updateDefaultTerminal(terminal)}
@@ -3038,6 +3056,7 @@ function SettingsDialog({
   onSettingsChange,
   onCheckAppUpdate,
   onInstallAppUpdate,
+  onSkipAppUpdate,
   onThemeChange,
   onLanguageChange,
   onDefaultTerminalChange,
@@ -3067,6 +3086,7 @@ function SettingsDialog({
   onSettingsChange: (settings: AppSettingsUpdate) => void;
   onCheckAppUpdate: () => void;
   onInstallAppUpdate: () => void;
+  onSkipAppUpdate: (untilNextVersion: boolean) => void;
   onThemeChange: (theme: ThemeMode) => void;
   onLanguageChange: (language: LanguageMode) => void;
   onDefaultTerminalChange: (terminal: AppSettings["defaultTerminal"]) => void;
@@ -3137,6 +3157,8 @@ function SettingsDialog({
     }
   }
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
+  const appUpdateSuppressed = Boolean(appUpdateStatus?.updateAvailable && !shouldSignalAppUpdate);
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const settingsContentRef = useRef<HTMLDivElement>(null);
 
@@ -3200,7 +3222,7 @@ function SettingsDialog({
             <button className={activeSection === "about" ? "active" : ""} onClick={() => setActiveSection("about")}>
               <Info size={15} />
               <span>{l("About", "关于")}</span>
-              {appUpdateStatus?.updateAvailable ? <span className="settings-update-dot" aria-hidden="true" /> : null}
+              {shouldSignalAppUpdate ? <span className="settings-update-dot" aria-hidden="true" /> : null}
             </button>
           </nav>
           <div ref={settingsContentRef} className="settings-content">
@@ -3357,6 +3379,19 @@ function SettingsDialog({
                     checked={Boolean(settings?.hideSubagentSessions)}
                     disabled={!settings || saving}
                     onChange={(event) => onSettingsChange({ hideSubagentSessions: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">Include CodeWiz</span>
+                    <span className="settings-field-sub">{l("Indexes CodeWiz sessions from ~/.local/share/codewiz.", "索引 ~/.local/share/codewiz 中的 CodeWiz 会话。")}</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.includeCodeWizCli)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ includeCodeWizCli: event.currentTarget.checked })}
                   />
                 </label>
                 <label className="settings-field settings-toggle">
@@ -3806,7 +3841,7 @@ function SettingsDialog({
                   <p>v{appUpdateStatus?.currentVersion ?? "0.0.0"}</p>
                 </div>
 
-                {appUpdateStatus?.updateAvailable && appUpdateStatus.manifest ? (
+                {shouldSignalAppUpdate && appUpdateStatus?.manifest ? (
                   <div className="update-available-card">
                     <div className="update-available-head">
                       <div className="update-available-copy">
@@ -3839,6 +3874,12 @@ function SettingsDialog({
                         >
                           <RefreshCw size={15} className={appUpdateBusy ? "spin" : ""} />
                         </button>
+                        <button type="button" className="update-secondary-button" disabled={appUpdateBusy} onClick={() => onSkipAppUpdate(false)}>
+                          {l("Skip", "跳过")}
+                        </button>
+                        <button type="button" className="update-secondary-button" disabled={appUpdateBusy} onClick={() => onSkipAppUpdate(true)}>
+                          {l("Skip until next", "跳过至下版")}
+                        </button>
                         <button type="button" className="update-primary-button" disabled={appUpdateBusy} onClick={onInstallAppUpdate}>
                           <Download size={15} aria-hidden="true" />
                           {appUpdateBusy ? l("Preparing...", "准备中...") : l("Update now", "立即更新")}
@@ -3860,16 +3901,20 @@ function SettingsDialog({
                       <strong>
                         {appUpdateBusy
                           ? l("Checking for updates...", "正在检查更新...")
-                          : appUpdateError || appUpdateStatus?.error || l("You're up to date", "当前已是最新版本")}
+                          : appUpdateError || appUpdateStatus?.error || (appUpdateSuppressed ? l("Update prompt skipped", "已跳过此次更新提示") : l("You're up to date", "当前已是最新版本"))}
                       </strong>
                       {!appUpdateBusy && !appUpdateError && !appUpdateStatus?.error ? (
-                        <span>{l("Automatic checks will keep you on the newest release.", "自动检查会让你及时获取后续新版本。")}</span>
+                        <span>
+                          {appUpdateSuppressed
+                            ? l("Use Check for updates to show the skipped release again.", "点击检查更新可重新显示已跳过的版本。")
+                            : l("Automatic checks will keep you on the newest release.", "自动检查会让你及时获取后续新版本。")}
+                        </span>
                       ) : null}
                     </span>
                   </div>
                 )}
 
-                {!appUpdateStatus?.updateAvailable ? (
+                {!shouldSignalAppUpdate ? (
                   <div className="update-about-actions">
                     <button type="button" className="settings-action-button" disabled={appUpdateBusy} onClick={onCheckAppUpdate}>
                       <RefreshCw size={14} className={appUpdateBusy ? "spin" : ""} />

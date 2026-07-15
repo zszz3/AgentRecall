@@ -52,6 +52,14 @@ describe("stylesheet theme contract", () => {
     expect(settingsContent).toMatch(/overflow-y:\s*auto/);
   });
 
+  it("aligns the about update toggle with the update card", () => {
+    const updateCard = stylesheet.match(/\.update-available-card\s*\{[^}]*\}/)?.[0] ?? "";
+    const autoCheck = stylesheet.match(/\.update-auto-check\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(updateCard).toMatch(/width:\s*min\(100%,\s*560px\)/);
+    expect(autoCheck).toMatch(/width:\s*min\(100%,\s*560px\)/);
+  });
+
   it("keeps the API config dialog viewport-bound with a clear provider switch", () => {
     const apiDialog = stylesheet.match(/\.api-config-dialog\s*\{[^}]*\}/)?.[0] ?? "";
     const apiBody = stylesheet.match(/\.api-config-body\s*\{[^}]*\}/)?.[0] ?? "";
@@ -182,5 +190,19 @@ describe("stylesheet theme contract", () => {
     expect(sshCheck).toMatch(/appearance:\s*none/);
     expect(sshCheck).toMatch(/outline:\s*0/);
     expect(checked).toMatch(/background:\s*var\(--accent\)/);
+  });
+
+  it("uses a soft Xiaohongshu red for CodeWiz badges", () => {
+    const root = stylesheet.match(/:root\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const dark = stylesheet.match(/:root\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const badge = stylesheet.match(/\.source-badge\.codewiz\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(root).toMatch(/--codewiz:\s*#ff2442/);
+    expect(root).toMatch(/--codewiz-badge-bg:\s*#fff0f2/);
+    expect(root).toMatch(/--codewiz-badge-text:\s*#b42335/);
+    expect(dark).toMatch(/--codewiz-badge-bg:\s*rgba\(255,\s*90,\s*111,\s*0\.16\)/);
+    expect(dark).toMatch(/--codewiz-badge-text:\s*#ff8d9d/);
+    expect(badge).toMatch(/background:\s*var\(--codewiz-badge-bg\)/);
+    expect(badge).toMatch(/color:\s*var\(--codewiz-badge-text\)/);
   });
 });

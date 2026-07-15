@@ -30,6 +30,7 @@ const CODEX_INTERNAL_DIR = ".codex-internal";
 const TCLAUDE_DIR = ".tclaude";
 const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
+const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 
 export interface SessionLoadOptions {
   homeDir?: string;
@@ -38,6 +39,7 @@ export interface SessionLoadOptions {
   includeTclaude?: boolean;
   includeTcodex?: boolean;
   includeCodeBuddyCli?: boolean;
+  includeCodeWizCli?: boolean;
   includeOpenClaw?: boolean;
   includeHermes?: boolean;
   includeOpenCode?: boolean;
@@ -721,7 +723,7 @@ function firstClaudeGitBranch(rows: unknown[]): string | null {
 }
 
 function createIndexedSession(input: {
-  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "tclaude" | "tcodex" | "codebuddy" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
+  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -1453,15 +1455,34 @@ function resolveOpenCodeDbPath(root: string): string {
 }
 
 export function loadOpenCodeSessions(opencodeRoot = path.join(os.homedir(), ".local", "share", "opencode")): LoadedSession[] {
+  return loadOpenCodeLikeSessions(opencodeRoot, {
+    keyPrefix: "opencode",
+    source: "opencode-cli",
+    traceSource: "opencode",
+  });
+}
+
+export function loadCodeWizSessions(codeWizRoot = path.join(os.homedir(), CODEWIZ_SHARE_DIR)): LoadedSession[] {
+  return loadOpenCodeLikeSessions(codeWizRoot, {
+    keyPrefix: "codewiz",
+    source: "codewiz-cli",
+    traceSource: "codewiz",
+  });
+}
+
+function loadOpenCodeLikeSessions(
+  opencodeRoot: string,
+  sourceOptions: { keyPrefix: "opencode" | "codewiz"; source: "opencode-cli" | "codewiz-cli"; traceSource: "opencode" | "codewiz" },
+): LoadedSession[] {
   const dbPath = resolveOpenCodeDbPath(opencodeRoot);
   const db = readOnlyDatabase(dbPath);
   if (!db) return [];
   try {
     if (!sqliteTableExists(db, "session")) return [];
     if (!sqliteHasColumns(db, "session", ["id", "time_created"])) return [];
-    if (sqliteTableExists(db, "message") && !sqliteHasColumns(db, "message", ["id", "session_id", "type", "data"])) return [];
+    if (sqliteTableExists(db, "message") && !sqliteHasColumns(db, "message", ["id", "session_id", "data"])) return [];
     const sessions = db.prepare("SELECT * FROM session ORDER BY time_created DESC").all() as Array<Record<string, unknown>>;
-    return sessions.map((session) => loadOpenCodeSessionRow(db, dbPath, session)).filter((item): item is LoadedSession => Boolean(item));
+    return sessions.map((session) => loadOpenCodeSessionRow(db, dbPath, session, sourceOptions)).filter((item): item is LoadedSession => Boolean(item));
   } catch {
     return [];
   } finally {
@@ -1469,16 +1490,21 @@ export function loadOpenCodeSessions(opencodeRoot = path.join(os.homedir(), ".lo
   }
 }
 
-function opencodeMessagesFromParts(db: import("node:sqlite").DatabaseSync, rawId: string): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[] } {
+function opencodeMessagesFromParts(
+  db: import("node:sqlite").DatabaseSync,
+  rawId: string,
+  traceSource: "opencode" | "codewiz" = "opencode",
+): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[] } {
   if (!sqliteTableExists(db, "message")) return { messages: [], traceEvents: [] };
   const messageColumns = sqliteColumns(db, "message");
   const partColumns = sqliteColumns(db, "part");
   const hasPart = sqliteTableExists(db, "part") && partColumns.has("data");
+  const messageTypeSelect = messageColumns.has("type") ? "message.type" : "'' AS type";
   const rows = hasPart
     ? (db
         .prepare(
           `
-          SELECT message.id, message.type, message.time_created, message.data AS message_data,
+          SELECT message.id, ${messageTypeSelect}, message.time_created, message.data AS message_data,
             part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
           FROM message
           LEFT JOIN part ON part.message_id = message.id
@@ -1514,7 +1540,7 @@ function opencodeMessagesFromParts(db: import("node:sqlite").DatabaseSync, rawId
       const name = isRecord(partData) ? firstStringField(partData, ["tool", "toolName", "name", "type"]) : stringField(row, "type");
       traceDrafts.push({
         kind: "event",
-        source: "opencode",
+        source: traceSource,
         title: normalizeTraceTitle(name || "part", firstStringField(partData, ["command", "path", "file_path", "query"])),
         detail: stringifyDetail(partData || messageData),
         timestamp: ts,
@@ -1527,10 +1553,19 @@ function opencodeMessagesFromParts(db: import("node:sqlite").DatabaseSync, rawId
   return { messages, traceEvents: dedupeTraceEvents(traceDrafts) };
 }
 
-function loadOpenCodeSessionRow(db: import("node:sqlite").DatabaseSync, dbPath: string, session: Record<string, unknown>): LoadedSession | null {
+function loadOpenCodeSessionRow(
+  db: import("node:sqlite").DatabaseSync,
+  dbPath: string,
+  session: Record<string, unknown>,
+  sourceOptions: { keyPrefix: "opencode" | "codewiz"; source: "opencode-cli" | "codewiz-cli"; traceSource: "opencode" | "codewiz" } = {
+    keyPrefix: "opencode",
+    source: "opencode-cli",
+    traceSource: "opencode",
+  },
+): LoadedSession | null {
   const rawId = stringField(session, "id");
   if (!rawId) return null;
-  const { messages, traceEvents } = opencodeMessagesFromParts(db, rawId);
+  const { messages, traceEvents } = opencodeMessagesFromParts(db, rawId, sourceOptions.traceSource);
   const question = firstQuestion(messages);
   const stat = safeStat(dbPath);
   const usage = createSourceTokenUsage(
@@ -1541,9 +1576,9 @@ function loadOpenCodeSessionRow(db: import("node:sqlite").DatabaseSync, dbPath: 
   );
   return {
     session: createIndexedSession({
-      keyPrefix: "opencode",
+      keyPrefix: sourceOptions.keyPrefix,
       rawId,
-      source: "opencode-cli",
+      source: sourceOptions.source,
       projectPath: stringField(session, "directory") || stringField(session, "path"),
       filePath: dbPath,
       originalTitle: stringField(session, "title") || cleanTitle(question) || rawId,
@@ -1781,6 +1816,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   }
   if (options.includeHermes) yield* loadHermesSessions();
   if (options.includeOpenCode) yield* loadOpenCodeSessions();
+  if (options.includeCodeWizCli) yield* loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR));
   if (options.includeCursorAgent) yield* loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options);
   if (options.includeTrae) yield* loadTraeSessionsIterator(path.join(homeDir, ".trae-cn"), options);
   if (options.includeClaudeInternal) yield* loadClaudeCliSessionsIterator(path.join(homeDir, CLAUDE_INTERNAL_DIR), "claude-internal", options);

@@ -27,6 +27,13 @@ export const MIGRATION_TARGETS: readonly MigrationTargetDescriptor[] = [
     enabledSetting: null,
   },
   {
+    id: "codewiz",
+    label: "CodeWiz",
+    family: "codewiz",
+    source: "codewiz-cli",
+    enabledSetting: null,
+  },
+  {
     id: "cursor",
     label: "Cursor Agent",
     family: "cursor",
@@ -67,6 +74,7 @@ export const MIGRATION_TARGET_IDS = [
   "claude",
   "codex",
   "codebuddy",
+  "codewiz",
   "cursor",
   "tclaude",
   "tcodex",
@@ -74,7 +82,7 @@ export const MIGRATION_TARGET_IDS = [
   "codex-internal",
 ] as const satisfies readonly MigrationTarget[];
 
-export const BASE_MIGRATION_TARGETS = ["claude", "codex", "codebuddy", "cursor"] as const satisfies readonly MigrationTarget[];
+export const BASE_MIGRATION_TARGETS = ["claude", "codex", "codebuddy", "codewiz", "cursor"] as const satisfies readonly MigrationTarget[];
 
 export function isMigrationTarget(value: unknown): value is MigrationTarget {
   return typeof value === "string" && (MIGRATION_TARGET_IDS as readonly string[]).includes(value);

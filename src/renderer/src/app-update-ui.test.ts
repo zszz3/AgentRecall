@@ -9,6 +9,13 @@ describe("application update UI", () => {
     expect(appSource).toContain('activeSection === "about"');
     expect(appSource).toContain('className="update-release-card"');
     expect(appSource).toContain('className="update-primary-button"');
+    expect(appSource).toContain('className="update-secondary-button"');
+    expect(appSource).toContain('onSkipAppUpdate(false)');
+    expect(appSource).toContain('onSkipAppUpdate(true)');
+    expect(appSource).toContain("!appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed");
+    expect(appSource).toContain("{shouldSignalAppUpdate && appUpdateStatus?.manifest ? (");
+    expect(appSource).toContain("Update prompt skipped");
+    expect(appSource).toContain("Use Check for updates to show the skipped release again.");
     expect(appSource).toContain('className="update-indicator"');
     expect(appSource).toContain('className="update-brand-mark"');
     expect(appSource).toContain('className="update-state-copy"');

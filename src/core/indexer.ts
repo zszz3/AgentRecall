@@ -1,7 +1,9 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   loadClaudeCliSessionRows,
   loadCodeBuddyCliSessionFile,
+  loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
   loadDefaultSessions,
@@ -183,6 +185,7 @@ function loadMigratedSessionFile(target: MigrationTarget, filePath: string): Loa
 
   const descriptor = migrationTargetDescriptor(target);
   if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
+  if (descriptor.family === "codewiz") return loadCodeWizSessions(path.dirname(filePath))[0] ?? null;
 
   let rows: unknown[];
   try {

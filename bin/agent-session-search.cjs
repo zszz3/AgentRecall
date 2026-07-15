@@ -16,6 +16,7 @@ const {
   ensureElectronRuntimeForLaunch,
   formatUpdateNotice,
   readUpdatePreference,
+  skipUpdateVersion,
   snoozeUpdatePrompt,
   waitForUpdateCompletion,
 } = require("./update-client.cjs");
@@ -88,17 +89,24 @@ async function main() {
     return;
   }
 
-  if (result?.updateAvailable && result.manifest && !result.promptSnoozed && process.stdin.isTTY && process.stdout.isTTY) {
+  if (result?.updateAvailable && result.manifest && !result.updateSkipped && !result.promptSnoozed && process.stdin.isTTY && process.stdout.isTTY) {
     process.stdout.write(`${formatUpdateNotice(result)}\n\n`);
     const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await prompt.question("是否立即更新？[y/N] ");
+    const answer = await prompt.question("请选择：[1] 更新  [2] 跳过  [3] 跳过，直至下个版本  (默认 2): ");
     prompt.close();
-    if (/^y(?:es)?$/i.test(answer.trim())) {
+    const choice = answer.trim().toLowerCase();
+    if (choice === "1" || choice === "u" || choice === "update" || /^y(?:es)?$/i.test(choice)) {
       process.stdout.write("正在准备更新，完成后会自动启动应用。\n");
       await scheduleUpdate(result.manifest, { stopApp: true });
       return;
     }
-    await snoozeUpdatePrompt(result.manifest.version);
+    if (choice === "3" || choice === "s" || choice === "skip-version") {
+      await skipUpdateVersion(result.manifest.version);
+      process.stdout.write(`已跳过 v${result.manifest.version}，下个版本发布前不再提示。\n`);
+    } else {
+      await snoozeUpdatePrompt(result.manifest.version);
+      process.stdout.write("本次已跳过，之后仍会提示该版本。\n");
+    }
   }
 
   await waitForUpdateCompletion({

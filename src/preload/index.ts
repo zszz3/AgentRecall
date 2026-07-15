@@ -94,6 +94,7 @@ const api = {
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
   getAppUpdateStatus: (force = false): Promise<AppUpdateStatus> => ipcRenderer.invoke("app-update:get-status", force),
   installAppUpdate: (): Promise<AppUpdateInstallResult> => ipcRenderer.invoke("app-update:install"),
+  skipAppUpdate: (untilNextVersion = false): Promise<AppUpdateStatus> => ipcRenderer.invoke("app-update:skip", untilNextVersion),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   applyCodexProfile: (apiConfig: ApiConfig): Promise<ApplyCodexProfileResult> => ipcRenderer.invoke("codex-profile:apply", apiConfig),

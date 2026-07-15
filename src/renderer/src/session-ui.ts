@@ -27,6 +27,7 @@ export const SOURCE_LABEL: Record<SessionSource, string> = {
   "tclaude-cli": "TClaude",
   "tcodex-cli": "TCodex",
   "codebuddy-cli": "CodeBuddy CLI",
+  "codewiz-cli": "CodeWiz",
   openclaw: "OpenClaw",
   hermes: "Hermes",
   "opencode-cli": "OpenCode",
@@ -85,6 +86,7 @@ export function sourceFilters(settings: AppSettings | null): Array<{ label: stri
     ...(settings?.includeTclaude ? [{ label: "TClaude", value: "tclaude-cli" as const }] : []),
     ...(settings?.includeTcodex ? [{ label: "TCodex", value: "tcodex-cli" as const }] : []),
     ...(settings?.includeCodeBuddyCli ? [{ label: "CodeBuddy CLI", value: "codebuddy-cli" as const }] : []),
+    ...(settings?.includeCodeWizCli ? [{ label: "CodeWiz", value: "codewiz-cli" as const }] : []),
     ...(settings?.includeOpenClaw ? [{ label: "OpenClaw", value: "openclaw" as const }] : []),
     ...(settings?.includeHermes ? [{ label: "Hermes", value: "hermes" as const }] : []),
     ...(settings?.includeOpenCode ? [{ label: "OpenCode", value: "opencode-cli" as const }] : []),
@@ -101,15 +103,16 @@ export function displayTagName(tagName: string): string {
   return tagName.startsWith("branch:") ? tagName.slice("branch:".length) : tagName;
 }
 
-export function sourceUiFamily(source: SessionSource): "claude" | "codex" | "codebuddy" | "other" {
+export function sourceUiFamily(source: SessionSource): "claude" | "codex" | "codebuddy" | "codewiz" | "other" {
   if (source.startsWith("claude")) return "claude";
   if (source.startsWith("codex")) return "codex";
   if (source === "codebuddy-cli") return "codebuddy";
+  if (source === "codewiz-cli") return "codewiz";
   return "other";
 }
 
 export function supportsResumeSource(source: SessionSource): boolean {
-  return source.startsWith("claude") || source.startsWith("codex") || source === "codebuddy-cli";
+  return source.startsWith("claude") || source.startsWith("codex") || source === "codebuddy-cli" || source === "codewiz-cli";
 }
 
 export function supportsMigrationSource(source: SessionSource): boolean {
