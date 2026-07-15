@@ -11,6 +11,7 @@ import {
   fetchRemoteSessionFilePayload,
   formatRemoteSyncProcessError,
   REMOTE_SYNC_EXEC_OPTIONS,
+  remoteFamilyForSource,
   syncRemoteEnvironment,
 } from "./remote-sync";
 import type { RemoteSessionFilePayload } from "./remote-session-loader";
@@ -54,6 +55,17 @@ function validCodexPayload(rawId = "remote-codex"): RemoteSessionFilePayload {
 }
 
 describe("remote sync", () => {
+  it.each([
+    ["claude-cli", "claude"],
+    ["tclaude-cli", "claude"],
+    ["codex-cli", "codex"],
+    ["tcodex-cli", "codex"],
+    ["codebuddy-cli", "codebuddy"],
+    ["codewiz-cli", "codewiz"],
+  ] as const)("maps %s to the %s remote family", (source, family) => {
+    expect(remoteFamilyForSource(source)).toBe(family);
+  });
+
   it("collects summaries from all five CLI sources and keeps same raw IDs isolated by source", async () => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);

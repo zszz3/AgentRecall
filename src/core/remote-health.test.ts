@@ -139,6 +139,7 @@ describe("remote health checks", () => {
     ["tclaude-cli", "tclaude"],
     ["tcodex-cli", "tcodex"],
     ["codebuddy-cli", "codebuddy"],
+    ["codewiz-cli", "codewiz"],
   ] as const)("preflights %s with %s", async (source, binary) => {
     let script = "";
     await preflightRemoteSessionResume(environment, { ...session, source } as SessionSearchResult, {
