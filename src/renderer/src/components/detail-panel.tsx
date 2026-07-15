@@ -8,6 +8,7 @@ import { localize, type LanguageMode } from "../language";
 import type { LiveSessionState } from "../live-filter";
 import type { ActionStatus } from "../app-types";
 import { HighlightedSearchText, searchHighlightTerms } from "../search-highlight";
+import { Markdown } from "../lightweight-markdown";
 import {
   environmentBadgeLabel,
   environmentBadgeTitle,
@@ -281,11 +282,20 @@ export function DetailPanel({
   useEffect(() => {
     if (loading || messages.length === 0 || pendingInitialScrollRef.current !== session.sessionKey) return;
     const frame = window.requestAnimationFrame(() => {
-      bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+      if (matchedMessageIndex !== null) {
+        const target = bodyRef.current?.querySelector(`[data-message-index="${matchedMessageIndex}"]`) as HTMLElement | null;
+        if (target) {
+          target.scrollIntoView({ behavior: "auto", block: "center" });
+        } else {
+          bodyRef.current?.scrollTo({ top: 0 });
+        }
+      } else {
+        bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+      }
       pendingInitialScrollRef.current = null;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [loading, messages.length, session.sessionKey]);
+  }, [loading, messages.length, session.sessionKey, matchedMessageIndex]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -599,13 +609,21 @@ function MessageBlock({
   }, [message.content, truncated, expanded, language]);
   const highlightTerms = useMemo(() => (highlight ? searchHighlightTerms(query) : []), [highlight, query]);
 
+  const useMarkdown = message.role === "assistant" && !highlight && (!truncated || expanded);
+
   return (
     <div className={`message ${message.role} ${highlight ? "match-context" : ""} ${target ? "match-target" : ""}`} data-message-index={message.index}>
       <div className="message-head">
         <strong>{message.role === "user" ? localize(language, "User", "用户") : localize(language, "Assistant", "助手")}</strong>
         <span>{formatMessageTime(message.timestamp)}</span>
       </div>
-      <pre>{highlight ? <HighlightedSearchText text={content} terms={highlightTerms} /> : content}</pre>
+      {useMarkdown ? (
+        <div className="message-md">
+          <Markdown text={content} />
+        </div>
+      ) : (
+        <pre>{highlight ? <HighlightedSearchText text={content} terms={highlightTerms} /> : content}</pre>
+      )}
       {truncated ? (
         <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}

@@ -2459,6 +2459,17 @@ select:focus-visible {
   line-height: 1.55;
 }
 
+.message-md {
+  padding: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.message-md .md-code {
+  font-size: 12px;
+}
+
 .trace-event {
   margin-bottom: 8px;
   overflow: hidden;
