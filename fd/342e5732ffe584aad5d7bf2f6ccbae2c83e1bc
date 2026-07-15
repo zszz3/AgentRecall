@@ -1,0 +1,27 @@
+src/core/skill-diff.test.ts
+  s_a2f2c976d4bbff::t_a293d662031e04 1-59
+src/core/skill-diff.ts
+  s_a2f2c976d4bbff::t_9c283f93e5806d 1-134
+src/renderer/src/skill-sync-view-model.test.ts
+  s_a2f2c976d4bbff::t_04ff1845e2fae2 1-123
+src/renderer/src/skill-sync-view-model.ts
+  s_a2f2c976d4bbff::t_74aba8b1323322 1-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "fd342e5732ffe584aad5d7bf2f6ccbae2c83e1bc",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

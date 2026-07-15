@@ -1,0 +1,45 @@
+.github/workflows/quality-check.yml
+  s_845ed15fd6b477::t_62e7e033849e3f 1-44
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_5746864ee3e7d5 1-12
+bin/uninstall.cjs
+  s_a2f2c976d4bbff::t_72e1a59bb2f1fd 1-65
+scripts/package-smoke.mjs
+  s_633deae4663eb6::t_d4587a3256812a 1-60
+scripts/uninstall.test.mjs
+  s_a2f2c976d4bbff::t_5258e2eadfb958 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "b04fa9508827dd1d657870dfb35c13db37b81bf2",
+  "prompts": {},
+  "sessions": {
+    "s_633deae4663eb6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6099-c72e-7e42-8302-85eb79423315",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    },
+    "s_845ed15fd6b477": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6099-8c79-79d1-9845-6296857f1d53",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    },
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
