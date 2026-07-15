@@ -338,17 +338,25 @@ test("validates Electron runtime with Node semantics when launched by Electron",
   const directory = await mkdtemp(path.join(tmpdir(), "agent-session-electron-node-mode-"));
   const packagePath = path.join(directory, "agent-session-search");
   const electronPath = path.join(packagePath, "node_modules", "electron");
-  await mkdir(path.join(electronPath, "dist", "Electron.app", "Contents", "MacOS"), { recursive: true });
-  await mkdir(path.join(electronPath, "dist", "Electron.app", "Contents", "Resources"), { recursive: true });
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeExecutable)), { recursive: true });
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeDefaultApp)), { recursive: true });
   await writeFile(
     path.join(electronPath, "index.js"),
-    'module.exports = require("node:path").join(__dirname, "dist", "Electron.app", "Contents", "MacOS", "Electron");\n',
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
     "utf8",
   );
   await writeFile(path.join(electronPath, "install.js"), "throw new Error('install script should not run');\n", "utf8");
-  await writeFile(path.join(electronPath, "path.txt"), "Electron.app/Contents/MacOS/Electron", "utf8");
-  await writeFile(path.join(electronPath, "dist", "Electron.app", "Contents", "MacOS", "Electron"), "ok", "utf8");
-  await writeFile(path.join(electronPath, "dist", "Electron.app", "Contents", "Resources", "default_app.asar"), "ok", "utf8");
+  await writeFile(path.join(electronPath, "path.txt"), relativeExecutable, "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeExecutable), "ok", "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeDefaultApp), "ok", "utf8");
   await writeFile(path.join(electronPath, "dist", "version"), "42.3.0", "utf8");
 
   let invocation = null;
