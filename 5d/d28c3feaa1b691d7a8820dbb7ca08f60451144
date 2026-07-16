@@ -1,0 +1,25 @@
+.release-notes/sync-update-summary.md
+  s_a2f2c976d4bbff::t_a0649b631fea5e 1-18
+src/core/remote-health.test.ts
+  s_a2f2c976d4bbff::t_adf6f8ad843ba6 1,35
+src/core/remote-sync.test.ts
+  s_a2f2c976d4bbff::t_74f3fe0b78fa46 5,22-23,733,883,1125,1140,1174-1175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "5dd28c3feaa1b691d7a8820dbb7ca08f60451144",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
