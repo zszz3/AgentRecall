@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -325,6 +325,36 @@ function migrationTargetForResumeSource(source: SessionSource): MigrationTarget 
   return null;
 }
 
+function legacyMigratedCodexProvider(session: SessionSearchResult, target: MigrationTarget): string | null {
+  if (target !== "codex" && target !== "tcodex" && target !== "codex-internal") return null;
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(session.filePath, "r");
+    const prefix = Buffer.allocUnsafe(64 * 1024);
+    const bytesRead = readSync(descriptor, prefix, 0, prefix.length, 0);
+    const firstLine = prefix.toString("utf8", 0, bytesRead).split(/\r?\n/, 1)[0];
+    const row = JSON.parse(firstLine) as {
+      type?: unknown;
+      payload?: { originator?: unknown; cli_version?: unknown; model_provider?: unknown };
+    };
+    if (
+      row.type !== "session_meta"
+      || row.payload?.originator !== "agent-session-search"
+      || row.payload?.cli_version !== "migration"
+      || (typeof row.payload?.model_provider === "string" && row.payload.model_provider.trim())
+    ) {
+      return null;
+    }
+    if (target === "tcodex") return "tencent";
+    if (target === "codex-internal") return "codebuddy";
+    return "openai";
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+  }
+}
+
 function buildResumeRuntimeProcessSpec(
   session: SessionSearchResult,
   settings: AppSettings,
@@ -338,6 +368,8 @@ function buildResumeRuntimeProcessSpec(
   }
 
   const args = migrationResumeArgs(target, session.rawId);
+  const legacyProvider = legacyMigratedCodexProvider(session, target);
+  if (legacyProvider) args.splice(1, 0, "-c", `model_provider=${JSON.stringify(legacyProvider)}`);
   if (skipPermissions) {
     if (target === "claude" || target === "tclaude" || target === "claude-internal") {
       args.push("--dangerously-skip-permissions");

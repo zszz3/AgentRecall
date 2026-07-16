@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { mergeApiConfigWithProfileDefaults, mergeClaudeApiConfigWithProfileDefaults } from "./api-config";
 import {
   buildGhosttyOpenArgs,
@@ -140,6 +142,40 @@ describe("platform application resolution", () => {
 });
 
 describe("resume commands", () => {
+  it.each([
+    ["codex-cli", "openai"],
+    ["tcodex-cli", "tencent"],
+    ["codex-internal", "codebuddy"],
+  ] as const)("supplies the matching provider for a legacy %s migration", (source, provider) => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-session-resume-provider-"));
+    const filePath = path.join(directory, "legacy-codex.jsonl");
+    try {
+      writeFileSync(filePath, `${JSON.stringify({
+        type: "session_meta",
+        payload: {
+          id: "legacy-codex",
+          originator: "agent-session-search",
+          cli_version: "migration",
+        },
+      })}\n`);
+      const session = {
+        source,
+        rawId: "legacy-codex",
+        projectPath: "/repo",
+        filePath,
+      } as SessionSearchResult;
+
+      expect(getResumeProcessSpec(session, defaultSettings, { platform: "darwin" }).args).toEqual([
+        "resume",
+        "-c",
+        `model_provider=${JSON.stringify(provider)}`,
+        "legacy-codex",
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses CodeBuddy CLI resume syntax for CodeBuddy sessions", () => {
     const session = {
       source: "codebuddy-cli",
