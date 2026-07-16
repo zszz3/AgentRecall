@@ -596,31 +596,49 @@ function RemoteRestoreDialog({
             <X size={16} />
           </button>
         </div>
-        <p className="remote-restore-session-title" title={request.remote.title}>{request.remote.title}</p>
-        <div className="remote-restore-field">
-          <span>{l("Restore to", "恢复到")}</span>
-          <div className="remote-targets">
-            {RESTORE_TARGETS.map((item) => (
-              <button key={item} type="button" className={target === item ? "active" : ""} onClick={() => onTargetChange(item)} disabled={restoring}>
-                {migrationAgentLabel(item)}
-              </button>
-            ))}
+        <div className="remote-restore-session-summary">
+          <Cloud size={16} />
+          <div className="remote-restore-session-copy">
+            <span>{l("Cloud session", "云端会话")}</span>
+            <strong title={request.remote.title}>{request.remote.title}</strong>
           </div>
         </div>
-        <div className="remote-restore-field destination">
-          <span>{l("Destination", "目标位置")}</span>
-          {request.destination === "source" ? (
-            <strong>{request.remote.sourceEnvironmentLabel}</strong>
-          ) : (
-            <button type="button" className="remote-project-picker" onClick={onChooseProject} disabled={restoring}>
-              <FolderOpen size={14} />
-              <span>{projectPath || l("Choose project", "选择项目")}</span>
-            </button>
-          )}
+        <div className="remote-restore-fields">
+          <div className="remote-restore-field">
+            <span>{l("Target Agent", "目标 Agent")}</span>
+            <div className="remote-restore-targets" role="group" aria-label={l("Target Agent", "目标 Agent")}>
+              {RESTORE_TARGETS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={target === item ? "active" : ""}
+                  aria-pressed={target === item}
+                  onClick={() => onTargetChange(item)}
+                  disabled={restoring}
+                >
+                  {migrationAgentLabel(item)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="remote-restore-field">
+            <span>{l("Destination", "目标位置")}</span>
+            {request.destination === "source" ? (
+              <div className="remote-restore-destination" title={request.remote.sourceEnvironmentLabel}>
+                <Server size={15} />
+                <span>{request.remote.sourceEnvironmentLabel}</span>
+              </div>
+            ) : (
+              <button type="button" className="remote-restore-destination remote-project-picker" onClick={onChooseProject} disabled={restoring}>
+                <FolderOpen size={15} />
+                <span>{projectPath || l("Choose project", "选择项目")}</span>
+              </button>
+            )}
+          </div>
         </div>
         <div className="dialog-actions">
           <button type="button" onClick={onCancel} disabled={restoring}>{l("Cancel", "取消")}</button>
-          <button type="button" className="primary" onClick={onConfirm} disabled={restoring}>
+          <button type="button" className="primary-action" onClick={onConfirm} disabled={restoring}>
             {restoring ? l("Restoring...", "正在恢复...") : l("Restore", "恢复")}
           </button>
         </div>
