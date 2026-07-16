@@ -129,7 +129,7 @@ function serializeCodex(session: PortableSession, sessionId: string, modelProvid
         timestamp: session.startedAt,
         cwd: session.projectPath,
         title: session.title,
-        originator: "agent-session-search",
+        originator: "agent-recall",
         cli_version: "migration",
         model_provider: modelProvider,
       },

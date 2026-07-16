@@ -116,7 +116,7 @@ export class AppUpdateService {
       await this.dependencies.showMessageBox({
         type: "info",
         title: "更新完成",
-        message: `Agent-Session-Search v${currentVersion} 已安装完成。`,
+        message: `AgentRecall v${currentVersion} 已安装完成。`,
         detail: "应用已经使用新版本重新启动。",
       });
     } else {
@@ -196,7 +196,7 @@ export async function launchDetachedAppUpdateInstaller(
   manifest: AppUpdateManifest,
   options: DetachedAppUpdateInstallerOptions,
 ): Promise<void> {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-session-search-app-update-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-recall-app-update-"));
   const manifestPath = path.join(directory, "update.json");
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   const spawnProcess = options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions));

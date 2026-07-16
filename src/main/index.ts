@@ -14,7 +14,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import Store from "electron-store";
-import { existsSync } from "node:fs";
+import { cpSync, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,9 +106,9 @@ import type {
 } from "../core/types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PRODUCT_NAME = "Agent-Session-Search";
+const PRODUCT_NAME = "AgentRecall";
 const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
-const releaseUpdateRuntime = app.isPackaged || process.env.AGENT_SESSION_SEARCH_RELEASE_BUILD === "1";
+const releaseUpdateRuntime = app.isPackaged || process.env.AGENT_RECALL_RELEASE_BUILD === "1";
 
 const OPTIONAL_SOURCE_SETTINGS: Array<{ key: keyof Pick<AppSettings, "includeClaudeInternal" | "includeCodexInternal" | "includeTclaude" | "includeTcodex" | "includeCodeBuddyCli" | "includeCodeWizCli" | "includeOpenClaw" | "includeHermes" | "includeOpenCode" | "includeCursorAgent" | "includeTrae">; sources: SessionSource[] }> = [
   { key: "includeClaudeInternal", sources: ["claude-internal"] },
@@ -154,7 +154,7 @@ function loadUpdateClient(): AppUpdateClient {
   return requireCjs(UPDATE_CLIENT_PATH) as AppUpdateClient;
 }
 
-function ensureSessionSearchMcpPreference(): boolean {
+function ensureAgentRecallMcpPreference(): boolean {
   const setup = loadMcpSetup();
   if (getSettings().sessionSearchMcpEnabled) {
     if (!setup.status()) setup.run(false);
@@ -162,8 +162,30 @@ function ensureSessionSearchMcpPreference(): boolean {
   return setup.status();
 }
 
+function migrateLegacyUserData(): void {
+  const target = app.getPath("userData");
+  if (existsSync(target)) return;
+
+  const parent = path.dirname(target);
+  const legacyNames = [
+    ["Agent", "Session", "Search"].join("-"),
+    ["agent", "session", "search"].join("-"),
+  ];
+  for (const legacyName of legacyNames) {
+    const legacy = path.join(parent, legacyName);
+    if (!existsSync(legacy)) continue;
+    try {
+      cpSync(legacy, target, { recursive: true, errorOnExist: false });
+    } catch (error) {
+      console.warn(`Could not migrate existing user data to ${PRODUCT_NAME}:`, error);
+    }
+    return;
+  }
+}
+
 app.setName(PRODUCT_NAME);
-app.setAppUserModelId("dev.zszz3.agent-session-search");
+app.setAppUserModelId("dev.zszz3.agent-recall");
+migrateLegacyUserData();
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -206,7 +228,7 @@ const appUpdateService = new AppUpdateService({
   getClient: loadUpdateClient,
   releaseRuntime: releaseUpdateRuntime,
   getAutoCheckEnabled: () => getSettings().autoCheckUpdates,
-  autoCheckDisabled: () => process.env.AGENT_SESSION_SEARCH_NO_UPDATE_CHECK === "1",
+  autoCheckDisabled: () => process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1",
   publishStatus: (status) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.status, status),
   launchInstaller: (manifest) => launchDetachedAppUpdateInstaller(manifest, { applyUpdatePath: APPLY_UPDATE_PATH }),
   requestQuit: () => app.quit(),
@@ -1237,7 +1259,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("mcp:status", () => {
     try {
-      return ensureSessionSearchMcpPreference();
+      return ensureAgentRecallMcpPreference();
     } catch {
       return false;
     }
@@ -1430,7 +1452,7 @@ app.whenReady().then(() => {
     // Non-fatal: the MCP server can still be pointed at the DB via env var.
   }
   try {
-    ensureSessionSearchMcpPreference();
+    ensureAgentRecallMcpPreference();
   } catch (error) {
     console.error(`Failed to configure session search MCP: ${error instanceof Error ? error.message : String(error)}`);
   }

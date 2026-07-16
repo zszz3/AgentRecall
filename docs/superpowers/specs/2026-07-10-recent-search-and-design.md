@@ -23,7 +23,7 @@ Create a focused renderer module at `src/renderer/src/search-history.ts` with pu
 Use a version-independent JSON string array under the localStorage key:
 
 ```text
-agent-session-search-recent-searches
+agent-recall-recent-searches
 ```
 
 Rules:

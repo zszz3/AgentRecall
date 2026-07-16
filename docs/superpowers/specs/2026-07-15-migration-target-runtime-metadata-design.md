@@ -8,7 +8,7 @@
 
 ## 目标
 
-- 迁移时读取具体目标 Agent 自己的配置目录，而不是读取 agent-session-search 保存的 API 配置。
+- 迁移时读取具体目标 Agent 自己的配置目录，而不是读取 agent-recall 保存的 API 配置。
 - Codex family 将目标 `config.toml` 的有效 `model_provider` 写入 `session_meta.payload.model_provider`。
 - Claude family 将目标 `settings.json` 中的有效模型写入历史 assistant 消息的 `message.model`。
 - 配置缺失、不可读或损坏时使用目标安全默认值，不能让迁移流程额外失败。

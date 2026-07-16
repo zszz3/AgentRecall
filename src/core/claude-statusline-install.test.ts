@@ -84,7 +84,7 @@ describe("installClaudeStatuslineBridge", () => {
     const homeDir = makeHome();
     try {
       writeSettings(homeDir, {
-        statusLine: { type: "command", command: "agent-session-search-claude-statusline" },
+        statusLine: { type: "command", command: "agent-recall-claude-statusline" },
       });
       const result = installClaudeStatuslineBridge({ homeDir, scriptPath: SCRIPT });
       expect(result.status).toBe("already");

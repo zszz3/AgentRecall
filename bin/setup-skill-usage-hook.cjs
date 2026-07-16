@@ -15,11 +15,11 @@ const os = require("node:os");
 const path = require("node:path");
 
 const RECORD_SCRIPT_BASENAME = "skill-usage-record.cjs";
-const RECORD_BIN_NAME = "agent-session-search-skill-usage";
+const RECORD_BIN_NAME = "agent-recall-skill-usage";
 const SKILL_MATCHER = "Skill";
 
 function defaultHomeDir() {
-  return process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+  return process.env.AGENT_RECALL_TEST_HOME || os.homedir();
 }
 
 function recordScriptPath() {

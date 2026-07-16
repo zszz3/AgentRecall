@@ -26,7 +26,7 @@ async function relaunchInstalledApp(options = {}) {
     return;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeError(`Agent-Session-Search 已安装完成，但立即重启失败：${message}\n正在重试启动。\n`);
+    writeError(`AgentRecall 已安装完成，但立即重启失败：${message}\n正在重试启动。\n`);
   }
 
   await delay(options.delayMs ?? 1_000);
@@ -34,7 +34,7 @@ async function relaunchInstalledApp(options = {}) {
     launch();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeError(`Agent-Session-Search 已安装完成，但自动重启失败：${message}\n请手动运行 agent-session-search 启动已安装的新版本。\n`);
+    writeError(`AgentRecall 已安装完成，但自动重启失败：${message}\n请手动运行 agent-recall 启动已安装的新版本。\n`);
   }
 }
 
@@ -53,12 +53,12 @@ async function main() {
     const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
     if (Number.isInteger(waitPid) && waitPid > 0 && waitPid !== process.pid) await waitForProcessExit(waitPid, 30_000);
     if (process.argv.includes("--stop-app")) await stopRunningApp();
-    process.stdout.write(`正在安装 Agent-Session-Search v${manifest.version}...\n`);
+    process.stdout.write(`正在安装 AgentRecall v${manifest.version}...\n`);
     await installUpdate(manifest, {
-      nodePath: process.env.AGENT_SESSION_SEARCH_NODE_PATH,
+      nodePath: process.env.AGENT_RECALL_NODE_PATH,
     });
     await clearInstallStatus().catch(() => undefined);
-    process.stdout.write(`Agent-Session-Search v${manifest.version} 安装完成，正在重新启动。\n`);
+    process.stdout.write(`AgentRecall v${manifest.version} 安装完成，正在重新启动。\n`);
     await relaunchInstalledApp();
   } finally {
     await lock?.release().catch(() => undefined);
@@ -70,7 +70,7 @@ if (require.main === module) main().catch(async (error) => {
   const message = error instanceof Error ? error.message : String(error);
   const updateInProgress = error?.code === "UPDATE_IN_PROGRESS";
   process.stderr.write(
-    `Agent-Session-Search 更新失败：${message}${updateInProgress ? "" : `\n\n${formatManualUpdateFallback()}`}\n`,
+    `AgentRecall 更新失败：${message}${updateInProgress ? "" : `\n\n${formatManualUpdateFallback()}`}\n`,
   );
   if (!updateInProgress) {
     const fallbackShown = showNativeUpdateFailure(message);

@@ -2,7 +2,7 @@
 
 ## 背景
 
-独立 MCP 入口 `bin/agent-session-search-mcp.mjs` 会加载 `out/mcp/migration-entry.js`，以注册 `migrate_session`。当入口源码更新、但被 `.gitignore` 忽略的 `out/mcp` 仍是旧构建时，bundle 可能缺少入口需要的导出。当前实现会在连接 stdio transport 前抛错，导致整个 MCP 进程退出，Codex 只报告 `initialize response` 前连接关闭。一个可选迁移工具的构建不一致因此会连带禁用搜索、读取和会话管理工具。
+独立 MCP 入口 `bin/agent-recall-mcp.mjs` 会加载 `out/mcp/migration-entry.js`，以注册 `migrate_session`。当入口源码更新、但被 `.gitignore` 忽略的 `out/mcp` 仍是旧构建时，bundle 可能缺少入口需要的导出。当前实现会在连接 stdio transport 前抛错，导致整个 MCP 进程退出，Codex 只报告 `initialize response` 前连接关闭。一个可选迁移工具的构建不一致因此会连带禁用搜索、读取和会话管理工具。
 
 ## 目标
 

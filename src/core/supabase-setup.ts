@@ -5,9 +5,9 @@ export const SUPABASE_PROJECTS_URL = "https://supabase.com/dashboard/projects";
 
 export function buildCombinedSupabaseSetupSql(): string {
   return [
-    "-- Agent-Session-Search remote sessions",
+    "-- AgentRecall remote sessions",
     buildRemoteSessionSetupSql(),
-    "-- Agent-Session-Search Skills",
+    "-- AgentRecall Skills",
     buildSkillSyncSetupSql(),
   ].join("\n\n");
 }

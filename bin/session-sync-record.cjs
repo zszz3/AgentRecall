@@ -11,11 +11,11 @@ const os = require("node:os");
 const path = require("node:path");
 
 function defaultHomeDir() {
-  return process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+  return process.env.AGENT_RECALL_TEST_HOME || os.homedir();
 }
 
 function queueDirectory(homeDir) {
-  return process.env.AGENT_SESSION_SEARCH_SYNC_QUEUE || path.join(homeDir || defaultHomeDir(), ".agent-session-search", "session-sync-queue");
+  return process.env.AGENT_RECALL_SYNC_QUEUE || path.join(homeDir || defaultHomeDir(), ".agent-recall", "session-sync-queue");
 }
 
 function cleanString(value, maxLength) {

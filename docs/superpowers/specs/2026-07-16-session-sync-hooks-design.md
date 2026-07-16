@@ -25,7 +25,7 @@
 
 - 安装器只合并本应用的 Hook，保留用户已有配置。
 - Codex Hook 写入用户级 `hooks.json`，安装后提示用户在 `/hooks` 中审查并信任。
-- “移除 Hook”、关闭会话同步以及 `agent-session-search uninstall` 都只删除本应用的 Hook 与待处理事件。
+- “移除 Hook”、关闭会话同步以及 `agent-recall uninstall` 都只删除本应用的 Hook 与待处理事件。
 
 ## 验证
 

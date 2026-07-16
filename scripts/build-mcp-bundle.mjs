@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Bundles the MCP migration entry point into a single ESM file so the standalone
-// MCP server (bin/agent-session-search-mcp.mjs) can call migrate_session without
+// MCP server (bin/agent-recall-mcp.mjs) can call migrate_session without
 // --experimental-strip-types and without resolving src/core imports at runtime.
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";

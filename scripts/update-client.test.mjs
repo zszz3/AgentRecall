@@ -66,11 +66,11 @@ function manifest(version = "0.2.0") {
     tag: `v${version}`,
     title: "自动更新",
     publishedAt: "2026-07-14T00:00:00.000Z",
-    releaseUrl: `https://github.com/zszz3/agent-session-search/releases/tag/v${version}`,
+    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v${version}`,
     notes: { features: ["终端显示更新。"], fixes: ["修复重启失败。"] },
     package: {
-      name: `agent-session-search-${version}.tgz`,
-      url: `https://github.com/zszz3/agent-session-search/releases/download/v${version}/agent-session-search-${version}.tgz`,
+      name: `agent-recall-${version}.tgz`,
+      url: `https://github.com/zszz3/AgentRecall/releases/download/v${version}/agent-recall-${version}.tgz`,
       sha256: "a".repeat(64),
       checksumUrl: "",
     },
@@ -130,7 +130,7 @@ test("skips the same update version until a newer version is released", async ()
 });
 
 test("terminal launcher does not prompt again for a skipped update version", async () => {
-  const launcherSource = await readFile(new URL("../bin/agent-session-search.cjs", import.meta.url), "utf8");
+  const launcherSource = await readFile(new URL("../bin/agent-recall.cjs", import.meta.url), "utf8");
   assert.match(launcherSource, /!result\.updateSkipped && !result\.promptSnoozed/);
   assert.match(launcherSource, /\[1\] 更新\s+\[2\] 跳过\s+\[3\] 跳过，直至下个版本/);
 });
@@ -142,7 +142,7 @@ test("refuses to install an update whose package checksum does not match", async
     installUpdate(value, {
       fetchImpl: async () => new Response("tampered package", { status: 200 }),
       statusPath: path.join(statusDirectory, "status.json"),
-      packagePath: path.join(statusDirectory, "prefix", "lib", "node_modules", "agent-session-search"),
+      packagePath: path.join(statusDirectory, "prefix", "lib", "node_modules", "agent-recall"),
     }),
     /checksum mismatch/,
   );
@@ -157,7 +157,7 @@ test("rejects untrusted release package URLs", () => {
 test("accepts release package URLs from the renamed GitHub repository", () => {
   const value = manifest("0.5.0");
   value.releaseUrl = "https://github.com/zszz3/AgentRecall/releases/tag/v0.5.0";
-  value.package.url = "https://github.com/zszz3/AgentRecall/releases/download/v0.5.0/agent-session-search-0.5.0.tgz";
+  value.package.url = "https://github.com/zszz3/AgentRecall/releases/download/v0.5.0/agent-recall-0.5.0.tgz";
   assert.equal(parseUpdateManifest(value).package.url, value.package.url);
 });
 
@@ -211,8 +211,8 @@ test("falls back to the direct latest manifest when the GitHub release API fails
   assert.equal(result.updateAvailable, true);
   assert.equal(result.error, null);
   assert.deepEqual(requests, [
-    "https://api.github.com/repos/zszz3/agent-session-search/releases/latest",
-    "https://github.com/zszz3/agent-session-search/releases/latest/download/update.json",
+    "https://api.github.com/repos/zszz3/AgentRecall/releases/latest",
+    "https://github.com/zszz3/AgentRecall/releases/latest/download/update.json",
   ]);
 });
 
@@ -220,12 +220,12 @@ test("provides an actionable manual fallback when automatic installation fails",
   const command = manualInstallCommand();
   assert.equal(
     command,
-    "npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz",
+    "npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz",
   );
   const message = formatManualUpdateFallback();
   assert.match(message, /自动更新未完成/);
-  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/agent-session-search\/releases\/latest\/download\/agent-session-search\.tgz/);
-  assert.match(message, /https:\/\/github\.com\/zszz3\/agent-session-search\/releases\/latest/);
+  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/latest\/download\/agent-recall\.tgz/);
+  assert.match(message, /https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/latest/);
 });
 
 test("converts subprocess update failures into readable text", () => {
@@ -246,9 +246,9 @@ test("shows a macOS-native fallback without requiring Electron", () => {
   });
   assert.equal(shown, true);
   assert.equal(calls[0].command, "osascript");
-  assert.equal(calls[0].options.env.AGENT_SESSION_SEARCH_UPDATE_ERROR, "Electron download failed");
+  assert.equal(calls[0].options.env.AGENT_RECALL_UPDATE_ERROR, "Electron download failed");
   assert.equal(calls[1].command, "pbcopy");
-  assert.match(calls[1].options.input, /npm install -g .*agent-session-search\.tgz/);
+  assert.match(calls[1].options.input, /npm install -g .*agent-recall\.tgz/);
 });
 
 test("shows a Windows-native fallback without requiring Electron", () => {
@@ -265,7 +265,7 @@ test("shows a Windows-native fallback without requiring Electron", () => {
   assert.ok(invocation.args.includes("-NonInteractive"));
   assert.match(invocation.args.at(-1), /Set-Clipboard/);
   assert.match(invocation.args.at(-1), /Start-Process/);
-  assert.equal(invocation.options.env.AGENT_SESSION_SEARCH_UPDATE_ERROR, "npm install failed");
+  assert.equal(invocation.options.env.AGENT_RECALL_UPDATE_ERROR, "npm install failed");
 });
 
 test("reports a clear error when the GitHub release check times out", async () => {
@@ -305,7 +305,7 @@ test("force-stops the installed application on Windows before replacing files", 
 
 test("stops a running npm-installed app when the saved process state is missing", async () => {
   const directory = await temporaryDirectory("agent-session-update-stop-app-");
-  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-session-search");
+  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-recall");
   const appEntry = path.join(packagePath, "out", "main", "index.js");
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   await new Promise((resolve, reject) => {
@@ -343,7 +343,7 @@ test("installs through the public registry and records a completed status", asyn
   value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
   const directory = await temporaryDirectory("agent-session-update-install-");
   const statusPath = path.join(directory, "status.json");
-  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-session-search");
+  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-recall");
   await mkdir(packagePath, { recursive: true });
   let invocation = null;
   let electronChecked = false;
@@ -378,7 +378,7 @@ test("restores the previous global package when post-install validation fails", 
   const value = manifest();
   value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
   const directory = await temporaryDirectory("agent-session-update-package-rollback-");
-  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-session-search");
+  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-recall");
   const statusPath = path.join(directory, "status.json");
   await mkdir(packagePath, { recursive: true });
   await writeFile(path.join(packagePath, "marker.txt"), "old package", "utf8");
@@ -439,7 +439,7 @@ test("repairs an incomplete Electron runtime before reporting update success", a
 
 test("validates Electron runtime with Node semantics when launched by Electron", async () => {
   const directory = await temporaryDirectory("agent-session-electron-node-mode-");
-  const packagePath = path.join(directory, "agent-session-search");
+  const packagePath = path.join(directory, "agent-recall");
   const electronPath = path.join(packagePath, "node_modules", "electron");
   const relativeExecutable = process.platform === "darwin"
     ? path.join("Electron.app", "Contents", "MacOS", "Electron")
@@ -489,7 +489,7 @@ test("validates Electron runtime with Node semantics when launched by Electron",
 
 test("uses a stable Node executable for Electron runtime checks after npm replaces Electron", async () => {
   const directory = await temporaryDirectory("agent-session-electron-stable-node-");
-  const packagePath = path.join(directory, "agent-session-search");
+  const packagePath = path.join(directory, "agent-recall");
   const electronPath = path.join(packagePath, "node_modules", "electron");
   const relativeExecutable = process.platform === "darwin"
     ? path.join("Electron.app", "Contents", "MacOS", "Electron")
@@ -582,7 +582,7 @@ test("serializes concurrent first-launch Electron preparation", async () => {
 test("relaunches without Electron's Node-mode environment", () => {
   let launchOptions = null;
   launchInstalledApp({
-    command: "/tmp/agent-session-search",
+    command: "/tmp/agent-recall",
     env: { ELECTRON_RUN_AS_NODE: "1" },
     spawnImpl: (_command, _args, options) => {
       launchOptions = options;
@@ -590,11 +590,11 @@ test("relaunches without Electron's Node-mode environment", () => {
     },
   });
   assert.equal("ELECTRON_RUN_AS_NODE" in launchOptions.env, false);
-  assert.equal(launchOptions.env.AGENT_SESSION_SEARCH_NO_UPDATE_CHECK, "1");
+  assert.equal(launchOptions.env.AGENT_RECALL_NO_UPDATE_CHECK, "1");
 });
 
 test("keeps the terminal attached until the updater reports an exit status", async () => {
-  const launcher = await readFile(new URL("../bin/agent-session-search.cjs", import.meta.url), "utf8");
+  const launcher = await readFile(new URL("../bin/agent-recall.cjs", import.meta.url), "utf8");
   assert.match(launcher, /child\.once\("exit"/);
   assert.doesNotMatch(launcher, /detached:\s*true,\s*stdio:\s*"inherit"/);
   assert.doesNotMatch(launcher, /"--wait-pid",\s*String\(process\.pid\)/);

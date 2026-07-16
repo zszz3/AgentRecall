@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agent-session-search-package-smoke-"));
+const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agent-recall-package-smoke-"));
 const packDir = path.join(tempRoot, "pack");
 const prefix = path.join(tempRoot, "prefix");
 const home = path.join(tempRoot, "home");
@@ -16,9 +16,9 @@ const environment = {
   ...process.env,
   HOME: home,
   USERPROFILE: home,
-  AGENT_SESSION_SEARCH_TEST_HOME: home,
-  AGENT_SESSION_SEARCH_SKIP_STATUSLINE_INSTALL: "1",
-  AGENT_SESSION_SEARCH_NO_UPDATE_CHECK: "1",
+  AGENT_RECALL_TEST_HOME: home,
+  AGENT_RECALL_SKIP_STATUSLINE_INSTALL: "1",
+  AGENT_RECALL_NO_UPDATE_CHECK: "1",
 };
 
 try {
@@ -42,8 +42,8 @@ try {
     maxBuffer: 16 * 1024 * 1024,
   });
   const packageRoots = process.platform === "win32"
-    ? [path.join(prefix, "node_modules", "agent-session-search")]
-    : [path.join(prefix, "lib", "node_modules", "agent-session-search"), path.join(prefix, "node_modules", "agent-session-search")];
+    ? [path.join(prefix, "node_modules", "agent-recall")]
+    : [path.join(prefix, "lib", "node_modules", "agent-recall"), path.join(prefix, "node_modules", "agent-recall")];
   let installedRoot = null;
   for (const candidate of packageRoots) {
     try { await access(path.join(candidate, "package.json")); installedRoot = candidate; break; } catch { /* try the next npm layout */ }
@@ -51,7 +51,7 @@ try {
   if (!installedRoot) throw new Error("Could not locate the package installed into the temporary npm prefix.");
   await access(path.join(installedRoot, "out", "main", "index.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
-  const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-session-search.cjs"), "--version"], { env: environment });
+  const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
   process.stdout.write(`Package smoke test passed for v${packageVersion} (${process.platform}).\n`);

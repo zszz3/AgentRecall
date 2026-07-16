@@ -1,6 +1,6 @@
 export type LanguageMode = "en" | "zh";
 
-export const LANGUAGE_STORAGE_KEY = "agent-session-search-language";
+export const LANGUAGE_STORAGE_KEY = "agent-recall-language";
 
 export function readStoredLanguage(value: string | null): LanguageMode {
   return value === "en" ? "en" : "zh";

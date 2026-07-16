@@ -10,7 +10,7 @@ import {
 import { applyClaudeApiConfig, loadClaudeApiConfigDefaults } from "./claude-profile";
 
 async function withClaudeHome<T>(run: (claudeHome: string) => Promise<T>): Promise<T> {
-  const claudeHome = await mkdtemp(path.join(tmpdir(), "agent-session-search-claude-"));
+  const claudeHome = await mkdtemp(path.join(tmpdir(), "agent-recall-claude-"));
   try {
     return await run(claudeHome);
   } finally {
@@ -145,7 +145,7 @@ describe("Claude Code provider switching", () => {
             hooks: {
               Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }],
             },
-            statusLine: { type: "command", command: "agent-session-search-claude-statusline" },
+            statusLine: { type: "command", command: "agent-recall-claude-statusline" },
           },
           null,
           2,
@@ -167,7 +167,7 @@ describe("Claude Code provider switching", () => {
       expect(settings.hooks).toEqual({
         Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }],
       });
-      expect(settings.statusLine).toEqual({ type: "command", command: "agent-session-search-claude-statusline" });
+      expect(settings.statusLine).toEqual({ type: "command", command: "agent-recall-claude-statusline" });
       expect(settings.env).toMatchObject({
         CLAUDE_CODE_EFFORT_LEVEL: "max",
         ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",

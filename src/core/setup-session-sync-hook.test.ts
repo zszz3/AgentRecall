@@ -54,7 +54,7 @@ describe("session sync hook setup", () => {
     }
   });
 
-  it("is idempotent and removes only Agent-Session-Search hooks", () => {
+  it("is idempotent and removes only AgentRecall hooks", () => {
     const homeDir = freshHome();
     const scriptPath = "/opt/app/bin/session-sync-record.cjs";
     try {

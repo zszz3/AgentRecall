@@ -8,7 +8,7 @@ import path from "node:path";
 // therefore writes its resolved database path to a stable pointer file that
 // standalone tools (the MCP server) read to find the live database.
 
-const POINTER_DIR = ".agent-session-search";
+const POINTER_DIR = ".agent-recall";
 const POINTER_FILE = "db-path";
 
 export function dbPointerPath(home: string = homedir()): string {
@@ -27,7 +27,7 @@ export function resolveDbPath(
   env: Record<string, string | undefined> = process.env,
   home: string = homedir(),
 ): string | null {
-  const override = env.AGENT_SESSION_SEARCH_DB?.trim();
+  const override = env.AGENT_RECALL_DB?.trim();
   if (override) return override;
   const pointer = dbPointerPath(home);
   try {

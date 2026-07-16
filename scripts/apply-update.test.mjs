@@ -32,6 +32,6 @@ test("keeps completed installs out of the update-failure fallback if relaunch ne
     },
   });
 
-  assert.match(messages.join(""), /请手动运行 agent-session-search/);
+  assert.match(messages.join(""), /请手动运行 agent-recall/);
   assert.doesNotMatch(messages.join(""), /自动更新未完成/);
 });

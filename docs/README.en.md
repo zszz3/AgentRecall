@@ -1,4 +1,4 @@
-<h1 align="center">Agent-Session-Search</h1>
+<h1 align="center">AgentRecall</h1>
 
 <p align="center">A local desktop tool to search, quick launch, and analyze AI coding-agent sessions</p>
 
@@ -11,12 +11,12 @@
   <img src="https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white" alt="Electron">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022.13-339933?logo=nodedotjs&logoColor=white" alt="Node">
-  <a href="https://github.com/zszz3/agent-session-search/stargazers"><img src="https://img.shields.io/github/stars/zszz3/agent-session-search?style=flat&logo=github" alt="GitHub Stars"></a>
+  <a href="https://github.com/zszz3/AgentRecall/stargazers"><img src="https://img.shields.io/github/stars/zszz3/AgentRecall?style=flat&logo=github" alt="GitHub Stars"></a>
   <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
 <p align="center">
-  <img src="../assets/show.png" alt="Agent-Session-Search preview" width="860">
+  <img src="../assets/show.png" alt="AgentRecall preview" width="860">
 </p>
 
 ## Features
@@ -128,9 +128,9 @@ To sync your personal skills between machines, enable Settings -> Skills -> Supa
 
 Sync uploads the full skill directory's regular files, including `SKILL.md`, `references/`, `scripts/`, examples, and other supporting files. Downloads restore them into the local user skill root. Codex skills install into `$CODEX_HOME/skills` or `~/.codex/skills`; Claude Code skills install into `~/.claude/skills`.
 
-If you created the `agent_session_search_skills` table with an earlier version, re-run the Copy setup SQL script once after upgrading to enable version history. The script is idempotent: it adds the `content_hash` column and changes the unique constraint from `local_fingerprint` to `(local_fingerprint, version)`.
+If you created the `agent_recall_skills` table with an earlier version, re-run the Copy setup SQL script once after upgrading to enable version history. The script is idempotent: it adds the `content_hash` column and changes the unique constraint from `local_fingerprint` to `(local_fingerprint, version)`.
 
-Supabase sync is designed for personal projects. It does not create tables automatically and does not require a service role key. The app stores only the Project URL and anon key locally, then uses the Supabase REST API to access the `agent_session_search_skills` table. The copied setup SQL grants anon read/write access through RLS for personal sync convenience; adjust the RLS policy first if you plan to share the project with other users or expose it more broadly.
+Supabase sync is designed for personal projects. It does not create tables automatically and does not require a service role key. The app stores only the Project URL and anon key locally, then uses the Supabase REST API to access the `agent_recall_skills` table. The copied setup SQL grants anon read/write access through RLS for personal sync convenience; adjust the RLS policy first if you plan to share the project with other users or expose it more broadly.
 
 ## Installation
 
@@ -139,27 +139,27 @@ Supabase sync is designed for personal projects. It does not create tables autom
 Install Node.js 22.13 or newer, then install the latest GitHub Release from a terminal. The same command works in macOS terminals and Windows PowerShell:
 
 ```bash
-npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
-agent-session-search
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz
+agent-recall
 ```
 
 The first installation downloads the Electron runtime for the current operating system. See the Development Setup section and [Install.md](../Install.md) for source-based installation.
 
-Once installed, run `agent-session-search` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings. The app uses a single-instance lock, so launching it again focuses the existing window instead of opening another instance.
+Once installed, run `agent-recall` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings. The app uses a single-instance lock, so launching it again focuses the existing window instead of opening another instance.
 
 Settings can also be opened with `Cmd+,`. Use Appearance to switch the color theme and English / Chinese UI.
 
 For daily use, you do not need to reinstall dependencies or rebuild. Just run:
 
 ```bash
-agent-session-search
+agent-recall
 ```
 
-If a new terminal says `agent-session-search: command not found`, the global command was probably installed under nvm's Node 22 directory while the current shell is using another Node version. Run:
+If a new terminal says `agent-recall: command not found`, the global command was probably installed under nvm's Node 22 directory while the current shell is using another Node version. Run:
 
 ```bash
 nvm use 22
-agent-session-search
+agent-recall
 ```
 
 Or set Node 22 as your nvm default once:
@@ -170,7 +170,7 @@ nvm alias default 22
 
 If you do not use nvm and have Node.js 22.13+ installed system-wide, daily startup does not need any nvm command.
 
-The terminal checks the latest GitHub Release automatically. When an update is available, it shows the release's new features and bug fixes and asks whether to install it. The same version, release notes, and **Update now** action are available under **Settings → About**. Use `agent-session-search --check-update` to check without launching the App or `agent-session-search --update` to install immediately. If an automatic update fails, the external updater attempts to reopen the installed version and uses an operating-system dialog to offer actions for copying the manual installation command or opening the latest Release page.
+The terminal checks the latest GitHub Release automatically. When an update is available, it shows the release's new features and bug fixes and asks whether to install it. The same version, release notes, and **Update now** action are available under **Settings → About**. Use `agent-recall --check-update` to check without launching the App or `agent-recall --update` to install immediately. If an automatic update fails, the external updater attempts to reopen the installed version and uses an operating-system dialog to offer actions for copying the manual installation command or opening the latest Release page.
 
 On macOS, press **⌥ Option + Space** by default to open the search window. On Windows, use **Ctrl + Alt + Space**. Both shortcuts can be changed in Settings.
 
@@ -187,8 +187,8 @@ Requirements:
 Clone the repository, install exactly the locked dependencies, and start the development app:
 
 ```bash
-git clone https://github.com/zszz3/agent-session-search.git
-cd agent-session-search
+git clone https://github.com/zszz3/AgentRecall.git
+cd AgentRecall
 npm ci
 npm run dev
 ```
@@ -215,6 +215,6 @@ This project is licensed under the [MIT License](../LICENSE). You may use, modif
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=zszz3%2Fagent-session-search&type=date&legend=top-left">
-  <img src="../assets/star-history.svg" alt="Agent-Session-Search Star History Chart" width="900" />
+<a href="https://www.star-history.com/?repos=zszz3%2FAgentRecall&type=date&legend=top-left">
+  <img src="../assets/star-history.svg" alt="AgentRecall Star History Chart" width="900" />
 </a>

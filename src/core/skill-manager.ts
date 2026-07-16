@@ -225,8 +225,8 @@ export function installRemoteSkillLocally(remoteSkill: RemoteSkill, options: Ins
   const overwritten = fs.existsSync(installedPath);
   const parentPath = path.dirname(directoryPath);
   const token = `${process.pid}-${randomUUID()}`;
-  const stagingPath = path.join(parentPath, `.${path.basename(directoryPath)}.agent-session-search-staging-${token}`);
-  const backupPath = path.join(parentPath, `.${path.basename(directoryPath)}.agent-session-search-backup-${token}`);
+  const stagingPath = path.join(parentPath, `.${path.basename(directoryPath)}.agent-recall-staging-${token}`);
+  const backupPath = path.join(parentPath, `.${path.basename(directoryPath)}.agent-recall-backup-${token}`);
   fs.mkdirSync(parentPath, { recursive: true });
   fs.rmSync(stagingPath, { recursive: true, force: true });
   fs.mkdirSync(stagingPath, { recursive: true });

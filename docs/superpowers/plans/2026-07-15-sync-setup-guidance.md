@@ -36,7 +36,7 @@
 
 ```ts
 expect(buildCombinedSupabaseSetupSql()).toContain("agent_session_remote_sessions");
-expect(buildCombinedSupabaseSetupSql()).toContain("agent_session_search_skills");
+expect(buildCombinedSupabaseSetupSql()).toContain("agent_recall_skills");
 expect(supabaseSqlEditorUrl("https://abc.supabase.co")).toBe(
   "https://supabase.com/dashboard/project/abc/sql/new",
 );
@@ -50,9 +50,9 @@ expect(supabaseSqlEditorUrl("invalid")).toBe("https://supabase.com/dashboard/pro
 ```ts
 export function buildCombinedSupabaseSetupSql(): string {
   return [
-    "-- Agent-Session-Search remote sessions",
+    "-- AgentRecall remote sessions",
     buildRemoteSessionSetupSql(),
-    "-- Agent-Session-Search Skills",
+    "-- AgentRecall Skills",
     buildSkillSyncSetupSql(),
   ].join("\n\n");
 }

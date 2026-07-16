@@ -272,8 +272,8 @@ function mergeTraceEventsByIndex(current: SessionTraceEvent[], next: SessionTrac
   return [...byIndex.values()].sort((a, b) => a.index - b.index);
 }
 
-const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-session-search-sidebar-sections";
-const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-session-search-collapsed-project-groups";
+const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-recall-sidebar-sections";
+const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-recall-collapsed-project-groups";
 
 function loadCollapsedProjectGroups(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -1756,7 +1756,7 @@ export function App(): ReactElement {
             <Search size={17} />
           </div>
           <div>
-            <h1>Agent Session Search</h1>
+            <h1>AgentRecall</h1>
             <p>{t("Codex and Claude Code", "Codex 和 Claude Code")}</p>
           </div>
         </div>

@@ -10,7 +10,7 @@ import {
 
 function freshQueue(): { homeDir: string; queueDir: string } {
   const homeDir = path.join(tmpdir(), `session-sync-queue-${process.pid}-${Math.random().toString(36).slice(2)}`);
-  const queueDir = path.join(homeDir, ".agent-session-search", "session-sync-queue");
+  const queueDir = path.join(homeDir, ".agent-recall", "session-sync-queue");
   mkdirSync(queueDir, { recursive: true });
   return { homeDir, queueDir };
 }

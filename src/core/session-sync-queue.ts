@@ -21,8 +21,8 @@ export interface SessionSyncHookStatus {
   lastError: string | null;
 }
 
-export function sessionSyncQueueDirectory(homeDir = process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir()): string {
-  return process.env.AGENT_SESSION_SEARCH_SYNC_QUEUE || path.join(homeDir, ".agent-session-search", "session-sync-queue");
+export function sessionSyncQueueDirectory(homeDir = process.env.AGENT_RECALL_TEST_HOME || os.homedir()): string {
+  return process.env.AGENT_RECALL_SYNC_QUEUE || path.join(homeDir, ".agent-recall", "session-sync-queue");
 }
 
 export function readSessionSyncQueue(homeDir?: string): { events: SessionSyncQueueEvent[]; invalidFiles: string[] } {

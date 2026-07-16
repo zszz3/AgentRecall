@@ -105,7 +105,7 @@ jobs:
           if ! git rev-parse "$TAG" >/dev/null 2>&1; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" "$MERGED_SHA" -m "Agent-Session-Search $TAG"
+            git tag -a "$TAG" "$MERGED_SHA" -m "AgentRecall $TAG"
             git push origin "$TAG"
           fi
           if release_is_draft="$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
@@ -113,17 +113,17 @@ jobs:
               echo "Release $TAG already exists and is published; refusing to overwrite it."
               exit 1
             fi
-            gh release edit "$TAG" --title "Agent-Session-Search $TAG" --notes-file release/release-notes.md
+            gh release edit "$TAG" --title "AgentRecall $TAG" --notes-file release/release-notes.md
           else
-            gh release create "$TAG" --draft --verify-tag --title "Agent-Session-Search $TAG" --notes-file release/release-notes.md
+            gh release create "$TAG" --draft --verify-tag --title "AgentRecall $TAG" --notes-file release/release-notes.md
           fi
           gh release upload "$TAG" release/*.tgz release/*.sha256 release/update.json --clobber
           verify_directory="$(mktemp -d)"
           gh release download "$TAG" \
-            --pattern "agent-session-search-${VERSION}.tgz" \
-            --pattern "agent-session-search-${VERSION}.tgz.sha256" \
-            --pattern "agent-session-search.tgz" \
-            --pattern "agent-session-search.tgz.sha256" \
+            --pattern "agent-recall-${VERSION}.tgz" \
+            --pattern "agent-recall-${VERSION}.tgz.sha256" \
+            --pattern "agent-recall.tgz" \
+            --pattern "agent-recall.tgz.sha256" \
             --pattern "update.json" \
             --dir "$verify_directory"
           node scripts/create-release-assets.mjs \

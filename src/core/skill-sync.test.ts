@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import {
-  AGENT_SESSION_SEARCH_SKILLS_TABLE,
+  AGENT_RECALL_SKILLS_TABLE,
   SkillVersionConflictError,
   SupabaseSkillSyncClient,
   buildSkillSyncSetupSql,
@@ -79,16 +79,16 @@ describe("skill sync", () => {
   it("builds Supabase setup SQL with per-version uniqueness and content hash", () => {
     const sql = buildSkillSyncSetupSql();
 
-    expect(sql).toContain(`create table if not exists public.${AGENT_SESSION_SEARCH_SKILLS_TABLE}`);
+    expect(sql).toContain(`create table if not exists public.${AGENT_RECALL_SKILLS_TABLE}`);
     expect(sql).toContain("content_hash text not null default ''");
     expect(sql).toContain(`add column if not exists content_hash`);
-    expect(sql).toContain(`drop index if exists ${AGENT_SESSION_SEARCH_SKILLS_TABLE}_fingerprint_idx;`);
-    expect(sql).toContain(`${AGENT_SESSION_SEARCH_SKILLS_TABLE}_fingerprint_version_idx`);
+    expect(sql).toContain(`drop index if exists ${AGENT_RECALL_SKILLS_TABLE}_fingerprint_idx;`);
+    expect(sql).toContain(`${AGENT_RECALL_SKILLS_TABLE}_fingerprint_version_idx`);
     expect(sql).toContain("(local_fingerprint, version)");
     expect(sql).toContain("storage.buckets");
     expect(sql).toContain("agent-session-skills");
     expect(sql).toContain("enable row level security");
-    expect(sql).toContain(`grant select, insert, update, delete on table public.${AGENT_SESSION_SEARCH_SKILLS_TABLE} to anon`);
+    expect(sql).toContain(`grant select, insert, update, delete on table public.${AGENT_RECALL_SKILLS_TABLE} to anon`);
     expect(sql).toContain("grant select on table storage.buckets to anon");
     expect(sql).not.toContain("service_role");
   });
@@ -165,7 +165,7 @@ describe("skill sync", () => {
 
     expect(status.kind).toBe("missing-table");
     expect(status).toMatchObject({ remediation: "sql" });
-    expect(status.setupSql).toContain(AGENT_SESSION_SEARCH_SKILLS_TABLE);
+    expect(status.setupSql).toContain(AGENT_RECALL_SKILLS_TABLE);
   });
 
   it("marks outdated Skill sync columns as SQL-remediable", async () => {
@@ -209,7 +209,7 @@ describe("skill sync", () => {
       url: "https://example.supabase.co/",
       anonKey: "anon",
       fetchImpl: async (url) => {
-        expect(String(url)).toContain(`/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=`);
+        expect(String(url)).toContain(`/rest/v1/${AGENT_RECALL_SKILLS_TABLE}?select=`);
         expect(String(url)).toContain("content_hash");
         expect(String(url)).not.toContain("markdown");
         expect(String(url)).toContain("order=local_fingerprint.asc,version.desc");
@@ -250,7 +250,7 @@ describe("skill sync", () => {
       url: "https://example.supabase.co",
       anonKey: "anon",
       fetchImpl: async (url, init) => {
-        expect(String(url)).toBe(`https://example.supabase.co/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}`);
+        expect(String(url)).toBe(`https://example.supabase.co/rest/v1/${AGENT_RECALL_SKILLS_TABLE}`);
         expect(init?.method).toBe("POST");
         expect((init?.headers as Record<string, string>).Prefer).toBe("return=representation");
         const body = JSON.parse(String(init?.body));
@@ -298,7 +298,7 @@ describe("skill sync", () => {
     expect(result.id).toBe("remote-large");
     expect(calls[0].url).toContain("/storage/v1/object/agent-session-skills/skills/");
     expect(gunzipSync(calls[0].body as Buffer).toString("utf8")).toContain("references/large.md");
-    expect(calls.some((call) => call.url.includes(`/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}`))).toBe(true);
+    expect(calls.some((call) => call.url.includes(`/rest/v1/${AGENT_RECALL_SKILLS_TABLE}`))).toBe(true);
   });
 
   it("hydrates gzip-compressed skill bundles", async () => {
@@ -417,7 +417,7 @@ describe("skill sync", () => {
       url: "https://example.supabase.co",
       anonKey: "anon",
       fetchImpl: async (url) => {
-        expect(String(url)).toBe(`https://example.supabase.co/rest/v1/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?id=eq.remote-1&select=*&limit=1`);
+        expect(String(url)).toBe(`https://example.supabase.co/rest/v1/${AGENT_RECALL_SKILLS_TABLE}?id=eq.remote-1&select=*&limit=1`);
         return new Response(JSON.stringify([versionRow({ markdown: "# Review", metadata: { skillFiles: [] } })]), { status: 200 });
       },
     });

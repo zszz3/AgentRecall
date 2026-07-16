@@ -10,7 +10,7 @@ import {
   type SkillPortableScope,
 } from "./skill-manager";
 
-export const AGENT_SESSION_SEARCH_SKILLS_TABLE = "agent_session_search_skills";
+export const AGENT_RECALL_SKILLS_TABLE = "agent_recall_skills";
 export const AGENT_SESSION_SKILLS_BUCKET = "agent-session-skills";
 const REMOTE_SKILL_VERSION_COLUMNS =
   "id,name,description,agent,source,local_fingerprint,content_hash,uploaded_from_path,portable_scope,relative_path,identity_version,version,created_at,updated_at";
@@ -184,7 +184,7 @@ export class SkillVersionConflictError extends Error {
   }
 }
 
-export function buildSkillSyncSetupSql(tableName = AGENT_SESSION_SEARCH_SKILLS_TABLE): string {
+export function buildSkillSyncSetupSql(tableName = AGENT_RECALL_SKILLS_TABLE): string {
   return [
     `create table if not exists public.${tableName} (`,
     "  id uuid primary key default gen_random_uuid(),",
@@ -240,8 +240,8 @@ export function buildSkillSyncSetupSql(tableName = AGENT_SESSION_SEARCH_SKILLS_T
     `alter table public.${tableName} enable row level security;`,
     `grant select, insert, update, delete on table public.${tableName} to anon;`,
     "",
-    `drop policy if exists "agent_session_search_skills_personal_sync" on public.${tableName};`,
-    `create policy "agent_session_search_skills_personal_sync"`,
+    `drop policy if exists "agent_recall_skills_personal_sync" on public.${tableName};`,
+    `create policy "agent_recall_skills_personal_sync"`,
     `  on public.${tableName}`,
     "  for all",
     "  to anon",
@@ -387,7 +387,7 @@ export class SupabaseSkillSyncClient {
 
   async checkStatus(): Promise<SkillSyncStatus> {
     const setupSql = buildSkillSyncSetupSql();
-    const response = await this.request(`/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=id,portable_scope,relative_path,identity_version&limit=1`, { method: "GET" });
+    const response = await this.request(`/${AGENT_RECALL_SKILLS_TABLE}?select=id,portable_scope,relative_path,identity_version&limit=1`, { method: "GET" });
     if (response.ok) {
       const bucketResponse = await this.request(`/storage/v1/bucket/${AGENT_SESSION_SKILLS_BUCKET}`, { method: "GET" });
       if (bucketResponse.ok) return { kind: "ready", setupSql };
@@ -405,7 +405,7 @@ export class SupabaseSkillSyncClient {
         kind: "missing-table",
         setupSql,
         remediation: "sql",
-        message: `Supabase table ${AGENT_SESSION_SEARCH_SKILLS_TABLE} was not found.`,
+        message: `Supabase table ${AGENT_RECALL_SKILLS_TABLE} was not found.`,
       };
     }
     if (isMissingSchemaColumnError(body)) {
@@ -421,7 +421,7 @@ export class SupabaseSkillSyncClient {
 
   async listRemoteSkillVersions(): Promise<RemoteSkillVersion[]> {
     const response = await this.request(
-      `/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?select=${REMOTE_SKILL_VERSION_COLUMNS}&order=local_fingerprint.asc,version.desc`,
+      `/${AGENT_RECALL_SKILLS_TABLE}?select=${REMOTE_SKILL_VERSION_COLUMNS}&order=local_fingerprint.asc,version.desc`,
       { method: "GET" },
     );
     const body = await readResponseBody(response);
@@ -431,7 +431,7 @@ export class SupabaseSkillSyncClient {
 
   async getLatestSkillVersion(localFingerprint: string): Promise<RemoteSkillVersion | null> {
     const response = await this.request(
-      `/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?local_fingerprint=eq.${encodeURIComponent(localFingerprint)}&select=${REMOTE_SKILL_VERSION_COLUMNS}&order=version.desc&limit=1`,
+      `/${AGENT_RECALL_SKILLS_TABLE}?local_fingerprint=eq.${encodeURIComponent(localFingerprint)}&select=${REMOTE_SKILL_VERSION_COLUMNS}&order=version.desc&limit=1`,
       { method: "GET" },
     );
     const body = await readResponseBody(response);
@@ -441,7 +441,7 @@ export class SupabaseSkillSyncClient {
   }
 
   async getRemoteSkill(remoteSkillId: string): Promise<RemoteSkill> {
-    const response = await this.request(`/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?id=eq.${encodeURIComponent(remoteSkillId)}&select=*&limit=1`, {
+    const response = await this.request(`/${AGENT_RECALL_SKILLS_TABLE}?id=eq.${encodeURIComponent(remoteSkillId)}&select=*&limit=1`, {
       method: "GET",
     });
     const body = await readResponseBody(response);
@@ -453,7 +453,7 @@ export class SupabaseSkillSyncClient {
 
   async deleteRemoteSkillGroup(localFingerprint: string): Promise<string[]> {
     const response = await this.request(
-      `/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?local_fingerprint=eq.${encodeURIComponent(localFingerprint)}&select=id,metadata`,
+      `/${AGENT_RECALL_SKILLS_TABLE}?local_fingerprint=eq.${encodeURIComponent(localFingerprint)}&select=id,metadata`,
       { method: "GET" },
     );
     const body = await readResponseBody(response);
@@ -468,7 +468,7 @@ export class SupabaseSkillSyncClient {
     if (safeIds.length !== ids.length) throw new Error("Remote Skill returned an invalid record id.");
     if (safeIds.length === 0) return [];
     const response = await this.request(
-      `/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?id=in.(${safeIds.join(",")})&select=id,metadata`,
+      `/${AGENT_RECALL_SKILLS_TABLE}?id=in.(${safeIds.join(",")})&select=id,metadata`,
       { method: "GET" },
     );
     const body = await readResponseBody(response);
@@ -492,7 +492,7 @@ export class SupabaseSkillSyncClient {
     const safeIds = ids.filter((id) => /^[0-9a-f-]+$/i.test(id));
     if (safeIds.length !== ids.length) throw new Error("Remote Skill returned an invalid record id.");
     const deleteResponse = await this.request(
-      `/${AGENT_SESSION_SEARCH_SKILLS_TABLE}?id=in.(${safeIds.join(",")})`,
+      `/${AGENT_RECALL_SKILLS_TABLE}?id=in.(${safeIds.join(",")})`,
       { method: "DELETE" },
     );
     const deleteBody = await readResponseBody(deleteResponse);
@@ -502,7 +502,7 @@ export class SupabaseSkillSyncClient {
 
   async insertSkillVersion(base: SkillVersionBasePayload, version: number): Promise<RemoteSkill> {
     const prepared = await this.prepareSkillVersionPayload(base, version);
-    const response = await this.request(`/${AGENT_SESSION_SEARCH_SKILLS_TABLE}`, {
+    const response = await this.request(`/${AGENT_RECALL_SKILLS_TABLE}`, {
       method: "POST",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({ ...prepared, version }),

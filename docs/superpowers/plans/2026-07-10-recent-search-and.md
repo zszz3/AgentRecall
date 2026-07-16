@@ -100,7 +100,7 @@ Expected: FAIL because the module is missing.
 Export:
 
 ```ts
-export const SEARCH_HISTORY_STORAGE_KEY = "agent-session-search-recent-searches";
+export const SEARCH_HISTORY_STORAGE_KEY = "agent-recall-recent-searches";
 export const SEARCH_HISTORY_LIMIT = 10;
 export function readSearchHistory(storage: SearchHistoryStorage): string[];
 export function recordSearch(storage: SearchHistoryStorage, current: string[], query: string): string[];

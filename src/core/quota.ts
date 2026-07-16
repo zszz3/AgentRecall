@@ -19,7 +19,7 @@ const QUOTA_CODE_REVIEW = "code_review";
 const FIVE_HOURS_SECONDS = 5 * 60 * 60;
 const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
 const CLAUDE_STATUSLINE_SCRIPT_BASENAME = "claude-statusline-snapshot.cjs";
-const CLAUDE_STATUSLINE_BIN_NAME = "agent-session-search-claude-statusline";
+const CLAUDE_STATUSLINE_BIN_NAME = "agent-recall-claude-statusline";
 
 interface QuotaLoadOptions {
   now?: Date;
@@ -189,7 +189,7 @@ export function loadClaudeQuotaCard(options: QuotaLoadOptions = {}): UsageQuotaC
         bridgeStatus === "installed"
           ? "Claude Code statusline bridge installed. Restart Claude Code, then run one request to generate quota data."
           : bridgeStatus === "conflict"
-            ? "Claude Code has a different statusLine configured, so Agent-Session-Search cannot generate quota data automatically."
+            ? "Claude Code has a different statusLine configured, so AgentRecall cannot generate quota data automatically."
             : card.detail,
     };
   }
@@ -322,7 +322,7 @@ function claudeStatuslineCandidates(options: QuotaLoadOptions): string[] {
   const env = options.env ?? process.env;
   const home = getHomeDir(options);
   const candidates: string[] = [];
-  const explicitPaths = [env.AGENT_SESSION_SEARCH_CLAUDE_STATUSLINE?.trim(), env.KABOO_CLAUDE_STATUSLINE?.trim()];
+  const explicitPaths = [env.AGENT_RECALL_CLAUDE_STATUSLINE?.trim(), env.KABOO_CLAUDE_STATUSLINE?.trim()];
   for (const explicitPath of explicitPaths) {
     if (explicitPath) candidates.push(expandHome(explicitPath, home));
   }
@@ -578,16 +578,16 @@ function doCodexUsagePowerShellRequest(endpoint: string, accessToken: string, ac
 $ErrorActionPreference = 'Stop'
 $headers = @{
   Accept = 'application/json'
-  Authorization = 'Bearer ' + $env:AGENT_SESSION_SEARCH_CODEX_ACCESS_TOKEN
-  'User-Agent' = 'agent-session-search'
+  Authorization = 'Bearer ' + $env:AGENT_RECALL_CODEX_ACCESS_TOKEN
+  'User-Agent' = 'agent-recall'
 }
-if ($env:AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID) {
-  $headers['X-Account-Id'] = $env:AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID
-  $headers['ChatClaude-Account-Id'] = $env:AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID
-  $headers['ChatGPT-Account-Id'] = $env:AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID
+if ($env:AGENT_RECALL_CODEX_ACCOUNT_ID) {
+  $headers['X-Account-Id'] = $env:AGENT_RECALL_CODEX_ACCOUNT_ID
+  $headers['ChatClaude-Account-Id'] = $env:AGENT_RECALL_CODEX_ACCOUNT_ID
+  $headers['ChatGPT-Account-Id'] = $env:AGENT_RECALL_CODEX_ACCOUNT_ID
 }
 try {
-  $response = Invoke-WebRequest -Uri $env:AGENT_SESSION_SEARCH_CODEX_USAGE_URL -Headers $headers -Method GET -TimeoutSec 15 -UseBasicParsing
+  $response = Invoke-WebRequest -Uri $env:AGENT_RECALL_CODEX_USAGE_URL -Headers $headers -Method GET -TimeoutSec 15 -UseBasicParsing
   [Console]::Out.Write($response.Content)
 } catch {
   $statusCode = $null
@@ -612,9 +612,9 @@ try {
         maxBuffer: HTTP_BODY_LIMIT,
         env: {
           ...process.env,
-          AGENT_SESSION_SEARCH_CODEX_USAGE_URL: endpoint,
-          AGENT_SESSION_SEARCH_CODEX_ACCESS_TOKEN: accessToken,
-          AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID: accountId,
+          AGENT_RECALL_CODEX_USAGE_URL: endpoint,
+          AGENT_RECALL_CODEX_ACCESS_TOKEN: accessToken,
+          AGENT_RECALL_CODEX_ACCOUNT_ID: accountId,
         },
       },
       (error, stdout, stderr) => {
@@ -647,15 +647,15 @@ export function doCodexUsagePythonRequest(endpoint: string, accessToken: string,
   const script = `
 import os, sys, urllib.request, urllib.error
 
-url = os.environ["AGENT_SESSION_SEARCH_CODEX_USAGE_URL"]
-token = os.environ["AGENT_SESSION_SEARCH_CODEX_ACCESS_TOKEN"]
-account = (os.environ.get("AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID") or "").strip()
-proxy_url = (os.environ.get("AGENT_SESSION_SEARCH_CODEX_PROXY") or "").strip()
+url = os.environ["AGENT_RECALL_CODEX_USAGE_URL"]
+token = os.environ["AGENT_RECALL_CODEX_ACCESS_TOKEN"]
+account = (os.environ.get("AGENT_RECALL_CODEX_ACCOUNT_ID") or "").strip()
+proxy_url = (os.environ.get("AGENT_RECALL_CODEX_PROXY") or "").strip()
 
 headers = {
     "Accept": "application/json",
     "Authorization": "Bearer " + token,
-    "User-Agent": "agent-session-search",
+    "User-Agent": "agent-recall",
 }
 if account:
     headers["X-Account-Id"] = account
@@ -694,10 +694,10 @@ else:
         maxBuffer: HTTP_BODY_LIMIT,
         env: {
           ...process.env,
-          AGENT_SESSION_SEARCH_CODEX_USAGE_URL: endpoint,
-          AGENT_SESSION_SEARCH_CODEX_ACCESS_TOKEN: accessToken,
-          AGENT_SESSION_SEARCH_CODEX_ACCOUNT_ID: accountId,
-          AGENT_SESSION_SEARCH_CODEX_PROXY: proxyUrl ?? "",
+          AGENT_RECALL_CODEX_USAGE_URL: endpoint,
+          AGENT_RECALL_CODEX_ACCESS_TOKEN: accessToken,
+          AGENT_RECALL_CODEX_ACCOUNT_ID: accountId,
+          AGENT_RECALL_CODEX_PROXY: proxyUrl ?? "",
         },
       },
       (error, stdout, stderr) => {
@@ -785,7 +785,7 @@ async function doCodexUsageRequest(endpoint: string, accessToken: string, accoun
     const headers: Record<string, string> = {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
-      "User-Agent": "agent-session-search",
+      "User-Agent": "agent-recall",
     };
     if (accountId) {
       headers["X-Account-Id"] = accountId;

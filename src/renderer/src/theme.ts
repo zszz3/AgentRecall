@@ -1,6 +1,6 @@
 export type ThemeMode = "dark" | "light";
 
-export const THEME_STORAGE_KEY = "agent-session-search-theme";
+export const THEME_STORAGE_KEY = "agent-recall-theme";
 
 export function readStoredTheme(value: string | null): ThemeMode {
   return value === "dark" ? "dark" : "light";

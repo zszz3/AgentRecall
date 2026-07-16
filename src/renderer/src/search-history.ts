@@ -1,4 +1,4 @@
-export const SEARCH_HISTORY_STORAGE_KEY = "agent-session-search-recent-searches";
+export const SEARCH_HISTORY_STORAGE_KEY = "agent-recall-recent-searches";
 export const SEARCH_HISTORY_LIMIT = 10;
 
 export interface SearchHistoryStorage {

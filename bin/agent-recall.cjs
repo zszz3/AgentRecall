@@ -22,14 +22,14 @@ const {
 } = require("./update-client.cjs");
 
 async function scheduleUpdate(manifest, { stopApp }) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-session-search-apply-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-recall-apply-"));
   const manifestPath = path.join(directory, "update.json");
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   const args = [path.join(__dirname, "apply-update.cjs"), "--manifest", manifestPath];
   if (stopApp) args.push("--stop-app");
   const child = spawn(process.execPath, args, {
     stdio: "inherit",
-    env: { ...process.env, AGENT_SESSION_SEARCH_NODE_PATH: process.execPath },
+    env: { ...process.env, AGENT_RECALL_NODE_PATH: process.execPath },
   });
   const exitCode = await new Promise((resolve, reject) => {
     child.once("error", reject);
@@ -49,16 +49,16 @@ function launchApp() {
   const electronPath = require("electron");
   const appEntry = path.join(__dirname, "..", "out", "main", "index.js");
   const environment = { ...process.env };
-  environment.AGENT_SESSION_SEARCH_NODE_PATH = process.execPath;
-  if (environment.AGENT_SESSION_SEARCH_SOURCE_BUILD !== "1") {
-    environment.AGENT_SESSION_SEARCH_RELEASE_BUILD = "1";
+  environment.AGENT_RECALL_NODE_PATH = process.execPath;
+  if (environment.AGENT_RECALL_SOURCE_BUILD !== "1") {
+    environment.AGENT_RECALL_RELEASE_BUILD = "1";
   } else {
-    delete environment.AGENT_SESSION_SEARCH_RELEASE_BUILD;
+    delete environment.AGENT_RECALL_RELEASE_BUILD;
   }
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(electronPath, [appEntry], { detached: true, stdio: "ignore", env: environment });
   child.on("error", (error) => {
-    console.error("Failed to launch Agent-Session-Search:", error.message);
+    console.error("Failed to launch AgentRecall:", error.message);
     process.exitCode = 1;
   });
   child.unref();
@@ -82,7 +82,7 @@ async function main() {
 
   const explicitCheck = args.has("--check-update") || args.has("--update");
   const preferenceEnabled = await readUpdatePreference();
-  const checkDisabled = args.has("--no-update-check") || process.env.AGENT_SESSION_SEARCH_NO_UPDATE_CHECK === "1" || !preferenceEnabled;
+  const checkDisabled = args.has("--no-update-check") || process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1" || !preferenceEnabled;
   let result = null;
   if (!checkDisabled || explicitCheck) {
     result = await checkForUpdate({ currentVersion: version, force: explicitCheck });
@@ -91,14 +91,14 @@ async function main() {
   if (args.has("--check-update")) {
     if (result?.error) process.stderr.write(`检查更新失败：${result.error}\n`);
     else if (result?.updateAvailable) process.stdout.write(`${formatUpdateNotice(result)}\n`);
-    else process.stdout.write(`Agent-Session-Search v${version} 已是最新版本。\n`);
+    else process.stdout.write(`AgentRecall v${version} 已是最新版本。\n`);
     return;
   }
 
   if (args.has("--update")) {
     if (!result?.updateAvailable || !result.manifest) {
       if (result?.error) throw new Error(`检查更新失败：${result.error}`);
-      process.stdout.write(`Agent-Session-Search v${version} 已是最新版本。\n`);
+      process.stdout.write(`AgentRecall v${version} 已是最新版本。\n`);
       return;
     }
     process.stdout.write(`${formatUpdateNotice(result)}\n\n正在准备更新，完成后会自动启动应用。\n`);

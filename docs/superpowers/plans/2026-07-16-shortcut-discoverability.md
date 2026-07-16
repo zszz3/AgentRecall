@@ -17,7 +17,7 @@
 - 中英文文案必须成对出现，中文保持直接、简短。
 - 不新增依赖，不导出只为测试服务的实现细节。
 - 分支新增且只新增一个 `.release-notes/*.md` 文件，内容只描述用户可见结果。
-- 完整验证使用 Node 22 和临时 `HOME=/private/tmp/agent-session-search-shortcut-home`，不得读写真实用户会话或配置。
+- 完整验证使用 Node 22 和临时 `HOME=/private/tmp/agent-recall-shortcut-home`，不得读写真实用户会话或配置。
 
 ---
 
@@ -358,23 +358,23 @@ git commit -m "style: format app shortcut reference"
 
 - [ ] **Step 2: 检查发布说明门禁**
 
-Run: `env HOME=/private/tmp/agent-session-search-shortcut-home npm run release-note:check`
+Run: `env HOME=/private/tmp/agent-recall-shortcut-home npm run release-note:check`
 
 Expected: `.release-notes/feat-shortcut-discoverability.md: 1 feature(s), 0 fix(es)`。
 
 - [ ] **Step 3: 运行完整测试**
 
-Run: `/bin/zsh -lc 'source /Users/xjx/.nvm/nvm.sh && nvm use 22 >/dev/null && env HOME=/private/tmp/agent-session-search-shortcut-home npm test'`
+Run: `/bin/zsh -lc 'source /Users/xjx/.nvm/nvm.sh && nvm use 22 >/dev/null && env HOME=/private/tmp/agent-recall-shortcut-home npm test'`
 
 Expected: exit 0；Vitest 现有 982 项加 3 项新测试，共 985 项通过；脚本测试 56 项通过。若沙箱阻止 `127.0.0.1` 监听，在主机环境运行同一命令。
 
 - [ ] **Step 4: 运行类型检查和生产构建**
 
-Run: `env HOME=/private/tmp/agent-session-search-shortcut-home npm run typecheck`
+Run: `env HOME=/private/tmp/agent-recall-shortcut-home npm run typecheck`
 
 Expected: exit 0，无 TypeScript 错误。
 
-Run: `env HOME=/private/tmp/agent-session-search-shortcut-home npm run build`
+Run: `env HOME=/private/tmp/agent-recall-shortcut-home npm run build`
 
 Expected: exit 0，主进程、preload、renderer 和 MCP bundle 均完成构建。
 

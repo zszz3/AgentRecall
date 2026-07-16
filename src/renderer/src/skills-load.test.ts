@@ -41,7 +41,7 @@ describe("skills panel loading", () => {
     const result = await loadSkillsPanelData({
       listSkills: async () => installedSkills,
       getSkillSyncSnapshot: async () => {
-        throw new Error("column agent_session_search_skills.content_hash does not exist");
+        throw new Error("column agent_recall_skills.content_hash does not exist");
       },
       fallbackSyncSnapshot,
     });
@@ -52,7 +52,7 @@ describe("skills panel loading", () => {
         kind: "error",
         setupSql: "setup sql",
         remediation: "settings",
-        message: "column agent_session_search_skills.content_hash does not exist",
+        message: "column agent_recall_skills.content_hash does not exist",
       },
       remoteSkillGroups: [],
       bindings: fallbackSyncSnapshot.bindings,

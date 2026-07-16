@@ -9,9 +9,9 @@ import {
 
 // electron-store writes config.json inside the Electron app's userData dir.
 // On macOS that is ~/Library/Application Support/<appName>. The packaged app
-// sets its name to "Agent-Session-Search"; in dev the lowercase package `name`
+// sets its name to "AgentRecall"; in dev the lowercase package `name`
 // is used, so we probe both to be safe.
-const CONFIG_CANDIDATE_DIRS = ["Agent-Session-Search", "agent-session-search"];
+const CONFIG_CANDIDATE_DIRS = ["AgentRecall", "agent-recall"];
 
 export interface McpSettingsOptions {
   env?: Record<string, string | undefined>;
@@ -26,7 +26,7 @@ export function resolveMcpConfigPath(options: McpSettingsOptions = {}): string |
 
   // An explicit override always wins, so tests and alternate installs can point
   // at a specific config without searching.
-  const override = env.AGENT_SESSION_SEARCH_CONFIG?.trim();
+  const override = env.AGENT_RECALL_CONFIG?.trim();
   if (override) return override;
 
   const roots = platform === "darwin"

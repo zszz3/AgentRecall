@@ -231,7 +231,7 @@ describe("writeMigratedSession", () => {
         timestamp: portable().startedAt,
         cwd: portable().projectPath,
         title: portable().title,
-        originator: "agent-session-search",
+        originator: "agent-recall",
         cli_version: "migration",
         model_provider: "openai",
       },

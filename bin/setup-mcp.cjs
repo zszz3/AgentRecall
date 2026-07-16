@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 "use strict";
 
-// Registers (or removes) the agent-session-search MCP server in Claude Code and
+// Registers (or removes) the agent-recall MCP server in Claude Code and
 // Codex configs so they can search past sessions. Run with `uninstall` to remove.
 
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const SERVER_NAME = "agent-session-search";
-const CODEX_SECTION = "mcp_servers.agent_session_search";
+const SERVER_NAME = "agent-recall";
+const CODEX_SECTION = "mcp_servers.agent_recall";
 
 function homeDir() {
-  return process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+  return process.env.AGENT_RECALL_TEST_HOME || os.homedir();
 }
 
 function serverScriptPath() {
-  return path.join(__dirname, "agent-session-search-mcp.mjs");
+  return path.join(__dirname, "agent-recall-mcp.mjs");
 }
 
 function nodeMajor(version) {

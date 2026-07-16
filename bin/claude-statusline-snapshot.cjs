@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const DEFAULT_OUTPUT = path.join(os.homedir(), ".claude", "statusline-snapshot.json");
-const outputPath = expandHome(process.env.AGENT_SESSION_SEARCH_CLAUDE_STATUSLINE || DEFAULT_OUTPUT);
+const outputPath = expandHome(process.env.AGENT_RECALL_CLAUDE_STATUSLINE || DEFAULT_OUTPUT);
 
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -34,7 +34,7 @@ process.stdin.on("end", () => {
 
 function buildSnapshot(input, previous) {
   const snapshot = {
-    source: "agent-session-search-statusline",
+    source: "agent-recall-statusline",
     updated_at: new Date().toISOString(),
   };
 

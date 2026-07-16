@@ -33,7 +33,7 @@ function readSettings(filePath) {
 }
 
 function homeDir() {
-  return process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+  return process.env.AGENT_RECALL_TEST_HOME || os.homedir();
 }
 
 function statuslineCommand() {
@@ -41,7 +41,7 @@ function statuslineCommand() {
   if (fs.existsSync(localScript)) {
     return process.platform === "win32" ? `node "${localScript}"` : `"${localScript}"`;
   }
-  return process.platform === "win32" ? "agent-session-search-claude-statusline.cmd" : "agent-session-search-claude-statusline";
+  return process.platform === "win32" ? "agent-recall-claude-statusline.cmd" : "agent-recall-claude-statusline";
 }
 
 function writeJsonAtomic(filePath, value) {

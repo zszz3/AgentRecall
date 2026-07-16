@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────────
-# Agent-Session-Search — smart launcher for macOS
+# AgentRecall — smart launcher for macOS
 #
 # Usage:  bash start.sh          # normal launch, may offer release updates
 #         bash start.sh local    # launch this checkout, no automatic release update check
@@ -49,7 +49,7 @@ ok()    { printf "${C_GREEN}✓ %s${C_RESET}\n" "$*"; }
 warn()  { printf "${C_YELLOW}⚠ %s${C_RESET}\n" "$*"; }
 fail()  { printf "${C_RED}✗ %s${C_RESET}\n" "$*" >&2; exit 1; }
 
-printf "%b\n" "${C_BOLD}Agent-Session-Search launcher${C_RESET}"
+printf "%b\n" "${C_BOLD}AgentRecall launcher${C_RESET}"
 if [ "$LOCAL_MODE" = true ]; then
   echo "Mode: local checkout (automatic release update check disabled)"
 else
@@ -122,7 +122,7 @@ newest_source=0
 for f in \
   $(find src -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.html' \) 2>/dev/null) \
   electron.vite.config.ts tsconfig.json package.json \
-  scripts/build-mcp-bundle.mjs bin/agent-session-search-mcp.mjs bin/setup-mcp.cjs; do
+  scripts/build-mcp-bundle.mjs bin/agent-recall-mcp.mjs bin/setup-mcp.cjs; do
   [ -f "$f" ] || continue
   m=$(stat -f '%m' "$f" 2>/dev/null || echo 0)
   [ "$m" -gt "$newest_source" ] && newest_source="$m"
@@ -157,8 +157,8 @@ fi
 # global bin dir. If any are missing (e.g. new bin entries added since the
 # last global install), re-run npm install -g . to refresh the symlinks.
 GLOBAL_PREFIX="$(npm prefix -g 2>/dev/null)"
-GLOBAL_BIN="$GLOBAL_PREFIX/bin/agent-session-search"
-LOCAL_BIN="$ROOT_DIR/bin/agent-session-search.cjs"
+GLOBAL_BIN="$GLOBAL_PREFIX/bin/agent-recall"
+LOCAL_BIN="$ROOT_DIR/bin/agent-recall.cjs"
 all_bins_linked=true
 if [ -x "$GLOBAL_BIN" ]; then
   linked_target="$(node -e 'const fs=require("fs"), path=require("path"); try { process.stdout.write(fs.realpathSync(process.argv[1])); } catch { process.stdout.write(""); }' "$GLOBAL_BIN")"
@@ -167,13 +167,13 @@ if [ -x "$GLOBAL_BIN" ]; then
     all_bins_linked=false
   fi
   for bin_name in \
-    agent-session-search \
-    agent-session-search-claude-statusline \
-    agent-session-search-setup-claude-statusline \
-    agent-session-search-skill-usage \
-    agent-session-search-setup-skill-usage-hook \
-    agent-session-search-mcp \
-    agent-session-search-setup-mcp; do
+    agent-recall \
+    agent-recall-claude-statusline \
+    agent-recall-setup-claude-statusline \
+    agent-recall-skill-usage \
+    agent-recall-setup-skill-usage-hook \
+    agent-recall-mcp \
+    agent-recall-setup-mcp; do
     if [ ! -x "$GLOBAL_PREFIX/bin/$bin_name" ]; then
       all_bins_linked=false
       break
@@ -184,7 +184,7 @@ else
 fi
 
 if [ "$all_bins_linked" = true ]; then
-  ok "Global command 'agent-session-search' registered"
+  ok "Global command 'agent-recall' registered"
 else
   info "Registering / refreshing global command (npm install -g .) …"
   npm install -g . || fail "npm install -g . failed"
@@ -195,26 +195,26 @@ if [ "$LOCAL_MODE" = true ]; then
   LAUNCH_BIN="$LOCAL_BIN"
   LAUNCH_NO_UPDATE=true
 else
-  LAUNCH_BIN="agent-session-search"
+  LAUNCH_BIN="agent-recall"
   LAUNCH_NO_UPDATE=false
 fi
 
-launch_agent_session_search() {
+launch_agent_recall() {
   if [ "$LAUNCH_NO_UPDATE" = true ]; then
-    AGENT_SESSION_SEARCH_SOURCE_BUILD=1 AGENT_SESSION_SEARCH_NO_UPDATE_CHECK=1 "$LAUNCH_BIN" --no-update-check "$@"
+    AGENT_RECALL_SOURCE_BUILD=1 AGENT_RECALL_NO_UPDATE_CHECK=1 "$LAUNCH_BIN" --no-update-check "$@"
   else
     "$LAUNCH_BIN" "$@"
   fi
 }
 
 # ── 6. register MCP server (skip if already registered) ────────
-SETUP_MCP="$(npm prefix -g 2>/dev/null)/bin/agent-session-search-setup-mcp"
+SETUP_MCP="$(npm prefix -g 2>/dev/null)/bin/agent-recall-setup-mcp"
 if [ -x "$SETUP_MCP" ]; then
   if "$SETUP_MCP" --status >/dev/null 2>&1; then
     ok "MCP server already registered"
   else
     info "Registering MCP server in Claude Code / Codex …"
-    "$SETUP_MCP" || warn "MCP registration failed (non-fatal — run 'agent-session-search-setup-mcp' manually later)"
+    "$SETUP_MCP" || warn "MCP registration failed (non-fatal — run 'agent-recall-setup-mcp' manually later)"
     ok "MCP server registered"
   fi
 else
@@ -236,13 +236,13 @@ fi
 # Helper sub-processes contain "--type=" in their command line, so we
 # exclude those to avoid false positives.
 ELECTRON_PATTERN="$ROOT_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
-APP_PROCESS_FILE="$HOME/.agent-session-search/app-process.json"
-USER_DATA_PATTERN="$HOME/Library/Application Support/Agent-Session-Search"
+APP_PROCESS_FILE="$HOME/.agent-recall/app-process.json"
+USER_DATA_PATTERN="$HOME/Library/Application Support/AgentRecall"
 
 is_main_process_command() {
   case "$1" in
     *"--type="*) return 1 ;;
-    *"agent-session-search-mcp"*) return 1 ;;
+    *"agent-recall-mcp"*) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -290,7 +290,7 @@ if [ "$APP_RUNNING" = true ] && [ "$build_needed" = false ]; then
   # App is running and code is unchanged — just focus it.
   ok "App is already running — focusing existing window"
   echo ""
-  launch_agent_session_search 2>/dev/null || true
+  launch_agent_recall 2>/dev/null || true
   exit 0
 fi
 
@@ -307,8 +307,8 @@ if [ "$APP_RUNNING" = true ]; then
 fi
 
 echo ""
-info "Launching Agent-Session-Search …"
+info "Launching AgentRecall …"
 printf "    %b\n" "${C_DIM}(The app runs in the menu bar — press Option+Space to show the window)${C_RESET}"
 echo ""
-launch_agent_session_search
+launch_agent_recall
 exit $?

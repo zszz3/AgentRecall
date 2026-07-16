@@ -1014,7 +1014,7 @@ export function SettingsDialog({
               <section className="settings-pane update-about-pane">
                 <div className="update-app-identity">
                   <UpdateBrandMark />
-                  <h3>Agent-Session-Search</h3>
+                  <h3>AgentRecall</h3>
                   <p>
                     {appUpdateStatus?.developmentBuild
                       ? `${l("Development build", "开发版本")} · v${appUpdateStatus.currentVersion}`

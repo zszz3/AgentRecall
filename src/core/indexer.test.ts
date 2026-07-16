@@ -68,7 +68,7 @@ describe("indexer", () => {
 
   it("skips unchanged default session files before reading them", async () => {
     const store = createInMemoryStore();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-default-skip-"));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-default-skip-"));
     try {
       const filePath = writeCodexSession(homeDir, "codex-skip", "original question", "Original Title");
       const cold = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
@@ -91,7 +91,7 @@ describe("indexer", () => {
 
   it("re-reads Codex sessions when the session index changes", async () => {
     const store = createInMemoryStore();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-codex-index-"));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-index-"));
     try {
       writeCodexSession(homeDir, "codex-title-refresh", "title refresh question", "Old Title");
       await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
@@ -129,7 +129,7 @@ describe("indexer", () => {
     "indexes one migrated $target session file as its concrete source without a full scan",
     async ({ target, source }) => {
       const store = createInMemoryStore();
-      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-session-search-index-migration-${target}-`));
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-recall-index-migration-${target}-`));
       try {
         const written = await writeMigratedSession({
           target,
@@ -157,7 +157,7 @@ describe("indexer", () => {
 
   it("indexes the exact migrated CodeWiz session from a shared database", async () => {
     const store = createInMemoryStore();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-session-search-index-codewiz-exact-"));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-index-codewiz-exact-"));
     try {
       await writeMigratedSession({
         target: "codewiz",
@@ -187,7 +187,7 @@ describe("indexer", () => {
     "reports a stable domain error when a migrated %s session file is missing",
     (target) => {
       const store = createInMemoryStore();
-      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-session-search-index-missing-${target}-`));
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-recall-index-missing-${target}-`));
       const filePath = path.join(homeDir, "missing.jsonl");
       try {
         expect(() => indexMigratedSessionFile(store, target, filePath)).toThrow(

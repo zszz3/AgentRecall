@@ -22,7 +22,7 @@ describe("Claude statusline snapshot bridge", () => {
         }),
         env: {
           ...process.env,
-          AGENT_SESSION_SEARCH_CLAUDE_STATUSLINE: outputPath,
+          AGENT_RECALL_CLAUDE_STATUSLINE: outputPath,
         },
         encoding: "utf8",
       });
@@ -30,7 +30,7 @@ describe("Claude statusline snapshot bridge", () => {
       const snapshot = JSON.parse(readFileSync(outputPath, "utf8")) as Record<string, unknown>;
       expect(stdout).toContain("5h 88% left");
       expect(snapshot).toMatchObject({
-        source: "agent-session-search-statusline",
+        source: "agent-recall-statusline",
         plan: "max",
         rate_limits: {
           five_hour: { used_percentage: 12.4, resets_at: 1_807_000_000 },
@@ -49,7 +49,7 @@ describe("Claude statusline snapshot bridge", () => {
     const run = (input: unknown): void => {
       execFileSync(process.execPath, [SCRIPT_PATH], {
         input: JSON.stringify(input),
-        env: { ...process.env, AGENT_SESSION_SEARCH_CLAUDE_STATUSLINE: outputPath },
+        env: { ...process.env, AGENT_RECALL_CLAUDE_STATUSLINE: outputPath },
         encoding: "utf8",
       });
     };
@@ -83,7 +83,7 @@ describe("Claude statusline snapshot bridge", () => {
     const run = (input: unknown): void => {
       execFileSync(process.execPath, [SCRIPT_PATH], {
         input: JSON.stringify(input),
-        env: { ...process.env, AGENT_SESSION_SEARCH_CLAUDE_STATUSLINE: outputPath },
+        env: { ...process.env, AGENT_RECALL_CLAUDE_STATUSLINE: outputPath },
         encoding: "utf8",
       });
     };

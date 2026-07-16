@@ -5,11 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import { readReleaseNote, renderReleaseNotes } from "./release-notes.mjs";
 
-export const LATEST_PACKAGE_NAME = "agent-session-search.tgz";
-export const UPDATE_MANIFEST_REPOSITORY = "zszz3/agent-session-search";
+export const LATEST_PACKAGE_NAME = "agent-recall.tgz";
+export const UPDATE_MANIFEST_REPOSITORY = "zszz3/AgentRecall";
 
 function releasePackageName(version) {
-  return `agent-session-search-${version}.tgz`;
+  return `agent-recall-${version}.tgz`;
 }
 
 function manifestRepositoryFor(repository) {

@@ -14,9 +14,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const HOME_DIR = process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+const HOME_DIR = process.env.AGENT_RECALL_TEST_HOME || os.homedir();
 const DEFAULT_OUTPUT = path.join(HOME_DIR, ".claude", "skill-usage.jsonl");
-const outputPath = expandHome(process.env.AGENT_SESSION_SEARCH_SKILL_USAGE || DEFAULT_OUTPUT);
+const outputPath = expandHome(process.env.AGENT_RECALL_SKILL_USAGE || DEFAULT_OUTPUT);
 
 let stdin = "";
 process.stdin.setEncoding("utf8");

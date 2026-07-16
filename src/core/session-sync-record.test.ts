@@ -54,7 +54,7 @@ describe("session sync hook recorder", () => {
       expect(event).not.toBeNull();
       if (!event) throw new Error("Expected a queue event.");
       const filePath = record.writeSessionSyncEvent(event, { homeDir });
-      const queueDir = path.join(homeDir, ".agent-session-search", "session-sync-queue");
+      const queueDir = path.join(homeDir, ".agent-recall", "session-sync-queue");
       expect(readdirSync(queueDir)).toEqual([path.basename(filePath)]);
       expect(JSON.parse(readFileSync(filePath, "utf8"))).toMatchObject({ agent: "claude", sessionId: "abc" });
     } finally {

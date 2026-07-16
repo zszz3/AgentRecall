@@ -76,6 +76,6 @@ describe("recent search history", () => {
   });
 
   it("uses the project-specific storage key", () => {
-    expect(SEARCH_HISTORY_STORAGE_KEY).toBe("agent-session-search-recent-searches");
+    expect(SEARCH_HISTORY_STORAGE_KEY).toBe("agent-recall-recent-searches");
   });
 });

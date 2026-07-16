@@ -109,14 +109,14 @@ Expected: all tests pass.
 Add a linked Shields.io badge using:
 
 ```text
-https://img.shields.io/github/stars/zszz3/agent-session-search?style=flat&logo=github
+https://img.shields.io/github/stars/zszz3/AgentRecall?style=flat&logo=github
 ```
 
 to the existing badge row in both READMEs.
 
 - [ ] **Step 2: Generate the chart with authenticated repository data**
 
-Run the generator with `GITHUB_REPOSITORY=zszz3/agent-session-search` and an authenticated GitHub token, writing to `assets/star-history.svg`.
+Run the generator with `GITHUB_REPOSITORY=zszz3/AgentRecall` and an authenticated GitHub token, writing to `assets/star-history.svg`.
 
 - [ ] **Step 3: Verify deterministic output**
 

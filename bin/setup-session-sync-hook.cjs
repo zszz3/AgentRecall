@@ -10,10 +10,10 @@ const os = require("node:os");
 const path = require("node:path");
 
 const RECORD_SCRIPT_BASENAME = "session-sync-record.cjs";
-const RECORD_BIN_NAME = "agent-session-search-session-sync";
+const RECORD_BIN_NAME = "agent-recall-session-sync";
 
 function defaultHomeDir() {
-  return process.env.AGENT_SESSION_SEARCH_TEST_HOME || os.homedir();
+  return process.env.AGENT_RECALL_TEST_HOME || os.homedir();
 }
 
 function recordScriptPath() {

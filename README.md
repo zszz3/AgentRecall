@@ -1,4 +1,4 @@
-<h1 align="center">Agent-Session-Search</h1>
+<h1 align="center">AgentRecall</h1>
 
 <p align="center">本地桌面工具 · 搜索、快速启动、分析多种 AI Coding Agent 会话</p>
 
@@ -11,12 +11,12 @@
   <img src="https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white" alt="Electron">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022.13-339933?logo=nodedotjs&logoColor=white" alt="Node">
-  <a href="https://github.com/zszz3/agent-session-search/stargazers"><img src="https://img.shields.io/github/stars/zszz3/agent-session-search?style=flat&logo=github" alt="GitHub Stars"></a>
+  <a href="https://github.com/zszz3/AgentRecall/stargazers"><img src="https://img.shields.io/github/stars/zszz3/AgentRecall?style=flat&logo=github" alt="GitHub Stars"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </p>
 
 <p align="center">
-  <img src="./assets/show.png" alt="Agent-Session-Search 界面预览" width="860">
+  <img src="./assets/show.png" alt="AgentRecall 界面预览" width="860">
 </p>
 
 ## 快速开始
@@ -26,43 +26,43 @@
 准备好 **Node.js 22.13 或更高版本**（自带 npm），然后在终端安装 GitHub 最新 Release：
 
 ```bash
-npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
-agent-session-search
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz
+agent-recall
 ```
 
 这条命令安装的是 Release 中已经编译好的应用，不需要克隆仓库，也不需要执行 `npm run build`。应用会安装到当前 Node.js 的全局 npm 目录，首次启动时会准备当前系统对应的 Electron 运行时；它与本地源码开发目录相互独立，不会覆盖你的代码修改。
 
 | 系统 | 启动命令 | 默认唤起快捷键 |
 | --- | --- | --- |
-| macOS | `agent-session-search` | `⌥ Option + Space` |
-| Windows | `agent-session-search` | `Ctrl + Alt + Space` |
+| macOS | `agent-recall` | `⌥ Option + Space` |
+| Windows | `agent-recall` | `Ctrl + Alt + Space` |
 
 应用启动后会常驻菜单栏或系统托盘。设置可通过界面入口打开，macOS 也可以使用 `Cmd+,`；全局快捷键、主题和界面语言都可以在设置中修改。
 
-日常使用只需要再次运行 `agent-session-search`。终端每天最多检查一次 GitHub Release；发现新版本时会先展示新增功能和问题修复，再由你决定是否安装。也可以主动执行：
+日常使用只需要再次运行 `agent-recall`。终端每天最多检查一次 GitHub Release；发现新版本时会先展示新增功能和问题修复，再由你决定是否安装。也可以主动执行：
 
 ```bash
-agent-session-search --check-update
-agent-session-search --update
+agent-recall --check-update
+agent-recall --update
 ```
 
 App 内的 **设置 → 关于** 也可以检查并安装更新。如果自动更新失败，更新进程会尝试重新打开已经安装的版本，并通过系统提示框提供 Release 下载页和下面这条手动覆盖安装命令：
 
 ```bash
-npm install -g https://github.com/zszz3/agent-session-search/releases/latest/download/agent-session-search.tgz
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz
 ```
 
-如果终端提示 `agent-session-search: command not found`，请确认当前 shell 使用的是安装时的 Node.js 版本。nvm 用户可以执行 `nvm use 22`，或用 `nvm alias default 22` 把 Node 22 设为默认版本。
+如果终端提示 `agent-recall: command not found`，请确认当前 shell 使用的是安装时的 Node.js 版本。nvm 用户可以执行 `nvm use 22`，或用 `nvm alias default 22` 把 Node 22 设为默认版本。
 
 完整的安装、网络镜像、SSH 依赖、更新和卸载说明见 [Install.md](./Install.md)。
 
 安装指定旧版本或回滚时，把版本号写进 Release 链接，例如：
 
 ```bash
-npm install -g https://github.com/zszz3/agent-session-search/releases/download/v0.2.0/agent-session-search.tgz
+npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/agent-recall.tgz
 ```
 
-完整卸载请先运行 `agent-session-search uninstall` 清理本应用写入的 statusLine、usage hook、会话同步 Hook、MCP 引用和缓存，再执行 `npm uninstall -g agent-session-search`；会话数据库、Supabase 配置和用户偏好会保留。
+完整卸载请先运行 `agent-recall uninstall` 清理本应用写入的 statusLine、usage hook、会话同步 Hook、MCP 引用和缓存，再执行 `npm uninstall -g agent-recall`；会话数据库、Supabase 配置和用户偏好会保留。
 
 ## 功能
 
@@ -163,7 +163,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 ## MCP 工具
 
-应用内置一个 stdio MCP 服务器（`agent-session-search-mcp`），让 Claude Code / Codex / CodeBuddy 在对话里直接搜索、读取历史会话，并管理标签、收藏、可见性，以及跨 Agent 迁移会话。首次打开应用后会自动写入数据库指针（`~/.agent-session-search/db-path`），MCP 服务器据此找到当前数据库；也可用 `AGENT_SESSION_SEARCH_DB` 环境变量覆盖。
+应用内置一个 stdio MCP 服务器（`agent-recall-mcp`），让 Claude Code / Codex / CodeBuddy 在对话里直接搜索、读取历史会话，并管理标签、收藏、可见性，以及跨 Agent 迁移会话。首次打开应用后会自动写入数据库指针（`~/.agent-recall/db-path`），MCP 服务器据此找到当前数据库；也可用 `AGENT_RECALL_DB` 环境变量覆盖。
 
 读取工具：
 
@@ -180,7 +180,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
   长会话会自动压缩：优先用 Settings 里配置的自定义摘要 API（`summarySource=custom`），否则回退到 `codex exec --ephemeral` / `claude --print`；压缩 provider 不可用时稳定回退到 `locally-truncated`。压缩过程中产生的临时 summary 会话会即时从数据库清除，不会残留脏数据。
 
-  MCP 服务器读取应用的配置文件（`~/Library/Application Support/Agent-Session-Search/config.json`，可用 `AGENT_SESSION_SEARCH_CONFIG` 覆盖路径）来判断摘要来源，并从数据库的 `api_provider_keys` 表补回自定义摘要 API 的密钥。
+  MCP 服务器读取应用的配置文件（`~/Library/Application Support/AgentRecall/config.json`，可用 `AGENT_RECALL_CONFIG` 覆盖路径）来判断摘要来源，并从数据库的 `api_provider_keys` 表补回自定义摘要 API 的密钥。
 
 ## Skills 管理与同步
 
@@ -197,17 +197,17 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 同步会上传整个 Skill 目录中的普通文件，包括 `SKILL.md`、`references/`、`scripts/`、示例文件等。云端只保存可移植作用域和相对目录，不保存上传设备的绝对路径；下载时按 `codex-user` → `$CODEX_HOME/skills`、`claude-user` → `~/.claude/skills`、`shared` → `~/.agents/skills` 定位，因此换设备或跨 macOS / Windows 不会沿用旧机器路径。同名 Skill 也会按作用域和相对目录区分。
 
-如果你在更早版本里已经创建过 `agent_session_search_skills` 表，升级后请重新执行一次 Copy setup SQL 的脚本来启用版本历史；脚本是幂等的，会补上 `content_hash` 列，并把唯一约束从 `local_fingerprint` 改为 `(local_fingerprint, version)`。
+如果你在更早版本里已经创建过 `agent_recall_skills` 表，升级后请重新执行一次 Copy setup SQL 的脚本来启用版本历史；脚本是幂等的，会补上 `content_hash` 列，并把唯一约束从 `local_fingerprint` 改为 `(local_fingerprint, version)`。
 
-当前 Supabase 同步按个人项目设计，不会自动创建表，也不会使用 service role key。应用只保存 Project URL 和 anon key 到本地设置，并通过 Supabase REST API 访问 `agent_session_search_skills` 表。初始化 SQL 会为 anon role 创建可读写策略，适合个人私有项目或仅自己掌握 URL/key 的项目；如果要多人共享或公开分发，请先按自己的 Supabase 安全模型调整 RLS policy。
+当前 Supabase 同步按个人项目设计，不会自动创建表，也不会使用 service role key。应用只保存 Project URL 和 anon key 到本地设置，并通过 Supabase REST API 访问 `agent_recall_skills` 表。初始化 SQL 会为 anon role 创建可读写策略，适合个人私有项目或仅自己掌握 URL/key 的项目；如果要多人共享或公开分发，请先按自己的 Supabase 安全模型调整 RLS policy。
 
 ## 开发者本地运行
 
 开发环境需要 macOS 或 Windows、Git、Node.js 22.13+ 和 npm。首次准备仓库：
 
 ```bash
-git clone https://github.com/zszz3/agent-session-search.git
-cd agent-session-search
+git clone https://github.com/zszz3/AgentRecall.git
+cd AgentRecall
 npm ci
 npm run dev
 ```
@@ -246,8 +246,8 @@ npm run package:smoke
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=zszz3%2Fagent-session-search&type=date&legend=top-left">
-  <img src="./assets/star-history.svg" alt="Agent-Session-Search Star History Chart" width="900" />
+<a href="https://www.star-history.com/?repos=zszz3%2FAgentRecall&type=date&legend=top-left">
+  <img src="./assets/star-history.svg" alt="AgentRecall Star History Chart" width="900" />
 </a>
 
 有任何问题，请提交issue。如果觉得我们的项目还不错，欢迎star✨。

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Keep the Agent-Session-Search MCP server available when its optional migration bundle is stale, while omitting only `migrate_session` and reporting an actionable rebuild warning.
+**Goal:** Keep the AgentRecall MCP server available when its optional migration bundle is stale, while omitting only `migrate_session` and reporting an actionable rebuild warning.
 
 **Architecture:** The standalone MCP entry keeps its eight bundle-independent tools on the unconditional startup path. Migration bundle loading validates the runtime contract before caching it; startup catches only migration capability failures, logs one warning, and connects the stdio transport without registering `migrate_session`.
 
@@ -23,7 +23,7 @@
 ### Task 1: Stale Migration Bundle Soft Degradation
 
 **Files:**
-- Modify: `bin/agent-session-search-mcp.mjs`
+- Modify: `bin/agent-recall-mcp.mjs`
 - Modify: `src/core/mcp-server.test.ts`
 
 **Interfaces:**
@@ -35,14 +35,14 @@
 Add Node child-process and URL imports to `src/core/mcp-server.test.ts`. Add a helper that creates a temporary package layout containing:
 
 ```text
-<temp>/bin/agent-session-search-mcp.mjs
+<temp>/bin/agent-recall-mcp.mjs
 <temp>/out/mcp/migration-entry.js
 <temp>/node_modules -> <repo>/node_modules
 <temp>/package.json  { "type": "module" }
 <temp>/sessions.db
 ```
 
-Copy the real MCP entry, write an old-style migration module that exports only `SessionStore`, create a file-backed `SessionStore`, then spawn Node with `AGENT_SESSION_SEARCH_DB=<temp>/sessions.db`. Send newline-delimited JSON-RPC messages in this order:
+Copy the real MCP entry, write an old-style migration module that exports only `SessionStore`, create a file-backed `SessionStore`, then spawn Node with `AGENT_RECALL_DB=<temp>/sessions.db`. Send newline-delimited JSON-RPC messages in this order:
 
 ```ts
 { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }
@@ -53,7 +53,7 @@ Copy the real MCP entry, write an old-style migration module that exports only `
 Parse stdout by response `id`, terminate the child after `id: 2`, and assert:
 
 ```ts
-expect(initialize.result.serverInfo.name).toBe("agent-session-search");
+expect(initialize.result.serverInfo.name).toBe("agent-recall");
 expect(toolNames).toEqual([
   "search_sessions",
   "get_session",
@@ -83,7 +83,7 @@ Expected: the new child-process test fails because the child exits before return
 
 - [ ] **Step 3: Add explicit migration bundle contract validation**
 
-In `bin/agent-session-search-mcp.mjs`, validate an imported candidate before assigning it to the module cache:
+In `bin/agent-recall-mcp.mjs`, validate an imported candidate before assigning it to the module cache:
 
 ```js
 function validateMigrationBundle(bundle) {
@@ -110,8 +110,8 @@ try {
   migrateTargetSchema = await migrationTargetSchema(z);
 } catch (error) {
   process.stderr.write(
-    `agent-session-search MCP migration tools disabled: ${error instanceof Error ? error.message : String(error)}. ` +
-      "Run `npm run build:mcp` in the Agent-Session-Search install directory, then restart the MCP client.\n",
+    `agent-recall MCP migration tools disabled: ${error instanceof Error ? error.message : String(error)}. ` +
+      "Run `npm run build:mcp` in the AgentRecall install directory, then restart the MCP client.\n",
   );
 }
 ```
@@ -145,14 +145,14 @@ Expected: all focused tests pass with both degraded and normal startup paths cov
 - [ ] **Step 8: Commit the behavior and regression tests**
 
 ```bash
-git add bin/agent-session-search-mcp.mjs src/core/mcp-server.test.ts
+git add bin/agent-recall-mcp.mjs src/core/mcp-server.test.ts
 git commit -m "fix: degrade MCP when migration bundle is stale"
 ```
 
 ### Task 2: Full Verification and Documentation Closeout
 
 **Files:**
-- Modify only if verification exposes a defect: `bin/agent-session-search-mcp.mjs`, `src/core/mcp-server.test.ts`
+- Modify only if verification exposes a defect: `bin/agent-recall-mcp.mjs`, `src/core/mcp-server.test.ts`
 - Existing design: `docs/superpowers/specs/2026-07-11-mcp-stale-bundle-degradation-design.md`
 
 **Interfaces:**
@@ -174,7 +174,7 @@ Expected: TypeScript exits 0; all Vitest files and tests pass; `build:mcp` plus 
 
 - [ ] **Step 2: Run a fresh real stdio handshake probe**
 
-Spawn `node bin/agent-session-search-mcp.mjs` with the live database pointer, send `initialize`, `notifications/initialized`, and `tools/list`, and verify response `id: 1` names `agent-session-search` and response `id: 2` contains all nine tools including `migrate_session`.
+Spawn `node bin/agent-recall-mcp.mjs` with the live database pointer, send `initialize`, `notifications/initialized`, and `tools/list`, and verify response `id: 1` names `agent-recall` and response `id: 2` contains all nine tools including `migrate_session`.
 
 - [ ] **Step 3: Inspect final repository state**
 
@@ -189,14 +189,14 @@ Expected: only intentional plan or implementation changes are present; ignored `
 
 - [ ] **Step 4: Record durable project memory**
 
-Update `/Users/xjx/Documents/Obsidian Vault/Codex/projects/agent-session-search.md` with a dated concise note covering the root cause, soft-degradation behavior, tests, branch, and commit. Do not store credentials or raw logs. Update `TODO.md` only if verification leaves an unresolved action.
+Update `/Users/xjx/Documents/Obsidian Vault/Codex/projects/agent-recall.md` with a dated concise note covering the root cause, soft-degradation behavior, tests, branch, and commit. Do not store credentials or raw logs. Update `TODO.md` only if verification leaves an unresolved action.
 
 - [ ] **Step 5: Commit any verification-driven source correction**
 
 Only when Step 1 or Step 2 required a source correction:
 
 ```bash
-git add bin/agent-session-search-mcp.mjs src/core/mcp-server.test.ts
+git add bin/agent-recall-mcp.mjs src/core/mcp-server.test.ts
 git commit -m "fix: complete MCP degradation verification"
 ```
 

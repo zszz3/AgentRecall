@@ -32,13 +32,13 @@ test('fetchStarCount reads only repository metadata', async () => {
   }
 
   const count = await fetchStarCount({
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     token: 'test-token',
     fetchImpl
   })
 
   assert.equal(count, 152)
-  assert.equal(requests[0].url, 'https://api.github.com/repos/zszz3/agent-session-search')
+  assert.equal(requests[0].url, 'https://api.github.com/repos/zszz3/AgentRecall')
   assert.equal(requests[0].options.headers.accept, 'application/vnd.github+json')
   assert.equal(requests[0].options.headers.authorization, 'Bearer test-token')
 })
@@ -46,7 +46,7 @@ test('fetchStarCount reads only repository metadata', async () => {
 test('fetchStarCount reports metadata failures and invalid counts', async () => {
   await assert.rejects(
     fetchStarCount({
-      repository: 'zszz3/agent-session-search',
+      repository: 'zszz3/AgentRecall',
       token: 'test-token',
       fetchImpl: async () => new Response('{"message":"blocked"}', { status: 403 })
     }),
@@ -54,7 +54,7 @@ test('fetchStarCount reports metadata failures and invalid counts', async () => 
   )
   await assert.rejects(
     fetchStarCount({
-      repository: 'zszz3/agent-session-search',
+      repository: 'zszz3/AgentRecall',
       token: 'test-token',
       fetchImpl: async () => new Response('{"stargazers_count":-1}', { status: 200 })
     }),
@@ -64,7 +64,7 @@ test('fetchStarCount reports metadata failures and invalid counts', async () => 
 
 test('parseStarHistoryData validates repository, ordering, dates, and counts', () => {
   const valid = {
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     snapshots: [{ date: '2026-07-13', count: 151 }, { date: '2026-07-14', count: 152 }]
   }
   assert.deepEqual(parseStarHistoryData(valid, valid.repository), valid)
@@ -96,12 +96,12 @@ test('generateStarHistory updates the snapshot and SVG together', async () => {
   const dataPath = join(directory, 'star-history-data.json')
   const outputPath = join(directory, 'star-history.svg')
   await writeFile(dataPath, JSON.stringify({
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     snapshots: [{ date: '2026-07-13', count: 151 }]
   }))
 
   const changed = await generateStarHistory({
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     token: 'test-token',
     dataPath,
     outputPath,
@@ -120,7 +120,7 @@ test('generateStarHistory is idempotent when today is unchanged', async () => {
   const dataPath = join(directory, 'star-history-data.json')
   const outputPath = join(directory, 'star-history.svg')
   const data = {
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     snapshots: [{ date: '2026-07-14', count: 152 }]
   }
   const json = `${JSON.stringify(data, null, 2)}\n`
@@ -144,7 +144,7 @@ test('generateStarHistory is idempotent when today is unchanged', async () => {
 
 test('rendered description uses star count history rather than cumulative wording', () => {
   const svg = renderStarHistorySvg({
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     series: [{ date: '2026-07-13', count: 152 }, { date: '2026-07-14', count: 151 }]
   })
   assert.match(svg, /GitHub star count history/)
@@ -153,7 +153,7 @@ test('rendered description uses star count history rather than cumulative wordin
 
 test('renderStarHistorySvg is deterministic and describes the final star count', () => {
   const input = {
-    repository: 'zszz3/agent-session-search',
+    repository: 'zszz3/AgentRecall',
     series: [
       { date: '2026-06-01', count: 1 },
       { date: '2026-06-02', count: 1 },
@@ -165,7 +165,7 @@ test('renderStarHistorySvg is deterministic and describes the final star count',
   const second = renderStarHistorySvg(input)
 
   assert.equal(first, second)
-  assert.match(first, /Agent-Session-Search Star History/)
+  assert.match(first, /AgentRecall Star History/)
   assert.match(first, /reaching 3 stars/)
   assert.match(first, /Updated Jun 3, 2026/)
   assert.doesNotMatch(first, /NaN|undefined/)

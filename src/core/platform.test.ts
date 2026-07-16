@@ -1378,16 +1378,16 @@ describe("migration cli process specs", () => {
   });
 
   it("merges child process env overrides without dropping the parent environment", () => {
-    const previous = process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT;
-    process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT = "parent";
+    const previous = process.env.AGENT_RECALL_ENV_CONTRACT;
+    process.env.AGENT_RECALL_ENV_CONTRACT = "parent";
     try {
       const merged = mergeProcessEnvOverrides({ CODEX_HOME: "/custom/home" });
-      expect(merged.AGENT_SESSION_SEARCH_ENV_CONTRACT).toBe("parent");
+      expect(merged.AGENT_RECALL_ENV_CONTRACT).toBe("parent");
       expect(merged.CODEX_HOME).toBe("/custom/home");
       expect(merged).not.toBe(process.env);
     } finally {
-      if (previous === undefined) delete process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT;
-      else process.env.AGENT_SESSION_SEARCH_ENV_CONTRACT = previous;
+      if (previous === undefined) delete process.env.AGENT_RECALL_ENV_CONTRACT;
+      else process.env.AGENT_RECALL_ENV_CONTRACT = previous;
     }
   });
 

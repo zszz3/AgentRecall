@@ -235,7 +235,7 @@ describe("usage quota loader", () => {
     try {
       writeJson(path.join(homeDir, ".claude", "settings.json"), { env: {} });
       writeJson(path.join(homeDir, ".claude", "statusline-snapshot.json"), {
-        source: "agent-session-search-statusline",
+        source: "agent-recall-statusline",
         updated_at: "2026-05-31T12:00:00.000Z",
         rate_limits: {
           five_hour: { used_percentage: 10, resets_at: 1_807_000_000 },
@@ -258,10 +258,10 @@ describe("usage quota loader", () => {
     const homeDir = makeHome();
     try {
       writeJson(path.join(homeDir, ".claude", "settings.json"), {
-        statusLine: { type: "command", command: "agent-session-search-claude-statusline" },
+        statusLine: { type: "command", command: "agent-recall-claude-statusline" },
       });
       writeJson(path.join(homeDir, ".claude", "statusline-snapshot.json"), {
-        source: "agent-session-search-statusline",
+        source: "agent-recall-statusline",
         updated_at: "2026-05-31T12:00:00.000Z",
         rate_limits: {
           five_hour: { used_percentage: 10, resets_at: 1_807_000_000 },
@@ -275,7 +275,7 @@ describe("usage quota loader", () => {
         statusLine?: { command?: string; type?: string };
       };
       // Should NOT overwrite the existing command—even if the resolved path differs.
-      expect(settings.statusLine?.command).toBe("agent-session-search-claude-statusline");
+      expect(settings.statusLine?.command).toBe("agent-recall-claude-statusline");
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
@@ -393,7 +393,7 @@ describe("quota E2E", () => {
 
       // Claude: snapshot file mimicking our statusline bridge output
       writeJson(path.join(homeDir, ".claude", "statusline-snapshot.json"), {
-        source: "agent-session-search-statusline",
+        source: "agent-recall-statusline",
         updated_at: "2026-06-01T11:59:00.000Z",
         plan: "max",
         rate_limits: {

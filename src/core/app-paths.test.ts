@@ -21,7 +21,7 @@ describe("app-paths db pointer", () => {
 
   it("prefers the env override over the pointer", () => {
     writeDbPointer("/data/from-pointer.sqlite", home);
-    expect(resolveDbPath({ AGENT_SESSION_SEARCH_DB: "/data/from-env.sqlite" }, home)).toBe("/data/from-env.sqlite");
+    expect(resolveDbPath({ AGENT_RECALL_DB: "/data/from-env.sqlite" }, home)).toBe("/data/from-env.sqlite");
   });
 
   it("returns null when neither override nor pointer exists", () => {

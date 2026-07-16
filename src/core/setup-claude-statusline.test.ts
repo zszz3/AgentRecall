@@ -17,7 +17,7 @@ describe("Claude statusline setup", () => {
       execFileSync(process.execPath, [SCRIPT_PATH], {
         env: {
           ...process.env,
-          AGENT_SESSION_SEARCH_TEST_HOME: homeDir,
+          AGENT_RECALL_TEST_HOME: homeDir,
         },
         encoding: "utf8",
       });

@@ -10,11 +10,11 @@ const path = require("node:path");
 const { promisify } = require("node:util");
 
 const execFileAsync = promisify(execFile);
-const GITHUB_REPOSITORY = "zszz3/agent-session-search";
+const GITHUB_REPOSITORY = "zszz3/AgentRecall";
 const TRUSTED_GITHUB_REPOSITORIES = new Set([GITHUB_REPOSITORY.toLowerCase(), "zszz3/agentrecall"]);
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`;
 const LATEST_RELEASE_URL = `https://github.com/${GITHUB_REPOSITORY}/releases/latest`;
-const LATEST_PACKAGE_URL = `${LATEST_RELEASE_URL}/download/agent-session-search.tgz`;
+const LATEST_PACKAGE_URL = `${LATEST_RELEASE_URL}/download/agent-recall.tgz`;
 const UPDATE_ASSET_NAME = "update.json";
 const LATEST_UPDATE_MANIFEST_URL = `https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${UPDATE_ASSET_NAME}`;
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -34,7 +34,7 @@ function currentVersion() {
 }
 
 function stateDirectory(homeDir = os.homedir()) {
-  return path.join(homeDir, ".agent-session-search");
+  return path.join(homeDir, ".agent-recall");
 }
 
 function defaultCachePath(homeDir = os.homedir()) {
@@ -202,7 +202,7 @@ async function checkForUpdate(options = {}) {
   try {
     const headers = {
       Accept: "application/vnd.github+json",
-      "User-Agent": "agent-session-search-updater",
+      "User-Agent": "agent-recall-updater",
       "X-GitHub-Api-Version": "2022-11-28",
     };
     if (cached?.etag) headers["If-None-Match"] = cached.etag;
@@ -224,7 +224,7 @@ async function checkForUpdate(options = {}) {
       const asset = Array.isArray(release.assets) ? release.assets.find((item) => item?.name === UPDATE_ASSET_NAME) : null;
       if (!asset?.browser_download_url) throw new Error("Latest GitHub Release does not contain update.json.");
       manifestResponse = await fetchWithTimeout(fetchImpl, asset.browser_download_url, {
-        headers: { "User-Agent": "agent-session-search-updater" },
+        headers: { "User-Agent": "agent-recall-updater" },
       }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
       if (!manifestResponse.ok) throw new Error(`Update manifest download failed (${manifestResponse.status}).`);
       releaseTag = typeof release.tag_name === "string" ? release.tag_name : null;
@@ -232,7 +232,7 @@ async function checkForUpdate(options = {}) {
     } catch (releaseError) {
       try {
         manifestResponse = await fetchWithTimeout(fetchImpl, LATEST_UPDATE_MANIFEST_URL, {
-          headers: { "User-Agent": "agent-session-search-updater", ...(cached?.etag ? { "If-None-Match": cached.etag } : {}) },
+          headers: { "User-Agent": "agent-recall-updater", ...(cached?.etag ? { "If-None-Match": cached.etag } : {}) },
         }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
         if (manifestResponse.status === 304 && cached) {
           await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
@@ -367,18 +367,18 @@ function showNativeUpdateFailure(errorMessage, options = {}) {
   const environment = {
     ...process.env,
     ...options.env,
-    AGENT_SESSION_SEARCH_UPDATE_ERROR: formatUpdateError(errorMessage),
-    AGENT_SESSION_SEARCH_UPDATE_COMMAND: command,
-    AGENT_SESSION_SEARCH_UPDATE_RELEASE_URL: LATEST_RELEASE_URL,
+    AGENT_RECALL_UPDATE_ERROR: formatUpdateError(errorMessage),
+    AGENT_RECALL_UPDATE_COMMAND: command,
+    AGENT_RECALL_UPDATE_RELEASE_URL: LATEST_RELEASE_URL,
   };
 
   try {
     if (platform === "darwin") {
       const script = [
-        'set errorDetail to system attribute "AGENT_SESSION_SEARCH_UPDATE_ERROR"',
-        'set installCommand to system attribute "AGENT_SESSION_SEARCH_UPDATE_COMMAND"',
+        'set errorDetail to system attribute "AGENT_RECALL_UPDATE_ERROR"',
+        'set installCommand to system attribute "AGENT_RECALL_UPDATE_COMMAND"',
         'set dialogText to "自动更新未能完成，应用会尝试继续启动已安装的版本。" & return & return & "原因：" & errorDetail & return & return & "你可以复制命令手动覆盖安装，或打开 GitHub Release 页面。" & return & installCommand',
-        'display dialog dialogText with title "Agent-Session-Search 更新失败" buttons {"稍后处理", "打开 Release 页面", "复制安装命令"} default button "复制安装命令" with icon caution',
+        'display dialog dialogText with title "AgentRecall 更新失败" buttons {"稍后处理", "打开 Release 页面", "复制安装命令"} default button "复制安装命令" with icon caution',
       ].join("\n");
       const output = String(run("osascript", ["-e", script], { encoding: "utf8", env: environment }) || "");
       if (output.includes("复制安装命令")) {
@@ -393,10 +393,10 @@ function showNativeUpdateFailure(errorMessage, options = {}) {
     if (platform === "win32") {
       const script = [
         "Add-Type -AssemblyName PresentationFramework",
-        '$text = "自动更新未能完成，应用会尝试继续启动已安装的版本。`n`n原因：$env:AGENT_SESSION_SEARCH_UPDATE_ERROR`n`n选择“是”复制安装命令，选择“否”打开 GitHub Release 页面。"',
-        '$choice = [System.Windows.MessageBox]::Show($text, "Agent-Session-Search 更新失败", "YesNoCancel", "Error")',
-        'if ($choice -eq "Yes") { Set-Clipboard -Value $env:AGENT_SESSION_SEARCH_UPDATE_COMMAND }',
-        'elseif ($choice -eq "No") { Start-Process $env:AGENT_SESSION_SEARCH_UPDATE_RELEASE_URL }',
+        '$text = "自动更新未能完成，应用会尝试继续启动已安装的版本。`n`n原因：$env:AGENT_RECALL_UPDATE_ERROR`n`n选择“是”复制安装命令，选择“否”打开 GitHub Release 页面。"',
+        '$choice = [System.Windows.MessageBox]::Show($text, "AgentRecall 更新失败", "YesNoCancel", "Error")',
+        'if ($choice -eq "Yes") { Set-Clipboard -Value $env:AGENT_RECALL_UPDATE_COMMAND }',
+        'elseif ($choice -eq "No") { Start-Process $env:AGENT_RECALL_UPDATE_RELEASE_URL }',
       ].join("; ");
       run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
         encoding: "utf8",
@@ -414,7 +414,7 @@ function showNativeUpdateFailure(errorMessage, options = {}) {
 async function installUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const tempDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-session-search-update-"));
+  const tempDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-recall-update-"));
   const archivePath = path.join(tempDirectory, parsed.package.name);
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
   const packageBackupPath = path.join(tempDirectory, "previous-package");
@@ -428,7 +428,7 @@ async function installUpdate(manifest, options = {}) {
     error: null,
   });
   try {
-    const response = await fetchWithTimeout(fetchImpl, parsed.package.url, { headers: { "User-Agent": "agent-session-search-updater" } }, options.timeoutMs ?? 120_000);
+    const response = await fetchWithTimeout(fetchImpl, parsed.package.url, { headers: { "User-Agent": "agent-recall-updater" } }, options.timeoutMs ?? 120_000);
     if (!response.ok) throw new Error(`Update package download failed (${response.status}).`);
     const bytes = Buffer.from(await response.arrayBuffer());
     const checksum = createHash("sha256").update(bytes).digest("hex");
@@ -439,7 +439,7 @@ async function installUpdate(manifest, options = {}) {
       packageBackedUp = true;
     }
     const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
-    const registry = options.registry || process.env.AGENT_SESSION_SEARCH_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
+    const registry = options.registry || process.env.AGENT_RECALL_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
     const installEnvironment = { ...process.env };
     delete installEnvironment.ELECTRON_RUN_AS_NODE;
     try {
@@ -509,7 +509,7 @@ function globalPackageRoot(options = {}) {
     shell: process.platform === "win32",
   }).trim();
   if (!npmRoot) throw new Error("无法确定 npm 全局安装目录。");
-  return path.join(npmRoot, "agent-session-search");
+  return path.join(npmRoot, "agent-recall");
 }
 
 function nodeSubprocessEnvironment(baseEnvironment = {}) {
@@ -573,8 +573,8 @@ async function ensureInstalledElectron(options = {}) {
   const repairId = `${process.pid}-${randomUUID()}`;
   const distPath = path.join(electronModulePath, "dist");
   const pathFile = path.join(electronModulePath, "path.txt");
-  const distBackup = path.join(electronModulePath, `.agent-session-search-dist-${repairId}.backup`);
-  const pathBackup = path.join(electronModulePath, `.agent-session-search-path-${repairId}.backup`);
+  const distBackup = path.join(electronModulePath, `.agent-recall-dist-${repairId}.backup`);
+  const pathBackup = path.join(electronModulePath, `.agent-recall-path-${repairId}.backup`);
   if (fs.existsSync(distPath)) await fsp.rename(distPath, distBackup);
   if (fs.existsSync(pathFile)) await fsp.rename(pathFile, pathBackup);
   try {
@@ -723,18 +723,18 @@ async function waitForProcessExit(pid, timeoutMs) {
     if (!isProcessRunning(pid)) return;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error("The running Agent-Session-Search process did not exit in time.");
+  throw new Error("The running AgentRecall process did not exit in time.");
 }
 
 function globalCommandPath() {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const prefix = execFileSync(npmCommand, ["prefix", "-g"], { encoding: "utf8", shell: process.platform === "win32" }).trim();
-  return process.platform === "win32" ? path.join(prefix, "agent-session-search.cmd") : path.join(prefix, "bin", "agent-session-search");
+  return process.platform === "win32" ? path.join(prefix, "agent-recall.cmd") : path.join(prefix, "bin", "agent-recall");
 }
 
 function launchInstalledApp(options = {}) {
   const command = options.command || globalCommandPath();
-  const environment = { ...process.env, ...options.env, AGENT_SESSION_SEARCH_NO_UPDATE_CHECK: "1" };
+  const environment = { ...process.env, ...options.env, AGENT_RECALL_NO_UPDATE_CHECK: "1" };
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = (options.spawnImpl || spawn)(command, options.args || ["--no-update-check"], {
     detached: true,

@@ -1,4 +1,4 @@
-export const TOOL_EVENTS_VISIBILITY_STORAGE_KEY = "agent-session-search-tool-events-visible";
+export const TOOL_EVENTS_VISIBILITY_STORAGE_KEY = "agent-recall-tool-events-visible";
 
 export interface ToolEventsVisibilityStorage {
   getItem(key: string): string | null;

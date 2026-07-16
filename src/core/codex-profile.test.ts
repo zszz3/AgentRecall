@@ -6,7 +6,7 @@ import { API_PROVIDER_PRESETS, defaultApiConfig, mergeApiConfigWithProfileDefaul
 import { applyCodexApiConfig, codexProfileForApiConfig, loadActiveCodexSummaryEndpointDefaults, loadCodexConfigSnapshot, loadCodexProfileDefaults, probeCodexModels } from "./codex-profile";
 
 async function withCodexHome<T>(run: (codexHome: string) => Promise<T>): Promise<T> {
-  const codexHome = await mkdtemp(path.join(tmpdir(), "agent-session-search-codex-"));
+  const codexHome = await mkdtemp(path.join(tmpdir(), "agent-recall-codex-"));
   try {
     return await run(codexHome);
   } finally {

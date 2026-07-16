@@ -42,7 +42,7 @@
 - Modify: `src/main/index.ts`
 
 **Interfaces:**
-- Consumes: event files from `~/.agent-session-search/session-sync-queue` and existing `uploadSessionToRemote(sessionKey)`.
+- Consumes: event files from `~/.agent-recall/session-sync-queue` and existing `uploadSessionToRemote(sessionKey)`.
 - Produces: `readSessionSyncQueue()`, `removeSessionSyncQueueEvent()`, and the main-process periodic drain.
 
 - [x] Write tests for malformed events, duplicate session coalescing, removal, and retained failures.
@@ -75,7 +75,7 @@
 - Modify: script tests as needed
 
 **Interfaces:**
-- `agent-session-search uninstall` removes both session hooks and queued events without removing Supabase settings or cloud data.
+- `agent-recall uninstall` removes both session hooks and queued events without removing Supabase settings or cloud data.
 
 - [x] Add a failing uninstall test using a temporary HOME.
 - [x] Extend uninstall and user documentation with automatic session sync and Codex trust instructions.

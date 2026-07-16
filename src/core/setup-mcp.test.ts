@@ -13,7 +13,7 @@ describe("setup-mcp Claude config", () => {
   it("adds the server while preserving existing config", () => {
     const next = applyClaudeConfig({ projects: { a: 1 } }, "/abs/server.mjs", false);
     expect(next).toMatchObject({ projects: { a: 1 } });
-    expect(next.mcpServers).toEqual({ "agent-session-search": { command: "node", args: ["/abs/server.mjs"] } });
+    expect(next.mcpServers).toEqual({ "agent-recall": { command: "node", args: ["/abs/server.mjs"] } });
   });
 
   it("removes only our server", () => {
@@ -31,17 +31,17 @@ describe("setup-mcp Claude config", () => {
 describe("setup-mcp Codex config", () => {
   it("appends the block and is idempotent", () => {
     const once = applyCodexConfig("[other]\nx = 1\n", "/abs/server.mjs", false);
-    expect(once).toContain("[mcp_servers.agent_session_search]");
+    expect(once).toContain("[mcp_servers.agent_recall]");
     expect(once).toContain('args = ["/abs/server.mjs"]');
     const twice = applyCodexConfig(once, "/abs/server.mjs", false);
-    expect(twice.match(/\[mcp_servers\.agent_session_search\]/g)).toHaveLength(1);
+    expect(twice.match(/\[mcp_servers\.agent_recall\]/g)).toHaveLength(1);
     expect(twice).toContain("[other]");
   });
 
   it("removes the block without touching other tables", () => {
     const withBlock = applyCodexConfig("[other]\nx = 1\n", "/abs/server.mjs", false);
     const removed = applyCodexConfig(withBlock, "/abs/server.mjs", true);
-    expect(removed).not.toContain("mcp_servers.agent_session_search");
+    expect(removed).not.toContain("mcp_servers.agent_recall");
     expect(removed).toContain("[other]");
     expect(removeCodexBlock(removed)).toBe(removed);
   });

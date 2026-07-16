@@ -20,7 +20,7 @@
 - Modify `src/core/indexer.ts` and tests: incrementally index into the concrete target source namespace.
 - Modify `src/core/platform.ts` and tests: target binaries, multi-line version checks, scoped `CODEX_HOME`, shell-safe resume commands.
 - Modify `src/main/index.ts`, `src/preload/index.ts`, renderer UI and tests: Settings-gated buttons, IPC validation, consistent Internal labels.
-- Modify `src/core/mcp-migration.ts`, `src/mcp/migration-entry.ts`, `bin/agent-session-search-mcp.mjs`, and tests: seven MCP targets with backend Settings enforcement.
+- Modify `src/core/mcp-migration.ts`, `src/mcp/migration-entry.ts`, `bin/agent-recall-mcp.mjs`, and tests: seven MCP targets with backend Settings enforcement.
 - Modify `README.md` and `docs/README.en.md`: document the enabled-target behavior and local-only boundary.
 
 ### Task 1: Target Registry And Settings Model
@@ -408,7 +408,7 @@ it.each([
   ["codebuddy", "codebuddy-cli"],
 ] as const)("indexes one migrated %s file as %s", async (target, source) => {
   const store = createInMemoryStore();
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-session-search-index-${target}-`));
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `agent-recall-index-${target}-`));
   try {
     const written = await writeMigratedSession({
       target,
@@ -747,7 +747,7 @@ git commit -m "feat: expose settings-gated migration targets"
 - Modify: `src/core/mcp-migration.ts:1-230`
 - Modify: `src/core/mcp-migration.test.ts:1-410`
 - Modify: `src/mcp/migration-entry.ts:1-45`
-- Modify: `bin/agent-session-search-mcp.mjs:285-315,430-485`
+- Modify: `bin/agent-recall-mcp.mjs:285-315,430-485`
 - Modify: `src/core/mcp-server.test.ts:240-285`
 
 - [ ] **Step 1: Write failing MCP target/gate tests**
@@ -842,7 +842,7 @@ Expected: MCP core/server/settings tests pass; the generated bundle loads seven-
 - [ ] **Step 5: Commit Task 7**
 
 ```bash
-git add src/core/mcp-migration.ts src/core/mcp-migration.test.ts src/mcp/migration-entry.ts bin/agent-session-search-mcp.mjs src/core/mcp-server.test.ts
+git add src/core/mcp-migration.ts src/core/mcp-migration.test.ts src/mcp/migration-entry.ts bin/agent-recall-mcp.mjs src/core/mcp-server.test.ts
 git commit -m "feat: extend mcp session migration targets"
 ```
 

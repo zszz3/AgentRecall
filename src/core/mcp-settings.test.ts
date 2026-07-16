@@ -25,13 +25,13 @@ describe("resolveMcpConfigPath", () => {
     expect(resolveMcpConfigPath({
       platform: "linux",
       home: root,
-      env: { AGENT_SESSION_SEARCH_CONFIG: `  ${override}  `, XDG_CONFIG_HOME: path.join(root, "xdg") },
+      env: { AGENT_RECALL_CONFIG: `  ${override}  `, XDG_CONFIG_HOME: path.join(root, "xdg") },
     })).toBe(override);
   });
 
   it("resolves the packaged macOS Electron userData directory before the legacy name", () => {
-    const packaged = path.join(root, "Library", "Application Support", "Agent-Session-Search", "config.json");
-    const legacy = path.join(root, "Library", "Application Support", "agent-session-search", "config.json");
+    const packaged = path.join(root, "Library", "Application Support", "AgentRecall", "config.json");
+    const legacy = path.join(root, "Library", "Application Support", "agent-recall", "config.json");
     touch(legacy);
     touch(packaged);
     expect(resolveMcpConfigPath({ platform: "darwin", home: root, env: {} })).toBe(packaged);
@@ -39,24 +39,24 @@ describe("resolveMcpConfigPath", () => {
 
   it("resolves the packaged Electron app name under Windows APPDATA", () => {
     const appData = path.join(root, "Roaming");
-    const packaged = path.join(appData, "Agent-Session-Search", "config.json");
+    const packaged = path.join(appData, "AgentRecall", "config.json");
     touch(packaged);
     expect(resolveMcpConfigPath({ platform: "win32", home: root, env: { APPDATA: appData } })).toBe(packaged);
   });
 
   it("falls back from empty or missing Windows APPDATA to home AppData/Roaming", () => {
     const home = path.join(root, "user");
-    const packaged = path.join(home, "AppData", "Roaming", "Agent-Session-Search", "config.json");
+    const packaged = path.join(home, "AppData", "Roaming", "AgentRecall", "config.json");
     touch(packaged);
     expect(resolveMcpConfigPath({ platform: "win32", home, env: { APPDATA: "  " } })).toBe(packaged);
   });
 
   it("resolves Linux XDG_CONFIG_HOME and falls back to ~/.config when its config is absent", () => {
     const xdg = path.join(root, "xdg");
-    const fallback = path.join(root, ".config", "Agent-Session-Search", "config.json");
+    const fallback = path.join(root, ".config", "AgentRecall", "config.json");
     touch(fallback);
     expect(resolveMcpConfigPath({ platform: "linux", home: root, env: { XDG_CONFIG_HOME: xdg } })).toBe(fallback);
-    const xdgConfig = path.join(xdg, "Agent-Session-Search", "config.json");
+    const xdgConfig = path.join(xdg, "AgentRecall", "config.json");
     touch(xdgConfig);
     expect(resolveMcpConfigPath({ platform: "linux", home: root, env: { XDG_CONFIG_HOME: xdg } })).toBe(xdgConfig);
   });
@@ -67,7 +67,7 @@ describe("resolveMcpConfigPath", () => {
 
   it("loads a Windows GUI optional-source switch from APPDATA", () => {
     const appData = path.join(root, "Roaming");
-    const configPath = path.join(appData, "Agent-Session-Search", "config.json");
+    const configPath = path.join(appData, "AgentRecall", "config.json");
     touch(configPath, JSON.stringify({ includeTcodex: true }));
     expect(readMcpAppSettings({ platform: "win32", home: root, env: { APPDATA: appData } }).includeTcodex).toBe(true);
   });

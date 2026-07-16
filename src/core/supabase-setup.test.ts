@@ -6,7 +6,7 @@ describe("Supabase setup guidance", () => {
     const sql = buildCombinedSupabaseSetupSql();
 
     expect(sql).toContain("agent_session_remote_sessions");
-    expect(sql).toContain("agent_session_search_skills");
+    expect(sql).toContain("agent_recall_skills");
     expect(sql).toContain("agent-session-remote");
     expect(sql).toContain("agent-session-skills");
     expect(sql).toContain("grant select, insert, update, delete");

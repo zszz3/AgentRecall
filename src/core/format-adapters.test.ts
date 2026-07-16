@@ -138,9 +138,9 @@ describe("format adapters", () => {
 
   it("decodes Cursor workspace slugs and subagent paths", () => {
     const pathMap = new Map([
-      ["Users-mac-myProject-agent-session-search", "/Users/mac/myProject/agent-session-search"],
+      ["Users-mac-myProject-agent-recall", "/Users/mac/myProject/agent-recall"],
     ]);
-    expect(decodeCursorWorkspaceSlug("Users-mac-myProject-agent-session-search", pathMap)).toBe("/Users/mac/myProject/agent-session-search");
+    expect(decodeCursorWorkspaceSlug("Users-mac-myProject-agent-recall", pathMap)).toBe("/Users/mac/myProject/agent-recall");
     expect(decodeCursorWorkspaceSlug("empty-window")).toBe("");
 
     const filePath = path.join(

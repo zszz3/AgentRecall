@@ -80,7 +80,7 @@ export async function fetchStarCount({ repository, token, fetchImpl = fetch }) {
         accept: 'application/vnd.github+json',
         authorization: `Bearer ${token}`,
         'x-github-api-version': '2022-11-28',
-        'user-agent': 'agent-session-search-star-history'
+        'user-agent': 'agent-recall-star-history'
       }
     }
   )

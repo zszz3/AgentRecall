@@ -11,7 +11,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const BRIDGE_SCRIPT_BASENAME = "claude-statusline-snapshot.cjs";
-const BRIDGE_BIN_NAME = "agent-session-search-claude-statusline";
+const BRIDGE_BIN_NAME = "agent-recall-claude-statusline";
 
 function bridgeScriptPath() {
   return path.join(__dirname, BRIDGE_SCRIPT_BASENAME);
@@ -112,7 +112,7 @@ function uninstallClaudeStatuslineBridge(options) {
 
 function runCli() {
   // Never fail the install: postinstall must always exit 0.
-  if (process.env.AGENT_SESSION_SEARCH_SKIP_STATUSLINE_INSTALL) return;
+  if (process.env.AGENT_RECALL_SKIP_STATUSLINE_INSTALL) return;
   if (process.env.CI) return;
 
   let result;
@@ -120,25 +120,25 @@ function runCli() {
     result = installClaudeStatuslineBridge();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stdout.write(`Agent-Session-Search: skipped Claude usage statusline setup (${message}).\n`);
+    process.stdout.write(`AgentRecall: skipped Claude usage statusline setup (${message}).\n`);
     return;
   }
 
   switch (result.status) {
     case "installed":
-      process.stdout.write(`Agent-Session-Search: enabled Claude Code usage display in ${result.settingsPath}.\n`);
+      process.stdout.write(`AgentRecall: enabled Claude Code usage display in ${result.settingsPath}.\n`);
       break;
     case "already":
       // Quiet on repeat installs.
       break;
     case "conflict":
       process.stdout.write(
-        "Agent-Session-Search: kept your existing Claude statusLine. To show Claude Code usage, " +
-          "point ~/.claude/settings.json statusLine.command at `agent-session-search-claude-statusline` (see README).\n",
+        "AgentRecall: kept your existing Claude statusLine. To show Claude Code usage, " +
+          "point ~/.claude/settings.json statusLine.command at `agent-recall-claude-statusline` (see README).\n",
       );
       break;
     default:
-      process.stdout.write(`Agent-Session-Search: could not set up Claude usage display (${result.detail || "unknown error"}).\n`);
+      process.stdout.write(`AgentRecall: could not set up Claude usage display (${result.detail || "unknown error"}).\n`);
       break;
   }
 }

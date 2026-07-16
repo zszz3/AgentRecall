@@ -10,7 +10,7 @@ import type { IndexedSession, SessionMessage } from "./types";
 // The MCP server runs standalone; we exercise its SDK-free query functions here.
 // The .mjs bin has no type declarations, so we type the imports explicitly.
 // @ts-expect-error -- untyped .mjs bin
-import * as mcp from "../../bin/agent-session-search-mcp.mjs";
+import * as mcp from "../../bin/agent-recall-mcp.mjs";
 
 type Db = import("node:sqlite").DatabaseSync;
 type SearchResult = { sessionKey: string; project: string; title: string; summary: string | null };
@@ -35,13 +35,13 @@ async function withMcpConfig(
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-server-config-"));
   const configPath = path.join(root, "config.json");
   fs.writeFileSync(configPath, JSON.stringify(config), "utf8");
-  const previous = process.env.AGENT_SESSION_SEARCH_CONFIG;
-  process.env.AGENT_SESSION_SEARCH_CONFIG = configPath;
+  const previous = process.env.AGENT_RECALL_CONFIG;
+  process.env.AGENT_RECALL_CONFIG = configPath;
   try {
     await run(root);
   } finally {
-    if (previous === undefined) delete process.env.AGENT_SESSION_SEARCH_CONFIG;
-    else process.env.AGENT_SESSION_SEARCH_CONFIG = previous;
+    if (previous === undefined) delete process.env.AGENT_RECALL_CONFIG;
+    else process.env.AGENT_RECALL_CONFIG = previous;
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
@@ -68,7 +68,7 @@ async function runMcpWithMigrationBundle(bundleSource: string): Promise<{
   const dbPath = path.join(root, "sessions.db");
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(bundleDir, { recursive: true });
-  fs.copyFileSync(path.resolve("bin", "agent-session-search-mcp.mjs"), path.join(binDir, "agent-session-search-mcp.mjs"));
+  fs.copyFileSync(path.resolve("bin", "agent-recall-mcp.mjs"), path.join(binDir, "agent-recall-mcp.mjs"));
   fs.writeFileSync(path.join(bundleDir, "migration-entry.js"), bundleSource, "utf8");
   fs.writeFileSync(path.join(root, "package.json"), '{"type":"module"}\n', "utf8");
   fs.symlinkSync(path.resolve("node_modules"), path.join(root, "node_modules"), "dir");
@@ -79,8 +79,8 @@ async function runMcpWithMigrationBundle(bundleSource: string): Promise<{
 
   try {
     return await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [path.join(binDir, "agent-session-search-mcp.mjs")], {
-        env: { ...process.env, AGENT_SESSION_SEARCH_DB: dbPath },
+      const child = spawn(process.execPath, [path.join(binDir, "agent-recall-mcp.mjs")], {
+        env: { ...process.env, AGENT_RECALL_DB: dbPath },
         stdio: ["pipe", "pipe", "pipe"],
       });
       const responses = new Map<number, JsonRpcResponse>();
@@ -385,7 +385,7 @@ describe("MCP migrate_session tool", () => {
   it("keeps base tools available when the migration bundle is stale", async () => {
     const result = await runMcpWithMigrationBundle("export class SessionStore {}\n");
 
-    expect(result.initialize.result?.serverInfo?.name).toBe("agent-session-search");
+    expect(result.initialize.result?.serverInfo?.name).toBe("agent-recall");
     expect(result.toolsList.result?.tools?.map((tool) => tool.name)).toEqual([
       "search_sessions",
       "get_session",
@@ -405,7 +405,7 @@ describe("MCP migrate_session tool", () => {
     const bundleSource = fs.readFileSync(path.resolve("out", "mcp", "migration-entry.js"), "utf8");
     const result = await runMcpWithMigrationBundle(bundleSource);
 
-    expect(result.initialize.result?.serverInfo?.name).toBe("agent-session-search");
+    expect(result.initialize.result?.serverInfo?.name).toBe("agent-recall");
     expect(result.toolsList.result?.tools?.map((tool) => tool.name)).toContain("migrate_session");
     expect(result.stderr).not.toContain("migration tools disabled");
   });

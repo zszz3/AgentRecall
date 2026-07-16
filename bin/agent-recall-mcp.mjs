@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// MCP stdio server exposing the local agent-session-search database, so
+// MCP stdio server exposing the local agent-recall database, so
 // Claude Code / Codex can recall "how did I solve X before" from past sessions
 // and manage them (tag, favorite, visibility).
 //
@@ -25,9 +25,9 @@ export function resolveAppVersion(packageUrl = new URL("../package.json", import
 
 // Mirrors src/core/app-paths.ts (this file runs standalone, outside the bundle).
 export function resolveDbPath(env = process.env, home = homedir()) {
-  const override = env.AGENT_SESSION_SEARCH_DB && env.AGENT_SESSION_SEARCH_DB.trim();
+  const override = env.AGENT_RECALL_DB && env.AGENT_RECALL_DB.trim();
   if (override) return override;
-  const pointer = path.join(home, ".agent-session-search", "db-path");
+  const pointer = path.join(home, ".agent-recall", "db-path");
   try {
     if (!existsSync(pointer)) return null;
     return readFileSync(pointer, "utf8").trim() || null;
@@ -352,7 +352,7 @@ async function runServer() {
   const dbPath = resolveDbPath();
   if (!dbPath || !existsSync(dbPath)) {
     process.stderr.write(
-      "agent-session-search database not found. Open the app at least once, or set AGENT_SESSION_SEARCH_DB.\n",
+      "agent-recall database not found. Open the app at least once, or set AGENT_RECALL_DB.\n",
     );
     process.exit(1);
   }
@@ -368,14 +368,14 @@ async function runServer() {
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = ON");
-  const server = new McpServer({ name: "agent-session-search", version: resolveAppVersion() });
+  const server = new McpServer({ name: "agent-recall", version: resolveAppVersion() });
   let migrateTargetSchema = null;
   try {
     migrateTargetSchema = await migrationTargetSchema(z);
   } catch (error) {
     process.stderr.write(
-      `agent-session-search MCP migration tools disabled: ${error instanceof Error ? error.message : String(error)}. ` +
-        "Run `npm run build:mcp` in the Agent-Session-Search install directory, then restart the MCP client.\n",
+      `agent-recall MCP migration tools disabled: ${error instanceof Error ? error.message : String(error)}. ` +
+        "Run `npm run build:mcp` in the AgentRecall install directory, then restart the MCP client.\n",
     );
   }
 
@@ -517,7 +517,7 @@ async function runServer() {
 
 if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
   runServer().catch((error) => {
-    process.stderr.write(`agent-session-search MCP server failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`agent-recall MCP server failed: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   });
 }

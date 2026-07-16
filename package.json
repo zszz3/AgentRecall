@@ -1,6 +1,6 @@
 {
-  "name": "agent-session-search",
-  "productName": "Agent-Session-Search",
+  "name": "agent-recall",
+  "productName": "AgentRecall",
   "version": "0.1.0",
   "private": true,
   "description": "Desktop console for searching, tagging, and resuming AI agent coding sessions.",
@@ -8,15 +8,15 @@
   "main": "out/main/index.js",
   "type": "module",
   "bin": {
-    "agent-session-search": "bin/agent-session-search.cjs",
-    "agent-session-search-claude-statusline": "bin/claude-statusline-snapshot.cjs",
-    "agent-session-search-setup-claude-statusline": "bin/setup-claude-statusline.cjs",
-    "agent-session-search-skill-usage": "bin/skill-usage-record.cjs",
-    "agent-session-search-setup-skill-usage-hook": "bin/setup-skill-usage-hook.cjs",
-    "agent-session-search-session-sync": "bin/session-sync-record.cjs",
-    "agent-session-search-setup-session-sync-hook": "bin/setup-session-sync-hook.cjs",
-    "agent-session-search-mcp": "bin/agent-session-search-mcp.mjs",
-    "agent-session-search-setup-mcp": "bin/setup-mcp.cjs"
+    "agent-recall": "bin/agent-recall.cjs",
+    "agent-recall-claude-statusline": "bin/claude-statusline-snapshot.cjs",
+    "agent-recall-setup-claude-statusline": "bin/setup-claude-statusline.cjs",
+    "agent-recall-skill-usage": "bin/skill-usage-record.cjs",
+    "agent-recall-setup-skill-usage-hook": "bin/setup-skill-usage-hook.cjs",
+    "agent-recall-session-sync": "bin/session-sync-record.cjs",
+    "agent-recall-setup-session-sync-hook": "bin/setup-session-sync-hook.cjs",
+    "agent-recall-mcp": "bin/agent-recall-mcp.mjs",
+    "agent-recall-setup-mcp": "bin/setup-mcp.cjs"
   },
   "engines": {
     "node": ">=22.13.0"
