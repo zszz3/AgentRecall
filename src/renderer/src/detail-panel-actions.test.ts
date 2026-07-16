@@ -280,11 +280,13 @@ describe("detail panel actions", () => {
     expect(remoteCommand).not.toContain("fallbackMigrationResumeDisplayCommand(target");
   });
 
-  it("loads the independent session sync list and exposes bulk cloud actions", () => {
+  it("loads the independent session sync list into the app cache and exposes bulk cloud actions", () => {
     expect(appSource).not.toContain("uploadVisibleRemoteSessions");
     expect(appSource).not.toContain("CloudUpload");
     expect(remoteSessionsDialogSource).not.toContain("onUploadVisible");
-    expect(remoteSessionsDialogSource).toContain("listSessionSyncItems");
+    expect(appSource).toContain("listSessionSyncItems");
+    expect(appSource).toContain("cache={remoteSessionsCache}");
+    expect(remoteSessionsDialogSource).not.toContain("listSessionSyncItems");
     expect(remoteSessionsDialogSource).toContain("Upload to cloud");
     expect(remoteSessionsDialogSource).toContain("selectedIds");
     expect(remoteSessionsDialogSource).toContain("Select visible");

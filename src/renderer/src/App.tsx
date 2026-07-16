@@ -54,7 +54,7 @@ import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { RemoteHealthReport } from "../../core/remote-health";
-import type { RemoteSessionDetailSnapshot } from "../../core/remote-session-sync";
+import type { RemoteSessionDetailSnapshot, RemoteSessionListItem } from "../../core/remote-session-sync";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import type { TraceEventQueryOptions } from "../../core/session-store";
 import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
@@ -100,6 +100,11 @@ import {
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 import { loadSkillsPanelData } from "./skills-load";
+import {
+  applyRemoteSessionDeletion,
+  applyRemoteSessionUpload,
+  EMPTY_REMOTE_SESSIONS_CACHE,
+} from "./remote-sessions-cache";
 import { clearSearchHistory, deleteSearch, readSearchHistory, recordSearch } from "./search-history";
 import { HighlightedSearchText } from "./search-highlight";
 import type {
@@ -525,6 +530,7 @@ export function App(): ReactElement {
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
+  const [remoteSessionsCache, setRemoteSessionsCache] = useState(EMPTY_REMOTE_SESSIONS_CACHE);
   const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
   const [skillSyncSnapshot, setSkillSyncSnapshot] = useState<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -555,6 +561,8 @@ export function App(): ReactElement {
   const metadataLoadSeqRef = useRef(0);
   const statsLoadSeqRef = useRef(0);
   const detailLoadSeqRef = useRef(0);
+  const remoteSessionsLoadSeqRef = useRef(0);
+  const remoteSessionsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const environmentIdRef = useRef(environmentId);
   const projectPathRef = useRef(projectPath);
@@ -723,6 +731,46 @@ export function App(): ReactElement {
       setSkillsLoading(false);
     }
   }, [t]);
+
+  const loadRemoteSessionsCache = useCallback((): Promise<void> => {
+    if (remoteSessionsLoadPromiseRef.current) return remoteSessionsLoadPromiseRef.current;
+    const requestId = ++remoteSessionsLoadSeqRef.current;
+    const request = (async () => {
+      setRemoteSessionsCache((current) => ({ ...current, loading: true, error: null }));
+      try {
+        const status = await window.sessionSearch.getRemoteSessionStatus();
+        const items = status.kind === "ready" ? await window.sessionSearch.listSessionSyncItems() : [];
+        if (requestId !== remoteSessionsLoadSeqRef.current) return;
+        setRemoteSessionsCache({ status, items, loading: false, error: null });
+      } catch (error) {
+        if (requestId !== remoteSessionsLoadSeqRef.current) return;
+        setRemoteSessionsCache((current) => ({
+          ...current,
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    })();
+    remoteSessionsLoadPromiseRef.current = request;
+    void request.finally(() => {
+      if (remoteSessionsLoadPromiseRef.current === request) remoteSessionsLoadPromiseRef.current = null;
+    });
+    return request;
+  }, []);
+
+  const cacheRemoteSessionUpload = useCallback((localSessionKey: string, remote: RemoteSessionListItem) => {
+    setRemoteSessionsCache((current) => ({
+      ...current,
+      items: applyRemoteSessionUpload(current.items, localSessionKey, remote),
+    }));
+  }, []);
+
+  const cacheRemoteSessionDeletion = useCallback((remoteIds: string[]) => {
+    setRemoteSessionsCache((current) => ({
+      ...current,
+      items: applyRemoteSessionDeletion(current.items, remoteIds),
+    }));
+  }, []);
 
   useEffect(() => {
     skillSyncSnapshotRef.current = skillSyncSnapshot;
@@ -906,6 +954,10 @@ export function App(): ReactElement {
     const timer = window.setInterval(() => void loadQuotas("background"), QUOTA_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadQuotas]);
+
+  useEffect(() => {
+    void loadRemoteSessionsCache();
+  }, [loadRemoteSessionsCache]);
 
   useEffect(() => {
     if (skillsOpen) void loadSkills({ refreshUsage: true, silent: true });
@@ -2576,7 +2628,11 @@ export function App(): ReactElement {
 
       {remoteSessionsOpen ? (
         <RemoteSessionsDialog
+          cache={remoteSessionsCache}
           language={language}
+          onRefresh={loadRemoteSessionsCache}
+          onRemoteSessionUploaded={cacheRemoteSessionUpload}
+          onRemoteSessionsDeleted={cacheRemoteSessionDeletion}
           onRestored={(result) => {
             if (!result.launched) setActionStatus({ kind: "error", message: result.warning || result.resumeCommand });
             void Promise.all([load(), loadSidebarMetadata()]);
