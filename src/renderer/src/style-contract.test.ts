@@ -64,6 +64,22 @@ describe("stylesheet theme contract", () => {
     expect(settingsContent).toMatch(/overflow-y:\s*auto/);
   });
 
+  it("keeps the app shortcut reference readable in narrow settings panes", () => {
+    const reference = stylesheet.match(/\.shortcut-reference\s*\{[^}]*\}/)?.[0] ?? "";
+    const row = stylesheet.match(/\.shortcut-reference-row\s*\{[^}]*\}/)?.[0] ?? "";
+    const keys = stylesheet.match(/\.shortcut-reference-row dd\s*\{[^}]*\}/)?.[0] ?? "";
+    const keycap = stylesheet.match(/\.shortcut-reference-combo kbd\s*\{[^}]*\}/)?.[0] ?? "";
+    const narrowRow = stylesheet.match(/@media \(max-width:\s*640px\)\s*\{[\s\S]*?\.shortcut-reference-row\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(reference).toMatch(/display:\s*grid/);
+    expect(row).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+    expect(keys).toMatch(/flex-wrap:\s*wrap/);
+    expect(keys).toMatch(/justify-content:\s*flex-end/);
+    expect(keycap).toMatch(/font-family:\s*var\(--mono\)/);
+    expect(keycap).toMatch(/white-space:\s*nowrap/);
+    expect(narrowRow).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  });
+
   it("aligns the about update toggle with the update card", () => {
     const updateCard = stylesheet.match(/\.update-available-card\s*\{[^}]*\}/)?.[0] ?? "";
     const autoCheck = stylesheet.match(/\.update-auto-check\s*\{[^}]*\}/)?.[0] ?? "";

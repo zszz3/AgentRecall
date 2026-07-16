@@ -4640,6 +4640,97 @@ select:focus-visible {
   font-size: 13px;
 }
 
+.shortcut-reference {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+}
+
+.shortcut-reference-head {
+  display: grid;
+  gap: 3px;
+}
+
+.shortcut-reference-head h4,
+.shortcut-reference-head p,
+.shortcut-reference-list {
+  margin: 0;
+}
+
+.shortcut-reference-head h4 {
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.shortcut-reference-head p {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.shortcut-reference-list {
+  display: grid;
+}
+
+.shortcut-reference-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.shortcut-reference-row dt {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.shortcut-reference-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0;
+}
+
+.shortcut-reference-group,
+.shortcut-reference-combo {
+  display: inline-flex;
+  align-items: center;
+}
+
+.shortcut-reference-group {
+  gap: 6px;
+}
+
+.shortcut-reference-combo {
+  gap: 4px;
+}
+
+.shortcut-reference-combo kbd {
+  min-width: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.shortcut-reference-separator {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .settings-field select {
   cursor: pointer;
 }
@@ -5458,6 +5549,15 @@ select:focus-visible {
   .api-settings-form .settings-field {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
+  }
+
+  .shortcut-reference-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .shortcut-reference-row dd {
+    justify-content: flex-start;
   }
 }
 
