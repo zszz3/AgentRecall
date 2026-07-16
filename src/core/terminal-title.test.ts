@@ -10,6 +10,7 @@ import {
 describe("terminal titles", () => {
   it("normalizes control characters while preserving Unicode", () => {
     expect(normalizeTerminalTitle("  修复登录\n流程\t\u001b[31m  ")).toBe("修复登录 流程 [31m");
+    expect(normalizeTerminalTitle("alpha\u0085beta\u2028gamma\u2029delta")).toBe("alphabetagammadelta");
   });
 
   it("caps by Unicode code points", () => {

@@ -162,6 +162,7 @@ describe("session title synchronization", () => {
   it("downgrades a live-snapshot error after persisting", async () => {
     const current = session();
     const setLiveTerminalTitle = vi.fn();
+    const onSyncError = vi.fn();
 
     await setSessionCustomTitleAndSyncTerminal(current.sessionKey, "Renamed", {
       getSession: () => current,
@@ -171,9 +172,11 @@ describe("session title synchronization", () => {
       },
       loadLiveSessions: async () => ({ generatedAt: new Date(0).toISOString(), sessions: [], error: "ps failed" }),
       setLiveTerminalTitle,
+      onSyncError,
     });
 
     expect(current.displayTitle).toBe("Renamed");
     expect(setLiveTerminalTitle).not.toHaveBeenCalled();
+    expect(onSyncError).toHaveBeenCalledWith(expect.objectContaining({ message: "ps failed" }));
   });
 });

@@ -3,7 +3,11 @@ import { sourceFamily } from "./platform";
 import { normalizeTerminalTitle } from "./terminal-title";
 import type { LiveSession, SessionSearchResult } from "./types";
 
-type CommandRunner = (command: string, args: string[]) => Promise<string>;
+interface CommandRunOptions {
+  env?: NodeJS.ProcessEnv;
+}
+
+type CommandRunner = (command: string, args: string[], options?: CommandRunOptions) => Promise<string>;
 
 export interface FocusLiveSessionOptions {
   platform?: NodeJS.Platform;
@@ -18,6 +22,11 @@ interface ProcessRecord {
 
 interface TerminalTarget {
   appName: string;
+}
+
+interface WezTermTarget {
+  paneId: string;
+  unixSocket: string;
 }
 
 export function liveSessionPidForSession(session: SessionSearchResult, liveSessions: LiveSession[]): number | null {
@@ -76,9 +85,13 @@ export async function setLiveSessionTerminalTitle(
   }
 
   if (target.appName === "WezTerm") {
-    const paneId = await wezTermPaneIdForPid(pid, runner);
-    if (!paneId) return false;
-    await runner("wezterm", ["cli", "set-tab-title", "--pane-id", paneId, normalizedTitle]);
+    const wezTermTarget = await wezTermTargetForPid(pid, runner);
+    if (!wezTermTarget) return false;
+    await runner(
+      "wezterm",
+      ["cli", "set-tab-title", "--pane-id", wezTermTarget.paneId, normalizedTitle],
+      { env: { ...process.env, WEZTERM_UNIX_SOCKET: wezTermTarget.unixSocket } },
+    );
     return true;
   }
 
@@ -227,10 +240,12 @@ end tell
 return "false"`;
 }
 
-async function wezTermPaneIdForPid(pid: number, runner: CommandRunner): Promise<string | null> {
+async function wezTermTargetForPid(pid: number, runner: CommandRunner): Promise<WezTermTarget | null> {
   try {
     const output = await runner("/bin/ps", ["eww", "-p", String(pid), "-o", "command="]);
-    return output.match(/(?:^|\s)WEZTERM_PANE=(\d+)(?=\s|$)/)?.[1] ?? null;
+    const paneId = output.match(/(?:^|\s)WEZTERM_PANE=(\d+)(?=\s|$)/)?.[1];
+    const unixSocket = output.match(/(?:^|\s)WEZTERM_UNIX_SOCKET=([^\s]+)(?=\s|$)/)?.[1];
+    return paneId && unixSocket ? { paneId, unixSocket } : null;
   } catch {
     return null;
   }
@@ -277,9 +292,9 @@ function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function runProcess(command: string, args: string[]): Promise<string> {
+function runProcess(command: string, args: string[], options: CommandRunOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, (error, stdout, stderr) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
       reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
     });

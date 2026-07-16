@@ -23,7 +23,10 @@ export async function setSessionCustomTitleAndSyncTerminal(
 
   try {
     const snapshot = await dependencies.loadLiveSessions();
-    if (snapshot.error) return;
+    if (snapshot.error) {
+      dependencies.onSyncError?.(new Error(snapshot.error));
+      return;
+    }
 
     const pid = liveSessionPidForSession(updated, snapshot.sessions);
     if (pid) await dependencies.setLiveTerminalTitle(pid, updated.displayTitle);
