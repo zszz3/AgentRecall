@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const source = readFileSync(new URL("../start.sh", import.meta.url), "utf8");
+const commandSource = readFileSync(new URL("../bin/agent-session-search.cjs", import.meta.url), "utf8");
 
 test("launcher documents and parses local mode", () => {
   assert.match(source, /bash start\.sh local/);
@@ -19,7 +20,12 @@ test("local launch starts this checkout without automatic update checks", () => 
   assert.match(source, /LOCAL_BIN="\$ROOT_DIR\/bin\/agent-session-search\.cjs"/);
   assert.match(source, /LAUNCH_BIN="\$LOCAL_BIN"/);
   assert.match(source, /LAUNCH_NO_UPDATE=true/);
-  assert.match(source, /AGENT_SESSION_SEARCH_NO_UPDATE_CHECK=1 "\$LAUNCH_BIN" --no-update-check/);
+  assert.match(source, /AGENT_SESSION_SEARCH_SOURCE_BUILD=1 AGENT_SESSION_SEARCH_NO_UPDATE_CHECK=1 "\$LAUNCH_BIN" --no-update-check/);
+});
+
+test("global command marks npm-installed launches as release builds", () => {
+  assert.match(commandSource, /environment\.AGENT_SESSION_SEARCH_RELEASE_BUILD = "1"/);
+  assert.match(commandSource, /environment\.AGENT_SESSION_SEARCH_SOURCE_BUILD !== "1"/);
 });
 
 test("launcher detects installed and local app instances", () => {

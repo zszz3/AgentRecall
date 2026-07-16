@@ -338,6 +338,27 @@ function formatManualUpdateFallback() {
   ].join("\n");
 }
 
+function formatUpdateError(error, fallback = "未知错误") {
+  const candidates = error && typeof error === "object"
+    ? [error.stderr, error.stdout, error.message, error]
+    : [error];
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    const text = Buffer.isBuffer(candidate) || candidate instanceof Uint8Array
+      ? Buffer.from(candidate).toString("utf8")
+      : String(candidate);
+    const readable = text
+      .replace(/\uFFFD/g, "")
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[^\S\n]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (readable && readable !== "[object Object]") return readable.slice(0, 2_000);
+  }
+  return fallback;
+}
+
 function showNativeUpdateFailure(errorMessage, options = {}) {
   const platform = options.platform || process.platform;
   const run = options.execFileSyncImpl || execFileSync;
@@ -346,7 +367,7 @@ function showNativeUpdateFailure(errorMessage, options = {}) {
   const environment = {
     ...process.env,
     ...options.env,
-    AGENT_SESSION_SEARCH_UPDATE_ERROR: String(errorMessage || "未知错误").slice(0, 2_000),
+    AGENT_SESSION_SEARCH_UPDATE_ERROR: formatUpdateError(errorMessage),
     AGENT_SESSION_SEARCH_UPDATE_COMMAND: command,
     AGENT_SESSION_SEARCH_UPDATE_RELEASE_URL: LATEST_RELEASE_URL,
   };
@@ -442,7 +463,7 @@ async function installUpdate(manifest, options = {}) {
         env: installEnvironment,
       });
     } catch (error) {
-      const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();
+      const detail = formatUpdateError(error);
       throw new Error(`npm 安装失败：${detail}`);
     }
     await (options.ensureElectronImpl || ensureInstalledElectron)({
@@ -571,7 +592,7 @@ async function ensureInstalledElectron(options = {}) {
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
     if (fs.existsSync(distBackup)) await fsp.rename(distBackup, distPath).catch(() => undefined);
     if (fs.existsSync(pathBackup)) await fsp.rename(pathBackup, pathFile).catch(() => undefined);
-    const detail = String(error?.stderr || error?.stdout || error?.message || error).trim();
+    const detail = formatUpdateError(error);
     throw new Error(`Electron 运行时安装失败：${detail}`);
   }
 }
@@ -640,21 +661,55 @@ async function clearAppProcess(pid = process.pid, options = {}) {
   if (!current || current.pid === pid) await fsp.rm(filePath, { force: true });
 }
 
+async function findInstalledAppProcessIds(options = {}) {
+  const platform = options.platform || process.platform;
+  const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
+  const appEntry = path.join(packagePath, "out", "main", "index.js");
+  const run = options.execFileImpl || execFileAsync;
+  const result = platform === "win32"
+    ? await run("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+    ], { encoding: "utf8", windowsHide: true, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 })
+    : await run("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 10_000, maxBuffer: 4 * 1024 * 1024 });
+  const expected = platform === "win32" ? appEntry.replaceAll("\\", "/").toLowerCase() : appEntry;
+  return String(result?.stdout || "")
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const match = line.trim().match(/^(\d+)\s+(.+)$/);
+      if (!match) return [];
+      const command = platform === "win32" ? match[2].replaceAll("\\", "/").toLowerCase() : match[2];
+      const pid = Number(match[1]);
+      return command.includes(expected) && pid !== process.pid ? [pid] : [];
+    });
+}
+
 async function stopRunningApp(options = {}) {
   const processFile = options.processPath || appProcessPath(options.homeDir);
   const entry = await readJson(processFile);
   const pid = Number(entry?.pid);
-  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
-  if (!isProcessRunning(pid)) {
+  const processIds = new Set();
+  if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && isProcessRunning(pid)) {
+    processIds.add(pid);
+  } else if (Number.isInteger(pid) && pid > 0) {
     await fsp.rm(processFile, { force: true }).catch(() => undefined);
-    return false;
   }
-  if (process.platform === "win32") {
-    await execFileAsync("taskkill", ["/PID", String(pid), "/T"], { timeout: 10_000 }).catch(() => undefined);
-  } else {
-    try { process.kill(pid, "SIGTERM"); } catch { return false; }
+  const discovered = await findInstalledAppProcessIds(options).catch(() => []);
+  for (const discoveredPid of discovered) {
+    if (Number.isInteger(discoveredPid) && discoveredPid > 0 && discoveredPid !== process.pid) processIds.add(discoveredPid);
   }
-  await waitForProcessExit(pid, options.waitTimeoutMs ?? 15_000);
+  if (processIds.size === 0) return false;
+  for (const appPid of processIds) {
+    if (process.platform === "win32") {
+      await execFileAsync("taskkill", ["/PID", String(appPid), "/T", "/F"], { timeout: 10_000 }).catch(() => undefined);
+    } else {
+      try { process.kill(appPid, "SIGTERM"); } catch { processIds.delete(appPid); }
+    }
+  }
+  await Promise.all([...processIds].map((appPid) => waitForProcessExit(appPid, options.waitTimeoutMs ?? 15_000)));
+  await fsp.rm(processFile, { force: true }).catch(() => undefined);
   return true;
 }
 
@@ -728,6 +783,7 @@ module.exports = {
   electronRuntimeLockPath,
   ensureElectronRuntimeForLaunch,
   ensureInstalledElectron,
+  formatUpdateError,
   formatManualUpdateFallback,
   formatUpdateNotice,
   globalPackageRoot,

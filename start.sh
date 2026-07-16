@@ -201,7 +201,7 @@ fi
 
 launch_agent_session_search() {
   if [ "$LAUNCH_NO_UPDATE" = true ]; then
-    AGENT_SESSION_SEARCH_NO_UPDATE_CHECK=1 "$LAUNCH_BIN" --no-update-check "$@"
+    AGENT_SESSION_SEARCH_SOURCE_BUILD=1 AGENT_SESSION_SEARCH_NO_UPDATE_CHECK=1 "$LAUNCH_BIN" --no-update-check "$@"
   else
     "$LAUNCH_BIN" "$@"
   fi

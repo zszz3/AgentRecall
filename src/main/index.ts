@@ -160,6 +160,7 @@ import type {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PRODUCT_NAME = "Agent-Session-Search";
 const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
+const releaseUpdateRuntime = app.isPackaged || process.env.AGENT_SESSION_SEARCH_RELEASE_BUILD === "1";
 type ApiProviderKeyTarget = "codex" | "claude" | "summary";
 
 const OPTIONAL_SOURCE_SETTINGS: Array<{ key: keyof Pick<AppSettings, "includeClaudeInternal" | "includeCodexInternal" | "includeTclaude" | "includeTcodex" | "includeCodeBuddyCli" | "includeCodeWizCli" | "includeOpenClaw" | "includeHermes" | "includeOpenCode" | "includeCursorAgent" | "includeTrae">; sources: SessionSource[] }> = [
@@ -218,6 +219,7 @@ interface UpdateClientModule {
   clearAppProcess(pid?: number): Promise<void>;
   clearInstallStatus(): Promise<void>;
   currentVersion(): string;
+  formatUpdateError(error: unknown): string;
   manualInstallCommand(): string;
   parseUpdateManifest(value: unknown): AppUpdateManifest;
   readInstallStatus(): Promise<{ status?: string; version?: string; error?: string | null } | null>;
@@ -849,7 +851,7 @@ function developmentAppUpdateStatus(): AppUpdateStatus {
 }
 
 async function refreshAppUpdateStatus(force = false): Promise<AppUpdateStatus> {
-  if (!app.isPackaged) return developmentAppUpdateStatus();
+  if (!releaseUpdateRuntime) return developmentAppUpdateStatus();
   if (activeAppUpdateCheck) return activeAppUpdateCheck;
   activeAppUpdateCheck = loadUpdateClient()
     .checkForUpdate({ currentVersion: loadUpdateClient().currentVersion(), force })
@@ -870,7 +872,7 @@ async function refreshAppUpdateStatus(force = false): Promise<AppUpdateStatus> {
 }
 
 async function getAppUpdateStatus(force = false): Promise<AppUpdateStatus> {
-  if (!app.isPackaged) return developmentAppUpdateStatus();
+  if (!releaseUpdateRuntime) return developmentAppUpdateStatus();
   if (!force && updateAutoCheckDisabledByEnvironment()) return appUpdateStatus ?? emptyAppUpdateStatus();
   if (!force && !getSettings().autoCheckUpdates) return appUpdateStatus ?? emptyAppUpdateStatus();
   if (!force && appUpdateStatus) return appUpdateStatus;
@@ -878,7 +880,7 @@ async function getAppUpdateStatus(force = false): Promise<AppUpdateStatus> {
 }
 
 async function startAppUpdate(): Promise<AppUpdateInstallResult> {
-  if (!app.isPackaged) throw new Error("Application updates are unavailable in development builds.");
+  if (!releaseUpdateRuntime) throw new Error("Application updates are unavailable in development builds.");
   const manifest = loadUpdateClient().parseUpdateManifest(appUpdateStatus?.manifest);
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-session-search-app-update-"));
   const manifestPath = path.join(directory, "update.json");
@@ -939,7 +941,7 @@ async function showPreviousUpdateResult(): Promise<void> {
       type: "error" as const,
       title: "更新失败",
       message: "自动更新未能完成，可以手动安装最新版本。",
-      detail: `${String(status?.error || "未知错误")}\n\n可以复制命令手动覆盖安装，或打开 GitHub Release 页面下载：\n${command}`,
+      detail: `${client.formatUpdateError(status?.error)}\n\n可以复制命令手动覆盖安装，或打开 GitHub Release 页面下载：\n${command}`,
       buttons: ["复制安装命令", "打开 Release 页面", "稍后处理"],
       defaultId: 0,
       cancelId: 2,
@@ -2276,7 +2278,7 @@ function registerIpc(): void {
     }
     persistApiProviderKeysFromUpdate(settings, next);
     settingsStore.set(withoutApiProviderKeys(next));
-    if ("autoCheckUpdates" in settings && app.isPackaged) {
+    if ("autoCheckUpdates" in settings && releaseUpdateRuntime) {
       await loadUpdateClient().writeUpdatePreference(next.autoCheckUpdates);
       if (next.autoCheckUpdates) void refreshAppUpdateStatus(false);
     }
@@ -2476,7 +2478,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
-  if (app.isPackaged) {
+  if (releaseUpdateRuntime) {
     void loadUpdateClient().writeAppProcess(process.pid).catch((error) => console.error(`Failed to write app process state: ${String(error)}`));
     void loadUpdateClient().writeUpdatePreference(getSettings().autoCheckUpdates).catch((error) => console.error(`Failed to write update preference: ${String(error)}`));
   }
@@ -2499,7 +2501,7 @@ app.whenReady().then(() => {
   createApplicationMenu();
   createWindow();
   createTray();
-  if (app.isPackaged) void showPreviousUpdateResult();
+  if (releaseUpdateRuntime) void showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;
   if (!registerAppGlobalShortcut(shortcut)) {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
@@ -2510,7 +2512,7 @@ app.whenReady().then(() => {
   startAutoIndexRefresh();
   startAutoSkillUsageRefresh();
   startAutoSessionSyncQueue();
-  if (app.isPackaged && getSettings().autoCheckUpdates) setTimeout(() => void refreshAppUpdateStatus(false), 1_000);
+  if (releaseUpdateRuntime && getSettings().autoCheckUpdates) setTimeout(() => void refreshAppUpdateStatus(false), 1_000);
 });
 
 app.on("window-all-closed", () => {
@@ -2522,7 +2524,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
-  if (app.isPackaged) void loadUpdateClient().clearAppProcess(process.pid).catch(() => undefined);
+  if (releaseUpdateRuntime) void loadUpdateClient().clearAppProcess(process.pid).catch(() => undefined);
   stopAutoIndexRefresh();
   stopAutoSkillUsageRefresh();
   stopAutoSessionSyncQueue();

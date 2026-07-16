@@ -44,8 +44,9 @@ describe("application update IPC", () => {
 
   it("does not check or install releases from an Electron development build", () => {
     expect(mainSource).toContain("function developmentAppUpdateStatus(): AppUpdateStatus");
-    expect(mainSource).toContain("if (!app.isPackaged) return developmentAppUpdateStatus();");
+    expect(mainSource).toContain('const releaseUpdateRuntime = app.isPackaged || process.env.AGENT_SESSION_SEARCH_RELEASE_BUILD === "1"');
+    expect(mainSource).toContain("if (!releaseUpdateRuntime) return developmentAppUpdateStatus();");
     expect(mainSource).toContain('throw new Error("Application updates are unavailable in development builds.")');
-    expect(mainSource).toContain("if (app.isPackaged && getSettings().autoCheckUpdates)");
+    expect(mainSource).toContain("if (releaseUpdateRuntime && getSettings().autoCheckUpdates)");
   });
 });

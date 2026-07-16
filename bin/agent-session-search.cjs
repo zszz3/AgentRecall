@@ -50,6 +50,11 @@ function launchApp() {
   const appEntry = path.join(__dirname, "..", "out", "main", "index.js");
   const environment = { ...process.env };
   environment.AGENT_SESSION_SEARCH_NODE_PATH = process.execPath;
+  if (environment.AGENT_SESSION_SEARCH_SOURCE_BUILD !== "1") {
+    environment.AGENT_SESSION_SEARCH_RELEASE_BUILD = "1";
+  } else {
+    delete environment.AGENT_SESSION_SEARCH_RELEASE_BUILD;
+  }
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(electronPath, [appEntry], { detached: true, stdio: "ignore", env: environment });
   child.on("error", (error) => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -29,6 +29,7 @@ async function electronFixtureExec(command, args, options) {
 }
 
 const require = createRequire(import.meta.url);
+const updateClientSource = await readFile(new URL("../bin/update-client.cjs", import.meta.url), "utf8");
 const {
   DEFAULT_NPM_REGISTRY,
   UPDATE_REQUEST_TIMEOUT_MS,
@@ -38,6 +39,7 @@ const {
   ensureElectronRuntimeForLaunch,
   ensureInstalledElectron,
   electronRuntimeLockPath,
+  formatUpdateError,
   formatManualUpdateFallback,
   formatUpdateNotice,
   installUpdate,
@@ -48,6 +50,7 @@ const {
   showNativeUpdateFailure,
   skipUpdateVersion,
   snoozeUpdatePrompt,
+  stopRunningApp,
   waitForUpdateCompletion,
   updateLockPath,
 } = require("../bin/update-client.cjs");
@@ -225,6 +228,13 @@ test("provides an actionable manual fallback when automatic installation fails",
   assert.match(message, /https:\/\/github\.com\/zszz3\/agent-session-search\/releases\/latest/);
 });
 
+test("converts subprocess update failures into readable text", () => {
+  assert.equal(formatUpdateError({ stderr: Buffer.from("npm 权限不足\n", "utf8") }), "npm 权限不足");
+  const binaryOutput = formatUpdateError({ stderr: Buffer.from([0x45, 0x72, 0x72, 0x6f, 0x72, 0, 0xff, 0x0b]) });
+  assert.match(binaryOutput, /^Error/);
+  assert.doesNotMatch(binaryOutput, /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffd]/);
+});
+
 test("shows a macOS-native fallback without requiring Electron", () => {
   const calls = [];
   const shown = showNativeUpdateFailure("Electron download failed", {
@@ -287,6 +297,36 @@ test("serializes update installers with a recoverable process lock", async () =>
 test("uses one atomic lock for application updates and Electron runtime repair", () => {
   const homeDir = path.join(tmpdir(), "agent-session-common-lock");
   assert.equal(electronRuntimeLockPath(homeDir), updateLockPath(homeDir));
+});
+
+test("force-stops the installed application on Windows before replacing files", () => {
+  assert.match(updateClientSource, /"taskkill", \["\/PID", String\(appPid\), "\/T", "\/F"\]/);
+});
+
+test("stops a running npm-installed app when the saved process state is missing", async () => {
+  const directory = await temporaryDirectory("agent-session-update-stop-app-");
+  const packagePath = path.join(directory, "prefix", "lib", "node_modules", "agent-session-search");
+  const appEntry = path.join(packagePath, "out", "main", "index.js");
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await new Promise((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+  try {
+    const stopped = await stopRunningApp({
+      processPath: path.join(directory, "missing-process.json"),
+      packagePath,
+      execFileImpl: async () => ({
+        stdout: `  101 /usr/bin/unrelated\n  ${child.pid} /path/Electron ${appEntry}\n`,
+        stderr: "",
+      }),
+      waitTimeoutMs: 5_000,
+    });
+    assert.equal(stopped, true);
+    assert.throws(() => process.kill(child.pid, 0));
+  } finally {
+    if (!child.killed) child.kill("SIGKILL");
+  }
 });
 
 test("waits for an active update lock before launching the application", async () => {
