@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { summarizeSkillRoots } from "./components/skills-dialog";
+import { summarizeSkillRoots } from "./features/skills/skills-dialog";
 import type { SkillRootStatus } from "../../core/skill-manager";
 
-const skillsDialogSource = readFileSync(new URL("./components/skills-dialog.tsx", import.meta.url), "utf8");
-const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const skillsDialogSource = readFileSync(new URL("./features/skills/skills-dialog.tsx", import.meta.url), "utf8");
+const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("skills dialog actions", () => {
@@ -31,12 +31,12 @@ describe("skills dialog actions", () => {
   });
 
   it("surfaces Supabase sync configuration and unified skill actions", () => {
-    const supabaseSettings = appSource.slice(appSource.indexOf("Supabase skill sync"), appSource.indexOf("Appearance", appSource.indexOf("Supabase skill sync")));
+    const supabaseSettings = settingsSource.slice(settingsSource.indexOf("Supabase skill sync"), settingsSource.indexOf("Appearance", settingsSource.indexOf("Supabase skill sync")));
 
-    expect(appSource).toContain("skillSyncSupabaseUrl");
-    expect(appSource).toContain("skillSyncSupabaseAnonKey");
-    expect(appSource).toContain("supabase.com/dashboard");
-    expect(appSource.match(/settings-field skills-sync-field/g)).toHaveLength(2);
+    expect(settingsSource).toContain("skillSyncSupabaseUrl");
+    expect(settingsSource).toContain("skillSyncSupabaseAnonKey");
+    expect(settingsSource).toContain("supabase.com/dashboard");
+    expect(settingsSource.match(/settings-field skills-sync-field/g)).toHaveLength(2);
     expect(supabaseSettings.match(/settings-field skills-sync-field/g)).toHaveLength(2);
     expect(skillsDialogSource).toContain("buildUnifiedSkillEntries");
     expect(skillsDialogSource).not.toContain("skills-view-tabs");
@@ -82,7 +82,7 @@ describe("skills dialog actions", () => {
   });
 
   it("renders local and cloud Skill documentation as Markdown", () => {
-    expect(skillsDialogSource).toContain('import { Markdown } from "../lightweight-markdown"');
+    expect(skillsDialogSource).toContain('import { Markdown } from "../../lightweight-markdown"');
     expect(skillsDialogSource).toContain("<Markdown text={skillPreviewMarkdown(selectedSkill.markdown, language)} />");
     expect(skillsDialogSource).toContain("<Markdown text={remoteVersionPreview(selectedVersion.id, versionContent, versionLoadingId, versionError, language)} />");
     expect(skillsDialogSource).not.toContain('<pre className="skill-markdown-preview">');

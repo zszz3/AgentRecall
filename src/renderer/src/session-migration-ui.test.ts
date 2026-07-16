@@ -5,13 +5,13 @@ import type { SessionSearchResult } from "../../core/types";
 import { SessionMigrationDialog } from "./components/session-migration-dialog";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const detailPanelSource = readFileSync(new URL("./components/detail-panel.tsx", import.meta.url), "utf8");
+const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
 const dialogSource = readFileSync(new URL("./components/session-migration-dialog.tsx", import.meta.url), "utf8");
 const sessionUiSource = readFileSync(new URL("./session-ui.ts", import.meta.url), "utf8");
 
 describe("session migration UI wiring", () => {
   it("wires migration controls through detail panel, context menu, dialog, and progress events", () => {
-    const contextMenuSource = appSource.slice(appSource.indexOf("function ContextMenu"), appSource.indexOf("function SettingsDialog"));
+    const contextMenuSource = appSource.slice(appSource.indexOf("function ContextMenu"));
 
     expect(detailPanelSource).toContain("onMigrate");
     expect(detailPanelSource).toMatch(/Migrate to/);

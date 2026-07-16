@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import { Copy, Download, FolderOpen, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
-import type { RemoteSkill, RemoteSkillGroup, RemoteSkillVersion, SkillSyncSnapshot, SkillSyncUploadConflict, SkillSyncUploadOutcome } from "../../../core/skill-sync";
-import type { SkillDiffSnapshot } from "../../../core/skill-diff";
-import type { InstalledSkill, InstalledSkillsSnapshot, SkillRootStatus, SkillSource } from "../../../core/skill-manager";
-import { formatCompactNumber } from "../format-count";
-import { localize, type LanguageMode } from "../language";
-import { Markdown } from "../lightweight-markdown";
-import { skillSourceLabel, type SkillSortKey, type SkillSourceFilter } from "../skill-manager";
-import { buildUnifiedSkillEntries, type UnifiedSkillEntry } from "../skill-sync-view-model";
-import type { SkillsFeedback } from "../app-types";
-import { useClampedContextMenuStyle } from "../context-menu-position";
-import { SupabaseSetupGuide } from "./supabase-setup-guide";
+import type { RemoteSkill, RemoteSkillGroup, RemoteSkillVersion, SkillSyncSnapshot, SkillSyncUploadConflict, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
+import type { SkillDiffSnapshot } from "../../../../core/skill-diff";
+import type { InstalledSkill, InstalledSkillsSnapshot, SkillRootStatus, SkillSource } from "../../../../core/skill-manager";
+import { formatCompactNumber } from "../../format-count";
+import { localize, type LanguageMode } from "../../language";
+import { Markdown } from "../../lightweight-markdown";
+import { skillSourceLabel, type SkillSortKey, type SkillSourceFilter } from "../../skill-manager";
+import { buildUnifiedSkillEntries, type UnifiedSkillEntry } from "../../skill-sync-view-model";
+import type { SkillsFeedback } from "../../app-types";
+import { useClampedContextMenuStyle } from "../../context-menu-position";
+import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 
 export function SkillsDialog({
   snapshot,
@@ -662,8 +662,8 @@ function skillManagementLabel(source: SkillSource, language: LanguageMode): stri
   return null;
 }
 
-function SkillSyncStateBadge({ state, language }: { state: import("../../../core/skill-sync").SkillSyncState; language: LanguageMode }): ReactElement {
-  const labels: Record<import("../../../core/skill-sync").SkillSyncState, [string, string]> = {
+function SkillSyncStateBadge({ state, language }: { state: import("../../../../core/skill-sync").SkillSyncState; language: LanguageMode }): ReactElement {
+  const labels: Record<import("../../../../core/skill-sync").SkillSyncState, [string, string]> = {
     "local-only": ["Not uploaded", "未上传"],
     synced: ["Synced", "已同步"],
     "local-newer": ["Local newer", "本地较新"],

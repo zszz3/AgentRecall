@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const searchBoxSource = readFileSync(new URL("./features/search/search-box.tsx", import.meta.url), "utf8");
 
 function sourceBlock(startNeedle: string, endNeedles: string[]): string {
   const start = appSource.indexOf(startNeedle);
@@ -13,7 +14,7 @@ function sourceBlock(startNeedle: string, endNeedles: string[]): string {
 
 describe("app loading performance", () => {
   it("runs and records searches only when Enter is pressed", () => {
-    const searchBox = sourceBlock("const SearchBox = forwardRef", ["export function App"]);
+    const searchBox = searchBoxSource;
     expect(searchBox).toContain("readSearchHistory(window.localStorage)");
     expect(searchBox).toContain("recordSearch(window.localStorage");
     expect(searchBox).toContain("deleteSearch(window.localStorage");
@@ -29,7 +30,7 @@ describe("app loading performance", () => {
   });
 
   it("runs recent searches immediately on click", () => {
-    const searchBox = sourceBlock("const SearchBox = forwardRef", ["export function App"]);
+    const searchBox = searchBoxSource;
     const selectRecent = searchBox.slice(searchBox.indexOf("function selectRecentSearch"), searchBox.indexOf("function runSearch"));
     expect(selectRecent).toContain("setValue(query)");
     expect(selectRecent).toContain("onSearch(query)");
@@ -37,7 +38,7 @@ describe("app loading performance", () => {
   });
 
   it("does not focus the main search input on startup", () => {
-    const searchBox = sourceBlock("const SearchBox = forwardRef", ["export function App"]);
+    const searchBox = searchBoxSource;
     expect(searchBox).not.toContain("autoFocus");
     expect(appSource).toContain("searchRef.current?.focus()");
   });

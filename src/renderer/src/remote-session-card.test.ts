@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SessionSyncItem } from "../../core/remote-session-sync";
 import type { SessionSearchResult } from "../../core/types";
-import { primarySessionAction, sessionCopySummary } from "./components/remote-sessions-dialog";
+import { primarySessionAction, sessionCopySummary } from "./features/remote-sessions/remote-sessions-dialog";
 
-const source = readFileSync(new URL("./components/remote-sessions-dialog.tsx", import.meta.url), "utf8");
+const source = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 const local: SessionSearchResult = {

@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { ArrowRightLeft, Cloud, CloudUpload, Eye, FolderOpen, Laptop, MoreHorizontal, RefreshCw, Search, Server, Trash2, X } from "lucide-react";
-import type { RemoteSessionDetailSnapshot, RemoteSessionListItem, RemoteSessionStatus, SessionSyncItem, SessionSyncState } from "../../../core/remote-session-sync";
-import type { MigrationAgent, SessionMigrationResult } from "../../../core/types";
-import { migrationAgentForSource } from "../../../core/session-migration";
-import { formatRelativeTime } from "../../../core/format-session";
-import { localize, type LanguageMode } from "../language";
-import { migrationAgentLabel, SOURCE_LABEL, sourceUiFamily } from "../session-ui";
-import type { ActionStatus } from "../app-types";
-import { SupabaseSetupGuide } from "./supabase-setup-guide";
+import type { RemoteSessionDetailSnapshot, RemoteSessionListItem, RemoteSessionStatus, SessionSyncItem, SessionSyncState } from "../../../../core/remote-session-sync";
+import type { MigrationAgent, SessionMigrationResult } from "../../../../core/types";
+import { migrationAgentForSource } from "../../../../core/session-migration";
+import { formatRelativeTime } from "../../../../core/format-session";
+import { localize, type LanguageMode } from "../../language";
+import { migrationAgentLabel, SOURCE_LABEL, sourceUiFamily } from "../../session-ui";
+import type { ActionStatus } from "../../app-types";
+import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 
 const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
 type RemoteSourceFilter = "all" | MigrationAgent;
@@ -670,3 +670,4 @@ function DeleteRemoteSessionsDialog({
     </div>
   );
 }
+

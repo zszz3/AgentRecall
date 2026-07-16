@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const remoteSessionsSource = readFileSync(new URL("./components/remote-sessions-dialog.tsx", import.meta.url), "utf8");
+const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
+const remoteSessionsSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 
 describe("stylesheet theme contract", () => {
   it("keeps structured search hits compact and highlighted with theme tokens", () => {
@@ -33,7 +34,7 @@ describe("stylesheet theme contract", () => {
   });
 
   it("opens session rows on single click without selecting row text", () => {
-    const rowRender = appSource.slice(appSource.indexOf("<article"), appSource.indexOf('<div className="session-main">'));
+    const rowRender = sessionRowSource;
     const sessionRow = stylesheet.match(/\.session-row\s*\{[^}]*\}/)?.[0] ?? "";
 
     expect(rowRender).toContain("onOpen(session);");

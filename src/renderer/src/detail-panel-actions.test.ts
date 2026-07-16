@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { SessionMessage, SessionTraceEvent } from "../../core/types";
-import { filterConversationTimeline } from "./components/detail-panel";
+import { filterConversationTimeline } from "./features/session-detail/detail-panel";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const detailPanelSource = readFileSync(new URL("./components/detail-panel.tsx", import.meta.url), "utf8");
-const remoteSessionsDialogSource = readFileSync(new URL("./components/remote-sessions-dialog.tsx", import.meta.url), "utf8");
+const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
+const remoteSessionsDialogSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
+const settingsDialogSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 const sessionUiSource = readFileSync(new URL("./session-ui.ts", import.meta.url), "utf8");
 const preloadSource = readFileSync(new URL("../../preload/index.ts", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../../main/index.ts", import.meta.url), "utf8");
@@ -48,7 +49,7 @@ describe("detail panel actions", () => {
   });
 
   it("keeps right-click resume and markdown export without standalone terminal focus or plain text copy", () => {
-    const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"), appSource.indexOf("function SettingsDialog"));
+    const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"));
 
     expect(contextMenu).toMatch(/Resume in Terminal/);
     expect(contextMenu).not.toMatch(/Bring to Front/);
@@ -187,7 +188,7 @@ describe("detail panel actions", () => {
   });
 
   it("marks local-only context menu actions disabled for remote sessions", () => {
-    const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"), appSource.indexOf("function SettingsDialog"));
+    const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"));
 
     expect(contextMenu).toContain("isRemoteSession(state.session)");
     expect(sessionUiSource).toContain("remote sessions do not open local native apps");
@@ -321,7 +322,7 @@ describe("detail panel actions", () => {
   });
 
   it("renders remote environment diagnostics in settings", () => {
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"), appSource.indexOf("function SettingsSection"));
+    const settingsDialog = settingsDialogSource;
 
     expect(appSource).toContain("environmentHealthReports");
     expect(appSource).toContain("diagnosingEnvironmentId");

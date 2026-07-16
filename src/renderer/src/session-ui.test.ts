@@ -13,10 +13,11 @@ import {
 } from "./session-ui";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
 
 describe("session source labels", () => {
   it("renders structured message hits with role, count, highlighting, and a dedicated open action", () => {
-    const sessionRow = appSource.slice(appSource.indexOf("const SessionRow = memo"), appSource.indexOf("function ActionToast"));
+    const sessionRow = sessionRowSource;
     expect(sessionRow).toContain("session.messageMatchCount");
     expect(sessionRow).toContain("matchHits.map");
     expect(sessionRow).toContain("HighlightedSearchText");
@@ -134,7 +135,7 @@ describe("session source labels", () => {
     expect(hasTokenUsage({ totalTokens: 0 })).toBe(false);
     expect(hasTokenUsage({ totalTokens: 1 })).toBe(true);
     expect(appSource).toContain("hasTokenUsage(stats.total)");
-    expect(appSource).toContain("hasTokenUsage(session.tokenUsage)");
+    expect(sessionRowSource).toContain("hasTokenUsage(session.tokenUsage)");
   });
 
   it("derives migration targets from enabled settings in registry order", () => {

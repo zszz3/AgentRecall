@@ -10,11 +10,11 @@ import {
   type ApiProviderPresetId,
   type ClaudeApiConfig,
   type ClaudeApiProviderPresetId,
-} from "../../../core/api-config";
-import type { AppSettings, AppSettingsUpdate } from "../../../core/platform";
-import type { CodexConfigSnapshot } from "../../../core/codex-profile";
-import type { SettingsFeedback } from "../app-types";
-import { localize, type LanguageMode } from "../language";
+} from "../../../../core/api-config";
+import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
+import type { CodexConfigSnapshot } from "../../../../core/codex-profile";
+import type { SettingsFeedback } from "../../app-types";
+import { localize, type LanguageMode } from "../../language";
 
 const SUMMARY_API_PROVIDER_PRESETS = API_PROVIDER_PRESETS.filter((preset) => preset.id !== "codexzh");
 
@@ -933,3 +933,4 @@ export function ApiConfigDialog({
 function normalizeProviderBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
+

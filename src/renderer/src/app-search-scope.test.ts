@@ -1,16 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-
-async function loadHelper() {
-  vi.resetModules();
-  vi.stubGlobal("window", { sessionSearch: { platform: "darwin" } });
-  const module = await import("./App");
-  return module;
-}
+import { describe, expect, it } from "vitest";
+import { resolveSearchScope } from "./features/search/search-scope";
+import { existingSshHostAliases } from "./features/settings/ssh-environment-dialog";
 
 describe("resolveSearchScope", () => {
-  it("marks explicit environment and another environment's selected project as incompatible", async () => {
-    const { resolveSearchScope } = await loadHelper();
-
+  it("marks explicit environment and another environment's selected project as incompatible", () => {
     expect(resolveSearchScope("ssh-b", "/work/app", "ssh-a")).toEqual({
       environmentId: "ssh-b",
       projectPath: "/work/app",
@@ -18,9 +11,7 @@ describe("resolveSearchScope", () => {
     });
   });
 
-  it("keeps all-environment project filters scoped to the selected project environment", async () => {
-    const { resolveSearchScope } = await loadHelper();
-
+  it("keeps all-environment project filters scoped to the selected project environment", () => {
     expect(resolveSearchScope("all", "/work/app", "ssh-a")).toEqual({
       environmentId: "ssh-a",
       projectPath: "/work/app",
@@ -30,9 +21,7 @@ describe("resolveSearchScope", () => {
 });
 
 describe("existingSshHostAliases", () => {
-  it("returns only actual aliases already represented by SSH environments", async () => {
-    const { existingSshHostAliases } = await loadHelper();
-
+  it("returns only actual aliases already represented by SSH environments", () => {
     expect(
       existingSshHostAliases([
         { kind: "local", label: "Local", hostAlias: null },

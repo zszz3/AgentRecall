@@ -4,7 +4,8 @@ import { readStoredLanguage } from "./language";
 import { readStoredTheme } from "./theme";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const apiConfigDialogSource = readFileSync(new URL("./components/api-config-dialog.tsx", import.meta.url), "utf8");
+const apiConfigDialogSource = readFileSync(new URL("./features/providers/api-config-dialog.tsx", import.meta.url), "utf8");
+const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 
 describe("theme storage", () => {
   it("defaults to light when no theme is stored", () => {
@@ -29,7 +30,7 @@ describe("language storage", () => {
 
 describe("theme controls", () => {
   it("offers a persisted subagent visibility toggle in settings", () => {
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
+    const settingsDialog = settingsSource;
     expect(settingsDialog).toContain("Hide subagent sessions");
     expect(settingsDialog).toContain("隐藏 Subagent 会话");
     expect(settingsDialog).toContain("checked={Boolean(settings?.hideSubagentSessions)}");
@@ -41,7 +42,7 @@ describe("theme controls", () => {
       appSource.indexOf('<header className="toolbar">'),
       appSource.indexOf('<div className="result-count">'),
     );
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
+    const settingsDialog = settingsSource;
 
     expect(toolbar).not.toContain("setTheme");
     expect(settingsDialog).toContain("theme-setting-toggle");
@@ -50,7 +51,7 @@ describe("theme controls", () => {
   });
 
   it("keeps language selection inside settings", () => {
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
+    const settingsDialog = settingsSource;
 
     expect(settingsDialog).toContain("language-setting-toggle");
     expect(settingsDialog).toContain("onLanguageChange");
@@ -60,7 +61,7 @@ describe("theme controls", () => {
   it("keeps API configuration beside Skills instead of inside settings", () => {
     const toolbarActions = appSource.slice(appSource.indexOf('<div className="top-actions">'), appSource.indexOf("</header>"));
     const apiDialog = apiConfigDialogSource;
-    const settingsDialog = appSource.slice(appSource.indexOf("function SettingsDialog"));
+    const settingsDialog = settingsSource;
 
     expect(toolbarActions).toContain("setApiConfigOpen(true)");
     expect(toolbarActions).toContain("PackageSearch");

@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
-import { formatMessageTime } from "../../../core/format-session";
-import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../core/types";
-import { formatTokenCount } from "../format-count";
-import { hasTokenUsage } from "../session-ui";
-import { localize, type LanguageMode } from "../language";
-import type { LiveSessionState } from "../live-filter";
-import type { ActionStatus } from "../app-types";
-import { HighlightedSearchText, searchHighlightTerms } from "../search-highlight";
-import { Markdown } from "../lightweight-markdown";
+import { formatMessageTime } from "../../../../core/format-session";
+import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
+import { formatTokenCount } from "../../format-count";
+import { hasTokenUsage } from "../../session-ui";
+import { localize, type LanguageMode } from "../../language";
+import type { LiveSessionState } from "../../live-filter";
+import type { ActionStatus } from "../../app-types";
+import { HighlightedSearchText, searchHighlightTerms } from "../../search-highlight";
+import { Markdown } from "../../lightweight-markdown";
 import {
   environmentBadgeLabel,
   environmentBadgeTitle,
@@ -19,8 +19,8 @@ import {
   remoteRevealTitle,
   SOURCE_LABEL,
   sourceUiFamily,
-} from "../session-ui";
-import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../tool-events-visibility";
+} from "../../session-ui";
+import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
 
 export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
@@ -693,3 +693,4 @@ function TraceEventBlock({ event, language, timelineKey }: { event: SessionTrace
     </details>
   );
 }
+

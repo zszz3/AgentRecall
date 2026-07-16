@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 
 function sourceBlock(startNeedle: string, endNeedle: string): string {
-  const start = appSource.indexOf(startNeedle);
-  const end = appSource.indexOf(endNeedle, start + startNeedle.length);
+  const start = settingsSource.indexOf(startNeedle);
+  const end = settingsSource.indexOf(endNeedle, start + startNeedle.length);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
-  return appSource.slice(start, end);
+  return settingsSource.slice(start, end);
 }
 
 describe("shortcut discoverability", () => {
@@ -18,7 +18,7 @@ describe("shortcut discoverability", () => {
       '{activeSection === "connections" ? (',
     );
 
-    expect(appSource).toContain('const appShortcutModifier = RUNTIME_PLATFORM === "darwin" ? "⌘" : "Ctrl";');
+    expect(settingsSource).toContain('const appShortcutModifier = platform === "darwin" ? "⌘" : "Ctrl";');
     for (const label of [
       'l("Focus search", "聚焦搜索")',
       'l("Search", "执行搜索")',
@@ -29,7 +29,7 @@ describe("shortcut discoverability", () => {
       'l("Previous / next match", "上一个 / 下一个匹配")',
       'l("Close current panel or dialog", "关闭当前面板或弹窗")',
     ]) {
-      expect(appSource).toContain(label);
+      expect(settingsSource).toContain(label);
     }
     for (const keys of [
       'keyGroups: [[appShortcutModifier, "K"]]',
@@ -41,7 +41,7 @@ describe("shortcut discoverability", () => {
       'keyGroups: [["Shift", "Enter"], ["Enter"]]',
       'keyGroups: [["Esc"]]',
     ]) {
-      expect(appSource).toContain(keys);
+      expect(settingsSource).toContain(keys);
     }
     expect(shortcutSettings).toContain('l("App shortcuts", "应用内快捷键")');
     expect(shortcutSettings).toContain('l("These shortcuts cannot be customized.", "这些快捷键不可自定义。")');
@@ -78,7 +78,7 @@ describe("shortcut discoverability", () => {
       "</section>",
     );
 
-    expect(appSource).toContain(
+    expect(settingsSource).toContain(
       'l("Previous match: Shift + Enter; next match: Enter", "上一个匹配：Shift + Enter；下一个匹配：Enter")',
     );
     expect(shortcutReference).toContain('<span className="shortcut-reference-accessible">{shortcut.accessibleLabel}</span>');
