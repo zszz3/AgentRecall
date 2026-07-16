@@ -113,4 +113,21 @@ describe("remote session comparison cards", () => {
     expect(stylesheet).toMatch(/\.remote-session-action\.primary\s*\{[^}]*width:\s*auto/);
     expect(stylesheet).toMatch(/\.remote-session-actions\.cloud-empty\s*\{[^}]*justify-content:\s*center/);
   });
+
+  it("uses balanced, dialog-specific controls for restoring a remote session", () => {
+    const restoreDialog = source.slice(
+      source.indexOf("function RemoteRestoreDialog"),
+      source.indexOf("function DeleteRemoteSessionsDialog"),
+    );
+
+    expect(restoreDialog).toContain('className="remote-restore-session-summary"');
+    expect(restoreDialog).toContain('className="remote-restore-targets"');
+    expect(restoreDialog).toContain('aria-pressed={target === item}');
+    expect(restoreDialog).toContain('className="remote-restore-destination remote-project-picker"');
+    expect(restoreDialog).toContain('className="primary-action"');
+    expect(restoreDialog).not.toContain('className="remote-targets"');
+    expect(restoreDialog).not.toContain('className="primary"');
+    expect(stylesheet).toMatch(/\.remote-restore-targets\s*\{[^}]*grid-template-columns:\s*repeat\(5, minmax\(0, 1fr\)\)/);
+    expect(stylesheet).toMatch(/\.remote-restore-destination\s*\{[^}]*height:\s*40px/);
+  });
 });

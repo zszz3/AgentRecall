@@ -8,6 +8,7 @@ import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
 import { migrationAgentLabel, SOURCE_LABEL, sourceUiFamily } from "../../session-ui";
 import type { ActionStatus } from "../../app-types";
+import type { RemoteSessionsCache } from "../../remote-sessions-cache";
 import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 
 const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
@@ -58,22 +59,28 @@ function syncStateLabel(state: SessionSyncState, language: LanguageMode): string
 }
 
 export function RemoteSessionsDialog({
+  cache,
   language,
+  onRefresh,
+  onRemoteSessionUploaded,
+  onRemoteSessionsDeleted,
   onClose,
   onRestored,
   onOpenDetail,
 }: {
+  cache: RemoteSessionsCache;
   language: LanguageMode;
+  onRefresh: () => Promise<void>;
+  onRemoteSessionUploaded: (localSessionKey: string, remote: RemoteSessionListItem) => void;
+  onRemoteSessionsDeleted: (remoteIds: string[]) => void;
   onClose: () => void;
   onRestored: (result: SessionMigrationResult) => void;
   onOpenDetail: (detail: RemoteSessionDetailSnapshot, query: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [status, setStatus] = useState<RemoteSessionStatus | null>(null);
-  const [items, setItems] = useState<SessionSyncItem[]>([]);
+  const { status, items, loading, error: cacheError } = cache;
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<RemoteSourceFilter>("all");
-  const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<ActionStatus | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -107,9 +114,9 @@ export function RemoteSessionsDialog({
   const selectedVisibleCount = useMemo(() => filtered.filter((item) => selectedIds.has(item.id)).length, [filtered, selectedIds]);
   const allVisibleSelected = filtered.length > 0 && selectedVisibleCount === filtered.length;
   const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
+  const visibleFeedback = feedback ?? (cacheError ? { kind: "error" as const, message: cacheError } : null);
 
   useEffect(() => {
-    void refresh();
     return () => {
       detailRequestSeqRef.current++;
     };
@@ -127,27 +134,6 @@ export function RemoteSessionsDialog({
     if (selectVisibleRef.current) selectVisibleRef.current.indeterminate = someVisibleSelected;
   }, [someVisibleSelected]);
 
-  async function refresh(): Promise<void> {
-    setLoading(true);
-    try {
-      const nextStatus = await window.sessionSearch.getRemoteSessionStatus();
-      setStatus(nextStatus);
-      if (nextStatus.kind === "ready") {
-        setItems(await window.sessionSearch.listSessionSyncItems());
-        setFeedback(null);
-      } else {
-        setItems([]);
-        setFeedback(null);
-      }
-    } catch (error) {
-      setItems([]);
-      setStatus(null);
-      setFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function copySetupSql(): Promise<void> {
     await window.sessionSearch.copyRemoteSessionSetupSql();
   }
@@ -163,14 +149,14 @@ export function RemoteSessionsDialog({
       for (const [index, item] of candidates.entries()) {
         setFeedback({ kind: "running", message: l(`Uploading ${index + 1}/${candidates.length}...`, `正在上传 ${index + 1}/${candidates.length}...`) });
         try {
-          await window.sessionSearch.uploadRemoteSession(item.local!.sessionKey);
+          const result = await window.sessionSearch.uploadRemoteSession(item.local!.sessionKey);
+          onRemoteSessionUploaded(item.local!.sessionKey, result.remoteSession);
           succeeded += 1;
         } catch (error) {
           failedIds.add(item.id);
           failures.push(`${syncItemTitle(item)}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      await refresh();
       setSelectedIds(failedIds);
       setFeedback(failures.length > 0
         ? { kind: "error", message: l(`${succeeded} uploaded, ${failures.length} failed. ${failures.slice(0, 2).join(" · ")}`, `已上传 ${succeeded} 个，${failures.length} 个失败。${failures.slice(0, 2).join(" · ")}`) }
@@ -185,8 +171,8 @@ export function RemoteSessionsDialog({
     setUploading(true);
     setFeedback({ kind: "running", message: l("Uploading session…", "正在上传会话…") });
     try {
-      await window.sessionSearch.uploadRemoteSession(item.local.sessionKey, force);
-      await refresh();
+      const result = await window.sessionSearch.uploadRemoteSession(item.local.sessionKey, force);
+      onRemoteSessionUploaded(item.local.sessionKey, result.remoteSession);
       setFeedback({ kind: "success", message: l("Session uploaded.", "会话已上传。") });
     } catch (error) {
       setFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -284,7 +270,7 @@ export function RemoteSessionsDialog({
       const result = await window.sessionSearch.deleteRemoteSessions(deleteCandidates.flatMap((item) => item.remote ? [item.remote.id] : []));
       const removedIds = new Set([...result.deletedIds, ...result.missingIds]);
       setDeleteCandidates([]);
-      await refresh();
+      onRemoteSessionsDeleted([...removedIds]);
       const failedRemoteIds = new Set(result.failures.map((failure) => failure.id));
       setSelectedIds(new Set(deleteCandidates.flatMap((item) => item.remote && failedRemoteIds.has(item.remote.id) ? [item.id] : [])));
       if (result.failures.length > 0) {
@@ -355,7 +341,7 @@ export function RemoteSessionsDialog({
             <Trash2 size={14} />
             <span>{l(`Delete cloud copies (${selectedRemoteItems.length})`, `删除云端副本（${selectedRemoteItems.length}）`)}</span>
           </button>
-          <button type="button" className="remote-toolbar-icon" onClick={() => void refresh()} disabled={loading || uploading || deleting} title={l("Refresh remote sessions", "刷新远程会话")} aria-label={l("Refresh remote sessions", "刷新远程会话")}>
+          <button type="button" className="remote-toolbar-icon" onClick={() => void onRefresh()} disabled={loading || uploading || deleting} title={l("Refresh remote sessions", "刷新远程会话")} aria-label={l("Refresh remote sessions", "刷新远程会话")}>
             <RefreshCw size={15} />
           </button>
         </div>
@@ -373,11 +359,11 @@ export function RemoteSessionsDialog({
             showSqlActions={status.remediation === "sql"}
             onCopySql={copySetupSql}
             onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("sessions")}
-            onRefresh={refresh}
+            onRefresh={onRefresh}
           />
         ) : null}
 
-        {feedback ? <div className={`settings-feedback inline remote-session-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
+        {visibleFeedback ? <div className={`settings-feedback inline remote-session-feedback ${visibleFeedback.kind}`}>{visibleFeedback.message}</div> : null}
         <div className="remote-session-list">
           {loading ? <div className="remote-empty">{l("Loading remote sessions...", "正在加载远程会话...")}</div> : null}
           {!loading && status?.kind === "ready" && filtered.length === 0 ? <div className="remote-empty">{l("No syncable sessions found.", "没有找到可同步的会话。")}</div> : null}
@@ -596,31 +582,49 @@ function RemoteRestoreDialog({
             <X size={16} />
           </button>
         </div>
-        <p className="remote-restore-session-title" title={request.remote.title}>{request.remote.title}</p>
-        <div className="remote-restore-field">
-          <span>{l("Restore to", "恢复到")}</span>
-          <div className="remote-targets">
-            {RESTORE_TARGETS.map((item) => (
-              <button key={item} type="button" className={target === item ? "active" : ""} onClick={() => onTargetChange(item)} disabled={restoring}>
-                {migrationAgentLabel(item)}
-              </button>
-            ))}
+        <div className="remote-restore-session-summary">
+          <Cloud size={16} />
+          <div className="remote-restore-session-copy">
+            <span>{l("Cloud session", "云端会话")}</span>
+            <strong title={request.remote.title}>{request.remote.title}</strong>
           </div>
         </div>
-        <div className="remote-restore-field destination">
-          <span>{l("Destination", "目标位置")}</span>
-          {request.destination === "source" ? (
-            <strong>{request.remote.sourceEnvironmentLabel}</strong>
-          ) : (
-            <button type="button" className="remote-project-picker" onClick={onChooseProject} disabled={restoring}>
-              <FolderOpen size={14} />
-              <span>{projectPath || l("Choose project", "选择项目")}</span>
-            </button>
-          )}
+        <div className="remote-restore-fields">
+          <div className="remote-restore-field">
+            <span>{l("Target Agent", "目标 Agent")}</span>
+            <div className="remote-restore-targets" role="group" aria-label={l("Target Agent", "目标 Agent")}>
+              {RESTORE_TARGETS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={target === item ? "active" : ""}
+                  aria-pressed={target === item}
+                  onClick={() => onTargetChange(item)}
+                  disabled={restoring}
+                >
+                  {migrationAgentLabel(item)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="remote-restore-field">
+            <span>{l("Destination", "目标位置")}</span>
+            {request.destination === "source" ? (
+              <div className="remote-restore-destination" title={request.remote.sourceEnvironmentLabel}>
+                <Server size={15} />
+                <span>{request.remote.sourceEnvironmentLabel}</span>
+              </div>
+            ) : (
+              <button type="button" className="remote-restore-destination remote-project-picker" onClick={onChooseProject} disabled={restoring}>
+                <FolderOpen size={15} />
+                <span>{projectPath || l("Choose project", "选择项目")}</span>
+              </button>
+            )}
+          </div>
         </div>
         <div className="dialog-actions">
           <button type="button" onClick={onCancel} disabled={restoring}>{l("Cancel", "取消")}</button>
-          <button type="button" className="primary" onClick={onConfirm} disabled={restoring}>
+          <button type="button" className="primary-action" onClick={onConfirm} disabled={restoring}>
             {restoring ? l("Restoring...", "正在恢复...") : l("Restore", "恢复")}
           </button>
         </div>
@@ -670,4 +674,3 @@ function DeleteRemoteSessionsDialog({
     </div>
   );
 }
-

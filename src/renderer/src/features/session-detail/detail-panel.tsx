@@ -627,7 +627,7 @@ function MessageBlock({
   }, [message.content, truncated, expanded, language]);
   const highlightTerms = useMemo(() => (highlight ? searchHighlightTerms(query) : []), [highlight, query]);
 
-  const useMarkdown = message.role === "assistant" && !highlight && (!truncated || expanded);
+  const useMarkdown = message.role === "assistant" && !highlight;
 
   return (
     <div className={`message ${message.role} ${highlight ? "match-context" : ""} ${target ? "match-target" : ""}`} data-message-index={message.index} data-timeline-key={timelineKey}>

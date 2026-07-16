@@ -90,6 +90,19 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).not.toContain('`${messages.length} messages`');
   });
 
+  it("renders truncated assistant replies as Markdown before they are expanded", () => {
+    const messageBlock = detailPanelSource.slice(
+      detailPanelSource.indexOf("function MessageBlock"),
+      detailPanelSource.indexOf("function traceStatusSymbol"),
+    );
+
+    expect(messageBlock).toContain('const useMarkdown = message.role === "assistant" && !highlight;');
+    expect(messageBlock).toContain("<Markdown text={content} />");
+    expect(messageBlock).not.toContain(
+      'const useMarkdown = message.role === "assistant" && !highlight && (!truncated || expanded);',
+    );
+  });
+
   it("filters the loaded full conversation by role while keeping pagination available", () => {
     const showOlderIndex = detailPanelSource.indexOf("olderMessageCount > 0");
     const visibleItemsIndex = detailPanelSource.indexOf("visibleTimelineItems.map");
@@ -268,11 +281,13 @@ describe("detail panel actions", () => {
     expect(remoteCommand).not.toContain("fallbackMigrationResumeDisplayCommand(target");
   });
 
-  it("loads the independent session sync list and exposes bulk cloud actions", () => {
+  it("loads the independent session sync list into the app cache and exposes bulk cloud actions", () => {
     expect(appSource).not.toContain("uploadVisibleRemoteSessions");
     expect(appSource).not.toContain("CloudUpload");
     expect(remoteSessionsDialogSource).not.toContain("onUploadVisible");
-    expect(remoteSessionsDialogSource).toContain("listSessionSyncItems");
+    expect(appSource).toContain("listSessionSyncItems");
+    expect(appSource).toContain("cache={remoteSessionsCache}");
+    expect(remoteSessionsDialogSource).not.toContain("listSessionSyncItems");
     expect(remoteSessionsDialogSource).toContain("Upload to cloud");
     expect(remoteSessionsDialogSource).toContain("selectedIds");
     expect(remoteSessionsDialogSource).toContain("Select visible");

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const searchBoxSource = readFileSync(new URL("./features/search/search-box.tsx", import.meta.url), "utf8");
+const remoteSessionsSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 
 function sourceBlock(startNeedle: string, endNeedles: string[]): string {
   const start = appSource.indexOf(startNeedle);
@@ -78,5 +79,25 @@ describe("app loading performance", () => {
       loadSkillsBlock.indexOf("window.sessionSearch.listSkills()"),
     );
     expect(skillsOpenEffect).toContain("loadSkills({ refreshUsage: true, silent: true })");
+  });
+
+  it("preloads and caches remote sessions instead of reloading them whenever the dialog opens", () => {
+    const cacheLoader = sourceBlock("const loadRemoteSessionsCache = useCallback", [
+      "const cacheRemoteSessionUpload = useCallback",
+    ]);
+    const startupEffect = sourceBlock("useEffect(() => {\n    void loadRemoteSessionsCache();", [
+      "useEffect(() => {\n    if (skillsOpen)",
+    ]);
+
+    expect(cacheLoader).toContain("window.sessionSearch.getRemoteSessionStatus()");
+    expect(cacheLoader).toContain("window.sessionSearch.listSessionSyncItems()");
+    expect(cacheLoader).toContain("if (remoteSessionsLoadPromiseRef.current) return remoteSessionsLoadPromiseRef.current");
+    expect(startupEffect).toContain("loadRemoteSessionsCache()");
+    expect(appSource).toContain("cache={remoteSessionsCache}");
+    expect(appSource).toContain("onRefresh={loadRemoteSessionsCache}");
+    expect(remoteSessionsSource).not.toContain("window.sessionSearch.getRemoteSessionStatus()");
+    expect(remoteSessionsSource).not.toContain("window.sessionSearch.listSessionSyncItems()");
+    expect(remoteSessionsSource).toContain("onRemoteSessionUploaded(item.local.sessionKey, result.remoteSession)");
+    expect(remoteSessionsSource).toContain("onRemoteSessionsDeleted([...removedIds])");
   });
 });
