@@ -17,6 +17,13 @@ import {
   normalizeTerminal,
   terminalOptionsFor,
 } from "./terminal-options";
+import {
+  normalizeTerminalTitle,
+  windowsTerminalTitleArgs,
+  withCmdTerminalTitle,
+  withPosixTerminalTitle,
+  withPowerShellTerminalTitle,
+} from "./terminal-title";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
@@ -506,24 +513,31 @@ export function buildWindowsLaunchPlan(
   cmdCommand: string,
   cwd: string,
   powershellCommand?: string,
+  title?: string,
 ): WindowsLaunch[] {
+  const titleArgs = title ? windowsTerminalTitleArgs(title) : [];
+  const titledCmdCommand = title ? withCmdTerminalTitle(cmdCommand, title) : cmdCommand;
+  const basePowerShellCommand = powershellCommand ?? cmdCommand;
+  const titledPowerShellCommand = title
+    ? withPowerShellTerminalTitle(basePowerShellCommand, title)
+    : basePowerShellCommand;
   const wt = (): WindowsLaunch => {
-    const inner = ["cmd.exe", "/d", "/k", cmdCommand];
-    return { file: "wt.exe", args: cwd ? ["-d", cwd, ...inner] : inner };
+    const inner = ["cmd.exe", "/d", "/k", titledCmdCommand];
+    return { file: "wt.exe", args: cwd ? ["-d", cwd, ...titleArgs, ...inner] : [...titleArgs, ...inner] };
   };
   const pwsh = (): WindowsLaunch => ({
     file: "pwsh.exe",
-    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", powershellCommand ?? cmdCommand],
+    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", titledPowerShellCommand],
     cwd: cwd || undefined,
   });
   const powershell = (): WindowsLaunch => ({
     file: "powershell.exe",
-    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", powershellCommand ?? cmdCommand],
+    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", titledPowerShellCommand],
     cwd: cwd || undefined,
   });
-  const cmd = (): WindowsLaunch => ({ file: "cmd.exe", args: ["/d", "/k", cmdCommand], cwd: cwd || undefined });
+  const cmd = (): WindowsLaunch => ({ file: "cmd.exe", args: ["/d", "/k", titledCmdCommand], cwd: cwd || undefined });
   const wezterm = (): WindowsLaunch => {
-    const inner = ["cmd.exe", "/d", "/k", cmdCommand];
+    const inner = ["cmd.exe", "/d", "/k", titledCmdCommand];
     return { file: "wezterm.exe", args: cwd ? ["start", "--cwd", cwd, "--", ...inner] : ["start", "--", ...inner] };
   };
 
@@ -539,24 +553,30 @@ function buildWindowsShellSpecificLaunchPlan(
   cmdCommand: string,
   powershellCommand: string,
   cwd: string,
+  title?: string,
 ): WindowsLaunch[] {
+  const titleArgs = title ? windowsTerminalTitleArgs(title) : [];
+  const titledCmdCommand = title ? withCmdTerminalTitle(cmdCommand, title) : cmdCommand;
+  const titledPowerShellCommand = title
+    ? withPowerShellTerminalTitle(powershellCommand, title)
+    : powershellCommand;
   const wt = (): WindowsLaunch => {
-    const inner = ["cmd.exe", "/d", "/k", cmdCommand];
-    return { file: "wt.exe", args: cwd ? ["-d", cwd, ...inner] : inner };
+    const inner = ["cmd.exe", "/d", "/k", titledCmdCommand];
+    return { file: "wt.exe", args: cwd ? ["-d", cwd, ...titleArgs, ...inner] : [...titleArgs, ...inner] };
   };
   const pwsh = (): WindowsLaunch => ({
     file: "pwsh.exe",
-    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", powershellCommand],
+    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", titledPowerShellCommand],
     cwd: cwd || undefined,
   });
   const powershell = (): WindowsLaunch => ({
     file: "powershell.exe",
-    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", powershellCommand],
+    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", titledPowerShellCommand],
     cwd: cwd || undefined,
   });
-  const cmd = (): WindowsLaunch => ({ file: "cmd.exe", args: ["/d", "/k", cmdCommand], cwd: cwd || undefined });
+  const cmd = (): WindowsLaunch => ({ file: "cmd.exe", args: ["/d", "/k", titledCmdCommand], cwd: cwd || undefined });
   const wezterm = (): WindowsLaunch => {
-    const inner = ["cmd.exe", "/d", "/k", cmdCommand];
+    const inner = ["cmd.exe", "/d", "/k", titledCmdCommand];
     return { file: "wezterm.exe", args: cwd ? ["start", "--cwd", cwd, "--", ...inner] : ["start", "--", ...inner] };
   };
 
@@ -594,8 +614,9 @@ export function buildWindowsResumeLaunchPlan(
       });
   const terminal = normalizeTerminal(opts.terminal ?? settings.defaultTerminal, "win32");
   const cwd = sshArgs ? "" : existingDirectory(session.projectPath);
-  if (!sshArgs) return buildWindowsLaunchPlan(terminal, cmdCommand, cwd, powershellCommand);
-  return buildWindowsShellSpecificLaunchPlan(terminal, cmdCommand, powershellCommand, cwd);
+  const title = session.displayTitle || undefined;
+  if (!sshArgs) return buildWindowsLaunchPlan(terminal, cmdCommand, cwd, powershellCommand, title);
+  return buildWindowsShellSpecificLaunchPlan(terminal, cmdCommand, powershellCommand, cwd, title);
 }
 
 async function openResumeInWindowsTerminal(
@@ -784,33 +805,22 @@ export function buildGhosttyOpenArgs(
   settings: AppSettings,
   opts: ResumeOpenOptions = {},
 ): string[] {
-  return buildGhosttyOpenArgsForCommand(getResumeCommand(session, settings, { ...opts, withCwd: true }));
+  const command = getResumeCommand(session, settings, { ...opts, withCwd: true });
+  const titledCommand = session.displayTitle ? withPosixTerminalTitle(command, session.displayTitle) : command;
+  return buildGhosttyOpenArgsForCommand(titledCommand);
 }
 
-export async function openResumeInTerminal(
-  session: SessionSearchResult,
-  settings: AppSettings,
-  opts: ResumeOpenOptions = {},
-): Promise<void> {
-  const sshArgs = resolveSshArgs(opts);
-  const command = getResumeCommand(session, settings, { ...opts, withCwd: true });
-  if (process.platform === "win32") {
-    await openResumeInWindowsTerminal(session, settings, opts);
-    return;
-  }
-  if (process.platform !== "darwin") {
-    // Linux / other: best-effort POSIX shell.
-    await runProcess("sh", ["-lc", command]);
-    return;
-  }
+export function buildTerminalResumeScript(command: string, title: string): string {
+  return `tell application "Terminal"
+  activate
+  set terminalTab to do script "${escapeAppleScript(command)}"
+  set custom title of terminalTab to "${escapeAppleScript(normalizeTerminalTitle(title))}"
+  set title displays custom title of terminalTab to true
+end tell`;
+}
 
-  if (settings.defaultTerminal === "iTerm") {
-    const appName = await resolveMacApplicationName(ITERM_APPLICATION_NAMES);
-    if (!appName) {
-      throw new Error("iTerm is not installed or is not registered with macOS. Install iTerm2 or use Resume in Terminal.");
-    }
-
-    await runAppleScript(`set wasRunning to application "${escapeAppleScript(appName)}" is running
+export function buildItermResumeScript(appName: string, command: string, title: string): string {
+  return `set wasRunning to application "${escapeAppleScript(appName)}" is running
 tell application "${escapeAppleScript(appName)}"
   activate
   if wasRunning then
@@ -826,8 +836,37 @@ tell application "${escapeAppleScript(appName)}"
   end if
   tell current session of current window
     write text "${escapeAppleScript(command)}"
+    set name to "${escapeAppleScript(normalizeTerminalTitle(title))}"
   end tell
-end tell`);
+end tell`;
+}
+
+export async function openResumeInTerminal(
+  session: SessionSearchResult,
+  settings: AppSettings,
+  opts: ResumeOpenOptions = {},
+): Promise<void> {
+  const sshArgs = resolveSshArgs(opts);
+  const command = getResumeCommand(session, settings, { ...opts, withCwd: true });
+  const title = session.displayTitle || session.originalTitle || session.rawId;
+  const titledCommand = withPosixTerminalTitle(command, title);
+  if (process.platform === "win32") {
+    await openResumeInWindowsTerminal(session, settings, opts);
+    return;
+  }
+  if (process.platform !== "darwin") {
+    // Linux / other: best-effort POSIX shell.
+    await runProcess("sh", ["-lc", titledCommand]);
+    return;
+  }
+
+  if (settings.defaultTerminal === "iTerm") {
+    const appName = await resolveMacApplicationName(ITERM_APPLICATION_NAMES);
+    if (!appName) {
+      throw new Error("iTerm is not installed or is not registered with macOS. Install iTerm2 or use Resume in Terminal.");
+    }
+
+    await runAppleScript(buildItermResumeScript(appName, command, title));
     return;
   }
 
@@ -843,7 +882,10 @@ end tell`);
       "--",
       process.env.SHELL || "/bin/zsh",
       "-ic",
-      getResumeCommand(session, settings, { ...opts, withCwd: Boolean(sshArgs) }),
+      withPosixTerminalTitle(
+        getResumeCommand(session, settings, { ...opts, withCwd: Boolean(sshArgs) }),
+        title,
+      ),
     );
     await runProcess("/usr/bin/open", args);
     return;
@@ -851,17 +893,14 @@ end tell`);
 
   if (settings.defaultTerminal === "Warp") {
     if (sshArgs) {
-      await runWarpCommand(command);
+      await runWarpCommand(titledCommand);
     } else {
       await runProcess("/usr/bin/open", session.projectPath ? ["-a", "Warp", session.projectPath] : ["-a", "Warp"]);
     }
     return;
   }
 
-  await runAppleScript(`tell application "Terminal"
-  activate
-  do script "${escapeAppleScript(command)}"
-end tell`);
+  await runAppleScript(buildTerminalResumeScript(command, title));
 }
 
 export async function openResumeInSpecificTerminal(

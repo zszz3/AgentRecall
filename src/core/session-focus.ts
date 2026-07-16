@@ -1,8 +1,13 @@
 import { execFile } from "node:child_process";
 import { sourceFamily } from "./platform";
+import { normalizeTerminalTitle } from "./terminal-title";
 import type { LiveSession, SessionSearchResult } from "./types";
 
-type CommandRunner = (command: string, args: string[]) => Promise<string>;
+interface CommandRunOptions {
+  env?: NodeJS.ProcessEnv;
+}
+
+type CommandRunner = (command: string, args: string[], options?: CommandRunOptions) => Promise<string>;
 
 export interface FocusLiveSessionOptions {
   platform?: NodeJS.Platform;
@@ -17,6 +22,11 @@ interface ProcessRecord {
 
 interface TerminalTarget {
   appName: string;
+}
+
+interface WezTermTarget {
+  paneId: string;
+  unixSocket: string;
 }
 
 export function liveSessionPidForSession(session: SessionSearchResult, liveSessions: LiveSession[]): number | null {
@@ -50,6 +60,42 @@ export async function focusLiveSessionTerminal(pid: number, options: FocusLiveSe
   }
 
   await runner("/usr/bin/osascript", ["-e", `tell application "${escapeAppleScript(target.appName)}" to activate`]);
+}
+
+export async function setLiveSessionTerminalTitle(
+  pid: number,
+  title: string,
+  options: FocusLiveSessionOptions = {},
+): Promise<boolean> {
+  const platform = options.platform ?? process.platform;
+  const runner = options.runner ?? runProcess;
+  if (platform !== "darwin") return false;
+
+  const tty = await ttyForPid(pid, runner);
+  const target = await findTerminalTarget(pid, runner);
+  if (!tty || !target) return false;
+
+  const normalizedTitle = normalizeTerminalTitle(title);
+  if (target.appName === "Terminal" || target.appName === "iTerm") {
+    const output = await runner("/usr/bin/osascript", [
+      "-e",
+      buildTtyTitleScript(target.appName, tty, normalizedTitle),
+    ]);
+    return output.trim() === "true";
+  }
+
+  if (target.appName === "WezTerm") {
+    const wezTermTarget = await wezTermTargetForPid(pid, runner);
+    if (!wezTermTarget) return false;
+    await runner(
+      "wezterm",
+      ["cli", "set-tab-title", "--pane-id", wezTermTarget.paneId, normalizedTitle],
+      { env: { ...process.env, WEZTERM_UNIX_SOCKET: wezTermTarget.unixSocket } },
+    );
+    return true;
+  }
+
+  return false;
 }
 
 async function ttyForPid(pid: number, runner: CommandRunner): Promise<string | null> {
@@ -159,6 +205,52 @@ end tell
 return "false"`;
 }
 
+function buildTtyTitleScript(appName: "Terminal" | "iTerm", tty: string, title: string): string {
+  const escapedTty = escapeAppleScript(tty);
+  const escapedTitle = escapeAppleScript(title);
+  if (appName === "Terminal") {
+    return `set targetTty to "${escapedTty}"
+tell application "Terminal"
+  repeat with terminalWindow in windows
+    repeat with terminalTab in tabs of terminalWindow
+      if tty of terminalTab is targetTty then
+        set custom title of terminalTab to "${escapedTitle}"
+        set title displays custom title of terminalTab to true
+        return "true"
+      end if
+    end repeat
+  end repeat
+end tell
+return "false"`;
+  }
+
+  return `set targetTty to "${escapedTty}"
+tell application "iTerm"
+  repeat with terminalWindow in windows
+    repeat with terminalTab in tabs of terminalWindow
+      repeat with terminalSession in sessions of terminalTab
+        if tty of terminalSession is targetTty then
+          set name of terminalSession to "${escapedTitle}"
+          return "true"
+        end if
+      end repeat
+    end repeat
+  end repeat
+end tell
+return "false"`;
+}
+
+async function wezTermTargetForPid(pid: number, runner: CommandRunner): Promise<WezTermTarget | null> {
+  try {
+    const output = await runner("/bin/ps", ["eww", "-p", String(pid), "-o", "command="]);
+    const paneId = output.match(/(?:^|\s)WEZTERM_PANE=(\d+)(?=\s|$)/)?.[1];
+    const unixSocket = output.match(/(?:^|\s)WEZTERM_UNIX_SOCKET=([^\s]+)(?=\s|$)/)?.[1];
+    return paneId && unixSocket ? { paneId, unixSocket } : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizedExecutableName(token: string | undefined): string {
   if (!token) return "";
   return token.replace(/^['"]|['"]$/g, "").split(/[\\/]/).pop()?.toLowerCase() || "";
@@ -200,9 +292,9 @@ function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function runProcess(command: string, args: string[]): Promise<string> {
+function runProcess(command: string, args: string[], options: CommandRunOptions = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, (error, stdout, stderr) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
       if (!error) return resolve(stdout);
       reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
     });

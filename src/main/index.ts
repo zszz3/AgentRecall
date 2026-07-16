@@ -50,7 +50,8 @@ import {
   revealInFileManager,
 } from "../core/platform";
 import { loadUsageQuotaSnapshot } from "../core/quota";
-import { focusLiveSessionTerminal } from "../core/session-focus";
+import { focusLiveSessionTerminal, setLiveSessionTerminalTitle } from "../core/session-focus";
+import { setSessionCustomTitleAndSyncTerminal } from "../core/session-title-sync";
 import { createCachedLiveSessionSnapshotLoader } from "../core/session-activity";
 import { summarizeSession, type SummaryEndpoint } from "../core/session-summarizer";
 import {
@@ -2219,7 +2220,15 @@ function registerIpc(): void {
   ipcMain.handle("environment:diagnose", (_event, environmentId: string) =>
     diagnoseRemoteEnvironment(requireSshEnvironment(environmentId)),
   );
-  ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) => store.setCustomTitle(sessionKey, title));
+  ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) =>
+    setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
+      getSession: (key) => store.getSession(key),
+      setCustomTitle: (key, customTitle) => store.setCustomTitle(key, customTitle),
+      loadLiveSessions: () => loadCachedLiveSessionSnapshot({ includeTrae: getSettings().includeTrae }),
+      setLiveTerminalTitle: (pid, displayTitle) => setLiveSessionTerminalTitle(pid, displayTitle),
+      onSyncError: (error) => console.warn("[terminal-title] Could not synchronize live terminal title.", error),
+    }),
+  );
   ipcMain.handle("tag:add", (_event, sessionKey: string, tagName: string) => store.addTag(sessionKey, tagName));
   ipcMain.handle("tag:remove", (_event, sessionKey: string, tagName: string) => store.removeTag(sessionKey, tagName));
   ipcMain.handle("tag:delete", (_event, tagName: string) => store.deleteTag(tagName));

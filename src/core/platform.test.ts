@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { mergeApiConfigWithProfileDefaults, mergeClaudeApiConfigWithProfileDefaults } from "./api-config";
 import {
   buildGhosttyOpenArgs,
+  buildItermResumeScript,
   buildRevealCommand,
+  buildTerminalResumeScript,
   buildWindowsResumeLaunchPlan,
   buildWindowsLaunchPlan,
   defaultApiConfig,
@@ -362,6 +364,35 @@ describe("Ghostty resume launch args", () => {
       expect(args.some((arg) => arg.includes("--initial-command"))).toBe(false);
     });
   });
+
+  it("adds a POSIX title prefix without changing the resume id", () => {
+    const session = {
+      source: "codex-cli",
+      rawId: "session-1",
+      projectPath: "/repo",
+      displayTitle: "登录修复",
+    } as SessionSearchResult;
+
+    withShell("/bin/zsh", () => {
+      const args = buildGhosttyOpenArgs(session, defaultSettings);
+      expect(args.at(-1)).toContain("printf '\\033]0;%s\\007' '登录修复'");
+      expect(args.at(-1)).toContain("codex resume session-1");
+    });
+  });
+});
+
+describe("macOS resume title scripts", () => {
+  it("sets a custom Terminal tab title", () => {
+    expect(buildTerminalResumeScript("codex resume abc", "登录修复")).toContain(
+      'set custom title of terminalTab to "登录修复"',
+    );
+  });
+
+  it("sets the iTerm session name after writing the resume command", () => {
+    const script = buildItermResumeScript("iTerm", "codex resume abc", "登录修复");
+    expect(script).toContain('write text "codex resume abc"');
+    expect(script).toContain('set name to "登录修复"');
+  });
 });
 
 describe("terminal options per platform", () => {
@@ -578,6 +609,39 @@ describe("buildWindowsLaunchPlan", () => {
 });
 
 describe("resume terminal launch plans", () => {
+  it("adds a stable title to the Windows Terminal resume plan", () => {
+    const session = {
+      source: "codex-cli",
+      rawId: "codex-1",
+      projectPath: process.cwd(),
+      displayTitle: "修复登录",
+    } as SessionSearchResult;
+
+    const plan = buildWindowsResumeLaunchPlan(session, defaultSettings, {
+      terminal: "WindowsTerminal",
+      platform: "win32",
+    });
+
+    expect(plan[0]).toMatchObject({ file: "wt.exe" });
+    expect(plan[0].args).toEqual(
+      expect.arrayContaining(["--title", "修复登录", "--suppressApplicationTitle"]),
+    );
+    expect(plan.find((item) => item.file === "pwsh.exe")?.args.at(-1)).toContain(
+      "$Host.UI.RawUI.WindowTitle = '修复登录'",
+    );
+  });
+
+  it("keeps copied resume commands title-free", () => {
+    const session = {
+      source: "codex-cli",
+      rawId: "codex-1",
+      projectPath: "/repo",
+      displayTitle: "登录修复",
+    } as SessionSearchResult;
+
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin" })).not.toContain("\\033]0;");
+  });
+
   it("keeps local Windows resume launches rooted in the local project path", () => {
     const session = {
       source: "codex-cli",
