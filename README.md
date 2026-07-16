@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/logo.png" alt="AgentRecall Logo" width="860">
+</p>
+
 <h1 align="center">AgentRecall</h1>
 
 <p align="center">本地桌面工具 · 搜索、快速启动、分析多种 AI Coding Agent 会话</p>
