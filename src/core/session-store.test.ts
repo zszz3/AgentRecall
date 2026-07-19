@@ -1354,6 +1354,104 @@ describe("SessionStore", () => {
     });
   });
 
+  it("disambiguates duplicate Codex task titles by date and time", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-18/task-a", new Date(2026, 6, 18, 9, 0).getTime()],
+      ["/Users/me/Documents/Codex/2026-07-19/task-b", new Date(2026, 6, 19, 10, 32).getTime()],
+      ["/Users/me/Documents/Codex/2026-07-19/task-c", new Date(2026, 6, 19, 16, 48).getTime()],
+    ] as const;
+    cases.forEach(([projectPath, timestamp], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:duplicate-${index}`,
+          rawId: `duplicate-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "调研 OpenCode",
+          timestamp,
+        }),
+        messages,
+      );
+    });
+
+    expect(cases.map(([projectPath]) => projectByPath(store, projectPath).labelSuffix)).toEqual([
+      "07-18",
+      "07-19 10:32",
+      "07-19 16:48",
+    ]);
+  });
+
+  it("uses the task directory basename when duplicate task labels still collide", () => {
+    const store = createInMemoryStore();
+    const timestamp = new Date(2026, 6, 19, 10, 32).getTime();
+    for (const slug of ["task-a", "task-b"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:${slug}`,
+          rawId: slug,
+          source: "codex-app",
+          projectPath: `/Users/me/Documents/Codex/2026-07-19/${slug}`,
+          originalTitle: "同名任务",
+          timestamp,
+        }),
+        messages,
+      );
+    }
+
+    expect(projectByPath(store, "/Users/me/Documents/Codex/2026-07-19/task-a").labelSuffix).toBe(
+      "07-19 10:32 · task-a",
+    );
+    expect(projectByPath(store, "/Users/me/Documents/Codex/2026-07-19/task-b").labelSuffix).toBe(
+      "07-19 10:32 · task-b",
+    );
+  });
+
+  it("keeps environment suffixes ahead of task-title collision handling", () => {
+    const store = createInMemoryStore();
+    store.upsertEnvironment({
+      id: "ssh-devbox",
+      kind: "ssh",
+      label: "devbox",
+      hostAlias: "devbox",
+      host: "devbox.example.com",
+      user: null,
+      port: null,
+      authMode: "none",
+      identityFile: null,
+      enabled: true,
+    });
+    const projectPath = "/Users/me/Documents/Codex/2026-07-19/shared-task";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:local-task",
+        rawId: "local-task",
+        source: "codex-app",
+        projectPath,
+        originalTitle: "共享任务",
+      }),
+      messages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "ssh:ssh-devbox:codex-app:remote-task",
+        rawId: "remote-task",
+        source: "codex-app",
+        projectPath,
+        originalTitle: "共享任务",
+        environmentId: "ssh-devbox",
+        environmentKind: "ssh",
+        environmentLabel: "devbox",
+      }),
+      messages,
+    );
+
+    expect(store.listProjects().map(({ environmentId, labelSuffix }) => ({ environmentId, labelSuffix }))).toEqual([
+      { environmentId: "local", labelSuffix: "Local" },
+      { environmentId: "ssh-devbox", labelSuffix: "devbox" },
+    ]);
+  });
+
   it("lists project creation and latest activity timestamps", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(

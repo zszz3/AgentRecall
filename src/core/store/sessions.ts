@@ -823,36 +823,38 @@ export class SessionsStore {
       environmentsByPath.set(summary.path, environmentIds);
     }
 
-    return summaries
-      .map((summary) => {
-        const repeatedAcrossEnvironments = (environmentsByPath.get(summary.path)?.size ?? 0) > 1;
-        return {
+    return disambiguateTaskLabels(
+      summaries
+        .map((summary) => {
+          const repeatedAcrossEnvironments = (environmentsByPath.get(summary.path)?.size ?? 0) > 1;
+          return {
+            ...summary,
+            label:
+              summary.labelKind === "path" &&
+              !repeatedAcrossEnvironments &&
+              (basenameCounts.get(projectBasename(summary.path)) || 0) > 1
+                ? projectParentLabel(summary.path)
+                : summary.label,
+            labelSuffix: repeatedAcrossEnvironments
+              ? appendLabelSuffix(summary.labelSuffix, summary.environmentLabel)
+              : summary.labelSuffix,
+          };
+        })
+        .map((summary) => ({
           ...summary,
-          label:
-            summary.labelKind === "path" &&
-            !repeatedAcrossEnvironments &&
-            (basenameCounts.get(projectBasename(summary.path)) || 0) > 1
-              ? projectParentLabel(summary.path)
-              : summary.label,
-          labelSuffix: repeatedAcrossEnvironments
-            ? appendLabelSuffix(summary.labelSuffix, summary.environmentLabel)
-            : summary.labelSuffix,
-        };
-      })
-      .map((summary) => ({
-        ...summary,
-        labelSuffix:
-          summary.labelKind === "codex-task-untitled"
-            ? appendLabelSuffix(summary.labelSuffix, formatMonthDayTime(summary.rootCreatedAt))
-            : summary.labelSuffix,
-      }))
+          labelSuffix:
+            summary.labelKind === "codex-task-untitled"
+              ? appendLabelSuffix(summary.labelSuffix, formatMonthDayTime(summary.rootCreatedAt))
+              : summary.labelSuffix,
+        })),
+    )
+      .map(publicProjectSummary)
       .sort(
         (a, b) =>
           environmentSortValue(a.environmentId) - environmentSortValue(b.environmentId) ||
           b.lastActivityAt - a.lastActivityAt ||
           a.label.localeCompare(b.label),
-      )
-      .map(publicProjectSummary);
+      );
   }
 
   getSession(sessionKey: string): SessionSearchResult | null {
@@ -1894,6 +1896,74 @@ function rootProjectTitle(row: ProjectAggregateRow): string | null {
   const originalTitle = row.root_original_title?.trim();
   if (originalTitle && originalTitle !== "Untitled Session") return originalTitle;
   return row.root_first_question?.trim() || null;
+}
+
+function normalizedProjectTitle(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function formatMonthDay(taskDate: string): string {
+  return taskDate.slice(5);
+}
+
+function formatClock(timestamp: number): string | null {
+  if (!timestamp || !Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function disambiguateTaskLabels(summaries: ProjectSummaryDraft[]): ProjectSummaryDraft[] {
+  const titleGroups = new Map<string, ProjectSummaryDraft[]>();
+  for (const summary of summaries) {
+    if (summary.labelKind !== "codex-task-title") continue;
+    const key = `${summary.environmentId}\0${normalizedProjectTitle(summary.label)}`;
+    const group = titleGroups.get(key) ?? [];
+    group.push(summary);
+    titleGroups.set(key, group);
+  }
+
+  const withTimeSuffixes = summaries.map((summary) => ({ ...summary }));
+  const byIdentity = new Map(
+    withTimeSuffixes.map((summary) => [`${summary.environmentId}\0${summary.path}`, summary]),
+  );
+  for (const group of titleGroups.values()) {
+    if (group.length < 2) continue;
+    const dateCounts = new Map<string, number>();
+    for (const summary of group) {
+      const date = summary.taskWorkspaceDate || "";
+      dateCounts.set(date, (dateCounts.get(date) || 0) + 1);
+    }
+    for (const summary of group) {
+      const target = byIdentity.get(`${summary.environmentId}\0${summary.path}`)!;
+      const date = summary.taskWorkspaceDate;
+      const clock = formatClock(summary.rootCreatedAt);
+      const suffix = date
+        ? (dateCounts.get(date) || 0) > 1 && clock
+          ? `${formatMonthDay(date)} ${clock}`
+          : formatMonthDay(date)
+        : projectBasename(summary.path);
+      target.labelSuffix = appendLabelSuffix(target.labelSuffix, suffix);
+    }
+  }
+
+  const finalGroups = new Map<string, ProjectSummaryDraft[]>();
+  for (const summary of withTimeSuffixes) {
+    if (!summary.labelKind.startsWith("codex-task")) continue;
+    const rendered = `${normalizedProjectTitle(summary.label)}\0${summary.labelSuffix || ""}`;
+    const key = `${summary.environmentId}\0${rendered}`;
+    const group = finalGroups.get(key) ?? [];
+    group.push(summary);
+    finalGroups.set(key, group);
+  }
+  for (const group of finalGroups.values()) {
+    if (group.length < 2) continue;
+    for (const summary of group) {
+      summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, projectBasename(summary.path));
+    }
+  }
+  return withTimeSuffixes;
 }
 
 function formatMonthDayTime(timestamp: number | null): string | null {
