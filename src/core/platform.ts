@@ -86,6 +86,7 @@ export interface AppSettings {
   includeCursorAgent: boolean;
   includeTrae: boolean;
   includeQoder: boolean;
+  rulesSyncEnabled: boolean;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   hideSubagentSessions: boolean;
@@ -143,6 +144,7 @@ export const defaultSettings: AppSettings = {
   includeCursorAgent: false,
   includeTrae: false,
   includeQoder: false,
+  rulesSyncEnabled: false,
   hideCodexQuota: false,
   hideClaudeQuota: false,
   hideSubagentSessions: true,
