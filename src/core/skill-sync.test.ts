@@ -91,6 +91,9 @@ describe("skill sync", () => {
     expect(sql).toContain(`grant select, insert, update, delete on table public.${AGENT_RECALL_SKILLS_TABLE} to anon`);
     expect(sql).toContain("grant select on table storage.buckets to anon");
     expect(sql).not.toContain("service_role");
+    expect(sql).toContain("agent in ('codex', 'claude', 'qoder')");
+    expect(sql).toContain(`drop constraint if exists ${AGENT_RECALL_SKILLS_TABLE}_agent_check`);
+    expect(sql).toContain(`add constraint ${AGENT_RECALL_SKILLS_TABLE}_agent_check`);
   });
 
   it("uses portable scope and relative path so same-name Skills do not collide", () => {
