@@ -80,6 +80,7 @@ import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerProvidersIpc } from "./ipc/providers";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
+import { registerRulesIpc, type RulesIpcService } from "./ipc/rules";
 import { registerSkillsIpc } from "./ipc/skills";
 import {
   AppUpdateService,
@@ -91,6 +92,7 @@ import {
   RemoteSessionService,
   type SessionSyncHookSetup,
 } from "./services/remote-session-service";
+import { buildRulesSyncSetupSql, ruleIdentity, scanLocalRules, SupabaseRulesSyncClient } from "../core/rules-sync";
 import { SkillService, type SkillUsageHookSetup } from "./services/skill-service";
 import type {
   EnvironmentUpsertInput,
@@ -275,6 +277,56 @@ const remoteSessionService = new RemoteSessionService({
 
 function visibleSearchOptions(options: SearchOptions = {}): SearchOptions {
   return { ...options, excludeSubagents: getSettings().hideSubagentSessions };
+}
+
+function createRulesSyncService(): RulesIpcService {
+  const projectDirs = () => store.listProjects(visibleProjectOptions()).map((p) => p.path);
+  const createClient = () => {
+    const settings = getSettings();
+    return new SupabaseRulesSyncClient({ url: settings.skillSyncSupabaseUrl, anonKey: settings.skillSyncSupabaseAnonKey });
+  };
+  return {
+    async getSyncSnapshot() {
+      const settings = getSettings();
+      const localRules = scanLocalRules({ projectDirs: projectDirs() });
+      if (!settings.rulesSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
+        return { status: { kind: "unconfigured" as const, setupSql: buildRulesSyncSetupSql() }, localRules, remoteRules: [], scannedAt: Date.now() };
+      }
+      const client = createClient();
+      const status = await client.checkStatus();
+      const remoteRules = status.kind === "ready" ? await client.listRemoteRules() : [];
+      return { status, localRules, remoteRules, scannedAt: Date.now() };
+    },
+    async upload(identity) {
+      const localRules = scanLocalRules({ projectDirs: projectDirs() });
+      const rule = localRules.find((r) => ruleIdentity(r) === identity);
+      if (!rule) throw new Error("Rule not found locally.");
+      return createClient().uploadRule(rule);
+    },
+    async uploadAll() {
+      const localRules = scanLocalRules({ projectDirs: projectDirs() });
+      const client = createClient();
+      const remoteRules = await client.listRemoteRules();
+      let uploaded = 0;
+      let skipped = 0;
+      for (const rule of localRules) {
+        const remote = remoteRules.find((r) => r.agent === rule.agent && r.scope === rule.scope && r.name === rule.name && r.project_path === rule.projectPath);
+        if (remote && remote.content_hash === rule.contentHash) {
+          skipped++;
+          continue;
+        }
+        await client.uploadRule(rule);
+        uploaded++;
+      }
+      return { uploaded, skipped };
+    },
+    async deleteRemote(remoteId) {
+      return createClient().deleteRule(remoteId);
+    },
+    copySetupSql() {
+      clipboard.writeText(buildRulesSyncSetupSql());
+    },
+  };
 }
 
 function visibleStatsOptions(options: SessionStatsOptions = {}): SessionStatsOptions {
@@ -1338,6 +1390,7 @@ function registerIpc(): void {
     return providerService.addStoredKeys(next);
   });
   registerSkillsIpc(ipcMain, skillService);
+  registerRulesIpc(ipcMain, createRulesSyncService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {
     clipboard.writeText(buildCombinedSupabaseSetupSql());
   });

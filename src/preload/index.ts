@@ -29,6 +29,7 @@ import type {
 import { createAppUpdateApi } from "./app-update";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
+import { createRulesApi } from "./rules";
 import { createSkillsApi } from "./skills";
 
 export interface AiAssistantReply {
@@ -85,6 +86,7 @@ const api = {
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   ...createProvidersApi(ipcRenderer),
   ...createSkillsApi(ipcRenderer),
+  ...createRulesApi(ipcRenderer),
   ...createRemoteSessionsApi(ipcRenderer),
   copyCombinedSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("supabase:copy-combined-setup-sql"),
   openSupabaseSqlEditor: (target: "sessions" | "skills"): Promise<void> => ipcRenderer.invoke("supabase:open-sql-editor", target),
