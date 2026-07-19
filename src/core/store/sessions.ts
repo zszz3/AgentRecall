@@ -990,9 +990,13 @@ export class SessionsStore {
       merged.set(hydrated.sessionKey, hydrated);
     }
 
-    const sorted = [...merged.values()].sort(
-      (a, b) => this.score(b, query) - this.score(a, query) || this.sortValue(b, options.sortBy) - this.sortValue(a, options.sortBy),
-    );
+    const sortBy = options.sortBy ?? "smart";
+    const sorted = [...merged.values()].sort((a, b) => {
+      if (sortBy === "smart" && query) {
+        return this.smartScore(b, query) - this.smartScore(a, query);
+      }
+      return this.score(b, query) - this.score(a, query) || this.sortValue(b, sortBy) - this.sortValue(a, sortBy);
+    });
     const totalCount = query ? sorted.length : this.countCandidateRows(options);
     const sessions = sorted.slice(0, limit);
     if (query) this.attachSearchMatchDetails(sessions, query);
@@ -1630,6 +1634,23 @@ export class SessionsStore {
     return score;
   }
 
+  /**
+   * Hybrid score blending relevance with time decay. Recent sessions with
+   * decent relevance outrank ancient exact matches. The decay uses a half-life
+   * of 30 days: a session active today has factor ~1.0, 30 days ago ~0.5,
+   * 60 days ago ~0.25. A small relevance floor (0.08) ensures completely
+   * irrelevant results never surface regardless of recency.
+   */
+  private smartScore(result: SessionSearchResult, query: string): number {
+    const relevance = this.score(result, query);
+    if (relevance <= 0) return 0;
+    const activityMs = result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
+    const ageDays = Math.max(0, (Date.now() - activityMs) / (24 * 60 * 60 * 1000));
+    const decay = Math.pow(0.5, ageDays / 30);
+    const pinnedBoost = result.pinned ? 1.2 : 1.0;
+    return relevance * (0.08 + 0.92 * decay) * pinnedBoost;
+  }
+
   private sortValue(result: SessionSearchResult, sortBy: SessionSortBy = "activity"): number {
     if (sortBy === "created") return result.timestamp || 0;
     return result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
@@ -1766,8 +1787,8 @@ function normalizeExplicitAnd(query: string): string {
 }
 
 function sessionSortSql(sortBy: SessionSortBy = "activity"): string {
-  if (sortBy === "activity") return sessionActivitySql("sessions");
-  return "COALESCE(timestamp, 0)";
+  if (sortBy === "created") return "COALESCE(timestamp, 0)";
+  return sessionActivitySql("sessions");
 }
 
 function sessionActivitySql(sessionTable: string): string {

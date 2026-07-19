@@ -58,6 +58,50 @@ describe("SessionsStore", () => {
     }
   });
 
+  it("smart sort ranks recent partial matches above ancient exact title matches", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+
+      // Ancient session whose title exactly matches the query (90 days old).
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:ancient",
+        rawId: "ancient",
+        originalTitle: "deploy",
+        firstQuestion: "deploy the app",
+        timestamp: now - 90 * dayMs,
+        fileMtimeMs: now - 90 * dayMs,
+      }), [
+        { role: "user", content: "deploy the app", timestamp: new Date(now - 90 * dayMs).toISOString(), index: 0 },
+      ]);
+
+      // Recent session that only mentions the query in body text (1 day old).
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:recent",
+        rawId: "recent",
+        originalTitle: "Fix login bug",
+        firstQuestion: "deploy pipeline broke after merge",
+        timestamp: now - 1 * dayMs,
+        fileMtimeMs: now - 1 * dayMs,
+      }), [
+        { role: "user", content: "deploy pipeline broke after merge", timestamp: new Date(now - 1 * dayMs).toISOString(), index: 0 },
+      ]);
+
+      // Smart sort: recent partial match should outrank ancient exact title match.
+      const smartResults = store.searchSessions({ query: "deploy", sortBy: "smart" });
+      expect(smartResults.map((s) => s.sessionKey)).toEqual(["codex:recent", "codex:ancient"]);
+
+      // Activity sort: exact title match still wins (pure relevance first).
+      const activityResults = store.searchSessions({ query: "deploy", sortBy: "activity" });
+      expect(activityResults[0].sessionKey).toBe("codex:ancient");
+    } finally {
+      db.close();
+    }
+  });
+
   it("composes environment, subagent, project, and statistics boundaries", () => {
     const db = new DatabaseSync(":memory:");
     try {

@@ -24,7 +24,7 @@
 ### Core Features
 
 - **Unified search and management for AI coding-agent sessions**:
-  Search, filter, inspect, organize, and quick launch Claude Code, Codex, and optional sessions from tclaude, tcodex, CodeBuddy, OpenClaw, Hermes, OpenCode, Cursor Agent, Trae, and Qoder; add custom titles, tags, favorites, pinned state, and hidden state; local and SSH remote environments are supported without installing this app on the remote machine. Sidebar projects are grouped by environment, each group can be collapsed, and projects within a group are ordered by recent activity. Sessions can be filtered across all time or the last 7, 30, or 90 days, and results always show the most recently active sessions first.
+  Search, filter, inspect, organize, and quick launch Claude Code, Codex, and optional sessions from tclaude, tcodex, CodeBuddy, OpenClaw, Hermes, OpenCode, Cursor Agent, Trae, and Qoder; add custom titles, tags, favorites, pinned state, and hidden state; local and SSH remote environments are supported without installing this app on the remote machine. Sidebar projects are grouped by environment, each group can be collapsed, and projects within a group are ordered by recent activity. Sessions can be filtered across all time or the last 7, 30, or 90 days; search results are sorted by smart ranking (relevance mixed with time decay) by default, with options to sort by newest or oldest activity.
 - **Full session context view**:
   The detail view shows complete messages, tool calls, Markdown / code blocks, and supports AI summaries plus Markdown export.
 - **AI / Agent-assisted session retrieval**:

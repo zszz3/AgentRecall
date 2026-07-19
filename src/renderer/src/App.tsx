@@ -60,6 +60,7 @@ import type {
   SessionMessage,
   SessionMatchHit,
   SessionSearchResult,
+  SessionSortBy,
   SessionStats,
   SessionStatsPeriod,
   SessionTraceEvent,
@@ -309,6 +310,7 @@ export function App(): ReactElement {
   const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<ViewMode>("default");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
+  const [sortBy, setSortBy] = useState<SessionSortBy>("smart");
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
   const [hoveredScopeFilter, setHoveredScopeFilter] = useState<string | null>(null);
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
@@ -401,8 +403,8 @@ export function App(): ReactElement {
   projectEnvironmentIdRef.current = projectEnvironmentId;
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const searchScopeKey = useMemo(
-    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, dateRange, liveStatus]),
-    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, liveStatus],
+    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, dateRange, sortBy, liveStatus]),
+    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sortBy, liveStatus],
   );
   const liveSessionKeys = useMemo(
     () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
@@ -422,7 +424,7 @@ export function App(): ReactElement {
       projectPath: searchScope.projectPath,
       environmentId: searchScope.environmentId,
       visibility,
-      sortBy: "activity",
+      sortBy,
       dateFrom,
       dateTo,
       limit: sessionLimit,
@@ -443,7 +445,7 @@ export function App(): ReactElement {
         current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
       );
     });
-  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
+  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
@@ -2045,6 +2047,30 @@ export function App(): ReactElement {
                   {dateRangeShortLabel(option.value, language)}
                 </button>
               ))}
+            </div>
+            <div className="sort-filter" role="group" aria-label={t("Sort order", "排序方式")}>
+              <ArrowRightLeft size={14} aria-hidden="true" />
+              <button
+                className={sortBy === "smart" ? "active" : ""}
+                onClick={() => setSortBy("smart")}
+                title={t("Smart: relevance + recency", "智能：相关性 + 时间")}
+              >
+                {t("Smart", "智能")}
+              </button>
+              <button
+                className={sortBy === "activity" ? "active" : ""}
+                onClick={() => setSortBy("activity")}
+                title={t("Most recent first", "最近活跃优先")}
+              >
+                {t("Recent", "最新")}
+              </button>
+              <button
+                className={sortBy === "created" ? "active" : ""}
+                onClick={() => setSortBy("created")}
+                title={t("Oldest first", "最早创建优先")}
+              >
+                {t("Oldest", "最早")}
+              </button>
             </div>
           </div>
           <div className="top-actions">

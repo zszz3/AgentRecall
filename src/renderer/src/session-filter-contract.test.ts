@@ -5,11 +5,12 @@ const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("session filter toolbar contract", () => {
-  it("offers date ranges without exposing selectable session sorting", () => {
-    expect(appSource).toContain('sortBy: "activity"');
+  it("offers date ranges and sort order controls", () => {
     expect(appSource).toContain('className="date-filter"');
-    expect(appSource).not.toContain('className="sort-menu"');
-    expect(appSource).not.toContain("setSortBy");
-    expect(stylesheet).not.toMatch(/\.sort-menu/);
+    expect(appSource).toContain('className="sort-filter"');
+    expect(appSource).toContain('setSortBy("smart")');
+    expect(appSource).toContain('setSortBy("activity")');
+    expect(appSource).toContain('setSortBy("created")');
+    expect(stylesheet).toMatch(/\.sort-filter/);
   });
 });

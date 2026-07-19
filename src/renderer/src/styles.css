@@ -1648,6 +1648,50 @@ select:focus-visible {
   color: var(--accent-bright);
 }
 
+.sort-filter {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  width: fit-content;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-bg);
+}
+
+.sort-filter svg {
+  flex: 0 0 auto;
+  margin: 0 4px;
+  color: var(--text-faint);
+}
+
+.sort-filter button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sort-filter button:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.sort-filter button.active {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
 .scope-filter {
   --scope-filter-max: 240px;
   position: relative;
