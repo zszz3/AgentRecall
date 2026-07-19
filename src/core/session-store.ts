@@ -74,6 +74,105 @@ export class SessionStore {
     this.db.close();
   }
 
+  importLegacyUserState(legacyDbPath: string): number {
+    const legacyDb = new DatabaseSync(legacyDbPath, { readOnly: true });
+    const refreshedTitles = new Map<string, string>();
+    let imported = 0;
+
+    try {
+      const legacyRows = legacyDb
+        .prepare(
+          `SELECT session_key, custom_title, favorited, pinned, hidden, last_opened_at, last_resumed_at
+           FROM sessions
+           WHERE custom_title IS NOT NULL
+              OR favorited = 1
+              OR pinned = 1
+              OR hidden = 1
+              OR last_opened_at IS NOT NULL
+              OR last_resumed_at IS NOT NULL
+              OR EXISTS (SELECT 1 FROM session_tags WHERE session_tags.session_key = sessions.session_key)`,
+        )
+        .all() as Array<{
+          session_key: string;
+          custom_title: string | null;
+          favorited: number;
+          pinned: number;
+          hidden: number;
+          last_opened_at: number | null;
+          last_resumed_at: number | null;
+        }>;
+      const currentRow = this.db.prepare("SELECT custom_title FROM sessions WHERE session_key = ?");
+      const update = this.db.prepare(
+        `UPDATE sessions SET
+           custom_title = COALESCE(custom_title, ?),
+           favorited = CASE WHEN favorited = 1 OR ? = 1 THEN 1 ELSE 0 END,
+           pinned = CASE WHEN pinned = 1 OR ? = 1 THEN 1 ELSE 0 END,
+           hidden = CASE WHEN hidden = 1 OR ? = 1 THEN 1 ELSE 0 END,
+           last_opened_at = CASE
+             WHEN ? IS NULL THEN last_opened_at
+             WHEN last_opened_at IS NULL OR last_opened_at < ? THEN ?
+             ELSE last_opened_at
+           END,
+           last_resumed_at = CASE
+             WHEN ? IS NULL THEN last_resumed_at
+             WHEN last_resumed_at IS NULL OR last_resumed_at < ? THEN ?
+             ELSE last_resumed_at
+           END
+         WHERE session_key = ?`,
+      );
+      const legacyTags = legacyDb.prepare(
+        `SELECT tags.name
+         FROM tags
+         JOIN session_tags ON session_tags.tag_id = tags.id
+         WHERE session_tags.session_key = ?`,
+      );
+      const insertTag = this.db.prepare("INSERT OR IGNORE INTO tags (name) VALUES (?)");
+      const attachTag = this.db.prepare(
+        `INSERT OR IGNORE INTO session_tags (session_key, tag_id)
+         SELECT ?, id FROM tags WHERE name = ?`,
+      );
+
+      this.db.exec("BEGIN");
+      try {
+        for (const legacy of legacyRows) {
+          const current = currentRow.get(legacy.session_key) as { custom_title: string | null } | undefined;
+          if (!current) continue;
+
+          update.run(
+            legacy.custom_title,
+            legacy.favorited,
+            legacy.pinned,
+            legacy.hidden,
+            legacy.last_opened_at,
+            legacy.last_opened_at,
+            legacy.last_opened_at,
+            legacy.last_resumed_at,
+            legacy.last_resumed_at,
+            legacy.last_resumed_at,
+            legacy.session_key,
+          );
+          for (const tag of legacyTags.all(legacy.session_key) as Array<{ name: string }>) {
+            insertTag.run(tag.name);
+            attachTag.run(legacy.session_key, tag.name);
+          }
+          if (!current.custom_title && legacy.custom_title) {
+            refreshedTitles.set(legacy.session_key, legacy.custom_title);
+          }
+          imported += 1;
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    } finally {
+      legacyDb.close();
+    }
+
+    for (const [sessionKey, title] of refreshedTitles) this.sessions.setCustomTitle(sessionKey, title);
+    return imported;
+  }
+
   upsertIndexedSession(
     session: IndexedSession,
     messages: SessionMessage[],

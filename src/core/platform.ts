@@ -59,6 +59,7 @@ interface ResumeOptions {
   homeDir?: string;
   sshTarget?: string;
   sshArgs?: string[];
+  preserveCustomTerminalTitle?: boolean;
 }
 
 type ResumeOpenOptions = Pick<ResumeOptions, "skipPermissions" | "platform" | "homeDir" | "sshTarget" | "sshArgs">;
@@ -330,6 +331,7 @@ function buildResumeRuntimeProcessSpec(
   skipPermissions: boolean,
   platform: NodeJS.Platform,
   homeDir: string,
+  preserveCustomTerminalTitle = false,
 ): Omit<ResumeProcessSpec, "displayCommand"> {
   const target = migrationTargetForResumeSource(session.source);
   if (!target) {
@@ -339,6 +341,9 @@ function buildResumeRuntimeProcessSpec(
   const args = migrationResumeArgs(target, session.rawId);
   const legacyProvider = legacyMigratedCodexProvider(session, target);
   if (legacyProvider) args.splice(1, 0, "-c", `model_provider=${JSON.stringify(legacyProvider)}`);
+  if (target === "codex" && preserveCustomTerminalTitle && session.customTitle?.trim()) {
+    args.splice(1, 0, "-c", "tui.terminal_title=[]");
+  }
   if (skipPermissions) {
     if (target === "claude" || target === "tclaude" || target === "claude-internal") {
       args.push("--dangerously-skip-permissions");
@@ -399,9 +404,20 @@ function buildShellCommand(
 function buildResumeShellCommand(
   session: SessionSearchResult,
   settings: AppSettings,
-  opts: Required<Pick<ResumeOptions, "withCwd" | "skipPermissions" | "platform">> & { shell: ShellKind; homeDir?: string },
+  opts: Required<Pick<ResumeOptions, "withCwd" | "skipPermissions" | "platform">> & {
+    shell: ShellKind;
+    homeDir?: string;
+    preserveCustomTerminalTitle?: boolean;
+  },
 ): string {
-  const spec = buildResumeRuntimeProcessSpec(session, settings, opts.skipPermissions, opts.platform, opts.homeDir ?? homedir());
+  const spec = buildResumeRuntimeProcessSpec(
+    session,
+    settings,
+    opts.skipPermissions,
+    opts.platform,
+    opts.homeDir ?? homedir(),
+    opts.preserveCustomTerminalTitle,
+  );
   return buildMigrationResumeShellCommand(spec, session.projectPath ?? "", opts.shell, opts.withCwd);
 }
 
@@ -483,11 +499,24 @@ export function getResumeCommand(
   settings: AppSettings = defaultSettings,
   opts: ResumeOptions = {},
 ): string {
-  const { withCwd = true, skipPermissions = false, platform = process.platform, homeDir = homedir() } = opts;
+  const {
+    withCwd = true,
+    skipPermissions = false,
+    platform = process.platform,
+    homeDir = homedir(),
+    preserveCustomTerminalTitle = false,
+  } = opts;
   const sshArgs = resolveSshArgs(opts);
   const shell = localShellKind(platform, settings);
   const runtimePlatform = sshArgs ? "linux" : platform;
-  const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, runtimePlatform, homeDir);
+  const spec = buildResumeRuntimeProcessSpec(
+    session,
+    settings,
+    skipPermissions,
+    runtimePlatform,
+    homeDir,
+    preserveCustomTerminalTitle,
+  );
   if (sshArgs) {
     // The remote command body always targets a POSIX shell; only the outer ssh
     // invocation is quoted for the local terminal (cmd carets vs PowerShell).
@@ -604,6 +633,7 @@ export function buildWindowsResumeLaunchPlan(
     homeDir: opts.homeDir,
     sshTarget: opts.sshTarget,
     sshArgs: opts.sshArgs,
+    preserveCustomTerminalTitle: true,
   });
   const powershellCommand = sshArgs
     ? getResumePowerShellCommand(session, settings, { ...opts, sshArgs })
@@ -612,6 +642,7 @@ export function buildWindowsResumeLaunchPlan(
         skipPermissions: opts.skipPermissions,
         platform,
         homeDir: opts.homeDir,
+        preserveCustomTerminalTitle: true,
       });
   const terminal = normalizeTerminal(opts.terminal ?? settings.defaultTerminal, "win32");
   const cwd = sshArgs ? "" : existingDirectory(session.projectPath);
@@ -806,7 +837,11 @@ export function buildGhosttyOpenArgs(
   settings: AppSettings,
   opts: ResumeOpenOptions = {},
 ): string[] {
-  const command = getResumeCommand(session, settings, { ...opts, withCwd: true });
+  const command = getResumeCommand(session, settings, {
+    ...opts,
+    withCwd: true,
+    preserveCustomTerminalTitle: true,
+  });
   const titledCommand = session.displayTitle ? withPosixTerminalTitle(command, session.displayTitle) : command;
   return buildGhosttyOpenArgsForCommand(titledCommand);
 }
@@ -848,7 +883,11 @@ export async function openResumeInTerminal(
   opts: ResumeOpenOptions = {},
 ): Promise<void> {
   const sshArgs = resolveSshArgs(opts);
-  const command = getResumeCommand(session, settings, { ...opts, withCwd: true });
+  const command = getResumeCommand(session, settings, {
+    ...opts,
+    withCwd: true,
+    preserveCustomTerminalTitle: true,
+  });
   const title = session.displayTitle || session.originalTitle || session.rawId;
   const titledCommand = withPosixTerminalTitle(command, title);
   if (process.platform === "win32") {
@@ -884,7 +923,11 @@ export async function openResumeInTerminal(
       process.env.SHELL || "/bin/zsh",
       "-ic",
       withPosixTerminalTitle(
-        getResumeCommand(session, settings, { ...opts, withCwd: Boolean(sshArgs) }),
+        getResumeCommand(session, settings, {
+          ...opts,
+          withCwd: Boolean(sshArgs),
+          preserveCustomTerminalTitle: true,
+        }),
         title,
       ),
     );
@@ -1139,6 +1182,7 @@ function getResumePowerShellCommand(
     shell: "posix",
     platform: "linux",
     homeDir: opts.homeDir,
+    preserveCustomTerminalTitle: true,
   });
   return formatPowershellSshDisplay(opts.sshArgs, innerCommand);
 }

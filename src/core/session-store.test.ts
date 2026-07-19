@@ -64,6 +64,48 @@ const traceEvents: SessionTraceEvent[] = [
 ];
 
 describe("SessionStore", () => {
+  it("imports legacy user state without overwriting newer current metadata", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-legacy-state-"));
+    const legacyPath = path.join(root, "legacy.sqlite");
+    const legacy = new SessionStore(legacyPath);
+    const current = createInMemoryStore();
+
+    try {
+      for (const store of [legacy, current]) {
+        store.upsertIndexedSession(sampleSession({ sessionKey: "codex:shared", rawId: "shared" }), messages);
+        store.upsertIndexedSession(sampleSession({ sessionKey: "codex:current", rawId: "current" }), messages);
+      }
+
+      legacy.setCustomTitle("codex:shared", "旧库自定义标题");
+      legacy.setFavorited("codex:shared", true);
+      legacy.setPinned("codex:shared", true);
+      legacy.setHidden("codex:shared", true);
+      legacy.addTag("codex:shared", "旧库标签");
+      legacy.setCustomTitle("codex:current", "不应覆盖的新标题");
+
+      current.setCustomTitle("codex:current", "当前库标题");
+      current.addTag("codex:current", "当前库标签");
+
+      expect(current.importLegacyUserState(legacyPath)).toBe(2);
+      expect(current.getSession("codex:shared")).toMatchObject({
+        customTitle: "旧库自定义标题",
+        displayTitle: "旧库自定义标题",
+        favorited: true,
+        pinned: true,
+        hidden: true,
+        tags: ["旧库标签"],
+      });
+      expect(current.getSession("codex:current")).toMatchObject({
+        customTitle: "当前库标题",
+        tags: ["当前库标签"],
+      });
+    } finally {
+      current.close();
+      legacy.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("atomically migrates a legacy key with all dependent data and migration history", () => {
     const store = createInMemoryStore();
     const legacyKey = "ssh:ssh-devbox:codex:legacy-all-data";

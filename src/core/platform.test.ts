@@ -439,13 +439,14 @@ describe("Ghostty resume launch args", () => {
       source: "codex-cli",
       rawId: "session-1",
       projectPath: "/repo",
+      customTitle: "登录修复",
       displayTitle: "登录修复",
     } as SessionSearchResult;
 
     withShell("/bin/zsh", () => {
       const args = buildGhosttyOpenArgs(session, defaultSettings);
       expect(args.at(-1)).toContain("printf '\\033]0;%s\\007' '登录修复'");
-      expect(args.at(-1)).toContain("codex resume session-1");
+      expect(args.at(-1)).toContain("codex resume -c 'tui.terminal_title=[]' session-1");
     });
   });
 });
@@ -705,10 +706,12 @@ describe("resume terminal launch plans", () => {
       source: "codex-cli",
       rawId: "codex-1",
       projectPath: "/repo",
+      customTitle: "登录修复",
       displayTitle: "登录修复",
     } as SessionSearchResult;
 
     expect(getResumeCommand(session, defaultSettings, { platform: "darwin" })).not.toContain("\\033]0;");
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin" })).not.toContain("terminal_title");
   });
 
   it("keeps local Windows resume launches rooted in the local project path", () => {

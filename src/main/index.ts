@@ -14,7 +14,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import Store from "electron-store";
-import { cpSync, existsSync } from "node:fs";
+import { cpSync, existsSync, writeFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,10 +155,8 @@ function ensureAgentRecallMcpPreference(): boolean {
   return setup.status();
 }
 
-function migrateLegacyUserData(): void {
+function legacyUserDataPath(): string | null {
   const target = app.getPath("userData");
-  if (existsSync(target)) return;
-
   const parent = path.dirname(target);
   const legacyNames = [
     ["Agent", "Session", "Search"].join("-"),
@@ -166,13 +164,20 @@ function migrateLegacyUserData(): void {
   ];
   for (const legacyName of legacyNames) {
     const legacy = path.join(parent, legacyName);
-    if (!existsSync(legacy)) continue;
-    try {
-      cpSync(legacy, target, { recursive: true, errorOnExist: false });
-    } catch (error) {
-      console.warn(`Could not migrate existing user data to ${PRODUCT_NAME}:`, error);
-    }
-    return;
+    if (existsSync(legacy)) return legacy;
+  }
+  return null;
+}
+
+function migrateLegacyUserData(): void {
+  const target = app.getPath("userData");
+  if (existsSync(target)) return;
+  const legacy = legacyUserDataPath();
+  if (!legacy) return;
+  try {
+    cpSync(legacy, target, { recursive: true, errorOnExist: false });
+  } catch (error) {
+    console.warn(`Could not migrate existing user data to ${PRODUCT_NAME}:`, error);
   }
 }
 
@@ -1448,8 +1453,19 @@ if (!app.requestSingleInstanceLock()) {
 
 app.whenReady().then(() => {
   void appUpdateService.registerRunningProcess();
-  const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
+  const userDataPath = app.getPath("userData");
+  const dbPath = path.join(userDataPath, "session-search.sqlite");
   store = new SessionStore(dbPath);
+  const legacyPath = legacyUserDataPath();
+  const legacyImportMarker = path.join(userDataPath, ".legacy-user-state-imported");
+  if (legacyPath && !existsSync(legacyImportMarker)) {
+    try {
+      store.importLegacyUserState(path.join(legacyPath, "session-search.sqlite"));
+      writeFileSync(legacyImportMarker, `${new Date().toISOString()}\n`, "utf8");
+    } catch (error) {
+      console.warn(`Could not import legacy user metadata to ${PRODUCT_NAME}:`, error);
+    }
+  }
   // Publish the live database path so the standalone MCP server can find it.
   try {
     writeDbPointer(dbPath);
