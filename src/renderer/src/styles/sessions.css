@@ -303,6 +303,31 @@
   color: var(--accent-bright);
 }
 
+.date-filter:has(.date-filter-custom) {
+  max-width: 306px;
+}
+
+.date-filter .date-filter-custom {
+  gap: 5px;
+  min-width: 68px;
+  max-width: 82px;
+  padding-inline: 7px;
+}
+
+.date-filter-custom > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-filter-custom > b {
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+}
+
 .scope-filter {
   --scope-filter-max: 240px;
   position: relative;

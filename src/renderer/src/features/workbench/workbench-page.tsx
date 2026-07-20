@@ -54,7 +54,7 @@ export interface WorkbenchPageProps {
   onOpenSession: (session: SessionSearchResult) => void;
   onResumeSession: (session: SessionSearchResult) => void;
   onShowSessions: (query: string) => void;
-  onSelectTrendDay?: (day: SessionDailyTokenUsage) => void;
+  onSelectTrendDay: (day: SessionDailyTokenUsage) => void;
 }
 
 export function WorkbenchPage({

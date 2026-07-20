@@ -14,7 +14,7 @@ const CHART_BOTTOM = 9;
 interface TokenTrendChartProps {
   points: SessionDailyTokenUsage[];
   language: LanguageMode;
-  onSelectDay?: (day: SessionDailyTokenUsage) => void;
+  onSelectDay: (day: SessionDailyTokenUsage) => void;
 }
 
 interface ChartPoint {
@@ -94,7 +94,7 @@ export function TokenTrendChart({ points, language, onSelectDay }: TokenTrendCha
                 onMouseLeave={() => setActiveIndex((current) => (current === index ? null : current))}
                 onFocus={() => setActiveIndex(index)}
                 onBlur={() => setActiveIndex((current) => (current === index ? null : current))}
-                onClick={() => onSelectDay?.(point.day)}
+                onClick={() => onSelectDay(point.day)}
                 aria-label={label}
                 aria-describedby={activeIndex === index ? `${gradientId}-tooltip` : undefined}
               >

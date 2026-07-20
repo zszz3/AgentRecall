@@ -56,6 +56,7 @@ import type {
   ProjectSummary,
   ProjectTagEntry,
   SearchOptions,
+  SessionDailyTokenUsage,
   SessionEnvironment,
   SessionMigrationProgress,
   SessionMigrationResult,
@@ -289,6 +290,7 @@ export function App(): ReactElement {
   const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<ViewMode>("default");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
+  const [customDateRange, setCustomDateRange] = useState<Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive"> | null>(null);
   const sortBy: SessionSortBy = "smart";
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
   const [hoveredScopeFilter, setHoveredScopeFilter] = useState<string | null>(null);
@@ -373,8 +375,21 @@ export function App(): ReactElement {
   projectEnvironmentIdRef.current = projectEnvironmentId;
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const searchScopeKey = useMemo(
-    () => JSON.stringify([query, source, environmentId, tag ?? "", projectPath ?? "", projectEnvironmentId ?? "", visibility, dateRange, sortBy, liveStatus]),
-    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sortBy, liveStatus],
+    () => JSON.stringify([
+      query,
+      source,
+      environmentId,
+      tag ?? "",
+      projectPath ?? "",
+      projectEnvironmentId ?? "",
+      visibility,
+      dateRange,
+      customDateRange?.dayStart ?? null,
+      customDateRange?.dayEndExclusive ?? null,
+      sortBy,
+      liveStatus,
+    ]),
+    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, customDateRange, sortBy, liveStatus],
   );
   const liveSessionKeys = useMemo(
     () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
@@ -386,7 +401,9 @@ export function App(): ReactElement {
   const load = useCallback(async () => {
     const requestId = ++loadSeqRef.current;
     const searchScope = resolveSearchScope(environmentId, projectPath, projectEnvironmentId);
-    const { dateFrom, dateTo } = resolveDateRange(dateRange);
+    const { dateFrom, dateTo } = customDateRange
+      ? { dateFrom: customDateRange.dayStart, dateTo: customDateRange.dayEndExclusive - 1 }
+      : resolveDateRange(dateRange);
     const options: SearchOptions = {
       query,
       source,
@@ -415,7 +432,7 @@ export function App(): ReactElement {
         current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
       );
     });
-  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
+  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, customDateRange, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
 
   const loadWorkbenchSessions = useCallback(async () => {
     const requestId = ++workbenchSessionsLoadSeqRef.current;
@@ -1850,6 +1867,18 @@ export function App(): ReactElement {
                 setActivePage("sessions");
                 setLiveStatus("all");
               }}
+              onSelectTrendDay={(day) => {
+                setQuery("");
+                setSource("all");
+                selectEnvironment("all");
+                clearProjectFilter();
+                setTag(undefined);
+                setVisibility("default");
+                setLiveStatus("all");
+                setDateRange("all");
+                setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
+                setActivePage("sessions");
+              }}
             />
           ) : null}
 
@@ -2062,11 +2091,25 @@ export function App(): ReactElement {
             </div>
             <div className="date-filter" role="group" aria-label={t("Session time range", "会话时间范围")}>
               <CalendarDays size={14} aria-hidden="true" />
+              {customDateRange ? (
+                <button
+                  className="date-filter-custom active"
+                  onClick={() => setCustomDateRange(null)}
+                  title={t("Clear exact day filter", "清除单日筛选")}
+                  aria-label={t("Clear exact day filter", "清除单日筛选")}
+                >
+                  <span>{new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", { month: "short", day: "numeric" }).format(customDateRange.dayStart)}</span>
+                  <b aria-hidden="true">×</b>
+                </button>
+              ) : null}
               {DATE_RANGE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
-                  className={dateRange === option.value ? "active" : ""}
-                  onClick={() => setDateRange(option.value)}
+                  className={!customDateRange && dateRange === option.value ? "active" : ""}
+                  onClick={() => {
+                    setCustomDateRange(null);
+                    setDateRange(option.value);
+                  }}
                   title={dateRangeLabel(option.value, language)}
                   aria-label={dateRangeLabel(option.value, language)}
                 >
