@@ -15,6 +15,7 @@ const {
   currentVersion,
   ensureElectronRuntimeForLaunch,
   formatUpdateNotice,
+  isElectronRuntimeReady,
   readUpdatePreference,
   skipUpdateVersion,
   snoozeUpdatePrompt,
@@ -131,13 +132,19 @@ async function main() {
       if (process.stdout.isTTY) process.stdout.write("正在等待自动更新完成...\n");
     },
   });
-  await ensureElectronRuntimeForLaunch({
-    packagePath: path.resolve(__dirname, ".."),
-    nodePath: process.execPath,
-    onWait: () => {
-      if (process.stdout.isTTY) process.stdout.write("正在等待 Electron 运行时准备完成...\n");
-    },
-  });
+  const packagePath = path.resolve(__dirname, "..");
+  try {
+    await ensureElectronRuntimeForLaunch({
+      packagePath,
+      nodePath: process.execPath,
+      onWait: () => {
+        if (process.stdout.isTTY) process.stdout.write("正在等待 Electron 运行时准备完成...\n");
+      },
+    });
+  } catch (error) {
+    if (!isElectronRuntimeReady(packagePath)) throw error;
+    if (process.stdout.isTTY) process.stdout.write("Electron 运行时校验失败，已检测到可用运行时，继续启动应用。\n");
+  }
   launchApp();
 }
 
