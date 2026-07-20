@@ -149,6 +149,7 @@ describe("workbench application shell", () => {
     expect(workbenchSource).toContain("points={stats.dailyTokenUsage}");
     expect(workbenchSource).not.toContain('className="workbench-overview-slot"');
     expect(tokenTrendSource).toContain('className="workbench-token-trend"');
+    expect(tokenTrendSource).toContain("points = []");
     expect(tokenTrendSource).toContain("<svg");
     expect(tokenTrendSource).toContain("<button");
     expect(tokenTrendSource).toContain('role="tooltip"');

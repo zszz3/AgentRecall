@@ -23,7 +23,7 @@ interface ChartPoint {
   y: number;
 }
 
-export function TokenTrendChart({ points, language, onSelectDay }: TokenTrendChartProps): ReactElement {
+export function TokenTrendChart({ points = [], language, onSelectDay }: TokenTrendChartProps): ReactElement {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const gradientId = `token-trend-${useId().replace(/:/g, "")}`;
   const locale = language === "zh" ? "zh-CN" : "en-US";
