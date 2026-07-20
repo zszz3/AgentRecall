@@ -43,11 +43,11 @@ describe("sync overlay navigation and progress", () => {
 
   it("does not keep a second local uploading banner after App reports completion", () => {
     const uploadSelected = skillsSource.slice(
-      skillsSource.indexOf("const uploadSelected = async"),
-      skillsSource.indexOf("const toggleRemoteSelection"),
+      skillsSource.indexOf("const uploadChecked = async"),
+      skillsSource.indexOf("const confirmDelete"),
     );
 
-    expect(uploadSelected).not.toContain("setBatchFeedback(l(`Uploading");
+    expect(uploadSelected).not.toContain("Uploading selected");
     expect(uploadSelected).toContain("await onUploadSelected");
   });
 });

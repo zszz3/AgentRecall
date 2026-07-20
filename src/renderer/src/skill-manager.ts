@@ -28,6 +28,7 @@ function byName(a: InstalledSkill, b: InstalledSkill): number {
 }
 
 export function skillSourceLabel(source: SkillSource): string {
+  if (source === "agent-recall") return "AgentRecall";
   if (source === "codex-user") return "Codex";
   if (source === "codex-system") return "Codex System";
   if (source === "codex-shared") return "Shared";

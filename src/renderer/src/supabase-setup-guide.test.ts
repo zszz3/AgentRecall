@@ -5,6 +5,7 @@ const guideSource = readFileSync(new URL("./components/supabase-setup-guide.tsx"
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 const skillsSource = readFileSync(new URL("./features/skills/skills-page.tsx", import.meta.url), "utf8");
+const skillSyncSource = readFileSync(new URL("./features/skills/skill-sync-panel.tsx", import.meta.url), "utf8");
 const sessionsSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 
 describe("Supabase setup guidance", () => {
@@ -18,19 +19,19 @@ describe("Supabase setup guidance", () => {
   it("offers combined first-time setup and targeted repair actions", () => {
     expect(settingsSource).toContain("copyCombinedSyncSetupSql");
     expect(`${appSource}\n${settingsSource}`).toContain("openSupabaseSqlEditor");
-    expect(skillsSource).toContain("SupabaseSetupGuide");
+    expect(skillSyncSource).toContain("SupabaseSetupGuide");
     expect(sessionsSource).toContain("SupabaseSetupGuide");
   });
 
   it("shows SQL actions only for SQL-remediable sync failures", () => {
     expect(guideSource).toContain("showSqlActions = true");
     expect(guideSource).toContain("{showSqlActions ? (");
-    expect(skillsSource).toContain('showSqlActions={snapshot.status.remediation === "sql"}');
+    expect(skillSyncSource).toContain('showSqlActions={snapshot.status.remediation === "sql"}');
     expect(sessionsSource).toContain('showSqlActions={status.remediation === "sql"}');
   });
 
   it("directs authentication failures to Supabase settings instead of SQL", () => {
-    expect(skillsSource).toContain("Check the Supabase URL and anon key in Settings, then refresh.");
+    expect(skillSyncSource).toContain("Check the Supabase URL and anon key in Settings, then refresh.");
     expect(sessionsSource).toContain("Check the Supabase URL and anon key in Remote sync settings, then refresh.");
   });
 });

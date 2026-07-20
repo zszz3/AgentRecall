@@ -77,5 +77,5 @@ function entryFrom(
 }
 
 function isSyncableSource(source: SkillSource): boolean {
-  return source === "codex-user" || source === "claude-user" || source === "codex-shared";
+  return source === "agent-recall" || source === "codex-user" || source === "claude-user" || source === "codex-shared";
 }
