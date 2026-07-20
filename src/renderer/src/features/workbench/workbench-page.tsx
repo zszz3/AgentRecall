@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactElement } from "react";
-import { ArrowRight, Clock3, GitBranch, RefreshCw, Workflow } from "lucide-react";
+import { ArrowRight, Clock3, GitBranch, Plus, RefreshCw, Workflow } from "lucide-react";
 import { formatRelativeTime } from "../../../../core/format-session";
 import type {
   SessionSearchResult,
@@ -80,67 +80,109 @@ export function WorkbenchPage({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const cacheRate = usageCacheRate(stats.total);
   const sourceRows = usageStatsDisplayRows(stats.bySource);
-  const sessionDetail = sourceRows.map((row) => `${row.label}: ${formatCompactNumber(row.sessionCount)} ${l("sessions", "个会话")}`).join("\n");
-  const messageDetail = sourceRows.map((row) => `${row.label}: ${formatCompactNumber(row.messageCount)} ${l("messages", "条消息")}`).join("\n");
   const tokenParts = [
-    { label: l("Input", "输入"), value: stats.total.inputTokens },
-    { label: l("Cached input", "缓存输入"), value: stats.total.cachedInputTokens },
-    { label: l("Output", "输出"), value: stats.total.outputTokens },
-    { label: l("Reasoning", "推理"), value: stats.total.reasoningOutputTokens },
-  ].filter((part) => part.value > 0);
-  const tokenDetail = [
-    ...tokenParts.map((part) => `${part.label}: ${formatTokenCount(part.value)}`),
-    ...sourceRows.map((row) => `${row.label}: ${formatTokenCount(row.totalTokens)}`),
-  ].join("\n");
-  const cacheDetail = cacheRate == null
-    ? l("No input token data is available.", "暂无输入 Token 数据。")
-    : l(
-        `Cached input accounts for ${cacheRate}% of all input tokens.`,
-        `缓存输入占全部输入 Token 的 ${cacheRate}%。`,
-      );
+    { key: "input", label: l("Input", "输入"), value: stats.total.inputTokens },
+    { key: "cached", label: l("Cached", "缓存"), value: stats.total.cachedInputTokens },
+    { key: "output", label: l("Output", "输出"), value: stats.total.outputTokens },
+    { key: "reasoning", label: l("Reasoning", "推理"), value: stats.total.reasoningOutputTokens },
+  ];
+  const tokenPartTotal = tokenParts.reduce((total, part) => total + Math.max(0, part.value), 0);
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
   return (
     <div className="workbench-page">
-      <section className="workbench-overview" aria-label={l("Agent usage overview", "Agent 使用总览")}>
+      <header className="app-page-head workbench-page-head">
+        <div>
+          <h2>{l("Workbench", "工作台")}</h2>
+          <p>One for all</p>
+        </div>
+      </header>
+      <div className="workbench-page-content">
+        <section className="workbench-overview" aria-label={l("Agent usage overview", "Agent 使用总览")}>
         <div className="workbench-usage">
-          <div className="workbench-section-head">
-            <div className="workbench-periods" role="group" aria-label={l("Usage period", "用量周期")}>
-              {PERIODS.map((period) => (
-                <button key={period} className={period === statsPeriod ? "active" : ""} onClick={() => onStatsPeriodChange(period)}>
-                  {statsPeriodLabel(period, language)}
-                </button>
-              ))}
+          <div className="workbench-usage-top">
+            <div className="workbench-section-head">
+              <div className="workbench-periods" role="group" aria-label={l("Usage period", "用量周期")}>
+                {PERIODS.map((period) => (
+                  <button key={period} className={period === statsPeriod ? "active" : ""} onClick={() => onStatsPeriodChange(period)}>
+                    {statsPeriodLabel(period, language)}
+                  </button>
+                ))}
+              </div>
+              <button className="workbench-icon-button" onClick={onRefreshStats} disabled={statsRefreshing} aria-label={l("Refresh usage", "刷新用量")}>
+                <RefreshCw size={14} />
+              </button>
             </div>
-            <button className="workbench-icon-button" onClick={onRefreshStats} disabled={statsRefreshing} aria-label={l("Refresh usage", "刷新用量")}>
-              <RefreshCw size={14} />
-            </button>
+            <div className="workbench-metrics">
+              <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
+              <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
+              <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
+              <UsageMetric value={cacheRate == null ? "—" : `${cacheRate}%`} label={l("Cache rate", "缓存率")} />
+            </div>
           </div>
-          <div className="workbench-metrics">
-            <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} detail={sessionDetail} />
-            <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} detail={messageDetail} />
-            <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" detail={tokenDetail} />
-            <UsageMetric value={cacheRate == null ? "—" : `${cacheRate}%`} label={l("Cache rate", "缓存率")} detail={cacheDetail} />
+          <div className="workbench-usage-detail">
+            <div className="workbench-token-composition">
+              <div className="workbench-detail-title">
+                <strong>{l("Token composition", "Token 构成")}</strong>
+                <span>{cacheRate == null
+                  ? l("No input token data", "暂无输入 Token 数据")
+                  : l(`Cached input is ${cacheRate}% of input`, `缓存输入占输入 ${cacheRate}%`)}</span>
+              </div>
+              <div className="workbench-token-track" aria-hidden="true">
+                {tokenParts.map((part) => (
+                  <i
+                    key={part.key}
+                    className={part.key}
+                    style={{ width: tokenPartTotal > 0 ? `${(Math.max(0, part.value) / tokenPartTotal) * 100}%` : "0%" } as CSSProperties}
+                  />
+                ))}
+              </div>
+              <div className="workbench-token-legend">
+                {tokenParts.map((part) => <span key={part.key} className={part.key}><i />{part.label} {formatTokenCount(part.value)}</span>)}
+              </div>
+            </div>
+            <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
+              {sourceRows.length > 0 ? sourceRows.map((row) => (
+                <div key={row.key} className="workbench-source-row" data-source={row.key}>
+                  <span><i />{row.label}</span><strong>{formatTokenCount(row.totalTokens)}</strong>
+                </div>
+              )) : <span className="workbench-source-empty">{l("No source data", "暂无来源数据")}</span>}
+            </div>
           </div>
           {statsFeedback ? <p className={`workbench-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</p> : null}
         </div>
 
-        {(["codex", "claude-code"] as const).map((provider) => (
-          <WorkbenchQuota
-            key={provider}
-            card={quotas.providers.find((item) => item.provider === provider) ?? null}
-            provider={provider}
-            loading={quotaLoading}
-            language={language}
-            onRefresh={onRefreshQuotas}
-            onOpenSettings={onOpenSettings}
-          />
-        ))}
-        {quotaFeedback ? <p className={`workbench-feedback quota ${quotaFeedback.kind}`}>{quotaFeedback.message}</p> : null}
-      </section>
+        <section className="workbench-quota-card" aria-label={l("Model quotas", "模型额度")}>
+          <div className="workbench-quota-card-head">
+            <strong>{l("Model quotas", "模型额度")}</strong>
+            <button className="workbench-icon-button" onClick={onRefreshQuotas} disabled={quotaLoading} aria-label={l("Refresh model quotas", "刷新模型额度")}>
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          <div className="workbench-quota-pair">
+            {(["codex", "claude-code"] as const).map((provider) => (
+              <WorkbenchQuota
+                key={provider}
+                card={quotas.providers.find((item) => item.provider === provider) ?? null}
+                provider={provider}
+                loading={quotaLoading}
+                language={language}
+                onOpenSettings={onOpenSettings}
+              />
+            ))}
+          </div>
+          {quotaFeedback ? <p className={`workbench-feedback quota ${quotaFeedback.kind}`}>{quotaFeedback.message}</p> : null}
+        </section>
 
-      <div className="workbench-primary-grid">
+        <aside className="workbench-overview-slot" aria-label={l("Reserved workbench module", "工作台预留模块")}>
+          <Plus size={18} aria-hidden="true" />
+          <strong>{l("More modules", "更多模块")}</strong>
+          <span>{l("Reserved for later", "后续内容放这里")}</span>
+        </aside>
+        </section>
+
+        <div className="workbench-primary-grid">
         <section className="workbench-panel workbench-sessions">
           <div className="workbench-panel-head">
             <h2>{l("Sessions", "会话")}</h2>
@@ -189,21 +231,16 @@ export function WorkbenchPage({
             <span>{l("This space is reserved for a future migration.", "这里先保留后续展示位置。")}</span>
           </div>
         </section>
+        </div>
       </div>
-
     </div>
   );
 }
 
-function UsageMetric({ value, label, detail }: { value: string; label: string; detail?: string }): ReactElement {
+function UsageMetric({ value, label }: { value: string; label: string }): ReactElement {
   return (
-    <div
-      className={detail ? "workbench-metric workbench-has-detail" : "workbench-metric"}
-      tabIndex={detail ? 0 : undefined}
-      aria-label={detail ? `${label}: ${value}. ${detail}` : `${label}: ${value}`}
-    >
+    <div className="workbench-metric" aria-label={`${label}: ${value}`}>
       <strong>{value}</strong><span>{label}</span>
-      {detail ? <span className="workbench-detail-hint" role="tooltip">{detail}</span> : null}
     </div>
   );
 }
@@ -213,14 +250,12 @@ function WorkbenchQuota({
   provider,
   loading,
   language,
-  onRefresh,
   onOpenSettings,
 }: {
   card: UsageQuotaCard | null;
   provider: UsageQuotaCard["provider"];
   loading: boolean;
   language: LanguageMode;
-  onRefresh: () => void;
   onOpenSettings: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
@@ -229,10 +264,7 @@ function WorkbenchQuota({
   const available = card?.status === "supported" && quotas.length > 0;
   return (
     <div className={`workbench-quota ${provider}`}>
-      <div className="workbench-section-head">
-        <div className="quota-identity"><i>{provider === "codex" ? "CX" : "CC"}</i><strong>{displayName}</strong></div>
-        <button className="workbench-icon-button" onClick={onRefresh} disabled={loading} aria-label={l(`Refresh ${displayName} quota`, `刷新 ${displayName} 额度`)}><RefreshCw size={14} /></button>
-      </div>
+      <div className="quota-identity"><i>{provider === "codex" ? "CX" : "CC"}</i><strong>{displayName}</strong></div>
       {available ? <div className="workbench-quota-windows">{quotas.map((quota) => <WorkbenchQuotaWindow key={quota.key} quota={quota} language={language} />)}</div> : (
         <div className="workbench-quota-empty">
           <span>{loading ? l("Checking quota...", "正在检查额度...") : card?.detail || l("Quota is unavailable.", "额度暂不可用。")}</span>
@@ -247,10 +279,10 @@ function WorkbenchQuotaWindow({ quota, language }: { quota: UsageQuota; language
   const label = quota.label === "5h" ? localize(language, "5 hours", "5 小时") : localize(language, "7 days", "7 天");
   const detail = quota.stale ? localize(language, "Data expired", "数据已过期") : formatQuotaReset(quota.resetsAt, language);
   return (
-    <div className="workbench-quota-window workbench-has-detail" tabIndex={0} aria-label={`${label}: ${Math.round(quota.remainingPercent)}%. ${detail}`}>
+    <div className="workbench-quota-window" aria-label={`${label}: ${Math.round(quota.remainingPercent)}%. ${detail}`}>
       <div><span>{label}</span><strong>{Math.round(quota.remainingPercent)}%</strong></div>
       <div className="workbench-quota-track" aria-hidden="true"><i style={{ width: `${quota.remainingPercent}%` } as CSSProperties} /></div>
-      {detail ? <span className="workbench-detail-hint" role="tooltip">{detail}</span> : null}
+      <span className="workbench-quota-reset">{detail || "\u00A0"}</span>
     </div>
   );
 }

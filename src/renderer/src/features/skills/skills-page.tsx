@@ -14,7 +14,7 @@ import type { SkillsFeedback } from "../../app-types";
 import { useClampedContextMenuStyle } from "../../context-menu-position";
 import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 
-export function SkillsDialog({
+export function SkillsPage({
   snapshot,
   syncSnapshot,
   loading,
@@ -32,7 +32,6 @@ export function SkillsDialog({
   onCopyPath,
   onReveal,
   onDelete,
-  onClose,
 }: {
   snapshot: InstalledSkillsSnapshot;
   syncSnapshot: SkillSyncSnapshot;
@@ -51,7 +50,6 @@ export function SkillsDialog({
   onCopyPath: (skillPath: string) => void;
   onReveal: (skillPath: string) => void;
   onDelete: (skill: InstalledSkill) => Promise<void>;
-  onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [query, setQuery] = useState("");
@@ -319,9 +317,15 @@ export function SkillsDialog({
   };
 
   return (
-    <div className="dialog-backdrop" onMouseDown={onClose}>
+    <div className="skills-page">
+      <header className="app-page-head skills-page-head">
+        <div>
+          <h2>Skills</h2>
+          <p>{l("Manage local Skills and sync them across devices.", "管理本地 Skills，并在设备之间同步。")}</p>
+        </div>
+      </header>
       <section
-        className="command-dialog skills-dialog"
+        className="command-dialog skills-dialog skills-page-surface"
         onMouseDown={(event) => {
           event.stopPropagation();
           setSkillContextMenu(null);
@@ -329,20 +333,17 @@ export function SkillsDialog({
         onKeyDown={handleListKeyDown}
       >
         <div className="dialog-title">
-          <span>{l("Skills", "Skills 管理")}</span>
+          <span>{l("Skill library", "Skill 库")}</span>
           <span className="skills-dialog-count">
             Codex {formatCompactNumber(codexCount)} · Claude Code {formatCompactNumber(claudeCount)}
             {syncReady ? ` · Remote ${formatCompactNumber(syncSnapshot.remoteSkillGroups.length)}` : ""}
           </span>
-          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
         </div>
 
         <div className="skills-toolbar">
           <label className="skills-search">
             <Search size={14} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={l("Search name, description, or path", "搜索名称、描述或路径")} autoFocus />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={l("Search name, description, or path", "搜索名称、描述或路径")} />
           </label>
           <div className="skills-filter" role="group" aria-label={l("Skill source filter", "Skill 来源筛选")}>
             {SKILL_SOURCE_FILTERS.map((filter) => (

@@ -1,0 +1,3187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentRecall 2.0 · 工作台原型</title>
+  <!-- PROTOTYPE — 三种工作台布局，通过 ?variant=A|B|C 或底部浮条切换。确认方向后删除或吸收。 -->
+  <style>
+    @font-face {
+      font-family: "Geist";
+      src: url("../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2");
+      font-weight: 100 900;
+    }
+
+    @font-face {
+      font-family: "Geist Mono";
+      src: url("../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2");
+      font-weight: 100 900;
+    }
+
+    :root {
+      color-scheme: light;
+      --app-bg: #ffffff;
+      --rail-bg: #f3f4f6;
+      --panel-bg: #ffffff;
+      --panel-subtle: #f6f8fa;
+      --panel-hover: #eef1f5;
+      --panel-active: #e5e7eb;
+      --border: #d8dee8;
+      --border-subtle: #e5e7eb;
+      --border-strong: #cbd5e1;
+      --text: #111827;
+      --text-dim: #374151;
+      --text-muted: #6b7280;
+      --text-faint: #8a94a6;
+      --accent: #0969da;
+      --accent-hover: #0757b7;
+      --accent-soft: #eff6ff;
+      --accent-ring: rgba(9, 105, 218, 0.12);
+      --codex: #19966f;
+      --codex-soft: #e6f4ef;
+      --codex-text: #096b4b;
+      --claude: #d97928;
+      --claude-soft: #fff4e5;
+      --claude-text: #8a4b12;
+      --purple: #6d5dfc;
+      --purple-soft: #eef0ff;
+      --danger: #b42318;
+      --running-bg: #fff7ed;
+      --running-text: #a45013;
+      --success-bg: #e6f4ef;
+      --success-text: #096b4b;
+      --shadow: 0 16px 42px rgba(15, 23, 42, 0.1);
+      --radius: 10px;
+      --radius-sm: 7px;
+      --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body[data-theme="dark"] {
+      color-scheme: dark;
+      --app-bg: #0a0b0d;
+      --rail-bg: #0d0e11;
+      --panel-bg: #15171b;
+      --panel-subtle: #1a1d22;
+      --panel-hover: rgba(255, 255, 255, 0.06);
+      --panel-active: rgba(255, 255, 255, 0.08);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.065);
+      --border-strong: rgba(255, 255, 255, 0.14);
+      --text: #eceef1;
+      --text-dim: #c9ced6;
+      --text-muted: #9aa1aa;
+      --text-faint: #626871;
+      --accent: #eca95c;
+      --accent-hover: #f4b86e;
+      --accent-soft: rgba(236, 169, 92, 0.14);
+      --accent-ring: rgba(236, 169, 92, 0.18);
+      --codex: #34c79a;
+      --codex-soft: rgba(52, 199, 154, 0.15);
+      --codex-text: #4fd6ad;
+      --claude: #e8924a;
+      --claude-soft: rgba(232, 146, 74, 0.16);
+      --claude-text: #f0a868;
+      --purple: #a78bfa;
+      --purple-soft: rgba(129, 112, 255, 0.18);
+      --danger: #ff8a80;
+      --running-bg: rgba(236, 169, 92, 0.1);
+      --running-text: #f4b86e;
+      --success-bg: rgba(52, 199, 154, 0.15);
+      --success-text: #4fd6ad;
+      --shadow: 0 22px 54px rgba(0, 0, 0, 0.42);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--app-bg);
+      color: var(--text);
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input {
+      font: inherit;
+      color: inherit;
+    }
+
+    button {
+      border: 0;
+      background: none;
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 104px minmax(0, 1fr);
+      height: 100vh;
+      min-width: 860px;
+      min-height: 560px;
+      background: var(--app-bg);
+    }
+
+    .traffic {
+      position: absolute;
+      top: 14px;
+      left: 15px;
+      display: flex;
+      gap: 7px;
+      z-index: 5;
+    }
+
+    .traffic i {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+
+    .traffic i:nth-child(1) { background: #ff5f57; }
+    .traffic i:nth-child(2) { background: #febc2e; }
+    .traffic i:nth-child(3) { background: #28c840; }
+
+    .rail {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      padding: 48px 9px 12px;
+      background: var(--rail-bg);
+      border-right: 1px solid var(--border);
+      min-height: 0;
+    }
+
+    .brand {
+      display: grid;
+      place-items: center;
+      gap: 7px;
+      padding: 3px 0 20px;
+    }
+
+    .brand-mark {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      background: var(--text);
+      color: var(--app-bg);
+      font-size: 12px;
+      font-weight: 780;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      right: -3px;
+      bottom: 3px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--rail-bg);
+      border-radius: 50%;
+      background: var(--codex);
+    }
+
+    .brand span {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: -0.1px;
+    }
+
+    .rail-nav {
+      display: grid;
+      gap: 5px;
+    }
+
+    .rail-bottom {
+      margin-top: auto;
+    }
+
+    .nav-tab {
+      position: relative;
+      display: grid;
+      justify-items: center;
+      align-content: center;
+      gap: 5px;
+      width: 100%;
+      min-height: 57px;
+      padding: 7px 4px;
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-size: 11px;
+      transition: color 140ms ease, background 140ms ease;
+    }
+
+    .nav-tab:hover {
+      color: var(--text);
+      background: var(--panel-hover);
+    }
+
+    .nav-tab.active {
+      color: var(--accent);
+      background: var(--accent-soft);
+      font-weight: 650;
+    }
+
+    .nav-tab.active::before {
+      content: "";
+      position: absolute;
+      left: -9px;
+      width: 3px;
+      height: 24px;
+      border-radius: 0 4px 4px 0;
+      background: var(--accent);
+    }
+
+    .shell {
+      display: grid;
+      grid-template-rows: 64px minmax(0, 1fr);
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      padding: 10px 20px;
+      background: color-mix(in srgb, var(--app-bg) 92%, transparent);
+      border-bottom: 1px solid var(--border-subtle);
+      -webkit-app-region: drag;
+    }
+
+    .topbar-index-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-right: 2px;
+      color: var(--text-faint);
+      font: 10px var(--mono);
+      -webkit-app-region: no-drag;
+    }
+
+    .topbar-index-state i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--codex);
+    }
+
+    .search {
+      position: relative;
+      display: flex;
+      align-items: center;
+      flex: 1;
+      min-width: 180px;
+      max-width: 720px;
+      height: 39px;
+      margin-left: auto;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-subtle);
+      -webkit-app-region: no-drag;
+    }
+
+    .sessions-search {
+      width: 100%;
+      max-width: none;
+      margin: 0 0 13px;
+      background: var(--panel-bg);
+    }
+
+    .search svg {
+      width: 16px;
+      margin-left: 12px;
+      color: var(--text-faint);
+    }
+
+    .search input {
+      width: 100%;
+      height: 100%;
+      padding: 0 72px 0 9px;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+    }
+
+    .search input::placeholder {
+      color: var(--text-faint);
+    }
+
+    .keycap {
+      position: absolute;
+      right: 8px;
+      padding: 3px 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel-bg);
+      color: var(--text-faint);
+      font: 11px var(--mono);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .icon-button,
+    .refresh-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-bg);
+      color: var(--text-dim);
+    }
+
+    .icon-button {
+      width: 38px;
+    }
+
+    .refresh-button {
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 620;
+    }
+
+    .icon-button:hover,
+    .refresh-button:hover {
+      border-color: var(--border-strong);
+      background: var(--panel-hover);
+      color: var(--text);
+    }
+
+    .refresh-button.loading svg {
+      animation: spin 750ms linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .viewport {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .page-view {
+      display: none;
+      height: 100%;
+      overflow: auto;
+      padding: 24px clamp(18px, 2.5vw, 34px) 92px;
+    }
+
+    body[data-page="workbench"] #workbench-page,
+    body[data-page="sessions"] #sessions-page,
+    body[data-page="skills"] #skills-page,
+    body[data-page="settings"] #settings-page {
+      display: block;
+    }
+
+    .page-inner {
+      width: min(100%, 1420px);
+      margin: 0 auto;
+    }
+
+    .page-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      min-height: 42px;
+      margin-bottom: 18px;
+    }
+
+    .page-heading h1 {
+      margin: 0;
+      font-size: 23px;
+      font-weight: 720;
+      letter-spacing: -0.7px;
+    }
+
+    .page-heading p {
+      margin: 5px 0 0;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .updated {
+      color: var(--text-faint);
+      font: 11px var(--mono);
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel-bg);
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .section-head h2,
+    .section-head h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 690;
+      letter-spacing: -0.2px;
+    }
+
+    .section-head h3 {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .section-meta {
+      color: var(--text-faint);
+      font: 11px var(--mono);
+    }
+
+    .link-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 620;
+    }
+
+    .link-button:hover {
+      color: var(--accent-hover);
+    }
+
+    .link-button svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .periods {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 6px;
+      background: var(--panel-subtle);
+    }
+
+    .periods button {
+      min-width: 38px;
+      height: 25px;
+      padding: 0 7px;
+      border-radius: 5px;
+      color: var(--text-faint);
+      font: 10px var(--mono);
+    }
+
+    .periods button.active {
+      background: var(--panel-bg);
+      color: var(--text);
+      box-shadow: 0 0 0 1px var(--border);
+    }
+
+    .metric-pair {
+      display: flex;
+      align-items: baseline;
+      gap: 24px;
+      margin-top: 14px;
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--text);
+      font: 650 24px/1 var(--mono);
+      letter-spacing: -1px;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 6px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .source-breakdown {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 15px;
+    }
+
+    .source-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font: 10px var(--mono);
+    }
+
+    .source-chip i,
+    .agent-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--provider);
+    }
+
+    .quota-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 15px;
+    }
+
+    .agent-mark {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: var(--provider-soft);
+      color: var(--provider);
+      font: 700 10px var(--mono);
+    }
+
+    .quota-head strong {
+      font-size: 12px;
+    }
+
+    .quota-head span {
+      display: block;
+      margin-top: 2px;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+    }
+
+    .quota-row + .quota-row {
+      margin-top: 12px;
+    }
+
+    .quota-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .quota-label strong {
+      color: var(--text);
+      font: 650 11px var(--mono);
+    }
+
+    .quota-track {
+      height: 5px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--panel-active);
+    }
+
+    .quota-track i {
+      display: block;
+      width: var(--value);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--provider);
+    }
+
+    .reset {
+      margin-top: 5px;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .codex {
+      --provider: var(--codex);
+      --provider-soft: var(--codex-soft);
+    }
+
+    .claude {
+      --provider: var(--claude);
+      --provider-soft: var(--claude-soft);
+    }
+
+    .other {
+      --provider: var(--purple);
+      --provider-soft: var(--purple-soft);
+    }
+
+    .session-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      min-width: 0;
+      min-height: 106px;
+      padding: 15px 14px 14px 17px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-bg);
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    .session-card:hover {
+      border-color: var(--border-strong);
+      background: var(--panel-subtle);
+      transform: translateY(-1px);
+    }
+
+    .session-card::before {
+      content: "";
+      position: absolute;
+      inset: 11px auto 11px 0;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--provider);
+      opacity: 0.72;
+    }
+
+    .session-card.is-live::before {
+      animation: live-trace 2.2s ease-in-out infinite;
+    }
+
+    @keyframes live-trace {
+      0%,
+      100% { opacity: 0.46; }
+      50% { opacity: 1; box-shadow: 0 0 10px color-mix(in srgb, var(--provider) 48%, transparent); }
+    }
+
+    .session-main {
+      min-width: 0;
+      cursor: pointer;
+    }
+
+    .session-topline {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 8px;
+    }
+
+    .live-label,
+    .source-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--provider);
+      font: 650 9px var(--mono);
+      letter-spacing: 0.45px;
+      text-transform: uppercase;
+    }
+
+    .live-label {
+      padding: 3px 6px;
+      border-radius: 5px;
+      background: var(--provider-soft);
+    }
+
+    .live-label .agent-dot {
+      width: 5px;
+      height: 5px;
+    }
+
+    .time {
+      margin-left: auto;
+      color: var(--text-faint);
+      font: 10px var(--mono);
+    }
+
+    .session-card h4 {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 640;
+      letter-spacing: -0.15px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-path {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      margin-top: 9px;
+      color: var(--text-muted);
+      font: 10px var(--mono);
+    }
+
+    .session-path svg {
+      flex: 0 0 auto;
+      width: 12px;
+      height: 12px;
+    }
+
+    .session-path span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .resume {
+      align-self: end;
+      min-width: 72px;
+      height: 31px;
+      padding: 0 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      background: var(--panel-bg);
+      color: var(--text-dim);
+      font: 620 11px var(--mono);
+      transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+    }
+
+    .resume:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .resume.done {
+      border-color: color-mix(in srgb, var(--codex) 48%, var(--border));
+      background: var(--success-bg);
+      color: var(--success-text);
+    }
+
+    .skills-panel {
+      margin-top: 16px;
+      padding: 15px 16px;
+    }
+
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .skill {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      background: var(--panel-subtle);
+      text-align: left;
+    }
+
+    .skill:hover {
+      border-color: var(--border-strong);
+      background: var(--panel-hover);
+    }
+
+    .skill-rank {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .skill strong {
+      display: block;
+      margin-top: 5px;
+      overflow: hidden;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .skill small {
+      display: block;
+      margin-top: 6px;
+      color: var(--text-muted);
+      font: 9px var(--mono);
+    }
+
+    /* Variant A — balanced cards */
+    .variant {
+      display: none;
+    }
+
+    body[data-variant="A"] .variant-a,
+    body[data-variant="B"] .variant-b,
+    body[data-variant="C"] .variant-c {
+      display: block;
+    }
+
+    .a-overview {
+      display: grid;
+      grid-template-columns: minmax(300px, 1.55fr) minmax(180px, 0.85fr) minmax(180px, 0.85fr);
+      overflow: hidden;
+    }
+
+    .a-overview > div {
+      min-width: 0;
+      padding: 16px;
+    }
+
+    .a-overview > div + div {
+      border-left: 1px solid var(--border-subtle);
+    }
+
+    .a-sessions {
+      margin-top: 16px;
+      padding: 16px;
+    }
+
+    .subsection + .subsection {
+      margin-top: 19px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .session-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    /* Variant B — flat, Finder-like rows */
+    .b-overview {
+      display: grid;
+      grid-template-columns: minmax(240px, 1.1fr) repeat(2, minmax(200px, 1fr));
+      overflow: hidden;
+    }
+
+    .b-overview > div {
+      min-width: 0;
+      padding: 16px;
+    }
+
+    .b-overview > div + div {
+      border-left: 1px solid var(--border-subtle);
+    }
+
+    .usage-source-list {
+      display: grid;
+      gap: 7px;
+      margin-top: 10px;
+      padding-top: 9px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .usage-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 14px;
+    }
+
+    .usage-metrics .metric strong {
+      font-size: clamp(17px, 1.45vw, 21px);
+    }
+
+    .token-mix {
+      margin-top: 11px;
+    }
+
+    .token-mix-bar {
+      display: flex;
+      height: 5px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--panel-subtle);
+    }
+
+    .token-mix-bar i {
+      width: var(--value);
+      min-width: 2px;
+      background: var(--mix-color);
+      transition: width 180ms ease;
+    }
+
+    .token-mix-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 10px;
+      margin-top: 7px;
+      color: var(--text-faint);
+      font: 8.5px var(--mono);
+    }
+
+    .token-mix-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+
+    .token-mix-legend i {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--mix-color);
+    }
+
+    .token-mix-legend b {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .usage-source-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 9px;
+      color: var(--text-muted);
+      font: 9px var(--mono);
+    }
+
+    .usage-source-row span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .usage-source-row i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--provider);
+    }
+
+    .usage-source-row em {
+      color: var(--text-dim);
+      font-style: normal;
+      white-space: nowrap;
+    }
+
+    .b-session-table {
+      margin-top: 16px;
+      overflow: hidden;
+    }
+
+    .b-work-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .b-session-panel,
+    .b-workflow-panel {
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .b-session-panel > .section-head {
+      min-height: 44px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .b-session-panel .session-line {
+      grid-template-columns: minmax(0, 1fr) 68px 70px;
+      gap: 9px;
+    }
+
+    .b-session-panel .session-line time {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .b-workflow-panel {
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+    }
+
+    .workflow-list {
+      display: grid;
+      flex: 1;
+      grid-template-rows: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .workflow-placeholder {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      margin-top: 12px;
+      border: 1px dashed var(--border-subtle);
+      border-radius: 8px;
+      color: var(--text-faint);
+      text-align: center;
+    }
+
+    .workflow-placeholder strong {
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .workflow-placeholder span {
+      max-width: 220px;
+      font: 9px/1.5 var(--mono);
+    }
+
+    .workflow-item {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 0;
+      padding: 10px 11px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      background: var(--panel-subtle);
+    }
+
+    .workflow-state,
+    .workflow-main,
+    .workflow-progress {
+      display: flex;
+      align-items: center;
+    }
+
+    .workflow-state {
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--text-muted);
+      font: 9px var(--mono);
+    }
+
+    .workflow-state-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--codex);
+      font-weight: 600;
+    }
+
+    .workflow-item.waiting .workflow-state-label {
+      color: var(--claude);
+    }
+
+    .workflow-state i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .workflow-main {
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .workflow-copy {
+      min-width: 0;
+    }
+
+    .workflow-copy h3 {
+      overflow: hidden;
+      font-size: 12px;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workflow-copy p {
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .workflow-main button {
+      flex: 0 0 auto;
+      height: 27px;
+      padding: 0 9px;
+      border-radius: 6px;
+      background: var(--text);
+      color: var(--panel-bg);
+      font-size: 9px;
+      font-weight: 650;
+    }
+
+    .workflow-progress {
+      gap: 9px;
+      margin-top: 9px;
+    }
+
+    .workflow-track {
+      flex: 1;
+      height: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--border-subtle);
+    }
+
+    .workflow-track i {
+      display: block;
+      width: var(--value);
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+    }
+
+    .workflow-progress span {
+      flex: 0 0 auto;
+      color: var(--text-muted);
+      font: 9px var(--mono);
+    }
+
+    .b-table-head,
+    .session-line {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.5fr) minmax(150px, 0.8fr) 110px 86px 82px;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .b-table-head {
+      height: 38px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.55px;
+    }
+
+    .b-group-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 32px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--panel-subtle);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 660;
+    }
+
+    .b-group-label .count {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .session-line {
+      min-height: 54px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .session-line:last-child {
+      border-bottom: 0;
+    }
+
+    .session-line:hover {
+      background: var(--panel-subtle);
+    }
+
+    .line-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .line-title::before {
+      content: "";
+      flex: 0 0 auto;
+      width: 3px;
+      height: 24px;
+      border-radius: 99px;
+      background: var(--provider);
+      opacity: 0.75;
+    }
+
+    .line-copy {
+      min-width: 0;
+    }
+
+    .line-copy strong,
+    .line-copy small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .line-copy strong {
+      font-size: 11px;
+      font-weight: 620;
+    }
+
+    .line-copy small {
+      margin-top: 3px;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .line-cell {
+      overflow: hidden;
+      color: var(--text-muted);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .line-cell.mono {
+      font-family: var(--mono);
+    }
+
+    .line-cell .source-label {
+      font-size: 9px;
+    }
+
+    .session-line .resume {
+      align-self: center;
+      min-width: 68px;
+      height: 29px;
+    }
+
+    .b-skills {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-top: 14px;
+      padding: 10px 12px;
+      overflow: hidden;
+    }
+
+    .b-skills > strong {
+      flex: 0 0 auto;
+      margin-right: 5px;
+      font-size: 11px;
+    }
+
+    .skill-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      padding: 7px 9px;
+      border-radius: 6px;
+      background: var(--panel-subtle);
+      color: var(--text-dim);
+      font: 10px var(--mono);
+    }
+
+    .skill-pill:hover {
+      background: var(--panel-hover);
+    }
+
+    .skill-pill em {
+      color: var(--text-faint);
+      font-style: normal;
+    }
+
+    /* Variant C — focus on the most recent live session */
+    .c-overview {
+      display: grid;
+      grid-template-columns: minmax(280px, 1.2fr) minmax(390px, 1.8fr);
+      overflow: hidden;
+    }
+
+    .c-overview > div {
+      padding: 15px 16px;
+    }
+
+    .c-overview > div + div {
+      border-left: 1px solid var(--border-subtle);
+    }
+
+    .c-quotas {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .c-quota-block + .c-quota-block {
+      padding-left: 20px;
+      border-left: 1px solid var(--border-subtle);
+    }
+
+    .c-session-board {
+      margin-top: 16px;
+      padding: 16px;
+    }
+
+    .focus-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 1.3fr) minmax(260px, 0.8fr);
+      gap: 10px;
+    }
+
+    .featured {
+      position: relative;
+      display: grid;
+      min-height: 186px;
+      padding: 20px;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--codex) 36%, var(--border));
+      border-radius: 9px;
+      background:
+        linear-gradient(135deg, color-mix(in srgb, var(--codex-soft) 70%, transparent), transparent 56%),
+        var(--panel-bg);
+    }
+
+    .featured::after {
+      content: "";
+      position: absolute;
+      right: -28px;
+      bottom: -44px;
+      width: 150px;
+      height: 150px;
+      border: 1px solid color-mix(in srgb, var(--codex) 18%, transparent);
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 28px color-mix(in srgb, var(--codex) 5%, transparent),
+        0 0 0 54px color-mix(in srgb, var(--codex) 3%, transparent);
+    }
+
+    .featured-copy {
+      position: relative;
+      z-index: 1;
+      align-self: end;
+      max-width: 520px;
+    }
+
+    .featured-copy h2 {
+      margin: 10px 0 8px;
+      font-size: clamp(18px, 2vw, 24px);
+      line-height: 1.16;
+      letter-spacing: -0.7px;
+    }
+
+    .featured-copy p {
+      margin: 0;
+      color: var(--text-muted);
+      font: 10px var(--mono);
+    }
+
+    .featured .resume {
+      position: relative;
+      z-index: 1;
+      justify-self: start;
+      align-self: end;
+      min-width: 96px;
+      border-color: var(--codex);
+      background: var(--codex);
+      color: #ffffff;
+    }
+
+    body[data-theme="dark"] .featured .resume {
+      color: #06251c;
+    }
+
+    .live-queue {
+      display: grid;
+      align-content: start;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-bg);
+    }
+
+    .queue-head {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .queue-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 57px;
+      padding: 8px 11px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .queue-item:last-child {
+      border-bottom: 0;
+    }
+
+    .queue-item:hover {
+      background: var(--panel-subtle);
+    }
+
+    .queue-copy {
+      min-width: 0;
+    }
+
+    .queue-copy strong,
+    .queue-copy small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .queue-copy strong {
+      font-size: 10px;
+    }
+
+    .queue-copy small {
+      margin-top: 4px;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .queue-item .resume {
+      min-width: 30px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+    }
+
+    .c-recent {
+      margin-top: 17px;
+      padding-top: 15px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: 22px;
+    }
+
+    .timeline-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: 68px 12px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 51px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .timeline-item time {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .timeline-node {
+      width: 7px;
+      height: 7px;
+      border: 2px solid var(--provider);
+      border-radius: 50%;
+      background: var(--panel-bg);
+    }
+
+    .timeline-copy {
+      min-width: 0;
+    }
+
+    .timeline-copy strong,
+    .timeline-copy small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .timeline-copy strong {
+      font-size: 10px;
+    }
+
+    .timeline-copy small {
+      margin-top: 3px;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .timeline-item .resume {
+      min-width: 62px;
+      height: 27px;
+      font-size: 9px;
+    }
+
+    .c-skills {
+      margin-top: 15px;
+      padding: 14px 15px;
+    }
+
+    .c-skills-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .c-skill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+      padding: 9px;
+      border-bottom: 2px solid var(--border-subtle);
+      color: var(--text-dim);
+      text-align: left;
+    }
+
+    .c-skill:hover {
+      border-color: var(--purple);
+      background: var(--panel-subtle);
+    }
+
+    .c-skill strong {
+      overflow: hidden;
+      font: 10px var(--mono);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .c-skill span {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    /* Secondary pages */
+    .session-scope {
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+
+    .scope-primary {
+      display: flex;
+      align-items: stretch;
+      gap: 9px;
+      padding: 10px;
+    }
+
+    .scope-route {
+      display: grid;
+      grid-template-columns: 1.05fr 1.25fr 0.9fr;
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-bg);
+      overflow: hidden;
+    }
+
+    .scope-node {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+      padding: 8px 11px;
+      color: var(--text-muted);
+    }
+
+    .scope-node + .scope-node {
+      border-left: 1px solid var(--border-subtle);
+    }
+
+    .scope-node:focus-within {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .scope-node svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    .scope-node-copy {
+      display: grid;
+      min-width: 0;
+    }
+
+    .scope-node-copy > span {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .scope-node select {
+      width: 100%;
+      min-width: 0;
+      height: 22px;
+      padding: 0 20px 0 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 610;
+      text-overflow: ellipsis;
+    }
+
+    .scope-reset {
+      flex: 0 0 auto;
+      min-width: 68px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-bg);
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .scope-reset:hover {
+      border-color: var(--border-strong);
+      background: var(--panel-hover);
+      color: var(--text);
+    }
+
+    .scope-secondary {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      min-height: 45px;
+      padding: 7px 10px;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--panel-subtle);
+    }
+
+    .scope-filter-group,
+    .scope-select-compact {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .scope-filter-group > span,
+    .scope-select-compact > span {
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      white-space: nowrap;
+    }
+
+    .scope-segment {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      background: var(--panel-bg);
+    }
+
+    .scope-segment button {
+      height: 24px;
+      padding: 0 7px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      font-size: 9px;
+    }
+
+    .scope-segment button.active {
+      background: var(--panel-active);
+      color: var(--text);
+      font-weight: 640;
+    }
+
+    .scope-select-compact {
+      height: 29px;
+      padding: 0 7px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      background: var(--panel-bg);
+    }
+
+    .scope-select-compact select {
+      max-width: 92px;
+      padding: 0 16px 0 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 9px;
+    }
+
+    .scope-select-compact:focus-within {
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+      background: var(--accent-soft);
+    }
+
+    .scope-result-total {
+      margin-left: auto;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      white-space: nowrap;
+    }
+
+    .secondary-list {
+      overflow: hidden;
+    }
+
+    .secondary-list-head,
+    .secondary-row {
+      display: grid;
+      grid-template-columns: minmax(250px, 1.45fr) minmax(130px, 0.75fr) 104px 100px 92px 110px;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .secondary-list-head {
+      min-height: 36px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.45px;
+    }
+
+    .secondary-row {
+      min-height: 60px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .secondary-row:last-child {
+      border-bottom: 0;
+    }
+
+    .secondary-row:hover {
+      background: var(--panel-subtle);
+    }
+
+    .secondary-row strong {
+      display: block;
+      font-size: 12px;
+    }
+
+    .secondary-row small {
+      display: block;
+      margin-top: 4px;
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .location-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      width: fit-content;
+      padding: 4px 6px;
+      border-radius: 5px;
+      color: var(--text-muted);
+      background: var(--panel-subtle);
+      font: 9px var(--mono);
+    }
+
+    .location-badge.remote {
+      color: var(--purple);
+      background: var(--purple-soft);
+    }
+
+    .location-badge i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .search-result-note {
+      display: none;
+      margin-bottom: 12px;
+      padding: 9px 11px;
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+      border-radius: 8px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+    }
+
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      min-height: 510px;
+      overflow: hidden;
+    }
+
+    .settings-menu {
+      padding: 10px;
+      border-right: 1px solid var(--border-subtle);
+      background: var(--panel-subtle);
+    }
+
+    .settings-menu button {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      padding: 10px;
+      border-radius: 7px;
+      color: var(--text-muted);
+      text-align: left;
+    }
+
+    .settings-menu button:hover,
+    .settings-menu button.active {
+      background: var(--panel-bg);
+      color: var(--text);
+    }
+
+    .settings-detail {
+      padding: 28px;
+    }
+
+    .settings-detail h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    .settings-detail p {
+      max-width: 680px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .detail-code {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 8px;
+      background: var(--panel-subtle);
+      color: var(--text-dim);
+      font: 11px/1.65 var(--mono);
+    }
+
+    .skills-page-layout {
+      display: flex;
+      min-height: 540px;
+      height: calc(100vh - 164px);
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .skills-page-toolbar {
+      display: flex;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .skills-page-search {
+      display: flex;
+      flex: 1 1 210px;
+      align-items: center;
+      gap: 7px;
+      min-width: 190px;
+      height: 32px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel-bg);
+      color: var(--text-faint);
+    }
+
+    .skills-page-search svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .skills-page-search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 10px;
+    }
+
+    .skills-page-search:focus-within {
+      border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .skills-source-filter {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel-subtle);
+    }
+
+    .skills-source-filter button {
+      height: 26px;
+      padding: 0 8px;
+      border-radius: 5px;
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 620;
+    }
+
+    .skills-source-filter button.active {
+      background: var(--panel-bg);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--border-subtle);
+    }
+
+    .skills-page-sort {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 32px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text-faint);
+      font-size: 9px;
+    }
+
+    .skills-page-sort select {
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 9px;
+    }
+
+    .skills-page-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .skills-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      height: 30px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .skills-action:hover {
+      background: var(--panel-hover);
+      color: var(--text);
+    }
+
+    .skills-action.danger {
+      color: var(--danger);
+    }
+
+    .skills-action.icon-only {
+      width: 30px;
+      justify-content: center;
+      padding: 0;
+      font-size: 14px;
+    }
+
+    .skills-page-roots {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 6px;
+      padding: 8px 12px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .skills-page-roots span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 23px;
+      padding: 0 8px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      background: var(--panel-subtle);
+      color: var(--text-faint);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .skills-page-roots strong {
+      color: var(--text-muted);
+      font-weight: 620;
+    }
+
+    .skills-page-shell {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      min-height: 0;
+      flex: 1;
+    }
+
+    .skills-page-list {
+      min-height: 0;
+      padding: 8px;
+      overflow: auto;
+      border-right: 1px solid var(--border-subtle);
+      background: var(--panel-subtle);
+    }
+
+    .skill-list-item {
+      display: grid;
+      gap: 5px;
+      padding: 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+
+    .skill-list-item + .skill-list-item {
+      margin-top: 5px;
+    }
+
+    .skill-list-item:hover {
+      background: var(--panel-hover);
+    }
+
+    .skill-list-item.active {
+      border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+      background: var(--panel-bg);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+
+    .skill-list-head,
+    .skill-list-name,
+    .skill-preview-title,
+    .skill-version-strip,
+    .skill-preview-tabs {
+      display: flex;
+      align-items: center;
+    }
+
+    .skill-list-head {
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .skill-list-head input {
+      flex: 0 0 auto;
+      width: 13px;
+      height: 13px;
+      margin: 0;
+    }
+
+    .skill-list-name {
+      min-width: 0;
+      flex: 1;
+      gap: 6px;
+    }
+
+    .skill-list-name strong {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 670;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .skill-source-badge,
+    .skill-sync-badge {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      font-size: 8px;
+      font-weight: 680;
+    }
+
+    .skill-source-badge.codex {
+      background: var(--codex-soft);
+      color: var(--codex-text);
+    }
+
+    .skill-source-badge.claude {
+      background: var(--claude-soft);
+      color: var(--claude-text);
+    }
+
+    .skill-source-badge.shared,
+    .skill-source-badge.project {
+      background: var(--purple-soft);
+      color: var(--purple);
+    }
+
+    .skill-sync-badge {
+      background: var(--panel-active);
+      color: var(--text-faint);
+    }
+
+    .skill-sync-badge.local-newer,
+    .skill-sync-badge.local-only {
+      background: var(--claude-soft);
+      color: var(--claude-text);
+    }
+
+    .skill-list-item > p,
+    .skill-list-item > small {
+      overflow: hidden;
+      margin: 0 0 0 20px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .skill-list-item > p {
+      color: var(--text-muted);
+      font-size: 9px;
+    }
+
+    .skill-list-item > small {
+      color: var(--text-faint);
+      font: 8px var(--mono);
+    }
+
+    .skill-page-preview {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .skill-preview-title {
+      min-height: 48px;
+      gap: 7px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .skill-preview-title h2 {
+      min-width: 0;
+      overflow: hidden;
+      font-size: 15px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .skill-preview-tabs {
+      flex: 0 0 auto;
+      gap: 3px;
+      padding: 7px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--panel-subtle);
+    }
+
+    .skill-preview-tabs button {
+      min-width: 70px;
+      height: 27px;
+      padding: 0 11px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 650;
+    }
+
+    .skill-preview-tabs button.active {
+      background: var(--panel-bg);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--border);
+    }
+
+    .skill-page-overview {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      background: var(--panel-subtle);
+    }
+
+    .skill-overview-intro {
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--panel-bg);
+    }
+
+    .skill-overview-intro h3,
+    .skill-overview-card h3 {
+      font-size: 10px;
+      font-weight: 680;
+    }
+
+    .skill-overview-intro p {
+      margin: 7px 0 0;
+      color: var(--text-muted);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .skill-version-strip {
+      gap: 12px;
+      min-height: 38px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--panel-bg);
+      color: var(--text-faint);
+      font: 9px var(--mono);
+    }
+
+    .skill-version-strip strong {
+      color: var(--text-dim);
+    }
+
+    .skill-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px 16px 18px;
+    }
+
+    .skill-overview-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      background: var(--panel-bg);
+    }
+
+    .skill-overview-card h3 {
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .skill-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding: 11px;
+    }
+
+    .skill-meta-grid div {
+      min-width: 0;
+    }
+
+    .skill-meta-grid .wide {
+      grid-column: 1 / -1;
+    }
+
+    .skill-meta-grid dt {
+      color: var(--text-faint);
+      font: 8px var(--mono);
+    }
+
+    .skill-meta-grid dd {
+      margin: 4px 0 0;
+      overflow: hidden;
+      color: var(--text-dim);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .skill-meta-grid .wide dd {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      font-family: var(--mono);
+      line-height: 1.45;
+    }
+
+    .prototype-switcher {
+      position: fixed;
+      z-index: 100;
+      left: 50%;
+      bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      height: 42px;
+      padding: 5px;
+      border-radius: 999px;
+      background: #101216;
+      color: #f7f8fa;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.26);
+      transform: translateX(-50%);
+    }
+
+    body[data-theme="dark"] .prototype-switcher {
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: #f5f6f8;
+      color: #14161a;
+    }
+
+    .prototype-switcher button {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      color: inherit;
+    }
+
+    .prototype-switcher button:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    body[data-theme="dark"] .prototype-switcher button:hover {
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    .variant-label {
+      min-width: 144px;
+      text-align: center;
+      font: 600 11px var(--mono);
+    }
+
+    .prototype-tag {
+      position: fixed;
+      z-index: 90;
+      right: 16px;
+      bottom: 18px;
+      padding: 6px 8px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 6px;
+      background: var(--panel-bg);
+      color: var(--text-faint);
+      font: 9px var(--mono);
+      letter-spacing: 0.5px;
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 110;
+      top: 74px;
+      right: 20px;
+      max-width: 320px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-bg);
+      color: var(--text-dim);
+      box-shadow: var(--shadow);
+      font-size: 11px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 1170px) {
+      .a-overview {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .a-overview .usage-pane {
+        grid-column: 1 / -1;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .a-overview > div:nth-child(2) {
+        border-left: 0;
+      }
+
+      .skills-grid,
+      .c-skills-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 980px) {
+      .session-grid,
+      .timeline,
+      .focus-grid,
+      .c-overview {
+        grid-template-columns: 1fr;
+      }
+
+      .c-overview > div + div {
+        border-top: 1px solid var(--border-subtle);
+        border-left: 0;
+      }
+
+      .b-table-head {
+        display: none;
+      }
+
+      .session-line {
+        grid-template-columns: minmax(220px, 1fr) 110px 86px 76px;
+      }
+
+      .session-line > :nth-child(2) {
+        display: none;
+      }
+
+      .b-work-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .b-session-panel .session-line {
+        grid-template-columns: minmax(0, 1fr) 58px 68px;
+      }
+
+      .b-session-panel .session-line > :nth-child(2) {
+        display: block;
+      }
+
+      .page-view {
+        padding-inline: 18px;
+      }
+
+      .scope-secondary {
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .scope-result-total {
+        margin-left: 0;
+      }
+
+      .secondary-list-head {
+        display: none;
+      }
+
+      .secondary-row {
+        grid-template-columns: minmax(220px, 1fr) 94px 88px 82px;
+      }
+
+      .secondary-row .project-cell,
+      .secondary-row .source-cell {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body data-theme="light" data-variant="B" data-page="workbench">
+  <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+
+  <div class="app">
+    <aside class="rail">
+      <div class="brand" aria-label="AgentRecall">
+        <div class="brand-mark">AR</div>
+        <span>Recall</span>
+      </div>
+
+      <nav class="rail-nav" aria-label="主导航">
+        <button class="nav-tab active" data-page-target="workbench">
+          <svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"></path><path d="M5.5 10v9h13v-9"></path><path d="M9.5 19v-5h5v5"></path></svg>
+          <span>工作台</span>
+        </button>
+        <button class="nav-tab" data-page-target="sessions">
+          <svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 3v-3H5z"></path><path d="M8 9h8M8 12h5"></path></svg>
+          <span>会话</span>
+        </button>
+        <button class="nav-tab" data-page-target="skills">
+          <svg viewBox="0 0 24 24"><path d="m12 3 2.1 4.8L19 10l-4.9 2.2L12 17l-2.1-4.8L5 10l4.9-2.2z"></path><path d="m18.5 16 .8 1.7L21 18.5l-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8z"></path></svg>
+          <span>Skills</span>
+        </button>
+      </nav>
+
+      <div class="rail-bottom">
+        <button class="nav-tab" data-page-target="settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"></path></svg>
+          <span>设置</span>
+        </button>
+      </div>
+    </aside>
+
+    <section class="shell">
+      <header class="topbar">
+        <span class="topbar-index-state"><i></i>索引已就绪</span>
+        <div class="top-actions">
+          <button class="icon-button" id="theme-toggle" title="切换明暗主题" aria-label="切换明暗主题">
+            <svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"></path><circle cx="12" cy="12" r="4"></circle></svg>
+          </button>
+          <button class="refresh-button" id="refresh-index">
+            <svg viewBox="0 0 24 24"><path d="M20 6v5h-5"></path><path d="M4 18v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 9M4 15l2.4 2.6A7 7 0 0 0 17.9 15"></path></svg>
+            <span>更新索引</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="viewport">
+        <main class="page-view" id="workbench-page">
+          <div class="page-inner">
+            <section class="variant variant-a" aria-label="方案 A">
+              <section class="panel a-overview">
+                <div class="usage-pane">
+                  <div class="section-head">
+                    <h2>用量</h2>
+                    <div class="periods" data-periods>
+                      <button class="active" data-period="today">今天</button>
+                      <button data-period="7d">7 天</button>
+                      <button data-period="30d">30 天</button>
+                      <button data-period="all">全部</button>
+                    </div>
+                  </div>
+                  <div class="metric-pair">
+                    <div class="metric"><strong data-messages>1,284</strong><span>消息</span></div>
+                    <div class="metric"><strong data-tokens>3.6M</strong><span>Token</span></div>
+                  </div>
+                  <div class="source-breakdown">
+                    <span class="source-chip codex"><i></i>Codex · 2.1M</span>
+                    <span class="source-chip claude"><i></i>Claude Code · 1.5M</span>
+                  </div>
+                </div>
+                <div class="codex">
+                  <div class="quota-head">
+                    <span class="agent-mark">CX</span>
+                    <div><strong>Codex</strong><span>额度</span></div>
+                  </div>
+                  <div class="quota-row">
+                    <div class="quota-label"><span>5 小时</span><strong>68%</strong></div>
+                    <div class="quota-track"><i style="--value:68%"></i></div>
+                    <div class="reset">2 小时 18 分后重置</div>
+                  </div>
+                  <div class="quota-row">
+                    <div class="quota-label"><span>7 天</span><strong>52%</strong></div>
+                    <div class="quota-track"><i style="--value:52%"></i></div>
+                    <div class="reset">周四 10:00 重置</div>
+                  </div>
+                </div>
+                <div class="claude">
+                  <div class="quota-head">
+                    <span class="agent-mark">CC</span>
+                    <div><strong>Claude Code</strong><span>额度</span></div>
+                  </div>
+                  <div class="quota-row">
+                    <div class="quota-label"><span>5 小时</span><strong>41%</strong></div>
+                    <div class="quota-track"><i style="--value:41%"></i></div>
+                    <div class="reset">1 小时 02 分后重置</div>
+                  </div>
+                  <div class="quota-row">
+                    <div class="quota-label"><span>7 天</span><strong>74%</strong></div>
+                    <div class="quota-track"><i style="--value:74%"></i></div>
+                    <div class="reset">周一 08:00 重置</div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel a-sessions">
+                <div class="section-head">
+                  <h2>会话</h2>
+                  <button class="link-button" data-goto-sessions>查看全部
+                    <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg>
+                  </button>
+                </div>
+                <div class="subsection">
+                  <div class="section-head">
+                    <h3>活跃会话</h3>
+                    <span class="section-meta">2 个正在运行</span>
+                  </div>
+                  <div class="session-grid">
+                    <article class="session-card is-live codex" tabindex="0">
+                      <div class="session-main">
+                        <div class="session-topline"><span class="live-label"><i class="agent-dot"></i>Open · Codex</span><time class="time">刚刚</time></div>
+                        <h4>优化启动时的增量索引</h4>
+                        <div class="session-path"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg><span>~/projects/agent-recall</span></div>
+                      </div>
+                      <button class="resume">Resume</button>
+                    </article>
+                    <article class="session-card is-live claude" tabindex="0">
+                      <div class="session-main">
+                        <div class="session-topline"><span class="live-label"><i class="agent-dot"></i>Open · Claude</span><time class="time">4 分钟前</time></div>
+                        <h4>整理远程会话同步的错误提示</h4>
+                        <div class="session-path"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg><span>~/projects/agent-recall</span></div>
+                      </div>
+                      <button class="resume">Resume</button>
+                    </article>
+                  </div>
+                </div>
+                <div class="subsection">
+                  <div class="section-head">
+                    <h3>最近会话</h3>
+                    <span class="section-meta">按最后活动时间</span>
+                  </div>
+                  <div class="session-grid">
+                    <article class="session-card codex" tabindex="0"><div class="session-main"><div class="session-topline"><span class="source-label"><i class="agent-dot"></i>Codex</span><time class="time">18 分钟前</time></div><h4>设计 AgentRecall 2.0 工作台</h4><div class="session-path"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg><span>~/projects/agent-recall</span></div></div><button class="resume">Resume</button></article>
+                    <article class="session-card claude" tabindex="0"><div class="session-main"><div class="session-topline"><span class="source-label"><i class="agent-dot"></i>Claude Code</span><time class="time">46 分钟前</time></div><h4>检查安装文档中的镜像说明</h4><div class="session-path"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg><span>~/projects/cli-tool</span></div></div><button class="resume">Resume</button></article>
+                    <article class="session-card codex" tabindex="0"><div class="session-main"><div class="session-topline"><span class="source-label"><i class="agent-dot"></i>Codex</span><time class="time">2 小时前</time></div><h4>修复 Windows 路径兼容性</h4><div class="session-path"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg><span>~/projects/sample-app</span></div></div><button class="resume">Resume</button></article>
+                    <article class="session-card claude" tabindex="0"><div class="session-main"><div class="session-topline"><span class="source-label"><i class="agent-dot"></i>Claude Code</span><time class="time">昨天</time></div><h4>梳理 Skills 使用次数统计</h4><div class="session-path"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg><span>~/projects/personal-notes</span></div></div><button class="resume">Resume</button></article>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel skills-panel">
+                <div class="section-head"><h2>常用 Skills</h2><button class="link-button" data-page-target="skills">查看 Skills <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></button></div>
+                <div class="skills-grid">
+                  <button class="skill" data-skill="brainstorming"><span class="skill-rank">01</span><strong>brainstorming</strong><small>38 次 · 今天</small></button>
+                  <button class="skill" data-skill="systematic-debugging"><span class="skill-rank">02</span><strong>systematic-debugging</strong><small>27 次 · 今天</small></button>
+                  <button class="skill" data-skill="frontend-design"><span class="skill-rank">03</span><strong>frontend-design</strong><small>21 次 · 昨天</small></button>
+                  <button class="skill" data-skill="test-driven-development"><span class="skill-rank">04</span><strong>test-driven-development</strong><small>19 次 · 2 天前</small></button>
+                  <button class="skill" data-skill="github"><span class="skill-rank">05</span><strong>github</strong><small>16 次 · 3 天前</small></button>
+                </div>
+              </section>
+            </section>
+
+            <section class="variant variant-b" aria-label="方案 B">
+              <section class="panel b-overview">
+                <div class="b-usage-current">
+                  <div class="section-head">
+                    <h2>用量</h2>
+                    <div class="periods" data-periods><button class="active" data-period="today">今天</button><button data-period="7d">7 天</button><button data-period="30d">30 天</button><button data-period="all">全部</button></div>
+                  </div>
+                  <div class="usage-metrics">
+                    <div class="metric"><strong data-sessions>42</strong><span>会话</span></div>
+                    <div class="metric"><strong data-messages>1,284</strong><span>消息</span></div>
+                    <div class="metric"><strong data-tokens>3.6M</strong><span>Token</span></div>
+                    <div class="metric" title="缓存输入 ÷（普通输入 + 缓存输入）"><strong data-cache-rate>45.3%</strong><span>缓存率</span></div>
+                  </div>
+                  <div class="token-mix" aria-label="Token 构成">
+                    <div class="token-mix-bar">
+                      <i data-mix-bar="input" style="--value:40.3%;--mix-color:var(--accent)"></i>
+                      <i data-mix-bar="cached" style="--value:33.3%;--mix-color:var(--purple)"></i>
+                      <i data-mix-bar="output" style="--value:20%;--mix-color:var(--codex)"></i>
+                      <i data-mix-bar="reasoning" style="--value:6.4%;--mix-color:var(--claude)"></i>
+                    </div>
+                    <div class="token-mix-legend">
+                      <span style="--mix-color:var(--accent)"><i></i>输入 <b data-mix-value="input">1.45M</b></span>
+                      <span style="--mix-color:var(--purple)"><i></i>缓存 <b data-mix-value="cached">1.20M</b></span>
+                      <span style="--mix-color:var(--codex)"><i></i>输出 <b data-mix-value="output">720K</b></span>
+                      <span style="--mix-color:var(--claude)"><i></i>推理 <b data-mix-value="reasoning">230K</b></span>
+                    </div>
+                  </div>
+                  <div class="usage-source-list">
+                    <div class="usage-source-row codex"><span><i></i>Codex</span><em>742 条 · 2.1M</em></div>
+                    <div class="usage-source-row claude"><span><i></i>Claude Code</span><em>542 条 · 1.5M</em></div>
+                  </div>
+                </div>
+                <div class="codex">
+                  <div class="quota-head"><span class="agent-mark">CX</span><div><strong>Codex</strong><span>额度</span></div></div>
+                  <div class="quota-row"><div class="quota-label"><span>5 小时</span><strong>68%</strong></div><div class="quota-track"><i style="--value:68%"></i></div><div class="reset">2 小时 18 分后重置</div></div>
+                  <div class="quota-row"><div class="quota-label"><span>7 天</span><strong>52%</strong></div><div class="quota-track"><i style="--value:52%"></i></div><div class="reset">周四 10:00 重置</div></div>
+                </div>
+                <div class="claude">
+                  <div class="quota-head"><span class="agent-mark">CC</span><div><strong>Claude Code</strong><span>额度</span></div></div>
+                  <div class="quota-row"><div class="quota-label"><span>5 小时</span><strong>41%</strong></div><div class="quota-track"><i style="--value:41%"></i></div><div class="reset">1 小时 02 分后重置</div></div>
+                  <div class="quota-row"><div class="quota-label"><span>7 天</span><strong>74%</strong></div><div class="quota-track"><i style="--value:74%"></i></div><div class="reset">周一 08:00 重置</div></div>
+                </div>
+              </section>
+
+              <section class="b-work-grid">
+                <section class="panel b-session-panel">
+                  <div class="section-head"><h2>会话</h2><button class="link-button" data-goto-sessions>查看全部 <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></button></div>
+                <div class="b-group-label"><i class="agent-dot codex"></i>活跃会话 <span class="count">2</span></div>
+                  <div class="session-line codex"><div class="line-title"><div class="line-copy"><strong>优化启动时的增量索引</strong><small>agent-recall · Codex</small></div></div><time>刚刚</time><button class="resume">Resume</button></div>
+                  <div class="session-line claude"><div class="line-title"><div class="line-copy"><strong>整理远程会话同步的错误提示</strong><small>agent-recall · Claude Code</small></div></div><time>4 分钟前</time><button class="resume">Resume</button></div>
+                <div class="b-group-label">最近会话 <span class="count">按最后活动时间</span></div>
+                  <div class="session-line codex"><div class="line-title"><div class="line-copy"><strong>设计 AgentRecall 2.0 工作台</strong><small>agent-recall · Codex</small></div></div><time>18 分钟前</time><button class="resume">Resume</button></div>
+                  <div class="session-line claude"><div class="line-title"><div class="line-copy"><strong>检查安装文档中的镜像说明</strong><small>cli-tool · Claude Code</small></div></div><time>46 分钟前</time><button class="resume">Resume</button></div>
+                  <div class="session-line codex"><div class="line-title"><div class="line-copy"><strong>修复 Windows 路径兼容性</strong><small>sample-app · Codex</small></div></div><time>2 小时前</time><button class="resume">Resume</button></div>
+                </section>
+
+                <section class="panel b-workflow-panel">
+                  <div class="section-head"><h2>Workflow</h2></div>
+                  <div class="workflow-placeholder">
+                    <strong>暂无进行中的 Workflow</strong>
+                    <span>Workflow 暂未迁移，这里先保留后续展示位置。</span>
+                  </div>
+                </section>
+              </section>
+            </section>
+
+            <section class="variant variant-c" aria-label="方案 C">
+              <section class="panel c-overview">
+                <div>
+                  <div class="section-head"><h2>今日用量</h2><div class="periods" data-periods><button class="active" data-period="today">今天</button><button data-period="7d">7 天</button><button data-period="30d">30 天</button><button data-period="all">全部</button></div></div>
+                  <div class="metric-pair"><div class="metric"><strong data-messages>1,284</strong><span>消息</span></div><div class="metric"><strong data-tokens>3.6M</strong><span>Token</span></div></div>
+                </div>
+                <div class="c-quotas">
+                  <div class="c-quota-block codex"><div class="quota-head"><span class="agent-mark">CX</span><div><strong>Codex</strong><span>额度</span></div></div><div class="quota-row"><div class="quota-label"><span>5 小时</span><strong>68%</strong></div><div class="quota-track"><i style="--value:68%"></i></div></div><div class="quota-row"><div class="quota-label"><span>7 天</span><strong>52%</strong></div><div class="quota-track"><i style="--value:52%"></i></div></div></div>
+                  <div class="c-quota-block claude"><div class="quota-head"><span class="agent-mark">CC</span><div><strong>Claude Code</strong><span>额度</span></div></div><div class="quota-row"><div class="quota-label"><span>5 小时</span><strong>41%</strong></div><div class="quota-track"><i style="--value:41%"></i></div></div><div class="quota-row"><div class="quota-label"><span>7 天</span><strong>74%</strong></div><div class="quota-track"><i style="--value:74%"></i></div></div></div>
+                </div>
+              </section>
+
+              <section class="panel c-session-board">
+                <div class="section-head"><h2>会话</h2><button class="link-button" data-goto-sessions>查看全部 <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></button></div>
+                <div class="focus-grid">
+                  <article class="featured codex">
+                    <div class="featured-copy"><span class="live-label"><i class="agent-dot"></i>Open · Codex · 刚刚</span><h2>优化启动时的增量索引</h2><p>~/projects/agent-recall</p></div>
+                    <button class="resume">Resume</button>
+                  </article>
+                  <div class="live-queue">
+                    <div class="queue-head">其他活跃会话</div>
+                    <div class="queue-item claude"><i class="agent-dot"></i><div class="queue-copy"><strong>整理远程同步错误提示</strong><small>Claude · 4 分钟前</small></div><button class="resume" title="Resume">↗</button></div>
+                    <div class="queue-item codex"><i class="agent-dot"></i><div class="queue-copy"><strong>检查构建后的启动速度</strong><small>Codex · 11 分钟前</small></div><button class="resume" title="Resume">↗</button></div>
+                    <div class="queue-item other"><i class="agent-dot"></i><div class="queue-copy"><strong>整理新的安装命令</strong><small>CodeBuddy · 15 分钟前</small></div><button class="resume" title="Resume">↗</button></div>
+                  </div>
+                </div>
+                <div class="c-recent">
+                  <div class="section-head"><h3>最近会话</h3><span class="section-meta">不包含上方活跃会话</span></div>
+                  <div class="timeline">
+                    <div class="timeline-item codex"><time>18 分钟前</time><i class="timeline-node"></i><div class="timeline-copy"><strong>设计 AgentRecall 2.0 工作台</strong><small>agent-recall · Codex</small></div><button class="resume">Resume</button></div>
+                    <div class="timeline-item claude"><time>46 分钟前</time><i class="timeline-node"></i><div class="timeline-copy"><strong>检查安装文档中的镜像说明</strong><small>cli-tool · Claude</small></div><button class="resume">Resume</button></div>
+                    <div class="timeline-item codex"><time>2 小时前</time><i class="timeline-node"></i><div class="timeline-copy"><strong>修复 Windows 路径兼容性</strong><small>sample-app · Codex</small></div><button class="resume">Resume</button></div>
+                    <div class="timeline-item claude"><time>昨天</time><i class="timeline-node"></i><div class="timeline-copy"><strong>梳理 Skills 使用次数统计</strong><small>personal-notes · Claude</small></div><button class="resume">Resume</button></div>
+                  </div>
+                </div>
+              </section>
+
+            </section>
+          </div>
+        </main>
+
+        <main class="page-view" id="sessions-page">
+          <div class="page-inner">
+            <div class="page-heading"><div><h1>会话</h1><p>搜索、筛选和管理全部 Agent 会话。</p></div><span class="updated" id="session-count">128 个会话</span></div>
+            <label class="search sessions-search">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+              <input id="global-search" type="search" placeholder="搜索全部会话，按 Enter 查看结果…" />
+              <span class="keycap">⌘ K</span>
+            </label>
+            <div class="search-result-note" id="search-result-note"></div>
+            <section class="panel session-scope" aria-label="会话范围和筛选">
+              <div class="scope-primary">
+                <div class="scope-route">
+                  <label class="scope-node">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+                    <span class="scope-node-copy"><span>位置</span><select id="location-filter"><option value="all">本机和远程</option><option value="local">这台电脑</option><option value="remote">全部远程</option><option value="devbox">远程 · devbox</option></select></span>
+                  </label>
+                  <label class="scope-node">
+                    <svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v10H3z"></path></svg>
+                    <span class="scope-node-copy"><span>项目</span><select id="project-filter"><option value="all">全部项目</option><option value="agent-recall">agent-recall</option><option value="cli-tool">cli-tool</option><option value="sample-app">sample-app</option></select></span>
+                  </label>
+                  <label class="scope-node">
+                    <svg viewBox="0 0 24 24"><path d="m12 3 2.1 4.8L19 10l-4.9 2.2L12 17l-2.1-4.8L5 10l4.9-2.2z"></path></svg>
+                    <span class="scope-node-copy"><span>Agent</span><select id="source-filter"><option value="all">全部来源</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select></span>
+                  </label>
+                </div>
+                <button class="scope-reset" id="reset-session-filters">重置</button>
+              </div>
+              <div class="scope-secondary">
+                <div class="scope-filter-group">
+                  <span>状态</span>
+                  <div class="scope-segment" id="live-filter"><button class="active" data-value="all">全部</button><button data-value="open">Open</button><button data-value="closed">Closed</button></div>
+                </div>
+                <div class="scope-filter-group">
+                  <span>时间</span>
+                  <div class="scope-segment" id="time-filter"><button class="active" data-value="all">全部</button><button data-value="today">今天</button><button data-value="7d">7 天</button><button data-value="30d">30 天</button></div>
+                </div>
+                <label class="scope-select-compact"><span>标签</span><select><option>全部</option><option>bug</option><option>release</option></select></label>
+                <label class="scope-select-compact"><span>视图</span><select><option>全部</option><option>收藏</option><option>隐藏</option></select></label>
+                <label class="scope-select-compact"><span>排序</span><select><option>最新活动</option><option>智能</option><option>最早创建</option></select></label>
+                <span class="scope-result-total" id="scope-result-total">全部范围</span>
+              </div>
+            </section>
+            <section class="panel secondary-list">
+              <div class="secondary-list-head"><span>会话</span><span>项目</span><span>位置</span><span>来源</span><span>最后活动</span><span></span></div>
+              <div class="secondary-row" data-project="agent-recall" data-location="local" data-source="codex" data-live="open"><div><strong>优化启动时的增量索引</strong><small>~/projects/agent-recall</small></div><span class="line-cell project-cell">agent-recall</span><span class="location-badge"><i></i>本机</span><span class="line-cell source-cell">Codex</span><span class="line-cell mono">刚刚</span><button class="resume">Resume</button></div>
+              <div class="secondary-row" data-project="agent-recall" data-location="remote" data-environment="devbox" data-source="claude" data-live="open"><div><strong>整理远程会话同步的错误提示</strong><small>/home/dev/projects/agent-recall</small></div><span class="line-cell project-cell">agent-recall</span><span class="location-badge remote"><i></i>devbox</span><span class="line-cell source-cell">Claude Code</span><span class="line-cell mono">4 分钟前</span><button class="resume">Resume</button></div>
+              <div class="secondary-row" data-project="agent-recall" data-location="local" data-source="codex" data-live="closed"><div><strong>设计 AgentRecall 2.0 工作台</strong><small>~/projects/agent-recall</small></div><span class="line-cell project-cell">agent-recall</span><span class="location-badge"><i></i>本机</span><span class="line-cell source-cell">Codex</span><span class="line-cell mono">18 分钟前</span><button class="resume">Resume</button></div>
+              <div class="secondary-row" data-project="cli-tool" data-location="remote" data-environment="devbox" data-source="claude" data-live="closed"><div><strong>检查安装文档中的镜像说明</strong><small>/home/dev/projects/cli-tool</small></div><span class="line-cell project-cell">cli-tool</span><span class="location-badge remote"><i></i>devbox</span><span class="line-cell source-cell">Claude Code</span><span class="line-cell mono">46 分钟前</span><button class="resume">Resume</button></div>
+            </section>
+          </div>
+        </main>
+
+        <main class="page-view" id="skills-page">
+          <div class="page-inner">
+            <div class="page-heading"><div><h1>Skills</h1><p>管理本地与云端 Skill，查看来源、路径和使用情况。</p></div><span class="updated">Codex 14 · Claude Code 10 · Remote 12</span></div>
+            <section class="panel skills-page-layout">
+              <div class="skills-page-toolbar">
+                <label class="skills-page-search">
+                  <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+                  <input id="skills-search" placeholder="搜索名称、描述或路径" />
+                </label>
+                <div class="skills-source-filter" id="skills-source-filter" role="group" aria-label="Skill 来源筛选">
+                  <button class="active" data-skill-filter="all">全部</button>
+                  <button data-skill-filter="codex">Codex</button>
+                  <button data-skill-filter="claude">Claude Code</button>
+                  <button data-skill-filter="shared">共享</button>
+                  <button data-skill-filter="project">项目</button>
+                </div>
+                <label class="skills-page-sort"><span>排序</span><select id="skills-sort"><option value="desc">最多使用</option><option value="asc">最少使用</option></select></label>
+                <div class="skills-page-actions">
+                  <button class="skills-action" id="select-visible-skills">选择当前可见</button>
+                  <button class="skills-action" id="upload-skills">↑ 上传（<span id="selected-skill-total">0</span>）</button>
+                  <button class="skills-action" id="download-skills">↓ 下载全部（12）</button>
+                  <button class="skills-action danger" id="delete-cloud-skills">删除云端（0）</button>
+                  <button class="skills-action icon-only" id="refresh-skills" title="刷新本地和云端 Skills">↻</button>
+                </div>
+              </div>
+              <div class="skills-page-roots">
+                <span><strong>Codex 用户</strong>9 个</span>
+                <span><strong>共享</strong>3 个</span>
+                <span><strong>Claude 用户</strong>8 个</span>
+                <span><strong>Codex 项目</strong>4 个</span>
+              </div>
+              <div class="skills-page-shell">
+                <div class="skills-page-list" id="skills-page-list">
+                  <div class="skill-list-item active" role="button" tabindex="0" data-skill-row="brainstorming" data-skill-source="codex" data-skill-count="38">
+                    <div class="skill-list-head"><input type="checkbox" data-skill-check aria-label="选择 brainstorming" /><span class="skill-list-name"><strong>brainstorming</strong><span class="skill-source-badge codex">Codex 用户</span></span><span class="skill-sync-badge">已同步</span></div>
+                    <p>在创造性工作前确认目标、约束和设计方向。</p><small>本地 已安装 · 云端 v3</small>
+                  </div>
+                  <div class="skill-list-item" role="button" tabindex="0" data-skill-row="systematic-debugging" data-skill-source="shared" data-skill-count="27">
+                    <div class="skill-list-head"><input type="checkbox" data-skill-check aria-label="选择 systematic-debugging" /><span class="skill-list-name"><strong>systematic-debugging</strong><span class="skill-source-badge shared">共享</span></span><span class="skill-sync-badge local-newer">本地较新</span></div>
+                    <p>用可复现证据定位复杂故障并验证修复。</p><small>本地 已安装 · 云端 v2</small>
+                  </div>
+                  <div class="skill-list-item" role="button" tabindex="0" data-skill-row="frontend-design" data-skill-source="claude" data-skill-count="21">
+                    <div class="skill-list-head"><input type="checkbox" data-skill-check aria-label="选择 frontend-design" /><span class="skill-list-name"><strong>frontend-design</strong><span class="skill-source-badge claude">Claude 用户</span></span><span class="skill-sync-badge">已同步</span></div>
+                    <p>为现有产品建立清晰、有辨识度的界面。</p><small>本地 已安装 · 云端 v5</small>
+                  </div>
+                  <div class="skill-list-item" role="button" tabindex="0" data-skill-row="test-driven-development" data-skill-source="codex" data-skill-count="19">
+                    <div class="skill-list-head"><input type="checkbox" data-skill-check aria-label="选择 test-driven-development" /><span class="skill-list-name"><strong>test-driven-development</strong><span class="skill-source-badge codex">Codex 用户</span></span><span class="skill-sync-badge">已同步</span></div>
+                    <p>先用失败测试锁定行为，再完成最小实现。</p><small>本地 已安装 · 云端 v4</small>
+                  </div>
+                  <div class="skill-list-item" role="button" tabindex="0" data-skill-row="github" data-skill-source="project" data-skill-count="16">
+                    <div class="skill-list-head"><span class="skill-list-name"><strong>github</strong><span class="skill-source-badge project">Codex 项目</span></span><span class="skill-sync-badge">随 Git 管理</span></div>
+                    <p>处理仓库、Issue 和 Pull Request 工作流。</p><small>随 Git 仓库同步</small>
+                  </div>
+                  <div class="skill-list-item" role="button" tabindex="0" data-skill-row="release-check" data-skill-source="codex" data-skill-count="4">
+                    <div class="skill-list-head"><input type="checkbox" data-skill-check aria-label="选择 release-check" /><span class="skill-list-name"><strong>release-check</strong><span class="skill-source-badge codex">Codex 用户</span></span><span class="skill-sync-badge local-only">未上传</span></div>
+                    <p>检查发布说明、构建产物和安装流程。</p><small>本地 已安装 · 云端 未上传</small>
+                  </div>
+                </div>
+                <div class="skill-page-preview">
+                  <div class="skill-preview-title"><h2 id="selected-skill-name">brainstorming</h2><span class="skill-source-badge codex" id="selected-skill-source">Codex 用户</span><span class="skill-sync-badge" id="selected-skill-state">已同步</span></div>
+                  <div class="skill-preview-tabs"><button class="active">概述</button><button>详情</button></div>
+                  <div class="skill-page-overview">
+                    <section class="skill-overview-intro"><h3>说明</h3><p id="selected-skill-description">在创造性工作前确认目标、约束和设计方向。</p></section>
+                    <div class="skill-version-strip"><span>本地 <strong id="selected-skill-local-version">已安装</strong></span><span>云端 <strong id="selected-skill-cloud-version">v3</strong></span></div>
+                    <div class="skill-overview-grid">
+                      <section class="skill-overview-card"><h3>本地概述</h3><dl class="skill-meta-grid"><div><dt>Agent</dt><dd id="selected-skill-agent">Codex</dd></div><div><dt>使用次数</dt><dd><span id="selected-skill-count">38</span> 次</dd></div><div><dt>管理方式</dt><dd id="selected-skill-management">已安装在此设备</dd></div><div><dt>更新时间</dt><dd>今天 01:24</dd></div><div class="wide"><dt>路径</dt><dd id="selected-skill-path">~/.codex/skills/brainstorming/SKILL.md</dd></div></dl></section>
+                      <section class="skill-overview-card"><h3>云端概述</h3><dl class="skill-meta-grid"><div><dt>最新版本</dt><dd id="selected-skill-cloud-latest">v3</dd></div><div><dt>版本数量</dt><dd id="selected-skill-version-count">3</dd></div><div><dt>更新时间</dt><dd>昨天 22:18</dd></div><div class="wide"><dt>位置</dt><dd id="selected-skill-cloud-path">codex/brainstorming</dd></div></dl></section>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <main class="page-view" id="settings-page">
+          <div class="page-inner">
+            <div class="page-heading"><div><h1>设置</h1><p>管理 Agent、同步、快捷键与应用行为。</p></div></div>
+            <section class="panel settings-layout">
+              <div class="settings-menu"><button class="active">常规</button><button>Agent 配置</button><button>远程同步</button><button>快捷键</button><button>关于</button></div>
+              <div class="settings-detail"><h2>常规</h2><p>工作台默认使用缓存数据立即显示，并在后台更新索引。刷新不会清空当前页面。</p><div class="detail-code">启动页面：工作台<br />屏蔽 subagent：开启<br />主题：跟随系统</div></div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <div class="prototype-switcher" aria-label="原型方案切换">
+    <button id="previous-variant" aria-label="上一个方案">←</button>
+    <div class="variant-label" id="variant-label">B — 紧凑列表</div>
+    <button id="next-variant" aria-label="下一个方案">→</button>
+  </div>
+  <div class="prototype-tag">THROWAWAY PROTOTYPE</div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    (function () {
+      var variants = ["A", "B", "C"];
+      var names = {
+        A: "均衡卡片",
+        B: "紧凑列表",
+        C: "聚焦继续"
+      };
+      var periodValues = {
+        today: ["1,284", "3.6M"],
+        "7d": ["8,920", "24.8M"],
+        "30d": ["31.4K", "87.2M"],
+        all: ["184K", "512M"]
+      };
+      var sessionValues = {
+        today: "42",
+        "7d": "186",
+        "30d": "612",
+        all: "3,408"
+      };
+      var cacheRateValues = {
+        today: "45.3%",
+        "7d": "45.5%",
+        "30d": "44.9%",
+        all: "44.4%"
+      };
+      var tokenMixValues = {
+        today: { input: ["1.45M", 40.3], cached: ["1.20M", 33.3], output: ["720K", 20], reasoning: ["230K", 6.4] },
+        "7d": { input: ["10.2M", 41.1], cached: ["8.5M", 34.3], output: ["4.6M", 18.5], reasoning: ["1.5M", 6.1] },
+        "30d": { input: ["36.6M", 42], cached: ["29.8M", 34.2], output: ["15.5M", 17.8], reasoning: ["5.3M", 6] },
+        all: { input: ["218M", 42.6], cached: ["174M", 34], output: ["91M", 17.8], reasoning: ["29M", 5.6] }
+      };
+      var skillCounts = {
+        brainstorming: "38",
+        "systematic-debugging": "27",
+        "frontend-design": "21",
+        "test-driven-development": "19",
+        github: "16"
+      };
+
+      var body = document.body;
+      var query = new URLSearchParams(window.location.search);
+      var requestedVariant = String(query.get("variant") || "B").toUpperCase();
+      var requestedPage = String(query.get("page") || "workbench");
+      body.dataset.variant = variants.indexOf(requestedVariant) >= 0 ? requestedVariant : "B";
+      if (["workbench", "sessions", "skills", "settings"].indexOf(requestedPage) >= 0) {
+        body.dataset.page = requestedPage;
+      }
+
+      function syncVariant() {
+        var variant = body.dataset.variant;
+        document.getElementById("variant-label").textContent = variant + " — " + names[variant];
+        var params = new URLSearchParams(window.location.search);
+        params.set("variant", variant);
+        history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+      }
+
+      function moveVariant(offset) {
+        var current = variants.indexOf(body.dataset.variant);
+        body.dataset.variant = variants[(current + offset + variants.length) % variants.length];
+        syncVariant();
+      }
+
+      function setPage(page) {
+        body.dataset.page = page;
+        document.querySelectorAll(".nav-tab").forEach(function (button) {
+          button.classList.toggle("active", button.dataset.pageTarget === page);
+        });
+      }
+
+      function showToast(message) {
+        var toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.classList.add("show");
+        window.clearTimeout(showToast.timer);
+        showToast.timer = window.setTimeout(function () {
+          toast.classList.remove("show");
+        }, 1700);
+      }
+
+      document.getElementById("previous-variant").addEventListener("click", function () { moveVariant(-1); });
+      document.getElementById("next-variant").addEventListener("click", function () { moveVariant(1); });
+
+      document.addEventListener("keydown", function (event) {
+        var tag = event.target && event.target.tagName;
+        var isEditing = tag === "INPUT" || tag === "TEXTAREA" || (event.target && event.target.isContentEditable);
+        if (!isEditing && event.key === "ArrowLeft") moveVariant(-1);
+        if (!isEditing && event.key === "ArrowRight") moveVariant(1);
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+          event.preventDefault();
+          setPage("sessions");
+          window.requestAnimationFrame(function () {
+            document.getElementById("global-search").focus();
+          });
+        }
+      });
+
+      document.querySelectorAll("[data-page-target]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          setPage(button.dataset.pageTarget);
+        });
+      });
+
+      document.querySelectorAll("[data-goto-sessions]").forEach(function (button) {
+        button.addEventListener("click", function () { setPage("sessions"); });
+      });
+
+      document.querySelectorAll("[data-periods] button").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var period = button.dataset.period;
+          document.querySelectorAll("[data-periods] button").forEach(function (item) {
+            item.classList.toggle("active", item.dataset.period === period);
+          });
+          document.querySelectorAll("[data-sessions]").forEach(function (item) { item.textContent = sessionValues[period]; });
+          document.querySelectorAll("[data-messages]").forEach(function (item) { item.textContent = periodValues[period][0]; });
+          document.querySelectorAll("[data-tokens]").forEach(function (item) { item.textContent = periodValues[period][1]; });
+          document.querySelectorAll("[data-cache-rate]").forEach(function (item) { item.textContent = cacheRateValues[period]; });
+          Object.keys(tokenMixValues[period]).forEach(function (kind) {
+            var value = tokenMixValues[period][kind];
+            document.querySelectorAll('[data-mix-value="' + kind + '"]').forEach(function (item) { item.textContent = value[0]; });
+            document.querySelectorAll('[data-mix-bar="' + kind + '"]').forEach(function (item) { item.style.setProperty("--value", value[1] + "%"); });
+          });
+        });
+      });
+
+      function applySessionFilters() {
+        var project = document.getElementById("project-filter").value;
+        var location = document.getElementById("location-filter").value;
+        var source = document.getElementById("source-filter").value;
+        var liveButton = document.querySelector("#live-filter button.active");
+        var live = liveButton ? liveButton.dataset.value : "all";
+        var visible = 0;
+
+        document.querySelectorAll("#sessions-page .secondary-row").forEach(function (row) {
+          var projectMatch = project === "all" || row.dataset.project === project;
+          var sourceMatch = source === "all" || row.dataset.source === source;
+          var liveMatch = live === "all" || row.dataset.live === live;
+          var locationMatch =
+            location === "all" ||
+            row.dataset.location === location ||
+            (location === "devbox" && row.dataset.environment === "devbox");
+          var matches = projectMatch && sourceMatch && liveMatch && locationMatch;
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+
+        document.getElementById("scope-result-total").textContent = visible + " 个示例结果";
+        document.getElementById("session-count").textContent = visible + " 个示例结果";
+      }
+
+      ["project-filter", "location-filter", "source-filter"].forEach(function (id) {
+        document.getElementById(id).addEventListener("change", applySessionFilters);
+      });
+
+      ["live-filter", "time-filter"].forEach(function (id) {
+        document.querySelectorAll("#" + id + " button").forEach(function (button) {
+          button.addEventListener("click", function () {
+            document.querySelectorAll("#" + id + " button").forEach(function (item) {
+              item.classList.toggle("active", item === button);
+            });
+            applySessionFilters();
+          });
+        });
+      });
+
+      document.getElementById("reset-session-filters").addEventListener("click", function () {
+        ["project-filter", "location-filter", "source-filter"].forEach(function (id) {
+          document.getElementById(id).selectedIndex = 0;
+        });
+        ["live-filter", "time-filter"].forEach(function (id) {
+          document.querySelectorAll("#" + id + " button").forEach(function (button, index) {
+            button.classList.toggle("active", index === 0);
+          });
+        });
+        applySessionFilters();
+      });
+
+      document.querySelectorAll(".resume").forEach(function (button) {
+        button.addEventListener("click", function (event) {
+          event.stopPropagation();
+          var original = button.textContent;
+          button.textContent = "打开中";
+          button.disabled = true;
+          window.setTimeout(function () {
+            button.textContent = "已打开";
+            button.classList.add("done");
+            showToast("已交给现有 Resume 流程处理");
+            window.setTimeout(function () {
+              button.textContent = original;
+              button.classList.remove("done");
+              button.disabled = false;
+            }, 1200);
+          }, 520);
+        });
+      });
+
+      document.querySelectorAll(".session-card, .featured").forEach(function (card) {
+        card.addEventListener("click", function (event) {
+          if (event.target.closest("button")) return;
+          showToast("点击卡片主体：打开现有会话详情");
+        });
+      });
+
+      document.querySelectorAll("[data-skill]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var skill = button.dataset.skill;
+          setPage("skills");
+          document.getElementById("selected-skill-name").textContent = skill;
+          document.getElementById("selected-skill-count").textContent = skillCounts[skill] || "—";
+          document.querySelectorAll("[data-skill-row]").forEach(function (row) {
+            row.classList.toggle("active", row.dataset.skillRow === skill);
+          });
+        });
+      });
+
+      document.querySelectorAll("[data-skill-row]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var skill = button.dataset.skillRow;
+          document.getElementById("selected-skill-name").textContent = skill;
+          document.getElementById("selected-skill-count").textContent = skillCounts[skill] || "—";
+          document.querySelectorAll("[data-skill-row]").forEach(function (row) {
+            row.classList.toggle("active", row === button);
+          });
+        });
+      });
+
+      document.getElementById("global-search").addEventListener("keydown", function (event) {
+        if (event.key !== "Enter") return;
+        var value = event.currentTarget.value.trim();
+        if (!value) return;
+        var note = document.getElementById("search-result-note");
+        note.textContent = "正在显示包含“" + value + "”的会话";
+        note.style.display = "block";
+        setPage("sessions");
+      });
+
+      document.getElementById("theme-toggle").addEventListener("click", function () {
+        body.dataset.theme = body.dataset.theme === "dark" ? "light" : "dark";
+      });
+
+      document.getElementById("refresh-index").addEventListener("click", function () {
+        var button = this;
+        var label = button.querySelector("span");
+        button.classList.add("loading");
+        button.disabled = true;
+        label.textContent = "后台更新中";
+        window.setTimeout(function () {
+          button.classList.remove("loading");
+          button.disabled = false;
+          label.textContent = "更新索引";
+          document.querySelectorAll(".updated").forEach(function (item) { item.textContent = "刚刚更新"; });
+          showToast("索引已增量更新，页面始终可用");
+        }, 1050);
+      });
+
+      syncVariant();
+      setPage(body.dataset.page);
+    })();
+  </script>
+</body>
+</html>

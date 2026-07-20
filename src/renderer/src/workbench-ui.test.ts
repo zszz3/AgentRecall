@@ -7,6 +7,7 @@ const skillsSource = readFileSync(new URL("./features/skills/skills-page.tsx", i
 const providerSource = readFileSync(new URL("./features/providers/provider-page.tsx", import.meta.url), "utf8");
 const workbenchSource = readFileSync(new URL("./features/workbench/workbench-page.tsx", import.meta.url), "utf8");
 const searchBoxSource = readFileSync(new URL("./features/search/search-box.tsx", import.meta.url), "utf8");
+const appShellSource = readFileSync(new URL("./styles/app-shell.css", import.meta.url), "utf8");
 const stylesheet = rendererStyleSource;
 
 describe("workbench application shell", () => {
@@ -17,6 +18,16 @@ describe("workbench application shell", () => {
     expect(appSource).toContain('data-page="sessions"');
     expect(appSource).toContain('data-page="skills"');
     expect(appSource).toContain('data-page="providers"');
+  });
+
+  it("gives every primary page a consistent title and description bar", () => {
+    expect(workbenchSource).toContain('className="app-page-head workbench-page-head"');
+    expect(workbenchSource).toContain('<h2>{l("Workbench", "工作台")}</h2>');
+    expect(workbenchSource).toContain("<p>One for all</p>");
+    expect(appSource).toContain('className="app-page-head sessions-page-head"');
+    expect(skillsSource).toContain('className="app-page-head skills-page-head"');
+    expect(providerSource).toContain('className="app-page-head provider-page-head"');
+    expect(appShellSource).toMatch(/\.app-page-head\s*\{[^}]*border-bottom:\s*1px solid var\(--border-subtle\)/);
   });
 
   it("owns Skills as a page instead of preserving the old modal interface", () => {
@@ -40,6 +51,15 @@ describe("workbench application shell", () => {
     expect(stylesheet).toMatch(/\.workbench-page\s*\{/);
     expect(stylesheet).toMatch(/\.sessions-page\s*\{/);
     expect(stylesheet).toMatch(/grid-template-columns:\s*84px\s+minmax\(0,\s*1fr\)/);
+  });
+
+  it("does not reserve a blank macOS titlebar row above every page", () => {
+    const workspace = appShellSource.match(/\.app-workspace\s*\{[^}]*\}/)?.[0] ?? "";
+    const dragStrip = appShellSource.match(/\.app\[data-platform="darwin"\] \.titlebar-drag\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(workspace).toMatch(/padding-top:\s*0/);
+    expect(dragStrip).toMatch(/left:\s*84px/);
+    expect(dragStrip).toMatch(/height:\s*8px/);
+    expect(appShellSource).toMatch(/\.app\[data-platform="darwin"\] \.titlebar-drag::before\s*\{[^}]*height:\s*40px/);
   });
 
   it("uses the README brand mark and a compact index refresh action without a persistent status bar", () => {
@@ -96,13 +116,22 @@ describe("workbench application shell", () => {
     expect(label).toMatch(/line-height:\s*14px/);
   });
 
-  it("compresses usage and quota into one status rail without permanent detail rows", () => {
+  it("keeps usage details visible in a three-zone overview", () => {
     const overview = stylesheet.match(/\.workbench-overview\s*\{[^}]*\}/)?.[0] ?? "";
-    expect(overview).toMatch(/min-height:\s*72px/);
-    expect(workbenchSource).not.toContain("<TokenComposition");
-    expect(workbenchSource).not.toContain('className="workbench-source-usage"');
-    expect(workbenchSource).toContain('className="workbench-detail-hint"');
-    expect(workbenchSource).toContain("tabIndex={detail ? 0 : undefined}");
+    expect(overview).toMatch(/min-height:\s*142px/);
+    expect(overview).toMatch(/grid-template-columns:[^;]*1\.8fr[^;]*1\.15fr[^;]*\.65fr/);
+    expect(workbenchSource).toContain('className="workbench-token-composition"');
+    expect(workbenchSource).toContain('className="workbench-source-usage"');
+    expect(workbenchSource).toContain('className="workbench-overview-slot"');
+    expect(workbenchSource).not.toContain('className="workbench-detail-hint"');
+  });
+
+  it("places both providers in one quota card with one shared refresh action", () => {
+    expect(workbenchSource).toContain('className="workbench-quota-card"');
+    expect(workbenchSource).toContain('className="workbench-quota-pair"');
+    expect(workbenchSource.match(/onClick=\{onRefreshQuotas\}/g)).toHaveLength(1);
+    expect(workbenchSource).toContain('l("Refresh model quotas", "刷新模型额度")');
+    expect(workbenchSource).not.toContain("onRefresh: () => void;");
   });
 
   it("shows explicit Open and Closed state in every workbench session row", () => {

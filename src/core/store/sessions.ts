@@ -991,11 +991,12 @@ export class SessionsStore {
     }
 
     const sortBy = options.sortBy ?? "smart";
+    const prioritizePinned = options.prioritizePinned !== false;
     const sorted = [...merged.values()].sort((a, b) => {
       if (sortBy === "smart" && query) {
-        return this.smartScore(b, query) - this.smartScore(a, query);
+        return this.smartScore(b, query, prioritizePinned) - this.smartScore(a, query, prioritizePinned);
       }
-      return this.score(b, query) - this.score(a, query) || this.sortValue(b, sortBy) - this.sortValue(a, sortBy);
+      return this.score(b, query, prioritizePinned) - this.score(a, query, prioritizePinned) || this.sortValue(b, sortBy) - this.sortValue(a, sortBy);
     });
     const totalCount = query ? sorted.length : this.countCandidateRows(options);
     const sessions = sorted.slice(0, limit);
@@ -1305,6 +1306,7 @@ export class SessionsStore {
     const { where, args } = this.sessionWhereClause(options);
 
     if (!query) {
+      const pinnedOrderSql = options.prioritizePinned === false ? "" : "pinned DESC, ";
       args.push(limit);
       return this.db
         .prepare(
@@ -1312,7 +1314,7 @@ export class SessionsStore {
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
-          ORDER BY pinned DESC, ${sessionSortSql(options.sortBy)} DESC
+          ORDER BY ${pinnedOrderSql}${sessionSortSql(options.sortBy)} DESC
           LIMIT ?
         `,
         )
@@ -1619,8 +1621,8 @@ export class SessionsStore {
     };
   }
 
-  private score(result: SessionSearchResult, query: string): number {
-    if (!query) return result.pinned ? 1_000_000_000_000 : 0;
+  private score(result: SessionSearchResult, query: string, prioritizePinned = true): number {
+    if (!query) return prioritizePinned && result.pinned ? 1_000_000_000_000 : 0;
     const q = query.toLowerCase();
     const title = result.displayTitle.toLowerCase();
     let score = 0;
@@ -1630,7 +1632,7 @@ export class SessionsStore {
     if (result.firstQuestion.toLowerCase().includes(q)) score += 300;
     if (result.matchSnippet) score += 120;
     if (result.projectPath.toLowerCase().includes(q) || result.rawId.toLowerCase().includes(q)) score += 50;
-    if (result.pinned) score += 25;
+    if (prioritizePinned && result.pinned) score += 25;
     return score;
   }
 
@@ -1641,13 +1643,13 @@ export class SessionsStore {
    * 60 days ago ~0.25. A small relevance floor (0.08) ensures completely
    * irrelevant results never surface regardless of recency.
    */
-  private smartScore(result: SessionSearchResult, query: string): number {
-    const relevance = this.score(result, query);
+  private smartScore(result: SessionSearchResult, query: string, prioritizePinned = true): number {
+    const relevance = this.score(result, query, prioritizePinned);
     if (relevance <= 0) return 0;
     const activityMs = result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
     const ageDays = Math.max(0, (Date.now() - activityMs) / (24 * 60 * 60 * 1000));
     const decay = Math.pow(0.5, ageDays / 30);
-    const pinnedBoost = result.pinned ? 1.2 : 1.0;
+    const pinnedBoost = prioritizePinned && result.pinned ? 1.2 : 1.0;
     return relevance * (0.08 + 0.92 * decay) * pinnedBoost;
   }
 
@@ -1833,4 +1835,3 @@ function projectParentLabel(projectPath: string): string {
   if (parts.length >= 2) return `${parts.at(-2)}/${parts.at(-1)}`;
   return projectLabel(projectPath);
 }
-

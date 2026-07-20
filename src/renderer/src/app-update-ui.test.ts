@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { rendererStyleSource } from "./style-test-source";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 const updateUiSource = `${appSource}\n${settingsSource}`;
-const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const stylesheet = rendererStyleSource;
 
 describe("application update UI", () => {
   it("shows an update indicator and a dedicated About settings section", () => {
@@ -18,7 +19,7 @@ describe("application update UI", () => {
     expect(updateUiSource).toContain(") : shouldSignalAppUpdate && appUpdateStatus?.manifest ? (");
     expect(updateUiSource).toContain("Update prompt skipped");
     expect(updateUiSource).toContain("Use Check for updates to show the skipped release again.");
-    expect(updateUiSource).toContain('className="update-indicator"');
+    expect(appSource).toContain('{shouldSignalAppUpdate ? <i aria-label={t("Update available", "有新版本可用")} /> : null}');
     expect(updateUiSource).toContain('className="update-brand-mark"');
     expect(updateUiSource).toContain('className="update-state-copy"');
     expect(updateUiSource).toContain('className="update-available-card"');

@@ -345,7 +345,7 @@ export function ProviderPage({
 
   return (
     <section className="provider-page" data-page="providers">
-      <header className="provider-page-head">
+      <header className="app-page-head provider-page-head">
         <div>
           <h2>Provider</h2>
           <p>{l(

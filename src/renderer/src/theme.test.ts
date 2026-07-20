@@ -50,6 +50,16 @@ describe("theme controls", () => {
     expect(settingsDialog).toMatch(/Appearance/);
   });
 
+  it("uses the global navigation as the only Settings entry on the sessions page", () => {
+    const toolbar = appSource.slice(
+      appSource.indexOf('<header className="toolbar">'),
+      appSource.indexOf('<div className="result-count">'),
+    );
+
+    expect(toolbar).not.toContain('<Settings size={15} />');
+    expect(toolbar).not.toContain('t("Settings", "设置")');
+  });
+
   it("keeps language selection inside settings", () => {
     const settingsDialog = settingsSource;
 

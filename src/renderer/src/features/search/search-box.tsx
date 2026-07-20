@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useState } from "react";
 import { History, Search, X } from "lucide-react";
 import {
   clearSearchHistory,
@@ -19,14 +19,17 @@ export const SearchBox = forwardRef<
     recentLabel: string;
     clearRecentLabel: string;
     deleteRecentLabel: string;
+    submittedValue?: string;
     onSearch: (value: string) => void;
   }
->(function SearchBox({ platform, placeholder, recentLabel, clearRecentLabel, deleteRecentLabel, onSearch }, ref) {
-  const [value, setValue] = useState("");
+>(function SearchBox({ platform, placeholder, recentLabel, clearRecentLabel, deleteRecentLabel, submittedValue = "", onSearch }, ref) {
+  const [value, setValue] = useState(submittedValue);
   const [history, setHistory] = useState<string[]>(() =>
     typeof window === "undefined" ? [] : readSearchHistory(window.localStorage),
   );
   const [focused, setFocused] = useState(false);
+
+  useEffect(() => setValue(submittedValue), [submittedValue]);
 
   function handleChange(next: string): void {
     if (value.length > 0 && next.length === 0) onSearch("");
@@ -115,5 +118,4 @@ export const SearchBox = forwardRef<
     </div>
   );
 });
-
 

@@ -1842,6 +1842,12 @@ export function App(): ReactElement {
 
           {activePage === "sessions" ? (
             <div className="sessions-page" data-page="sessions">
+              <header className="app-page-head sessions-page-head">
+                <div>
+                  <h2>{t("Sessions", "会话")}</h2>
+                  <p>{t("Search, filter, and continue local or remote Agent sessions.", "搜索、筛选并继续本地或远程 Agent 会话。")}</p>
+                </div>
+              </header>
               <section className="sidebar">
                 <div className="session-sidebar-title"><strong>{t("Session scope", "会话范围")}</strong><span>{sessionTotalCount}</span></div>
         <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
@@ -2079,19 +2085,6 @@ export function App(): ReactElement {
               aria-label={t("Remote sessions", "远程会话")}
             >
               <Cloud size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${shouldSignalAppUpdate ? "update-available" : ""}`}
-              onClick={() => {
-                setRemoteSessionsOpen(false);
-                setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
-                setSettingsOpen(true);
-              }}
-              title={shouldSignalAppUpdate ? t("Update available", "有新版本可用") : t("Settings", "设置")}
-              aria-label={shouldSignalAppUpdate ? t("Update available", "有新版本可用") : t("Settings", "设置")}
-            >
-              <Settings size={15} />
-              {shouldSignalAppUpdate ? <span className="update-indicator" aria-hidden="true" /> : null}
             </button>
           </div>
         </header>

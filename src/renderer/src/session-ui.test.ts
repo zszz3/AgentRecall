@@ -7,18 +7,53 @@ import {
   projectSortTimestamp,
   resumeActionLabel,
   resumeRouteMessage,
+  selectWorkbenchSessions,
   sessionSortTimestamp,
   sourceFilterLabel,
   sourceFilters,
+  usageCacheRate,
   usageStatsDisplayRows,
   hasTokenUsage,
+  WORKBENCH_SESSION_LIMIT,
 } from "./session-ui";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
 const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
+const workbenchSource = readFileSync(new URL("./features/workbench/workbench-page.tsx", import.meta.url), "utf8");
 
 describe("session source labels", () => {
+  it("builds one ten-item workbench list with live sessions first and no duplicates", () => {
+    const sessions = [
+      { sessionKey: "closed-old", source: "codex-cli", rawId: "closed-old", lastActivityAt: 100 },
+      { sessionKey: "active-new", source: "codex-cli", rawId: "active-new", lastActivityAt: 500 },
+      { sessionKey: "closed-new", source: "claude-cli", rawId: "closed-new", lastActivityAt: 400 },
+      { sessionKey: "active-old", source: "claude-cli", rawId: "active-old", lastActivityAt: 300 },
+      { sessionKey: "closed-middle", source: "codex-app", rawId: "closed-middle", lastActivityAt: 200 },
+    ] as const;
+
+    expect(selectWorkbenchSessions(sessions, new Set(["codex:active-new", "claude:active-old"]), false)).toEqual([
+      sessions[1],
+      sessions[3],
+      sessions[2],
+      sessions[4],
+      sessions[0],
+    ]);
+
+    const overflow = Array.from({ length: WORKBENCH_SESSION_LIMIT + 2 }, (_, index) => ({
+      sessionKey: `closed-${index}`,
+      source: "codex-cli" as const,
+      rawId: `closed-${index}`,
+      lastActivityAt: index,
+    }));
+    expect(selectWorkbenchSessions(overflow, new Set(), false)).toHaveLength(WORKBENCH_SESSION_LIMIT);
+  });
+
+  it("calculates cache rate from non-cache and cached input without reporting an empty denominator", () => {
+    expect(usageCacheRate({ inputTokens: 300, cachedInputTokens: 100 })).toBe(25);
+    expect(usageCacheRate({ inputTokens: 0, cachedInputTokens: 0 })).toBeNull();
+  });
+
   it("uses Codex App wording for App resume actions and results", () => {
     expect(resumeActionLabel("codex-app", "en")).toBe("Opening in Codex");
     expect(resumeActionLabel("codex-app", "zh")).toBe("正在 Codex 中打开");
@@ -28,7 +63,7 @@ describe("session source labels", () => {
   });
 
   it("routes keyboard, detail, and context-menu actions through Codex-aware Resume UI", () => {
-    expect(appSource.match(/resumeActionLabel\(/g)).toHaveLength(4);
+    expect(appSource.match(/resumeActionLabel\(/g)).toHaveLength(5);
     expect(appSource).toContain('showItermAction={IS_MAC && detail.source !== "codex-app"}');
     expect(appSource).toContain('state.session.source !== "codex-app"');
     expect(detailPanelSource).toContain('session.source === "codex-app"');
@@ -153,7 +188,7 @@ describe("session source labels", () => {
   it("treats zero-token sources as unknown usage instead of displayable usage", () => {
     expect(hasTokenUsage({ totalTokens: 0 })).toBe(false);
     expect(hasTokenUsage({ totalTokens: 1 })).toBe(true);
-    expect(appSource).toContain("hasTokenUsage(stats.total)");
+    expect(workbenchSource).toContain("formatTokenCount(stats.total.totalTokens)");
     expect(sessionRowSource).toContain("hasTokenUsage(session.tokenUsage)");
   });
 

@@ -200,6 +200,7 @@ export interface SearchOptions {
   dateTo?: number;
   limit?: number;
   excludeSubagents?: boolean;
+  prioritizePinned?: boolean;
 }
 
 export interface ProjectQueryOptions {

@@ -20,7 +20,7 @@ import {
 import type { AppSettings } from "../../core/platform";
 import type { ResumeRouteResult } from "../../core/resume-router";
 import { localize, type LanguageMode } from "./language";
-import { liveStateLabel, type LiveSessionState, type LiveStatusFilter } from "./live-filter";
+import { getLiveSessionState, liveStateLabel, type LiveSessionState, type LiveStatusFilter } from "./live-filter";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 
 export const SOURCE_LABEL = Object.fromEntries(
@@ -68,6 +68,31 @@ export function usageStatsDisplayRows(rows: SessionSourceStats[]): UsageStatsDis
 
 export function hasTokenUsage(value: Pick<SessionStatsSummary, "totalTokens">): boolean {
   return value.totalTokens > 0;
+}
+
+export function usageCacheRate(value: Pick<SessionStatsSummary, "inputTokens" | "cachedInputTokens">): number | null {
+  const inputTokens = Math.max(0, value.inputTokens);
+  const cachedInputTokens = Math.max(0, value.cachedInputTokens);
+  const totalInputTokens = inputTokens + cachedInputTokens;
+  if (totalInputTokens === 0) return null;
+  return Math.round((cachedInputTokens / totalInputTokens) * 1_000) / 10;
+}
+
+export const WORKBENCH_SESSION_LIMIT = 10;
+
+export function selectWorkbenchSessions<
+  T extends Pick<SessionSearchResult, "sessionKey" | "source" | "rawId" | "lastActivityAt">,
+>(sessions: readonly T[], liveSessionKeys: Set<string>, liveDetectionFailed: boolean): T[] {
+  const ordered = [...sessions].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  const liveKeys = new Set(
+    ordered
+      .filter((session) => getLiveSessionState(session, liveSessionKeys, liveDetectionFailed) === "open")
+      .map((session) => session.sessionKey),
+  );
+  return [
+    ...ordered.filter((session) => liveKeys.has(session.sessionKey)),
+    ...ordered.filter((session) => !liveKeys.has(session.sessionKey)),
+  ].slice(0, WORKBENCH_SESSION_LIMIT);
 }
 
 const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [

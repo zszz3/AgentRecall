@@ -64,12 +64,20 @@ describe("app loading performance", () => {
     expect(loadSessionsBlock).not.toContain("window.sessionSearch.getStats");
   });
 
-  it("refreshes skill usage when the Skills dialog is opened before listing skills", () => {
+  it("does not build the full Sessions result list while the Workbench is active", () => {
+    const loadSessionsEffect = sourceBlock('useEffect(() => {\n    if (activePage !== "sessions") return;', [
+      "useEffect(() => {\n    void loadSidebarMetadata();",
+    ]);
+    expect(loadSessionsEffect).toContain("void load()");
+  });
+
+  it("refreshes skill usage when the Skills page is opened before listing skills", () => {
     const loadSkillsBlock = sourceBlock("const loadSkills = useCallback(async (options:", [
       "const deleteSkill = useCallback",
       "useEffect(() => {",
     ]);
-    const skillsOpenEffect = sourceBlock("useEffect(() => {\n    if (skillsOpen)", [
+    const skillsOpenEffect = sourceBlock('useEffect(() => {\n    if (activePage === "skills")', [
+      "useEffect(() => {\n    void loadWorkbenchSessions();",
       "useEffect(() => {\n    if (!settingsOpen)",
       "const toggleSkillUsageHook = useCallback",
     ]);
@@ -86,7 +94,7 @@ describe("app loading performance", () => {
       "const cacheRemoteSessionUpload = useCallback",
     ]);
     const startupEffect = sourceBlock("useEffect(() => {\n    void loadRemoteSessionsCache();", [
-      "useEffect(() => {\n    if (skillsOpen)",
+      'useEffect(() => {\n    if (activePage === "skills")',
     ]);
 
     expect(cacheLoader).toContain("window.sessionSearch.getRemoteSessionStatus()");

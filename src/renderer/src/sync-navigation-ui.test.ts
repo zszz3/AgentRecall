@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { rendererStyleSource } from "./style-test-source";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const detailSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
-const skillsSource = readFileSync(new URL("./features/skills/skills-dialog.tsx", import.meta.url), "utf8");
-const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const skillsSource = readFileSync(new URL("./features/skills/skills-page.tsx", import.meta.url), "utf8");
+const stylesheet = rendererStyleSource;
 
 describe("sync overlay navigation and progress", () => {
   it("keeps the remote session list mounted underneath its preview", () => {

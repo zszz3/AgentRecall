@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { summarizeSkillRoots } from "./features/skills/skills-dialog";
+import { summarizeSkillRoots } from "./features/skills/skills-page";
 import type { SkillRootStatus } from "../../core/skill-manager";
+import { rendererStyleSource } from "./style-test-source";
 
-const skillsDialogSource = readFileSync(new URL("./features/skills/skills-dialog.tsx", import.meta.url), "utf8");
+const skillsDialogSource = readFileSync(new URL("./features/skills/skills-page.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
-const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const stylesheet = rendererStyleSource;
 
 describe("skills dialog actions", () => {
   it("copies the SKILL.md path but reveals the skill directory", () => {

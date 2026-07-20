@@ -1470,6 +1470,30 @@ describe("SessionStore", () => {
     expect(page.hasMore).toBe(true);
   });
 
+  it("can order a bounded workbench query strictly by recent activity", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:pinned-old",
+        rawId: "pinned-old",
+        timestamp: new Date("2026-06-01T10:00:00Z").getTime(),
+      }),
+      [{ role: "user", content: "old", timestamp: "2026-06-01T10:00:00Z", index: 0 }],
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:recent",
+        rawId: "recent",
+        timestamp: new Date("2026-06-03T10:00:00Z").getTime(),
+      }),
+      [{ role: "user", content: "recent", timestamp: "2026-06-03T10:00:00Z", index: 0 }],
+    );
+    store.setPinned("codex:pinned-old", true);
+
+    expect(store.searchSessions({ query: "", sortBy: "activity", limit: 1 })[0]?.sessionKey).toBe("codex:pinned-old");
+    expect(store.searchSessions({ query: "", sortBy: "activity", limit: 1, prioritizePinned: false })[0]?.sessionKey).toBe("codex:recent");
+  });
+
   it("applies live status filtering before page limits", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(
