@@ -1,6 +1,21 @@
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AppSettings } from "../../core/platform";
 import type { SkillSyncBinding } from "../../core/session-store";
+import {
+  ManagedSkillLibrary,
+  type ManagedSkill,
+  type ManagedSkillFileImport,
+  type ManagedSkillImportResult,
+  type ManagedSkillsSnapshot,
+  type SkillInstallTarget,
+} from "../../core/managed-skill-library";
+import {
+  SkillsShClient,
+  type SkillsShDetail,
+  type SkillsShEntry,
+  type SkillsShPage,
+} from "../../core/skills-sh";
 import {
   deleteInstalledSkill,
   installRemoteSkillLocally,
@@ -72,6 +87,21 @@ export interface SkillSyncClientPort {
   deleteRemoteSkillVersions(remoteIds: string[]): Promise<string[]>;
 }
 
+export interface ManagedSkillLibraryPort {
+  list(): ManagedSkillsSnapshot;
+  listImportCandidates(projectDirs: string[]): InstalledSkillsSnapshot;
+  importLocalSkill(skillPath: string, projectDirs?: string[]): ManagedSkillImportResult;
+  importFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
+  replaceFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
+  updateTargets(managedId: string, targets: SkillInstallTarget[]): ManagedSkill;
+  delete(managedId: string): DeleteInstalledSkillResult;
+}
+
+export interface SkillsShClientPort {
+  list(input: { page: number; query: string }): Promise<SkillsShPage>;
+  getDetail(entry: SkillsShEntry): Promise<SkillsShDetail>;
+}
+
 export interface SkillServiceOperations {
   listInstalledSkills: typeof listInstalledSkills;
   skillProjectDirsFromIndexedProjects: typeof skillProjectDirsFromIndexedProjects;
@@ -100,6 +130,12 @@ export interface SkillServiceDependencies {
   revealPath(path: string): Promise<void>;
   now(): number;
   logError(message: string): void;
+  managedLibrary?: ManagedSkillLibraryPort;
+  skillsShClient?: SkillsShClientPort;
+  libraryRoot?: string;
+  skillsShCachePath?: string;
+  homeDir?: string;
+  codexHome?: string;
   operations?: Partial<SkillServiceOperations>;
   timers?: {
     setTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
@@ -138,21 +174,38 @@ const defaultTimers = {
 export class SkillService {
   private readonly operations: SkillServiceOperations;
   private readonly timers: NonNullable<SkillServiceDependencies["timers"]>;
+  private readonly managedLibrary: ManagedSkillLibraryPort | null;
+  private readonly skillsShClient: SkillsShClientPort | null;
+  private readonly discoveredSkills = new Map<string, SkillsShEntry>();
   private initialUsageTimer: ReturnType<typeof setTimeout> | null = null;
   private autoUsageTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly dependencies: SkillServiceDependencies) {
     this.operations = { ...defaultOperations, ...dependencies.operations };
     this.timers = dependencies.timers ?? defaultTimers;
+    const homeDir = dependencies.homeDir ?? os.homedir();
+    this.managedLibrary = dependencies.managedLibrary ?? (dependencies.libraryRoot
+      ? new ManagedSkillLibrary({
+        libraryRoot: dependencies.libraryRoot,
+        homeDir,
+        codexHome: dependencies.codexHome,
+      })
+      : null);
+    this.skillsShClient = dependencies.skillsShClient ?? (dependencies.skillsShCachePath
+      ? new SkillsShClient({ cachePath: dependencies.skillsShCachePath })
+      : null);
   }
 
   listSkills(): InstalledSkillsSnapshot {
     const store = this.dependencies.getStore();
-    const projectDirs = this.operations.skillProjectDirsFromIndexedProjects(store.listProjects());
-    const snapshot = this.operations.listInstalledSkills({ projectDirs });
+    const snapshot = this.managedLibrary
+      ? this.managedLibrary.list()
+      : this.operations.listInstalledSkills({ projectDirs: this.projectDirs() });
     const usage = store.getSkillUsageSnapshot();
     const skills = snapshot.skills.map((skill) => {
-      const stat = this.operations.usageForSkill(usage, skill.name, skill.agent);
+      const stat = this.managedLibrary
+        ? this.operations.usageForSkill(usage, skill.name)
+        : this.operations.usageForSkill(usage, skill.name, skill.agent);
       return { ...skill, usageCount: stat?.count ?? 0, lastUsedAt: stat?.lastUsedAt ?? null };
     });
     return {
@@ -164,6 +217,50 @@ export class SkillService {
         totalEvents: usage.totalEvents,
       },
     };
+  }
+
+  listImportCandidates(): InstalledSkillsSnapshot {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    return this.managedLibrary.listImportCandidates(this.projectDirs());
+  }
+
+  importLocalSkills(skillPaths: string[]): ManagedSkillImportResult[] {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    const projectDirs = this.projectDirs();
+    return this.uniqueValues(skillPaths).map((skillPath) => this.managedLibrary!.importLocalSkill(skillPath, projectDirs));
+  }
+
+  updateManagedSkillTargets(managedId: string, targets: SkillInstallTarget[]): ManagedSkill {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    return this.managedLibrary.updateTargets(managedId, targets);
+  }
+
+  async listDiscoveredSkills(input: { page: number; query: string }): Promise<SkillsShPage> {
+    const client = this.requireSkillsShClient();
+    const result = await client.list(input);
+    for (const entry of result.skills) this.discoveredSkills.set(entry.id, entry);
+    return result;
+  }
+
+  getDiscoveredSkill(id: string): Promise<SkillsShDetail> {
+    const entry = this.discoveredSkills.get(id);
+    if (!entry) throw new Error("This Skill is no longer in the current discovery results. Refresh and try again.");
+    return this.requireSkillsShClient().getDetail(entry);
+  }
+
+  async importDiscoveredSkill(id: string): Promise<ManagedSkillImportResult> {
+    if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
+    const detail = await this.getDiscoveredSkill(id);
+    return this.managedLibrary.importFiles({
+      suggestedId: detail.entry.skillId,
+      origin: {
+        kind: "skills-sh",
+        label: "skills.sh",
+        source: detail.entry.source,
+        url: detail.entry.url,
+      },
+      files: detail.files,
+    });
   }
 
   refreshUsage(): SkillUsageRefreshStatus {
@@ -298,10 +395,30 @@ export class SkillService {
     if (remoteSkill.legacy || !remoteSkill.portableScope || !remoteSkill.relativePath) {
       throw new Error("This legacy Skill can only be previewed or deleted because its install location is uncertain.");
     }
-    const installed = this.operations.installRemoteSkillLocally(remoteSkill);
-    const identity = `${remoteSkill.portableScope}/${remoteSkill.relativePath}`;
-    const binding = this.persistBinding(installed.installedPath, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
-    return { remoteSkill, binding, installedPath: installed.installedPath, overwritten: installed.overwritten };
+    if (!this.managedLibrary) {
+      const installed = this.operations.installRemoteSkillLocally(remoteSkill);
+      const identity = `${remoteSkill.portableScope}/${remoteSkill.relativePath}`;
+      const binding = this.persistBinding(installed.installedPath, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
+      return { remoteSkill, binding, installedPath: installed.installedPath, overwritten: installed.overwritten };
+    }
+    const suggestedId = remoteSkill.relativePath.split("/").filter(Boolean).at(-1) || remoteSkill.name;
+    const existing = this.managedLibrary.list().skills.some((skill) => skill.managedId === suggestedId);
+    const files = this.operations.skillSyncFilesFromMetadata(remoteSkill.metadata)
+      .filter((file) => file.relativePath.toLowerCase() !== "skill.md")
+      .map((file) => ({
+        relativePath: file.relativePath,
+        contents: Buffer.from(file.contentBase64, "base64"),
+        mode: file.mode,
+      }));
+    const input: ManagedSkillFileImport = {
+      suggestedId,
+      origin: { kind: "remote", label: "Cloud sync" },
+      files: [{ relativePath: "SKILL.md", contents: remoteSkill.markdown }, ...files],
+    };
+    const imported = existing ? this.managedLibrary.replaceFiles(input) : this.managedLibrary.importFiles(input);
+    const identity = `agent-recall/${imported.managedId}`;
+    const binding = this.persistBinding(imported.skill.path, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
+    return { remoteSkill, binding, installedPath: imported.skill.path, overwritten: existing };
   }
 
   getVersion(remoteSkillId: string): Promise<RemoteSkill> {
@@ -402,6 +519,13 @@ export class SkillService {
   }
 
   delete(skillPath: string): DeleteInstalledSkillResult {
+    if (this.managedLibrary) {
+      const normalized = path.resolve(skillPath);
+      const skill = this.managedLibrary.list().skills.find((item) =>
+        path.resolve(item.path) === normalized || path.resolve(item.directoryPath) === normalized);
+      if (!skill) throw new Error("Skill is no longer installed or is outside the managed library.");
+      return this.managedLibrary.delete(skill.managedId);
+    }
     const projectDirs = this.operations.skillProjectDirsFromIndexedProjects(this.dependencies.getStore().listProjects());
     return this.operations.deleteInstalledSkill(skillPath, { projectDirs });
   }
@@ -428,6 +552,15 @@ export class SkillService {
 
   private syncConfigured(settings: AppSettings): boolean {
     return Boolean(settings.skillSyncEnabled && settings.skillSyncSupabaseUrl && settings.skillSyncSupabaseAnonKey);
+  }
+
+  private projectDirs(): string[] {
+    return this.operations.skillProjectDirsFromIndexedProjects(this.dependencies.getStore().listProjects());
+  }
+
+  private requireSkillsShClient(): SkillsShClientPort {
+    if (!this.skillsShClient) throw new Error("Skill discovery is unavailable.");
+    return this.skillsShClient;
   }
 
   private createSyncClient(): SkillSyncClientPort {

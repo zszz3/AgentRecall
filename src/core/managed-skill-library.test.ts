@@ -104,6 +104,29 @@ describe("ManagedSkillLibrary local import", () => {
     expect(existsSync(path.join(libraryRoot, "unsafe-skill"))).toBe(false);
     expect(existsSync(path.join(libraryRoot, "outside.txt"))).toBe(false);
   });
+
+  it("atomically replaces a managed Skill only through the explicit update operation", () => {
+    const { libraryRoot, library } = createHarness();
+    library.importFiles({
+      suggestedId: "review-code",
+      origin: { kind: "remote", label: "Cloud sync" },
+      files: [{ relativePath: "SKILL.md", contents: "# Version 1\n" }],
+    });
+
+    expect(() => library.importFiles({
+      suggestedId: "review-code",
+      origin: { kind: "remote", label: "Cloud sync" },
+      files: [{ relativePath: "SKILL.md", contents: "# Version 2\n" }],
+    })).toThrow(/different content/i);
+
+    const updated = library.replaceFiles({
+      suggestedId: "review-code",
+      origin: { kind: "remote", label: "Cloud sync" },
+      files: [{ relativePath: "SKILL.md", contents: "# Version 2\n" }],
+    });
+    expect(updated.status).toBe("updated");
+    expect(readFileSync(path.join(libraryRoot, "review-code", "SKILL.md"), "utf8")).toBe("# Version 2\n");
+  });
 });
 
 describe("ManagedSkillLibrary target installation", () => {

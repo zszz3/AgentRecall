@@ -1,5 +1,7 @@
 import type { IpcRenderer } from "electron";
 import type { DeleteInstalledSkillResult, InstalledSkillsSnapshot } from "../core/skill-manager";
+import type { ManagedSkill, ManagedSkillImportResult, SkillInstallTarget } from "../core/managed-skill-library";
+import type { SkillsShDetail, SkillsShPage } from "../core/skills-sh";
 import type { SkillDiffSnapshot } from "../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
@@ -10,6 +12,16 @@ export type SkillsIpcRenderer = Pick<IpcRenderer, "invoke">;
 export function createSkillsApi(ipc: SkillsIpcRenderer) {
   return {
     listSkills: (): Promise<InstalledSkillsSnapshot> => ipc.invoke(SKILLS_IPC.list.channel),
+    listSkillImportCandidates: (): Promise<InstalledSkillsSnapshot> => ipc.invoke(SKILLS_IPC.listImportCandidates.channel),
+    importLocalSkills: (skillPaths: string[]): Promise<ManagedSkillImportResult[]> =>
+      ipc.invoke(SKILLS_IPC.importLocal.channel, skillPaths),
+    updateManagedSkillTargets: (managedId: string, targets: SkillInstallTarget[]): Promise<ManagedSkill> =>
+      ipc.invoke(SKILLS_IPC.updateTargets.channel, managedId, targets),
+    listDiscoveredSkills: (input: { page: number; query: string }): Promise<SkillsShPage> =>
+      ipc.invoke(SKILLS_IPC.listDiscovered.channel, input),
+    getDiscoveredSkill: (id: string): Promise<SkillsShDetail> => ipc.invoke(SKILLS_IPC.getDiscovered.channel, id),
+    importDiscoveredSkill: (id: string): Promise<ManagedSkillImportResult> =>
+      ipc.invoke(SKILLS_IPC.importDiscovered.channel, id),
     refreshSkillUsage: (): Promise<SkillUsageRefreshStatus> => ipc.invoke(SKILLS_IPC.refreshUsage.channel),
     getSkillSyncSnapshot: (): Promise<SkillSyncSnapshot> => ipc.invoke(SKILLS_IPC.getSyncSnapshot.channel),
     uploadSkillToSync: (skillPath: string, force?: boolean): Promise<SkillSyncUploadOutcome> =>

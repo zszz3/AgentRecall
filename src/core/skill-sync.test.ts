@@ -100,6 +100,25 @@ describe("skill sync", () => {
     expect(skillSyncFingerprint(localSkill({ rootPath: "/other/.codex/skills", directoryPath: "/other/.codex/skills/review-code", path: "/other/.codex/skills/review-code/SKILL.md" }))).toBe(expected);
     expect(skillSyncFingerprint(localSkill({ source: "codex-shared", rootPath: "/tmp/.agents/skills", directoryPath: "/tmp/.agents/skills/review-code" }))).not.toBe(expected);
     expect(skillSyncFingerprint(localSkill({ directoryPath: "/tmp/.codex/skills/team/review-code" }))).not.toBe(expected);
+    expect(skillSyncFingerprint(localSkill({
+      source: "agent-recall",
+      rootPath: "/tmp/agent-recall/skills",
+      directoryPath: "/tmp/agent-recall/skills/review-code",
+    }))).toBe(createHash("sha256").update("agent-recall/review-code").digest("hex"));
+  });
+
+  it("preserves the AgentRecall portable scope in remote versions", async () => {
+    const client = new SupabaseSkillSyncClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async () => new Response(JSON.stringify([versionRow({
+        portable_scope: "agent-recall",
+      })]), { status: 200 }),
+    });
+
+    await expect(client.listRemoteSkillVersions()).resolves.toEqual([
+      expect.objectContaining({ portableScope: "agent-recall", legacy: false }),
+    ]);
   });
 
   it("computes a content hash that is stable for identical content and changes with content", () => {

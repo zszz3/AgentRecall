@@ -2,27 +2,38 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultSettings, type AppSettings } from "../../core/platform";
 import type { SkillSyncBinding } from "../../core/session-store";
 import type { InstalledSkill } from "../../core/skill-manager";
+import type { ManagedSkill, ManagedSkillImportResult } from "../../core/managed-skill-library";
+import type { SkillsShDetail, SkillsShEntry, SkillsShPage } from "../../core/skills-sh";
 import type { RemoteSkill, RemoteSkillGroup, RemoteSkillVersion, SkillVersionBasePayload } from "../../core/skill-sync";
 import type { SkillUsageSource } from "../../core/skill-usage";
 import {
   SkillService,
+  type ManagedSkillLibraryPort,
+  type SkillsShClientPort,
   type SkillServiceOperations,
   type SkillStorePort,
   type SkillSyncClientPort,
 } from "./skill-service";
 
-function installedSkill(): InstalledSkill {
+function installedSkill(): ManagedSkill {
   return {
-    id: "codex-user:review",
+    id: "agent-recall:review",
     name: "review",
     description: "Review code",
     agent: "codex",
-    source: "codex-user",
-    path: "/tmp/.codex/skills/review/SKILL.md",
-    directoryPath: "/tmp/.codex/skills/review",
-    rootPath: "/tmp/.codex/skills",
+    source: "agent-recall",
+    path: "/tmp/agent-recall/skills/review/SKILL.md",
+    directoryPath: "/tmp/agent-recall/skills/review",
+    rootPath: "/tmp/agent-recall/skills",
     markdown: "# Review\n",
     mtimeMs: 1,
+    managedId: "review",
+    origin: { kind: "local", label: "Codex" },
+    installations: [
+      { target: "codex", path: "/tmp/.codex/skills/review", state: "installed" },
+      { target: "claude", path: "/tmp/.claude/skills/review", state: "not-installed" },
+      { target: "trae", path: "/tmp/.trae/skills/review", state: "not-installed" },
+    ],
   };
 }
 
@@ -32,11 +43,11 @@ function remoteVersion(overrides: Partial<RemoteSkillVersion> = {}): RemoteSkill
     name: "review",
     description: "Review code",
     agent: "codex",
-    source: "codex-user",
+    source: "agent-recall",
     localFingerprint: "fp-review",
     contentHash: "remote-hash",
     uploadedFromPath: "/old/path",
-    portableScope: "codex-user",
+    portableScope: "agent-recall",
     relativePath: "review",
     identityVersion: 2,
     legacy: false,
@@ -62,8 +73,8 @@ function remoteGroup(version = remoteVersion()): RemoteSkillGroup {
     agent: "codex",
     name: "review",
     description: "Review code",
-    source: "codex-user",
-    portableScope: "codex-user",
+    source: "agent-recall",
+    portableScope: "agent-recall",
     relativePath: "review",
     legacy: false,
     latest: version,
@@ -103,6 +114,38 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
     deleteRemoteSkillVersions: vi.fn(async (ids) => ids),
   };
   const diffResult = { state: "different" as const, localHash: "local-hash", remoteHash: "remote-hash", files: [] };
+  const importResult: ManagedSkillImportResult = { status: "imported", managedId: "review", skill: installedSkill() };
+  const managedLibrary: ManagedSkillLibraryPort = {
+    list: vi.fn(() => ({ skills: [installedSkill()], roots: [], scannedAt: 1 })),
+    listImportCandidates: vi.fn(() => ({ skills: [], roots: [], scannedAt: 1 })),
+    importLocalSkill: vi.fn(() => importResult),
+    importFiles: vi.fn(() => importResult),
+    replaceFiles: vi.fn(() => ({ ...importResult, status: "updated" as const })),
+    updateTargets: vi.fn(() => installedSkill()),
+    delete: vi.fn(() => ({ deletedPath: installedSkill().directoryPath, skillName: "review" })),
+  };
+  const discoveredEntry: SkillsShEntry = {
+    id: "acme/tools/review",
+    source: "acme/tools",
+    owner: "acme",
+    repo: "tools",
+    skillId: "review",
+    name: "Review",
+    installs: 42,
+    url: "https://skills.sh/acme/tools/review",
+  };
+  const discoveredPage: SkillsShPage = { skills: [discoveredEntry], total: 1, hasMore: false, page: 0, stale: false };
+  const discoveredDetail: SkillsShDetail = {
+    entry: discoveredEntry,
+    hash: "download-hash",
+    markdown: "# Review\n",
+    files: [{ relativePath: "SKILL.md", contents: "# Review\n" }],
+    stale: false,
+  };
+  const skillsShClient: SkillsShClientPort = {
+    list: vi.fn(async () => discoveredPage),
+    getDetail: vi.fn(async () => discoveredDetail),
+  };
   const operations: SkillServiceOperations = {
     listInstalledSkills: vi.fn(() => ({ skills: [installedSkill()], roots: [], scannedAt: 1 })),
     skillProjectDirsFromIndexedProjects: vi.fn(() => []),
@@ -110,7 +153,7 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
     listSkillUsageSources: vi.fn(() => usageSources),
     readSkillUsageSourceEvents: vi.fn(() => [{ agent: "codex" as const, skill: "review", timestamp: 100 }]),
     isSyncableSkill: vi.fn(() => true),
-    portableSkillLocation: vi.fn(() => ({ scope: "codex-user" as const, relativePath: "review", identity: "codex-user/review" })),
+    portableSkillLocation: vi.fn(() => ({ scope: "agent-recall" as const, relativePath: "review", identity: "agent-recall/review" })),
     skillSyncLocalContentHash: vi.fn(async () => "local-hash"),
     skillSyncFingerprint: vi.fn(() => "fp-review"),
     buildSkillVersionBasePayload: vi.fn(() => ({ base: { metadata: {} } as SkillVersionBasePayload, contentHash: "local-hash" })),
@@ -142,8 +185,10 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
     now: () => 123,
     logError: vi.fn(),
     operations,
+    managedLibrary,
+    skillsShClient,
   });
-  return { service, settings, store, bindings, usageSources, client, operations, hookSetup, copyText, revealPath, diffResult };
+  return { service, settings, store, bindings, usageSources, client, operations, hookSetup, copyText, revealPath, diffResult, managedLibrary, skillsShClient, discoveredEntry, discoveredPage, discoveredDetail };
 }
 
 describe("SkillService local skills and usage", () => {
@@ -152,6 +197,34 @@ describe("SkillService local skills and usage", () => {
     const snapshot = harness.service.listSkills();
     expect(snapshot.skills[0]).toMatchObject({ name: "review", usageCount: 3, lastUsedAt: 100 });
     expect(snapshot.usage).toEqual({ hookInstalled: true, logExists: true, totalEvents: 3 });
+    expect(harness.managedLibrary.list).toHaveBeenCalledOnce();
+    expect(harness.operations.listInstalledSkills).not.toHaveBeenCalled();
+    expect(harness.operations.usageForSkill).toHaveBeenCalledWith(expect.any(Object), "review");
+  });
+
+  it("imports only explicitly selected local Skills and updates installation targets", () => {
+    const harness = createHarness();
+    harness.service.listImportCandidates();
+    expect(harness.managedLibrary.listImportCandidates).toHaveBeenCalledWith([]);
+
+    expect(harness.service.importLocalSkills(["/tmp/a/SKILL.md", "/tmp/b/SKILL.md"])).toHaveLength(2);
+    expect(harness.managedLibrary.importLocalSkill).toHaveBeenNthCalledWith(1, "/tmp/a/SKILL.md", []);
+    expect(harness.managedLibrary.importLocalSkill).toHaveBeenNthCalledWith(2, "/tmp/b/SKILL.md", []);
+
+    harness.service.updateManagedSkillTargets("review", ["codex", "trae"]);
+    expect(harness.managedLibrary.updateTargets).toHaveBeenCalledWith("review", ["codex", "trae"]);
+  });
+
+  it("lists, previews, and imports a selected skills.sh result", async () => {
+    const harness = createHarness();
+    await expect(harness.service.listDiscoveredSkills({ page: 0, query: "review" })).resolves.toBe(harness.discoveredPage);
+    await expect(harness.service.getDiscoveredSkill(harness.discoveredEntry.id)).resolves.toBe(harness.discoveredDetail);
+    await expect(harness.service.importDiscoveredSkill(harness.discoveredEntry.id)).resolves.toMatchObject({ managedId: "review" });
+    expect(harness.managedLibrary.importFiles).toHaveBeenCalledWith(expect.objectContaining({
+      suggestedId: "review",
+      origin: expect.objectContaining({ kind: "skills-sh", source: "acme/tools" }),
+      files: harness.discoveredDetail.files,
+    }));
   });
 
   it("refreshes only stale usage sources and prunes removed files", () => {
@@ -203,7 +276,7 @@ describe("SkillService sync orchestration", () => {
     });
     expect(harness.store.upsertSkillSyncBinding).toHaveBeenCalledWith(expect.objectContaining({
       localSkillPath: installedSkill().path,
-      portableIdentity: "codex-user/review",
+      portableIdentity: "agent-recall/review",
       lastContentHash: "local-hash",
       lastSyncedAt: 123,
       direction: "upload",

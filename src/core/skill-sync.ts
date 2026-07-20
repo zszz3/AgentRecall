@@ -734,7 +734,7 @@ function versionFromRow(row: SupabaseSkillRow): RemoteSkillVersion {
 }
 
 function parsePortableScope(value: unknown): SkillPortableScope | null {
-  return value === "codex-user" || value === "claude-user" || value === "shared" ? value : null;
+  return value === "agent-recall" || value === "codex-user" || value === "claude-user" || value === "shared" ? value : null;
 }
 
 function legacyRelativePath(uploadedFromPath: string): string {

@@ -52,7 +52,7 @@ export interface ManagedSkillFileImport {
 }
 
 export interface ManagedSkillImportResult {
-  status: "imported" | "existing";
+  status: "imported" | "existing" | "updated";
   managedId: string;
   skill: ManagedSkill;
 }
@@ -159,6 +159,22 @@ export class ManagedSkillLibrary {
     });
   }
 
+  replaceFiles(input: ManagedSkillFileImport): ManagedSkillImportResult {
+    const managedId = safeManagedSkillId(input.suggestedId);
+    const validated = input.files.map((file) => ({ ...file, relativePath: safeRelativeSkillPath(file.relativePath) }));
+    if (!validated.some((file) => file.relativePath.toLowerCase() === "skill.md")) {
+      throw new Error("Downloaded Skill does not include SKILL.md.");
+    }
+    return this.importIntoStaging(managedId, input.origin, (stagingPath) => {
+      for (const file of validated) {
+        const targetPath = path.join(stagingPath, ...file.relativePath.split("/"));
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.writeFileSync(targetPath, file.contents);
+        if (file.mode !== undefined && this.platform !== "win32") fs.chmodSync(targetPath, file.mode & 0o777);
+      }
+    }, true);
+  }
+
   updateTargets(managedId: string, targets: SkillInstallTarget[]): ManagedSkill {
     const skill = this.requireManagedSkill(managedId);
     const requestedTargets = new Set(targets);
@@ -230,6 +246,7 @@ export class ManagedSkillLibrary {
     managedId: string,
     origin: ManagedSkillOrigin,
     populate: (stagingPath: string) => void,
+    replaceExisting = false,
   ): ManagedSkillImportResult {
     fs.mkdirSync(this.libraryRoot, { recursive: true });
     const targetPath = this.managedSkillDirectory(managedId);
@@ -241,12 +258,26 @@ export class ManagedSkillLibrary {
         throw new Error("Imported Skill does not include SKILL.md.");
       }
       if (fs.existsSync(targetPath)) {
-        if (directoryContentHash(targetPath) !== directoryContentHash(stagingPath)) {
+        if (directoryContentHash(targetPath) === directoryContentHash(stagingPath)) {
+          fs.rmSync(stagingPath, { recursive: true, force: true });
+          this.writeMetadata(managedId, origin);
+          return { status: "existing", managedId, skill: this.requireManagedSkill(managedId) };
+        }
+        if (!replaceExisting) {
           throw new Error(`Managed Skill ${managedId} already exists with different content.`);
         }
-        fs.rmSync(stagingPath, { recursive: true, force: true });
-        this.writeMetadata(managedId, origin);
-        return { status: "existing", managedId, skill: this.requireManagedSkill(managedId) };
+        const backupPath = path.join(this.libraryRoot, `.backup-${managedId}-${randomUUID()}`);
+        fs.renameSync(targetPath, backupPath);
+        try {
+          fs.renameSync(stagingPath, targetPath);
+          this.writeMetadata(managedId, origin);
+          fs.rmSync(backupPath, { recursive: true, force: true });
+          return { status: "updated", managedId, skill: this.requireManagedSkill(managedId) };
+        } catch (error) {
+          fs.rmSync(targetPath, { recursive: true, force: true });
+          if (fs.existsSync(backupPath)) fs.renameSync(backupPath, targetPath);
+          throw error;
+        }
       }
       fs.renameSync(stagingPath, targetPath);
       this.writeMetadata(managedId, origin);

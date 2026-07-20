@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { rendererStyleSource } from "./style-test-source";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const mainSource = readFileSync(new URL("../../main/index.ts", import.meta.url), "utf8");
 const skillsSource = readFileSync(new URL("./features/skills/skills-page.tsx", import.meta.url), "utf8");
 const providerSource = readFileSync(new URL("./features/providers/provider-page.tsx", import.meta.url), "utf8");
 const workbenchSource = readFileSync(new URL("./features/workbench/workbench-page.tsx", import.meta.url), "utf8");
@@ -18,6 +19,13 @@ describe("workbench application shell", () => {
     expect(appSource).toContain('data-page="sessions"');
     expect(appSource).toContain('data-page="skills"');
     expect(appSource).toContain('data-page="providers"');
+  });
+
+  it("keeps ordinary window activation on Workbench and focuses search only for the explicit shortcut", () => {
+    expect(mainSource).toContain("function showWindow(options: { focusSearch?: boolean } = {})");
+    expect(mainSource).toContain("if (options.focusSearch) mainWindow.webContents.send(\"focus-search\")");
+    expect(mainSource).toContain("showWindow({ focusSearch: true })");
+    expect(mainSource).toContain('app.on("activate", () => {\n  showWindow();');
   });
 
   it("gives every primary page a consistent title and description bar", () => {

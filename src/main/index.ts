@@ -253,6 +253,10 @@ const skillService = new SkillService({
   getStore: () => store,
   getSettings,
   getHookSetup: loadSkillUsageHookSetup,
+  libraryRoot: path.join(app.getPath("userData"), "skills"),
+  skillsShCachePath: path.join(app.getPath("userData"), "cache", "skills-sh.json"),
+  homeDir: app.getPath("home"),
+  codexHome: process.env.CODEX_HOME,
   copyText: (text) => clipboard.writeText(text),
   revealPath: (targetPath) => revealInFileManager(targetPath),
   now: () => Date.now(),
@@ -514,15 +518,15 @@ function toggleWindow(): void {
     mainWindow.hide();
     return;
   }
-  showWindow();
+  showWindow({ focusSearch: true });
 }
 
-function showWindow(): void {
+function showWindow(options: { focusSearch?: boolean } = {}): void {
   if (!mainWindow) createWindow();
   if (!mainWindow) return;
   mainWindow.show();
   mainWindow.focus();
-  mainWindow.webContents.send("focus-search");
+  if (options.focusSearch) mainWindow.webContents.send("focus-search");
 }
 
 function registerAppGlobalShortcut(accelerator: string): boolean {
@@ -555,13 +559,13 @@ function createTray(): void {
   tray.setToolTip(PRODUCT_NAME);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `Open ${PRODUCT_NAME}`, click: showWindow },
+      { label: `Open ${PRODUCT_NAME}`, click: () => showWindow() },
       { label: "Refresh Now", click: () => void runIndexSync() },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
     ]),
   );
-  tray.on("click", showWindow);
+  tray.on("click", () => showWindow());
 }
 
 function loadTrayIcon(): Electron.NativeImage {
