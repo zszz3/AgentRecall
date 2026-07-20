@@ -4,7 +4,7 @@ import { readStoredLanguage } from "./language";
 import { readStoredTheme } from "./theme";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const apiConfigDialogSource = readFileSync(new URL("./features/providers/api-config-dialog.tsx", import.meta.url), "utf8");
+const apiConfigDialogSource = readFileSync(new URL("./features/providers/provider-page.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 
 describe("theme storage", () => {
@@ -58,14 +58,17 @@ describe("theme controls", () => {
     expect(settingsDialog).toMatch(/Language/);
   });
 
-  it("keeps API configuration beside Skills instead of inside settings", () => {
-    const toolbarActions = appSource.slice(appSource.indexOf('<div className="top-actions">'), appSource.indexOf("</header>"));
+  it("keeps API configuration in the Provider page instead of the session tools or settings", () => {
+    const toolbarStart = appSource.indexOf('<div className="top-actions">');
+    const toolbarActions = appSource.slice(toolbarStart, appSource.indexOf("</header>", toolbarStart));
     const apiDialog = apiConfigDialogSource;
     const settingsDialog = settingsSource;
 
-    expect(toolbarActions).toContain("setApiConfigOpen(true)");
-    expect(toolbarActions).toContain("PackageSearch");
-    expect(toolbarActions).toContain("KeyRound");
+    expect(toolbarActions).not.toContain("setApiConfigOpen(true)");
+    expect(toolbarActions).not.toContain("KeyRound");
+    expect(appSource).toContain('data-page="providers"');
+    expect(appSource).toContain("<ProviderPage");
+    expect(appSource).toContain("PackageSearch");
     expect(settingsDialog).not.toContain("api-settings-form");
     expect(settingsDialog).not.toContain('activeSection === "api"');
     expect(apiDialog).toContain("api-settings-form");
@@ -81,7 +84,7 @@ describe("theme controls", () => {
     expect(apiDialog).toMatch(/LongCat/);
     expect(apiDialog).toMatch(/Kimi/);
     expect(apiDialog).toMatch(/MiMo/);
-    expect(apiDialog).toMatch(/API configuration/);
+    expect(apiDialog).toContain('className="provider-page"');
     expect(apiDialog).toMatch(/Base URL/);
     expect(apiDialog).toMatch(/API Key/);
     expect(apiDialog).toMatch(/Model/);

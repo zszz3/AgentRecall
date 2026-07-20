@@ -1,5 +1,5 @@
 import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import {
   AppWindow,
   Archive,
@@ -20,12 +20,13 @@ import {
   GitBranch,
   KeyRound,
   Laptop,
+  LayoutDashboard,
+  MessagesSquare,
   PackageSearch,
   Pin,
   PinOff,
   Play,
   RefreshCw,
-  Search,
   Server,
   Settings,
   Sparkles,
@@ -65,10 +66,8 @@ import type {
   SessionStats,
   SessionStatsPeriod,
   SessionTraceEvent,
-  UsageQuotaCard,
   UsageQuotaSnapshot,
 } from "../../core/types";
-import { formatCompactNumber, formatTokenCount } from "./format-count";
 import { DATE_RANGE_OPTIONS, dateRangeLabel, dateRangeShortLabel, resolveDateRange, type DateRangeFilter } from "./date-range";
 import {
   filterSessionsByLiveStatus,
@@ -102,11 +101,11 @@ import type {
   SkillsFeedback,
   StatsFeedback,
 } from "./app-types";
-import { ApiConfigDialog } from "./features/providers/api-config-dialog";
+import { ProviderPage } from "./features/providers/provider-page";
 import { DetailPanel } from "./features/session-detail/detail-panel";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
-import { SkillsDialog } from "./features/skills/skills-dialog";
+import { SkillsPage } from "./features/skills/skills-page";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
 import { RemoteSessionsDialog } from "./features/remote-sessions/remote-sessions-dialog";
 import { SupabaseSetupGuide } from "./components/supabase-setup-guide";
@@ -120,11 +119,11 @@ import {
   type SettingsSection,
 } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
+import { WorkbenchPage } from "./features/workbench/workbench-page";
 import {
   SOURCE_LABEL,
   environmentBadgeLabel,
   environmentBadgeTitle,
-  hasTokenUsage,
   isBranchTag,
   displayTagName,
   isRemoteSession,
@@ -141,24 +140,17 @@ import {
   sourceFilters,
   sourceUiFamily,
   supportsMigrationSource,
-  statsPeriodLabel,
   supportsResumeSource,
   unsupportedMigrationTitle,
-  usageStatsDisplayRows,
+  WORKBENCH_SESSION_LIMIT,
   migrationAgentLabel,
   migrationTargetsForSession,
 } from "./session-ui";
 
-const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> = [
-  { label: "Today", value: "today" },
-  { label: "7D", value: "sevenDay" },
-  { label: "30D", value: "thirtyDay" },
-  { label: "All", value: "allTime" },
-];
-
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
+const BRAND_LOGO_URL = new URL("../../../assets/logo.png", import.meta.url).href;
 
 const LIVE_STATUS_FILTERS: Array<{ label: string; value: LiveStatusFilter }> = [
   { label: "All", value: "all" },
@@ -174,6 +166,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
 } satisfies MigrationTargetSettings;
 
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
+type AppPage = "workbench" | "sessions" | "skills" | "providers";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -282,10 +275,12 @@ function loadInitialSidebarSections(): SidebarSectionsState {
 export function App(): ReactElement {
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
+  const [activePage, setActivePage] = useState<AppPage>("workbench");
   const [sidebarSections, setSidebarSections] = useState<SidebarSectionsState>(() => loadInitialSidebarSections());
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => loadCollapsedProjectGroups());
   const [collapsedTreeProjects, setCollapsedTreeProjects] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [workbenchQuery, setWorkbenchQuery] = useState("");
   const [source, setSource] = useState<SearchOptions["source"]>("all");
   const [environmentId, setEnvironmentId] = useState<string | "all">("all");
   const [tag, setTag] = useState<string | undefined>();
@@ -293,7 +288,7 @@ export function App(): ReactElement {
   const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<ViewMode>("default");
   const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
-  const [sortBy, setSortBy] = useState<SessionSortBy>("smart");
+  const sortBy: SessionSortBy = "smart";
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
   const [hoveredScopeFilter, setHoveredScopeFilter] = useState<string | null>(null);
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
@@ -312,6 +307,7 @@ export function App(): ReactElement {
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [quotaFeedback, setQuotaFeedback] = useState<QuotaFeedback>(null);
   const [liveSessions, setLiveSessions] = useState<LiveSessionSnapshot>(EMPTY_LIVE_SESSIONS);
+  const [workbenchSessions, setWorkbenchSessions] = useState<SessionSearchResult[]>([]);
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionSearchResult | null>(null);
@@ -339,8 +335,6 @@ export function App(): ReactElement {
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
   const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  const [apiConfigOpen, setApiConfigOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
   const [remoteSessionsCache, setRemoteSessionsCache] = useState(EMPTY_REMOTE_SESSIONS_CACHE);
@@ -365,6 +359,7 @@ export function App(): ReactElement {
   const statsLoadSeqRef = useRef(0);
   const detailLoadSeqRef = useRef(0);
   const remoteSessionsLoadSeqRef = useRef(0);
+  const workbenchSessionsLoadSeqRef = useRef(0);
   const remoteSessionsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const environmentIdRef = useRef(environmentId);
@@ -418,6 +413,49 @@ export function App(): ReactElement {
       );
     });
   }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
+
+  const loadWorkbenchSessions = useCallback(async () => {
+    const requestId = ++workbenchSessionsLoadSeqRef.current;
+    if (workbenchQuery.trim()) {
+      const page = await window.sessionSearch.searchSessionPage({
+        query: workbenchQuery,
+        source: "all",
+        visibility: "default",
+        sortBy: "smart",
+        prioritizePinned: false,
+        limit: WORKBENCH_SESSION_LIMIT,
+      });
+      if (requestId === workbenchSessionsLoadSeqRef.current) setWorkbenchSessions(page.sessions);
+      return;
+    }
+    const recentRequest = window.sessionSearch.searchSessionPage({
+      query: "",
+      source: "all",
+      visibility: "default",
+      sortBy: "activity",
+      prioritizePinned: false,
+      liveStatus: liveDetectionFailed ? undefined : "closed",
+      liveSessionKeys: liveDetectionFailed ? [] : liveSearchKeys,
+      limit: WORKBENCH_SESSION_LIMIT,
+    });
+    const activeRequest = !liveDetectionFailed && liveSearchKeys.length > 0
+      ? window.sessionSearch.searchSessionPage({
+          query: "",
+          source: "all",
+          visibility: "default",
+          sortBy: "activity",
+          prioritizePinned: false,
+          liveStatus: "open",
+          liveSessionKeys: liveSearchKeys,
+          limit: WORKBENCH_SESSION_LIMIT,
+        })
+      : Promise.resolve({ sessions: [], totalCount: 0, hasMore: false });
+    const [recentPage, activeSessionsPage] = await Promise.all([recentRequest, activeRequest]);
+    if (requestId !== workbenchSessionsLoadSeqRef.current) return;
+    const sessionsByKey = new Map<string, SessionSearchResult>();
+    for (const session of [...activeSessionsPage.sessions, ...recentPage.sessions]) sessionsByKey.set(session.sessionKey, session);
+    setWorkbenchSessions([...sessionsByKey.values()]);
+  }, [liveDetectionFailed, liveSearchKeys, workbenchQuery]);
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
@@ -739,10 +777,11 @@ export function App(): ReactElement {
   }, [searchScopeKey]);
 
   useEffect(() => {
+    if (activePage !== "sessions") return;
     // Typing is debounced inside SearchBox, so the search can run immediately
     // here; filter and sort changes then respond without an extra delay.
     void load();
-  }, [load]);
+  }, [activePage, load]);
 
   useEffect(() => {
     void loadSidebarMetadata();
@@ -763,8 +802,12 @@ export function App(): ReactElement {
   }, [loadRemoteSessionsCache]);
 
   useEffect(() => {
-    if (skillsOpen) void loadSkills({ refreshUsage: true, silent: true });
-  }, [skillsOpen, loadSkills]);
+    if (activePage === "skills") void loadSkills({ refreshUsage: true, silent: true });
+  }, [activePage, loadSkills]);
+
+  useEffect(() => {
+    void loadWorkbenchSessions();
+  }, [loadWorkbenchSessions]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -779,7 +822,7 @@ export function App(): ReactElement {
       if (enabled) await window.sessionSearch.installSkillUsageHook();
       else await window.sessionSearch.uninstallSkillUsageHook();
       setSkillHookInstalled(await window.sessionSearch.getSkillUsageHookStatus());
-      if (skillsOpen) void loadSkills({ refreshUsage: true, silent: true });
+      if (activePage === "skills") void loadSkills({ refreshUsage: true, silent: true });
       const message = enabled ? t("Skill usage tracking on.", "已开启 Skill 使用统计。") : t("Skill usage tracking off.", "已关闭 Skill 使用统计。");
       setSettingsFeedback({ kind: "success", message });
       window.setTimeout(() => setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current)), 1600);
@@ -788,7 +831,7 @@ export function App(): ReactElement {
     } finally {
       setSkillHookBusy(false);
     }
-  }, [skillsOpen, loadSkills, t]);
+  }, [activePage, loadSkills, t]);
 
   const toggleSessionSyncHook = useCallback(async (enabled: boolean) => {
     setSessionHookBusy(true);
@@ -899,16 +942,19 @@ export function App(): ReactElement {
   useEffect(() => {
     const offIndex = window.sessionSearch.onIndexStatus((nextStatus) => {
       setIndexStatus(nextStatus);
+      if (nextStatus.error) setRefreshFeedback({ kind: "error", message: nextStatus.error });
       if (!nextStatus.running) {
-        void load();
+        if (activePage === "sessions") void load();
         void loadSidebarMetadata();
         void loadStats();
+        void loadWorkbenchSessions();
       }
     });
-    const offFocus = window.sessionSearch.onFocusSearch(() => searchRef.current?.focus());
+    const offFocus = window.sessionSearch.onFocusSearch(() => {
+      setActivePage("sessions");
+      window.requestAnimationFrame(() => searchRef.current?.focus());
+    });
     const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
-      setSkillsOpen(false);
-      setApiConfigOpen(false);
       setSettingsInitialSection("terminal");
       setSettingsOpen(true);
     });
@@ -925,7 +971,7 @@ export function App(): ReactElement {
         }
         return current;
       });
-      void load();
+      if (activePage === "sessions") void load();
     });
     return () => {
       offIndex();
@@ -934,7 +980,7 @@ export function App(): ReactElement {
       offAppUpdate();
       offEnvironments();
     };
-  }, [load, loadSidebarMetadata, loadStats]);
+  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions]);
 
   useEffect(() => {
     void window.sessionSearch.getAppUpdateStatus(false).then(setAppUpdateStatus).catch(() => undefined);
@@ -961,8 +1007,6 @@ export function App(): ReactElement {
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
         setContextMenu(null);
-        setSkillsOpen(false);
-        setApiConfigOpen(false);
         setSettingsInitialSection("terminal");
         setSettingsOpen(true);
         return;
@@ -970,8 +1014,11 @@ export function App(): ReactElement {
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
+        setActivePage("sessions");
+        window.requestAnimationFrame(() => {
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        });
         return;
       }
 
@@ -983,8 +1030,6 @@ export function App(): ReactElement {
         else if (deleteSessionCandidate && !deletingSession) setDeleteSessionCandidate(null);
         else if (deleteTagName) setDeleteTagName(null);
         else if (contextMenu) setContextMenu(null);
-        else if (skillsOpen) setSkillsOpen(false);
-        else if (apiConfigOpen) setApiConfigOpen(false);
         else if (aiAssistantOpen) setAiAssistantOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (remoteDetail) closeRemoteDetail();
@@ -996,7 +1041,7 @@ export function App(): ReactElement {
       }
 
       // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen) return;
+      if (detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
@@ -1036,7 +1081,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -1044,9 +1089,9 @@ export function App(): ReactElement {
   }, [selectedKey]);
 
   useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail || remoteDetail || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen));
+    document.body.classList.toggle("overlay-open", Boolean(detail || remoteDetail || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen));
     return () => document.body.classList.remove("overlay-open");
-  }, [detail, remoteDetail, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen]);
+  }, [detail, remoteDetail, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen]);
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -1720,87 +1765,85 @@ export function App(): ReactElement {
   return (
     <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
-      <section className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <Search size={17} />
-          </div>
-          <div>
-            <h1>AgentRecall</h1>
-            <p>{t("Codex and Claude Code", "Codex 和 Claude Code")}</p>
-          </div>
-        </div>
-
-        <div className="refresh-control">
-          <button className={`primary ${indexStatus?.running ? "is-running" : ""}`} onClick={() => void refreshNow()} disabled={indexStatus?.running}>
-            <RefreshCw size={16} />
-            {indexStatus?.running ? t("Refreshing Index...", "正在更新索引...") : t("Refresh Index", "更新索引")}
+      <aside className="app-navigation">
+        <button className="app-navigation-brand" onClick={() => setActivePage("workbench")} aria-label="AgentRecall">
+          <span className="app-navigation-brand-mark" aria-hidden="true">
+            <svg viewBox="75 240 280 280"><image href={BRAND_LOGO_URL} width="1800" height="796" /></svg>
+          </span>
+          <strong>AgentRecall</strong>
+        </button>
+        <nav aria-label={t("Main navigation", "主导航")}>
+          <button data-page="workbench" className={activePage === "workbench" ? "active" : ""} onClick={() => setActivePage("workbench")}>
+            <LayoutDashboard size={18} /><span>{t("Workbench", "工作台")}</span>
           </button>
-          {refreshFeedback ? <div className={`refresh-feedback ${refreshFeedback.kind}`}>{refreshFeedback.message}</div> : null}
-        </div>
+          <button data-page="sessions" className={activePage === "sessions" ? "active" : ""} onClick={() => setActivePage("sessions")}>
+            <MessagesSquare size={18} /><span>{t("Sessions", "会话")}</span>
+          </button>
+          <button data-page="skills" className={activePage === "skills" ? "active" : ""} onClick={() => setActivePage("skills")}>
+            <PackageSearch size={18} /><span>Skills</span>
+          </button>
+          <button data-page="providers" className={activePage === "providers" ? "active" : ""} onClick={() => setActivePage("providers")}>
+            <KeyRound size={18} /><span>Provider</span>
+          </button>
+        </nav>
+        <button
+          className={`app-navigation-refresh ${indexStatus?.running ? "is-running" : ""} ${indexStatus?.error ? "error" : ""}`}
+          onClick={() => void refreshNow()}
+          disabled={indexStatus?.running}
+          title={indexStatus?.error
+            ? t("Index update failed. Click to retry.", "索引更新失败，点击重试。")
+            : indexStatus?.lastIndexedAt
+              ? `${t("Refresh index", "刷新索引")} · ${formatRelativeTime(indexStatus.lastIndexedAt)}`
+              : t("Refresh index", "刷新索引")}
+          aria-label={indexStatus?.running ? t("Refreshing index", "正在刷新索引") : t("Refresh index", "刷新索引")}
+        >
+          <RefreshCw size={15} />
+        </button>
+        <button
+          className={`app-navigation-settings ${settingsOpen ? "active" : ""}`}
+          onClick={() => { setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal"); setSettingsOpen(true); }}
+        >
+          <Settings size={18} /><span>{t("Settings", "设置")}</span>
+          {shouldSignalAppUpdate ? <i aria-label={t("Update available", "有新版本可用")} /> : null}
+        </button>
+      </aside>
 
-        <div className="stats-panel">
-          <div className="stats-header">
-            <span>{t("Usage", "用量")}</span>
-            <div className="stats-controls">
-              <div className="stats-period-toggle" role="group" aria-label={t("Usage period", "用量周期")}>
-                {STATS_PERIOD_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={statsPeriod === option.value ? "active" : ""}
-                    onClick={() => setStatsPeriod(option.value)}
-                  >
-                    {statsPeriodLabel(option.value, language)}
-                  </button>
-                ))}
-              </div>
-              <button
-                className="stats-refresh"
-                onClick={() => void refreshStats()}
-                disabled={statsRefreshing}
-                title={t("Refresh usage stats", "刷新用量统计")}
-                aria-label={t("Refresh usage stats", "刷新用量统计")}
-              >
-                <RefreshCw size={13} />
-              </button>
-            </div>
-          </div>
-          {statsFeedback ? <div className={`stats-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</div> : null}
-          <div className="stats-metrics">
-            <span>
-              <strong>{formatCompactNumber(stats.total.messageCount)}</strong>
-              {t("Messages", "消息")}
-            </span>
-            {hasTokenUsage(stats.total) ? (
-              <span>
-                <strong>{formatTokenCount(stats.total.totalTokens)}</strong>
-                {t("Tokens", "Token")}
-              </span>
-            ) : null}
-          </div>
-          <div className="stats-breakdown">
-            {usageStatsDisplayRows(stats.bySource).map((item) => (
-              <div key={item.key}>
-                <span>{item.label}</span>
-                <em>
-                  {formatCompactNumber(item.messageCount)} {t("msg", "条")}
-                  {hasTokenUsage(item) ? ` · ${formatTokenCount(item.totalTokens)}` : ""}
-                </em>
-              </div>
-            ))}
-          </div>
-        </div>
+      <section className="app-workspace">
+        <div className="app-page-host">
+          {activePage === "workbench" ? (
+            <WorkbenchPage
+              stats={stats}
+              statsPeriod={statsPeriod}
+              statsRefreshing={statsRefreshing}
+              statsFeedback={statsFeedback}
+              quotas={quotas}
+              quotaLoading={quotaLoading}
+              quotaFeedback={quotaFeedback}
+              sessions={workbenchSessions}
+              sessionQuery={workbenchQuery}
+              liveSessionKeys={liveSessionKeys}
+              liveDetectionFailed={liveDetectionFailed}
+              platform={RUNTIME_PLATFORM}
+              language={language}
+              onStatsPeriodChange={setStatsPeriod}
+              onRefreshStats={() => void refreshStats()}
+              onRefreshQuotas={() => void loadQuotas("manual")}
+              onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
+              onSearchSessions={setWorkbenchQuery}
+              onOpenSession={(session) => void openDetail(session)}
+              onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
+              onShowSessions={(submittedQuery) => {
+                setQuery(submittedQuery);
+                setActivePage("sessions");
+                setLiveStatus("all");
+              }}
+            />
+          ) : null}
 
-        <QuotaPanel
-          snapshot={quotas}
-          loading={quotaLoading}
-          feedback={quotaFeedback}
-          expanded={sidebarSections.remaining}
-          onToggle={() => toggleSidebarSectionById("remaining")}
-          onRefresh={() => void loadQuotas("manual")}
-          language={language}
-        />
-
+          {activePage === "sessions" ? (
+            <div className="sessions-page" data-page="sessions">
+              <section className="sidebar">
+                <div className="session-sidebar-title"><strong>{t("Session scope", "会话范围")}</strong><span>{sessionTotalCount}</span></div>
         <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
         {sidebarSections.environments ? (
           <nav className="sidebar-tree">
@@ -1958,6 +2001,7 @@ export function App(): ReactElement {
             recentLabel={t("Recent searches", "最近搜索")}
             clearRecentLabel={t("Clear", "清空")}
             deleteRecentLabel={t("Delete recent search", "删除最近搜索")}
+            submittedValue={query}
             onSearch={setQuery}
           />
           <div className="toolbar-filters">
@@ -2011,38 +2055,12 @@ export function App(): ReactElement {
                 </button>
               ))}
             </div>
-            <div className="sort-filter" role="group" aria-label={t("Sort order", "排序方式")}>
-              <ArrowRightLeft size={14} aria-hidden="true" />
-              <button
-                className={sortBy === "smart" ? "active" : ""}
-                onClick={() => setSortBy("smart")}
-                title={t("Smart: relevance + recency", "智能：相关性 + 时间")}
-              >
-                {t("Smart", "智能")}
-              </button>
-              <button
-                className={sortBy === "activity" ? "active" : ""}
-                onClick={() => setSortBy("activity")}
-                title={t("Most recent first", "最近活跃优先")}
-              >
-                {t("Recent", "最新")}
-              </button>
-              <button
-                className={sortBy === "created" ? "active" : ""}
-                onClick={() => setSortBy("created")}
-                title={t("Oldest first", "最早创建优先")}
-              >
-                {t("Oldest", "最早")}
-              </button>
-            </div>
           </div>
           <div className="top-actions">
             <button
               className={`icon-button toolbar-icon-button ${aiAssistantOpen ? "active" : ""}`}
               onClick={() => {
                 setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setSkillsOpen(false);
                 setRemoteSessionsOpen(false);
                 setAiAssistantOpen(true);
               }}
@@ -2052,24 +2070,9 @@ export function App(): ReactElement {
               <Sparkles size={15} />
             </button>
             <button
-              className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setRemoteSessionsOpen(false);
-                setSkillsOpen(true);
-              }}
-              title={t("Skills", "Skills 管理")}
-              aria-label={t("Skills", "Skills 管理")}
-            >
-              <PackageSearch size={15} />
-            </button>
-            <button
               className={`icon-button toolbar-icon-button ${remoteSessionsOpen ? "active" : ""}`}
               onClick={() => {
                 setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setSkillsOpen(false);
                 setRemoteSessionsOpen(true);
               }}
               title={t("Remote sessions", "远程会话")}
@@ -2078,23 +2081,8 @@ export function App(): ReactElement {
               <Cloud size={15} />
             </button>
             <button
-              className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
-              onClick={() => {
-                setSkillsOpen(false);
-                setSettingsOpen(false);
-                setRemoteSessionsOpen(false);
-                setApiConfigOpen(true);
-              }}
-              title={t("API configuration", "API 配置")}
-              aria-label={t("API configuration", "API 配置")}
-            >
-              <KeyRound size={15} />
-            </button>
-            <button
               className={`icon-button toolbar-icon-button ${shouldSignalAppUpdate ? "update-available" : ""}`}
               onClick={() => {
-                setSkillsOpen(false);
-                setApiConfigOpen(false);
                 setRemoteSessionsOpen(false);
                 setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
                 setSettingsOpen(true);
@@ -2137,6 +2125,47 @@ export function App(): ReactElement {
               <ChevronDown size={14} />
               {t(`Load ${SESSION_PAGE_SIZE} more`, `再加载 ${SESSION_PAGE_SIZE} 个`)}
             </button>
+          ) : null}
+        </div>
+      </section>
+            </div>
+          ) : null}
+
+          {activePage === "skills" ? (
+            <SkillsPage
+              snapshot={installedSkills}
+              syncSnapshot={skillSyncSnapshot}
+              loading={skillsLoading}
+              feedback={skillsFeedback}
+              language={language}
+              revealLabel={FILE_MANAGER_LABEL}
+              onRefresh={() => void loadSkills({ refreshUsage: true })}
+              onUpload={(skill, force) => uploadSkillToSync(skill, force)}
+              onUploadSelected={(skills) => uploadSelectedSkillsToSync(skills)}
+              onInstallRemote={(remoteSkillId) => installSyncedSkill(remoteSkillId)}
+              onFetchVersion={(remoteSkillId) => fetchSyncedSkillVersion(remoteSkillId)}
+              onRefreshRemote={() => void loadSkills({ silent: true })}
+              onCopySetupSql={() => void copySkillSyncSetupSql()}
+              onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
+              onCopyPath={(skillPath) =>
+                void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
+              }
+              onReveal={(skillPath) =>
+                void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
+              }
+              onDelete={(skill) => deleteSkill(skill)}
+            />
+          ) : null}
+
+          {activePage === "providers" ? (
+            <ProviderPage
+              settings={appSettings}
+              language={language}
+              feedback={settingsFeedback}
+              onSettingsChange={(next) => void updateSettings(next)}
+              onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
+              onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
+            />
           ) : null}
         </div>
       </section>
@@ -2324,7 +2353,11 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {actionStatus ? <ActionToast status={actionStatus} onClose={() => setActionStatus(null)} /> : null}
+      {actionStatus
+        ? <ActionToast status={actionStatus} onClose={() => setActionStatus(null)} />
+        : refreshFeedback
+          ? <ActionToast status={refreshFeedback} onClose={() => setRefreshFeedback(null)} />
+          : null}
 
       {dialog ? (
         <CommandDialog
@@ -2355,18 +2388,6 @@ export function App(): ReactElement {
           onCancel={() => {
             if (!deletingSession) setDeleteSessionCandidate(null);
           }}
-        />
-      ) : null}
-
-      {apiConfigOpen ? (
-        <ApiConfigDialog
-          settings={appSettings}
-          language={language}
-          feedback={settingsFeedback}
-          onSettingsChange={(next) => void updateSettings(next)}
-          onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
-          onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
-          onClose={() => setApiConfigOpen(false)}
         />
       ) : null}
 
@@ -2404,7 +2425,7 @@ export function App(): ReactElement {
           onAddSsh={() => setSshDialogOpen(true)}
           onOpenApiConfig={() => {
             setSettingsOpen(false);
-            setApiConfigOpen(true);
+            setActivePage("providers");
           }}
           onOpenRemoteSessions={() => {
             setSettingsOpen(false);
@@ -2421,33 +2442,6 @@ export function App(): ReactElement {
           feedback={settingsFeedback}
           onSaveEnvironment={(input) => saveSshEnvironment(input)}
           onClose={() => setSshDialogOpen(false)}
-        />
-      ) : null}
-
-      {skillsOpen ? (
-        <SkillsDialog
-          snapshot={installedSkills}
-          syncSnapshot={skillSyncSnapshot}
-          loading={skillsLoading}
-          feedback={skillsFeedback}
-          language={language}
-          revealLabel={FILE_MANAGER_LABEL}
-          onRefresh={() => void loadSkills({ refreshUsage: true })}
-          onUpload={(skill, force) => uploadSkillToSync(skill, force)}
-          onUploadSelected={(skills) => uploadSelectedSkillsToSync(skills)}
-          onInstallRemote={(remoteSkillId) => installSyncedSkill(remoteSkillId)}
-          onFetchVersion={(remoteSkillId) => fetchSyncedSkillVersion(remoteSkillId)}
-          onRefreshRemote={() => void loadSkills({ silent: true })}
-          onCopySetupSql={() => void copySkillSyncSetupSql()}
-          onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
-          onCopyPath={(skillPath) =>
-            void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
-          }
-          onReveal={(skillPath) =>
-            void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
-          }
-          onDelete={(skill) => deleteSkill(skill)}
-          onClose={() => setSkillsOpen(false)}
         />
       ) : null}
 
@@ -2481,93 +2475,6 @@ export function App(): ReactElement {
   );
 }
 
-function QuotaPanel({
-  snapshot,
-  loading,
-  feedback,
-  expanded,
-  onToggle,
-  onRefresh,
-  language,
-}: {
-  snapshot: UsageQuotaSnapshot;
-  loading: boolean;
-  feedback: QuotaFeedback;
-  expanded: boolean;
-  onToggle: () => void;
-  onRefresh: () => void;
-  language: LanguageMode;
-}): ReactElement {
-  const updatedAt = snapshot.generatedAt ? formatRelativeTime(Date.parse(snapshot.generatedAt)) : "";
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className="quota-panel">
-      <div className="quota-header">
-        <button className="quota-section-toggle" onClick={onToggle} aria-expanded={expanded}>
-          <span>{l("Remaining", "剩余额度")}</span>
-          {updatedAt ? <em>{updatedAt}</em> : null}
-          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </button>
-        <button
-          className="quota-refresh"
-          onClick={onRefresh}
-          disabled={loading}
-          title={l("Refresh usage limits", "刷新额度")}
-          aria-label={l("Refresh usage limits", "刷新额度")}
-        >
-          <RefreshCw size={13} />
-        </button>
-      </div>
-      {expanded ? (
-        <>
-          <div className="quota-list">
-            {snapshot.providers.map((card) => (
-              <QuotaProviderCard key={card.provider} card={card} language={language} />
-            ))}
-            {snapshot.providers.length === 0 ? (
-              <div className="quota-empty">{loading ? l("Checking usage limits...", "正在检查额度...") : l("Usage limits unavailable.", "额度不可用。")}</div>
-            ) : null}
-          </div>
-          {feedback ? <div className={`quota-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function QuotaProviderCard({ card, language }: { card: UsageQuotaCard; language: LanguageMode }): ReactElement {
-  const supported = card.status === "supported" && card.quotas.length > 0;
-  const meta = card.plan;
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className={`quota-card ${card.provider}`}>
-      <div className="quota-provider-head">
-        <span className="quota-provider-name">{card.displayName}</span>
-        <span className={`quota-status ${card.status}`}>{quotaStatusLabel(card.status, language)}</span>
-      </div>
-      {meta ? <div className="quota-meta">{meta}</div> : null}
-      {supported ? (
-        <div className="quota-windows">
-          {card.quotas.map((quota) => (
-            <div className="quota-window" key={quota.key}>
-              <div className="quota-window-top">
-                <span>{quota.label}</span>
-                <strong>{l(`${quota.remainingDisplay} left`, `剩余 ${quota.remainingDisplay}`)}</strong>
-              </div>
-              <div className="quota-track" aria-hidden="true">
-                <div className="quota-fill" style={{ width: `${quota.remainingPercent}%` } as CSSProperties} />
-              </div>
-              <div className="quota-reset">{quota.stale ? l("stale", "已过期") : formatQuotaReset(quota.resetsAt, language)}</div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="quota-detail">{card.detail || l("Quota data unavailable.", "额度数据不可用。")}</p>
-      )}
-    </div>
-  );
-}
-
 function SidebarSectionHeader({
   title,
   expanded,
@@ -2596,32 +2503,6 @@ function ActionToast({ status, onClose }: { status: ActionStatus; onClose: () =>
       ) : null}
     </div>
   );
-}
-
-function quotaStatusLabel(status: UsageQuotaCard["status"], language: LanguageMode): string {
-  if (status === "supported") return localize(language, "Live", "可用");
-  if (status === "unsupported_api_key") return localize(language, "Unsupported", "不支持");
-  if (status === "error") return localize(language, "Error", "错误");
-  return localize(language, "Setup", "设置");
-}
-
-function formatQuotaReset(resetsAt: string | undefined, language: LanguageMode): string {
-  if (!resetsAt) return "";
-  const timestamp = Date.parse(resetsAt);
-  if (!Number.isFinite(timestamp)) return "";
-  const diff = timestamp - Date.now();
-  if (diff <= 0) return localize(language, "reset due", "应重置");
-  const minutes = Math.ceil(diff / 60_000);
-  if (minutes < 60) return localize(language, `resets in ${minutes}m`, `${minutes} 分钟后重置`);
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    const remainingMinutes = minutes - hours * 60;
-    return remainingMinutes > 0
-      ? localize(language, `resets in ${hours}h ${remainingMinutes}m`, `${hours} 小时 ${remainingMinutes} 分钟后重置`)
-      : localize(language, `resets in ${hours}h`, `${hours} 小时后重置`);
-  }
-  const days = Math.ceil(hours / 24);
-  return localize(language, `resets in ${days}d`, `${days} 天后重置`);
 }
 
 function migrationStrategyLabel(strategy: SessionMigrationResult["strategy"], language: LanguageMode): string {

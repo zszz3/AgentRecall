@@ -4,17 +4,19 @@ import { rendererStyleSource } from "./style-test-source";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const skillsSource = readFileSync(new URL("./features/skills/skills-page.tsx", import.meta.url), "utf8");
+const providerSource = readFileSync(new URL("./features/providers/provider-page.tsx", import.meta.url), "utf8");
 const workbenchSource = readFileSync(new URL("./features/workbench/workbench-page.tsx", import.meta.url), "utf8");
 const searchBoxSource = readFileSync(new URL("./features/search/search-box.tsx", import.meta.url), "utf8");
 const stylesheet = rendererStyleSource;
 
 describe("workbench application shell", () => {
-  it("starts on the workbench and exposes workbench, sessions, and Skills navigation", () => {
-    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "skills"');
+  it("starts on the workbench and exposes workbench, sessions, Skills, and Provider navigation", () => {
+    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "skills" | "providers"');
     expect(appSource).toContain('useState<AppPage>("workbench")');
     expect(appSource).toContain("<WorkbenchPage");
     expect(appSource).toContain('data-page="sessions"');
     expect(appSource).toContain('data-page="skills"');
+    expect(appSource).toContain('data-page="providers"');
   });
 
   it("owns Skills as a page instead of preserving the old modal interface", () => {
@@ -23,6 +25,14 @@ describe("workbench application shell", () => {
     expect(skillsSource).not.toContain('presentation?: "dialog" | "page"');
     expect(appSource).toContain("<SkillsPage");
     expect(appSource).not.toContain('presentation="page"');
+  });
+
+  it("owns Provider as a page instead of preserving the API configuration overlay", () => {
+    expect(providerSource).toContain("export function ProviderPage");
+    expect(providerSource).toContain('className="provider-page"');
+    expect(providerSource).not.toContain('className="dialog-backdrop"');
+    expect(appSource).toContain("<ProviderPage");
+    expect(appSource).not.toContain("apiConfigOpen");
   });
 
   it("uses the compact navigation rail and independent workbench/session page scrollers", () => {

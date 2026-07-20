@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { rendererStyleSource } from "./style-test-source";
 
-const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const stylesheet = rendererStyleSource;
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
 const remoteSessionsSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
@@ -98,8 +99,8 @@ describe("stylesheet theme contract", () => {
     expect(autoCheck).toMatch(/width:\s*min\(100%,\s*560px\)/);
   });
 
-  it("keeps the API config dialog viewport-bound with a clear provider switch", () => {
-    const apiDialog = stylesheet.match(/\.api-config-dialog\s*\{[^}]*\}/)?.[0] ?? "";
+  it("keeps the Provider page full-height with a scrollable body and clear provider switch", () => {
+    const providerPage = stylesheet.match(/\.provider-page\s*\{[^}]*\}/)?.[0] ?? "";
     const apiBody = stylesheet.match(/\.api-config-body\s*\{[^}]*\}/)?.[0] ?? "";
     const providerSwitch = stylesheet.match(/\.api-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
     const codexProviderSwitch = stylesheet.match(/\.codex-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
@@ -109,7 +110,8 @@ describe("stylesheet theme contract", () => {
     const apiField = stylesheet.match(/\.api-settings-form\s+\.settings-field\s*\{[^}]*\}/)?.[0] ?? "";
     const apiInput = stylesheet.match(/\.api-settings-form\s+\.settings-field\s+(?:input|select)[^{]*\{[^}]*\}/)?.[0] ?? "";
 
-    expect(apiDialog).toMatch(/height:\s*min\([^;]*100vh/);
+    expect(providerPage).toMatch(/height:\s*100%/);
+    expect(providerPage).toMatch(/display:\s*flex/);
     expect(apiBody).toMatch(/overflow-y:\s*auto/);
     expect(providerSwitch).toMatch(/grid-template-columns:\s*repeat\(auto-fit/);
     expect(providerSwitch).toMatch(/minmax\(92px,\s*1fr\)/);

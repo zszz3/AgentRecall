@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { Eye, EyeOff, X } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import {
   API_PROVIDER_PRESETS,
   CLAUDE_API_PROVIDER_PRESETS,
@@ -68,14 +68,13 @@ function buildSummarySourceFromSettings(settings: AppSettings | null): AppSettin
   return settings?.summarySource ?? "custom";
 }
 
-export function ApiConfigDialog({
+export function ProviderPage({
   settings,
   language,
   feedback,
   onSettingsChange,
   onApplyToCodex,
   onApplyToClaude,
-  onClose,
 }: {
   settings: AppSettings | null;
   language: LanguageMode;
@@ -83,7 +82,6 @@ export function ApiConfigDialog({
   onSettingsChange: (settings: AppSettingsUpdate) => void;
   onApplyToCodex: (apiConfig: ApiConfig) => void;
   onApplyToClaude: (claudeApiConfig: ClaudeApiConfig) => void;
-  onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const saving = feedback?.kind === "running";
@@ -346,14 +344,16 @@ export function ApiConfigDialog({
   };
 
   return (
-    <div className="dialog-backdrop" onMouseDown={onClose}>
-      <section className="command-dialog api-config-dialog" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dialog-title">
-          <span>{l("API configuration", "API 配置")}</span>
-          <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}>
-            <X size={16} />
-          </button>
+    <section className="provider-page" data-page="providers">
+      <header className="provider-page-head">
+        <div>
+          <h2>Provider</h2>
+          <p>{l(
+            "Configure the routes used by Codex, Claude Code, summaries, and AI search.",
+            "配置 Codex、Claude Code、摘要和 AI 搜索使用的服务。",
+          )}</p>
         </div>
+      </header>
         <div className="api-target-tabs" role="tablist" aria-label={l("API target", "API 目标")}>
           <button type="button" className={apiTarget === "codex" ? "active" : ""} onClick={() => setApiTarget("codex")}>
             Codex
@@ -925,12 +925,10 @@ export function ApiConfigDialog({
             </button>
           )}
         </div>
-      </section>
-    </div>
+    </section>
   );
 }
 
 function normalizeProviderBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
-
