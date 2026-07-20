@@ -101,25 +101,34 @@ export function WorkbenchPage({
       <div className="workbench-page-content">
         <section className="workbench-overview" aria-label={l("Agent usage overview", "Agent 使用总览")}>
         <div className="workbench-usage">
-          <div className="workbench-usage-top">
-            <div className="workbench-section-head">
-              <div className="workbench-periods" role="group" aria-label={l("Usage period", "用量周期")}>
+          <div className="workbench-usage-head">
+            <strong>{l("Usage", "用量")}</strong>
+            <div className="workbench-usage-actions">
+              <select
+                className="workbench-period-select"
+                value={statsPeriod}
+                onChange={(event) => onStatsPeriodChange(event.currentTarget.value as SessionStatsPeriod)}
+                aria-label={l("Usage period", "用量周期")}
+              >
                 {PERIODS.map((period) => (
-                  <button key={period} className={period === statsPeriod ? "active" : ""} onClick={() => onStatsPeriodChange(period)}>
-                    {statsPeriodLabel(period, language)}
-                  </button>
+                  <option key={period} value={period}>{statsPeriodLabel(period, language)}</option>
                 ))}
-              </div>
-              <button className="workbench-icon-button" onClick={onRefreshStats} disabled={statsRefreshing} aria-label={l("Refresh usage", "刷新用量")}>
+              </select>
+              <button
+                className="workbench-icon-button"
+                onClick={onRefreshStats}
+                disabled={statsRefreshing}
+                aria-label={l("Refresh usage", "刷新用量")}
+              >
                 <RefreshCw size={14} />
               </button>
             </div>
-            <div className="workbench-metrics">
-              <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
-              <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
-              <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
-              <UsageMetric value={cacheRate == null ? "—" : `${cacheRate}%`} label={l("Cache rate", "缓存率")} />
-            </div>
+          </div>
+          <div className="workbench-metrics">
+            <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
+            <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
+            <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
+            <UsageMetric value={cacheRate == null ? "—" : `${cacheRate}%`} label={l("Cache rate", "缓存率")} />
           </div>
           <div className="workbench-usage-detail">
             <div className="workbench-token-composition">

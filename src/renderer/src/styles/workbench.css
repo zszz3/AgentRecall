@@ -46,11 +46,26 @@
   flex-direction: column;
 }
 
-.workbench-usage-top {
+.workbench-usage-head {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.workbench-usage-head > strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.workbench-usage-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
 }
 
 .workbench-quota-card {
@@ -86,7 +101,6 @@
   font-size: 9px;
 }
 
-.workbench-section-head,
 .workbench-panel-head,
 .workbench-session-section-head {
   display: flex;
@@ -95,30 +109,22 @@
   gap: 10px;
 }
 
-.workbench-periods {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: var(--panel-subtle);
-}
-
-.workbench-periods button {
-  height: 22px;
+.workbench-period-select {
+  width: 76px;
+  height: 24px;
   padding: 0 6px;
-  border: 0;
-  border-radius: 5px;
-  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--panel-subtle);
+  color: var(--text);
   font-size: 10.5px;
   font-weight: 640;
+  cursor: pointer;
 }
 
-.workbench-periods button.active {
-  background: var(--panel-bg);
-  color: var(--text);
-  box-shadow: 0 0 0 1px var(--border-subtle);
+.workbench-period-select:hover {
+  border-color: var(--border);
+  background: var(--panel-hover);
 }
 
 .workbench-icon-button {
@@ -144,11 +150,10 @@
 .workbench-metrics {
   display: grid;
   min-width: 0;
-  flex: 1;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
   gap: 10px;
-  margin-top: 0;
+  margin-top: 5px;
 }
 
 .workbench-metrics > div {
@@ -197,8 +202,8 @@
   min-width: 0;
   grid-template-columns: minmax(0, 1.45fr) minmax(118px, .65fr);
   gap: 15px;
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: 7px;
+  padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
 }
 

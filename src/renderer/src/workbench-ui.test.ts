@@ -124,6 +124,19 @@ describe("workbench application shell", () => {
     expect(label).toMatch(/line-height:\s*14px/);
   });
 
+  it("places the usage period in a compact card-header dropdown", () => {
+    const usageHead = stylesheet.match(/\.workbench-usage-head\s*\{[^}]*\}/)?.[0] ?? "";
+    const periodSelect = stylesheet.match(/\.workbench-period-select\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(workbenchSource).toContain('className="workbench-usage-head"');
+    expect(workbenchSource).toContain('className="workbench-period-select"');
+    expect(workbenchSource).toContain("value={statsPeriod}");
+    expect(workbenchSource).toContain("event.currentTarget.value as SessionStatsPeriod");
+    expect(workbenchSource).toContain("<option key={period} value={period}>");
+    expect(workbenchSource).not.toContain('className="workbench-periods"');
+    expect(usageHead).toMatch(/justify-content:\s*space-between/);
+    expect(periodSelect).toMatch(/height:\s*24px/);
+  });
+
   it("keeps usage details visible in a three-zone overview", () => {
     const overview = stylesheet.match(/\.workbench-overview\s*\{[^}]*\}/)?.[0] ?? "";
     expect(overview).toMatch(/min-height:\s*142px/);
