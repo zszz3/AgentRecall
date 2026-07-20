@@ -1,8 +1,9 @@
 import type { CSSProperties, ReactElement } from "react";
-import { ArrowRight, Clock3, GitBranch, Plus, RefreshCw, Workflow } from "lucide-react";
+import { ArrowRight, Clock3, GitBranch, RefreshCw, Workflow } from "lucide-react";
 import { formatRelativeTime } from "../../../../core/format-session";
 import type {
   SessionSearchResult,
+  SessionDailyTokenUsage,
   SessionStats,
   SessionStatsPeriod,
   UsageQuota,
@@ -15,6 +16,7 @@ import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
 import { getLiveSessionState } from "../../live-filter";
 import { SearchBox } from "../search/search-box";
+import { TokenTrendChart } from "./token-trend-chart";
 import {
   SOURCE_LABEL,
   isRemoteSession,
@@ -52,6 +54,7 @@ export interface WorkbenchPageProps {
   onOpenSession: (session: SessionSearchResult) => void;
   onResumeSession: (session: SessionSearchResult) => void;
   onShowSessions: (query: string) => void;
+  onSelectTrendDay?: (day: SessionDailyTokenUsage) => void;
 }
 
 export function WorkbenchPage({
@@ -76,6 +79,7 @@ export function WorkbenchPage({
   onOpenSession,
   onResumeSession,
   onShowSessions,
+  onSelectTrendDay,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const cacheRate = usageCacheRate(stats.total);
@@ -184,11 +188,7 @@ export function WorkbenchPage({
           {quotaFeedback ? <p className={`workbench-feedback quota ${quotaFeedback.kind}`}>{quotaFeedback.message}</p> : null}
         </section>
 
-        <aside className="workbench-overview-slot" aria-label={l("Reserved workbench module", "工作台预留模块")}>
-          <Plus size={18} aria-hidden="true" />
-          <strong>{l("More modules", "更多模块")}</strong>
-          <span>{l("Reserved for later", "后续内容放这里")}</span>
-        </aside>
+        <TokenTrendChart points={stats.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>
 
         <div className="workbench-primary-grid">

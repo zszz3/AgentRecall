@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { rendererStyleSource } from "./style-test-source";
 
@@ -7,6 +7,8 @@ const mainSource = readFileSync(new URL("../../main/index.ts", import.meta.url),
 const skillsSource = readFileSync(new URL("./features/skills/skills-page.tsx", import.meta.url), "utf8");
 const providerSource = readFileSync(new URL("./features/providers/provider-page.tsx", import.meta.url), "utf8");
 const workbenchSource = readFileSync(new URL("./features/workbench/workbench-page.tsx", import.meta.url), "utf8");
+const tokenTrendUrl = new URL("./features/workbench/token-trend-chart.tsx", import.meta.url);
+const tokenTrendSource = existsSync(tokenTrendUrl) ? readFileSync(tokenTrendUrl, "utf8") : "";
 const searchBoxSource = readFileSync(new URL("./features/search/search-box.tsx", import.meta.url), "utf8");
 const appShellSource = readFileSync(new URL("./styles/app-shell.css", import.meta.url), "utf8");
 const stylesheet = rendererStyleSource;
@@ -137,13 +139,19 @@ describe("workbench application shell", () => {
     expect(periodSelect).toMatch(/height:\s*24px/);
   });
 
-  it("keeps usage details visible in a three-zone overview", () => {
+  it("keeps usage details visible beside an accessible seven-day Token trend", () => {
     const overview = stylesheet.match(/\.workbench-overview\s*\{[^}]*\}/)?.[0] ?? "";
     expect(overview).toMatch(/min-height:\s*142px/);
-    expect(overview).toMatch(/grid-template-columns:[^;]*1\.8fr[^;]*1\.15fr[^;]*\.65fr/);
+    expect(overview).toMatch(/grid-template-columns:[^;]*1\.24fr[^;]*1\.04fr[^;]*\.78fr/);
     expect(workbenchSource).toContain('className="workbench-token-composition"');
     expect(workbenchSource).toContain('className="workbench-source-usage"');
-    expect(workbenchSource).toContain('className="workbench-overview-slot"');
+    expect(workbenchSource).toContain("<TokenTrendChart");
+    expect(workbenchSource).toContain("points={stats.dailyTokenUsage}");
+    expect(workbenchSource).not.toContain('className="workbench-overview-slot"');
+    expect(tokenTrendSource).toContain('className="workbench-token-trend"');
+    expect(tokenTrendSource).toContain("<svg");
+    expect(tokenTrendSource).toContain("<button");
+    expect(tokenTrendSource).toContain('role="tooltip"');
     expect(workbenchSource).not.toContain('className="workbench-detail-hint"');
   });
 
