@@ -105,7 +105,7 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 | Hermes | 可在设置中开启，读取 `~/.hermes/state.db` |
 | OpenCode | 可在设置中开启，读取 `~/.local/share/opencode/opencode.db` |
 | Cursor Agent | 可在设置中开启，读取 `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` |
-| Trae | 可在设置中开启，同时读取 macOS/Linux 的 `~/.trae/memory/projects/**/session_memory_*.jsonl`、`~/.trae-cn/memory/projects/**/session_memory_*.jsonl`，以及 Windows 的 `%userprofile%/.trae/memory/projects/**/session_memory_*.jsonl`、`%userprofile%/.trae-cn/memory/projects/**/session_memory_*.jsonl`；打开状态会读取 Trae workspace 的本地状态库 |
+| Trae | 可在设置中开启，读取 `~/.trae-cn/memory/projects/**/session_memory_*.jsonl` 和 `~/.trae/memory/projects/**/session_memory_*.jsonl`；打开状态会读取 Trae workspace 的本地状态库 |
 | Qoder | 可在设置中开启，读取 `~/.qoder/cache/projects/*/conversation-history/*/*.jsonl`；支持 Live 检测和远程同步 |
 | SSH 远程环境 | 通过 SSH 读取远端用户目录下同样的 Codex / Claude Code session 路径 |
 
