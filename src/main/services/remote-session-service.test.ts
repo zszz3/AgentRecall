@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultSettings, type AppSettings } from "../../core/platform";
+import { STALE_SESSION_SYNC_EVENT_AGE_MS } from "../../core/refresh-policy";
 import type { RemoteSessionRestoreDependencies } from "../../core/remote-session-restore";
 import type {
   RemoteSessionDetailSnapshot,
@@ -161,6 +162,7 @@ function createHarness(options: {
   environment?: SessionEnvironment | null;
   queueEvents?: SessionSyncQueueEvent[];
   localRevision?: string;
+  now?: number;
 } = {}) {
   const settings = options.settings ?? structuredClone(defaultSettings);
   const sessions = options.sessions ?? [localSession()];
@@ -266,7 +268,7 @@ function createHarness(options: {
     createLocalRestoreDependencies,
     createSourceRestoreDependencies,
     copyText: vi.fn(),
-    now: () => 123,
+    now: () => options.now ?? 123,
     logError,
     operations,
     timers: { setInterval, clearInterval },
@@ -451,6 +453,60 @@ describe("RemoteSessionService cloud orchestration", () => {
 });
 
 describe("RemoteSessionService automatic queue lifecycle", () => {
+  it("keeps a fresh unmatched event for a later index retry", async () => {
+    const event = queueEvent();
+    const queuedAt = Date.parse(event.queuedAt);
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [],
+      queueEvents: [event],
+      now: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS - 1,
+    });
+
+    await harness.service.drainQueue();
+
+    expect(harness.removeQueueFiles).not.toHaveBeenCalledWith([event.filePath]);
+    expect(harness.createClient).not.toHaveBeenCalled();
+    expect(harness.ensureSessionDetails).not.toHaveBeenCalled();
+  });
+
+  it("removes an unmatched event when its grace period expires", async () => {
+    const event = queueEvent();
+    const queuedAt = Date.parse(event.queuedAt);
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [],
+      queueEvents: [event],
+      now: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS,
+    });
+
+    await harness.service.drainQueue();
+
+    expect(harness.removeQueueFiles).toHaveBeenCalledWith([event.filePath]);
+    expect(harness.createClient).not.toHaveBeenCalled();
+    expect(harness.ensureSessionDetails).not.toHaveBeenCalled();
+    expect(harness.service.getHookStatus()).toMatchObject({ lastProcessedAt: null, lastError: null });
+  });
+
+  it("processes an old event when its session can still be matched", async () => {
+    const event = queueEvent();
+    const queuedAt = Date.parse(event.queuedAt);
+    const harness = createHarness({
+      settings: configuredSettings(),
+      queueEvents: [event],
+      now: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS,
+    });
+
+    await harness.service.drainQueue();
+
+    expect(harness.client.uploadSession).toHaveBeenCalledOnce();
+    expect(harness.removeQueueFiles).toHaveBeenCalledWith([event.filePath]);
+    expect(harness.service.getHookStatus()).toMatchObject({
+      lastProcessedAt: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS,
+      lastError: null,
+    });
+  });
+
   it("removes subagent events without uploading their conversations", async () => {
     const event = queueEvent();
     const harness = createHarness({
@@ -526,9 +582,10 @@ describe("RemoteSessionService automatic queue lifecycle", () => {
   });
 
   it("logs failures from fire-and-forget queue drains", async () => {
+    const event = queueEvent();
     const harness = createHarness({
       settings: configuredSettings(),
-      queueEvents: [queueEvent()],
+      queueEvents: [event],
     });
     harness.runIndexSync.mockRejectedValueOnce(new Error("index unavailable"));
 
@@ -538,6 +595,7 @@ describe("RemoteSessionService automatic queue lifecycle", () => {
         "Failed to drain the session sync queue: index unavailable",
       );
     });
+    expect(harness.removeQueueFiles).not.toHaveBeenCalledWith([event.filePath]);
     harness.service.stopQueue();
   });
 

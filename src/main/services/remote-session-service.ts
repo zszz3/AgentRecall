@@ -23,7 +23,10 @@ import {
   type SessionSyncHookStatus,
   type SessionSyncQueueEvent,
 } from "../../core/session-sync-queue";
-import { AUTO_SESSION_SYNC_QUEUE_INTERVAL_MS } from "../../core/refresh-policy";
+import {
+  AUTO_SESSION_SYNC_QUEUE_INTERVAL_MS,
+  STALE_SESSION_SYNC_EVENT_AGE_MS,
+} from "../../core/refresh-policy";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type {
   MigrationAgent,
@@ -354,7 +357,12 @@ export class RemoteSessionService {
       migrationAgentForSource(candidate.source) === event.agent
       && ((event.transcriptPath && path.resolve(candidate.filePath) === path.resolve(event.transcriptPath))
         || candidate.rawId === event.sessionId));
-    if (!session) return;
+    if (!session) {
+      if (this.dependencies.now() - Date.parse(event.queuedAt) >= STALE_SESSION_SYNC_EVENT_AGE_MS) {
+        this.operations.removeQueueFiles([event.filePath]);
+      }
+      return;
+    }
     if (session.isSubagent) {
       this.operations.removeQueueFiles([event.filePath]);
       return;
