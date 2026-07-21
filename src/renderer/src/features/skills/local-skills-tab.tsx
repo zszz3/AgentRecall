@@ -201,7 +201,7 @@ export function LocalSkillsTab({
               const managed = managedSourcePaths.has(skill.directoryPath);
               return (
                 <div
-                  key={skill.id}
+                  key={skill.path}
                   className={`skill-library-row local-skill-row ${activeRow ? "active" : ""}`}
                   role="option"
                   aria-selected={activeRow}

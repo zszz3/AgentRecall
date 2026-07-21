@@ -75,7 +75,16 @@
 
 .app-navigation nav {
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   gap: 5px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.app-navigation nav::-webkit-scrollbar {
+  display: none;
 }
 
 .app-navigation nav button:hover,

@@ -1,0 +1,147 @@
+{
+  "id": "bundled-job-tailored-resume",
+  "title": "岗位定制简历",
+  "objective": "根据用户已有的主简历和目标岗位 JD，生成一份事实可靠、重点匹配、易于 ATS 解析的岗位定制简历，并提供可解释的岗位要求覆盖报告。",
+  "assets": {
+    "__TAILORING_GUIDELINES__": "tailoring-guidelines.md",
+    "__RESUME_TEMPLATE__": "resume-template.html",
+    "__REVIEW_CHECKLIST__": "review-checklist.md"
+  },
+  "definition": {
+    "workflowId": "bundled-job-tailored-resume",
+    "graphVersion": 1,
+    "objective": "根据用户已有的主简历和目标岗位 JD，生成一份事实可靠、重点匹配、易于 ATS 解析的岗位定制简历，并提供可解释的岗位要求覆盖报告。",
+    "nodes": [
+      {
+        "id": "analyze-job",
+        "kind": "agent",
+        "title": "分析目标岗位",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "one-shot",
+        "executionModeRationale": "This node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "从工作流任务描述和工作目录中寻找目标岗位 JD。优先使用用户在任务描述中粘贴的完整 JD；否则查找名称包含 jd、job、position、职位或岗位的文本/Markdown 文件。\n\n如果找不到 JD，唯一动作是输出 workflowGate.ask(\"请粘贴目标岗位 JD，或告诉我 JD 文件在工作目录中的路径。\")，不要猜测岗位要求。\n\n找到后结构化提取：岗位名称与级别、核心职责、硬性要求、加分项、技术/业务关键词、重复出现的主题、可验证的年限或资质要求。根据 JD 的顺序和措辞标记高/中/低优先级，并区分明确要求与合理推断。把完整分析作为交接内容传给下游，不生成最终简历，不虚构公司信息。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "extract-resume",
+        "kind": "agent",
+        "title": "提取主简历事实",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "one-shot",
+        "executionModeRationale": "This node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "在工作目录中寻找主简历，优先读取 resume.md、resume.tex、resume.txt，其次读取名称包含 resume、cv 或简历的可解析文本文件。若只有其他格式，使用当前 Runtime 可用的安全读取方式提取文本。\n\n如果找不到主简历，唯一动作是输出 workflowGate.ask(\"请把主简历放入工作目录，或告诉我简历文件的路径。\")，不要凭空创建候选人经历。\n\n逐项提取个人信息、教育、工作/实习、项目、技能、证书及量化成果。每条事实保留来源文件和原始表述；数字、时间、技术名词、职责边界不得泛化或补全。可检查代码和 Git 历史验证已有项目，但不能把无法证明的推断写成候选人事实。把事实清单作为交接内容传给下游，不生成最终简历。",
+        "outputFields": [
+          {
+            "key": "answer_markdown",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "match-evidence",
+        "kind": "agent",
+        "title": "匹配岗位证据",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "interactive",
+        "executionModeRationale": "This node explicitly collects or confirms user-provided facts.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "基于上游的 JD 分析与主简历事实，建立逐项证据矩阵。每项岗位要求必须标记为：强匹配、可通过真实经历改写、无证据、或信息不足。列出对应的简历原文/来源、建议强调方式及风险。\n\n不得编造技能、职责、任职时间、项目结果或量化数据；仅仅在 JD 中出现的关键词不能自动成为候选人的技能。不要生成百分制 ATS 分数。给出可解释的覆盖摘要，并指出最多 5 个对岗位最关键且可能需要用户补充的问题。\n\n遵循以下固定规则：\n\n__TAILORING_GUIDELINES__\n\n只产出证据矩阵和待澄清项，不生成最终简历文件。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "clarify-gaps",
+        "kind": "agent",
+        "title": "确认关键信息",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "interactive",
+        "executionModeRationale": "This node explicitly collects or confirms user-provided facts.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "检查上游证据矩阵。仅当高优先级岗位要求缺少证据、但现有材料暗示用户可能有相关真实经历或指标时，合并成一个简短问题并输出 workflowGate.ask(\"...\")。问题中必须列出需要确认的具体事实，最多 5 项，不要询问可以从文件直接确认的内容。\n\n用户回答后，把回答标记为“用户补充事实”并连同原证据矩阵传给下游。用户明确没有相关经历时保留为未覆盖项。若没有必要澄清，直接说明无需补充并继续。任何情况下都不得自行补数字、年限、技能或成果。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "tailor-resume",
+        "kind": "agent",
+        "title": "生成定制简历",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "interactive",
+        "executionModeRationale": "This node explicitly collects or confirms user-provided facts.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "使用上游已验证事实和用户补充事实，按目标岗位优先级生成定制简历。允许重排、压缩和改写，不得改变事实含义；未覆盖要求只能写入报告，不能塞进简历。bullet 优先采用“动作 + 方法/范围 + 可验证结果”，数字只能来自证据。自然复用 JD 的准确术语，禁止机械堆砌关键词。\n\n必须在工作流存储计划的 output 目录生成：\n1. tailored-resume.md：便于继续编辑的完整 Markdown 简历。\n2. tailored-resume.html：严格使用下方固定单栏模板，填满真实内容，删除不适用区块与所有 {{...}} 占位。\n3. match-report.md：按岗位要求列出优先级、覆盖状态、简历证据、未覆盖项和主要改写说明；不得提供虚假的 ATS 百分比分数。\n\n遵循以下固定写作规则：\n\n__TAILORING_GUIDELINES__\n\n===== 固定 HTML 模板（开始）=====\n__RESUME_TEMPLATE__\n===== 固定 HTML 模板（结束）=====\n\n回复中只给出三个文件的相对路径和一句完成摘要。",
+        "outputFields": [
+          {
+            "key": "answer_markdown",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "review",
+        "kind": "agent",
+        "title": "独立审查",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "This node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "独立审查上游生成的 tailored-resume.md、tailored-resume.html 和 match-report.md，并对照全部上游证据。必须逐项执行下方清单。发现问题时直接修正对应文件，然后重新检查；不得为了提高匹配度添加无证据内容。若 HTML 无法完成，保留 Markdown 和报告，并在最终回复中明确具体原因。\n\n__REVIEW_CHECKLIST__\n\n最终回复列出三个输出文件的相对路径、已修正的问题数量，以及仍未覆盖的高优先级岗位要求数量。",
+        "outputFields": [
+          {
+            "key": "answer_markdown",
+            "required": true
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "fromNodeId": "analyze-job",
+        "toNodeId": "match-evidence"
+      },
+      {
+        "fromNodeId": "extract-resume",
+        "toNodeId": "match-evidence"
+      },
+      {
+        "fromNodeId": "match-evidence",
+        "toNodeId": "clarify-gaps"
+      },
+      {
+        "fromNodeId": "clarify-gaps",
+        "toNodeId": "tailor-resume"
+      },
+      {
+        "fromNodeId": "tailor-resume",
+        "toNodeId": "review"
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "tags": ["skills", "authoring", "agents", "evaluation"],
+  "categoryId": "productivity",
+  "sourceLabel": "Adapted from Anthropic Skills",
+  "sourceUrl": "https://github.com/anthropics/skills/tree/main/skills/skill-creator"
+}

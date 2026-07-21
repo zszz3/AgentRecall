@@ -1,0 +1,400 @@
+.automation-page {
+  --line: var(--border);
+  --line-faint: var(--border-subtle);
+  --line-strong: var(--border-strong);
+  --panel: var(--panel-bg);
+  --panel-soft: var(--panel-subtle);
+  --panel-raised: var(--panel-bg);
+  --sidebar: var(--sidebar-bg);
+  --hover: var(--panel-hover);
+  --accent-tint: var(--accent-soft);
+  --muted: var(--text-muted);
+  --subtle: var(--text-faint);
+  --ink: var(--text);
+  --bg: var(--app-bg);
+  --soft: var(--panel-subtle);
+  --input: var(--panel-subtle);
+  --on-accent: var(--accent-contrast);
+  --accent-strong: var(--accent-hover);
+  --ok: var(--success-text);
+  --ok-strong: var(--success-text);
+  --ok-tint: var(--success-bg);
+  --success: var(--success-text);
+  --warn: var(--running-text);
+  --warn-strong: var(--running-text);
+  --danger-tint: var(--danger-soft);
+  --neutral-tint: var(--panel-subtle);
+  --scrollbar: var(--border-strong);
+  --shadow: 0 12px 30px color-mix(in srgb, var(--text) 6%, transparent);
+  --ease: cubic-bezier(.25, .46, .45, .94);
+  --hermes: #8b5cf6;
+  --opencode: #2563eb;
+  --openclaw: #f5654a;
+
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--app-bg);
+  color: var(--text);
+}
+
+.automation-page-head {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.automation-page-head > div {
+  width: auto;
+}
+
+.automation-page-head button {
+  -webkit-app-region: no-drag;
+}
+
+.automation-page-state {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 32px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.automation-page-state strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.automation-page-state span {
+  max-width: 560px;
+  font: 11px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.automation-page-state.is-error > svg {
+  color: var(--danger);
+}
+
+.automation-control-button,
+.control-btn,
+.send-btn {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 650;
+  width: auto;
+  margin-top: 0;
+}
+
+.automation-control-button:hover,
+.control-btn:hover,
+.send-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.automation-control-button.is-primary,
+.send-btn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.automation-tabs {
+  display: flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  gap: 22px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.automation-tabs button {
+  display: flex;
+  height: 42px;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 630;
+}
+
+.automation-tabs button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.automation-tabs small {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font: 9px var(--mono);
+}
+
+.automation-runtime-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  padding: 14px 18px 18px;
+  overflow: hidden;
+}
+
+.automation-runtime-content > .runtime-page,
+.automation-runtime-content > .agent-page {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.automation-runtime-content > .runtime-page {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.automation-runtime-content > .agent-page > .config-header {
+  display: none;
+}
+
+.automation-runtime-content .runtime-layout,
+.automation-runtime-content .runtime-config-toolbar,
+.automation-runtime-content .config-form,
+.automation-runtime-content .configured-agent-panel,
+.automation-runtime-content .configured-agent-browser,
+.automation-runtime-content .configured-agent-editor {
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.automation-runtime-content .runtime-layout {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.automation-runtime-content .runtime-config-toolbar {
+  box-shadow: none;
+}
+
+.automation-runtime-content .runtime-selector {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+}
+
+.automation-runtime-content .runtime-selector .agent-provider-presets-head > span {
+  display: none;
+}
+
+.automation-runtime-content .runtime-selector .agent-provider-preset-list {
+  gap: 5px;
+}
+
+.automation-runtime-content .runtime-selector .agent-provider-preset {
+  min-height: 28px;
+}
+
+.automation-runtime-content .runtime-editor {
+  gap: 8px;
+}
+
+.automation-runtime-content .runtime-editor-actions {
+  padding: 7px 9px;
+}
+
+.automation-runtime-content .config-form {
+  min-height: 0;
+}
+
+.automation-workflow-shell {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 18px 18px;
+  overflow: hidden;
+}
+
+.automation-workflow-shell > .workflow-list-panel {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.automation-workflow-detail {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-bg);
+}
+
+.automation-workflow-detail .workflow-chat-header {
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.automation-workflow-detail .workflow-page-actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.automation-workflow-detail .workflow-page-actions > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.automation-workflow-detail .workflow-workdir-button {
+  max-width: 260px;
+}
+
+.automation-workflow-detail .workflow-transcript {
+  padding: 18px 20px;
+}
+
+.automation-workflow-detail > .workflow-page {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+}
+
+.automation-page .workflow-history-card {
+  background: var(--panel-bg);
+}
+
+.automation-page .workflow-history-card:hover,
+.automation-page .workflow-history-card.is-active {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: var(--accent-soft);
+}
+
+.automation-mcp-page {
+  padding: 14px 18px 18px;
+}
+
+.automation-mcp-page > .mcp-workbench,
+.automation-mcp-page > .automation-page-state + .mcp-workbench {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  border-color: var(--border);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.automation-page .workbench-header {
+  min-height: 64px;
+  padding: 14px 18px 12px;
+}
+
+.automation-page .workbench-heading h2 {
+  font-size: 15px;
+}
+
+.automation-page .icon-btn {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+}
+
+.automation-page .icon-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.automation-page input,
+.automation-page select,
+.automation-page textarea {
+  border-color: var(--border);
+  background: var(--panel-subtle);
+  color: var(--text);
+}
+
+.automation-page .agent-context-menu {
+  position: fixed;
+  z-index: 80;
+}
+
+@media (max-width: 980px) {
+  .automation-workflow-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
+    padding-inline: 12px;
+  }
+
+  .automation-runtime-content {
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .automation-workflow-shell {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .automation-workflow-shell > .workflow-list-panel {
+    max-height: 220px;
+    flex: 0 0 auto;
+  }
+
+  .automation-workflow-detail {
+    min-height: 520px;
+  }
+}
+
+.is-spinning {
+  animation: automation-spin .9s linear infinite;
+}
+
+@keyframes automation-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning { animation: none; }
+}

@@ -1,0 +1,80 @@
+{
+  "id": "bundled-resume-html",
+  "title": "简历生成 (HTML)",
+  "objective": "把工作目录里已有的简历（如 resume.tex）渲染成一份专业、精致的单文件 HTML 简历，完整保留其中的真实项目与量化指标；可用代码/git 补充近期亮点。模版与写法要点均为工作流固定资产，不含任何个人内容。",
+  "assets": {
+    "__RESUME_TEMPLATE__": "resume-template.html",
+    "__RESUME_GUIDE__": "resume-guidelines.md"
+  },
+  "definition": {
+    "workflowId": "bundled-resume-html",
+    "graphVersion": 1,
+    "objective": "把工作目录里已有的简历（如 resume.tex）渲染成一份专业、精致的单文件 HTML 简历，完整保留其中的真实项目与量化指标；可用代码/git 补充近期亮点。模版与写法要点均为工作流固定资产，不含任何个人内容。",
+    "nodes": [
+      {
+        "id": "content",
+        "kind": "agent",
+        "title": "整理简历素材",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "one-shot",
+        "executionModeRationale": "The node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "工作目录里通常已有一份简历文件（优先找 resume.tex，其次 resume.md/.txt 等）。请读取它，作为主要素材来源。完整提取：个人信息与联系方式、教育背景、实习/工作经历、个人项目、竞赛与科研等。务必原样保留所有具体的量化指标与技术细节（QPS、延迟、百分比、金额、单量，以及 Redis/DB 幂等、TCC、Kafka/Binlog、Eino 等技术词），不要泛化、不要丢数字。把整理好的完整内容作为交接内容传给下游，不要生成文件。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "extra",
+        "kind": "agent",
+        "title": "近期亮点补充",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "one-shot",
+        "executionModeRationale": "The node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "浏览工作目录下的代码项目与 git 提交记录，找出简历里可能还没体现的近期技术亮点（中间件、架构、性能、你负责的模块）。这是补充，不要与已有简历内容重复；有价值就列几条，没有就说明。作为交接内容传给下游，不要生成文件。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "render",
+        "kind": "agent",
+        "title": "生成 HTML 简历",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "The node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "你必须严格使用工作流自带的【固定 HTML 模版】（工作流资产，见下方，本身不含任何个人信息）作为样式与结构骨架，把上游素材填进去；写每条项目 bullet 时遵守下方【简历写法要点】。\n规则：\n1. 保持 <style> 与整体结构/风格不变。\n2. 把所有 {{占位}} 和示例文字替换成来自上游“简历素材”（主）与“近期亮点”（补充）的真实内容。\n3. “项目经历”区同时容纳工作项目与个人项目；有仓库链接才放，没有就只写项目名，不要编造 GitHub 链接。\n4. 每个区块（教育 .item / 实习 .item / .proj / li / 项目）按需复制多份，容纳全部内容；bullet 密集、结果导向。\n5. 关键指标与技术名词用 <strong> 加粗。\n6. 最终产出不得残留任何 {{...}} 占位或示例注释；确实缺失才用【待补充】。\n唯一产出：把填好的完整 HTML 保存到工作流存储计划的 output 目录，文件名 resume.html，并在回复里给出相对路径。\n\n===== 简历写法要点（开始）=====\n__RESUME_GUIDE__\n===== 简历写法要点（结束）=====\n\n===== 固定 HTML 模版（开始）=====\n__RESUME_TEMPLATE__\n===== 固定 HTML 模版（结束）=====",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "fromNodeId": "content",
+        "toNodeId": "render"
+      },
+      {
+        "fromNodeId": "extra",
+        "toNodeId": "render"
+      }
+    ]
+  }
+}

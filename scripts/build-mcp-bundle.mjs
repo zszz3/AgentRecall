@@ -7,11 +7,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(fileURLToPath(import.meta.url), "..", "..");
-const entry = path.join(root, "src", "mcp", "migration-entry.ts");
 const outdir = path.join(root, "out", "mcp");
 
 await build({
-  entryPoints: [entry],
+  entryPoints: [
+    path.join(root, "src", "mcp", "migration-entry.ts"),
+    path.join(root, "src", "mcp", "workflow-entry.ts"),
+  ],
   outdir,
   bundle: true,
   format: "esm",

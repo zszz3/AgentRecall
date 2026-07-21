@@ -14,11 +14,15 @@ const appShellSource = readFileSync(new URL("./styles/app-shell.css", import.met
 const stylesheet = rendererStyleSource;
 
 describe("workbench application shell", () => {
-  it("starts on the workbench and exposes workbench, sessions, Skills, and Provider navigation", () => {
-    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "skills" | "providers"');
+  it("starts on the workbench and exposes every primary navigation page", () => {
+    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "workflows" | "runtimes" | "mcp" | "memories" | "skills" | "providers"');
     expect(appSource).toContain('useState<AppPage>("workbench")');
     expect(appSource).toContain("<WorkbenchPage");
     expect(appSource).toContain('data-page="sessions"');
+    expect(appSource).toContain('data-page="workflows"');
+    expect(appSource).toContain('data-page="runtimes"');
+    expect(appSource).toContain('data-page="mcp"');
+    expect(appSource).toContain('data-page="memories"');
     expect(appSource).toContain('data-page="skills"');
     expect(appSource).toContain('data-page="providers"');
   });
@@ -169,10 +173,13 @@ describe("workbench application shell", () => {
     expect(workbenchSource).toContain("workbench-session-state ${liveState}");
   });
 
-  it("reserves Workflow as an empty slot without migrating workflow data", () => {
-    expect(workbenchSource).toContain('l("Workflow is not migrated yet", "Workflow 暂未迁移")');
-    expect(workbenchSource).not.toContain("onOpenWorkflow");
-    expect(workbenchSource).not.toContain("workflows:");
+  it("shows live Workflow state and lets the user create or reopen workflows", () => {
+    expect(workbenchSource).toContain("workflows: WorkbenchWorkflowItem[]");
+    expect(workbenchSource).toContain("onOpenWorkflow");
+    expect(workbenchSource).toContain("onNewWorkflow");
+    expect(workbenchSource).toContain('className="workbench-workflow-list"');
+    expect(workbenchSource).toContain('className={`workbench-workflow-status is-${item.status}`}');
+    expect(workbenchSource).not.toContain("Workflow is not migrated yet");
   });
 
   it("opens the usage settings section from unavailable quota cards", () => {

@@ -1,0 +1,57 @@
+{
+  "id": "bundled-github-daily-ai",
+  "title": "GitHub 每日 AI 新星榜",
+  "objective": "检索过去 24 小时新创建的 AI 相关 GitHub 仓库，按当前累计 Star 选出前 10 名，并生成一份项目介绍清晰、来源可核验的中文日报。",
+  "assets": {
+    "__REPORT_GUIDELINES__": "report-guidelines.md"
+  },
+  "definition": {
+    "workflowId": "bundled-github-daily-ai",
+    "graphVersion": 1,
+    "objective": "检索过去 24 小时新创建的 AI 相关 GitHub 仓库，按当前累计 Star 选出前 10 名，并生成一份项目介绍清晰、来源可核验的中文日报。",
+    "nodes": [
+      {
+        "id": "collect",
+        "kind": "agent",
+        "title": "检索与核验",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "one-shot",
+        "executionModeRationale": "This node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "以运行时当前时刻为截止点，检索过去 24 小时内新创建的 GitHub 仓库。围绕 AI、LLM、Agent、RAG、machine learning、deep learning、inference、evaluation、model tooling 等关键词组合查询，并加入精确的 created 时间范围、fork:false 和 archived:false；优先使用 GitHub CLI/API，在不可用时使用当前 Runtime 可用的网页检索能力。\n\n合并并去重候选，按当前累计 Star 降序排列。这里的排序是当前累计 Star，不得伪装成过去 24 小时新增 Star。至少核验高星前 15 个候选；逐项读取仓库描述和 README，判断其是否实质属于 AI、LLM、Agent、RAG、机器学习、深度学习、推理、评测或模型工具领域。剔除关键词堆砌、空壳仓库、镜像、重复项目和明显无关项目。\n\n对保留候选记录：owner/repo、GitHub URL、当前 Star、主语言、created_at、仓库描述、README 中可支持项目介绍的关键事实，以及 AI 相关性证据。任何字段无法获取时明确标注未获取，不得猜测。把最多 15 个已核验候选按 Star 降序作为结构化交接内容传给下游，并附查询时间、统计窗口、实际查询式、数据来源、被剔除项目及原因。不要生成最终日报文件。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true
+          }
+        ]
+      },
+      {
+        "id": "report",
+        "kind": "agent",
+        "title": "编辑中文日报",
+        "execModel": "llm",
+        "role": "executor",
+        "executionMode": "one-shot",
+        "executionModeRationale": "This node can complete from workflow context without user interaction.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "读取上游候选及其 GitHub/README 证据，再次检查 AI 相关性和排序，选择前 10 个；不足 10 个时如实输出，不得用低质量或无关项目补数。\n\n必须在工作流存储计划的 output 目录写入中文 Markdown 日报，文件名为 github-ai-daily-YYYY-MM-DD.md。报告采用“顶部简榜 + 下方逐项目介绍”，不能把一句话简介塞在表格后就结束，也不能把介绍和关注理由拆到相距很远的两个章节。每个项目必须包含一句话定位、解决的问题、主要实现方式、核心能力、今日看点及 GitHub 链接；介绍要让未读过 README 的开发者也能理解。不得出现“适合谁使用”。\n\n严格遵循以下编辑规范：\n\n__REPORT_GUIDELINES__\n\n所有事实以仓库描述、README 和 GitHub 元数据为准。不得生硬直译 GitHub description，不得虚构 Star 增长、功能、性能、团队背景或技术实现。文末说明过去 24 小时时间窗口、抓取与生成时间、按当前累计 Star 排序的口径、查询覆盖范围、数据缺失和 GitHub 搜索索引延迟。最终回复只给出入榜数量、最值得关注的 1 至 3 个具体发现和产物相对路径，不要在聊天中重复整份日报。",
+        "outputFields": [
+          {
+            "key": "answer_markdown",
+            "required": true
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "fromNodeId": "collect",
+        "toNodeId": "report"
+      }
+    ]
+  }
+}

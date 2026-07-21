@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +20,54 @@ const environment = {
   AGENT_RECALL_SKIP_STATUSLINE_INSTALL: "1",
   AGENT_RECALL_NO_UPDATE_CHECK: "1",
 };
+let workflowMcpProcess = null;
+
+async function stopWorkflowMcp(child) {
+  if (!child || child.exitCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill();
+  const stopped = await Promise.race([
+    exited.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 2_000)),
+  ]);
+  if (!stopped && child.exitCode === null) {
+    child.kill("SIGKILL");
+    await exited;
+  }
+}
+
+async function queryWorkflowMcp(entryPath) {
+  const child = spawn(process.execPath, [entryPath], { env: environment, stdio: ["pipe", "pipe", "pipe"] });
+  workflowMcpProcess = child;
+  let stdout = "";
+  let stderr = "";
+  const responses = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Workflow MCP handshake timed out. ${stderr}`)), 10_000);
+    const finish = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const lines = stdout.split(/\r?\n/);
+      stdout = lines.pop() ?? "";
+      const parsed = lines.filter(Boolean).map((line) => JSON.parse(line));
+      const all = [...(child.__responses ?? []), ...parsed];
+      child.__responses = all;
+      if (all.some((item) => item.id === 1) && all.some((item) => item.id === 2)) finish(all);
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`Workflow MCP exited before handshake (${code}). ${stderr}`)));
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })}\n`);
+  });
+  await stopWorkflowMcp(child);
+  workflowMcpProcess = null;
+  return responses;
+}
 
 try {
   await Promise.all([packDir, prefix, home].map((directory) => mkdir(directory, { recursive: true })));
@@ -50,11 +98,20 @@ try {
   }
   if (!installedRoot) throw new Error("Could not locate the package installed into the temporary npm prefix.");
   await access(path.join(installedRoot, "out", "main", "index.js"));
+  await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
+  const workflowMcpEntry = path.join(installedRoot, "bin", "agent-recall-workflow-mcp.mjs");
+  await access(workflowMcpEntry);
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
+  const mcpResponses = await queryWorkflowMcp(workflowMcpEntry);
+  const initialize = mcpResponses.find((item) => item.id === 1);
+  const tools = mcpResponses.find((item) => item.id === 2)?.result?.tools;
+  if (initialize?.result?.serverInfo?.name !== "agent-recall") throw new Error("Packaged Workflow MCP returned the wrong server identity.");
+  if (!Array.isArray(tools) || !tools.some((tool) => tool.name === "workflow_create")) throw new Error("Packaged Workflow MCP did not advertise workflow_create.");
   process.stdout.write(`Package smoke test passed for v${packageVersion} (${process.platform}).\n`);
 } finally {
+  await stopWorkflowMcp(workflowMcpProcess);
   await rm(tempRoot, { recursive: true, force: true });
 }

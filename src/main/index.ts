@@ -77,6 +77,8 @@ import { isLocalSessionEnvironment } from "../core/session-environment";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
+import { registerAgentMemoryIpc } from "./ipc/agent-memory";
+import { registerAutomationIpc } from "./ipc/automation";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerProvidersIpc } from "./ipc/providers";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
@@ -86,6 +88,9 @@ import {
   launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
 } from "./services/app-update-service";
+import { AgentMemoryService } from "./services/agent-memory-service";
+import { NativeAutomationService } from "./services/automation-service";
+import { createLocalTextFilePreviewUnderRoots } from "../automation/engine/main/platform/local-file-preview";
 import { ProviderService } from "./services/provider-service";
 import {
   RemoteSessionService,
@@ -181,6 +186,9 @@ app.setAppUserModelId("dev.zszz3.agent-recall");
 migrateLegacyUserData();
 
 let mainWindow: BrowserWindow | null = null;
+let automationService: NativeAutomationService | null = null;
+let disposeAutomationIpc: (() => void) | null = null;
+let automationQuitReady = false;
 let tray: Tray | null = null;
 let store: SessionStore;
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
@@ -215,6 +223,36 @@ function getSettings(): AppSettings {
     globalShortcut: normalizeGlobalShortcut(settings.globalShortcut),
     defaultTerminal: normalizeTerminal(settings.defaultTerminal),
   };
+}
+
+function bundledAutomationWorkflowsPath(): string {
+  const candidates = [
+    path.join(app.getAppPath(), "assets", "automation", "bundled-workflows"),
+    path.join(app.getAppPath(), "src", "automation", "engine", "shared", "bundled-workflows"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
+function createAutomationService(): NativeAutomationService {
+  return new NativeAutomationService({
+    userDataPath: app.getPath("userData"),
+    homePath: app.getPath("home"),
+    appDataPath: app.getPath("appData"),
+    bundledWorkflowsPath: bundledAutomationWorkflowsPath(),
+    workflowMcpServerPath: path.join(app.getAppPath(), "out", "mcp", "workflow-entry.js"),
+  });
+}
+
+async function pickAutomationDirectory(defaultPath?: string): Promise<string | undefined> {
+  const options: Electron.OpenDialogOptions = {
+    title: "Choose workflow directory",
+    defaultPath: defaultPath || app.getPath("home"),
+    properties: ["openDirectory", "createDirectory"],
+  };
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options);
+  return result.canceled ? undefined : result.filePaths[0];
 }
 
 const appUpdateService = new AppUpdateService({
@@ -263,6 +301,10 @@ const skillService = new SkillService({
   revealPath: (targetPath) => revealInFileManager(targetPath),
   now: () => Date.now(),
   logError: (message) => console.error(message),
+});
+
+const agentMemoryService = new AgentMemoryService({
+  chooseDirectory: chooseAgentMemoryDirectory,
 });
 
 const remoteSessionService = new RemoteSessionService({
@@ -398,6 +440,16 @@ async function chooseLocalProjectDirectory(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
     title: "Choose local project directory",
     properties: ["openDirectory", "createDirectory"],
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+}
+
+async function chooseAgentMemoryDirectory(): Promise<string | null> {
+  const options: Electron.OpenDialogOptions = {
+    title: "Choose a directory for Agent memory",
+    properties: ["openDirectory"],
   };
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
   if (result.canceled) return null;
@@ -1090,6 +1142,25 @@ function stopAutoIndexRefresh(): void {
 }
 
 function registerIpc(): void {
+  if (!automationService) throw new Error("Automation service must be created before IPC registration.");
+  disposeAutomationIpc = registerAutomationIpc({
+    ipc: ipcMain,
+    service: automationService,
+    send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
+    pickDirectory: pickAutomationDirectory,
+    readLocalFile: (filePath, allowedRoots) =>
+      createLocalTextFilePreviewUnderRoots(filePath, allowedRoots, app.getPath("home")),
+    revealPath: async (filePath) => {
+      const resolvedPath = path.resolve(filePath);
+      await createLocalTextFilePreviewUnderRoots(
+        resolvedPath,
+        automationService?.hub().allowedFileRoots() ?? [],
+        app.getPath("home"),
+      );
+      shell.showItemInFolder(resolvedPath);
+      return resolvedPath;
+    },
+  });
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
     if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
@@ -1324,6 +1395,7 @@ function registerIpc(): void {
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
   registerAppUpdateIpc(ipcMain, appUpdateService);
+  registerAgentMemoryIpc(ipcMain, agentMemoryService);
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
   registerProvidersIpc(ipcMain, providerService);
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
@@ -1469,9 +1541,11 @@ app.whenReady().then(() => {
   }
   providerService.migrateLegacyKeys();
   pruneDisabledOptionalSources(getSettings());
+  automationService = createAutomationService();
   registerIpc();
   createApplicationMenu();
   createWindow();
+  void automationService.initialize();
   createTray();
   void appUpdateService.showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;
@@ -1495,13 +1569,25 @@ app.on("activate", () => {
   showWindow();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (automationService && !automationQuitReady) {
+    event.preventDefault();
+    void automationService.shutdown().catch((error) => {
+      console.error(`Failed to stop AgentRecall automation cleanly: ${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => {
+      automationQuitReady = true;
+      app.quit();
+    });
+    return;
+  }
   void appUpdateService.clearRunningProcess();
   stopAutoIndexRefresh();
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
   remoteEnvironmentLifecycle?.stopAll();
   void providerService.stopCodexChatProxy();
+  disposeAutomationIpc?.();
+  disposeAutomationIpc = null;
   globalShortcut.unregisterAll();
   store?.close();
 });

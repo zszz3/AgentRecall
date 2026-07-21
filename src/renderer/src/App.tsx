@@ -4,6 +4,7 @@ import {
   AppWindow,
   Archive,
   ArrowRightLeft,
+  BrainCircuit,
   CalendarDays,
   ChevronDown,
   ChevronRight,
@@ -11,6 +12,7 @@ import {
   Cloud,
   Code2,
   Copy,
+  Cpu,
   Download,
   Edit3,
   Eye,
@@ -26,6 +28,7 @@ import {
   Pin,
   PinOff,
   Play,
+  PlugZap,
   RefreshCw,
   Server,
   Settings,
@@ -34,6 +37,7 @@ import {
   Tag,
   Terminal as TerminalIcon,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
@@ -121,6 +125,12 @@ import {
 } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WorkbenchPage } from "./features/workbench/workbench-page";
+import { AgentMemoryPage } from "./features/agent-memory/agent-memory-page";
+import { useAutomation } from "./features/automation/automation-provider";
+import { McpFeaturePage } from "./features/automation/mcp-feature-page";
+import { RuntimeFeaturePage } from "./features/automation/runtime-feature-page";
+import { WorkflowFeaturePage } from "./features/automation/workflow-feature-page";
+import { selectWorkbenchWorkflows } from "./features/automation/workbench-workflows";
 import {
   SOURCE_LABEL,
   environmentBadgeLabel,
@@ -167,7 +177,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
 } satisfies MigrationTargetSettings;
 
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
-type AppPage = "workbench" | "sessions" | "skills" | "providers";
+type AppPage = "workbench" | "sessions" | "workflows" | "runtimes" | "mcp" | "memories" | "skills" | "providers";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -275,9 +285,30 @@ function loadInitialSidebarSections(): SidebarSectionsState {
 }
 
 export function App(): ReactElement {
+  const automation = useAutomation();
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
   const [activePage, setActivePage] = useState<AppPage>("workbench");
+  const pageNavigationGuardRef = useRef<(() => Promise<boolean>) | null>(null);
+  const setPageNavigationGuard = useCallback((guard: (() => Promise<boolean>) | null): void => {
+    pageNavigationGuardRef.current = guard;
+  }, []);
+  const navigateToPage = useCallback(async (page: AppPage): Promise<boolean> => {
+    if (page === activePage) return true;
+    try {
+      if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
+      pageNavigationGuardRef.current = null;
+      setActivePage(page);
+      return true;
+    } catch (error) {
+      console.warn("Failed to leave the current page", error);
+      return false;
+    }
+  }, [activePage]);
+  const workbenchWorkflows = useMemo(
+    () => selectWorkbenchWorkflows(automation.snapshot.workflowStore.workflows, automation.snapshot.workflowStore.runs),
+    [automation.snapshot.workflowStore.runs, automation.snapshot.workflowStore.workflows],
+  );
   const [sidebarSections, setSidebarSections] = useState<SidebarSectionsState>(() => loadInitialSidebarSections());
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => loadCollapsedProjectGroups());
   const [collapsedTreeProjects, setCollapsedTreeProjects] = useState<Set<string>>(new Set());
@@ -981,8 +1012,9 @@ export function App(): ReactElement {
       }
     });
     const offFocus = window.sessionSearch.onFocusSearch(() => {
-      setActivePage("sessions");
-      window.requestAnimationFrame(() => searchRef.current?.focus());
+      void navigateToPage("sessions").then((navigated) => {
+        if (navigated) window.requestAnimationFrame(() => searchRef.current?.focus());
+      });
     });
     const offOpenSettings = window.sessionSearch.onOpenSettings(() => {
       setSettingsInitialSection("terminal");
@@ -1010,7 +1042,7 @@ export function App(): ReactElement {
       offAppUpdate();
       offEnvironments();
     };
-  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions]);
+  }, [activePage, load, loadSidebarMetadata, loadStats, loadWorkbenchSessions, navigateToPage]);
 
   useEffect(() => {
     void window.sessionSearch.getAppUpdateStatus(false).then(setAppUpdateStatus).catch(() => undefined);
@@ -1044,10 +1076,12 @@ export function App(): ReactElement {
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setActivePage("sessions");
-        window.requestAnimationFrame(() => {
-          searchRef.current?.focus();
-          searchRef.current?.select();
+        void navigateToPage("sessions").then((navigated) => {
+          if (!navigated) return;
+          window.requestAnimationFrame(() => {
+            searchRef.current?.focus();
+            searchRef.current?.select();
+          });
         });
         return;
       }
@@ -1111,7 +1145,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen, actionStatus, navigateToPage, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -1796,23 +1830,35 @@ export function App(): ReactElement {
     <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
       <aside className="app-navigation">
-        <button className="app-navigation-brand" onClick={() => setActivePage("workbench")} aria-label="AgentRecall">
+        <button className="app-navigation-brand" onClick={() => void navigateToPage("workbench")} aria-label="AgentRecall">
           <span className="app-navigation-brand-mark" aria-hidden="true">
             <svg viewBox="75 240 280 280"><image href={BRAND_LOGO_URL} width="1800" height="796" /></svg>
           </span>
           <strong>AgentRecall</strong>
         </button>
         <nav aria-label={t("Main navigation", "主导航")}>
-          <button data-page="workbench" className={activePage === "workbench" ? "active" : ""} onClick={() => setActivePage("workbench")}>
+          <button data-page="workbench" className={activePage === "workbench" ? "active" : ""} onClick={() => void navigateToPage("workbench")}>
             <LayoutDashboard size={18} /><span>{t("Workbench", "工作台")}</span>
           </button>
-          <button data-page="sessions" className={activePage === "sessions" ? "active" : ""} onClick={() => setActivePage("sessions")}>
+          <button data-page="sessions" className={activePage === "sessions" ? "active" : ""} onClick={() => void navigateToPage("sessions")}>
             <MessagesSquare size={18} /><span>{t("Sessions", "会话")}</span>
           </button>
-          <button data-page="skills" className={activePage === "skills" ? "active" : ""} onClick={() => setActivePage("skills")}>
+          <button data-page="workflows" className={activePage === "workflows" ? "active" : ""} onClick={() => void navigateToPage("workflows")}>
+            <Workflow size={18} /><span>Workflow</span>
+          </button>
+          <button data-page="runtimes" className={activePage === "runtimes" ? "active" : ""} onClick={() => void navigateToPage("runtimes")}>
+            <Cpu size={18} /><span>Runtime</span>
+          </button>
+          <button data-page="mcp" className={activePage === "mcp" ? "active" : ""} onClick={() => void navigateToPage("mcp")}>
+            <PlugZap size={18} /><span>MCP</span>
+          </button>
+          <button data-page="memories" className={activePage === "memories" ? "active" : ""} onClick={() => void navigateToPage("memories")}>
+            <BrainCircuit size={18} /><span>Memory</span>
+          </button>
+          <button data-page="skills" className={activePage === "skills" ? "active" : ""} onClick={() => void navigateToPage("skills")}>
             <PackageSearch size={18} /><span>Skills</span>
           </button>
-          <button data-page="providers" className={activePage === "providers" ? "active" : ""} onClick={() => setActivePage("providers")}>
+          <button data-page="providers" className={activePage === "providers" ? "active" : ""} onClick={() => void navigateToPage("providers")}>
             <KeyRound size={18} /><span>Provider</span>
           </button>
         </nav>
@@ -1879,6 +1925,22 @@ export function App(): ReactElement {
                 setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
                 setActivePage("sessions");
               }}
+              workflows={workbenchWorkflows}
+              workflowsLoading={automation.loading}
+              workflowsError={automation.error}
+              onOpenWorkflow={(workflowId) => {
+                void automation.api.selectWorkflow(workflowId).then((next) => {
+                  automation.setSnapshot(next);
+                  setActivePage("workflows");
+                }).catch((error) => setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) }));
+              }}
+              onNewWorkflow={() => {
+                void automation.api.createWorkflowDraft().then((next) => {
+                  automation.setSnapshot(next);
+                  setActivePage("workflows");
+                }).catch((error) => setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) }));
+              }}
+              onShowWorkflows={() => void navigateToPage("workflows")}
             />
           ) : null}
 
@@ -2206,6 +2268,16 @@ export function App(): ReactElement {
             />
           ) : null}
 
+          {activePage === "workflows" ? <WorkflowFeaturePage language={language} /> : null}
+
+          {activePage === "runtimes" ? (
+            <RuntimeFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
+          ) : null}
+
+          {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
+
+          {activePage === "memories" ? <AgentMemoryPage language={language} /> : null}
+
           {activePage === "providers" ? (
             <ProviderPage
               settings={appSettings}
@@ -2474,7 +2546,7 @@ export function App(): ReactElement {
           onAddSsh={() => setSshDialogOpen(true)}
           onOpenApiConfig={() => {
             setSettingsOpen(false);
-            setActivePage("providers");
+            void navigateToPage("providers");
           }}
           onOpenRemoteSessions={() => {
             setSettingsOpen(false);

@@ -127,6 +127,14 @@ describe("managed Skills page", () => {
     expect(localTabSource).toContain("onScroll={showMoreSkillsNearBottom}");
   });
 
+  it("keys local Skill rows by path so duplicate catalog identities remain distinct", () => {
+    expect(existsSync(localSkillsTabUrl)).toBe(true);
+    if (!existsSync(localSkillsTabUrl)) return;
+    const localTabSource = readFileSync(localSkillsTabUrl, "utf8");
+    expect(localTabSource).toContain("key={skill.path}");
+    expect(localTabSource).not.toContain("key={skill.id}");
+  });
+
   it("adds one-shot AI search to discovery without hiding keyword search", () => {
     expect(discoveryDialogSource).toContain("aiSearchDiscoveredSkills");
     expect(discoveryDialogSource).toContain('className="skill-discovery-ai-action"');

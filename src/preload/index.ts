@@ -27,6 +27,8 @@ import type {
   UsageQuotaSnapshot,
 } from "../core/types";
 import { createAppUpdateApi } from "./app-update";
+import { createAgentMemoryApi } from "./agent-memory";
+import { createAutomationApi } from "./automation";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createSkillsApi } from "./skills";
@@ -38,6 +40,7 @@ export interface AiAssistantReply {
 
 const api = {
   platform: process.platform as NodeJS.Platform,
+  automation: createAutomationApi(ipcRenderer),
   askAiAssistant: (messages: AiChatMessage[]): Promise<AiAssistantReply> => ipcRenderer.invoke("ai:assistant-chat", messages),
   searchSessions: (options: SearchOptions): Promise<SessionSearchResult[]> => ipcRenderer.invoke("search:sessions", options),
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),
@@ -81,6 +84,7 @@ const api = {
   refreshIndex: (): Promise<IndexStatus> => ipcRenderer.invoke("index:refresh"),
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
   ...createAppUpdateApi(ipcRenderer),
+  ...createAgentMemoryApi(ipcRenderer),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   ...createProvidersApi(ipcRenderer),

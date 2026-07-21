@@ -1,0 +1,10 @@
+{
+  "tags": [
+    "paper",
+    "academic",
+    "writing"
+  ],
+  "sourceLabel": "bundled custom skill",
+  "categoryId": "writing",
+  "sourceUrl": "https://github.com/zszz3/agent-session-search/tree/main/src/automation/engine/shared/bundled-skills/paper-writing"
+}

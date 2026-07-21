@@ -1,0 +1,10 @@
+{
+  "tags": [
+    "finance",
+    "planning",
+    "risk"
+  ],
+  "sourceLabel": "bundled custom skill / TradingAgents reference",
+  "categoryId": "life",
+  "sourceUrl": "https://github.com/TauricResearch/TradingAgents"
+}

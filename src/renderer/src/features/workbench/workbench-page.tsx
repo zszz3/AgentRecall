@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactElement } from "react";
-import { ArrowRight, Clock3, GitBranch, RefreshCw, Workflow } from "lucide-react";
+import { ArrowRight, Clock3, GitBranch, Plus, RefreshCw, Workflow } from "lucide-react";
 import { formatRelativeTime } from "../../../../core/format-session";
 import type {
   SessionSearchResult,
@@ -17,6 +17,7 @@ import { localize } from "../../language";
 import { getLiveSessionState } from "../../live-filter";
 import { SearchBox } from "../search/search-box";
 import { TokenTrendChart } from "./token-trend-chart";
+import type { WorkbenchWorkflowItem } from "../automation/workbench-workflows";
 import {
   SOURCE_LABEL,
   isRemoteSession,
@@ -55,6 +56,12 @@ export interface WorkbenchPageProps {
   onResumeSession: (session: SessionSearchResult) => void;
   onShowSessions: (query: string) => void;
   onSelectTrendDay: (day: SessionDailyTokenUsage) => void;
+  workflows: WorkbenchWorkflowItem[];
+  workflowsLoading: boolean;
+  workflowsError: string | null;
+  onOpenWorkflow: (workflowId: string) => void;
+  onNewWorkflow: () => void;
+  onShowWorkflows: () => void;
 }
 
 export function WorkbenchPage({
@@ -80,6 +87,12 @@ export function WorkbenchPage({
   onResumeSession,
   onShowSessions,
   onSelectTrendDay,
+  workflows,
+  workflowsLoading,
+  workflowsError,
+  onOpenWorkflow,
+  onNewWorkflow,
+  onShowWorkflows,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const cacheRate = usageCacheRate(stats.total);
@@ -233,17 +246,47 @@ export function WorkbenchPage({
         </section>
 
         <section className="workbench-panel workbench-workflows">
-          <div className="workbench-panel-head"><h2>Workflow</h2></div>
-          <div className="workbench-empty-state">
-            <Workflow size={22} />
-            <strong>{l("Workflow is not migrated yet", "Workflow 暂未迁移")}</strong>
-            <span>{l("This space is reserved for a future migration.", "这里先保留后续展示位置。")}</span>
+          <div className="workbench-panel-head">
+            <h2>Workflow</h2>
+            <button onClick={onShowWorkflows}>{l("View all", "查看全部")} <ArrowRight size={13} /></button>
           </div>
+          {workflowsLoading ? (
+            <div className="workbench-empty-state"><RefreshCw className="is-spinning" size={20} /><span>{l("Loading workflows…", "正在加载工作流…")}</span></div>
+          ) : workflowsError ? (
+            <div className="workbench-empty-state is-error"><Workflow size={20} /><strong>{l("Workflow unavailable", "Workflow 暂不可用")}</strong><span>{workflowsError}</span></div>
+          ) : workflows.length > 0 ? (
+            <div className="workbench-workflow-list">
+              {workflows.map((item) => (
+                <button key={item.workflow.workflowId} className="workbench-workflow-row" type="button" onClick={() => onOpenWorkflow(item.workflow.workflowId)}>
+                  <span className={`workbench-workflow-status is-${item.status}`}><i />{workflowStatusLabel(item.status, language)}</span>
+                  <strong title={item.workflow.title}>{item.workflow.title || l("Untitled workflow", "未命名工作流")}</strong>
+                  <small>{item.workflow.definition.nodes.length} {l("nodes", "个节点")} · {formatRelativeTime(item.updatedAt)}</small>
+                  <ArrowRight size={13} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="workbench-empty-state">
+              <Workflow size={22} />
+              <strong>{l("No workflows yet", "还没有工作流")}</strong>
+              <span>{l("Create a reusable Agent workflow and run it from here.", "创建可复用的 Agent 工作流，并从这里继续运行。")}</span>
+              <button className="workbench-workflow-create" type="button" onClick={onNewWorkflow}><Plus size={13} />{l("New workflow", "新建 Workflow")}</button>
+            </div>
+          )}
         </section>
         </div>
       </div>
     </div>
   );
+}
+
+function workflowStatusLabel(status: WorkbenchWorkflowItem["status"], language: LanguageMode): string {
+  if (status === "waiting_for_user") return localize(language, "Needs input", "等待输入");
+  if (status === "running") return localize(language, "Running", "运行中");
+  if (status === "completed") return localize(language, "Completed", "已完成");
+  if (status === "failed") return localize(language, "Failed", "失败");
+  if (status === "stopped") return localize(language, "Stopped", "已停止");
+  return localize(language, "Draft", "草稿");
 }
 
 function UsageMetric({ value, label }: { value: string; label: string }): ReactElement {

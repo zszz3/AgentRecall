@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{NAME}} - {{TARGET_ROLE}}</title>
+  <style>
+    :root {
+      color: #171717;
+      background: #ffffff;
+      font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #ececec; }
+    main {
+      width: min(210mm, 100%);
+      min-height: 297mm;
+      margin: 0 auto;
+      padding: 14mm 16mm;
+      background: #ffffff;
+    }
+    header { margin-bottom: 18px; border-bottom: 2px solid #171717; padding-bottom: 12px; }
+    h1 { margin: 0 0 5px; font-size: 27px; line-height: 1.15; letter-spacing: 0; }
+    .target { margin: 0 0 7px; color: #3f3f46; font-size: 15px; font-weight: 700; }
+    .contact { margin: 0; color: #404040; overflow-wrap: anywhere; }
+    section { margin-top: 16px; break-inside: avoid; }
+    h2 {
+      margin: 0 0 8px;
+      border-bottom: 1px solid #a3a3a3;
+      padding-bottom: 3px;
+      font-size: 15px;
+      line-height: 1.2;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .item { margin: 0 0 11px; break-inside: avoid; }
+    .item-head { display: flex; justify-content: space-between; gap: 16px; font-weight: 700; }
+    .item-meta { margin: 2px 0 4px; color: #525252; }
+    p { margin: 4px 0; }
+    ul { margin: 4px 0 0; padding-left: 19px; }
+    li { margin: 2px 0; }
+    a { color: inherit; text-decoration: underline; }
+    .skills { margin: 0; }
+    @media print {
+      body { background: #ffffff; }
+      main { width: auto; min-height: 0; margin: 0; padding: 0; }
+      a { text-decoration: none; }
+    }
+    @media (max-width: 640px) {
+      main { min-height: 0; padding: 24px 20px; }
+      .item-head { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>{{NAME}}</h1>
+      <p class="target">{{TARGET_ROLE}}</p>
+      <p class="contact">{{CONTACT_AND_LINKS}}</p>
+    </header>
+
+    <section>
+      <h2>职业概述</h2>
+      <p>{{SUMMARY}}</p>
+    </section>
+
+    <section>
+      <h2>核心技能</h2>
+      <p class="skills">{{SKILLS}}</p>
+    </section>
+
+    <section>
+      <h2>工作经历</h2>
+      <div class="item">
+        <div class="item-head"><span>{{ROLE_AND_ORGANIZATION}}</span><span>{{DATES}}</span></div>
+        <p class="item-meta">{{LOCATION_OR_CONTEXT}}</p>
+        <ul>
+          <li>{{VERIFIED_ACHIEVEMENT}}</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <h2>项目经历</h2>
+      <div class="item">
+        <div class="item-head"><span>{{PROJECT_NAME}}</span><span>{{DATES}}</span></div>
+        <p class="item-meta">{{TECHNOLOGIES_AND_LINK}}</p>
+        <ul>
+          <li>{{VERIFIED_PROJECT_ACHIEVEMENT}}</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <h2>教育背景</h2>
+      <div class="item">
+        <div class="item-head"><span>{{SCHOOL_AND_DEGREE}}</span><span>{{DATES}}</span></div>
+        <p class="item-meta">{{EDUCATION_DETAILS}}</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
