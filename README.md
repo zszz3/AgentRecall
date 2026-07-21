@@ -404,12 +404,21 @@ npm run package:smoke
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/MSHLD">
+                    <img src="https://avatars.githubusercontent.com/u/102949095?v=4" width="80;" alt="MSHLD"/>
+                    <br />
+                    <sub><b>MSHLD</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/275145">
                     <img src="https://avatars.githubusercontent.com/u/79244504?v=4" width="80;" alt="275145"/>
                     <br />
                     <sub><b>275145</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/puppyben1">
                     <img src="https://avatars.githubusercontent.com/u/136492871?v=4" width="80;" alt="puppyben1"/>
