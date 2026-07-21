@@ -81,7 +81,9 @@ describe("extra session sources", () => {
 
   it("loads Trae memory JSONL as searchable summary sessions", () => {
     const root = tmpDir("trae");
+    const siblingRoot = tmpDir("trae-sibling");
     const filePath = path.join(root, "memory", "projects", "-tmp-demo-project", "20260610", "session_memory_abc.jsonl");
+    const siblingFilePath = path.join(siblingRoot, "memory", "projects", "-tmp-demo-project", "20260610", "session_memory_sibling.jsonl");
     writeJsonl(filePath, [
       {
         intent: "Investigate slow checkout",
@@ -92,6 +94,7 @@ describe("extra session sources", () => {
         message_id: "m1",
       },
     ]);
+    writeJsonl(siblingFilePath, [{ intent: "Must not be loaded from an unselected Trae root" }]);
 
     const loaded = loadTraeSessions(root);
 
@@ -108,6 +111,7 @@ describe("extra session sources", () => {
     expect(loaded[0].messages[1].content).toContain("Found redundant API polling");
 
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(siblingRoot, { recursive: true, force: true });
   });
 
   it.skipIf(process.platform === "win32")("resolves legacy Trae project directories containing underscores", () => {

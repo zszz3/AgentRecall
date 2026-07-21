@@ -14,4 +14,4 @@ TRAE 官方版使用 `.trae`，TRAE CN 使用 `.trae-cn`。当前默认发现只
 
 ## 验证
 
-使用临时 home 和合成 JSONL fixture 覆盖单目录、双目录和显式根目录场景；文档同步列出 macOS/Linux 与 Windows 的两组路径。
+使用临时 home 和合成 JSONL fixture 覆盖单目录、双目录和显式根目录场景；文档同步列出 `.trae-cn` 与 `.trae` 两个固定路径。

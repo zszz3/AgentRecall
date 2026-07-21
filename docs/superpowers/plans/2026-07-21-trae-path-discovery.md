@@ -36,7 +36,7 @@
 - Modify: `docs/README.en.md`
 - Create: `.release-notes/fix-trae-path-discovery.md`
 
-- [x] Document both roots for macOS/Linux and Windows.
+- [x] Document both fixed Trae roots in the concise user-facing path line.
 - [x] Add one user-facing bug-fix release note explaining that official Trae sessions are no longer missed.
 - [x] Run `npm run release-note:check`.
 
