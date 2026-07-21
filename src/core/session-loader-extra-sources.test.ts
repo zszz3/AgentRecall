@@ -9,6 +9,7 @@ import {
   loadHermesSessions,
   loadOpenClawSessions,
   loadOpenCodeSessions,
+  loadDefaultSessions,
   loadTraeSessions,
   loadQoderSessions,
 } from "./session-loader";
@@ -107,6 +108,45 @@ describe("extra session sources", () => {
     expect(loaded[0].messages[1].content).toContain("Found redundant API polling");
 
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([".trae", ".trae-cn"] as const)("discovers Trae sessions from the default %s home directory", (directory) => {
+    const homeDir = tmpDir("trae-default-single");
+    try {
+      const filePath = path.join(homeDir, directory, "memory", "projects", "-tmp-demo-project", "20260721", "session_memory_single.jsonl");
+      writeJsonl(filePath, [{ intent: `Inspect ${directory}`, projectPath: "/tmp/demo/project" }]);
+
+      const loaded = loadDefaultSessions({ homeDir, includeTrae: true });
+
+      expect(loaded.filter((item) => item.session.source === "trae").map((item) => item.session.rawId)).toEqual(["session_memory_single"]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers Trae sessions from both official and CN home directories", () => {
+    const homeDir = tmpDir("trae-default");
+    try {
+      for (const [directory, id] of [[".trae", "international"], [".trae-cn", "china"]] as const) {
+        const filePath = path.join(homeDir, directory, "memory", "projects", "-tmp-demo-project", "20260721", `session_memory_${id}.jsonl`);
+        writeJsonl(filePath, [
+          {
+            intent: `Investigate ${id} checkout`,
+            projectPath: "/tmp/demo/project",
+            message_summary_time: "2026-07-21T09:00:00Z",
+          },
+        ]);
+      }
+
+      const loaded = loadDefaultSessions({ homeDir, includeTrae: true });
+
+      expect(loaded.filter((item) => item.session.source === "trae").map((item) => item.session.rawId)).toEqual([
+        "session_memory_international",
+        "session_memory_china",
+      ]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 
   it("loads Qoder conversation history JSONL as searchable sessions", () => {
