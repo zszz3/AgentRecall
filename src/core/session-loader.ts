@@ -1308,8 +1308,45 @@ export function* loadOpenClawSessionsIterator(
 
 function decodeTraeProjectDir(value: string): string {
   if (!value) return "";
-  if (value.startsWith("-")) return value.replace(/-/g, "/");
-  return value;
+  if (!value.startsWith("-")) return value;
+
+  const decoded = value.replace(/-/g, "/");
+  if (fs.existsSync(decoded)) return decoded;
+
+  // Trae's legacy directory encoding is lossy: "/" and "_" both become "-".
+  // Prefer a candidate that exists on disk when the session has no raw cwd.
+  const slashIndexes: number[] = [];
+  for (let index = 1; index < decoded.length; index += 1) {
+    if (decoded[index] === "/") slashIndexes.push(index);
+  }
+
+  const maxCandidates = 4096;
+  let attempts = 0;
+  const chars = decoded.split("");
+  const findExistingCandidate = (index: number): string | null => {
+    if (attempts >= maxCandidates) return null;
+    if (index >= slashIndexes.length) {
+      attempts += 1;
+      const candidate = chars.join("");
+      return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    const slashIndex = slashIndexes[index];
+    const slashCandidate = findExistingCandidate(index + 1);
+    if (slashCandidate) return slashCandidate;
+
+    chars[slashIndex] = "_";
+    const underscoreCandidate = findExistingCandidate(index + 1);
+    chars[slashIndex] = "/";
+    return underscoreCandidate;
+  };
+
+  const existingCandidate = findExistingCandidate(0);
+  if (existingCandidate) {
+    return existingCandidate;
+  }
+
+  return decoded;
 }
 
 function traeAssistantSummary(row: Record<string, unknown>): string {

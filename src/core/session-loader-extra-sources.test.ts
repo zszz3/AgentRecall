@@ -109,6 +109,33 @@ describe("extra session sources", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  it("resolves legacy Trae project directories containing underscores", () => {
+    const root = tmpDir("trae-underscore-data");
+    const projectRoot = fs.mkdtempSync("/tmp/agentrecall");
+    const projectPath = path.join(projectRoot, "trae_projects");
+    const projectSegment = projectPath.replace(/[/_]/g, "-");
+    const filePath = path.join(root, "memory", "projects", projectSegment, "20260610", "session_memory_underscore.jsonl");
+
+    try {
+      fs.mkdirSync(projectPath, { recursive: true });
+      writeJsonl(filePath, [
+        {
+          intent: "Resolve a Trae project path",
+          outcome: "Resolved from the filesystem",
+          message_summary_time: "2026-06-10T09:00:00Z",
+        },
+      ]);
+
+      const loaded = loadTraeSessions(root);
+
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].session.projectPath).toBe(projectPath);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("loads Qoder conversation history JSONL as searchable sessions", () => {
     const root = tmpDir("qoder");
     const filePath = path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-fe3", "task-fe3.jsonl");
