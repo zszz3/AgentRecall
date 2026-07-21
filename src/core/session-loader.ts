@@ -45,6 +45,7 @@ export interface SessionLoadOptions {
   includeOpenClaw?: boolean;
   includeHermes?: boolean;
   includeOpenCode?: boolean;
+  includeZcode?: boolean;
   includeCursorAgent?: boolean;
   includeTrae?: boolean;
   includeQoder?: boolean;
@@ -739,7 +740,7 @@ function firstClaudeGitBranch(rows: unknown[]): string | null {
 }
 
 function createIndexedSession(input: {
-  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae" | "qoder";
+  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -1752,6 +1753,215 @@ function loadOpenCodeSessionRow(
   };
 }
 
+function zcodeDatabaseStat(dbPath: string): VirtualSessionFileStat {
+  const database = safeStat(dbPath);
+  const wal = safeStat(`${dbPath}-wal`);
+  return {
+    mtimeMs: Math.max(database.mtimeMs, wal.mtimeMs),
+    size: database.size + wal.size,
+  };
+}
+
+function zcodeToolStatus(value: string): "success" | "failure" | "unknown" {
+  if (value === "completed") return "success";
+  if (value === "error") return "failure";
+  return "unknown";
+}
+
+function zcodeMessagesFromParts(
+  db: import("node:sqlite").DatabaseSync,
+  rawId: string,
+): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[]; assistantMessageIds: Set<string> } {
+  const rows = db
+    .prepare(
+      `
+        SELECT message.id AS message_id, message.time_created AS message_time_created, message.data AS message_data,
+          part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
+        FROM message
+        LEFT JOIN part ON part.message_id = message.id
+        WHERE message.session_id = ?
+        ORDER BY message.time_created, message.id, part.time_created, part.id
+      `,
+    )
+    .all(rawId) as Array<Record<string, unknown>>;
+
+  const drafts = new Map<string, { role: "user" | "assistant"; timestamp: string; text: string[] }>();
+  const assistantMessageIds = new Set<string>();
+  const traceDrafts: TraceEventDraft[] = [];
+  for (const row of rows) {
+    const messageId = stringField(row, "message_id");
+    const messageData = parseJsonText(unknownField(row, "message_data"));
+    const role = roleFromValue(messageData);
+    if (!messageId || !role) continue;
+    if (role === "assistant") assistantMessageIds.add(messageId);
+
+    let draft = drafts.get(messageId);
+    if (!draft) {
+      draft = {
+        role,
+        timestamp: timestampString(unknownField(row, "message_time_created")),
+        text: [],
+      };
+      drafts.set(messageId, draft);
+    }
+
+    const partData = parseJsonText(unknownField(row, "part_data"));
+    if (!isRecord(partData)) continue;
+    const partType = stringField(partData, "type");
+    if (partType === "text") {
+      const text = stringField(partData, "text").trim();
+      if (text) draft.text.push(text);
+      continue;
+    }
+    if (partType !== "tool") continue;
+
+    const state = objectField(partData, "state");
+    const input = state ? unknownField(state, "input") : undefined;
+    const output = state ? unknownField(state, "output") : undefined;
+    const time = state ? objectField(state, "time") : null;
+    const toolName = stringField(partData, "tool") || "tool";
+    const summary = firstStringField(input, ["command", "path", "file_path", "query", "url", "description"]);
+    traceDrafts.push({
+      kind: "tool_call",
+      source: "zcode",
+      title: normalizeTraceTitle(toolName, summary),
+      detail: stringifyDetail({ input, output }),
+      timestamp: timestampString(unknownField(time, "start") || unknownField(row, "part_time_created")),
+      callId: stringField(partData, "callID") || null,
+      eventType: "tool",
+      status: zcodeToolStatus(stringField(state, "status")),
+    });
+  }
+
+  const messages: SessionMessage[] = [];
+  for (const draft of drafts.values()) {
+    const content = draft.text.join("\n");
+    if (!content || (draft.role === "user" && !isMeaningfulUserMessage(content))) continue;
+    messages.push(messageFromParts(draft.role, content, draft.timestamp, messages.length));
+  }
+  return { messages, traceEvents: dedupeTraceEvents(traceDrafts), assistantMessageIds };
+}
+
+function zcodeTokenEventsFromModelUsage(
+  db: import("node:sqlite").DatabaseSync,
+  rawId: string,
+  assistantMessageIds: ReadonlySet<string>,
+): TokenUsageEvent[] {
+  if (!sqliteTableExists(db, "model_usage")) return [];
+  if (
+    !sqliteHasColumns(db, "model_usage", [
+      "id",
+      "session_id",
+      "assistant_message_id",
+      "query_source",
+      "status",
+      "started_at",
+      "completed_at",
+      "input_tokens",
+      "output_tokens",
+      "reasoning_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    ])
+  ) {
+    return [];
+  }
+
+  try {
+    const rows = db
+      .prepare(
+        `
+          SELECT id, assistant_message_id, started_at, completed_at, input_tokens, output_tokens,
+            reasoning_tokens, cache_creation_input_tokens, cache_read_input_tokens
+          FROM model_usage
+          WHERE session_id = ? AND status = 'completed' AND query_source <> 'session_title'
+          ORDER BY COALESCE(completed_at, started_at), started_at, id
+        `,
+      )
+      .all(rawId) as Array<Record<string, unknown>>;
+    const events: TokenUsageEvent[] = [];
+    for (const row of rows) {
+      const id = stringField(row, "id");
+      const assistantMessageId = stringField(row, "assistant_message_id");
+      if (!id || !assistantMessageIds.has(assistantMessageId)) continue;
+      const cached = Math.max(0, numberField(row, "cache_read_input_tokens")) + Math.max(0, numberField(row, "cache_creation_input_tokens"));
+      const freshInput = Math.max(0, numberField(row, "input_tokens") - cached);
+      events.push(
+        tokenEvent(
+          timestampMs(unknownField(row, "completed_at")) || timestampMs(unknownField(row, "started_at")),
+          id,
+          freshInput,
+          Math.max(0, numberField(row, "output_tokens")),
+          cached,
+          Math.max(0, numberField(row, "reasoning_tokens")),
+        ),
+      );
+    }
+    return events;
+  } catch {
+    return [];
+  }
+}
+
+function loadZcodeSessionRow(
+  db: import("node:sqlite").DatabaseSync,
+  dbPath: string,
+  stat: VirtualSessionFileStat,
+  session: Record<string, unknown>,
+): LoadedSession | null {
+  const rawId = stringField(session, "id");
+  if (!rawId) return null;
+  const { messages, traceEvents, assistantMessageIds } = zcodeMessagesFromParts(db, rawId);
+  const tokenEvents = zcodeTokenEventsFromModelUsage(db, rawId, assistantMessageIds);
+  const question = firstQuestion(messages);
+  const parentSessionId = stringField(session, "parent_id") || null;
+  return {
+    session: createIndexedSession({
+      keyPrefix: "zcode",
+      rawId,
+      source: "zcode-cli",
+      projectPath: stringField(session, "directory"),
+      filePath: dbPath,
+      originalTitle: stringField(session, "title") || cleanTitle(question) || rawId,
+      firstQuestion: cleanTitle(question),
+      timestamp: timestampMs(unknownField(session, "time_updated")) || timestampMs(unknownField(session, "time_created")) || stat.mtimeMs,
+      tokenUsage: tokenUsageFromEvents(tokenEvents),
+      stat,
+      isSubagent: parentSessionId !== null,
+      parentSessionId,
+    }),
+    messages,
+    tokenEvents,
+    traceEvents,
+  };
+}
+
+export function loadZcodeSessions(zcodeDir = path.join(os.homedir(), ".zcode")): LoadedSession[] {
+  const dbPath = path.join(zcodeDir, "cli", "db", "db.sqlite");
+  const db = readOnlyDatabase(dbPath);
+  if (!db) return [];
+  try {
+    if (!sqliteHasColumns(db, "session", ["id", "title", "directory", "time_created", "time_updated", "parent_id"])) return [];
+    if (!sqliteHasColumns(db, "message", ["id", "session_id", "time_created", "data"])) return [];
+    if (!sqliteHasColumns(db, "part", ["id", "message_id", "session_id", "time_created", "data"])) return [];
+    const stat = zcodeDatabaseStat(dbPath);
+    const sessions = db.prepare("SELECT * FROM session ORDER BY time_updated DESC, time_created DESC, id").all() as Array<Record<string, unknown>>;
+    return sessions
+      .map((session) => {
+        try {
+          return loadZcodeSessionRow(db, dbPath, stat, session);
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is LoadedSession => Boolean(item));
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
 function traceEventsFromCursorRows(rows: unknown[]): SessionTraceEvent[] {
   const events: TraceEventDraft[] = [];
   for (const row of rows) {
@@ -1976,6 +2186,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   }
   if (options.includeHermes) yield* loadHermesSessions();
   if (options.includeOpenCode) yield* loadOpenCodeSessions();
+  if (options.includeZcode) yield* loadZcodeSessions(path.join(homeDir, ".zcode"));
   if (options.includeCodeWizCli) yield* loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR));
   if (options.includeCursorAgent) yield* loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options);
   if (options.includeTrae) {

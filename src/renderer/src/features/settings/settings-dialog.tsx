@@ -628,6 +628,21 @@ export function SettingsDialog({
                 </label>
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
+                    <span className="settings-field-title">Include ZCode</span>
+                    <span className="settings-field-sub">
+                      {l("Indexes local ZCode sessions read-only.", "以只读方式索引本地 ZCode 会话。")}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.includeZcode)}
+                    disabled={!settings || saving}
+                    onChange={(event) => onSettingsChange({ includeZcode: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
                     <span className="settings-field-title">Include Cursor Agent</span>
                     <span className="settings-field-sub">{l("Indexes local Cursor agent transcripts.", "索引本地 Cursor agent 记录。")}</span>
                   </div>

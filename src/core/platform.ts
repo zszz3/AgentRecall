@@ -83,6 +83,7 @@ export interface AppSettings {
   includeOpenClaw: boolean;
   includeHermes: boolean;
   includeOpenCode: boolean;
+  includeZcode: boolean;
   includeCursorAgent: boolean;
   includeTrae: boolean;
   includeQoder: boolean;
@@ -142,6 +143,7 @@ export const defaultSettings: AppSettings = {
   includeOpenClaw: false,
   includeHermes: false,
   includeOpenCode: false,
+  includeZcode: false,
   includeCursorAgent: false,
   includeTrae: false,
   includeQoder: false,

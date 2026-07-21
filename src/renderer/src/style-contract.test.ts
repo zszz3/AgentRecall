@@ -243,6 +243,20 @@ describe("stylesheet theme contract", () => {
     expect(badge).toMatch(/color:\s*var\(--codewiz-badge-text\)/);
   });
 
+  it("uses a distinct blue accent for ZCode badges", () => {
+    const root = stylesheet.match(/:root\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const dark = stylesheet.match(/:root\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const badge = stylesheet.match(/\.source-badge\.zcode\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(root).toMatch(/--zcode:\s*#2563eb/);
+    expect(root).toMatch(/--zcode-badge-bg:\s*#eaf2ff/);
+    expect(root).toMatch(/--zcode-badge-text:\s*#1d4ed8/);
+    expect(dark).toMatch(/--zcode-badge-bg:\s*rgba\(59,\s*130,\s*246,\s*0\.18\)/);
+    expect(dark).toMatch(/--zcode-badge-text:\s*#93c5fd/);
+    expect(badge).toMatch(/background:\s*var\(--zcode-badge-bg\)/);
+    expect(badge).toMatch(/color:\s*var\(--zcode-badge-text\)/);
+  });
+
   it("uses one desktop toolbar and the available viewport height for session sync", () => {
     const dialog = stylesheet.match(/\.remote-sessions-dialog\s*\{[^}]*\}/)?.[0] ?? "";
     const toolbar = stylesheet.match(/\.remote-sessions-toolbar\s*\{[^}]*\}/)?.[0] ?? "";

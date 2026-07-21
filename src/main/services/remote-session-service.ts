@@ -194,6 +194,9 @@ export class RemoteSessionService {
   async upload(sessionKey: string, force = false): Promise<RemoteSessionUploadResult> {
     const client = this.createClient();
     const store = this.dependencies.getStore();
+    const session = store.getSession(sessionKey);
+    if (!session) throw new Error("Session not found.");
+    if (session.source === "zcode-cli") throw new Error("ZCode sessions cannot be saved remotely yet.");
     await this.dependencies.ensureSessionDetails(sessionKey);
     const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
     const { payload, detailJson, portableJson } = this.operations.buildUpload(

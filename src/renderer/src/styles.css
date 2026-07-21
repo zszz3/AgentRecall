@@ -53,6 +53,9 @@
   --codewiz: #ff2442;
   --codewiz-badge-bg: #fff0f2;
   --codewiz-badge-text: #b42335;
+  --zcode: #2563eb;
+  --zcode-badge-bg: #eaf2ff;
+  --zcode-badge-text: #1d4ed8;
 
   --tag-bg: #f1f5f9;
   --tag-text: #475569;
@@ -135,6 +138,9 @@
   --codewiz: #ff5a6f;
   --codewiz-badge-bg: rgba(255, 90, 111, 0.16);
   --codewiz-badge-text: #ff8d9d;
+  --zcode: #60a5fa;
+  --zcode-badge-bg: rgba(59, 130, 246, 0.18);
+  --zcode-badge-text: #93c5fd;
 
   --tag-bg: rgba(255, 255, 255, 0.05);
   --tag-text: #c9ced6;
@@ -1971,6 +1977,11 @@ select:focus-visible {
 .source-badge.codewiz {
   background: var(--codewiz-badge-bg);
   color: var(--codewiz-badge-text);
+}
+
+.source-badge.zcode {
+  background: var(--zcode-badge-bg);
+  color: var(--zcode-badge-text);
 }
 
 .source-badge.other {

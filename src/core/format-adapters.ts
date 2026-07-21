@@ -184,6 +184,7 @@ export function cursorTimestampFromRow(raw: unknown): string {
 export const openClawAdapter = genericAdapter("openclaw");
 export const hermesAdapter = genericAdapter("hermes");
 export const openCodeAdapter = genericAdapter("opencode");
+export const zcodeAdapter = genericAdapter("zcode");
 export const codeWizAdapter = genericAdapter("codewiz");
 export const traeAdapter = genericAdapter("trae");
 export const qoderAdapter = genericAdapter("qoder");
@@ -201,6 +202,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (sourceOrFormat === "openclaw") return openClawAdapter;
   if (sourceOrFormat === "hermes") return hermesAdapter;
   if (sourceOrFormat === "opencode") return openCodeAdapter;
+  if (sourceOrFormat === "zcode") return zcodeAdapter;
   if (sourceOrFormat === "cursor") return cursorAdapter;
   if (sourceOrFormat === "trae") return traeAdapter;
   if (sourceOrFormat === "qoder") return qoderAdapter;
@@ -211,6 +213,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (format === "openclaw") return openClawAdapter;
   if (format === "hermes") return hermesAdapter;
   if (format === "opencode") return openCodeAdapter;
+  if (format === "zcode") return zcodeAdapter;
   if (format === "cursor") return cursorAdapter;
   if (format === "trae") return traeAdapter;
   if (format === "qoder") return qoderAdapter;

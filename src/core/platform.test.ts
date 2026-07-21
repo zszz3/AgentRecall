@@ -105,6 +105,7 @@ describe("platform application resolution", () => {
     expect(defaultSettings.includeOpenClaw).toBe(false);
     expect(defaultSettings.includeHermes).toBe(false);
     expect(defaultSettings.includeOpenCode).toBe(false);
+    expect(defaultSettings.includeZcode).toBe(false);
     expect(defaultSettings.includeCursorAgent).toBe(false);
     expect(defaultSettings.includeTrae).toBe(false);
     expect(defaultSettings.includeQoder).toBe(false);

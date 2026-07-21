@@ -12,10 +12,11 @@ export type SessionSource =
   | "openclaw"
   | "hermes"
   | "opencode-cli"
+  | "zcode-cli"
   | "cursor-agent"
   | "trae"
   | "qoder";
-export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae" | "qoder";
+export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder";
 export type SessionSortBy = "smart" | "activity" | "created";
 export type EnvironmentKind = "local" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";

@@ -27,6 +27,7 @@ import type {
 } from "../types";
 import type { SessionStoreDatabase } from "./database";
 import { EnvironmentStore, localEnvironment } from "./environments";
+import { deleteZcodeSession } from "../zcode-session-writer";
 
 const LIVE_SESSION_KEY_SQL = `
   CASE
@@ -477,12 +478,18 @@ export class SessionsStore {
   }
 
   deleteSession(sessionKey: string): boolean {
+    const row = this.db.prepare("SELECT source, raw_id, file_path FROM sessions WHERE session_key = ?").get(sessionKey) as
+      | { source: SessionSource; raw_id: string; file_path: string }
+      | undefined;
+    if (!row) return false;
+    if (row.source === "zcode-cli") {
+      const sourceDeleted = deleteZcodeSession(row.file_path, row.raw_id);
+      const indexDeleted = this.deleteSessionRecord(sessionKey);
+      return sourceDeleted || indexDeleted;
+    }
+
     let deleted = false;
     this.transaction(() => {
-      const row = this.db.prepare("SELECT source, file_path FROM sessions WHERE session_key = ?").get(sessionKey) as
-        | { source: SessionSource; file_path: string }
-        | undefined;
-      if (!row) return;
       if (row.source === "hermes") throw new Error("Cannot delete shared Hermes source database.");
       if (row.source === "opencode-cli") throw new Error("Cannot delete shared OpenCode source database.");
       this.deleteSessionSourceFile(row.file_path);

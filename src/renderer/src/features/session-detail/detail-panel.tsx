@@ -133,6 +133,7 @@ export function DetailPanel({
   onResumeIterm,
   onMigrate,
   onUploadRemote,
+  remoteUploadDisabled = false,
   onCopyResume,
   onCopyMarkdown,
   onExportMarkdown,
@@ -171,6 +172,7 @@ export function DetailPanel({
   onResumeIterm: () => void;
   onMigrate: () => void;
   onUploadRemote?: () => void;
+  remoteUploadDisabled?: boolean;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
@@ -443,7 +445,11 @@ export function DetailPanel({
               <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
             </button>
             {onUploadRemote ? (
-              <button onClick={onUploadRemote} disabled={actionRunning}>
+              <button
+                onClick={onUploadRemote}
+                disabled={actionRunning || remoteUploadDisabled}
+                title={remoteUploadDisabled ? l("ZCode remote saving is not supported yet.", "ZCode 暂不支持保存到远程。") : undefined}
+              >
                 <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
               </button>
             ) : null}

@@ -219,6 +219,12 @@ describe("detail panel actions", () => {
     expect(detailPanel).toContain("environment-badge");
   });
 
+  it("keeps ZCode remote saving visible but disabled until snapshot-only upload is supported", () => {
+    expect(appSource).toContain('remoteUploadDisabled={detail.source === "zcode-cli"}');
+    expect(detailPanelSource).toContain("disabled={actionRunning || remoteUploadDisabled}");
+    expect(detailPanelSource).toContain("ZCode remote saving is not supported yet.");
+  });
+
   it("marks local-only context menu actions disabled for remote sessions", () => {
     const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"));
 

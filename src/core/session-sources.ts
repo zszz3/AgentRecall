@@ -10,6 +10,7 @@ export type OptionalSessionSourceSetting =
   | "includeOpenClaw"
   | "includeHermes"
   | "includeOpenCode"
+  | "includeZcode"
   | "includeCursorAgent"
   | "includeTrae"
   | "includeQoder";
@@ -24,11 +25,12 @@ export type SessionSourceFamily =
   | "openclaw"
   | "hermes"
   | "opencode"
+  | "zcode"
   | "cursor"
   | "trae"
   | "qoder";
 
-export type SessionSourceUiFamily = "claude" | "codex" | "codebuddy" | "codewiz" | "other";
+export type SessionSourceUiFamily = "claude" | "codex" | "codebuddy" | "codewiz" | "zcode" | "other";
 
 export interface SessionSourceCapabilities {
   live: boolean;
@@ -133,6 +135,12 @@ export const SESSION_SOURCE_REGISTRY = {
   "opencode-cli": {
     id: "opencode-cli", label: "OpenCode", format: "opencode", family: "opencode", uiFamily: "other", statsGroup: null,
     optionalSetting: "includeOpenCode", pendingKey: "opencode", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
+    resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
+    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+  },
+  "zcode-cli": {
+    id: "zcode-cli", label: "ZCode", format: "zcode", family: "zcode", uiFamily: "zcode", statsGroup: null,
+    optionalSetting: "includeZcode", pendingKey: "zcode", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
     capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
   },

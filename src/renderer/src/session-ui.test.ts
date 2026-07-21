@@ -92,18 +92,19 @@ describe("session source labels", () => {
   it("shows optional local agent sources only after they are enabled in settings", () => {
     const defaultLabels = sourceFilters(defaultSettings).map((filter) => sourceFilterLabel(filter, "en"));
 
-    expect(defaultLabels).not.toEqual(expect.arrayContaining(["OpenClaw", "Hermes", "OpenCode", "Cursor Agent", "Trae"]));
+    expect(defaultLabels).not.toEqual(expect.arrayContaining(["OpenClaw", "Hermes", "OpenCode", "ZCode", "Cursor Agent", "Trae"]));
 
     const enabledLabels = sourceFilters({
       ...defaultSettings,
       includeOpenClaw: true,
       includeHermes: true,
       includeOpenCode: true,
+      includeZcode: true,
       includeCursorAgent: true,
       includeTrae: true,
     }).map((filter) => sourceFilterLabel(filter, "en"));
 
-    expect(enabledLabels).toEqual(expect.arrayContaining(["OpenClaw", "Hermes", "OpenCode", "Cursor Agent", "Trae"]));
+    expect(enabledLabels).toEqual(expect.arrayContaining(["OpenClaw", "Hermes", "OpenCode", "ZCode", "Cursor Agent", "Trae"]));
   });
 
   it("uses Internal labels for all four optional migration sources", () => {

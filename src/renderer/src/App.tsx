@@ -1331,7 +1331,9 @@ export function App(): ReactElement {
         if (detail?.sessionKey === session.sessionKey) closeDetail();
         setSelectedKey((current) => (current === session.sessionKey ? null : current));
         await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
-        const message = t("Session file deleted.", "会话文件已删除。");
+        const message = session.source === "zcode-cli"
+          ? t("ZCode session deleted from the local database.", "ZCode 会话已从本地数据库删除。")
+          : t("Session file deleted.", "会话文件已删除。");
         setActionStatus({ kind: "success", message });
         window.setTimeout(() => {
           setActionStatus((current) => (current?.kind === "success" && current.message === message ? null : current));
@@ -2157,6 +2159,7 @@ export function App(): ReactElement {
           }
           onMigrate={() => beginMigrate(detail)}
           onUploadRemote={() => void uploadRemoteSession(detail)}
+          remoteUploadDisabled={detail.source === "zcode-cli"}
           onCopyResume={() =>
             void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(detail.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
           }
