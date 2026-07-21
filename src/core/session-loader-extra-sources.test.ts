@@ -151,7 +151,7 @@ describe("extra session sources", () => {
 
   it.skipIf(process.platform === "win32")("resolves legacy Trae project directories containing underscores", () => {
     const root = tmpDir("trae-underscore-data");
-    const projectRoot = tmpDir("trae-project");
+    const projectRoot = fs.mkdtempSync("/tmp/agentrecall");
     const projectPath = path.join(projectRoot, "trae_projects");
     const projectSegment = projectPath.replace(/[/_]/g, "-");
     const filePath = path.join(root, "memory", "projects", projectSegment, "20260610", "session_memory_underscore.jsonl");
