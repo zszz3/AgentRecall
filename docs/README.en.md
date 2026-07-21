@@ -57,7 +57,7 @@
 | Hermes | Optional in settings; reads `~/.hermes/state.db` |
 | OpenCode | Optional in settings; reads `~/.local/share/opencode/opencode.db` |
 | Cursor Agent | Optional in settings; reads `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` |
-| Trae | Optional in settings; reads `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`; open-state detection reads Trae's local workspace state database |
+| Trae | Optional in settings; reads `~/.trae/memory/projects/**/session_memory_*.jsonl` and `~/.trae-cn/memory/projects/**/session_memory_*.jsonl` on macOS/Linux, or `%userprofile%/.trae/memory/projects/**/session_memory_*.jsonl` and `%userprofile%/.trae-cn/memory/projects/**/session_memory_*.jsonl` on Windows; open-state detection reads Trae's local workspace state database |
 | Qoder | Optional in settings; reads `~/.qoder/cache/projects/*/conversation-history/*/*.jsonl`; supports live detection and remote sync |
 | SSH remote environment | Reads the same Codex / Claude Code session paths under the remote user's home directory over SSH |
 

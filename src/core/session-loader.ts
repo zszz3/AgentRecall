@@ -32,6 +32,7 @@ const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
 const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 const QODER_DIR = ".qoder";
+const TRAE_DIR_NAMES = [".trae", ".trae-cn"] as const;
 
 export interface SessionLoadOptions {
   homeDir?: string;
@@ -1390,11 +1391,11 @@ function loadTraeMemoryFile(filePath: string, traeDir: string, stat = safeStat(f
   };
 }
 
-export function loadTraeSessions(traeDir = path.join(os.homedir(), ".trae-cn")): LoadedSession[] {
+export function loadTraeSessions(traeDir = path.join(os.homedir(), ".trae")): LoadedSession[] {
   return [...loadTraeSessionsIterator(traeDir)];
 }
 
-export function* loadTraeSessionsIterator(traeDir = path.join(os.homedir(), ".trae-cn"), options: SessionLoadOptions = {}): Generator<LoadedSession> {
+export function* loadTraeSessionsIterator(traeDir = path.join(os.homedir(), ".trae"), options: SessionLoadOptions = {}): Generator<LoadedSession> {
   const memoryDir = path.join(traeDir, "memory", "projects");
   if (!fs.existsSync(memoryDir)) return;
   for (const filePath of walkJsonlFiles(memoryDir)) {
@@ -1964,7 +1965,9 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   if (options.includeOpenCode) yield* loadOpenCodeSessions();
   if (options.includeCodeWizCli) yield* loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR));
   if (options.includeCursorAgent) yield* loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options);
-  if (options.includeTrae) yield* loadTraeSessionsIterator(path.join(homeDir, ".trae-cn"), options);
+  if (options.includeTrae) {
+    for (const dirName of TRAE_DIR_NAMES) yield* loadTraeSessionsIterator(path.join(homeDir, dirName), options);
+  }
   if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
   if (options.includeClaudeInternal) yield* loadClaudeCliSessionsIterator(path.join(homeDir, CLAUDE_INTERNAL_DIR), "claude-internal", options);
   if (options.includeCodexInternal) yield* loadCodexSessionsIterator(path.join(homeDir, CODEX_INTERNAL_DIR), "codex-internal", options);
