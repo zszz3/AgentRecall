@@ -87,6 +87,7 @@ export interface AppSettings {
   includeTrae: boolean;
   includeQoder: boolean;
   rulesSyncEnabled: boolean;
+  memoriesSyncEnabled: boolean;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   hideSubagentSessions: boolean;
@@ -145,6 +146,7 @@ export const defaultSettings: AppSettings = {
   includeTrae: false,
   includeQoder: false,
   rulesSyncEnabled: false,
+  memoriesSyncEnabled: false,
   hideCodexQuota: false,
   hideClaudeQuota: false,
   hideSubagentSessions: true,

@@ -4,6 +4,7 @@ import { defaultSettings } from "../../core/platform";
 import {
   migrationTargetsForSession,
   migrationTargetsForSource,
+  projectDisplayLabel,
   projectSortTimestamp,
   resumeActionLabel,
   resumeRouteMessage,
@@ -19,6 +20,34 @@ const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx
 const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
 
 describe("session source labels", () => {
+  it("renders structured project labels in both languages", () => {
+    expect(projectDisplayLabel({ label: "app", labelKind: "path", labelSuffix: "Local" }, "zh")).toBe("app · Local");
+    expect(projectDisplayLabel({ label: "Hermes 重写", labelKind: "codex-task-title", labelSuffix: "07-18" }, "zh")).toBe(
+      "Hermes 重写 · 07-18",
+    );
+    expect(
+      projectDisplayLabel(
+        { label: "Untitled session", labelKind: "codex-task-untitled", labelSuffix: "07-19 19:25" },
+        "zh",
+      ),
+    ).toBe("未命名会话 · 07-19 19:25");
+    expect(
+      projectDisplayLabel(
+        { label: "Untitled session", labelKind: "codex-task-untitled", labelSuffix: null },
+        "en",
+      ),
+    ).toBe("Untitled session");
+  });
+
+  it("uses the structured project label everywhere the selected project is shown", () => {
+    expect(appSource).toContain(
+      'const selectedProjectLabel = selectedProject ? projectDisplayLabel(selectedProject, language) : ""',
+    );
+    expect(appSource).toContain("label: selectedProjectLabel");
+    expect(appSource).toContain('Search within ${selectedProjectLabel || "project"}');
+    expect(appSource).toContain("projectDisplayLabel(project, language)");
+  });
+
   it("uses Codex App wording for App resume actions and results", () => {
     expect(resumeActionLabel("codex-app", "en")).toBe("Opening in Codex");
     expect(resumeActionLabel("codex-app", "zh")).toBe("正在 Codex 中打开");

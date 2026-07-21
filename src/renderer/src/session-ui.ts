@@ -133,6 +133,16 @@ export function projectSortTimestamp(project: Pick<ProjectSummary, "createdAt" |
   return project.lastActivityAt || project.createdAt || 0;
 }
 
+export function projectDisplayLabel(
+  project: Pick<ProjectSummary, "label" | "labelKind" | "labelSuffix">,
+  language: LanguageMode,
+): string {
+  const base = project.labelKind === "codex-task-untitled"
+    ? localize(language, "Untitled session", "未命名会话")
+    : project.label;
+  return project.labelSuffix ? `${base} · ${project.labelSuffix}` : base;
+}
+
 export function statsPeriodLabel(value: SessionStatsPeriod, language: LanguageMode): string {
   if (value === "today") return localize(language, "Today", "今天");
   if (value === "sevenDay") return localize(language, "7D", "7 天");

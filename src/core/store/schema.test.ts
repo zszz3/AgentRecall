@@ -25,6 +25,7 @@ describe("session store schema", () => {
         "skill_sync_bindings",
         "session_sync_bindings",
         "session_migrations",
+        "data_migrations",
         "session_fts",
       ]));
       expect(db.prepare("SELECT id, kind, label, enabled FROM environments WHERE id = 'local'").get()).toEqual({
@@ -69,6 +70,38 @@ describe("session store schema", () => {
         last_error: "offline",
         created_at: 10,
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("invalidates legacy Codex source classifications exactly once", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const hasMigrationTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'")
+        .get();
+      if (hasMigrationTable) {
+        db.prepare("DELETE FROM data_migrations WHERE id = 'codex-work-desktop-originator-v1'").run();
+      }
+      const insert = db.prepare(`
+        INSERT INTO sessions (
+          session_key, raw_id, source, project_path, file_path,
+          original_title, first_question, timestamp, file_mtime_ms, file_size
+        ) VALUES (?, ?, ?, '/repo', ?, 'Title', 'Question', 1, ?, 10)
+      `);
+      insert.run("codex:legacy", "legacy", "codex-cli", "/tmp/codex.jsonl", 123);
+      insert.run("claude:unchanged", "unchanged", "claude-cli", "/tmp/claude.jsonl", 456);
+
+      migrateSessionStore(db);
+
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'codex:legacy'").get()).toEqual({ file_mtime_ms: 0 });
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'claude:unchanged'").get()).toEqual({ file_mtime_ms: 456 });
+
+      db.prepare("UPDATE sessions SET file_mtime_ms = 789 WHERE session_key = 'codex:legacy'").run();
+      migrateSessionStore(db);
+      expect(db.prepare("SELECT file_mtime_ms FROM sessions WHERE session_key = 'codex:legacy'").get()).toEqual({ file_mtime_ms: 789 });
     } finally {
       db.close();
     }

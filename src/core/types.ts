@@ -220,9 +220,13 @@ export interface ProjectTagEntry {
   tags: string[];
 }
 
+export type ProjectLabelKind = "path" | "codex-task-title" | "codex-task-untitled";
+
 export interface ProjectSummary {
   path: string;
   label: string;
+  labelKind: ProjectLabelKind;
+  labelSuffix: string | null;
   sessionCount: number;
   environmentId: string;
   environmentLabel: string;

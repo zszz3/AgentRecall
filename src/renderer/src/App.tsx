@@ -130,6 +130,7 @@ import {
   isRemoteSession,
   liveStatusFilterLabel,
   localizedLiveStateLabel,
+  projectDisplayLabel,
   projectSortTimestamp,
   remoteOpenAppTitle,
   remoteMigrationTitle,
@@ -1064,6 +1065,7 @@ export function App(): ReactElement {
       (projectPath ? projects.find((project) => project.path === projectPath) || null : null),
     [projects, projectPath, projectEnvironmentId],
   );
+  const selectedProjectLabel = selectedProject ? projectDisplayLabel(selectedProject, language) : "";
   const sidebarTree = useMemo(() => {
     // Build env → project → tag tree. Tags are scoped per environment+project
     // so the same branch name on different environments shows separately.
@@ -1102,7 +1104,7 @@ export function App(): ReactElement {
     selectedProject
       ? {
           key: "project",
-          label: selectedProject.label,
+          label: selectedProjectLabel,
           title: selectedProject.path,
           onClear: clearProjectScopeFilter,
         }
@@ -1118,7 +1120,7 @@ export function App(): ReactElement {
       : null,
   ].filter((filter): filter is NonNullable<typeof filter> => filter !== null);
   const searchPlaceholder = projectPath
-    ? t(`Search within ${selectedProject?.label || "project"}`, `在 ${selectedProject?.label || "项目"} 中搜索`)
+    ? t(`Search within ${selectedProjectLabel || "project"}`, `在 ${selectedProjectLabel || "项目"} 中搜索`)
     : tag
       ? t(`Search within ${displayTagName(tag)}`, `在 ${displayTagName(tag)} 中搜索`)
       : t("Search titles, first questions, full text, paths, or ids", "搜索标题、首个问题、全文、路径或 ID");
@@ -1291,7 +1293,7 @@ export function App(): ReactElement {
       await window.sessionSearch.addTag(dialog.session.sessionKey, value);
     }
     setDialog(null);
-    await refreshAfterAction({ metadata: dialogKind === "tag" && Boolean(value) });
+    await refreshAfterAction({ metadata: dialogKind === "rename" || (dialogKind === "tag" && Boolean(value)) });
   }
 
   async function removeTag(session: SessionSearchResult, tagName: string): Promise<void> {
@@ -1867,7 +1869,7 @@ export function App(): ReactElement {
                             title={project.path}
                           >
                             <Folder size={13} />
-                            <span>{project.label}</span>
+                            <span>{projectDisplayLabel(project, language)}</span>
                             <em>{formatRelativeTime(projectSortTimestamp(project))}</em>
                           </button>
                         </div>

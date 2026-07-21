@@ -64,6 +64,14 @@ describe("app loading performance", () => {
     expect(loadSessionsBlock).not.toContain("window.sessionSearch.getStats");
   });
 
+  it("refreshes sidebar metadata after a session title changes", () => {
+    const submitDialogBlock = sourceBlock("async function submitDialog", [
+      "async function removeTag",
+    ]);
+    expect(submitDialogBlock).toContain('dialogKind === "rename" || (dialogKind === "tag" && Boolean(value))');
+    expect(submitDialogBlock).toContain("refreshAfterAction({ metadata:");
+  });
+
   it("refreshes skill usage when the Skills dialog is opened before listing skills", () => {
     const loadSkillsBlock = sourceBlock("const loadSkills = useCallback(async (options:", [
       "const deleteSkill = useCallback",

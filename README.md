@@ -249,6 +249,102 @@ npm run package:smoke
 
 本项目基于 [MIT License](./LICENSE) 开源。你可以自由使用、修改和分发本项目，但需要保留原始版权声明和许可声明。
 
+## 贡献者
+
+### Collaborators
+
+<!-- readme: collaborators -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/wlh26">
+                    <img src="https://avatars.githubusercontent.com/u/145627315?v=4" width="80;" alt="wlh26"/>
+                    <br />
+                    <sub><b>wlh26</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
+<!-- readme: collaborators -end -->
+
+### Contributors
+
+<!-- readme: contributors -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/Blue-Berrys">
+                    <img src="https://avatars.githubusercontent.com/u/75206464?v=4" width="80;" alt="Blue-Berrys"/>
+                    <br />
+                    <sub><b>Blue-Berrys</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/zszz3">
+                    <img src="https://avatars.githubusercontent.com/u/91608029?v=4" width="80;" alt="zszz3"/>
+                    <br />
+                    <sub><b>zszz3</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/mesakurax">
+                    <img src="https://avatars.githubusercontent.com/u/140772694?v=4" width="80;" alt="mesakurax"/>
+                    <br />
+                    <sub><b>mesakurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/MeloMei">
+                    <img src="https://avatars.githubusercontent.com/u/225048942?v=4" width="80;" alt="MeloMei"/>
+                    <br />
+                    <sub><b>MeloMei</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/G-Pegasus">
+                    <img src="https://avatars.githubusercontent.com/u/87853009?v=4" width="80;" alt="G-Pegasus"/>
+                    <br />
+                    <sub><b>G-Pegasus</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/LANSGANBS">
+                    <img src="https://avatars.githubusercontent.com/u/144577410?v=4" width="80;" alt="LANSGANBS"/>
+                    <br />
+                    <sub><b>LANSGANBS</b></sub>
+                </a>
+            </td>
+		</tr>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/wanglongze123">
+                    <img src="https://avatars.githubusercontent.com/u/278380769?v=4" width="80;" alt="wanglongze123"/>
+                    <br />
+                    <sub><b>wanglongze123</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/CuSO41108">
+                    <img src="https://avatars.githubusercontent.com/u/177388097?v=4" width="80;" alt="CuSO41108"/>
+                    <br />
+                    <sub><b>CuSO41108</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/wlh26">
+                    <img src="https://avatars.githubusercontent.com/u/145627315?v=4" width="80;" alt="wlh26"/>
+                    <br />
+                    <sub><b>wlh26</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
+<!-- readme: contributors -end -->
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=zszz3%2FAgentRecall&type=date&legend=top-left">

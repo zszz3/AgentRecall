@@ -176,6 +176,11 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS data_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
       session_key UNINDEXED,
       title,
@@ -233,6 +238,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       )
       .run();
   }
+  runCodexDesktopOriginatorMigration(db);
   addColumnIfMissing(db, "skill_sync_bindings", "remote_version", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "skill_sync_bindings", "portable_identity", "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, "skill_sync_bindings", "last_content_hash", "TEXT NOT NULL DEFAULT ''");
@@ -259,6 +265,22 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   `);
   upgradeFtsTokenizer(db);
   ensureLocalEnvironment(db);
+}
+
+function runCodexDesktopOriginatorMigration(db: SessionStoreDatabase): void {
+  const migrationId = "codex-work-desktop-originator-v1";
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare("UPDATE sessions SET file_mtime_ms = 0 WHERE source = 'codex-cli' AND environment_id = 'local'").run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 
@@ -347,4 +369,3 @@ function refreshFtsForSession(db: SessionStoreDatabase, sessionKey: string): voi
     "INSERT INTO session_fts (session_key, title, first_question, content_text, project_path) VALUES (?, ?, ?, ?, ?)",
   ).run(sessionKey, title, row.first_question, ftsContent, row.project_path);
 }
-

@@ -24,7 +24,7 @@ import type {
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
 
-const CODEX_APP_ORIGINATOR = "Codex Desktop";
+const CODEX_APP_ORIGINATORS = new Set(["Codex Desktop", "codex_work_desktop"]);
 const CLAUDE_INTERNAL_DIR = ".claude-internal";
 const CODEX_INTERNAL_DIR = ".codex-internal";
 const TCLAUDE_DIR = ".tclaude";
@@ -808,7 +808,7 @@ export function loadCodexSessionRows(
   const traceEvents = extractTraceEvents(rows, "codex");
   const tokenUsage = tokenUsageFromEvents(tokenEvents);
   const question = firstQuestion(messages);
-  const source: SessionSource = options.sourceOverride || (meta.originator === CODEX_APP_ORIGINATOR ? "codex-app" : "codex-cli");
+  const source: SessionSource = options.sourceOverride || (CODEX_APP_ORIGINATORS.has(meta.originator || "") ? "codex-app" : "codex-cli");
   const session = createIndexedSession({
     keyPrefix: source === "codex-internal" ? "codex-internal" : source === "tcodex-cli" ? "tcodex" : "codex",
     rawId: meta.id,
@@ -1309,8 +1309,45 @@ export function* loadOpenClawSessionsIterator(
 
 function decodeTraeProjectDir(value: string): string {
   if (!value) return "";
-  if (value.startsWith("-")) return value.replace(/-/g, "/");
-  return value;
+  if (!value.startsWith("-")) return value;
+
+  const decoded = value.replace(/-/g, "/");
+  if (fs.existsSync(decoded)) return decoded;
+
+  // Trae's legacy directory encoding is lossy: "/" and "_" both become "-".
+  // Prefer a candidate that exists on disk when the session has no raw cwd.
+  const slashIndexes: number[] = [];
+  for (let index = 1; index < decoded.length; index += 1) {
+    if (decoded[index] === "/") slashIndexes.push(index);
+  }
+
+  const maxCandidates = 4096;
+  let attempts = 0;
+  const chars = decoded.split("");
+  const findExistingCandidate = (index: number): string | null => {
+    if (attempts >= maxCandidates) return null;
+    if (index >= slashIndexes.length) {
+      attempts += 1;
+      const candidate = chars.join("");
+      return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    const slashIndex = slashIndexes[index];
+    const slashCandidate = findExistingCandidate(index + 1);
+    if (slashCandidate) return slashCandidate;
+
+    chars[slashIndex] = "_";
+    const underscoreCandidate = findExistingCandidate(index + 1);
+    chars[slashIndex] = "/";
+    return underscoreCandidate;
+  };
+
+  const existingCandidate = findExistingCandidate(0);
+  if (existingCandidate) {
+    return existingCandidate;
+  }
+
+  return decoded;
 }
 
 function traeAssistantSummary(row: Record<string, unknown>): string {

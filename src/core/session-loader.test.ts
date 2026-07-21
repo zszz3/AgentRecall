@@ -106,6 +106,34 @@ describe("Codex session loading", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("recognizes the current Codex desktop originator", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-app-originator-"));
+    const filePath = path.join(dir, "rollout.jsonl");
+    fs.writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-07-19T14:37:55Z",
+          payload: {
+            id: "codex-current-desktop",
+            cwd: "/Users/test/Documents/Codex/2026-07-19/rewrite-feishu-doc",
+            originator: "codex_work_desktop",
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-07-19T14:38:17Z",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "重写飞书文档" }] },
+        }),
+      ].join("\n"),
+    );
+
+    expect(loadCodexSessionFile(filePath)?.session.source).toBe("codex-app");
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("extracts Codex token usage from token_count events without double counting duplicates", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-"));
     const filePath = path.join(dir, "rollout.jsonl");

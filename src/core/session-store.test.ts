@@ -40,6 +40,81 @@ const messages: SessionMessage[] = [
   { role: "assistant", content: "refresh token expired after 30 minutes", timestamp: "2026-06-01T10:01:00Z", index: 1 },
 ];
 
+function projectByPath(store: SessionStore, projectPath: string) {
+  const project = store.listProjects().find((item) => item.path === projectPath);
+  expect(project).toBeDefined();
+  return project!;
+}
+
+function visibleProjectLabels(project: ReturnType<SessionStore["listProjects"]>[number]): string[] {
+  const suffix = project.labelSuffix ? ` · ${project.labelSuffix}` : "";
+  if (project.labelKind === "codex-task-untitled") {
+    return [`Untitled session${suffix}`, `未命名会话${suffix}`];
+  }
+  return [`${project.label}${suffix}`];
+}
+
+type ListedProject = ReturnType<SessionStore["listProjects"]>[number];
+
+function addSshEnvironment(store: SessionStore, id: string, label: string): void {
+  store.upsertEnvironment({
+    id,
+    kind: "ssh",
+    label,
+    hostAlias: id,
+    host: `${id}.example.com`,
+    user: null,
+    port: null,
+    authMode: "none",
+    identityFile: null,
+    enabled: true,
+  });
+}
+
+function captureProjectSortComparison(
+  store: SessionStore,
+  leftIdentity: Pick<ListedProject, "path" | "environmentId">,
+  rightIdentity: Pick<ListedProject, "path" | "environmentId">,
+): [number, number] {
+  let comparison: [number, number] | null = null;
+  const originalSort = Array.prototype.sort as (
+    this: unknown[],
+    compareFn?: (left: unknown, right: unknown) => number,
+  ) => unknown[];
+  const sortSpy = vi.spyOn(Array.prototype, "sort").mockImplementation(function (
+    this: unknown[],
+    compareFn?: (left: unknown, right: unknown) => number,
+  ) {
+    if (compareFn) {
+      const projects = this.filter(
+        (value): value is ListedProject =>
+          typeof value === "object" &&
+          value !== null &&
+          "path" in value &&
+          "environmentId" in value &&
+          "labelSuffix" in value,
+      );
+      const left = projects.find(
+        (project) =>
+          project.path === leftIdentity.path && project.environmentId === leftIdentity.environmentId,
+      );
+      const right = projects.find(
+        (project) =>
+          project.path === rightIdentity.path && project.environmentId === rightIdentity.environmentId,
+      );
+      if (left && right) comparison = [compareFn(left, right), compareFn(right, left)];
+    }
+    return originalSort.call(this, compareFn);
+  } as typeof Array.prototype.sort);
+  try {
+    store.listProjects();
+  } finally {
+    sortSpy.mockRestore();
+  }
+  expect(comparison).not.toBeNull();
+  return comparison!;
+}
+
 const traceEvents: SessionTraceEvent[] = [
   {
     index: 0,
@@ -1202,6 +1277,8 @@ describe("SessionStore", () => {
       {
         path: "/work/team-a/app",
         label: "team-a/app",
+        labelKind: "path",
+        labelSuffix: null,
         sessionCount: 2,
         environmentId: "local",
         environmentLabel: "Local",
@@ -1211,12 +1288,963 @@ describe("SessionStore", () => {
       {
         path: "/work/team-b/app",
         label: "team-b/app",
+        labelKind: "path",
+        labelSuffix: null,
         sessionCount: 1,
         environmentId: "local",
         environmentLabel: "Local",
         createdAt,
         lastActivityAt,
       },
+    ]);
+  });
+
+  it("labels a Codex App dated task workspace from its unique root session", () => {
+    const store = createInMemoryStore();
+    const taskPath = "/Users/me/Documents/Codex/2026-07-18/https-example-com-wiki-token";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:task-root",
+        rawId: "task-root",
+        source: "codex-app",
+        projectPath: taskPath,
+        originalTitle: "Hermes 重写",
+        firstQuestion: "https://example.com/wiki/token",
+        isSubagent: false,
+      }),
+      messages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:task-child",
+        rawId: "task-child",
+        source: "codex-app",
+        projectPath: taskPath,
+        originalTitle: "worker-1",
+        firstQuestion: "worker prompt",
+        isSubagent: true,
+        parentSessionId: "task-root",
+      }),
+      messages,
+    );
+
+    expect(projectByPath(store, taskPath)).toMatchObject({
+      label: "Hermes 重写",
+      labelKind: "codex-task-title",
+      labelSuffix: null,
+    });
+
+    store.setCustomTitle("codex:task-root", "Hermes 教程重写");
+    expect(projectByPath(store, taskPath).label).toBe("Hermes 教程重写");
+
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:task-root",
+        rawId: "task-root",
+        source: "codex-app",
+        projectPath: taskPath,
+        originalTitle: "重新索引后的原生标题",
+        firstQuestion: "https://example.com/wiki/token",
+        isSubagent: false,
+      }),
+      messages,
+    );
+    expect(projectByPath(store, taskPath).label).toBe("Hermes 教程重写");
+
+    store.setCustomTitle("codex:task-root", null);
+    expect(projectByPath(store, taskPath).label).toBe("重新索引后的原生标题");
+  });
+
+  it("recognizes Windows task paths but rejects invalid dates, normal projects, and multiple roots", () => {
+    const store = createInMemoryStore();
+    const windowsTask = "C:\\Users\\me\\Documents\\cOdEx\\2026-07-18\\new-chat";
+    const invalidDate = "/Users/me/Documents/Codex/2026-02-30/new-chat";
+    const normalRepo = "/Users/me/work/agent-recall";
+    const multipleRoots = "/Users/me/Documents/Codex/2026-07-19/shared";
+    const cliTask = "/Users/me/Documents/Codex/2026-07-19/cli-task";
+
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:win", rawId: "win", source: "codex-app", projectPath: windowsTask, originalTitle: "Windows 任务" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:bad-date", rawId: "bad-date", source: "codex-app", projectPath: invalidDate, originalTitle: "无效日期" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:repo", rawId: "repo", source: "codex-app", projectPath: normalRepo, originalTitle: "普通项目对话" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:root-a", rawId: "root-a", source: "codex-app", projectPath: multipleRoots, originalTitle: "根 A" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:root-b", rawId: "root-b", source: "codex-app", projectPath: multipleRoots, originalTitle: "根 B" }), messages);
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:cli", rawId: "cli", source: "codex-cli", projectPath: cliTask, originalTitle: "CLI 任务" }), messages);
+
+    expect(projectByPath(store, windowsTask)).toMatchObject({ label: "Windows 任务", labelKind: "codex-task-title" });
+    expect(projectByPath(store, invalidDate)).toMatchObject({ label: "new-chat", labelKind: "path" });
+    expect(projectByPath(store, normalRepo)).toMatchObject({ label: "agent-recall", labelKind: "path" });
+    expect(projectByPath(store, multipleRoots)).toMatchObject({ label: "shared", labelKind: "path" });
+    expect(projectByPath(store, cliTask)).toMatchObject({ label: "cli-task", labelKind: "path" });
+  });
+
+  it("falls back to the root first question when no usable native title exists", () => {
+    const store = createInMemoryStore();
+    const taskPath = "/Users/me/Documents/Codex/2026-07-19/question-fallback";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:question-fallback",
+        rawId: "question-fallback",
+        source: "codex-app",
+        projectPath: taskPath,
+        originalTitle: "Untitled Session",
+        firstQuestion: "分析 AgentRecall 项目名称",
+      }),
+      messages,
+    );
+
+    expect(projectByPath(store, taskPath)).toMatchObject({
+      label: "分析 AgentRecall 项目名称",
+      labelKind: "codex-task-title",
+      labelSuffix: null,
+    });
+  });
+
+  it("uses a localized-ready untitled label with the stable root start time", () => {
+    const store = createInMemoryStore();
+    const timestamp = new Date(2026, 6, 19, 19, 25).getTime();
+    const taskPath = "/Users/me/Documents/Codex/2026-07-19/new-chat";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:untitled",
+        rawId: "untitled",
+        source: "codex-app",
+        projectPath: taskPath,
+        originalTitle: "Untitled Session",
+        firstQuestion: "",
+        timestamp,
+      }),
+      [{ role: "user", content: "first", timestamp: new Date(timestamp).toISOString(), index: 0 }],
+    );
+
+    expect(projectByPath(store, taskPath)).toMatchObject({
+      label: "Untitled session",
+      labelKind: "codex-task-untitled",
+      labelSuffix: "07-19 19:25",
+    });
+  });
+
+  it("disambiguates duplicate Codex task titles by date and time", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-18/task-a", new Date(2026, 6, 18, 9, 0).getTime()],
+      ["/Users/me/Documents/Codex/2026-07-19/task-b", new Date(2026, 6, 19, 10, 32).getTime()],
+      ["/Users/me/Documents/Codex/2026-07-19/task-c", new Date(2026, 6, 19, 16, 48).getTime()],
+    ] as const;
+    cases.forEach(([projectPath, timestamp], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:duplicate-${index}`,
+          rawId: `duplicate-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "调研 OpenCode",
+          timestamp,
+        }),
+        [{ role: "user", content: "first", timestamp: new Date(timestamp).toISOString(), index: 0 }],
+      );
+    });
+
+    expect(cases.map(([projectPath]) => projectByPath(store, projectPath).labelSuffix)).toEqual([
+      "07-18",
+      "07-19 10:32",
+      "07-19 16:48",
+    ]);
+  });
+
+  it("disambiguates a visible title delimiter from a generated date suffix", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-19/delimiter", "Foo · 07-19", new Date(2026, 6, 19, 9, 0)],
+      ["/Users/me/Documents/Codex/2026-07-19/foo-current", "Foo", new Date(2026, 6, 19, 10, 32)],
+      ["/Users/me/Documents/Codex/2026-07-18/foo-old", "Foo", new Date(2026, 6, 18, 10, 32)],
+    ] as const;
+    cases.forEach(([projectPath, originalTitle, startedAt], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:visible-delimiter-${index}`,
+          rawId: `visible-delimiter-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle,
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
+      );
+    });
+
+    const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
+    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
+  });
+
+  it("disambiguates a custom title delimiter from a generated date suffix", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-19/custom-delimiter", "Source title", new Date(2026, 6, 19, 9, 0)],
+      ["/Users/me/Documents/Codex/2026-07-19/custom-foo-current", "Foo", new Date(2026, 6, 19, 10, 32)],
+      ["/Users/me/Documents/Codex/2026-07-18/custom-foo-old", "Foo", new Date(2026, 6, 18, 10, 32)],
+    ] as const;
+    cases.forEach(([projectPath, originalTitle, startedAt], index) => {
+      const sessionKey = `codex:visible-custom-delimiter-${index}`;
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey,
+          rawId: `visible-custom-delimiter-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle,
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
+      );
+      if (index === 0) store.setCustomTitle(sessionKey, "Foo · 07-19");
+    });
+
+    const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
+    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
+  });
+
+  it("disambiguates a titled task from the English untitled rendering", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32);
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-19/english-title", "Untitled session · 07-19 10:32", "visible-english-title"],
+      ["/Users/me/Documents/Codex/2026-07-19/english-untitled", "Untitled Session", "visible-english-untitled"],
+    ] as const;
+    cases.forEach(([projectPath, originalTitle, rawId], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:${rawId}`,
+          rawId,
+          source: "codex-app",
+          projectPath,
+          originalTitle,
+          firstQuestion: index === 0 ? "titled" : "",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
+      );
+    });
+
+    const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
+    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
+  });
+
+  it("disambiguates a titled task from the Chinese untitled rendering", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32);
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-19/chinese-title", "未命名会话 · 07-19 10:32", "visible-chinese-title"],
+      ["/Users/me/Documents/Codex/2026-07-19/chinese-untitled", "Untitled Session", "visible-chinese-untitled"],
+    ] as const;
+    cases.forEach(([projectPath, originalTitle, rawId], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:${rawId}`,
+          rawId,
+          source: "codex-app",
+          projectPath,
+          originalTitle,
+          firstQuestion: index === 0 ? "titled" : "",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
+      );
+    });
+
+    const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
+    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
+  });
+
+  it("resolves overlapping English and Chinese untitled collisions deterministically", () => {
+    const startedAt = new Date(2026, 6, 19, 10, 32);
+    const cases = [
+      {
+        projectPath: "/Users/me/Documents/Codex/2026-07-19/overlap-english",
+        originalTitle: "Untitled session · 07-19 10:32",
+        rawId: "overlap-english",
+        firstQuestion: "titled",
+      },
+      {
+        projectPath: "/Users/me/Documents/Codex/2026-07-19/overlap-untitled",
+        originalTitle: "Untitled Session",
+        rawId: "overlap-untitled",
+        firstQuestion: "",
+      },
+      {
+        projectPath: "/Users/me/Documents/Codex/2026-07-19/overlap-chinese",
+        originalTitle: "未命名会话 · 07-19 10:32",
+        rawId: "overlap-chinese",
+        firstQuestion: "titled",
+      },
+    ] as const;
+    const insertionOrders = [cases, [...cases].reverse()];
+    const results = insertionOrders.map((orderedCases) => {
+      const store = createInMemoryStore();
+      for (const { projectPath, originalTitle, rawId, firstQuestion } of orderedCases) {
+        store.upsertIndexedSession(
+          sampleSession({
+            sessionKey: `codex:${rawId}`,
+            rawId,
+            source: "codex-app",
+            projectPath,
+            originalTitle,
+            firstQuestion,
+          }),
+          [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
+        );
+      }
+
+      const projects = cases.map(({ projectPath }) => projectByPath(store, projectPath));
+      const englishLabels = projects.map((project) => visibleProjectLabels(project)[0]);
+      const chineseLabels = projects.map((project) => {
+        const variants = visibleProjectLabels(project);
+        return project.labelKind === "codex-task-untitled" ? variants[1] : variants[0];
+      });
+      expect(new Set(englishLabels).size).toBe(projects.length);
+      expect(new Set(chineseLabels).size).toBe(projects.length);
+
+      return Object.fromEntries(
+        projects.map(({ path, label, labelSuffix }) => [path, { label, labelSuffix }]),
+      );
+    });
+
+    expect(results[1]).toEqual(results[0]);
+  });
+
+  it("revalidates visible collisions through basename, raw path, and identity fallbacks", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32);
+    const cases = [
+      {
+        projectPath: "/home/a/Codex/2026-07-19/task",
+        originalTitle: "Foo · 07-19 10:32 · task",
+        rawId: "visible-fallback-crafted",
+      },
+      {
+        projectPath: "home\\a\\Codex\\2026-07-19\\task",
+        originalTitle: "Foo",
+        rawId: "visible-fallback-windows",
+      },
+      {
+        projectPath: "/home//a/Codex/2026-07-19/task",
+        originalTitle: "Foo",
+        rawId: "visible-fallback-double-separator",
+      },
+      {
+        projectPath: "/home/d/Codex/2026-07-19/identity-task",
+        originalTitle: "Foo · 07-19 10:32 · task · /home/a/Codex/2026-07-19/task",
+        rawId: "visible-fallback-identity",
+      },
+    ] as const;
+    for (const { projectPath, originalTitle, rawId } of cases) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:${rawId}`,
+          rawId,
+          source: "codex-app",
+          projectPath,
+          originalTitle,
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
+      );
+    }
+
+    const projects = store.listProjects().filter(({ path }) => cases.some(({ projectPath }) => projectPath === path));
+    const visibleLabels = projects.flatMap(visibleProjectLabels);
+    expect(projects).toHaveLength(4);
+    expect(projectByPath(store, "/home/a/Codex/2026-07-19/task").labelSuffix ?? "").toContain(
+      "/home/a/Codex/2026-07-19/task",
+    );
+    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
+  });
+
+  it("uses the task directory basename when duplicate task labels still collide", () => {
+    const store = createInMemoryStore();
+    const timestamp = new Date(2026, 6, 19, 10, 32).getTime();
+    for (const slug of ["task-a", "task-b"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:${slug}`,
+          rawId: slug,
+          source: "codex-app",
+          projectPath: `/Users/me/Documents/Codex/2026-07-19/${slug}`,
+          originalTitle: "同名任务",
+          timestamp,
+        }),
+        [{ role: "user", content: "first", timestamp: new Date(timestamp).toISOString(), index: 0 }],
+      );
+    }
+
+    expect(projectByPath(store, "/Users/me/Documents/Codex/2026-07-19/task-a").labelSuffix).toBe(
+      "07-19 10:32 · task-a",
+    );
+    expect(projectByPath(store, "/Users/me/Documents/Codex/2026-07-19/task-b").labelSuffix).toBe(
+      "07-19 10:32 · task-b",
+    );
+  });
+
+  it("uses the earliest root message timestamp for duplicate Codex task clocks", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      {
+        projectPath: "/Users/me/Documents/Codex/2026-07-19/task-a",
+        indexedAt: new Date(2026, 6, 19, 15, 0).getTime(),
+        startedAt: new Date(2026, 6, 19, 10, 32),
+        expectedSuffix: "07-19 10:32",
+      },
+      {
+        projectPath: "/Users/me/Documents/Codex/2026-07-19/task-b",
+        indexedAt: new Date(2026, 6, 19, 16, 0).getTime(),
+        startedAt: new Date(2026, 6, 19, 10, 45),
+        expectedSuffix: "07-19 10:45",
+      },
+    ];
+
+    cases.forEach(({ projectPath, indexedAt, startedAt }, index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:root-message-time-${index}`,
+          rawId: `root-message-time-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "稳定标题",
+          timestamp: indexedAt,
+        }),
+        [
+          { role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 },
+          {
+            role: "assistant",
+            content: "latest",
+            timestamp: new Date(2026, 6, 19, 12, 0).toISOString(),
+            index: 1,
+          },
+        ],
+      );
+    });
+
+    expect(cases.map(({ projectPath }) => projectByPath(store, projectPath).labelSuffix)).toEqual(
+      cases.map(({ expectedSuffix }) => expectedSuffix),
+    );
+  });
+
+  it("keeps a duplicate Codex task suffix stable when only the indexed timestamp changes", () => {
+    const store = createInMemoryStore();
+    const stableMessages: SessionMessage[] = [
+      {
+        role: "user",
+        content: "first",
+        timestamp: new Date(2026, 6, 19, 10, 32).toISOString(),
+        index: 0,
+      },
+      {
+        role: "assistant",
+        content: "latest",
+        timestamp: new Date(2026, 6, 19, 12, 0).toISOString(),
+        index: 1,
+      },
+    ];
+    const stablePath = "/Users/me/Documents/Codex/2026-07-19/stable-a";
+    const otherPath = "/Users/me/Documents/Codex/2026-07-19/stable-b";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:stable-a",
+        rawId: "stable-a",
+        source: "codex-app",
+        projectPath: stablePath,
+        originalTitle: "稳定标题",
+        timestamp: new Date(2026, 6, 19, 8, 0).getTime(),
+      }),
+      stableMessages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:stable-b",
+        rawId: "stable-b",
+        source: "codex-app",
+        projectPath: otherPath,
+        originalTitle: "稳定标题",
+        timestamp: new Date(2026, 6, 19, 9, 0).getTime(),
+      }),
+      [
+        { role: "user", content: "first", timestamp: new Date(2026, 6, 19, 10, 45).toISOString(), index: 0 },
+        { role: "assistant", content: "latest", timestamp: new Date(2026, 6, 19, 12, 0).toISOString(), index: 1 },
+      ],
+    );
+    const beforeReindex = projectByPath(store, stablePath).labelSuffix;
+
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:stable-a",
+        rawId: "stable-a",
+        source: "codex-app",
+        projectPath: stablePath,
+        originalTitle: "稳定标题",
+        timestamp: new Date(2026, 6, 19, 18, 0).getTime(),
+      }),
+      stableMessages,
+    );
+
+    expect(projectByPath(store, stablePath).labelSuffix).toBe(beforeReindex);
+  });
+
+  it("falls back to basenames for duplicate titled Codex tasks without message timestamps", () => {
+    const store = createInMemoryStore();
+    for (const slug of ["task-a", "task-b"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:no-message-${slug}`,
+          rawId: `no-message-${slug}`,
+          source: "codex-app",
+          projectPath: `/Users/me/Documents/Codex/2026-07-19/${slug}`,
+          originalTitle: "无消息时间",
+          timestamp: new Date(2026, 6, 19, 10, 32).getTime(),
+        }),
+        [],
+      );
+    }
+
+    expect(projectByPath(store, "/Users/me/Documents/Codex/2026-07-19/task-a").labelSuffix).toBe(
+      "07-19 · task-a",
+    );
+    expect(projectByPath(store, "/Users/me/Documents/Codex/2026-07-19/task-b").labelSuffix).toBe(
+      "07-19 · task-b",
+    );
+  });
+
+  it("uses the task basename for an untitled Codex task without a valid message timestamp", () => {
+    const store = createInMemoryStore();
+    const taskPath = "/Users/me/Documents/Codex/2026-07-19/new-chat";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:untitled-no-message-time",
+        rawId: "untitled-no-message-time",
+        source: "codex-app",
+        projectPath: taskPath,
+        originalTitle: "Untitled Session",
+        firstQuestion: "",
+        timestamp: new Date(2026, 6, 19, 19, 25).getTime(),
+      }),
+      [],
+    );
+
+    expect(projectByPath(store, taskPath)).toMatchObject({
+      label: "Untitled session",
+      labelKind: "codex-task-untitled",
+      labelSuffix: "new-chat",
+    });
+  });
+
+  it("uses the shortest unique parent fragment when duplicate Codex task basenames still collide", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    for (const owner of ["a", "b"]) {
+      const projectPath = `/home/${owner}/Codex/2026-07-19/task`;
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:parent-${owner}`,
+          rawId: `parent-${owner}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "同名同路径任务",
+        }),
+        [
+          { role: "user", content: "first", timestamp: startedAt, index: 0 },
+          {
+            role: "assistant",
+            content: "latest",
+            timestamp: new Date(2026, 6, 19, 12, 0).toISOString(),
+            index: 1,
+          },
+        ],
+      );
+    }
+
+    expect(projectByPath(store, "/home/a/Codex/2026-07-19/task").labelSuffix).toBe(
+      "07-19 10:32 · task · a",
+    );
+    expect(projectByPath(store, "/home/b/Codex/2026-07-19/task").labelSuffix).toBe(
+      "07-19 10:32 · task · b",
+    );
+  });
+
+  it("does not append an untitled task basename twice before parent disambiguation", () => {
+    const store = createInMemoryStore();
+    for (const owner of ["a", "b"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:untitled-parent-${owner}`,
+          rawId: `untitled-parent-${owner}`,
+          source: "codex-app",
+          projectPath: `/home/${owner}/Codex/2026-07-19/task`,
+          originalTitle: "Untitled Session",
+          firstQuestion: "",
+        }),
+        [],
+      );
+    }
+
+    expect(projectByPath(store, "/home/a/Codex/2026-07-19/task").labelSuffix).toBe("task · a");
+    expect(projectByPath(store, "/home/b/Codex/2026-07-19/task").labelSuffix).toBe("task · b");
+  });
+
+  it("chooses distinct parent fragments for three same-title same-minute same-basename tasks", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    for (const owner of ["a", "b", "c"]) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:three-parent-${owner}`,
+          rawId: `three-parent-${owner}`,
+          source: "codex-app",
+          projectPath: `/home/${owner}/Codex/2026-07-19/task`,
+          originalTitle: "三路同名任务",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt, index: 0 }],
+      );
+    }
+
+    expect(["a", "b", "c"].map((owner) => projectByPath(store, `/home/${owner}/Codex/2026-07-19/task`).labelSuffix)).toEqual([
+      "07-19 10:32 · task · a",
+      "07-19 10:32 · task · b",
+      "07-19 10:32 · task · c",
+    ]);
+  });
+
+  it("searches parent fragments at equal relative depths for paths with different total depths", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    const cases = [
+      ["/home/a/Codex/2026-07-19/task", "home"],
+      ["/mnt/team/a/Codex/2026-07-19/task", "team"],
+    ] as const;
+    cases.forEach(([projectPath], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:different-depth-${index}`,
+          rawId: `different-depth-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "不同深度任务",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt, index: 0 }],
+      );
+    });
+
+    expect(cases.map(([projectPath]) => projectByPath(store, projectPath).labelSuffix)).toEqual(
+      cases.map(([, fragment]) => `07-19 10:32 · task · ${fragment}`),
+    );
+  });
+
+  it("uses raw project paths when no parent segment is unique", () => {
+    const store = createInMemoryStore();
+    const startedAt = new Date(2026, 6, 19, 10, 32).toISOString();
+    const paths = [
+      "/home/a/Codex/2026-07-19/task",
+      "home\\a\\Codex\\2026-07-19\\task",
+    ];
+    paths.forEach((projectPath, index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:raw-path-${index}`,
+          rawId: `raw-path-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "原始路径兜底",
+        }),
+        [{ role: "user", content: "first", timestamp: startedAt, index: 0 }],
+      );
+    });
+
+    expect(paths.map((projectPath) => projectByPath(store, projectPath).labelSuffix)).toEqual(
+      paths.map((projectPath) => `07-19 10:32 · task · ${projectPath}`),
+    );
+  });
+
+  it("ignores invalid and pre-epoch root message timestamps before the first positive timestamp", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      ["/Users/me/Documents/Codex/2026-07-19/invalid-a", new Date(2026, 6, 19, 10, 32)],
+      ["/Users/me/Documents/Codex/2026-07-19/invalid-b", new Date(2026, 6, 19, 10, 45)],
+    ] as const;
+    cases.forEach(([projectPath, startedAt], index) => {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `codex:invalid-time-${index}`,
+          rawId: `invalid-time-${index}`,
+          source: "codex-app",
+          projectPath,
+          originalTitle: "无效时间过滤",
+        }),
+        [
+          { role: "user", content: "invalid", timestamp: "not-a-time", index: 0 },
+          { role: "assistant", content: "pre-epoch", timestamp: "1960-01-01T00:00:00.000Z", index: 1 },
+          { role: "user", content: "first positive", timestamp: startedAt.toISOString(), index: 2 },
+          {
+            role: "assistant",
+            content: "later positive",
+            timestamp: new Date(2026, 6, 19, 12, 0).toISOString(),
+            index: 3,
+          },
+        ],
+      );
+    });
+
+    expect(cases.map(([projectPath]) => projectByPath(store, projectPath).labelSuffix)).toEqual([
+      "07-19 10:32",
+      "07-19 10:45",
+    ]);
+  });
+
+  it("uses raw code units when canonically equivalent base labels compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const decomposedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${composed}`,
+      environmentId: `ssh-base-${composed}`,
+    };
+    const composedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${decomposed}`,
+      environmentId: `ssh-base-${decomposed}`,
+    };
+    addSshEnvironment(store, decomposedIdentity.environmentId, "base-left");
+    addSshEnvironment(store, composedIdentity.environmentId, "base-right");
+    for (const [identity, title, index] of [
+      [decomposedIdentity, decomposed, 0],
+      [composedIdentity, composed, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-base-${index}`,
+          rawId: `unicode-base-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath: identity.path,
+          originalTitle: title,
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposed.localeCompare(composed)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("uses raw code units when canonically equivalent suffixes compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const projectPath = "/Users/me/Documents/Codex/2026-07-19/unicode-suffix";
+    const decomposedIdentity = { path: projectPath, environmentId: `ssh-suffix-${composed}` };
+    const composedIdentity = { path: projectPath, environmentId: `ssh-suffix-${decomposed}` };
+    addSshEnvironment(store, decomposedIdentity.environmentId, decomposed);
+    addSshEnvironment(store, composedIdentity.environmentId, composed);
+    for (const [identity, index] of [
+      [decomposedIdentity, 0],
+      [composedIdentity, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-suffix-${index}`,
+          rawId: `unicode-suffix-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath,
+          originalTitle: "Unicode suffix",
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposed.localeCompare(composed)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("uses raw code units when canonically equivalent paths compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const decomposedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${decomposed}`,
+      environmentId: `ssh-path-${composed}`,
+    };
+    const composedIdentity = {
+      path: `/Users/me/Documents/Codex/2026-07-19/${composed}`,
+      environmentId: `ssh-path-${decomposed}`,
+    };
+    addSshEnvironment(store, decomposedIdentity.environmentId, "path-left");
+    addSshEnvironment(store, composedIdentity.environmentId, "path-right");
+    for (const [identity, index] of [
+      [decomposedIdentity, 0],
+      [composedIdentity, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-path-${index}`,
+          rawId: `unicode-path-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath: identity.path,
+          originalTitle: "Unicode path",
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposedIdentity.path.localeCompare(composedIdentity.path)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("uses raw code units when canonically equivalent environment identities compare equal by locale", () => {
+    const store = createInMemoryStore();
+    const decomposed = "e\u0301";
+    const composed = "é";
+    const projectPath = "/Users/me/Documents/Codex/2026-07-19/unicode-environment";
+    const decomposedIdentity = { path: projectPath, environmentId: `ssh-environment-${decomposed}` };
+    const composedIdentity = { path: projectPath, environmentId: `ssh-environment-${composed}` };
+    addSshEnvironment(store, decomposedIdentity.environmentId, "same-environment-label");
+    addSshEnvironment(store, composedIdentity.environmentId, "same-environment-label");
+    for (const [identity, index] of [
+      [decomposedIdentity, 0],
+      [composedIdentity, 1],
+    ] as const) {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `unicode-environment-${index}`,
+          rawId: `unicode-environment-${index}`,
+          source: "codex-app",
+          environmentId: identity.environmentId,
+          projectPath,
+          originalTitle: "Unicode environment",
+        }),
+        messages,
+      );
+    }
+
+    expect(decomposedIdentity.environmentId.localeCompare(composedIdentity.environmentId)).toBe(0);
+    const [forward, reverse] = captureProjectSortComparison(store, decomposedIdentity, composedIdentity);
+    expect(forward).toBeLessThan(0);
+    expect(reverse).toBeGreaterThan(0);
+  });
+
+  it("sorts tied projects by suffix, path, and environment identity", () => {
+    const store = createInMemoryStore();
+    const cases = [
+      { environmentId: "ssh-path-z", environmentLabel: "unused-z", projectPath: "/Users/z/Codex/2026-07-19/task" },
+      { environmentId: "ssh-path-a", environmentLabel: "unused-a", projectPath: "/Users/a/Codex/2026-07-19/task" },
+      { environmentId: "ssh-suffix-z", environmentLabel: "Zulu", projectPath: "/Users/shared/Codex/2026-07-19/suffix-task" },
+      { environmentId: "ssh-suffix-a", environmentLabel: "Alpha", projectPath: "/Users/shared/Codex/2026-07-19/suffix-task" },
+      { environmentId: "ssh-id-z", environmentLabel: "Same", projectPath: "/Users/shared/Codex/2026-07-19/id-task" },
+      { environmentId: "ssh-id-a", environmentLabel: "Same", projectPath: "/Users/shared/Codex/2026-07-19/id-task" },
+    ];
+    const tiedMessages: SessionMessage[] = [
+      { role: "user", content: "first", timestamp: new Date(2026, 6, 19, 10, 32).toISOString(), index: 0 },
+      { role: "assistant", content: "latest", timestamp: new Date(2026, 6, 19, 12, 0).toISOString(), index: 1 },
+    ];
+    for (const { environmentId, environmentLabel, projectPath } of cases) {
+      store.upsertEnvironment({
+        id: environmentId,
+        kind: "ssh",
+        label: environmentLabel,
+        hostAlias: environmentId,
+        host: `${environmentId}.example.com`,
+        user: null,
+        port: null,
+        authMode: "none",
+        identityFile: null,
+        enabled: true,
+      });
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: `${environmentId}:codex-app:sort`,
+          rawId: `${environmentId}-sort`,
+          source: "codex-app",
+          environmentId,
+          environmentKind: "ssh",
+          environmentLabel,
+          projectPath,
+          originalTitle: "排序任务",
+          timestamp: new Date(2026, 6, 19, 9, 0).getTime(),
+        }),
+        tiedMessages,
+      );
+    }
+
+    expect(store.listProjects().map(({ environmentId }) => environmentId)).toEqual([
+      "ssh-path-a",
+      "ssh-path-z",
+      "ssh-suffix-a",
+      "ssh-id-a",
+      "ssh-id-z",
+      "ssh-suffix-z",
+    ]);
+  });
+
+  it("keeps codex-cli dated workspaces on path labels without task disambiguation", () => {
+    const store = createInMemoryStore();
+    const taskPath = "/Users/me/Documents/Codex/2026-07-19/cli-task";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:cli-dated-task",
+        rawId: "cli-dated-task",
+        source: "codex-cli",
+        projectPath: taskPath,
+        originalTitle: "不应显示的友好标题",
+      }),
+      [{ role: "user", content: "first", timestamp: new Date(2026, 6, 19, 10, 32).toISOString(), index: 0 }],
+    );
+
+    expect(projectByPath(store, taskPath)).toMatchObject({
+      label: "cli-task",
+      labelKind: "path",
+      labelSuffix: null,
+    });
+  });
+
+  it("keeps environment suffixes ahead of task-title collision handling", () => {
+    const store = createInMemoryStore();
+    store.upsertEnvironment({
+      id: "ssh-devbox",
+      kind: "ssh",
+      label: "devbox",
+      hostAlias: "devbox",
+      host: "devbox.example.com",
+      user: null,
+      port: null,
+      authMode: "none",
+      identityFile: null,
+      enabled: true,
+    });
+    const projectPath = "/Users/me/Documents/Codex/2026-07-19/shared-task";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:local-task",
+        rawId: "local-task",
+        source: "codex-app",
+        projectPath,
+        originalTitle: "共享任务",
+      }),
+      messages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "ssh:ssh-devbox:codex-app:remote-task",
+        rawId: "remote-task",
+        source: "codex-app",
+        projectPath,
+        originalTitle: "共享任务",
+        environmentId: "ssh-devbox",
+        environmentKind: "ssh",
+        environmentLabel: "devbox",
+      }),
+      messages,
+    );
+
+    expect(store.listProjects().map(({ environmentId, labelSuffix }) => ({ environmentId, labelSuffix }))).toEqual([
+      { environmentId: "local", labelSuffix: "Local" },
+      { environmentId: "ssh-devbox", labelSuffix: "devbox" },
     ]);
   });
 
@@ -1247,6 +2275,8 @@ describe("SessionStore", () => {
       {
         path: "/work/app",
         label: "app",
+        labelKind: "path",
+        labelSuffix: null,
         sessionCount: 2,
         environmentId: "local",
         environmentLabel: "Local",
@@ -1841,27 +2871,11 @@ describe("SessionStore", () => {
       messages,
     );
 
-    const createdAt = new Date("2026-06-01T10:00:00Z").getTime();
-    const lastActivityAt = new Date("2026-06-01T10:01:00Z").getTime();
-    expect(store.listProjects()).toEqual([
-      {
-        path: "/work/app",
-        label: "app · Local",
-        sessionCount: 1,
-        environmentId: "local",
-        environmentLabel: "Local",
-        createdAt,
-        lastActivityAt,
-      },
-      {
-        path: "/work/app",
-        label: "app · devbox",
-        sessionCount: 1,
-        environmentId: "ssh-devbox",
-        environmentLabel: "devbox",
-        createdAt,
-        lastActivityAt,
-      },
+    expect(
+      store.listProjects().map(({ label, labelKind, labelSuffix }) => ({ label, labelKind, labelSuffix })),
+    ).toEqual([
+      { label: "app", labelKind: "path", labelSuffix: "Local" },
+      { label: "app", labelKind: "path", labelSuffix: "devbox" },
     ]);
   });
 
