@@ -6,6 +6,8 @@ import type { WorkflowV2GenerationReviewState } from "../workflow-v2/generation-
 import type { WorkflowGrillMessage } from "./draft";
 import type { WorkflowArtifactReference, WorkflowEvent, WorkflowRunProgressItem, WorkflowStatus } from "./run";
 
+// Shared request/result shells for workflow mutations. Keeping these stable
+// lets preload/main/UI layers migrate independently without renaming payloads.
 export interface SendWorkflowNodeMessageRequest {
   conversationId: string;
   message: string;

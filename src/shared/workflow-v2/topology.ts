@@ -16,6 +16,9 @@ export function listWorkflowV2TerminalNodeIds(definition: WorkflowV2Definition):
 }
 
 export function normalizeWorkflowV2TerminalNode(definition: WorkflowV2Definition): WorkflowV2TerminalNormalizationResult {
+  // The execution/review pipeline expects one terminal node. When an authored
+  // graph fans out into multiple terminal branches, we preserve the branches
+  // and add a synthetic final summary node instead of mutating branch content.
   const normalizedDefinition = structuredClone(definition);
   const terminalNodeIds = listWorkflowV2TerminalNodeIds(normalizedDefinition);
   if (terminalNodeIds.length <= 1) {
@@ -67,6 +70,7 @@ function createSummaryNode(nodeId: string, upstreamNodeCount: number): WorkflowV
 }
 
 function uniqueSummaryNodeId(nodeIds: ReadonlySet<string>): string {
+  // Keep normalization deterministic while avoiding collisions with authored ids.
   if (!nodeIds.has(WORKFLOW_V2_SUMMARY_NODE_ID)) return WORKFLOW_V2_SUMMARY_NODE_ID;
   let suffix = 2;
   while (nodeIds.has(`${WORKFLOW_V2_SUMMARY_NODE_ID}-${suffix}`)) suffix += 1;

@@ -9,6 +9,8 @@ export type {
   WorkflowV2NodeHooks,
 } from "./hooks";
 
+// Core shared contract for Workflow V2. This file is kept close to the source
+// repo shape so higher layers can be migrated without inventing an adapter yet.
 export type WorkflowV2NodeRole = "orchestrator" | "executor" | "reviewer";
 export type WorkflowV2ExecModel = "llm" | "script";
 export type WorkflowV2ExecutionMode = "one-shot" | "interactive" | "script";
@@ -131,6 +133,8 @@ export function createWorkflowV2InlineScriptSpec(input: {
   timeoutMs?: number;
   outputSchema?: { type: "object"; required?: string[] };
 }): WorkflowV2ScriptSpec {
+  // Shared helper for tests and future callers that need a canonical "pure
+  // inline transform" script contract without filling every field manually.
   return {
     executable: { kind: "inline", language: input.language, code: input.code },
     parameters: [],
