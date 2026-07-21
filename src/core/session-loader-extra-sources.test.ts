@@ -110,7 +110,7 @@ describe("extra session sources", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("resolves legacy Trae project directories containing underscores", () => {
+  it.skipIf(process.platform === "win32")("resolves legacy Trae project directories containing underscores", () => {
     const root = tmpDir("trae-underscore-data");
     const projectRoot = fs.mkdtempSync("/tmp/agentrecall");
     const projectPath = path.join(projectRoot, "trae_projects");
