@@ -115,7 +115,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 ## 远程会话同步
 
-远程会话同步用于把本机某段会话保存到你自己的 Supabase 项目里。另一台设备配置同一个 Supabase URL 和 anon key 后，可以打开远程会话列表，搜索、按来源筛选、查看详情，并把远程会话恢复到本机任意支持的 Agent 中。比如设备 A 上传了一段 Codex 会话，设备 B 可以在远程会话列表里查看这段会话，并选择恢复到 Claude Code、Codex 或 CodeBuddy。
+远程会话同步用于把本机会话保存到你自己的 Supabase 项目里。另一台设备配置同一个 Supabase URL 和 anon key 后，可以打开会话同步窗口，搜索、按来源筛选、查看详情，并把远程会话恢复到本机任意支持的 Agent 中。比如设备 A 上传了一段 Codex 会话，设备 B 可以在会话同步窗口里查看这段会话，并选择恢复到 Claude Code、Codex、CodeBuddy、CodeWiz 或 Cursor。
 
 当前版本按**单人使用、由用户控制同步**设计：
 
@@ -161,7 +161,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 点击顶部工具栏的云图标打开 Remote Sessions：
 
 - 使用搜索框按标题、项目路径、摘要、标签和全文搜索远程会话。
-- 使用 Source / 来源筛选只看 Claude、Codex 或 CodeBuddy 上传的会话。
+- 使用 Source / 来源筛选只看 Claude、Codex、CodeBuddy、CodeWiz 或 Cursor 上传的会话。
 - 点击 View / 查看可以打开远程详情页；这个详情页是只读的。
 - 在 Restore to / 恢复到 中选择目标 Agent，再点击某条会话的 Restore。
 - 第一次恢复时需要选择当前设备上的本地项目目录；恢复完成后会写入目标 Agent 的本机会话目录，并尝试启动对应 Agent 继续工作。

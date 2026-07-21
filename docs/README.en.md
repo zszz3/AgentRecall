@@ -65,13 +65,16 @@ CodeBuddy CLI, TClaude, TCodex, Claude Code Internal, Codex Internal, OpenClaw, 
 
 ## Remote Session Sync
 
-Remote session sync saves a selected local session into your own Supabase project. After configuring the same Supabase URL and anon key on another device, you can open the remote session list, search, filter by source, inspect details, and restore the remote session into any supported local agent. For example, device A can upload a Codex session, and device B can view that session from Remote Sessions and restore it into Claude Code, Codex, or CodeBuddy.
+Remote session sync saves local sessions into your own Supabase project. After configuring the same Supabase URL and anon key on another device, you can open the Session sync window, search, filter by source, inspect details, and restore a remote session into any supported local agent. For example, device A can upload a Codex session, and device B can view it and restore it into Claude Code, Codex, CodeBuddy, CodeWiz, or Cursor.
 
-This version is designed for **single-user, manual snapshot sync**:
+This version is designed for **single-user, user-controlled sync**:
 
 - There is no user isolation or app login. It assumes you control the Supabase project and anon key.
-- There is no automatic background sync. If you continue a local session after uploading it, the remote copy stays at the last uploaded snapshot until you upload it again.
+- Manual upload is available by default. You can also install Claude Code and Codex session hooks in Settings. After each response, a hook only records the pending session; the tray app updates the cloud copy using a stable content revision. Pending work is processed the next time the app starts if it was not running.
 - Re-uploading the same local session updates the latest remote snapshot. If the content has not changed, the upload is skipped. Remote sessions do not keep version history.
+- Automatic sync never overwrites a conflict. If both the local and cloud copies changed, resolve the conflict in the Session sync window. Turning off remote session sync or removing hooks only removes this app's hooks and does not delete cloud data.
+- The Session sync window compares all syncable local sessions with cloud copies and labels them as Local only, Upload available, Synced, Cloud newer, Cloud only, or Conflict. The comparison uses stable content revisions instead of device paths, upload times, or file modification times.
+- Batch upload skips conflicts. Only an explicit overwrite action can replace a changed cloud copy. You can select visible sessions for batch upload or cloud deletion; deleting a cloud copy never deletes the local session, and restore always creates a new local copy.
 - Remote details include the session metadata, messages, tool calls / trace events, tags, AI summary, and the other information currently supported by the detail view.
 - Restore uses the stored portable session and asks you to choose a local project directory on the current device as the target project path.
 
@@ -82,6 +85,7 @@ This version is designed for **single-user, manual snapshot sync**:
 3. In the app, open Settings -> Remote sync and paste the Supabase URL and anon key.
 4. Under First-time setup, click Copy latest SQL and then Open SQL Editor. The app opens the SQL Editor for the configured project.
 5. Paste and run the SQL, return to the app, and enable remote sync. If Session sync or Skills later reports that the schema or permissions need an update, run the latest SQL offered there and click Refresh.
+6. To enable automatic sync, click Install hooks. Codex prompts you to review its hook the first time; run `/hooks` in Codex and confirm that you trust it. Existing Claude Code and Codex hook configuration remains unchanged.
 
 The first-time script initializes both session and Skill sync. For session sync it creates:
 
@@ -93,11 +97,9 @@ The first-time script initializes both session and Skill sync. For session sync 
 
 The script is idempotent and can be run more than once. It creates anon-role read/write policies suitable for a personal project. Those policies are convenient for single-user sync, but they are not a multi-user isolation model. If you plan to share the project with other users or expose it more broadly, adjust the RLS policies for your own Supabase security model first.
 
-### Upload A Session
+### Upload Sessions
 
-1. Open a local session from the search results.
-2. Click the Upload button with the cloud-upload icon at the top of the detail view.
-3. After upload succeeds, the session appears in the Remote Sessions list.
+Open the Session sync window from the top toolbar, select sessions marked Local only or Upload available, then click Upload to cloud. The window compares all syncable local sessions, independent of the main window's current search, filters, or selection.
 
 If the same session has already been uploaded:
 
@@ -106,10 +108,10 @@ If the same session has already been uploaded:
 
 ### Search, Inspect, And Restore Remote Sessions
 
-Click the cloud icon in the top toolbar to open Remote Sessions:
+Click the cloud icon in the top toolbar to open Session sync:
 
 - Search remote sessions by title, project path, summary, tags, and full text.
-- Use Source to filter uploaded sessions by Claude, Codex, or CodeBuddy.
+- Use Source to filter uploaded sessions by Claude, Codex, CodeBuddy, CodeWiz, or Cursor.
 - Click View to open a read-only remote detail view.
 - Choose the target agent under Restore to, then click Restore on a session row.
 - On first restore, choose a local project directory on the current device. The app writes the session into the target agent's local session directory and attempts to launch that agent so you can continue working.
