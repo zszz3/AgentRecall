@@ -84,6 +84,15 @@ interface FailureEvidence extends SessionAgentFailure {
 
 const FULL_PLAN_TOOLS = new Set(["update_plan", "todowrite", "rewrite_todo_list", "write_todos"]);
 const PLAN_UPDATE_TOOLS = new Set(["update_todo_status", "update_plan_item", "todo_update"]);
+const STANDALONE_TOOL_EVENT_TYPES = new Set([
+  "exec_command_end",
+  "patch_apply_end",
+  "mcp_tool_call_end",
+  "web_search_end",
+  "tool",
+  "tool_call",
+  "tool_use",
+]);
 const FRAMEWORK_META_MESSAGE = /^<(agent_status|system-reminder)\b/i;
 const TEXT_PREVIEW_LIMIT = 240;
 
@@ -112,6 +121,15 @@ function isStateEvent(event: SessionTraceEvent): boolean {
   return type === "error" || type === "context_compacted" || type === "turn_aborted";
 }
 
+function isStandaloneToolEvent(event: SessionTraceEvent): boolean {
+  const type = eventType(event);
+  const name = toolName(event.title).toLocaleLowerCase();
+  return STANDALONE_TOOL_EVENT_TYPES.has(type)
+    || type.includes("tool_call")
+    || name === "tool"
+    || name.includes("tool_call");
+}
+
 function mergeStatus(current: ObservedStatus, next: SessionTraceEvent["status"]): ObservedStatus {
   if (current === "failure" || next === "failure") return "failure";
   if (current === "success" || next === "success") return "success";
@@ -127,12 +145,15 @@ function newerObservation(current: ToolInvocation, event: SessionTraceEvent): bo
 
 function aggregateInvocations(traceEvents: SessionTraceEvent[]): ToolInvocation[] {
   const invocations = new Map<string, ToolInvocation>();
+  const orderedEvents = [
+    ...traceEvents.filter((event) => event.kind === "tool_call"),
+    ...traceEvents.filter((event) => event.kind === "event"),
+  ];
 
-  for (const event of traceEvents) {
-    if (event.kind === "tool_result" || isStateEvent(event)) continue;
-    if (event.kind !== "tool_call" && event.kind !== "event") continue;
-
+  for (const event of orderedEvents) {
+    if (isStateEvent(event)) continue;
     const key = event.callId ? `call:${event.callId}` : `event:${event.index}`;
+    if (event.kind === "event" && !invocations.has(key) && !isStandaloneToolEvent(event)) continue;
     const priority = event.kind === "tool_call" ? 2 : 1;
     const existing = invocations.get(key);
     if (!existing) {
@@ -347,17 +368,17 @@ function failureEvidence(invocations: ToolInvocation[], traceEvents: SessionTrac
   }
 
   for (const event of traceEvents) {
-    if (eventType(event) !== "error") continue;
+    if (eventType(event) !== "error" && event.status !== "failure") continue;
     const key = event.callId ? `call:${event.callId}` : `error:${event.index}`;
+    const current = evidence.get(key);
     const candidate: FailureEvidence = {
       key,
-      title: toolName(event.title),
+      title: current?.title || toolName(event.title),
       detail: compactText(event.detail),
       timestamp: event.timestamp,
       timestampMs: parseTimestamp(event.timestamp),
       order: event.index,
     };
-    const current = evidence.get(key);
     if (!current || (candidate.timestampMs ?? candidate.order) >= (current.timestampMs ?? current.order)) {
       evidence.set(key, candidate);
     }

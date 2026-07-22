@@ -93,13 +93,28 @@ describe("session Agent status analysis", () => {
         trace(2, { callId: "call-2", title: "Read · /repo/package.json" }),
         trace(3, { callId: null, title: "web_search · Electron status bar" }),
         trace(4, { kind: "tool_result", callId: "call-2", title: "tool output" }),
+        trace(5, {
+          kind: "event",
+          callId: "lifecycle-1",
+          title: "token_count",
+          eventType: "token_count",
+        }),
+        trace(6, {
+          kind: "event",
+          callId: "lifecycle-failure",
+          title: "checkpoint",
+          eventType: "checkpoint",
+          status: "failure",
+          detail: "checkpoint failed",
+          timestamp: "2026-07-22T08:00:30Z",
+        }),
       ],
       live: false,
       analyzedAt: new Date("2026-07-22T09:00:00Z"),
     });
 
     expect(result.toolCallCount).toBe(3);
-    expect(result.failureCount).toBe(1);
+    expect(result.failureCount).toBe(2);
     expect(result.latestFailure).toMatchObject({
       title: "shell_command",
       detail: "exit_code: 1 stderr: failed",
