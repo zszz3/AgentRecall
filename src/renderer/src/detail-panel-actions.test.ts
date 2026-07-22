@@ -256,6 +256,15 @@ describe("detail panel actions", () => {
     expect(mainSource).toContain("await ensureRemoteSessionDetailsLoaded(sessionKey)");
   });
 
+  it("analyzes status from the complete indexed trajectory on demand", () => {
+    const handler = mainHandlerSource("session:agent-status");
+
+    expect(preloadSource).toContain("analyzeSessionAgentStatus");
+    expect(preloadSource).toContain("session:agent-status");
+    expect(handler).toContain("await ensureRemoteSessionDetailsLoaded(sessionKey)");
+    expect(handler).toContain("analyzeIndexedSessionAgentStatus(store, sessionKey, live)");
+  });
+
   it("does not hydrate remote session details before building resume commands", () => {
     for (const channel of ["command:copy-resume", "command:resume", "command:resume-iterm"]) {
       const handler = mainHandlerSource(channel);

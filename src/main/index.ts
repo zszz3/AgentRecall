@@ -41,6 +41,7 @@ import {
 } from "../core/platform";
 import { loadUsageQuotaSnapshot } from "../core/quota";
 import { focusLiveSessionTerminal, setLiveSessionTerminalTitle } from "../core/session-focus";
+import { analyzeIndexedSessionAgentStatus } from "../core/session-agent-status";
 import { setSessionCustomTitleAndSyncTerminal } from "../core/session-title-sync";
 import { createCachedLiveSessionSnapshotLoader } from "../core/session-activity";
 import { summarizeSession, type SummaryEndpoint } from "../core/session-summarizer";
@@ -1190,6 +1191,13 @@ function registerIpc(): void {
     if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) return [];
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getTraceEvents(sessionKey, options);
+  });
+  ipcMain.handle("session:agent-status", async (_event, sessionKey: string, live: boolean) => {
+    if (typeof sessionKey !== "string" || !sessionKey.trim()) throw new Error("Session key is required.");
+    await ensureRemoteSessionDetailsLoaded(sessionKey);
+    const status = analyzeIndexedSessionAgentStatus(store, sessionKey, live);
+    if (!status) throw new Error("Session is no longer available.");
+    return status;
   });
   ipcMain.handle("sessions:live", () => loadCachedLiveSessionSnapshot({ includeTrae: getSettings().includeTrae, includeQoder: getSettings().includeQoder }));
   ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
