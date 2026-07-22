@@ -25,22 +25,22 @@ afterEach(() => {
 });
 
 describe("Codex request export", () => {
-  it("returns the newest exact request captured for the matching thread", () => {
+  it("returns the newest exact request captured for the matching thread", async () => {
     const root = temporaryDirectory();
     const bundle = path.join(root, "trace-bundle-thread-1");
     fs.mkdirSync(path.join(bundle, "payloads"), { recursive: true });
     fs.writeFileSync(path.join(bundle, "payloads", "old.json"), JSON.stringify({ model: "old" }));
-    fs.writeFileSync(path.join(bundle, "payloads", "new.json"), JSON.stringify({ model: "gpt-5", stream: true }));
+    fs.writeFileSync(path.join(bundle, "payloads", "new.json"), JSON.stringify({ model: "gpt-5", stream: true, parallel_tool_calls: true }));
     writeJsonLines(path.join(bundle, "trace.jsonl"), [
       { wall_time_unix_ms: 1, payload: { type: "inference_started", thread_id: "thread-1", request_payload: { path: "payloads/old.json" } } },
       { wall_time_unix_ms: 3, payload: { type: "inference_started", thread_id: "other", request_payload: { path: "payloads/ignored.json" } } },
       { wall_time_unix_ms: 2, payload: { type: "inference_started", thread_id: "thread-1", request_payload: { path: "payloads/new.json" } } },
     ]);
 
-    expect(findLatestCodexTraceRequest(root, "thread-1")).toEqual({ model: "gpt-5", stream: true });
+    expect(await findLatestCodexTraceRequest(root, "thread-1")).toEqual({ model: "gpt-5", stream: true, parallel_tool_calls: true });
   });
 
-  it("does not read a trace payload outside its bundle", () => {
+  it("does not read a trace payload outside its bundle", async () => {
     const root = temporaryDirectory();
     const bundle = path.join(root, "trace-bundle-thread-1");
     fs.mkdirSync(bundle, { recursive: true });
@@ -49,10 +49,10 @@ describe("Codex request export", () => {
       { payload: { type: "inference_started", thread_id: "thread-1", request_payload: { path: "../outside.json" } } },
     ]);
 
-    expect(findLatestCodexTraceRequest(root, "thread-1")).toBeNull();
+    expect(await findLatestCodexTraceRequest(root, "thread-1")).toBeNull();
   });
 
-  it("reconstructs persisted Responses fields and tools", () => {
+  it("reconstructs persisted Responses fields and tools", async () => {
     const root = temporaryDirectory();
     const rollout = path.join(root, "rollout.jsonl");
     writeJsonLines(rollout, [
@@ -72,7 +72,7 @@ describe("Codex request export", () => {
       { type: "response_item", payload: { type: "function_call_output", call_id: "call-1", output: "found" } },
     ]);
 
-    expect(reconstructCodexResponsesRequest(rollout)).toEqual({
+    expect(await reconstructCodexResponsesRequest(rollout)).toEqual({
       model: "gpt-5.4",
       instructions: "Follow the repository instructions.",
       input: [
@@ -82,7 +82,6 @@ describe("Codex request export", () => {
       ],
       tools: [{ type: "function", name: "lookup", description: "Look up a record", strict: false, parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } }],
       tool_choice: "auto",
-      parallel_tool_calls: false,
       reasoning: { effort: "high", summary: "concise" },
       store: false,
       stream: true,
@@ -92,7 +91,108 @@ describe("Codex request export", () => {
     });
   });
 
-  it("falls back to reconstruction when no matching trace is available", () => {
+  it("rebuilds legacy compaction from retained user messages and a user-role summary", async () => {
+    const root = temporaryDirectory();
+    const rollout = path.join(root, "rollout.jsonl");
+    const message = (role: "user" | "assistant", text: string) => ({
+      type: "response_item",
+      payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] },
+    });
+    writeJsonLines(rollout, [
+      { type: "session_meta", payload: { id: "thread-1" } },
+      message("user", "first user"),
+      message("assistant", "first assistant"),
+      { type: "compacted", payload: { message: "summary one" } },
+      message("user", "second user"),
+      message("assistant", "second assistant"),
+      { type: "compacted", payload: { message: "summary two" } },
+      message("user", "third user"),
+    ]);
+
+    const request = await reconstructCodexResponsesRequest(rollout);
+    expect(request?.input).toEqual([
+      { type: "message", role: "user", content: [{ type: "input_text", text: "first user" }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "second user" }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "summary two" }] },
+      { type: "message", role: "user", content: [{ type: "input_text", text: "third user" }] },
+    ]);
+  });
+
+  it("rejects a trace payload symlink that resolves outside the bundle", async () => {
+    const root = temporaryDirectory();
+    const bundle = path.join(root, "trace-bundle-thread-1");
+    fs.mkdirSync(path.join(bundle, "payloads"), { recursive: true });
+    const outside = path.join(root, "outside.json");
+    const linkedPayload = path.join(bundle, "payloads", "request.json");
+    fs.writeFileSync(outside, JSON.stringify({ secret: true }));
+    try {
+      fs.symlinkSync(outside, linkedPayload, "file");
+    } catch (error) {
+      if (process.platform === "win32" && (error as NodeJS.ErrnoException).code === "EPERM") return;
+      throw error;
+    }
+    writeJsonLines(path.join(bundle, "trace.jsonl"), [
+      { payload: { type: "inference_started", thread_id: "thread-1", request_payload: { path: "payloads/request.json" } } },
+    ]);
+
+    expect(await findLatestCodexTraceRequest(root, "thread-1")).toBeNull();
+  });
+
+  it("keeps namespaced dynamic tools and infers custom tools without duplicates", async () => {
+    const root = temporaryDirectory();
+    const rollout = path.join(root, "rollout.jsonl");
+    writeJsonLines(rollout, [
+      { type: "session_meta", payload: {
+        id: "thread-1",
+        dynamic_tools: [{ Namespace: {
+          name: "files",
+          tools: [{ Function: { name: "read", inputSchema: { type: "object" } } }],
+        } }],
+      } },
+      { type: "response_item", payload: { type: "function_call", namespace: "files", name: "read", call_id: "call-1", arguments: "{}" } },
+      { type: "response_item", payload: { type: "custom_tool_call", name: "python", call_id: "call-2", input: "print(1)" } },
+    ]);
+
+    const request = await reconstructCodexResponsesRequest(rollout);
+    expect(request?.tools).toEqual([
+      {
+        type: "namespace",
+        name: "files",
+        description: "",
+        tools: [{
+          type: "function",
+          name: "read",
+          description: "",
+          strict: false,
+          parameters: { type: "object" },
+        }],
+      },
+      {
+        type: "custom",
+        name: "python",
+        description: "Reconstructed from recorded custom tool calls; the original format was not persisted.",
+      },
+    ]);
+  });
+
+  it("streams large rollout files without changing item order", async () => {
+    const root = temporaryDirectory();
+    const rollout = path.join(root, "rollout.jsonl");
+    const rows = Array.from({ length: 1_500 }, (_, index) => ({
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: `message-${index}` }] },
+    }));
+    writeJsonLines(rollout, [
+      { type: "session_meta", payload: { id: "thread-1" } },
+      ...rows,
+    ]);
+
+    const request = await reconstructCodexResponsesRequest(rollout);
+    expect((request?.input as unknown[] | undefined)?.length).toBe(1_500);
+    expect((request?.input as Array<{ content: Array<{ text: string }> }>)[1_499].content[0].text).toBe("message-1499");
+  });
+
+  it("falls back to reconstruction when no matching trace is available", async () => {
     const root = temporaryDirectory();
     const rollout = path.join(root, "rollout.jsonl");
     writeJsonLines(rollout, [
@@ -100,7 +200,7 @@ describe("Codex request export", () => {
       { type: "turn_context", payload: { model: "gpt-5" } },
     ]);
 
-    expect(resolveCodexResponsesRequest({ filePath: rollout, rawId: "thread-1", traceRoot: root })).toMatchObject({
+    expect(await resolveCodexResponsesRequest({ filePath: rollout, rawId: "thread-1", traceRoot: root })).toMatchObject({
       fidelity: "reconstructed",
       body: { model: "gpt-5", stream: true },
     });

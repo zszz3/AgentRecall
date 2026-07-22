@@ -1,5 +1,7 @@
-import * as fs from "node:fs";
+import { createReadStream, type Dirent } from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { createInterface } from "node:readline";
 
 export type CodexRequestFidelity = "exact-trace" | "reconstructed" | "normalized";
 
@@ -13,21 +15,21 @@ interface TraceCandidate {
   timestamp: number;
 }
 
-export function resolveCodexResponsesRequest(options: {
+export async function resolveCodexResponsesRequest(options: {
   filePath: string;
   rawId: string;
   traceRoot?: string;
-}): CodexRequestExport | null {
-  const exact = options.traceRoot ? findLatestCodexTraceRequest(options.traceRoot, options.rawId) : null;
+}): Promise<CodexRequestExport | null> {
+  const exact = options.traceRoot ? await findLatestCodexTraceRequest(options.traceRoot, options.rawId) : null;
   if (exact) return { body: exact, fidelity: "exact-trace" };
-  const reconstructed = reconstructCodexResponsesRequest(options.filePath);
+  const reconstructed = await reconstructCodexResponsesRequest(options.filePath);
   return reconstructed ? { body: reconstructed, fidelity: "reconstructed" } : null;
 }
 
-export function findLatestCodexTraceRequest(traceRoot: string, threadId: string): Record<string, unknown> | null {
-  let entries: fs.Dirent[];
+export async function findLatestCodexTraceRequest(traceRoot: string, threadId: string): Promise<Record<string, unknown> | null> {
+  let entries: Dirent[];
   try {
-    entries = fs.readdirSync(traceRoot, { withFileTypes: true });
+    entries = await fs.readdir(traceRoot, { withFileTypes: true });
   } catch {
     return null;
   }
@@ -37,60 +39,54 @@ export function findLatestCodexTraceRequest(traceRoot: string, threadId: string)
     if (!entry.isDirectory() || !entry.name.startsWith("trace-")) continue;
     const bundlePath = path.join(traceRoot, entry.name);
     const eventLogPath = path.join(bundlePath, "trace.jsonl");
-    let lines: string[];
     try {
-      lines = fs.readFileSync(eventLogPath, "utf8").split(/\r?\n/);
+      for await (const event of readJsonObjects(eventLogPath)) {
+        const payload = objectField(event, "payload");
+        if (!payload || payload.type !== "inference_started" || payload.thread_id !== threadId) continue;
+        const requestPayload = objectField(payload, "request_payload");
+        const relativePath = requestPayload && typeof requestPayload.path === "string" ? requestPayload.path : "";
+        const payloadPath = await resolveBundlePath(bundlePath, relativePath);
+        if (!payloadPath) continue;
+        const body = await readJsonObject(payloadPath);
+        if (!body) continue;
+        const timestamp = typeof event.wall_time_unix_ms === "number" ? event.wall_time_unix_ms : 0;
+        if (!latest || timestamp >= latest.timestamp) latest = { body, timestamp };
+      }
     } catch {
       continue;
-    }
-
-    for (const line of lines) {
-      const event = parseObject(line);
-      if (!event) continue;
-      const payload = objectField(event, "payload");
-      if (!payload || payload.type !== "inference_started" || payload.thread_id !== threadId) continue;
-      const requestPayload = objectField(payload, "request_payload");
-      const relativePath = requestPayload && typeof requestPayload.path === "string" ? requestPayload.path : "";
-      const payloadPath = resolveBundlePath(bundlePath, relativePath);
-      if (!payloadPath) continue;
-      const body = readJsonObject(payloadPath);
-      if (!body) continue;
-      const timestamp = typeof event.wall_time_unix_ms === "number" ? event.wall_time_unix_ms : 0;
-      if (!latest || timestamp >= latest.timestamp) latest = { body, timestamp };
     }
   }
   return latest?.body ?? null;
 }
 
-export function reconstructCodexResponsesRequest(filePath: string): Record<string, unknown> | null {
-  let lines: string[];
-  try {
-    lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-  } catch {
-    return null;
-  }
-
+export async function reconstructCodexResponsesRequest(filePath: string): Promise<Record<string, unknown> | null> {
   let sessionMeta: Record<string, unknown> | null = null;
   let turnContext: Record<string, unknown> | null = null;
   let input: unknown[] = [];
-  for (const line of lines) {
-    const row = parseObject(line);
-    if (!row) continue;
-    const payload = objectField(row, "payload");
-    if (row.type === "session_meta" && payload) {
-      sessionMeta = payload;
-    } else if (row.type === "turn_context" && payload) {
-      turnContext = payload;
-    } else if (row.type === "response_item" && payload && isRequestInputItem(payload)) {
-      input.push(payload);
-    } else if (row.type === "compacted" && payload) {
-      const replacement = Array.isArray(payload.replacement_history) ? payload.replacement_history : null;
-      if (replacement) {
-        input = replacement.filter(isRequestInputItem);
-      } else if (typeof payload.message === "string" && payload.message.trim()) {
-        input = [{ type: "message", role: "assistant", content: [{ type: "output_text", text: payload.message }] }];
+  const compactionSummaries = new Set<string>();
+  try {
+    for await (const row of readJsonObjects(filePath)) {
+      const payload = objectField(row, "payload");
+      if (row.type === "session_meta" && payload) {
+        sessionMeta = payload;
+      } else if (row.type === "turn_context" && payload) {
+        turnContext = payload;
+      } else if (row.type === "response_item" && payload && isRequestInputItem(payload)) {
+        input.push(payload);
+      } else if (row.type === "compacted" && payload) {
+        const replacement = Array.isArray(payload.replacement_history) ? payload.replacement_history : null;
+        const summary = typeof payload.message === "string" ? payload.message.trim() : "";
+        if (replacement) {
+          input = replacement.filter(isRequestInputItem);
+        } else if (summary) {
+          input = input.filter((item) => isRetainedCompactionUserMessage(item, compactionSummaries));
+          input.push({ type: "message", role: "user", content: [{ type: "input_text", text: summary }] });
+        }
+        if (summary) compactionSummaries.add(summary);
       }
     }
+  } catch {
+    return null;
   }
   if (!sessionMeta && !turnContext && input.length === 0) return null;
 
@@ -112,7 +108,6 @@ export function reconstructCodexResponsesRequest(filePath: string): Record<strin
     input,
     tools,
     tool_choice: "auto",
-    parallel_tool_calls: false,
     ...(reasoning ? { reasoning } : {}),
     store: false,
     stream: true,
@@ -136,21 +131,53 @@ function reconstructedTools(dynamicTools: unknown, input: unknown[]): unknown[] 
   for (const raw of Array.isArray(dynamicTools) ? dynamicTools : []) {
     for (const tool of responseToolsFromDynamic(raw)) {
       tools.push(tool);
-      if (typeof tool.name === "string") knownNames.add(tool.name);
+      collectResponseToolKeys(tool, knownNames);
     }
   }
   for (const item of input) {
-    if (!isObject(item) || item.type !== "function_call" || typeof item.name !== "string" || knownNames.has(item.name)) continue;
-    knownNames.add(item.name);
-    tools.push({
-      type: "function",
-      name: item.name,
-      description: "Reconstructed from recorded tool calls; the original description was not persisted.",
-      strict: false,
-      parameters: { type: "object", additionalProperties: true },
-    });
+    if (!isObject(item) || typeof item.name !== "string") continue;
+    if (item.type !== "function_call" && item.type !== "custom_tool_call") continue;
+    const namespace = typeof item.namespace === "string" ? item.namespace : "";
+    const key = responseToolKey(namespace, item.name);
+    if (knownNames.has(key)) continue;
+    knownNames.add(key);
+    if (item.type === "custom_tool_call") {
+      tools.push({
+        type: "custom",
+        name: item.name,
+        ...(namespace ? { namespace } : {}),
+        description: "Reconstructed from recorded custom tool calls; the original format was not persisted.",
+      });
+    } else {
+      tools.push({
+        type: "function",
+        name: item.name,
+        ...(namespace ? { namespace } : {}),
+        description: "Reconstructed from recorded tool calls; the original description was not persisted.",
+        strict: false,
+        parameters: { type: "object", additionalProperties: true },
+      });
+    }
   }
   return tools;
+}
+
+function collectResponseToolKeys(tool: Record<string, unknown>, keys: Set<string>, namespace = ""): void {
+  if (tool.type === "namespace" && typeof tool.name === "string") {
+    const childNamespace = namespace ? `${namespace}/${tool.name}` : tool.name;
+    for (const child of Array.isArray(tool.tools) ? tool.tools : []) {
+      if (isObject(child)) collectResponseToolKeys(child, keys, childNamespace);
+    }
+    return;
+  }
+  if (typeof tool.name === "string") {
+    const explicitNamespace = typeof tool.namespace === "string" ? tool.namespace : namespace;
+    keys.add(responseToolKey(explicitNamespace, tool.name));
+  }
+}
+
+function responseToolKey(namespace: string, name: string): string {
+  return namespace ? `${namespace}::${name}` : name;
 }
 
 function responseToolsFromDynamic(raw: unknown): Record<string, unknown>[] {
@@ -204,22 +231,43 @@ function baseInstructionsText(value: unknown): string {
   return stringField(isObject(value) ? value : null, "text");
 }
 
-function resolveBundlePath(bundlePath: string, relativePath: string): string | null {
+async function resolveBundlePath(bundlePath: string, relativePath: string): Promise<string | null> {
   if (!relativePath || path.isAbsolute(relativePath)) return null;
-  const resolvedBundle = path.resolve(bundlePath);
-  const resolvedPath = path.resolve(resolvedBundle, relativePath);
-  const relative = path.relative(resolvedBundle, resolvedPath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
-  return resolvedPath;
+  try {
+    const resolvedBundle = await fs.realpath(bundlePath);
+    const resolvedPath = await fs.realpath(path.resolve(bundlePath, relativePath));
+    const relative = path.relative(resolvedBundle, resolvedPath);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+    const stat = await fs.stat(resolvedPath);
+    return stat.isFile() ? resolvedPath : null;
+  } catch {
+    return null;
+  }
 }
 
-function readJsonObject(filePath: string): Record<string, unknown> | null {
+async function readJsonObject(filePath: string): Promise<Record<string, unknown> | null> {
   try {
-    const value = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const value = JSON.parse(await fs.readFile(filePath, "utf8"));
     return isObject(value) ? value : null;
   } catch {
     return null;
   }
+}
+
+async function* readJsonObjects(filePath: string): AsyncGenerator<Record<string, unknown>> {
+  const input = createReadStream(filePath, { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  for await (const line of lines) {
+    const parsed = parseObject(line);
+    if (parsed) yield parsed;
+  }
+}
+
+function isRetainedCompactionUserMessage(value: unknown, priorSummaries: Set<string>): boolean {
+  if (!isObject(value) || value.type !== "message" || value.role !== "user") return false;
+  const content = Array.isArray(value.content) ? value.content : [];
+  const text = content.flatMap((part) => isObject(part) && typeof part.text === "string" ? [part.text] : []).join("\n").trim();
+  return !priorSummaries.has(text);
 }
 
 function parseObject(line: string): Record<string, unknown> | null {

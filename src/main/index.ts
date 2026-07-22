@@ -1606,13 +1606,13 @@ function registerIpc(): void {
     const isCodexSession = ["codex-cli", "codex-app", "codex-internal", "tcodex-cli"].includes(session.source);
     if (isCodexSession && isLocalSessionEnvironment(session)) {
       if (format === "openai_responses") {
-        codexRequest = resolveCodexResponsesRequest({
+        codexRequest = await resolveCodexResponsesRequest({
           filePath: session.filePath,
           rawId: session.rawId,
           traceRoot: process.env.CODEX_ROLLOUT_TRACE_ROOT?.trim() || undefined,
         });
       } else {
-        const reconstructed = reconstructCodexResponsesRequest(session.filePath);
+        const reconstructed = await reconstructCodexResponsesRequest(session.filePath);
         if (reconstructed) codexRequest = { body: reconstructed, fidelity: "reconstructed" };
       }
     }

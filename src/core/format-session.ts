@@ -125,36 +125,41 @@ export function formatSessionJson(
 
 function responsesToChatCompletions(request: Record<string, unknown>): Record<string, unknown> {
   const messages: Record<string, unknown>[] = [];
+  if (typeof request.instructions === "string" && request.instructions) {
+    messages.push({ role: "developer", content: request.instructions });
+  }
+  let pendingToolCalls: Record<string, unknown>[] = [];
+  const flushToolCalls = (): void => {
+    if (pendingToolCalls.length === 0) return;
+    messages.push({ role: "assistant", content: null, tool_calls: pendingToolCalls });
+    pendingToolCalls = [];
+  };
   for (const item of Array.isArray(request.input) ? request.input : []) {
     if (!isObject(item)) continue;
     if (item.type === "message") {
+      flushToolCalls();
       messages.push({ role: item.role, content: responseContentText(item.content) });
-    } else if (item.type === "function_call") {
-      messages.push({
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: item.call_id,
-          type: "function",
-          function: { name: item.name, arguments: item.arguments },
-        }],
+    } else if (item.type === "function_call" || item.type === "custom_tool_call") {
+      const custom = item.type === "custom_tool_call";
+      pendingToolCalls.push({
+        id: item.call_id,
+        type: "function",
+        function: {
+          name: qualifiedToolName(item.namespace, item.name),
+          arguments: custom
+            ? safeJsonStringify({ input: item.input ?? "" })
+            : typeof item.arguments === "string" ? item.arguments : safeJsonStringify(item.arguments ?? {}),
+        },
       });
     } else if (item.type === "function_call_output") {
-      messages.push({ role: "tool", tool_call_id: item.call_id, content: item.output });
-    } else if (item.type === "custom_tool_call") {
-      messages.push({
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: item.call_id,
-          type: "function",
-          function: { name: item.name, arguments: item.input },
-        }],
-      });
+      flushToolCalls();
+      messages.push({ role: "tool", tool_call_id: item.call_id, content: serializeToolOutput(item.output) });
     } else if (item.type === "custom_tool_call_output") {
-      messages.push({ role: "tool", tool_call_id: item.call_id, content: item.output });
+      flushToolCalls();
+      messages.push({ role: "tool", tool_call_id: item.call_id, content: serializeToolOutput(item.output) });
     }
   }
+  flushToolCalls();
 
   const body: Record<string, unknown> = {
     model: request.model ?? EXPORTED_MODEL_PLACEHOLDER,
@@ -180,20 +185,24 @@ function responsesToAnthropic(request: Record<string, unknown>): Record<string, 
       const text = responseContentText(item.content);
       if (item.role === "system" || item.role === "developer") {
         if (text) systemParts.push(text);
-      } else {
-        messages.push({ role: item.role === "assistant" ? "assistant" : "user", content: text });
+      } else if (text) {
+        appendAnthropicContent(messages, item.role === "assistant" ? "assistant" : "user", [{ type: "text", text }]);
       }
     } else if (item.type === "function_call" || item.type === "custom_tool_call") {
-      const rawInput = item.type === "function_call" ? item.arguments : item.input;
-      messages.push({
-        role: "assistant",
-        content: [{ type: "tool_use", id: item.call_id, name: item.name, input: parseToolInput(rawInput) }],
-      });
+      const custom = item.type === "custom_tool_call";
+      const rawInput = custom ? { input: item.input ?? "" } : parseToolInput(item.arguments);
+      appendAnthropicContent(messages, "assistant", [{
+        type: "tool_use",
+        id: item.call_id,
+        name: qualifiedToolName(item.namespace, item.name),
+        input: rawInput,
+      }]);
     } else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
-      messages.push({
-        role: "user",
-        content: [{ type: "tool_result", tool_use_id: item.call_id, content: String(item.output ?? "") }],
-      });
+      appendAnthropicContent(messages, "user", [{
+        type: "tool_result",
+        tool_use_id: item.call_id,
+        content: anthropicToolResultContent(item.output),
+      }]);
     }
   }
 
@@ -211,30 +220,104 @@ function responsesToAnthropic(request: Record<string, unknown>): Record<string, 
 }
 
 function responseToolsToChat(value: unknown): Record<string, unknown>[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((tool) => {
-    if (!isObject(tool) || tool.type !== "function" || typeof tool.name !== "string") return [];
-    return [{
-      type: "function",
-      function: {
-        name: tool.name,
-        ...(typeof tool.description === "string" ? { description: tool.description } : {}),
-        parameters: tool.parameters ?? { type: "object", properties: {} },
-      },
-    }];
-  });
+  return flattenResponseTools(value).map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      parameters: tool.parameters,
+    },
+  }));
 }
 
 function responseToolsToAnthropic(value: unknown): Record<string, unknown>[] {
+  return flattenResponseTools(value).map((tool) => ({
+    name: tool.name,
+    ...(tool.description ? { description: tool.description } : {}),
+    input_schema: tool.parameters,
+  }));
+}
+
+function flattenResponseTools(value: unknown, namespace?: string): Array<{
+  name: string;
+  description: string;
+  parameters: unknown;
+}> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((tool) => {
-    if (!isObject(tool) || tool.type !== "function" || typeof tool.name !== "string") return [];
-    return [{
-      name: tool.name,
-      ...(typeof tool.description === "string" ? { description: tool.description } : {}),
-      input_schema: tool.parameters ?? { type: "object", properties: {} },
-    }];
+    if (!isObject(tool) || typeof tool.name !== "string") return [];
+    if (tool.type === "namespace") {
+      return flattenResponseTools(tool.tools, namespace ? `${namespace}/${tool.name}` : tool.name);
+    }
+    if (tool.type === "function") {
+      return [{
+        name: qualifiedToolName(namespace ?? tool.namespace, tool.name),
+        description: typeof tool.description === "string" ? tool.description : "",
+        parameters: tool.parameters ?? { type: "object", properties: {} },
+      }];
+    }
+    if (tool.type === "custom") {
+      return [{
+        name: qualifiedToolName(namespace ?? tool.namespace, tool.name),
+        description: typeof tool.description === "string" ? tool.description : "",
+        parameters: {
+          type: "object",
+          properties: { input: { type: "string" } },
+          required: ["input"],
+          additionalProperties: false,
+        },
+      }];
+    }
+    return [];
   });
+}
+
+function appendAnthropicContent(
+  messages: Record<string, unknown>[],
+  role: "user" | "assistant",
+  blocks: Record<string, unknown>[],
+): void {
+  const previous = messages.at(-1);
+  if (previous?.role === role && Array.isArray(previous.content)) {
+    previous.content.push(...blocks);
+    return;
+  }
+  messages.push({ role, content: blocks });
+}
+
+function qualifiedToolName(namespace: unknown, name: unknown): string {
+  const toolName = typeof name === "string" && name ? name : "tool";
+  if (typeof namespace !== "string" || !namespace) return sanitizeToolName(toolName);
+  const namespaceParts = namespace.split(/[/.]+/).filter(Boolean).map(sanitizeToolName);
+  return [...namespaceParts, sanitizeToolName(toolName)].join("__");
+}
+
+function sanitizeToolName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function serializeToolOutput(value: unknown): string {
+  return typeof value === "string" ? value : safeJsonStringify(value ?? "");
+}
+
+function anthropicToolResultContent(value: unknown): unknown {
+  if (typeof value === "string") return value;
+  const blocks = isObject(value) && Array.isArray(value.content) ? value.content : value;
+  if (Array.isArray(blocks) && blocks.every((item) => isObject(item) && typeof item.type === "string")) {
+    return blocks.map((item) => {
+      if (!isObject(item)) return item;
+      return item.type === "input_text" || item.type === "output_text" ? { ...item, type: "text" } : item;
+    });
+  }
+  return safeJsonStringify(value ?? "");
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
+  }
 }
 
 function responseContentText(value: unknown): string {
