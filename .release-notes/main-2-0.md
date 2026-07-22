@@ -10,6 +10,7 @@
 - Skill 使用次数、云端同步、版本恢复和文件差异集中到所选 Skill 的详情中；应用冷启动、托盘打开和普通唤起默认停留在工作台，只有搜索快捷键会进入会话搜索。
 - 新增目录级 Agent Memory 管理：用户可主动选择工作目录，查看从 Git 根目录逐级继承的 `AGENTS.md`、`CLAUDE.md` 与 Cursor Rules，并在当前目录新建或编辑记忆文件；还可按 Codex、Claude Code、Cursor 预览最终生效内容，将一份记忆同步为其他 Agent 的格式，确认差异后写入并支持立即撤销。检查范围仅限所选目录的继承链，不会遍历整个项目。
 - 新增 Runtime、MCP 与 Workflow 工作区：可通过紧凑下拉切换并测试 Codex、Claude Code、API、Hermes、OpenCode 和 OpenClaw 配置，管理本地或远程 MCP 服务及工具，并在应用内完成 Workflow 的创建、审核、确认、运行、暂停、人工介入和输出查看；工作台会同步展示真实 Workflow 状态并直达详情。
+- Session 详情新增按需 Agent 状态分析：可从完整会话轨迹中查看当前等待状态、最近诉求、显式计划、工具调用与失败、上下文压缩和中断记录；结果仅在当前详情中展示，不调用模型，也不会改写原会话。
 
 ## Bug 修复
 
