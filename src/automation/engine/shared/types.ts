@@ -316,6 +316,9 @@ export interface RuntimeRequest {
   continuationPolicy: RuntimeContinuationPolicy;
   runtimeConfig: RuntimeConfig;
   runtimeConversation?: RuntimeConversation;
+  planningWorkflowId?: string;
+  workflowRunId?: string;
+  workflowNodeId?: string;
 }
 
 export interface RuntimeResumeCapabilities {
@@ -445,6 +448,9 @@ export interface RunTaskRequest {
   workDir?: string;
   continuationPolicy?: RuntimeContinuationPolicy;
   runtimeConversation?: RuntimeConversation;
+  planningWorkflowId?: string;
+  workflowRunId?: string;
+  workflowNodeId?: string;
 }
 
 export interface WorkflowAgentRequest extends RuntimeRequest {

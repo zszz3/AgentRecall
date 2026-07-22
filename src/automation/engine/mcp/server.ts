@@ -34,6 +34,7 @@ const TOOL_ROUTES: Record<string, string> = {
   workflow_validate: "/mcp/workflow/validate",
   workflow_context_append: "/mcp/workflow/context/append",
   workflow_run_context_append: "/mcp/workflow/run-context/append",
+  workflow_node_complete: "/mcp/workflow/node/complete",
 };
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
@@ -92,7 +93,7 @@ const artifactsSchema = {
 };
 
 export function mcpToolDefinitions(): McpToolDefinition[] {
-  return [
+  const tools: McpToolDefinition[] = [
     {
       name: "agent_templates_list",
       description: "Compatibility alias for skill_templates_list.",
@@ -241,6 +242,22 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
       ),
     },
   ];
+  if (process.env.AGENT_RECALL_WORKFLOW_RUN_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_ID) {
+    tools.push({
+      name: "workflow_node_complete",
+      description: "Submit the current workflow node's validated structured result. Call this exactly once when the node is complete; ordinary text remains conversation history.",
+      inputSchema: objectSchema({
+        nodeId: { type: "string", const: process.env.AGENT_RECALL_WORKFLOW_NODE_ID },
+        summary: { type: "string", minLength: 1 },
+        outputs: { type: "object", additionalProperties: true },
+        evidence: { type: "array", items: { type: "string" } },
+        risks: { type: "array", items: { type: "string" } },
+        nextStepSuggestions: { type: "array", items: { type: "string" } },
+        proposals: { type: "array" },
+      }, ["nodeId", "summary", "outputs", "proposals"]),
+    });
+  }
+  return tools;
 }
 
 export function resolveBridgeDiscoveryPath(): string {
@@ -277,6 +294,10 @@ export async function callMcpTool(name: string, args: unknown): Promise<unknown>
     },
     body: JSON.stringify({
       ...(args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : {}),
+      ...(name === "workflow_node_complete" ? {
+        workflowId: process.env.AGENT_RECALL_WORKFLOW_ID,
+        runId: process.env.AGENT_RECALL_WORKFLOW_RUN_ID,
+      } : {}),
     }),
   });
   const payload = (await response.json()) as unknown;

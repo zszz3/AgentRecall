@@ -290,7 +290,12 @@ export class WorkflowV2RunExecutor {
 
     const startModelTask = async (nodeId: string, request: RunTaskRequest, allowOutputWrite = false): Promise<TaskRun> => {
       consumeModelCallBudget(nodeId);
-      const task = await startWorkflowTask(request, allowOutputWrite);
+      const task = await startWorkflowTask({
+        ...request,
+        planningWorkflowId: workflow.workflowId,
+        workflowRunId: runId,
+        workflowNodeId: nodeId,
+      }, allowOutputWrite);
       this.runRegistry.get(runId)?.taskIdByNodeId.set(nodeId, task.id);
       return task;
     };

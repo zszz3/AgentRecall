@@ -351,6 +351,21 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     if (typeof record.nodeId === "string") request.nodeId = record.nodeId;
     return hub.appendWorkflowRunContext(request);
   }
+  if (route === "/mcp/workflow/node/complete") {
+    const output = {
+      nodeId: typeof record.nodeId === "string" ? record.nodeId : "",
+      summary: typeof record.summary === "string" ? record.summary : "",
+      outputs: record.outputs,
+      ...(Array.isArray(record.evidence) ? { evidence: record.evidence } : {}),
+      ...(Array.isArray(record.risks) ? { risks: record.risks } : {}),
+      ...(Array.isArray(record.nextStepSuggestions) ? { nextStepSuggestions: record.nextStepSuggestions } : {}),
+      proposals: Array.isArray(record.proposals) ? record.proposals : [],
+    };
+    if (!output.nodeId || !output.summary || !output.outputs || typeof output.outputs !== "object" || Array.isArray(output.outputs)) {
+      return { ok: false, error: "workflow_node_complete requires nodeId, summary, outputs, and proposals." };
+    }
+    return { ok: true, output };
+  }
   if (route === "/mcp/artifacts/register") {
     const request: RegisterArtifactRequest = {
       target: typeof record.target === "string" ? record.target : "",

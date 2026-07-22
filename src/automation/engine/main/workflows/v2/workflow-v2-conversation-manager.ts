@@ -243,7 +243,8 @@ export class WorkflowV2ConversationManager {
       }
     }
     if (event.type === "completed") {
-      const finalContent = (event.content || (conversation.messages.at(-1)?.eventType === "delta" ? conversation.messages.at(-1)?.content : "") || "").trim();
+      const completionTool = [...conversation.messages].reverse().find((message) => message.eventType === "tool_call" && message.name?.toLowerCase().includes("workflow_node_complete"));
+      const finalContent = (completionTool?.content || event.content || (conversation.messages.at(-1)?.eventType === "delta" ? conversation.messages.at(-1)?.content : "") || "").trim();
       this.deps.onCompleted?.(structuredClone(conversation), finalContent);
     }
     if (event.type === "error") conversation.status = "failed";
