@@ -42,24 +42,10 @@ import {
   updatePluginAt,
 } from "./runtime-utils";
 import { RuntimeProviderFields } from "./RuntimeProviderFields";
+import { RuntimeProviderPicker } from "./RuntimeProviderPicker";
 import { agentRecallAutomationService } from "../../app/services/agent-recall-service";
 
 const AGENTS: AgentId[] = [...RUNTIME_IDS];
-const PROVIDER_CATEGORY_ORDER = ["local", "official", "cn_official", "cloud_provider", "aggregator", "third_party", "custom"];
-
-function providerCategoryLabel(category: string, language: Language): string {
-  const labels: Record<string, [string, string]> = {
-    local: ["本地配置", "Local config"],
-    official: ["官方", "Official"],
-    cn_official: ["国内官方 / Coding Plan", "China official / Coding plan"],
-    cloud_provider: ["云服务商", "Cloud providers"],
-    aggregator: ["聚合服务", "Aggregators"],
-    third_party: ["第三方", "Third party"],
-    custom: ["自定义", "Custom"],
-  };
-  const label = labels[category] ?? ["其他", "Other"];
-  return language === "zh" ? label[0] : label[1];
-}
 
 const CONFIG_TEXT = {
   zh: {
@@ -175,6 +161,8 @@ export function RuntimePage({
 }: RuntimePageProps) {
   const configText = CONFIG_TEXT[language];
   const [showProviderKey, setShowProviderKey] = useState(false);
+  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  const [providerQuery, setProviderQuery] = useState("");
   const runtimeTitle = language === "zh" ? "配置" : "Config";
   const runtimeDescription =
     language === "zh"
@@ -192,8 +180,14 @@ export function RuntimePage({
   const balanceTitle = language === "zh" ? "余额" : "Balance";
   const refreshBalanceText = language === "zh" ? "刷新余额" : "Refresh balance";
   const balanceRefreshingText = language === "zh" ? "查询中" : "Checking";
-  const balanceIdleText = language === "zh" ? "点击刷新查询当前 Provider 余额。" : "Refresh to query the current provider balance.";
   const balanceNoDataText = language === "zh" ? "Provider 没有返回余额明细。" : "The provider did not return balance details.";
+  const balanceNotQueriedText = language === "zh" ? "未查询" : "Not checked";
+  const balanceUnavailableText = language === "zh" ? "不可用" : "Unavailable";
+  const changeProviderText = language === "zh" ? "更换 Provider" : "Change provider";
+  const currentConfigText = language === "zh" ? "当前配置" : "Current config";
+  const modelsDescription = language === "zh" ? "管理当前配置可用的模型" : "Manage models available to this config";
+  const pluginsDescription = language === "zh" ? "管理 Codex 的扩展能力" : "Manage Codex extensions";
+  const advancedDescription = language === "zh" ? "连接、环境变量与请求覆盖" : "Connection, environment, and request overrides";
   const visibleRuntimeChannels = useMemo(() => selectConfigChannelsForDisplay(channels), [channels]);
   const selectedRuntimeChannels = useMemo(
     () => visibleRuntimeChannels.filter((channel) => channel.agentId === selectedRuntimeId),
@@ -209,14 +203,6 @@ export function RuntimePage({
   const selectedRuntime = selectedRuntimeId;
   const localConfigImportSupported = runtimeDefinition(selectedRuntime).localConfigImport;
   const runtimeProviderPresets = useMemo(() => AGENT_PROVIDER_PRESETS.filter((preset) => preset.runtimeAgentId === selectedRuntime), [selectedRuntime]);
-  const runtimeProviderCategories = useMemo(() => {
-    const categories = new Set(runtimeProviderPresets.map((preset) => preset.category ?? (preset.id.includes("custom") ? "custom" : "third_party")));
-    return [...categories].sort((left, right) => {
-      const leftIndex = PROVIDER_CATEGORY_ORDER.indexOf(left);
-      const rightIndex = PROVIDER_CATEGORY_ORDER.indexOf(right);
-      return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
-    });
-  }, [runtimeProviderPresets]);
   const updateSelectedRuntimeChannel = (updater: (channel: AgentChannel) => AgentChannel): void => {
     if (!selectedRuntimeChannelRecord) return;
     onUpdateChannel(selectedRuntimeChannelRecord.id, updater);
@@ -234,6 +220,17 @@ export function RuntimePage({
   const selectedChannelTesting = Boolean(selectedRuntimeChannelRecord && testingAgentId === selectedRuntimeChannelRecord.id);
   const selectedBalanceResult = selectedRuntimeChannelRecord ? balanceResults[selectedRuntimeChannelRecord.id] : undefined;
   const selectedBalanceLoading = Boolean(selectedRuntimeChannelRecord && balanceLoadingChannelId === selectedRuntimeChannelRecord.id);
+  const selectedBalanceItem = selectedBalanceResult?.items[0];
+  const selectedBalanceDetail = selectedBalanceItem ? formatBalanceDetail(selectedBalanceItem, language) : "";
+  const selectedBalanceValue = selectedBalanceLoading
+    ? balanceRefreshingText
+    : selectedBalanceItem
+      ? formatBalanceValue(selectedBalanceItem)
+      : selectedBalanceResult
+        ? selectedBalanceResult.status === "success"
+          ? balanceNoDataText
+          : balanceUnavailableText
+        : balanceNotQueriedText;
   const selectedChannelTestElapsedMs =
     selectedChannelTestResult?.state === "running"
       ? Date.now() - selectedChannelTestResult.startedAt + agentTestTick * 0
@@ -290,6 +287,14 @@ export function RuntimePage({
     const apiKey = cachedProviderKeys[preset.id] ?? (preset.id === selectedRuntimePresetId ? apiKeyFromChannelHeaders(selectedRuntimeChannelRecord, preset) : "");
     updateSelectedRuntimeChannel((channel) => applyProviderPresetToChannel(channel, preset, apiKey));
   };
+  const closeProviderPicker = (): void => {
+    setProviderPickerOpen(false);
+    setProviderQuery("");
+  };
+  const selectRuntimeProvider = async (preset: AgentProviderPreset): Promise<void> => {
+    await applyRuntimePreset(preset);
+    closeProviderPicker();
+  };
   const updateSelectedProviderKey = (value: string): void => {
     if (!selectedRuntimePreset) return;
     onUpdateProviderKey(selectedRuntimePreset.id, value);
@@ -333,11 +338,8 @@ export function RuntimePage({
 
       <div className="runtime-layout">
         <section className="config-form runtime-editor">
-          <section className="agent-provider-presets runtime-selector">
-            <div className="agent-provider-presets-head">
-              <h3>CLI</h3>
-              <span>{configText.cliHelp}</span>
-            </div>
+          <nav className="runtime-selector" aria-label={language === "zh" ? "选择 Runtime" : "Select Runtime"}>
+            <span className="runtime-selector-label">Runtime</span>
             <div className="agent-provider-preset-list">
               {AGENTS.map((agentId) => (
                 <button
@@ -352,36 +354,73 @@ export function RuntimePage({
                 </button>
               ))}
             </div>
-          </section>
+          </nav>
           {selectedRuntimeChannelRecord ? (
             <>
-              <div className="runtime-editor-actions">
-                <div className="runtime-editor-config">
-                  <span className={`agent-badge mini ${agentAccent(selectedRuntime)}`}>{agentLabel(selectedRuntime)}</span>
-                  <select
-                    aria-label={selectConfigText}
-                    value={selectedRuntimeChannelId}
-                    onChange={(event) => void onSelectChannel(event.target.value)}
-                  >
-                    {selectedRuntimeChannels.map((channel) => (
-                      <option key={channel.id} value={channel.id}>{channel.label || channel.id}</option>
-                    ))}
-                  </select>
-                  <button className="icon-btn" type="button" aria-label={addConfigText} title={addConfigText} onClick={onAddConfig}>
-                    <Plus size={13} />
-                  </button>
-                  <button
-                    className="icon-btn"
-                    type="button"
-                    aria-label={deleteConfigText}
-                    title={deleteConfigText}
-                    disabled={!selectedRuntimeChannelId || visibleRuntimeChannels.length <= 1}
-                    onClick={() => onDeleteConfig(selectedRuntimeChannelId)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+              <section className={`runtime-config-summary ${agentAccent(selectedRuntime)}`}>
+                <div className="runtime-summary-main">
+                  <div className="runtime-summary-identity">
+                    <span className={`agent-badge mini ${agentAccent(selectedRuntime)}`}>{agentLabel(selectedRuntime)}</span>
+                    <div>
+                      <span>{currentConfigText}</span>
+                      <div className="runtime-editor-config">
+                        <select
+                          aria-label={selectConfigText}
+                          value={selectedRuntimeChannelId}
+                          onChange={(event) => void onSelectChannel(event.target.value)}
+                        >
+                          {selectedRuntimeChannels.map((channel) => (
+                            <option key={channel.id} value={channel.id}>{channel.label || channel.id}</option>
+                          ))}
+                        </select>
+                        <button className="icon-btn" type="button" aria-label={addConfigText} title={addConfigText} onClick={onAddConfig}>
+                          <Plus size={13} />
+                        </button>
+                        <button
+                          className="icon-btn"
+                          type="button"
+                          aria-label={deleteConfigText}
+                          title={deleteConfigText}
+                          disabled={!selectedRuntimeChannelId || visibleRuntimeChannels.length <= 1}
+                          onClick={() => onDeleteConfig(selectedRuntimeChannelId)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="runtime-summary-provider">
+                    <span>Provider</span>
+                    <strong>{selectedRuntimePreset?.label ?? selectedRuntimeChannelRecord.providerName ?? agentLabel(selectedRuntime)}</strong>
+                    <button type="button" className="runtime-summary-link" onClick={() => setProviderPickerOpen(true)}>
+                      {changeProviderText}
+                    </button>
+                  </div>
+
+                  <div className={`runtime-summary-balance ${selectedBalanceResult?.status ?? "idle"}`}>
+                    <div>
+                      <span>{balanceTitle}</span>
+                      <strong>{selectedBalanceValue}</strong>
+                      <small>
+                        {selectedBalanceItem?.label ?? selectedBalanceResult?.message ?? selectedRuntimeChannelRecord.providerName ?? selectedRuntimeChannelRecord.label}
+                        {selectedBalanceDetail ? ` · ${selectedBalanceDetail}` : ""}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label={selectedBalanceLoading ? balanceRefreshingText : refreshBalanceText}
+                      title={selectedBalanceLoading ? balanceRefreshingText : refreshBalanceText}
+                      onClick={() => void onQueryBalance?.(selectedRuntimeChannelRecord.id)}
+                      disabled={selectedBalanceLoading || !onQueryBalance}
+                    >
+                      <RefreshCw size={13} className={selectedBalanceLoading ? "is-spinning" : undefined} />
+                    </button>
+                  </div>
                 </div>
-                <div className="config-plugin-actions">
+
+                <div className="runtime-summary-actions">
                   {localConfigImportSupported && onImportLocalConfig ? (
                     <button
                       type="button"
@@ -389,20 +428,20 @@ export function RuntimePage({
                       onClick={() => void onImportLocalConfig(selectedRuntime, selectedRuntimeChannelRecord.id)}
                     >
                       <RefreshCw size={13} />
-                      <span>{language === "zh" ? "导入本地默认配置" : "Import local defaults"}</span>
+                      <span>{language === "zh" ? "导入本地配置" : "Import local config"}</span>
                     </button>
                   ) : null}
                   <button
                     type="button"
-                    className="control-btn compact secondary"
+                    className="control-btn compact"
                     onClick={() => void onTestChannel(selectedRuntimeChannelRecord.id)}
                     disabled={selectedChannelTesting}
                   >
-                    <RefreshCw size={13} />
+                    <RefreshCw size={13} className={selectedChannelTesting ? "is-spinning" : undefined} />
                     <span>{selectedChannelTesting ? runtimeConfigTesting : runtimeConfigTest}</span>
                   </button>
                 </div>
-              </div>
+              </section>
               {status ? <div className="config-status runtime-config-status">{status}</div> : null}
               {selectedChannelTestResult ? (
                 selectedChannelTestResult.state === "passed" ? (
@@ -455,120 +494,69 @@ export function RuntimePage({
                   </section>
                 )
               ) : null}
-              <section className={`provider-balance-panel ${selectedBalanceResult?.status ?? "idle"}`}>
-                <div className="provider-balance-head">
-                  <div>
-                    <h3>{balanceTitle}</h3>
-                    <span>{selectedBalanceResult?.providerName ?? selectedRuntimeChannelRecord.providerName ?? selectedRuntimeChannelRecord.label}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="control-btn compact secondary"
-                    onClick={() => void onQueryBalance?.(selectedRuntimeChannelRecord.id)}
-                    disabled={selectedBalanceLoading || !onQueryBalance}
-                  >
-                    <RefreshCw size={13} />
-                    <span>{selectedBalanceLoading ? balanceRefreshingText : refreshBalanceText}</span>
-                  </button>
-                </div>
-                {selectedBalanceResult ? (
-                  <div className="provider-balance-body">
-                    {selectedBalanceResult.items.length > 0 ? (
-                      selectedBalanceResult.items.map((item, index) => {
-                        const detail = formatBalanceDetail(item, language);
-                        return (
-                          <div key={`${item.label ?? "balance"}:${index}`} className={`provider-balance-item ${item.isValid === false ? "is-invalid" : ""}`}>
-                            <span>{item.label ?? selectedBalanceResult.providerName ?? balanceTitle}</span>
-                            <strong>{formatBalanceValue(item)}</strong>
-                            {detail ? <small>{detail}</small> : null}
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <p>{selectedBalanceResult.status === "success" ? balanceNoDataText : selectedBalanceResult.message}</p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="provider-balance-idle">{selectedBalanceLoading ? balanceRefreshingText : balanceIdleText}</p>
-                )}
-              </section>
-              <details className="agent-provider-presets agent-provider-disclosure" open>
-                <summary className="agent-provider-presets-head">
-                  <h3>Provider</h3>
-                  <span>{selectedRuntimePreset?.label ?? agentLabel(selectedRuntime)}</span>
-                </summary>
-                <div className="agent-provider-catalog" aria-label="Provider presets">
-                  {runtimeProviderCategories.map((category) => (
-                    <section className="agent-provider-category" key={category}>
-                      <span className="agent-provider-category-label">{providerCategoryLabel(category, language)}</span>
-                      <div className="agent-provider-option-grid">
-                        {runtimeProviderPresets
-                          .filter((preset) => (preset.category ?? (preset.id.includes("custom") ? "custom" : "third_party")) === category)
-                          .map((preset) => (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              className={`agent-provider-option ${selectedRuntimePresetId === preset.id ? "is-active" : ""}`}
-                              aria-pressed={selectedRuntimePresetId === preset.id}
-                              title={preset.label}
-                              onClick={() => void applyRuntimePreset(preset)}
-                            >
-                              {preset.label}
-                            </button>
-                          ))}
+              {selectedRuntimePreset?.usesApiKey || selectedRuntimePreset?.configurableModelId ? (
+                <section className="runtime-connection-fields">
+                  {selectedRuntimePreset?.usesApiKey ? (
+                    <label className="agent-provider-key-field">
+                      <span>{configText.apiKey}</span>
+                      <div className="agent-provider-key-input">
+                        <input
+                          aria-label="Provider API key"
+                          type={showProviderKey ? "text" : "password"}
+                          value={selectedProviderKey}
+                          placeholder={`${configText.usedByAll} ${selectedRuntimePreset.label} agents`}
+                          onChange={(event) => updateSelectedProviderKey(event.currentTarget.value)}
+                        />
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={showProviderKey ? "Hide provider API key" : "Show provider API key"}
+                          title={showProviderKey ? "Hide" : "Show"}
+                          onClick={() => setShowProviderKey((visible) => !visible)}
+                        >
+                          {showProviderKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
                       </div>
-                    </section>
-                  ))}
-                </div>
-                {selectedRuntimePreset?.usesApiKey ? (
-                  <label className="agent-provider-key-field">
-                    <span>{configText.apiKey}</span>
-                    <div className="agent-provider-key-input">
+                    </label>
+                  ) : null}
+                  {selectedRuntimePreset?.configurableModelId ? (
+                    <label className="agent-provider-key-field">
+                      <span>{selectedRuntimePreset.configurableModelLabel ?? "Model ID"}</span>
                       <input
-                        aria-label="Provider API key"
-                        type={showProviderKey ? "text" : "password"}
-                        value={selectedProviderKey}
-                        placeholder={`${configText.usedByAll} ${selectedRuntimePreset.label} agents`}
-                        onChange={(event) => updateSelectedProviderKey(event.currentTarget.value)}
+                        aria-label="Provider endpoint or model id"
+                        value={selectedRuntimeCustomModelId}
+                        placeholder={selectedRuntimePreset.configurableModelPlaceholder ?? "model-or-endpoint-id"}
+                        onChange={(event) => updateSelectedProviderModelId(event.currentTarget.value)}
                       />
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        aria-label={showProviderKey ? "Hide provider API key" : "Show provider API key"}
-                        title={showProviderKey ? "Hide" : "Show"}
-                        onClick={() => setShowProviderKey((visible) => !visible)}
-                      >
-                        {showProviderKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    </div>
-                  </label>
-                ) : null}
-                {selectedRuntimePreset?.configurableModelId ? (
-                  <label className="agent-provider-key-field">
-                    <span>{selectedRuntimePreset.configurableModelLabel ?? "Model ID"}</span>
-                    <input
-                      aria-label="Provider endpoint or model id"
-                      value={selectedRuntimeCustomModelId}
-                      placeholder={selectedRuntimePreset.configurableModelPlaceholder ?? "model-or-endpoint-id"}
-                      onChange={(event) => updateSelectedProviderModelId(event.currentTarget.value)}
-                    />
-                  </label>
-                ) : null}
-              </details>
+                    </label>
+                  ) : null}
+                </section>
+              ) : null}
 
-              <details className="agent-advanced-panel">
-                <summary>{configText.advancedProvider}</summary>
-                <RuntimeProviderFields
-                  channel={selectedRuntimeChannelRecord}
+              {providerPickerOpen ? (
+                <RuntimeProviderPicker
                   language={language}
-                  onChange={updateSelectedRuntimeChannel}
+                  presets={runtimeProviderPresets}
+                  selectedPresetId={selectedRuntimePresetId}
+                  query={providerQuery}
+                  onQueryChange={setProviderQuery}
+                  onSelect={selectRuntimeProvider}
+                  onClose={closeProviderPicker}
                 />
-              </details>
+              ) : null}
 
               {selectedRuntime === "codex" ? (
-                <section className="agent-channel-models">
+                <details className="runtime-config-disclosure runtime-plugins-disclosure">
+                  <summary>
+                    <div>
+                      <strong>{configText.plugins}</strong>
+                      <span>{pluginsDescription}</span>
+                    </div>
+                    <small>{(selectedRuntimeChannelRecord.plugins ?? []).length}</small>
+                  </summary>
+                  <div className="runtime-disclosure-content agent-channel-models">
                   <div className="config-models-header">
-                    <h3>{configText.plugins}</h3>
+                    <span>{language === "zh" ? "为当前 Codex 配置添加插件" : "Add plugins to the current Codex config"}</span>
                     <div className="config-plugin-actions">
                       <button
                         className="control-btn compact secondary"
@@ -651,12 +639,21 @@ export function RuntimePage({
                       ))
                     )}
                   </div>
-                </section>
+                  </div>
+                </details>
               ) : null}
 
-              <section className="agent-channel-models">
+              <details className="runtime-config-disclosure runtime-models-disclosure">
+                <summary>
+                  <div>
+                    <strong>{configText.models}</strong>
+                    <span>{modelsDescription}</span>
+                  </div>
+                  <small>{selectedRuntimeChannelRecord.models.length}</small>
+                </summary>
+                <div className="runtime-disclosure-content agent-channel-models">
                 <div className="config-models-header">
-                  <h3>{configText.models}</h3>
+                  <span>{language === "zh" ? "模型 ID 与显示名称" : "Model ID and display name"}</span>
                   <div className="config-plugin-actions">
                     <button
                       className="icon-btn"
@@ -697,7 +694,25 @@ export function RuntimePage({
                     </div>
                   ))}
                 </div>
-              </section>
+                </div>
+              </details>
+
+              <details className="runtime-config-disclosure runtime-advanced-disclosure">
+                <summary>
+                  <div>
+                    <strong>{configText.advancedProvider}</strong>
+                    <span>{advancedDescription}</span>
+                  </div>
+                  <small>{language === "zh" ? "可选" : "Optional"}</small>
+                </summary>
+                <div className="runtime-disclosure-content">
+                  <RuntimeProviderFields
+                    channel={selectedRuntimeChannelRecord}
+                    language={language}
+                    onChange={updateSelectedRuntimeChannel}
+                  />
+                </div>
+              </details>
             </>
           ) : (
             <div className="empty-state config-empty runtime-empty-config">

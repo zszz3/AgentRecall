@@ -57,5 +57,11 @@ describe("RuntimePage", () => {
     expect(configSelect).not.toContain("Claude Code");
     expect(configSelect).not.toContain("Codex · Codex OpenAI · OpenAI");
     expect(markup).not.toContain("runtime-channel-row");
+    expect(markup).toContain('class="runtime-config-summary');
+    expect(markup).toContain("更换 Provider");
+    expect(markup).toContain("OpenAI");
+    expect(markup).not.toContain('aria-label="Provider presets"');
+    expect(markup).toContain('class="runtime-config-disclosure runtime-models-disclosure"');
+    expect(markup).toContain('class="runtime-config-disclosure runtime-plugins-disclosure"');
   });
 });
