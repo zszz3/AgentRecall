@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { buildRemoteSyncSshArgs } from "./remote-sync";
+import { spawnRemoteCommand } from "./remote-process";
 import type { SessionEnvironment } from "./types";
 
 export interface WatchHandle {
@@ -35,7 +36,7 @@ export class RemoteWatchManager {
   }
 
   start(environment: SessionEnvironment): void {
-    if (this.handles.has(environment.id) || !environment.enabled || environment.kind !== "ssh") return;
+    if (this.handles.has(environment.id) || !environment.enabled || (environment.kind !== "ssh" && environment.kind !== "wsl")) return;
     const token = this.nextToken;
     this.nextToken += 1;
     this.activeTokens.set(environment.id, token);
@@ -153,6 +154,7 @@ export function buildRemoteWatchCommand(): string {
 }
 
 function startSystemWatcher(environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void): WatchHandle {
+  if (environment.kind === "wsl") return startWslWatcher(environment, onEvent, onUnavailable);
   const remoteCommand = buildRemoteWatchCommand();
   let reportedUnavailable = false;
   const reportUnavailable = (): void => {
@@ -168,4 +170,26 @@ function startSystemWatcher(environment: SessionEnvironment, onEvent: () => void
   return {
     stop: () => child.kill(),
   };
+}
+
+function startWslWatcher(environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void): WatchHandle {
+  const remoteCommand = buildWslWatchCommand();
+  let reportedUnavailable = false;
+  const reportUnavailable = (): void => {
+    if (reportedUnavailable) return;
+    reportedUnavailable = true;
+    onUnavailable?.();
+  };
+  const child = spawnRemoteCommand(environment, remoteCommand);
+  child.stdout?.on("data", onEvent);
+  child.stderr?.on("data", () => undefined);
+  child.once("error", reportUnavailable);
+  child.once("exit", reportUnavailable);
+  return {
+    stop: () => child.kill(),
+  };
+}
+
+function buildWslWatchCommand(): string {
+  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
 }

@@ -4585,6 +4585,10 @@ select:focus-visible {
   gap: 12px;
 }
 
+.settings-pane-head-row > .settings-action-button:first-of-type {
+  margin-left: auto;
+}
+
 .settings-action-button {
   display: inline-flex;
   align-items: center;

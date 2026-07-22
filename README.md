@@ -73,7 +73,7 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 ### 核心功能
 
 - **统一搜索和管理多种 AI Coding Agent 会话**：
-  搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder 等会话；支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；也支持本地环境和 SSH 远程环境，远程机器无需安装本应用。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
+  搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder 等会话；支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；支持本地环境、Windows WSL 发行版和 SSH 远程环境。Windows 用户可以添加 WSL 发行版，搜索、查看并 Resume 其中的 Codex 与 Claude Code 会话；WSL 会话暂不支持迁移。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
 - **完整查看会话上下文**：
   详情页展示完整消息、tool call 与 Markdown / code block，并支持查看 AI 摘要、导出 Markdown，以及导出 OpenAI Chat、OpenAI Responses 或 Anthropic 请求体 JSON。Codex 会话会从 rollout 重建模型、指令、工具调用、推理参数、流式开关和请求 metadata；如果启动 Codex 与 AgentRecall 时均设置了 `CODEX_ROLLOUT_TRACE_ROOT`，OpenAI Responses 导出还会优先使用 Codex trace 中捕获的原始请求体。trace 可能包含完整提示词、工具参数与响应，请只保存到受信任的本地目录并妥善清理。
 - **AI / Agent 辅助检索历史会话**：
@@ -111,10 +111,11 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 | Trae | 可在设置中开启，读取 `~/.trae/memory/projects/**/session_memory_*.jsonl` 和 `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`；打开状态会读取 Trae workspace 的本地状态库 |
 | Qoder | 可在设置中开启，读取 `~/.qoder/cache/projects/*/conversation-history/*/*.jsonl`；支持 Live 检测和远程同步 |
 | SSH 远程环境 | 通过 SSH 读取远端用户目录下同样的 Codex / Claude Code session 路径 |
+| WSL 环境 | Windows 专用；读取 WSL 发行版中的 Codex / Claude Code session 路径，支持搜索、详情查看和 Resume |
 
 当 `~/.codex/session_index.jsonl` 存在时，应用会读取 Codex 的标题元数据。没有上游标题时，会使用第一个有效用户问题作为默认标题。
 
-CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Internal、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae 和 Qoder 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令），CodeWiz 支持本机和 SSH 远程会话索引、详情查看、Resume、迁移与恢复，ZCode 额外支持本地工具调用记录和按时间范围统计 Token。ZCode 不支持 Resume、会话迁移、SSH、远程同步、打开 ZCode 或额度查询；删除 ZCode 会话时只删除明确选中的会话及其关联记录，不删除共享数据库文件。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 和 Qoder 额外支持打开状态检测。
+CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Internal、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae 和 Qoder 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令），CodeWiz 支持本机和 SSH 远程会话索引、详情查看、Resume、迁移与恢复，ZCode 额外支持本地工具调用记录和按时间范围统计 Token。WSL 环境仅支持 Codex 与 Claude Code 的搜索、详情查看和 Resume，暂不支持会话迁移。ZCode 不支持 Resume、会话迁移、SSH、远程同步、打开 ZCode 或额度查询；删除 ZCode 会话时只删除明确选中的会话及其关联记录，不删除共享数据库文件。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 和 Qoder 额外支持打开状态检测。
 
 ## 远程会话同步
 

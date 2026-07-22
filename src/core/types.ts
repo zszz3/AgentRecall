@@ -18,7 +18,7 @@ export type SessionSource =
   | "qoder";
 export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder";
 export type SessionSortBy = "smart" | "activity" | "created";
-export type EnvironmentKind = "local" | "ssh";
+export type EnvironmentKind = "local" | "wsl" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";
 export type SshAuthMode = "none" | "identityFile";
 
@@ -26,6 +26,7 @@ export interface SessionEnvironment {
   id: string;
   kind: EnvironmentKind;
   label: string;
+  wslDistribution?: string | null;
   hostAlias: string | null;
   host: string | null;
   user: string | null;
@@ -44,6 +45,7 @@ export interface EnvironmentUpsertInput {
   id?: string;
   kind: EnvironmentKind;
   label: string;
+  wslDistribution?: string | null;
   hostAlias?: string | null;
   host?: string | null;
   user?: string | null;

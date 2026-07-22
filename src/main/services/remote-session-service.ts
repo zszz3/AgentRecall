@@ -197,6 +197,7 @@ export class RemoteSessionService {
     const session = store.getSession(sessionKey);
     if (!session) throw new Error("Session not found.");
     if (session.source === "zcode-cli") throw new Error("ZCode sessions cannot be saved remotely yet.");
+    if (session.environmentKind === "wsl") throw new Error("WSL sessions cannot be saved to cloud yet.");
     await this.dependencies.ensureSessionDetails(sessionKey);
     const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
     const { payload, detailJson, portableJson } = this.operations.buildUpload(
@@ -240,6 +241,7 @@ export class RemoteSessionService {
       .filter((remote) => store.getSession(remote.sourceSessionKey)?.isSubagent !== true);
     const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
     await this.runBounded(store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
+      if (session.environmentKind === "wsl") return;
       if (!migrationAgentForSource(session.source) || !session.projectPath.trim()) return;
       try {
         await this.dependencies.ensureSessionDetails(session.sessionKey);

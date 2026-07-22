@@ -206,6 +206,14 @@ describe("detail panel actions", () => {
     expect(lastGroup).not.toContain("onReveal");
   });
 
+  it("deletes WSL source files remotely before removing the local record", () => {
+    const handler = mainHandlerSource("session:delete");
+    expect(handler).toContain('session.environmentKind !== "wsl"');
+    expect(handler).toContain("await deleteWslSessionFile(requireWslEnvironment(session), session.filePath)");
+    expect(handler).toContain("return store.deleteSessionRecord(sessionKey)");
+    expect(handler).toContain("return store.deleteSession(sessionKey)");
+  });
+
   it("exposes remote environment management IPC through preload and main", () => {
     for (const channel of [
       "environments:list",
@@ -238,9 +246,9 @@ describe("detail panel actions", () => {
   });
 
   it("keeps ZCode remote saving visible but disabled until snapshot-only upload is supported", () => {
-    expect(appSource).toContain('remoteUploadDisabled={detail.source === "zcode-cli"}');
+    expect(appSource).toContain('remoteUploadDisabled={detail.source === "zcode-cli" || detail.environmentKind === "wsl"}');
     expect(detailPanelSource).toContain("disabled={actionRunning || remoteUploadDisabled}");
-    expect(detailPanelSource).toContain("ZCode remote saving is not supported yet.");
+    expect(detailPanelSource).toContain("This session cannot be saved to cloud.");
   });
 
   it("marks local-only context menu actions disabled for remote sessions", () => {

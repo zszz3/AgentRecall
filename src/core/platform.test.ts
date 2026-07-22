@@ -972,6 +972,32 @@ describe("resume process specs", () => {
     );
   });
 
+  it("builds WSL resume as wsl.exe argv with a Linux project path", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "claude-1",
+      projectPath: "/home/me/project",
+    } as SessionSearchResult;
+
+    expect(getResumeProcessSpec(session, defaultSettings, { platform: "win32", wslDistribution: "Ubuntu" })).toMatchObject({
+      command: "wsl.exe",
+      args: ["--distribution", "Ubuntu", "--exec", "bash", "-lc", "cd /home/me/project && claude --resume claude-1"],
+      cwd: undefined,
+    });
+  });
+
+  it("keeps both Windows terminal launch variants inside WSL", () => {
+    const session = { source: "codex-cli", rawId: "codex-1", projectPath: "/home/me/project", displayTitle: "WSL task" } as SessionSearchResult;
+    const plan = buildWindowsResumeLaunchPlan(session, { ...defaultSettings, defaultTerminal: "WindowsTerminal" }, {
+      platform: "win32",
+      terminal: "WindowsTerminal",
+      wslDistribution: "Ubuntu",
+    });
+    expect(plan[0]?.args.join(" ")).toContain("wsl.exe");
+    expect(plan.some((launch) => launch.args.join(" ").includes("/home/me/project"))).toBe(true);
+    expect(plan.every((launch) => launch.cwd === undefined || launch.cwd === "")).toBe(true);
+  });
+
   it("preserves manual ssh args separately in remote process specs", () => {
     const session = {
       source: "codex-cli",

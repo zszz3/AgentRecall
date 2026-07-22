@@ -215,6 +215,7 @@ export function environmentBadgeLabel(
   language: LanguageMode,
 ): string {
   if (session.environmentKind === "ssh") return `SSH · ${session.environmentLabel}`;
+  if (session.environmentKind === "wsl") return `WSL · ${session.environmentLabel}`;
   return localize(language, "Local", "本地");
 }
 
@@ -224,6 +225,9 @@ export function environmentBadgeTitle(
 ): string {
   if (session.environmentKind === "ssh") {
     return localize(language, `Remote SSH environment: ${session.environmentLabel}`, `远程 SSH 环境：${session.environmentLabel}`);
+  }
+  if (session.environmentKind === "wsl") {
+    return localize(language, `Local WSL environment: ${session.environmentLabel}`, `本地 WSL 环境：${session.environmentLabel}`);
   }
   return localize(language, "Local session on this computer", "这台电脑上的本地会话");
 }
