@@ -15,11 +15,12 @@ const stylesheet = rendererStyleSource;
 
 describe("workbench application shell", () => {
   it("starts on the workbench and exposes every primary navigation page", () => {
-    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "workflows" | "runtimes" | "mcp" | "memories" | "skills" | "providers"');
+    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers"');
     expect(appSource).toContain('useState<AppPage>("workbench")');
     expect(appSource).toContain("<WorkbenchPage");
     expect(appSource).toContain('data-page="sessions"');
     expect(appSource).toContain('data-page="workflows"');
+    expect(appSource).toContain('data-page="evaluation"');
     expect(appSource).toContain('data-page="runtimes"');
     expect(appSource).toContain('data-page="mcp"');
     expect(appSource).toContain('data-page="memories"');

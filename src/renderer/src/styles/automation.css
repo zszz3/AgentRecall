@@ -868,12 +868,23 @@
   background: var(--accent-soft);
 }
 
-.automation-mcp-page {
+.automation-mcp-page,
+.automation-evaluation-page {
   padding: 14px 18px 18px;
 }
 
 .automation-mcp-page > .mcp-workbench,
 .automation-mcp-page > .automation-page-state + .mcp-workbench {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  border-color: var(--border);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.automation-evaluation-page > .evaluation-workbench {
   width: 100%;
   min-width: 0;
   min-height: 0;

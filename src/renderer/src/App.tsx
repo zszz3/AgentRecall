@@ -4,6 +4,7 @@ import {
   AppWindow,
   Archive,
   ArrowRightLeft,
+  Beaker,
   BrainCircuit,
   CalendarDays,
   ChevronDown,
@@ -130,6 +131,7 @@ import { useAutomation } from "./features/automation/automation-provider";
 import { McpFeaturePage } from "./features/automation/mcp-feature-page";
 import { RuntimeFeaturePage } from "./features/automation/runtime-feature-page";
 import { WorkflowFeaturePage } from "./features/automation/workflow-feature-page";
+import { EvaluationFeaturePage } from "./features/automation/evaluation-feature-page";
 import { selectWorkbenchWorkflows } from "./features/automation/workbench-workflows";
 import {
   SOURCE_LABEL,
@@ -177,7 +179,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
 } satisfies MigrationTargetSettings;
 
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
-type AppPage = "workbench" | "sessions" | "workflows" | "runtimes" | "mcp" | "memories" | "skills" | "providers";
+type AppPage = "workbench" | "sessions" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -1846,6 +1848,9 @@ export function App(): ReactElement {
           <button data-page="workflows" className={activePage === "workflows" ? "active" : ""} onClick={() => void navigateToPage("workflows")}>
             <Workflow size={18} /><span>Workflow</span>
           </button>
+          <button data-page="evaluation" className={activePage === "evaluation" ? "active" : ""} onClick={() => void navigateToPage("evaluation")}>
+            <Beaker size={18} /><span>Eval</span>
+          </button>
           <button data-page="runtimes" className={activePage === "runtimes" ? "active" : ""} onClick={() => void navigateToPage("runtimes")}>
             <Cpu size={18} /><span>Runtime</span>
           </button>
@@ -2269,6 +2274,10 @@ export function App(): ReactElement {
           ) : null}
 
           {activePage === "workflows" ? <WorkflowFeaturePage language={language} /> : null}
+
+          {activePage === "evaluation" ? (
+            <EvaluationFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
+          ) : null}
 
           {activePage === "runtimes" ? (
             <RuntimeFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />

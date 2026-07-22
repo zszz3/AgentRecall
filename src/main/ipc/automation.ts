@@ -5,6 +5,9 @@ import type {
   ConfiguredAgent,
   ConfirmWorkflowRequest,
   CreateWorkflowDraftRequest,
+  EvaluationDataset,
+  EvaluationEvaluator,
+  EvaluationExperiment,
   InterruptWorkflowNodeConversationRequest,
   InterruptWorkflowReviewRequest,
   ListWorkflowOutputsRequest,
@@ -54,6 +57,62 @@ const agentSchema = z.object({
   createdAt: z.number().finite(),
   updatedAt: z.number().finite(),
 }).passthrough();
+const timestampSchema = z.number().finite().nonnegative();
+
+function isBoundedJsonValue(value: unknown, depth = 0): boolean {
+  if (value === null || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "string") return value.length <= 200_000;
+  if (depth >= 8) return false;
+  if (Array.isArray(value)) {
+    return value.length <= 1_000 && value.every((item) => isBoundedJsonValue(item, depth + 1));
+  }
+  if (typeof value !== "object") return false;
+  const entries = Object.entries(value);
+  return entries.length <= 500 && entries.every(
+    ([key, item]) => key.length <= 200 && isBoundedJsonValue(item, depth + 1),
+  );
+}
+
+const evaluationMetadataSchema = z.record(z.string().max(200), z.unknown()).refine(
+  (value) => isBoundedJsonValue(value),
+  "Evaluation metadata must be bounded JSON data.",
+);
+const evaluationDatasetSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1).max(200),
+  description: z.string().max(20_000),
+  items: z.array(z.object({
+    id: idSchema,
+    input: z.string().min(1).max(200_000),
+    expectedOutput: z.string().max(200_000).optional(),
+    metadata: evaluationMetadataSchema,
+    sequence: z.number().int().nonnegative(),
+  }).strict()).max(5_000),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+}).strict();
+const evaluationEvaluatorSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1).max(200),
+  kind: z.enum(["contains", "exact_match", "json_valid", "llm_judge"]),
+  prompt: z.string().max(500_000).optional(),
+  runtimeId: idSchema.optional(),
+  threshold: z.number().finite().min(0).max(1),
+  enabled: z.boolean(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+}).strict();
+const evaluationExperimentSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1).max(200),
+  datasetId: idSchema,
+  agentId: idSchema,
+  evaluatorIds: z.array(idSchema).max(500),
+  repetitions: z.number().int().min(1).max(5),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+}).strict();
 const workflowIdSchema = z.object({ workflowId: idSchema });
 const workflowRequestSchema = workflowIdSchema.passthrough();
 const workflowReviewSchema = workflowIdSchema.extend({ expectedRevision: z.number().int().nonnegative() }).passthrough();
@@ -188,6 +247,30 @@ export function registerAutomationIpc({
   ready(AUTOMATION_CHANNELS.mcpAgentList, (value: unknown) => service.mcpAgents().listForAgent(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.mcpAgentInstall, (value: unknown) => service.mcpAgents().install(mcpInstallSchema.parse(value) as McpInstallRequest));
   ready(AUTOMATION_CHANNELS.mcpAgentUninstall, (value: unknown) => service.mcpAgents().uninstall(mcpInstallSchema.parse(value) as McpInstallRequest));
+
+  ready(AUTOMATION_CHANNELS.evaluationDatasetList, () => service.evaluations().listDatasets());
+  ready(AUTOMATION_CHANNELS.evaluationDatasetSave, (value: unknown) =>
+    service.evaluations().saveDataset(evaluationDatasetSchema.parse(value) as EvaluationDataset));
+  ready(AUTOMATION_CHANNELS.evaluationDatasetDelete, (value: unknown) =>
+    service.evaluations().deleteDataset(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationEvaluatorList, () => service.evaluations().listEvaluators());
+  ready(AUTOMATION_CHANNELS.evaluationEvaluatorSave, (value: unknown) =>
+    service.evaluations().saveEvaluator(evaluationEvaluatorSchema.parse(value) as EvaluationEvaluator));
+  ready(AUTOMATION_CHANNELS.evaluationEvaluatorDelete, (value: unknown) =>
+    service.evaluations().deleteEvaluator(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationExperimentList, () => service.evaluations().listExperiments());
+  ready(AUTOMATION_CHANNELS.evaluationExperimentSave, (value: unknown) =>
+    service.evaluations().saveExperiment(evaluationExperimentSchema.parse(value) as EvaluationExperiment));
+  ready(AUTOMATION_CHANNELS.evaluationExperimentDelete, (value: unknown) =>
+    service.evaluations().deleteExperiment(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationExperimentRun, (value: unknown) => {
+    const request = z.object({ experimentId: idSchema }).strict().parse(value);
+    return service.evaluations().runExperiment(request.experimentId);
+  });
+  ready(AUTOMATION_CHANNELS.evaluationRunList, (value: unknown) =>
+    service.evaluations().listRuns(value === undefined ? undefined : idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationRunDelete, (value: unknown) =>
+    service.evaluations().deleteRun(idSchema.parse(value)));
 
   ready(AUTOMATION_CHANNELS.workflowDraftCreate, (value: unknown) =>
     service.hub().createWorkflowDraft((value === undefined ? {} : z.object({

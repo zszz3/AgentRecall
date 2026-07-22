@@ -11,6 +11,8 @@ import {
 } from "../../automation/engine/main/bridges/mcp-bridge";
 import { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import { McpAgentManagementService } from "../../automation/engine/main/mcp/agent-management-service";
+import { EvaluationStore } from "../../automation/engine/main/evaluation-store";
+import { ConfiguredAgentExecutionService } from "../../automation/engine/main/platform/configured-agent-execution-service";
 import {
   loadBundledWorkflows,
   type BundledWorkflowDefinition,
@@ -18,6 +20,7 @@ import {
 import { mcpToolDefinitions } from "../../automation/engine/mcp/server";
 import type { AutomationHealth } from "../../shared/ipc/automation";
 import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths";
+import { EvaluationService } from "./evaluation-service";
 
 export interface AutomationServiceOptions {
   userDataPath: string;
@@ -31,6 +34,7 @@ interface AutomationServiceDependencies {
   hub?: AgentHub;
   registry?: McpRegistryStore;
   agents?: McpAgentManagementService;
+  evaluations?: EvaluationService;
   loadBundledWorkflows?: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
   startBridge?: typeof startMcpBridge;
   startRouter?: typeof startCodexChatRouter;
@@ -44,6 +48,7 @@ export class NativeAutomationService {
   private readonly hubInstance: AgentHub;
   private readonly registryInstance: McpRegistryStore;
   private readonly agentsInstance: McpAgentManagementService;
+  private readonly evaluationsInstance: EvaluationService;
   private readonly loadWorkflows: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
   private readonly startBridgeService: typeof startMcpBridge;
   private readonly startRouterService: typeof startCodexChatRouter;
@@ -68,6 +73,18 @@ export class NativeAutomationService {
     this.startBridgeService = dependencies.startBridge ?? startMcpBridge;
     this.startRouterService = dependencies.startRouter ?? startCodexChatRouter;
     this.setRouterBaseUrl = dependencies.setRouterBaseUrl ?? setCodexChatRouterBaseUrl;
+    const configuredAgentExecutor = new ConfiguredAgentExecutionService({
+      agents: () => this.hubInstance.snapshot().configuredAgents,
+      channels: () => this.hubInstance.snapshot().channels,
+      defaultWorkDir: () => this.hubInstance.getWorkDir(),
+      execute: (request) => this.hubInstance.askWorkflowAgent(request),
+    });
+    this.evaluationsInstance = dependencies.evaluations ?? new EvaluationService({
+      store: new EvaluationStore(this.paths.databasePath),
+      agents: () => this.hubInstance.snapshot().configuredAgents,
+      executeAgent: (configuredAgentId, prompt) =>
+        configuredAgentExecutor.runOneShot({ configuredAgentId, prompt }),
+    });
     this.agentsInstance = dependencies.agents ?? new McpAgentManagementService({
       homeDir: () => options.homePath,
       appDataDir: () => options.appDataPath,
@@ -151,6 +168,10 @@ export class NativeAutomationService {
     return this.agentsInstance;
   }
 
+  evaluations(): EvaluationService {
+    return this.evaluationsInstance;
+  }
+
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownPromise = this.shutdownInternal();
@@ -161,6 +182,7 @@ export class NativeAutomationService {
     await this.hubInstance.shutdown();
     await this.bridge?.stop();
     await this.router?.stop();
+    this.evaluationsInstance.close();
     this.registryInstance.close();
     this.unsubscribeHub();
     this.listeners.clear();

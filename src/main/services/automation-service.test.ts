@@ -3,6 +3,7 @@ import type { AppSnapshot } from "../../automation/engine/shared/types";
 import type { AgentHub } from "../../automation/engine/main/hub/agent-hub";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type { McpAgentManagementService } from "../../automation/engine/main/mcp/agent-management-service";
+import type { EvaluationService } from "./evaluation-service";
 import { NativeAutomationService } from "./automation-service";
 
 function snapshot(workDir = "/repo"): AppSnapshot {
@@ -30,6 +31,7 @@ function fixture() {
     shutdown: vi.fn(async () => { calls.push("hub-stop"); }),
   } as unknown as AgentHub;
   const registry = { close: vi.fn(() => { calls.push("registry-close"); }) } as unknown as McpRegistryStore;
+  const evaluations = { close: vi.fn(() => { calls.push("evaluations-close"); }) } as unknown as EvaluationService;
   const agents = {} as McpAgentManagementService;
   const service = new NativeAutomationService(
     {
@@ -42,6 +44,7 @@ function fixture() {
     {
       hub,
       registry,
+      evaluations,
       agents,
       loadBundledWorkflows: vi.fn(async () => [{ workflowId: "wf", title: "One", objective: "One", definition: {} as never }]),
       startRouter: vi.fn(async () => ({ host: "127.0.0.1", port: 1, baseUrl: "http://127.0.0.1:1", stop: async () => { calls.push("router-stop"); } })),
@@ -55,7 +58,7 @@ function fixture() {
       })),
     },
   );
-  return { service, calls, hub, registry, emit: (value: AppSnapshot) => { current = value; listener?.(value); } };
+  return { service, calls, hub, registry, evaluations, emit: (value: AppSnapshot) => { current = value; listener?.(value); } };
 }
 
 describe("NativeAutomationService", () => {
@@ -83,12 +86,13 @@ describe("NativeAutomationService", () => {
   });
 
   it("flushes runtime state before bridge and registry shutdown", async () => {
-    const { service, calls } = fixture();
+    const { service, calls, evaluations } = fixture();
     await service.initialize();
 
     await service.shutdown();
     await service.shutdown();
 
-    expect(calls.slice(-4)).toEqual(["hub-stop", "bridge-stop", "router-stop", "registry-close"]);
+    expect(calls.slice(-5)).toEqual(["hub-stop", "bridge-stop", "router-stop", "evaluations-close", "registry-close"]);
+    expect(service.evaluations()).toBe(evaluations);
   });
 });

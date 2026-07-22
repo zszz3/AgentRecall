@@ -2147,6 +2147,111 @@
       "path": "shared/workflow/run.ts",
       "kind": "source",
       "sha256": "3131ca6bf5def7ab3f2076c8f61e8bf7746cce778292f943e45f26bd2db267f5"
+    },
+    {
+      "path": "main/evaluation-runner.test.ts",
+      "kind": "test",
+      "sha256": "81ffcaf517c9de3b608b7681d42932b3054dc99573222022414a2fee86bfc0c5"
+    },
+    {
+      "path": "main/evaluation-runner.ts",
+      "kind": "source",
+      "sha256": "79d5357895cac62790d7c8e5da7fb148cd1f755bd116534fe6da65e09f7dee6c"
+    },
+    {
+      "path": "main/evaluation-store.test.ts",
+      "kind": "test",
+      "sha256": "516d0ca73d503a2921f271dac83df960f18f73fdc3da5234f69ddbd4f090893c"
+    },
+    {
+      "path": "main/evaluation-store.ts",
+      "kind": "source",
+      "sha256": "8c518523d9bbcf478d4906602820f375f3a38f6c09257fe74d83f05f8d2a042a"
+    },
+    {
+      "path": "main/evaluation/schema.ts",
+      "kind": "source",
+      "sha256": "90798c12f09e77de12fcfeaab2055df065501540b2ad7eb1ce3af429facdc3c1"
+    },
+    {
+      "path": "main/platform/configured-agent-execution-service.ts",
+      "kind": "source",
+      "sha256": "5095e54b8cbe1471a84ef8e01c57909a4f14cf3f1a2e7800da6f7a3196a6df03"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/DatasetWorkspace.tsx",
+      "kind": "source",
+      "sha256": "c8ddb39accad9d3e08bdb39869fedd0c76563b317a6478e313f3539e543b9dfe"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/EvaluationOverview.tsx",
+      "kind": "source",
+      "sha256": "22cd08cb1b9edd6ebbfbd96409d225afdc838a84f49769a117ce6dd0897ab502"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/EvaluationPage.tsx",
+      "kind": "source",
+      "sha256": "4c7a46e1a41f9cd44cec4317a1739098d7997fd81d7d46234b2cef8829dc40c3"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/EvaluatorTemplateMenu.tsx",
+      "kind": "source",
+      "sha256": "e1085c29490369e062ba66dc38fa6e306b1e905e1905f4bdb81c0bc949e4f328"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/EvaluatorWorkspace.tsx",
+      "kind": "source",
+      "sha256": "ff7e1ea3769bbf5256976d9d9ecaa61dfe3b8de9e636cdd4643d1e2a5eb2e6f0"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/ExperimentWorkspace.tsx",
+      "kind": "source",
+      "sha256": "ac7d5c92e8474db432fea3db6dde6fa50365aadd99927188a9586eaa777241d7"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/evaluation-format.ts",
+      "kind": "source",
+      "sha256": "dcc26cf1f31cb1914364a45c2e3f47d56d4c5b7a8aa1ef08437ba361732573b8"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/evaluator-factory.test.ts",
+      "kind": "test",
+      "sha256": "d2fbe0aa169ce31a99bcbf528aa732ebeebf361f3a5e5c2d72cd1ce342fcc498"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/evaluator-factory.ts",
+      "kind": "source",
+      "sha256": "1974fbaee5bf7c675e18d0a927389bd0a4ad01554597ad61a7d34f1c74090307"
+    },
+    {
+      "path": "renderer/src/pages/evaluation/useEvaluationWorkbench.ts",
+      "kind": "source",
+      "sha256": "be9af4d94e77736af37e76fbe1c8f70a3f00a429e36bc9af331c267d6c546f22"
+    },
+    {
+      "path": "renderer/src/ui/workbench/useEntityDraft.test.ts",
+      "kind": "test",
+      "sha256": "76f3475385c86da36d4e16ea21ae5c7aac512188d4ae56c0d6567cfd39c4e601"
+    },
+    {
+      "path": "renderer/src/ui/workbench/useEntityDraft.ts",
+      "kind": "source",
+      "sha256": "69f1b67aab4a06c418a3bb5aded43850ca7b8a50a09afd54786c40e721bd8ef9"
+    },
+    {
+      "path": "shared/evaluation-templates.test.ts",
+      "kind": "test",
+      "sha256": "a910bb8a4184dbeba0c148ef0f74710db0d04711d63dc746d50f086fb60b0fc1"
+    },
+    {
+      "path": "shared/evaluation-templates.ts",
+      "kind": "source",
+      "sha256": "3727a1a56c0928f1b26c77d384d1c6ee87e2bc619cd36c040159e516e8645059"
+    },
+    {
+      "path": "shared/evaluation/evaluator-prompts.ts",
+      "kind": "source",
+      "sha256": "1006fda47be13a48cfcb5eb2fc1f720142ef900eb33d9ae0625966ffd49db295"
     }
   ]
 }

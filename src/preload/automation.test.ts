@@ -30,4 +30,40 @@ describe("createAutomationApi", () => {
 
     expect(ipc.removeListener).toHaveBeenCalledWith(AUTOMATION_CHANNELS.snapshotChanged, listener);
   });
+
+  it("maps the complete Evaluation API to prefixed channels", async () => {
+    const ipc = { invoke: vi.fn(async () => ({ ok: true })), on: vi.fn(), removeListener: vi.fn() };
+    const api = createAutomationApi(ipc as never);
+    const dataset = { id: "dataset-1" } as never;
+    const evaluator = { id: "evaluator-1" } as never;
+    const experiment = { id: "experiment-1" } as never;
+
+    await api.listEvaluationDatasets();
+    await api.saveEvaluationDataset(dataset);
+    await api.deleteEvaluationDataset("dataset-1");
+    await api.listEvaluationEvaluators();
+    await api.saveEvaluationEvaluator(evaluator);
+    await api.deleteEvaluationEvaluator("evaluator-1");
+    await api.listEvaluationExperiments();
+    await api.saveEvaluationExperiment(experiment);
+    await api.deleteEvaluationExperiment("experiment-1");
+    await api.listEvaluationRuns("experiment-1");
+    await api.deleteEvaluationRun("run-1");
+    await api.runEvaluationExperiment("experiment-1");
+
+    expect(ipc.invoke.mock.calls).toEqual([
+      [AUTOMATION_CHANNELS.evaluationDatasetList],
+      [AUTOMATION_CHANNELS.evaluationDatasetSave, dataset],
+      [AUTOMATION_CHANNELS.evaluationDatasetDelete, "dataset-1"],
+      [AUTOMATION_CHANNELS.evaluationEvaluatorList],
+      [AUTOMATION_CHANNELS.evaluationEvaluatorSave, evaluator],
+      [AUTOMATION_CHANNELS.evaluationEvaluatorDelete, "evaluator-1"],
+      [AUTOMATION_CHANNELS.evaluationExperimentList],
+      [AUTOMATION_CHANNELS.evaluationExperimentSave, experiment],
+      [AUTOMATION_CHANNELS.evaluationExperimentDelete, "experiment-1"],
+      [AUTOMATION_CHANNELS.evaluationRunList, "experiment-1"],
+      [AUTOMATION_CHANNELS.evaluationRunDelete, "run-1"],
+      [AUTOMATION_CHANNELS.evaluationExperimentRun, { experimentId: "experiment-1" }],
+    ]);
+  });
 });

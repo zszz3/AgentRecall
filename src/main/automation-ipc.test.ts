@@ -20,6 +20,20 @@ function setup() {
     recordTest: vi.fn(),
     delete: vi.fn(),
   };
+  const evaluations = {
+    listDatasets: vi.fn(async () => []),
+    saveDataset: vi.fn(async (value) => value),
+    deleteDataset: vi.fn(async () => true),
+    listEvaluators: vi.fn(async () => []),
+    saveEvaluator: vi.fn(async (value) => value),
+    deleteEvaluator: vi.fn(async () => true),
+    listExperiments: vi.fn(async () => []),
+    saveExperiment: vi.fn(async (value) => value),
+    deleteExperiment: vi.fn(async () => true),
+    listRuns: vi.fn(async () => []),
+    deleteRun: vi.fn(async () => true),
+    runExperiment: vi.fn(async (experimentId) => ({ experimentId })),
+  };
   const service = {
     requireReady: vi.fn(async () => undefined),
     health: vi.fn(() => ({ state: "ready" })),
@@ -28,10 +42,11 @@ function setup() {
     hub: vi.fn(() => hub),
     mcpRegistry: vi.fn(() => registry),
     mcpAgents: vi.fn(() => ({})),
+    evaluations: vi.fn(() => evaluations),
   } as unknown as NativeAutomationService;
   registerAutomationIpc({ ipc: ipc as never, service, send: vi.fn() });
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args);
-  return { handlers, invoke, hub, registry, service };
+  return { handlers, invoke, hub, registry, evaluations, service };
 }
 
 describe("registerAutomationIpc", () => {
@@ -78,5 +93,46 @@ describe("registerAutomationIpc", () => {
       reply: "x".repeat(200_001),
     })).rejects.toThrow(/too big|too long|maximum/i);
     expect(hub.sendWorkflowDraftReply).not.toHaveBeenCalled();
+  });
+
+  it("validates and delegates Evaluation datasets", async () => {
+    const { invoke, evaluations } = setup();
+    const dataset = {
+      id: "dataset-1",
+      name: "Regression",
+      description: "Core cases",
+      items: [{ id: "case-1", input: "Explain this", metadata: {}, sequence: 0 }],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    await expect(invoke(AUTOMATION_CHANNELS.evaluationDatasetSave, dataset)).resolves.toEqual(dataset);
+    expect(evaluations.saveDataset).toHaveBeenCalledWith(dataset);
+
+    await expect(invoke(AUTOMATION_CHANNELS.evaluationDatasetSave, {
+      ...dataset,
+      items: [{ ...dataset.items[0], input: "x".repeat(200_001) }],
+    })).rejects.toThrow(/too big|too long|maximum/i);
+    expect(evaluations.saveDataset).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds Evaluation repetitions and runs only saved experiments", async () => {
+    const { invoke, evaluations } = setup();
+    const experiment = {
+      id: "experiment-1",
+      name: "Regression",
+      datasetId: "dataset-1",
+      agentId: "agent-1",
+      evaluatorIds: ["evaluator-1"],
+      repetitions: 6,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    await expect(invoke(AUTOMATION_CHANNELS.evaluationExperimentSave, experiment)).rejects.toThrow(/less than or equal|maximum|too big/i);
+    expect(evaluations.saveExperiment).not.toHaveBeenCalled();
+
+    await expect(invoke(AUTOMATION_CHANNELS.evaluationExperimentRun, { experimentId: "experiment-1" })).resolves.toEqual({ experimentId: "experiment-1" });
+    expect(evaluations.runExperiment).toHaveBeenCalledWith("experiment-1");
   });
 });

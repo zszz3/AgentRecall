@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { WorkflowDraftState, WorkflowRunState } from "../../automation/engine/shared/types";
 import { selectWorkbenchWorkflows } from "./features/automation/workbench-workflows";
@@ -55,6 +55,20 @@ describe("native automation UI", () => {
     expect(appSource).toContain("<RuntimeFeaturePage");
     expect(appSource).toContain("<McpFeaturePage");
     expect(mainSource).toContain("<AutomationProvider>");
+  });
+
+  it("exposes Evaluation as a first-class page backed by the Automation API", () => {
+    const featureUrl = new URL("./features/automation/evaluation-feature-page.tsx", import.meta.url);
+
+    expect(appSource).toContain('data-page="evaluation"');
+    expect(appSource).toContain("<EvaluationFeaturePage");
+    expect(existsSync(featureUrl)).toBe(true);
+    if (!existsSync(featureUrl)) return;
+
+    const featureSource = readFileSync(featureUrl, "utf8");
+    expect(featureSource).toContain("snapshot.configuredAgents");
+    expect(featureSource).toContain("snapshot.channels");
+    expect(featureSource).toContain("api={api}");
   });
 
   it("prioritizes waiting and running workflows before recent inactive workflows", () => {
