@@ -14,7 +14,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import Store from "electron-store";
-import { cpSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -97,6 +97,7 @@ import {
   type SessionSyncHookSetup,
 } from "./services/remote-session-service";
 import { SkillService, type SkillUsageHookSetup } from "./services/skill-service";
+import { bootstrapApplicationPaths } from "./app-path-bootstrap";
 import type {
   EnvironmentUpsertInput,
   MigrationAgent,
@@ -160,30 +161,16 @@ function ensureAgentRecallMcpPreference(): boolean {
   return setup.status();
 }
 
-function migrateLegacyUserData(): void {
-  const target = app.getPath("userData");
-  if (existsSync(target)) return;
-
-  const parent = path.dirname(target);
-  const legacyNames = [
-    ["Agent", "Session", "Search"].join("-"),
-    ["agent", "session", "search"].join("-"),
-  ];
-  for (const legacyName of legacyNames) {
-    const legacy = path.join(parent, legacyName);
-    if (!existsSync(legacy)) continue;
-    try {
-      cpSync(legacy, target, { recursive: true, errorOnExist: false });
-    } catch (error) {
-      console.warn(`Could not migrate existing user data to ${PRODUCT_NAME}:`, error);
-    }
-    return;
-  }
-}
-
 app.setName(PRODUCT_NAME);
 app.setAppUserModelId("dev.zszz3.agent-recall");
-migrateLegacyUserData();
+bootstrapApplicationPaths({
+  app,
+  productName: PRODUCT_NAME,
+  legacyProductNames: [
+    ["Agent", "Session", "Search"].join("-"),
+    ["agent", "session", "search"].join("-"),
+  ],
+});
 
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
