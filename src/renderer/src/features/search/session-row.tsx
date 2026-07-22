@@ -5,6 +5,7 @@ import type {
 } from "react";
 import {
   Code2,
+  Container,
   Edit3,
   EyeOff,
   Laptop,
@@ -115,7 +116,7 @@ export const SessionRow = memo(function SessionRow({
             {SOURCE_LABEL[session.source]}
           </span>
           <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-            {isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
+              {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
             {environmentBadgeLabel(session, language)}
           </span>
           <span>{session.projectPath || l("No project path", "无项目路径")}</span>

@@ -64,13 +64,15 @@ import { writeDbPointer } from "../core/app-paths";
 import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
 import { buildRemoteSyncSshArgs, fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
-import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
+import { REMOTE_PROCESS_EXEC_OPTIONS, runRemoteCommandWithInput } from "../core/remote-process";
+import { loadRemoteSessionDetailPayload, loadWslSessionDetailPayload } from "../core/remote-session-loader";
 import type { RemoteSessionRestoreDependencies } from "../core/remote-session-restore";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
 import { RemoteWatchManager } from "../core/remote-watch";
 import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { buildSshArgs, readUserSshConfig } from "../core/ssh-config";
+import { listWslDistributions } from "../core/wsl";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
 import { isLocalSessionEnvironment } from "../core/session-environment";
@@ -432,6 +434,18 @@ function requireSshArgsForRemoteSession(session: SessionSearchResult): string[] 
   return sshArgs;
 }
 
+function requireWslEnvironment(session: SessionSearchResult): SessionEnvironment {
+  const environment = store.getEnvironment(session.environmentId);
+  if (environment?.kind !== "wsl") throw new Error("WSL environment is not available for this remote session.");
+  return environment;
+}
+
+function requireWslResumeOptions(session: SessionSearchResult): { wslDistribution: string } {
+  const environment = requireWslEnvironment(session);
+  if (!environment.wslDistribution) throw new Error("WSL distribution is not configured for this remote session.");
+  return { wslDistribution: environment.wslDistribution };
+}
+
 function requireRemoteSshEnvironment(session: SessionSearchResult): SessionEnvironment | null {
   if (isLocalSessionEnvironment(session)) return null;
   const environment = store.getEnvironment(session.environmentId);
@@ -473,6 +487,12 @@ async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<voi
     if (!latest || isLocalSessionEnvironment(latest)) return;
     if (latest.source === "codewiz-cli") return;
     const environment = store.getEnvironment(latest.environmentId);
+    if (environment?.kind === "wsl") {
+      const payload = await fetchRemoteSessionFilePayload(environment, latest);
+      const loaded = loadWslSessionDetailPayload(environment, payload, latest);
+      if (loaded) store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
+      return;
+    }
     if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
     const payload = await fetchRemoteSessionFilePayload(environment, latest);
     const loaded = loadRemoteSessionDetailPayload(environment, payload, latest);
@@ -615,6 +635,29 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
+}
+
+async function ensureWslResumePreflight(session: SessionSearchResult): Promise<void> {
+  const environment = requireWslEnvironment(session);
+  const report = await preflightRemoteSessionResume(environment, session);
+  const errors = report.checks.filter((check) => check.status === "error");
+  if (errors.length > 0) {
+    throw new Error(errors.map((check) => `${check.label}: ${check.message}`).join("\n"));
+  }
+}
+
+async function resumeWslSession(session: SessionSearchResult): Promise<{ route: "resume" }> {
+  const wslOptions = requireWslResumeOptions(session);
+  await ensureWslResumePreflight(session);
+  await openResumeInTerminal(session, getSettings(), wslOptions);
+  store.markResumed(session.sessionKey);
+  return { route: "resume" };
+}
+
+async function resumeWslSessionInIterm(session: SessionSearchResult): Promise<void> {
+  await ensureWslResumePreflight(session);
+  await openResumeInSpecificTerminal(session, getSettings(), "iTerm", requireWslResumeOptions(session));
+  store.markResumed(session.sessionKey);
 }
 
 function toggleWindow(): void {
@@ -1122,7 +1165,7 @@ async function runRemotePathCheck(environment: SessionEnvironment, targetPath: s
 
 function runRemotePython(environment: SessionEnvironment, script: string, payload: unknown): Promise<string> {
   const remoteCommand = buildPythonBase64Command(script);
-  return runSshWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
+  return runRemoteWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
 }
 
 function runSshWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
@@ -1134,6 +1177,12 @@ function runSshWithInput(environment: SessionEnvironment, remoteCommand: string,
     });
     child.stdin?.end(input);
   });
+}
+
+function runRemoteWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
+  return environment.kind === "wsl"
+    ? runRemoteCommandWithInput(environment, remoteCommand, input, REMOTE_PROCESS_EXEC_OPTIONS)
+    : runSshWithInput(environment, remoteCommand, input);
 }
 
 function buildPythonBase64Command(script: string): string {
@@ -1210,7 +1259,9 @@ function registerIpc(): void {
     const session = store.getSession(sessionKey);
     if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) {
       if (session.messageCount <= 0) return [];
-      const environment = requireRemoteSshEnvironment(session);
+      const environment = session.environmentKind === "wsl"
+        ? requireWslEnvironment(session)
+        : requireRemoteSshEnvironment(session);
       if (!environment) return [];
       return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit);
     }
@@ -1396,6 +1447,7 @@ function registerIpc(): void {
   ipcMain.handle("tags:by-project", () => store.listTagsByProject(visibleProjectOptions()));
   ipcMain.handle("environments:list", () => store.listEnvironments());
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
+  ipcMain.handle("wsl:list-distributions", () => listWslDistributions());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>
     ensureRemoteEnvironmentLifecycle().saveEnvironment(input),
   );
@@ -1405,9 +1457,11 @@ function registerIpc(): void {
   ipcMain.handle("environment:refresh", (_event, environmentId: string) =>
     ensureRemoteEnvironmentLifecycle().refreshEnvironment(environmentId),
   );
-  ipcMain.handle("environment:diagnose", (_event, environmentId: string) =>
-    diagnoseRemoteEnvironment(requireSshEnvironment(environmentId)),
-  );
+  ipcMain.handle("environment:diagnose", (_event, environmentId: string) => {
+    const environment = store.getEnvironment(environmentId);
+    if (environment?.kind === "wsl") return diagnoseRemoteEnvironment(environment);
+    return diagnoseRemoteEnvironment(requireSshEnvironment(environmentId));
+  });
   ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) =>
     setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
       getSession: (key) => store.getSession(key),
@@ -1461,11 +1515,16 @@ function registerIpc(): void {
   ipcMain.handle("command:copy-resume", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return;
+    if (session.environmentKind === "wsl") {
+      clipboard.writeText(getResumeCommand(session, getSettings(), requireWslResumeOptions(session)));
+      return;
+    }
     clipboard.writeText(getResumeCommand(session, getSettings(), { sshArgs: requireSshArgsForRemoteSession(session) }));
   });
   ipcMain.handle("command:resume", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return { route: "resume" as const };
+    if (session.environmentKind === "wsl") return resumeWslSession(session);
     const sshArgs = requireSshArgsForRemoteSession(session);
     if (!isLocalSessionEnvironment(session)) {
       await ensureRemoteResumePreflight(session);
@@ -1492,6 +1551,7 @@ function registerIpc(): void {
   ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return;
+    if (session.environmentKind === "wsl") return resumeWslSessionInIterm(session);
     const sshArgs = requireSshArgsForRemoteSession(session);
     await ensureRemoteResumePreflight(session);
     await openResumeInSpecificTerminal(session, getSettings(), "iTerm", { sshArgs });

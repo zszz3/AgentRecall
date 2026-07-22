@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Cloud,
+  Container,
   Download,
   Folder,
   Gauge,
@@ -131,6 +132,7 @@ export function SettingsDialog({
   onDiagnoseEnvironment,
   onDeleteEnvironment,
   onAddSsh,
+  onAddWsl,
   onOpenApiConfig,
   onOpenRemoteSessions,
   onClose,
@@ -165,6 +167,7 @@ export function SettingsDialog({
   onDiagnoseEnvironment: (environment: SessionEnvironment) => void;
   onDeleteEnvironment: (environment: SessionEnvironment) => void;
   onAddSsh: () => void;
+  onAddWsl?: () => void;
   onOpenApiConfig: () => void;
   onOpenRemoteSessions: () => void;
   onClose: () => void;
@@ -411,8 +414,14 @@ export function SettingsDialog({
                 <header className="settings-pane-head settings-pane-head-row">
                   <div>
                     <h3>{l("Connections", "连接")}</h3>
-                    <p>{l("Local and SSH environments indexed by session search.", "会话搜索索引的本地和 SSH 环境。")}</p>
+                    <p>{l("Local, WSL, and SSH environments indexed by session search.", "会话搜索索引的本地、WSL 和 SSH 环境。")}</p>
                   </div>
+                  {platform === "win32" && onAddWsl ? (
+                    <button className="settings-action-button" onClick={onAddWsl}>
+                      <Container size={14} />
+                      <span>{l("Add WSL", "添加 WSL")}</span>
+                    </button>
+                  ) : null}
                   <button className="settings-action-button" onClick={onAddSsh}>
                     <Plus size={14} />
                     <span>{l("Add SSH", "添加 SSH")}</span>
@@ -424,14 +433,14 @@ export function SettingsDialog({
                     const diagnosing = diagnosingEnvironmentId === environment.id;
                     return (
                       <div key={environment.id} className={`connection-row ${environmentStatus(environment)} ${report ? "with-diagnostics" : ""}`}>
-                        <div className="connection-icon">{environment.kind === "local" ? <Laptop size={15} /> : <Server size={15} />}</div>
+                        <div className="connection-icon">{environment.kind === "local" ? <Laptop size={15} /> : environment.kind === "wsl" ? <Container size={15} /> : <Server size={15} />}</div>
                         <div className="connection-main">
                           <span className="connection-title">{environment.label}</span>
                           <span className="connection-target">{environmentTarget(environment, language)}</span>
                           {environment.lastError ? <span className="connection-error">{environment.lastError}</span> : null}
                         </div>
                         <span className="connection-status">{environmentStatusLabel(environment, language)}</span>
-                        {environment.kind === "ssh" ? (
+                        {environment.kind !== "local" ? (
                           <div className="connection-actions">
                             <button
                               className="icon-button"

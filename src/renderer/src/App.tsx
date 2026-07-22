@@ -10,6 +10,7 @@ import {
   Clipboard,
   Cloud,
   Code2,
+  Container,
   Copy,
   Download,
   Edit3,
@@ -124,6 +125,7 @@ import {
   type SettingsSection,
 } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
+import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
 import {
   SOURCE_LABEL,
   environmentBadgeLabel,
@@ -347,6 +349,7 @@ export function App(): ReactElement {
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
   const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
+  const [wslDialogOpen, setWslDialogOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [assetsOpen, setAssetsOpen] = useState(false);
   const [rulesSnapshot, setRulesSnapshot] = useState<RulesSyncSnapshot | null>(null);
@@ -998,6 +1001,7 @@ export function App(): ReactElement {
       // Esc backs out of the frontmost layer, one at a time.
       if (event.key === "Escape") {
         if (sshDialogOpen) setSshDialogOpen(false);
+        else if (wslDialogOpen) setWslDialogOpen(false);
         else if (migrationDialog) setMigrationDialog(null);
         else if (dialog) setDialog(null);
         else if (deleteSessionCandidate && !deletingSession) setDeleteSessionCandidate(null);
@@ -1017,7 +1021,7 @@ export function App(): ReactElement {
       }
 
       // Leave list navigation alone while an overlay or menu is in front.
-      if (detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen) return;
+      if (detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || skillsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
@@ -1057,7 +1061,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen, actionStatus, t]);
+  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -1065,9 +1069,9 @@ export function App(): ReactElement {
   }, [selectedKey]);
 
   useEffect(() => {
-    document.body.classList.toggle("overlay-open", Boolean(detail || remoteDetail || skillsOpen || assetsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || remoteSessionsOpen));
+    document.body.classList.toggle("overlay-open", Boolean(detail || remoteDetail || skillsOpen || assetsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen));
     return () => document.body.classList.remove("overlay-open");
-  }, [detail, remoteDetail, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, remoteSessionsOpen]);
+  }, [detail, remoteDetail, skillsOpen, apiConfigOpen, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen]);
 
   const visibleSourceFilters = useMemo(() => {
     if (!appSettings) return sourceFilters(null);
@@ -1590,7 +1594,7 @@ export function App(): ReactElement {
   }
 
   async function diagnoseEnvironment(environment: SessionEnvironment): Promise<void> {
-    if (environment.kind !== "ssh") return;
+    if (environment.kind !== "ssh" && environment.kind !== "wsl") return;
     setDiagnosingEnvironmentId(environment.id);
     setSettingsFeedback({ kind: "running", message: t(`Checking ${environment.label}...`, `正在检查 ${environment.label}...`) });
     try {
@@ -1632,6 +1636,22 @@ export function App(): ReactElement {
       await window.sessionSearch.saveEnvironment(input);
       await reloadEnvironmentData();
       const message = t("SSH environment saved.", "SSH 环境已保存。");
+      setSettingsFeedback({ kind: "success", message });
+      window.setTimeout(() => {
+        setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
+      }, 1800);
+    } catch (error) {
+      setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  async function saveWslEnvironment(input: EnvironmentUpsertInput): Promise<void> {
+    setSettingsFeedback({ kind: "running", message: t("Saving WSL environment...", "正在保存 WSL 环境...") });
+    try {
+      await window.sessionSearch.saveEnvironment(input);
+      await reloadEnvironmentData();
+      const message = t("WSL environment saved.", "WSL 环境已保存。");
       setSettingsFeedback({ kind: "success", message });
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
@@ -1818,7 +1838,7 @@ export function App(): ReactElement {
                       onClick={() => { selectEnvironment(groupId); clearProjectFilter(); setTag(undefined); }}
                       title={group.environment ? environmentTarget(group.environment, language) : t("Unknown", "未知")}
                     >
-                      {group.environment?.kind === "local" ? <Laptop size={13} /> : <Server size={13} />}
+                      {group.environment?.kind === "local" ? <Laptop size={13} /> : group.environment?.kind === "wsl" ? <Container size={13} /> : <Server size={13} />}
                       <span>{group.environment?.label ?? t("Unknown", "未知")}</span>
                       <em className="tree-count">{group.projects.length}</em>
                     </button>
@@ -2159,7 +2179,7 @@ export function App(): ReactElement {
           }
           onMigrate={() => beginMigrate(detail)}
           onUploadRemote={() => void uploadRemoteSession(detail)}
-          remoteUploadDisabled={detail.source === "zcode-cli"}
+          remoteUploadDisabled={detail.source === "zcode-cli" || detail.environmentKind === "wsl"}
           onCopyResume={() =>
             void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(detail.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
           }
@@ -2380,6 +2400,7 @@ export function App(): ReactElement {
           onDiagnoseEnvironment={(environment) => void diagnoseEnvironment(environment)}
           onDeleteEnvironment={(environment) => void deleteEnvironment(environment)}
           onAddSsh={() => setSshDialogOpen(true)}
+          onAddWsl={() => setWslDialogOpen(true)}
           onOpenApiConfig={() => {
             setSettingsOpen(false);
             setApiConfigOpen(true);
@@ -2399,6 +2420,16 @@ export function App(): ReactElement {
           feedback={settingsFeedback}
           onSaveEnvironment={(input) => saveSshEnvironment(input)}
           onClose={() => setSshDialogOpen(false)}
+        />
+      ) : null}
+
+      {wslDialogOpen ? (
+        <WslEnvironmentDialog
+          environments={environments}
+          language={language}
+          feedback={settingsFeedback}
+          onSaveEnvironment={(input) => saveWslEnvironment(input)}
+          onClose={() => setWslDialogOpen(false)}
         />
       ) : null}
 
