@@ -27,6 +27,7 @@ function configuredAgent(
     runtimeAgentId?: AgentId;
     channelId?: string;
     modelId?: string;
+    instructions?: string;
   } = {},
 ): ConfiguredAgent {
   const runtimeAgentId = options.runtimeAgentId ?? "codex";
@@ -34,6 +35,7 @@ function configuredAgent(
     id,
     name: options.name ?? id,
     description: "",
+    ...(options.instructions ? { instructions: options.instructions } : {}),
     runtimeAgentId,
     channelId:
       options.channelId ??
@@ -179,6 +181,7 @@ function createHubWithClaudeOneShot(
   const options: RuntimeAgentExecutorFactoryOptions = {
     executables: resolvedExecutables,
     channelById: (channelId) => (hub as any).channelById(channelId),
+    mcpServersForAgent: (configuredAgentId) => (hub as any).boundMcpServersForAgent(configuredAgentId),
     ...(workflowMcpDiscoveryPath ? { workflowMcpDiscoveryPath } : {}),
   };
   const defaultDrivers = createRuntimeDriverRegistry(options);
@@ -288,7 +291,7 @@ test("api runtime advertises oneshot chat style", () => {
   expect(capabilities.chatStyle).toBe("oneshot");
 });
 
-test("askWorkflowAgent delegates to the registered runtime driver hook", async () => {
+test("workflow and generic Agent execution use the correct instruction scope", async () => {
   const workflow = vi.fn(async () => ({
     content: "hermes workflow",
   }));
@@ -322,7 +325,11 @@ test("askWorkflowAgent delegates to the registered runtime driver hook", async (
     version: "test",
     available: true,
   });
-  addConfiguredAgents(hub, [configuredAgent("hermes-agent", { runtimeAgentId: "hermes", channelId: "hermes-local" })]);
+  addConfiguredAgents(hub, [configuredAgent("hermes-agent", {
+    runtimeAgentId: "hermes",
+    channelId: "hermes-local",
+    instructions: "Follow the configured Agent policy.",
+  })]);
 
   const response = await hub.askWorkflowAgent({
     prompt: "Plan the repo",
@@ -336,7 +343,24 @@ test("askWorkflowAgent delegates to the registered runtime driver hook", async (
   expect(response).toEqual({
     content: "hermes workflow",
   });
-  expect(workflow).toHaveBeenCalled();
+  expect(workflow).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    configuredAgentId: "hermes-agent",
+    developerInstructions: "Follow the configured Agent policy.",
+    instructionScope: "workflow",
+  }));
+
+  await hub.askConfiguredAgent({
+    prompt: "Evaluate the answer",
+    configuredAgentId: "hermes-agent",
+    runtimeId: "hermes",
+    executionMode: "oneshot",
+    continuationPolicy: "fresh",
+    runtimeConfig: { model: DEFAULT_MODEL_ID },
+  });
+  expect(workflow).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    developerInstructions: "Follow the configured Agent policy.",
+    instructionScope: "agent",
+  }));
 });
 
 async function writeCodexAppServerFake(dir: string): Promise<{ executable: string; callsPath: string }> {
@@ -594,6 +618,31 @@ async function waitFor<T>(read: () => T, predicate: (value: T) => boolean): Prom
 }
 
 describe("AgentHub chat sessions", () => {
+  test("coalesces bursty assistant deltas into one snapshot and flushes terminal events immediately", async () => {
+    vi.useFakeTimers();
+    const hub = new AgentHub();
+    const listener = vi.fn();
+    const unsubscribe = hub.onChange(listener);
+    listener.mockClear();
+    try {
+      const chat = (hub as any).chats.get(hub.snapshot().activeChatId!);
+      for (let index = 0; index < 20; index += 1) {
+        (hub as any).handleAgentEvent(chat, { type: "delta", content: String(index) });
+      }
+
+      expect(listener).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(40);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      (hub as any).handleAgentEvent(chat, { type: "completed", content: "done" });
+      expect(listener).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribe();
+      await hub.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   test("creates default agents once without binding their later edits to runtime configs", () => {
     const hub = new AgentHub();
     (hub as any).channels = [
@@ -654,6 +703,7 @@ describe("AgentHub chat sessions", () => {
       id: "sol-agent",
       name: "Sol Agent",
       description: "",
+      instructions: "Always include the verification result.",
       runtimeAgentId: "codex",
       channelId: "codex-openai",
       modelId: "gpt-5.6-sol",
@@ -762,6 +812,7 @@ describe("AgentHub chat sessions", () => {
       id: "sol-agent",
       name: "Sol Agent",
       description: "",
+      instructions: "Always include the verification result.",
       runtimeAgentId: "codex",
       channelId: "codex-openai",
       modelId: "gpt-5.6-sol",
@@ -785,6 +836,7 @@ describe("AgentHub chat sessions", () => {
       continuationPolicy: "resume-preferred",
       developerInstructions: expect.stringContaining("desktop chat UI"),
     });
+    expect(events[0].developerInstructions).toContain("Always include the verification result.");
     const activeChat = hub.snapshot().chats.find((chat) => chat.id === chatId);
     expect(activeChat?.runtimeConversation).toEqual(runtimeConversation("codex", { native: { threadId: "executor-session" } }));
     expect(activeChat?.messages).toEqual([
@@ -2854,6 +2906,36 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     expect(argv.join("\n")).toContain("wf-codex-planning");
   });
 
+  test("injects only the custom MCP servers bound to the selected Codex Agent", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-bound-mcp-codex-"));
+    const fake = await writeSequentialCodexFake(dir);
+    const hub = new AgentHub({ codex: fake.executable, claude: "missing-claude-for-test" });
+    (hub as any).runtimes.set("codex", { id: "codex", label: "Codex", command: fake.executable, version: "test", available: true });
+    hub.setMcpServers([
+      { id: "bound", name: "Bound", transport: "stdio", command: "node", args: ["bound.js"], env: {}, enabled: true, tools: [], status: "connected", createdAt: 1, updatedAt: 1 },
+      { id: "unbound", name: "Unbound", transport: "stdio", command: "node", args: ["unbound.js"], env: {}, enabled: true, tools: [], status: "connected", createdAt: 1, updatedAt: 1 },
+    ]);
+    hub.updateConfiguredAgents(hub.snapshot().configuredAgents.map((agent) => agent.id === "default-agent"
+      ? { ...agent, mcpBindings: [{ serverId: "bound", toolAllowlist: [] }] }
+      : agent));
+
+    await hub.askWorkflowAgent({
+      requestId: "bound-mcp-codex",
+      prompt: "Use the bound server.",
+      configuredAgentId: "default-agent",
+      workDir: dir,
+      runtimeId: "codex",
+      executionMode: "oneshot",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: DEFAULT_MODEL_ID },
+    });
+
+    const calls = (await readFile(fake.callsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as any);
+    const argv = (calls.find((call) => call.method === "process/argv")?.params.args as string[]).join("\n");
+    expect(argv).toContain("bound.js");
+    expect(argv).not.toContain("unbound.js");
+  });
+
   test("asks a Claude workflow agent through the official SDK one-shot path without resuming when continuationPolicy is fresh", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-claude-workflow-sdk-"));
     const runOneShot = vi.fn(async (input: any) => {
@@ -2949,6 +3031,37 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
         AGENT_RECALL_WORKFLOW_ID: "wf-claude-planning",
       }),
     });
+  });
+
+  test("combines workflow and Agent-bound MCP servers for Claude", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-bound-mcp-claude-"));
+    const runOneShot = vi.fn(async (input: any) => {
+      input.onEvent({ type: "completed", content: "done" });
+    });
+    const hub = createHubWithClaudeOneShot(runOneShot);
+    addConfiguredAgents(hub, [{
+      ...configuredAgent("claude-agent", { runtimeAgentId: "claude", name: "Claude Agent" }),
+      mcpBindings: [{ serverId: "remote", toolAllowlist: [] }],
+    }]);
+    hub.setMcpServers([
+      { id: "remote", name: "Remote", transport: "http", args: [], url: "https://example.test/mcp", env: {}, enabled: true, tools: [], status: "connected", createdAt: 1, updatedAt: 1 },
+    ]);
+    (hub as any).runtimes.set("claude", { id: "claude", label: "Claude", command: "claude", version: "test", available: true });
+
+    await hub.askWorkflowAgent({
+      requestId: "bound-mcp-claude",
+      prompt: "Use the bound server.",
+      configuredAgentId: "claude-agent",
+      workDir: dir,
+      runtimeId: "claude",
+      executionMode: "oneshot",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: DEFAULT_MODEL_ID },
+    });
+
+    expect(Object.values(runOneShot.mock.calls[0]?.[0].mcpServers ?? {})).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "http", url: "https://example.test/mcp" }),
+    ]));
   });
 
   test("resumes a Claude workflow agent through the official SDK one-shot path when continuationPolicy is resume-preferred", async () => {
@@ -4811,6 +4924,75 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       "work",
       "followup",
     ]);
+  });
+
+  test("keeps a completed interactive node open until the user confirms it", async () => {
+    let interactiveContext: any;
+    const session = {
+      reconfigure: vi.fn(),
+      ensureAttached: vi.fn(async () => undefined),
+      sendPrompt: vi.fn(async () => {
+        interactiveContext.emit({ type: "delta", content: JSON.stringify({ nodeId: "work", summary: "Done", outputs: { result: "finished" }, evidence: [], risks: [], proposals: [] }) });
+        interactiveContext.emit({ type: "completed" });
+      }),
+      interrupt: vi.fn(async () => undefined),
+      detach: vi.fn(async () => undefined),
+      detachIfStillExpired: vi.fn(async () => undefined),
+      snapshot: () => ({
+        runtimeState: {
+          executionStyle: "interactive" as const,
+          attachmentState: "idle" as const,
+          attachmentGeneration: 1,
+          capabilities: runtimeSessionCapabilities(),
+        },
+      }),
+    };
+    const runtimeDrivers = new RuntimeDriverRegistry([{
+      runtimeId: "codex",
+      surfaceSupport: [support("chat", ["interactive"], ["fresh", "resume-preferred", "resume-required"])],
+      runtimeStateCodec: codexRuntimeStateCodec,
+      getCapabilities: () => interactiveChatCapabilities("codex"),
+      createOneShotExecutor: () => ({ start: async () => undefined, stop: async () => undefined }),
+      createInteractiveSession: (context: any) => { interactiveContext = context; return session; },
+    } as any]);
+    const hub = new AgentHub(
+      { codex: "codex-for-test", claude: "missing-claude-for-test" },
+      undefined,
+      runtimeDrivers,
+    );
+    const completeInteractiveNode = vi.spyOn((hub as any).workflowRuntime, "completeInteractiveNode");
+    (hub as any).runtimes.set("codex", { id: "codex", label: "Codex", command: "codex", version: "test", available: true });
+    const configuredAgentId = hub.snapshot().configuredAgents.find((agent) => agent.runtimeAgentId === "codex")!.id;
+    const created = createV2Workflow(hub, {
+      configuredAgentId,
+      title: "Confirmation workflow",
+      objective: "Wait for confirmation",
+      definition: {
+        workflowId: "wf_confirmation",
+        graphVersion: 1,
+        objective: "Wait for confirmation",
+        nodes: [{ id: "work", kind: "implementation", title: "Work", execModel: "llm", executionMode: "interactive", prompt: "Do the work.", outputFields: [{ key: "result", required: true }] }],
+        edges: [],
+      },
+      graph: {
+        title: "Confirmation workflow",
+        objective: "Wait for confirmation",
+        nodes: [{ id: "start", kind: "start", title: "Start", prompt: "" }, { id: "work", kind: "agent", title: "Work", prompt: "Do the work." }, { id: "end", kind: "end", title: "Done", prompt: "" }],
+        edges: [{ id: "start->work", fromNodeId: "start", toNodeId: "work" }, { id: "work->end", fromNodeId: "work", toNodeId: "end" }],
+      },
+    });
+
+    const started = (hub as any).runWorkflow({ workflowId: created.workflowId });
+    await waitFor(
+      () => hub.snapshot(),
+      (snapshot) => snapshot.workflowNodeConversations.some((conversation) => conversation.runId === started.runId),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const snapshot = hub.snapshot();
+    expect(completeInteractiveNode).not.toHaveBeenCalled();
+    expect(snapshot.workflowNodeConversations.find((conversation) => conversation.runId === started.runId)).toMatchObject({ status: "completion_proposed" });
+    expect(snapshot.workflowStore.runs.find((run) => run.runId === started.runId)?.status).toBe("waiting_for_user");
   });
 
   test("projects an unavailable interactive conversation as awaiting input", async () => {

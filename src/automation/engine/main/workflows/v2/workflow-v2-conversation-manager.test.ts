@@ -8,6 +8,27 @@ function output() {
 }
 
 describe("WorkflowV2ConversationManager", () => {
+  test("marks streaming deltas for coalesced publication while keeping terminal events immediate", async () => {
+    let emit!: (event: AgentEvent) => void;
+    const deliveries: Array<"stream" | "immediate" | undefined> = [];
+    const manager = new WorkflowV2ConversationManager({
+      now: () => 1,
+      createSession: (input) => {
+        emit = input.emit;
+        return { sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined };
+      },
+      onChanged: (delivery) => deliveries.push(delivery),
+    });
+    await manager.start({ workflowId: "w", runId: "r", nodeId: "n", configuredAgentId: "a", modelId: "m", workDir: "C:/workspace", initialPrompt: "Start" });
+    deliveries.length = 0;
+
+    emit({ type: "delta", content: "one" });
+    emit({ type: "delta", content: " two" });
+    emit({ type: "tool_result", name: "read", content: "done" });
+
+    expect(deliveries).toEqual(["stream", "stream", "immediate"]);
+  });
+
   test("publishes the conversation before the initial agent turn finishes", async () => {
     let release!: () => void;
     const initialTurn = new Promise<void>((resolve) => { release = resolve; });
@@ -63,6 +84,31 @@ describe("WorkflowV2ConversationManager", () => {
     const manager = new WorkflowV2ConversationManager({ now: () => 10, createSession: () => ({ sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined }) });
     manager.restore([{ conversationId: "w::r::n", workflowId: "w", runId: "r", nodeId: "n", configuredAgentId: "a", modelId: "m", workDir: "C:/workspace", status: "active", messages: [{ id: "m1", role: "assistant", content: "Approve?", at: 1, event: { id: "e1", type: "approval_request", content: "Approve?", timestamp: 1, requestId: "approval-1", requestState: "live" } }], createdAt: 1, updatedAt: 1, lastActivityAt: 1 }]);
     expect(manager.get("w::r::n")?.messages[0]?.event?.requestState).toBe("expired");
+  });
+  test("drops malformed persisted messages before exposing a restored conversation", () => {
+    const manager = new WorkflowV2ConversationManager({ now: () => 10, createSession: () => ({ sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined }) });
+    manager.restore([{
+      conversationId: "w::r::n", workflowId: "w", runId: "r", nodeId: "n", configuredAgentId: "a", modelId: "m", workDir: "C:/workspace", status: "closed",
+      messages: [
+        { id: "valid", role: "assistant", content: "Done", at: 1 },
+        { id: "missing-content", role: "assistant", at: 2 },
+      ],
+      createdAt: 1, updatedAt: 2, lastActivityAt: 2,
+    }] as never);
+
+    expect(manager.get("w::r::n")?.messages).toEqual([
+      expect.objectContaining({ id: "valid", content: "Done" }),
+    ]);
+  });
+  test("downgrades a malformed persisted completion proposal to user input", () => {
+    const manager = new WorkflowV2ConversationManager({ now: () => 10, createSession: () => ({ sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined }) });
+    manager.restore([{
+      conversationId: "w::r::n", workflowId: "w", runId: "r", nodeId: "n", configuredAgentId: "a", modelId: "m", workDir: "C:/workspace", status: "completion_proposed",
+      messages: [], completionProposal: { output: {}, unresolvedRisks: "unknown" }, createdAt: 1, updatedAt: 2, lastActivityAt: 2,
+    }] as never);
+
+    expect(manager.get("w::r::n")?.status).toBe("waiting_for_user");
+    expect(manager.get("w::r::n")?.completionProposal).toBeUndefined();
   });
   test("reuses one interactive session across multiple user turns and requires confirmation", async () => {
     let now = 10;

@@ -47,7 +47,8 @@ describe("createAutomationApi", () => {
     await api.listEvaluationExperiments();
     await api.saveEvaluationExperiment(experiment);
     await api.deleteEvaluationExperiment("experiment-1");
-    await api.listEvaluationRuns("experiment-1");
+    await api.listEvaluationRuns({ experimentId: "experiment-1", limit: 25 });
+    await api.getEvaluationRun("run-1");
     await api.deleteEvaluationRun("run-1");
     await api.runEvaluationExperiment("experiment-1");
 
@@ -61,7 +62,8 @@ describe("createAutomationApi", () => {
       [AUTOMATION_CHANNELS.evaluationExperimentList],
       [AUTOMATION_CHANNELS.evaluationExperimentSave, experiment],
       [AUTOMATION_CHANNELS.evaluationExperimentDelete, "experiment-1"],
-      [AUTOMATION_CHANNELS.evaluationRunList, "experiment-1"],
+      [AUTOMATION_CHANNELS.evaluationRunList, { experimentId: "experiment-1", limit: 25 }],
+      [AUTOMATION_CHANNELS.evaluationRunGet, "run-1"],
       [AUTOMATION_CHANNELS.evaluationRunDelete, "run-1"],
       [AUTOMATION_CHANNELS.evaluationExperimentRun, { experimentId: "experiment-1" }],
     ]);

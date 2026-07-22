@@ -12,6 +12,7 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunSummary,
 } from "../../../../shared/types";
 import {
   InlineStatus,
@@ -26,6 +27,8 @@ export function EvaluationOverview({
   evaluators,
   experiments,
   runs,
+  runDetails,
+  runTotal,
   agents,
   onCreateExperiment,
 }: {
@@ -33,12 +36,14 @@ export function EvaluationOverview({
   datasets: EvaluationDataset[];
   evaluators: EvaluationEvaluator[];
   experiments: EvaluationExperiment[];
-  runs: EvaluationRun[];
+  runs: EvaluationRunSummary[];
+  runDetails: EvaluationRun[];
+  runTotal: number;
   agents: ConfiguredAgent[];
   onCreateExperiment: () => void;
 }) {
   const completed = runs.filter((run) => run.status === "completed");
-  const failedCases = runs
+  const failedCases = runDetails
     .flatMap((run) => run.results)
     .filter(
       (result) => result.error || result.scores.some((score) => !score.passed),
@@ -206,7 +211,7 @@ export function EvaluationOverview({
         <div>
           <Gauge size={16} />
           <span>{zh ? "累计运行" : "Total runs"}</span>
-          <strong>{runs.length}</strong>
+          <strong>{runTotal}</strong>
         </div>
       </div>
     </div>

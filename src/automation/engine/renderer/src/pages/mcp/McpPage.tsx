@@ -17,7 +17,15 @@ import { useMcpRegistry } from "./useMcpRegistry";
 import { McpAgentBindings } from "./McpAgentBindings";
 import type { ConfiguredAgent } from "../../../../shared/types";
 
-export function McpPage({ language = "en", agents }: { language?: Language; agents: ConfiguredAgent[] }) {
+export function McpPage({
+  language = "en",
+  agents,
+  onSaveAgents,
+}: {
+  language?: Language;
+  agents: ConfiguredAgent[];
+  onSaveAgents?: (agents: ConfiguredAgent[]) => Promise<void>;
+}) {
   const zh = language === "zh";
   const model = useMcpRegistry();
   const [view, setView] = useState<"servers" | "agents">("servers");
@@ -73,7 +81,7 @@ export function McpPage({ language = "en", agents }: { language?: Language; agen
           { id: "agents", label: zh ? "Agent 绑定" : "Agent bindings", count: agents.length },
         ]}
       />
-      {view === "agents" ? <McpAgentBindings agents={agents} /> : (
+      {view === "agents" ? <McpAgentBindings agents={agents} servers={model.servers} onSaveAgents={onSaveAgents} /> : (
         <>
       {model.error ? (
         <div className="workbench-error" role="alert">

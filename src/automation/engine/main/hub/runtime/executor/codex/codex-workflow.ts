@@ -11,14 +11,15 @@ import {
 } from "../agent-executor-conversation";
 import {
   createWorkflowAgentTimeout,
+  developerInstructionsForWorkflowRequest,
   modelFromRuntimeConfig,
   type RuntimeWorkflowExecutionOptions,
   WORKFLOW_AGENT_IDLE_TIMEOUT_MS,
-  WORKFLOW_DEVELOPER_INSTRUCTIONS,
 } from "../workflow/agent-executor-workflow-shared";
 import { reasoningEffortFromRuntimeConfig } from "../agent-executor-types";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
 import { codexWorkflowMcpArgs } from "./codex-workflow-mcp";
+import { codexMcpLaunchConfig } from "../runtime-mcp";
 
 export async function runCodexWorkflow(
   input: RuntimeWorkflowRequestContext,
@@ -32,6 +33,10 @@ export async function runCodexWorkflow(
   let runtimeConversation = input.runtimeConversation ? cloneCodexRuntimeConversation(input.runtimeConversation) : undefined;
   let timeout: ReturnType<typeof createWorkflowAgentTimeout> | undefined;
   let client: CodexRpcClient | undefined;
+  const mcp = codexMcpLaunchConfig(input.configuredAgentId
+    ? options.mcpServersForAgent?.(input.configuredAgentId) ?? []
+    : []);
+  const developerInstructions = developerInstructionsForWorkflowRequest(input);
 
   return new Promise<WorkflowAgentResponse>((resolve, reject) => {
     let abort: () => void;
@@ -63,8 +68,9 @@ export async function runCodexWorkflow(
           reasoningEffortFromRuntimeConfig(input.runtimeConfig),
         ),
         ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), input.planningWorkflowId),
+        ...mcp.args,
       ],
-      env: codexEnvironmentForChannel(channel),
+      env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
       onEvent: (event) => {
         timeout?.refresh();
         if (event.type === "delta") {
@@ -112,7 +118,7 @@ export async function runCodexWorkflow(
               approvalPolicy: "on-request",
               config: null,
               baseInstructions: null,
-              developerInstructions: WORKFLOW_DEVELOPER_INSTRUCTIONS,
+              developerInstructions,
             })
           : await client.request("thread/start", {
               model,
@@ -122,7 +128,7 @@ export async function runCodexWorkflow(
               approvalPolicy: "on-request",
               config: null,
               baseInstructions: null,
-              developerInstructions: WORKFLOW_DEVELOPER_INSTRUCTIONS,
+              developerInstructions,
               compactPrompt: null,
               includeApplyPatchTool: null,
               experimentalRawEvents: true,

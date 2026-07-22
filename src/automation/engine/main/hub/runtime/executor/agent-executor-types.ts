@@ -12,10 +12,12 @@ import type {
   RuntimeWorkflowRequestContext,
 } from "../../../agents/runtime/runtime-driver";
 import type { RuntimeApprovalRequester } from "../../../approvals/runtime-approval-broker";
+import type { BoundMcpServer } from "./runtime-mcp";
 
 export interface AgentExecutionContext extends RuntimeRequest {
   runId: string;
   runKind: "chat" | "task";
+  configuredAgentId?: string;
   runtime: AgentRuntime;
   channelId: string;
   prompt: string;
@@ -38,6 +40,7 @@ export interface RuntimeAgentExecutorFactoryOptions {
   executables: Record<AgentId, string>;
   channelById: (channelId: string) => AgentChannel | undefined;
   workflowMcpDiscoveryPath?: () => string | undefined;
+  mcpServersForAgent?: (configuredAgentId: string) => BoundMcpServer[];
   requestApproval?: RuntimeApprovalRequester;
   askWorkflowByRuntime?: Partial<Record<AgentId, (input: RuntimeWorkflowRequestContext) => Promise<WorkflowAgentResponse>>>;
   testChannelByRuntime?: Partial<Record<AgentId, (input: RuntimeChannelTestContext) => Promise<string>>>;

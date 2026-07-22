@@ -9,8 +9,8 @@
 - Skills 页面将本 App Skill 与本地 Skill 分为两个 Tab：本地 Skill 按使用量优先排列，可直接预览并加入本 App；发现入口支持榜单、关键词和一次性 AI 搜索，安装位置改为可扩展的 Agent 多选弹窗，原目录与同名冲突目录不会被覆盖。
 - Skill 使用次数、云端同步、版本恢复和文件差异集中到所选 Skill 的详情中；应用冷启动、托盘打开和普通唤起默认停留在工作台，只有搜索快捷键会进入会话搜索。
 - 新增目录级 Agent Memory 管理：用户可主动选择工作目录，查看从 Git 根目录逐级继承的 `AGENTS.md`、`CLAUDE.md` 与 Cursor Rules，并在当前目录新建或编辑记忆文件；还可按 Codex、Claude Code、Cursor 预览最终生效内容，将一份记忆同步为其他 Agent 的格式，确认差异后写入并支持立即撤销。检查范围仅限所选目录的继承链，不会遍历整个项目。
-- 新增 Runtime、MCP 与 Workflow 工作区：可通过紧凑下拉切换并测试 Codex、Claude Code、API、Hermes、OpenCode 和 OpenClaw 配置，管理本地或远程 MCP 服务及工具，并在应用内完成 Workflow 的创建、审核、确认、运行、暂停、人工介入和输出查看；工作台会同步展示真实 Workflow 状态并直达详情。
-- 新增 Agent 评测工作区：可维护测试数据集，组合确定性规则或 LLM Judge，针对 Runtime 中的 Agent 重复运行实验，并查看每个 Case 的输出、评分理由、通过率、耗时和历史结果。
+- 新增 Runtime、MCP 与 Workflow 工作区：可通过紧凑下拉切换并测试 Codex、Claude Code、API、Hermes、OpenCode 和 OpenClaw 配置，管理本地或远程 MCP 服务及工具，把自定义 MCP 按 Agent 绑定到新会话，并在应用内完成 Workflow 的创建、审核、确认、运行、暂停、人工介入和输出查看；工作台会同步展示真实 Workflow 状态并直达详情。
+- 新增 Agent 评测工作区：可维护测试数据集，组合确定性规则或 LLM Judge，针对 Runtime 中的 Agent 重复运行实验，并查看每个 Case 的输出、评分理由、通过率、耗时和历史结果；历史记录较多时仍可按需继续加载。
 
 ## Bug 修复
 
@@ -20,4 +20,8 @@
 - 修复同一个 Skill 同时来自多个本机目录时列表键冲突、条目可能重复或消失的问题。
 - 调整工作台用量周期选择器的位置，以紧凑下拉框归入用量标题栏，避免统计数字被挤压。
 - 修复 Workflow 审核、确认和运行按钮在详情标题栏中上飘，或在较窄窗口中被挤出内容区域的问题。
+- 修复 Workflow 节点完成后未经确认就自动继续的问题；现在会先展示完成提议，等待用户确认或要求修改，异常的旧会话记录也不会再导致节点详情报错。
+- 修复长回复持续输出或评测历史较多时页面明显卡顿的问题，并避免应用重启后丢失 Agent 的指令、组合关系、版本和 MCP 绑定。
+- 修复 Agent 评测混入 Workflow 规划指令的问题；评测与普通会话现在都会按所选 Agent 的自身指令执行。
+- 修复不支持 MCP 的 API Runtime 仍显示可绑定，以及 Agent 切换 Runtime 后旧的托管服务无法移除的问题。
 - 重整 Runtime 配置页：Codex、Claude Code 等配置可从贴边侧栏直接切换，Provider、余额和测试状态集中显示；低频 Provider 列表改为可搜索弹窗，模型、插件与高级配置默认折叠，减少首屏拥挤和横向空白。

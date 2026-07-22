@@ -2,7 +2,8 @@ import type { AgentRuntime, WorkflowAgentResponse } from "../../../../../shared/
 import { runtimeModelId } from "../../../../../shared/models";
 import { OpenClawRunner } from "../../../../agents/openclaw/openclaw-runner";
 import type { RuntimeChannelTestContext, RuntimeWorkflowRequestContext } from "../../../../agents/runtime/runtime-driver";
-import { modelFromRuntimeConfig, type RuntimeWorkflowExecutionOptions } from "../workflow/agent-executor-workflow-shared";
+import { developerInstructionsForWorkflowRequest, modelFromRuntimeConfig, type RuntimeWorkflowExecutionOptions } from "../workflow/agent-executor-workflow-shared";
+import { promptWithDeveloperInstructions } from "../runtime-instructions";
 
 const OPENCLAW_AGENT_TEST_PROMPT = "Reply with OK only.";
 
@@ -17,7 +18,10 @@ export async function runOpenClawWorkflow(
   const runner = new OpenClawRunner({
     executable: input.runtime.command || options.executables.openclaw,
     cwd: input.workDir,
-    prompt: input.prompt,
+    prompt: promptWithDeveloperInstructions(
+      input.prompt,
+      developerInstructionsForWorkflowRequest(input),
+    ),
     sessionKey: `agent-recall-${input.requestId}`,
     modelId: modelFromRuntimeConfig(input.runtimeConfig),
     onEvent: (event) => {

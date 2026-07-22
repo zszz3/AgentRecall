@@ -48,15 +48,26 @@ const channelSchema = z.object({
 }).passthrough();
 const agentSchema = z.object({
   id: idSchema,
+  agentType: z.enum(["execution", "composed"]).optional(),
   name: z.string().trim().min(1).max(200),
+  instructions: z.string().max(500_000).optional(),
+  baseAgentId: idSchema.optional(),
   runtimeAgentId: runtimeIdSchema,
   channelId: idSchema,
   modelId: idSchema,
+  reasoningEffort: z.string().trim().min(1).max(100).optional(),
   description: z.string().max(20_000),
   tags: z.array(z.string().max(200)).max(200),
+  mcpBindings: z.array(z.object({
+    serverId: idSchema,
+    toolAllowlist: z.array(z.string().trim().min(1).max(512)).max(1_000),
+  }).strict()).max(200).optional(),
+  currentRevisionId: idSchema.optional(),
+  revision: z.number().int().positive().max(1_000_000_000).optional(),
+  managed: z.boolean().optional(),
   createdAt: z.number().finite(),
   updatedAt: z.number().finite(),
-}).passthrough();
+}).strict();
 const timestampSchema = z.number().finite().nonnegative();
 
 function isBoundedJsonValue(value: unknown, depth = 0): boolean {
@@ -112,6 +123,11 @@ const evaluationExperimentSchema = z.object({
   repetitions: z.number().int().min(1).max(5),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
+}).strict();
+const evaluationRunListSchema = z.object({
+  experimentId: idSchema.optional(),
+  offset: z.number().int().nonnegative().max(1_000_000).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
 }).strict();
 const workflowIdSchema = z.object({ workflowId: idSchema });
 const workflowRequestSchema = workflowIdSchema.passthrough();
@@ -232,16 +248,38 @@ export function registerAutomationIpc({
   });
 
   ready(AUTOMATION_CHANNELS.mcpList, () => service.mcpRegistry().list());
-  ready(AUTOMATION_CHANNELS.mcpSave, (value: unknown) => service.mcpRegistry().upsert(mcpServerSchema.parse(value) as McpServerDefinition));
+  ready(AUTOMATION_CHANNELS.mcpSave, async (value: unknown) => {
+    const saved = await service.mcpRegistry().upsert(mcpServerSchema.parse(value) as McpServerDefinition);
+    service.hub().setMcpServers(await service.mcpRegistry().list());
+    return saved;
+  });
   ready(AUTOMATION_CHANNELS.mcpTest, async (value: unknown) => {
     const server = mcpServerSchema.parse(value) as McpServerDefinition;
     try {
-      return await service.mcpRegistry().recordTest(server, await discoverMcpTools(server));
+      const tested = await service.mcpRegistry().recordTest(server, await discoverMcpTools(server));
+      service.hub().setMcpServers(await service.mcpRegistry().list());
+      return tested;
     } catch (error) {
-      return service.mcpRegistry().recordTest(server, [], error instanceof Error ? error.message : String(error));
+      const tested = service.mcpRegistry().recordTest(server, [], error instanceof Error ? error.message : String(error));
+      service.hub().setMcpServers(await service.mcpRegistry().list());
+      return tested;
     }
   });
-  ready(AUTOMATION_CHANNELS.mcpDelete, (value: unknown) => service.mcpRegistry().delete(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpDelete, async (value: unknown) => {
+    const serverId = idSchema.parse(value);
+    const deleted = await service.mcpRegistry().delete(serverId);
+    if (deleted) {
+      service.hub().setMcpServers(await service.mcpRegistry().list());
+      const agents = service.hub().listConfiguredAgents().map((agent) => ({
+        ...agent,
+        ...(agent.mcpBindings ? {
+          mcpBindings: agent.mcpBindings.filter((binding) => binding.serverId !== serverId),
+        } : {}),
+      }));
+      service.hub().updateConfiguredAgents(agents);
+    }
+    return deleted;
+  });
   ready(AUTOMATION_CHANNELS.mcpSetupStatus, () => service.mcpAgents().status());
   ready(AUTOMATION_CHANNELS.mcpInstalledList, () => service.mcpAgents().listInstalled());
   ready(AUTOMATION_CHANNELS.mcpAgentList, (value: unknown) => service.mcpAgents().listForAgent(idSchema.parse(value)));
@@ -268,7 +306,9 @@ export function registerAutomationIpc({
     return service.evaluations().runExperiment(request.experimentId);
   });
   ready(AUTOMATION_CHANNELS.evaluationRunList, (value: unknown) =>
-    service.evaluations().listRuns(value === undefined ? undefined : idSchema.parse(value)));
+    service.evaluations().listRuns(value === undefined ? undefined : evaluationRunListSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationRunGet, (value: unknown) =>
+    service.evaluations().getRun(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.evaluationRunDelete, (value: unknown) =>
     service.evaluations().deleteRun(idSchema.parse(value)));
 

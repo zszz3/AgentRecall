@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ConfiguredAgent } from "../../../../shared/types";
+import type { McpServerDefinition } from "../../../../shared/mcp/types";
 import { MCP_CATALOG, type McpAgentDiagnostic } from "../../../../shared/mcp-config";
 import { agentRecallAutomationService } from "../../app/services/agent-recall-service";
 
-export function useMcpAgentBindings(agents: ConfiguredAgent[]) {
+export function useMcpAgentBindings(
+  agents: ConfiguredAgent[],
+  servers: McpServerDefinition[],
+  onSaveAgents?: (agents: ConfiguredAgent[]) => Promise<void>,
+) {
   const [agentId, setAgentId] = useState(agents[0]?.id ?? "");
   const [diagnostics, setDiagnostics] = useState<McpAgentDiagnostic[]>([]);
   const [selectedCatalogId, setSelectedCatalogId] = useState(MCP_CATALOG[0]?.id ?? "");
@@ -25,6 +30,22 @@ export function useMcpAgentBindings(agents: ConfiguredAgent[]) {
 
   const installedIds = useMemo(() => new Set(diagnostics.map((item) => item.catalogId)), [diagnostics]);
   const available = useMemo(() => MCP_CATALOG.filter((item) => !installedIds.has(item.id)), [installedIds]);
+  const customServers = useMemo(() => servers.filter((server) => server.enabled), [servers]);
+  const boundServerIds = useMemo(() => new Set(agent?.mcpBindings?.map((binding) => binding.serverId) ?? []), [agent?.mcpBindings]);
+  const toggleServer = useCallback(async (serverId: string) => {
+    if (!agent || !onSaveAgents) return;
+    setBusy(true); setError(undefined);
+    try {
+      const bindings = agent.mcpBindings ?? [];
+      const nextBindings = bindings.some((binding) => binding.serverId === serverId)
+        ? bindings.filter((binding) => binding.serverId !== serverId)
+        : [...bindings, { serverId, toolAllowlist: [] }];
+      await onSaveAgents(agents.map((item) => item.id === agent.id
+        ? { ...item, mcpBindings: nextBindings, updatedAt: Date.now() }
+        : item));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  }, [agent, agents, onSaveAgents]);
   const install = useCallback(async () => {
     if (!agent || !selectedCatalogId) return;
     setBusy(true); setError(undefined);
@@ -39,5 +60,5 @@ export function useMcpAgentBindings(agents: ConfiguredAgent[]) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }, [agent, reload]);
-  return { agent, agentId, setAgentId, diagnostics, available, selectedCatalogId, setSelectedCatalogId, allowedPath, setAllowedPath, token, setToken, busy, error, install, uninstall, reload };
+  return { agent, agentId, setAgentId, diagnostics, available, customServers, boundServerIds, selectedCatalogId, setSelectedCatalogId, allowedPath, setAllowedPath, token, setToken, busy, error, install, uninstall, toggleServer, reload };
 }

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { WORKFLOW_DEVELOPER_INSTRUCTIONS } from "./agent-executor-workflow-shared";
+import {
+  developerInstructionsForWorkflowRequest,
+  WORKFLOW_DEVELOPER_INSTRUCTIONS,
+} from "./agent-executor-workflow-shared";
 
 describe("workflow manager execution-mode policy", () => {
   test("uses script nodes for deterministic typed user input", () => {
@@ -9,5 +12,16 @@ describe("workflow manager execution-mode policy", () => {
     expect(WORKFLOW_DEVELOPER_INSTRUCTIONS).toContain("must remain a script node");
     expect(WORKFLOW_DEVELOPER_INSTRUCTIONS).toContain("Do not use memory");
     expect(WORKFLOW_DEVELOPER_INSTRUCTIONS).toContain("WorkflowV2Definition");
+  });
+
+  test("keeps workflow-manager instructions out of generic Agent execution", () => {
+    expect(developerInstructionsForWorkflowRequest({
+      instructionScope: "workflow",
+      developerInstructions: "Configured policy",
+    })).toContain(WORKFLOW_DEVELOPER_INSTRUCTIONS);
+    expect(developerInstructionsForWorkflowRequest({
+      instructionScope: "agent",
+      developerInstructions: "Configured policy",
+    })).toBe("Configured policy");
   });
 });

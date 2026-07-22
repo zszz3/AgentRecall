@@ -79,3 +79,21 @@ export interface EvaluationRun {
   error?: string;
   results: EvaluationCaseResult[];
 }
+
+export type EvaluationRunSummary = Omit<EvaluationRun, "results"> & {
+  resultCount: number;
+  failedResultCount: number;
+};
+
+export interface ListEvaluationRunsRequest {
+  experimentId?: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface EvaluationRunPage {
+  items: EvaluationRunSummary[];
+  total: number;
+  offset: number;
+  limit: number;
+}

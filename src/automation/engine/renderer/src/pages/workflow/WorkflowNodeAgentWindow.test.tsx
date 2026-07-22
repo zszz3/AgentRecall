@@ -109,6 +109,16 @@ describe("WorkflowNodeAgentWindow", () => {
     expect(html).not.toContain("&quot;nodeId&quot;");
   });
 
+  test("does not offer completion actions after a proposal has already been closed", () => {
+    const html = renderToStaticMarkup(<WorkflowNodeAgentWindow nodeTitle="Answer" onClose={() => undefined} conversation={{
+      conversationId: "workflow::run::answer", workflowId: "workflow", runId: "run", nodeId: "answer", configuredAgentId: "agent", modelId: "model", workDir: "C:/workspace", status: "closed",
+      messages: [], completionProposal: { output: { nodeId: "answer", summary: "Done", outputs: {}, proposals: [] }, acceptanceCriteria: [], unresolvedRisks: [], proposedAt: 1 }, createdAt: 1, updatedAt: 1, lastActivityAt: 1,
+    }} />);
+
+    expect(html).not.toContain("Confirm and continue");
+    expect(html).not.toContain("Reject / request changes");
+  });
+
   test("keeps agent progress text and renders the trailing packet as Markdown", () => {
     const content = `The question is clear. Using official docs first.${JSON.stringify({ nodeId: "web-search-answer", summary: "Verified", outputs: { answer_markdown: "## Answer\n\nGPT-5.6 Sol", source_links: ["https://developers.openai.com/api/docs/models"] }, evidence: [], risks: [], nextStepSuggestions: [], proposals: [] })}`;
     const html = renderToStaticMarkup(<WorkflowNodeAgentWindow nodeTitle="Answer" onClose={() => undefined} conversation={{

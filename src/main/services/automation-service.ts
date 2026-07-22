@@ -77,7 +77,7 @@ export class NativeAutomationService {
       agents: () => this.hubInstance.snapshot().configuredAgents,
       channels: () => this.hubInstance.snapshot().channels,
       defaultWorkDir: () => this.hubInstance.getWorkDir(),
-      execute: (request) => this.hubInstance.askWorkflowAgent(request),
+      execute: (request) => this.hubInstance.askConfiguredAgent(request),
     });
     this.evaluationsInstance = dependencies.evaluations ?? new EvaluationService({
       store: new EvaluationStore(this.paths.databasePath),
@@ -93,6 +93,8 @@ export class NativeAutomationService {
       bridgePath: () => this.bridge?.discoveryPath ?? this.paths.discoveryPath,
       bridgeRunning: () => Boolean(this.bridge),
       workflowCreateAvailable: () => mcpToolDefinitions().some((tool) => tool.name === "workflow_create"),
+      runtimeForAgent: (agentId) => this.hubInstance.snapshot().configuredAgents
+        .find((agent) => agent.id === agentId)?.runtimeAgentId,
     });
     this.currentSnapshot = this.hubInstance.snapshot();
     this.unsubscribeHub = this.hubInstance.onChange((snapshot) => {
@@ -119,6 +121,7 @@ export class NativeAutomationService {
   private async initializeInternal(): Promise<void> {
     await this.hubInstance.loadModelChannels(this.paths.channelsPath);
     await this.hubInstance.loadPersistedState(this.paths.databasePath);
+    this.hubInstance.setMcpServers(await this.registryInstance.list());
     this.hubInstance.ensureBundledWorkflows(await this.loadWorkflows(this.options.bundledWorkflowsPath));
 
     this.router = await this.startRouterService({ channels: () => this.hubInstance.snapshot().channels });

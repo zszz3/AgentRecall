@@ -18,6 +18,7 @@ function fixture() {
     loadModelChannels: vi.fn(async () => { calls.push("channels"); }),
     loadPersistedState: vi.fn(async () => { calls.push("database"); }),
     ensureBundledWorkflows: vi.fn(() => { calls.push("bundled"); }),
+    setMcpServers: vi.fn(() => { calls.push("mcp"); }),
     setWorkflowMcpDiscoveryPath: vi.fn(() => { calls.push("discovery"); }),
     initialize: vi.fn(async () => { calls.push("runtime"); }),
     refreshDiscoverableModelCatalogs: vi.fn(async () => undefined),
@@ -30,7 +31,10 @@ function fixture() {
     getWorkDir: vi.fn(() => current.workDir),
     shutdown: vi.fn(async () => { calls.push("hub-stop"); }),
   } as unknown as AgentHub;
-  const registry = { close: vi.fn(() => { calls.push("registry-close"); }) } as unknown as McpRegistryStore;
+  const registry = {
+    list: vi.fn(async () => []),
+    close: vi.fn(() => { calls.push("registry-close"); }),
+  } as unknown as McpRegistryStore;
   const evaluations = { close: vi.fn(() => { calls.push("evaluations-close"); }) } as unknown as EvaluationService;
   const agents = {} as McpAgentManagementService;
   const service = new NativeAutomationService(
@@ -67,7 +71,7 @@ describe("NativeAutomationService", () => {
 
     await Promise.all([service.initialize(), service.initialize()]);
 
-    expect(calls).toEqual(["channels", "database", "bundled", "discovery", "runtime"]);
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "runtime"]);
     expect(hub.loadModelChannels).toHaveBeenCalledWith("/user-data/runtime-channels.json");
     expect(hub.loadPersistedState).toHaveBeenCalledWith("/user-data/automation.db");
     expect(service.health()).toEqual({ state: "ready" });

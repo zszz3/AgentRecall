@@ -16,6 +16,7 @@ export class McpAgentManagementService {
     bridgePath: () => string;
     bridgeRunning: () => boolean;
     workflowCreateAvailable: () => boolean;
+    runtimeForAgent: (agentId: string) => string | undefined;
   }) {}
 
   status(): McpSetupStatus {
@@ -28,6 +29,9 @@ export class McpAgentManagementService {
   uninstall(request: McpInstallRequest): Promise<McpInstallResult> { return this.mutate(request, false); }
 
   private async mutate(request: McpInstallRequest, install: boolean): Promise<McpInstallResult> {
+    if (install && this.dependencies.runtimeForAgent(request.agentId) !== "codex") {
+      throw new Error("Catalog MCP installation currently supports Codex Agents only. Bind custom MCP servers for other runtimes.");
+    }
     const item = MCP_CATALOG.find((candidate) => candidate.id === request.catalogId);
     if (!item) throw new Error(`Unknown MCP catalog item: ${request.catalogId}`);
     const configPath = this.configPath();

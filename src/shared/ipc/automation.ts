@@ -36,6 +36,7 @@ export const AUTOMATION_CHANNELS = {
   evaluationExperimentDelete: "automation:evaluation:experiments:delete",
   evaluationExperimentRun: "automation:evaluation:experiments:run",
   evaluationRunList: "automation:evaluation:runs:list",
+  evaluationRunGet: "automation:evaluation:runs:get",
   evaluationRunDelete: "automation:evaluation:runs:delete",
   workflowDraftCreate: "automation:workflow:draft-create",
   workflowDraftPatch: "automation:workflow:draft-patch",

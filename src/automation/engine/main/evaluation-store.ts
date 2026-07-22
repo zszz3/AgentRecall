@@ -6,6 +6,9 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunPage,
+  EvaluationRunSummary,
+  ListEvaluationRunsRequest,
 } from "../shared/evaluation/types";
 import { ensureEvaluationSchema } from "./evaluation/schema";
 const require = createRequire(import.meta.url);
@@ -183,18 +186,36 @@ export class EvaluationStore {
       ) > 0
     );
   }
-  async listRuns(experimentId?: string): Promise<EvaluationRun[]> {
+  async listRuns(input: ListEvaluationRunsRequest = {}): Promise<EvaluationRunPage> {
     const db = await this.open();
-    const rows = experimentId
-      ? db
-          .prepare(
-            "select * from evaluation_runs where experiment_id=? order by started_at desc",
-          )
-          .all(experimentId)
-      : db
-          .prepare("select * from evaluation_runs order by started_at desc")
-          .all();
-    return rows.map((v) => this.run(db, v as Row));
+    const offset = Math.max(0, Math.floor(input.offset ?? 0));
+    const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)));
+    const filter = input.experimentId ? "where r.experiment_id=?" : "";
+    const params = input.experimentId ? [input.experimentId] : [];
+    const totalRow = db.prepare(`select count(*) as total from evaluation_runs r ${filter}`).all(...params)[0] as Row;
+    const rows = db.prepare(`
+      select r.*,
+        (select count(*) from evaluation_case_results c where c.run_id=r.id) as result_count,
+        (select count(distinct c.id)
+          from evaluation_case_results c
+          left join evaluation_scores s on s.case_result_id=c.id
+          where c.run_id=r.id and (c.error is not null or s.passed=0)) as failed_result_count
+      from evaluation_runs r
+      ${filter}
+      order by r.started_at desc
+      limit ? offset ?
+    `).all(...params, limit, offset);
+    return {
+      items: rows.map((value) => this.runSummary(value as Row)),
+      total: Number(totalRow?.total ?? 0),
+      offset,
+      limit,
+    };
+  }
+  async getRun(id: string): Promise<EvaluationRun | undefined> {
+    const db = await this.open();
+    const row = db.prepare("select * from evaluation_runs where id=?").all(id)[0] as Row | undefined;
+    return row ? this.run(db, row) : undefined;
   }
   async deleteRun(id: string) {
     return (
@@ -298,54 +319,47 @@ export class EvaluationStore {
     };
   }
   private run(db: DB, r: Row): EvaluationRun {
-    const results = db
-      .prepare(
-        "select * from evaluation_case_results where run_id=? order by id",
-      )
-      .all(r.id)
-      .map((v) => {
-        const c = v as Row;
-        return {
-          id: String(c.id),
-          runId: String(c.run_id),
-          datasetItemId: String(c.dataset_item_id),
-          repetition: Number(c.repetition),
-          input: String(c.input),
-          ...(c.expected_output
-            ? { expectedOutput: String(c.expected_output) }
-            : {}),
-          output: String(c.output),
-          ...(c.error ? { error: String(c.error) } : {}),
-          durationMs: Number(c.duration_ms),
-          scores: db
-            .prepare("select * from evaluation_scores where case_result_id=?")
-            .all(c.id)
-            .map((v) => {
-              const s = v as Row;
-              return {
-                evaluatorId: String(s.evaluator_id),
-                score: Number(s.score),
-                passed: Number(s.passed) === 1,
-                ...(s.reason ? { reason: String(s.reason) } : {}),
-                ...(s.evidence_json
-                  ? { evidence: JSON.parse(String(s.evidence_json)) }
-                  : {}),
-                ...(s.failed_criteria_json
-                  ? {
-                      failedCriteria: JSON.parse(
-                        String(s.failed_criteria_json),
-                      ),
-                    }
-                  : {}),
-                durationMs: Number(s.duration_ms),
-                ...(s.token_count ? { tokenCount: Number(s.token_count) } : {}),
-                ...(s.estimated_cost
-                  ? { estimatedCost: Number(s.estimated_cost) }
-                  : {}),
-              };
-            }),
-        };
+    const caseRows = db.prepare("select * from evaluation_case_results where run_id=? order by id").all(r.id) as Row[];
+    const scoresByCase = new Map<string, EvaluationRun["results"][number]["scores"]>();
+    const scoreRows = db.prepare(`
+      select s.* from evaluation_scores s
+      inner join evaluation_case_results c on c.id=s.case_result_id
+      where c.run_id=?
+      order by s.case_result_id, s.evaluator_id
+    `).all(r.id) as Row[];
+    for (const s of scoreRows) {
+      const caseResultId = String(s.case_result_id);
+      const scores = scoresByCase.get(caseResultId) ?? [];
+      scores.push({
+        evaluatorId: String(s.evaluator_id),
+        score: Number(s.score),
+        passed: Number(s.passed) === 1,
+        ...(s.reason ? { reason: String(s.reason) } : {}),
+        ...(s.evidence_json ? { evidence: JSON.parse(String(s.evidence_json)) } : {}),
+        ...(s.failed_criteria_json ? { failedCriteria: JSON.parse(String(s.failed_criteria_json)) } : {}),
+        durationMs: Number(s.duration_ms),
+        ...(s.token_count != null ? { tokenCount: Number(s.token_count) } : {}),
+        ...(s.estimated_cost != null ? { estimatedCost: Number(s.estimated_cost) } : {}),
       });
+      scoresByCase.set(caseResultId, scores);
+    }
+    const results = caseRows.map((c) => ({
+      id: String(c.id),
+      runId: String(c.run_id),
+      datasetItemId: String(c.dataset_item_id),
+      repetition: Number(c.repetition),
+      input: String(c.input),
+      ...(c.expected_output ? { expectedOutput: String(c.expected_output) } : {}),
+      output: String(c.output),
+      ...(c.error ? { error: String(c.error) } : {}),
+      durationMs: Number(c.duration_ms),
+      scores: scoresByCase.get(String(c.id)) ?? [],
+    }));
+    const { resultCount: _resultCount, failedResultCount: _failedResultCount, ...run } =
+      this.runSummary(r);
+    return { ...run, results };
+  }
+  private runSummary(r: Row): EvaluationRunSummary {
     return {
       id: String(r.id),
       experimentId: String(r.experiment_id),
@@ -366,7 +380,8 @@ export class EvaluationStore {
         ? { totalDurationMs: Number(r.total_duration_ms) }
         : {}),
       ...(r.error ? { error: String(r.error) } : {}),
-      results,
+      resultCount: Number(r.result_count ?? 0),
+      failedResultCount: Number(r.failed_result_count ?? 0),
     };
   }
   private async open(): Promise<DB> {
@@ -378,6 +393,7 @@ export class EvaluationStore {
     const db = new DatabaseSync(this.dbPath);
     db.exec("pragma journal_mode=WAL");
     db.exec("pragma foreign_keys=ON");
+    db.exec("pragma busy_timeout=5000");
     ensureEvaluationSchema(db);
     this.db = db;
     return db;

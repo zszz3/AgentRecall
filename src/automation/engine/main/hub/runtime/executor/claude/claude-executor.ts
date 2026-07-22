@@ -2,6 +2,7 @@ import { ClaudeAgentSdkAdapter } from "../../../../agents/claude/claude-agent-sd
 import { claudeSessionIdFromConversation } from "../agent-executor-conversation";
 import type { AgentExecutionContext, AgentExecutor } from "../agent-executor-types";
 import type { RuntimeApprovalRequester } from "../../../../approvals/runtime-approval-broker";
+import type { ClaudeAgentSdkRunInput } from "../../../../agents/claude/claude-agent-sdk";
 
 export class ClaudeAgentExecutor implements AgentExecutor {
   private abortController: AbortController | undefined;
@@ -11,6 +12,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
     private readonly adapter: Pick<ClaudeAgentSdkAdapter, "runOneShot">,
     private readonly resolvedModelId: string | undefined,
     private readonly requestApproval?: RuntimeApprovalRequester,
+    private readonly mcpServers?: ClaudeAgentSdkRunInput["mcpServers"],
   ) {}
 
   async start(): Promise<void> {
@@ -29,6 +31,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
         ...(this.requestApproval ? { requestApproval: this.requestApproval } : {}),
         ...(this.resolvedModelId ? { modelId: this.resolvedModelId } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),
+        ...(this.mcpServers ? { mcpServers: this.mcpServers } : {}),
       });
       this.context.onExit(0);
     } catch (error) {

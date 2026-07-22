@@ -9,9 +9,11 @@ import type {
   RuntimeWorkflowRequestContext,
 } from "../../../../agents/runtime/runtime-driver";
 import {
+  developerInstructionsForWorkflowRequest,
   modelFromRuntimeConfig,
   type RuntimeWorkflowExecutionOptions,
 } from "../workflow/agent-executor-workflow-shared";
+import { promptWithDeveloperInstructions } from "../runtime-instructions";
 
 const HERMES_AGENT_TEST_PROMPT = "Reply with OK only.";
 
@@ -27,7 +29,10 @@ export async function runHermesWorkflow(
   const runner = new HermesRunner({
     executable: input.runtime.command || options.executables.hermes,
     cwd: input.workDir,
-    prompt: input.prompt,
+    prompt: promptWithDeveloperInstructions(
+      input.prompt,
+      developerInstructionsForWorkflowRequest(input),
+    ),
     modelId: modelFromRuntimeConfig(input.runtimeConfig),
     onEvent: (event) => {
       if (event.type === "completed") {

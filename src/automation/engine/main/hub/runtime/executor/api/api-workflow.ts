@@ -1,7 +1,7 @@
 import type { WorkflowAgentResponse } from "../../../../../shared/types";
 import type { RuntimeWorkflowRequestContext } from "../../../../agents/runtime/runtime-driver";
 import type { RuntimeAgentExecutorFactoryOptions } from "../agent-executor-types";
-import { WORKFLOW_DEVELOPER_INSTRUCTIONS } from "../workflow/agent-executor-workflow-shared";
+import { developerInstructionsForWorkflowRequest } from "../workflow/agent-executor-workflow-shared";
 import { apiRequestBody, apiRequestUrl, extractApiContent, resolveApiModel } from "./api-protocol";
 
 export async function runApiWorkflow(
@@ -19,7 +19,12 @@ export async function runApiWorkflow(
       "content-type": "application/json",
       ...(channel.httpHeaders ?? {}),
     },
-    body: JSON.stringify(apiRequestBody(channel, model, input.prompt, WORKFLOW_DEVELOPER_INSTRUCTIONS)),
+    body: JSON.stringify(apiRequestBody(
+      channel,
+      model,
+      input.prompt,
+      developerInstructionsForWorkflowRequest(input),
+    )),
     ...(input.signal ? { signal: input.signal } : {}),
   });
   const text = await response.text();

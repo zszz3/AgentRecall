@@ -5,6 +5,7 @@ import type {
   WorkflowNodeMessage,
 } from "../../../shared/workflow-v2/conversation";
 import { workflowNodeConversationId } from "../../../shared/workflow-v2/conversation";
+import { isWorkflowV2WorkerOutput } from "../../../shared/workflow-v2/packets";
 
 export interface WorkflowNodeInteractiveSession {
   sendPrompt(prompt: string): Promise<void>;
@@ -34,7 +35,7 @@ export class WorkflowV2ConversationManager {
   constructor(private readonly deps: {
     now: () => number;
     createSession: (input: CreateWorkflowNodeConversationInput & { emit: (event: AgentEvent) => void }) => WorkflowNodeInteractiveSession;
-    onChanged?: (conversation: WorkflowNodeConversation) => void;
+    onChanged?: (delivery: "stream" | "immediate") => void;
     onCompleted?: (conversation: WorkflowNodeConversation, content: string) => void;
   }) {}
 
@@ -197,17 +198,19 @@ export class WorkflowV2ConversationManager {
       .map((conversation) => structuredClone(conversation));
   }
 
-  restore(conversations: WorkflowNodeConversation[]): void {
-    for (const conversation of conversations) {
-      const restored = structuredClone(conversation);
+  restore(conversations: unknown): void {
+    if (!Array.isArray(conversations)) return;
+    for (const value of conversations) {
+      const restored = restoreWorkflowNodeConversation(value);
+      if (!restored) continue;
       for (const message of restored.messages) {
         if ((message.event?.type === "approval_request" || message.event?.type === "user_input_request") && message.event.requestState === "live") message.event.requestState = "expired";
       }
-      this.conversations.set(conversation.conversationId, restored);
-      this.restoredInputs.set(conversation.conversationId, {
-        workflowId: conversation.workflowId, runId: conversation.runId, nodeId: conversation.nodeId,
-        configuredAgentId: conversation.configuredAgentId, modelId: conversation.modelId, workDir: conversation.workDir,
-        initialPrompt: conversation.messages.find((message) => message.role === "system")?.content ?? "Continue this workflow node.",
+      this.conversations.set(restored.conversationId, restored);
+      this.restoredInputs.set(restored.conversationId, {
+        workflowId: restored.workflowId, runId: restored.runId, nodeId: restored.nodeId,
+        configuredAgentId: restored.configuredAgentId, modelId: restored.modelId, workDir: restored.workDir,
+        initialPrompt: restored.messages.find((message) => message.role === "system")?.content ?? "Continue this workflow node.",
       });
     }
   }
@@ -245,7 +248,7 @@ export class WorkflowV2ConversationManager {
     }
     if (event.type === "error") conversation.status = "failed";
     this.syncRuntimeConversation(conversationId);
-    this.changed(conversation);
+    this.changed(conversation, event.type === "delta" ? "stream" : "immediate");
   }
 
   private syncRuntimeConversation(conversationId: string): void {
@@ -262,9 +265,9 @@ export class WorkflowV2ConversationManager {
     conversation.lastActivityAt = at;
   }
 
-  private changed(conversation: WorkflowNodeConversation): void {
+  private changed(conversation: WorkflowNodeConversation, delivery: "stream" | "immediate" = "immediate"): void {
     conversation.updatedAt = this.deps.now();
-    this.deps.onChanged?.(structuredClone(conversation));
+    this.deps.onChanged?.(delivery);
   }
 
   private mutableRequired(conversationId: string): WorkflowNodeConversation {
@@ -295,6 +298,89 @@ export class WorkflowV2ConversationManager {
     if (!session) throw new Error(`Workflow node conversation session ${conversationId} was not found.`);
     return session;
   }
+}
+
+const workflowNodeConversationStatuses = new Set<WorkflowNodeConversation["status"]>([
+  "starting", "active", "waiting_for_user", "completion_proposed", "closed", "failed",
+]);
+const workflowNodeMessageRoles = new Set<WorkflowNodeMessage["role"]>(["user", "assistant", "system", "tool"]);
+const workflowNodeEventTypes = new Set<AgentEvent["type"]>([
+  "runtime_conversation", "delta", "completed", "error", "system", "tool_call", "tool_result", "handoff",
+  "approval_request", "approval_response", "user_input_request", "user_input_response",
+]);
+const chatEventTypes = new Set<ChatEvent["type"]>([
+  "meta", "system", "tool_call", "tool_result", "handoff", "approval_request", "approval_response",
+  "user_input_request", "user_input_response", "error",
+]);
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function restoredWorkflowNodeMessage(value: unknown): WorkflowNodeMessage | undefined {
+  const record = objectRecord(value);
+  if (!record || typeof record.id !== "string" || !workflowNodeMessageRoles.has(record.role as WorkflowNodeMessage["role"]) || typeof record.content !== "string") return undefined;
+  const at = finiteNumber(record.at);
+  if (at === undefined) return undefined;
+  const message: WorkflowNodeMessage = { id: record.id, role: record.role as WorkflowNodeMessage["role"], content: record.content, at };
+  if (workflowNodeEventTypes.has(record.eventType as AgentEvent["type"])) message.eventType = record.eventType as AgentEvent["type"];
+  if (typeof record.name === "string") message.name = record.name;
+  const event = objectRecord(record.event);
+  if (event && typeof event.id === "string" && chatEventTypes.has(event.type as ChatEvent["type"]) && typeof event.content === "string" && finiteNumber(event.timestamp) !== undefined) {
+    message.event = structuredClone(event) as unknown as ChatEvent;
+  }
+  return message;
+}
+
+function restoredCompletionProposal(value: unknown): WorkflowNodeCompletionProposal | undefined {
+  const record = objectRecord(value);
+  if (!record || !isWorkflowV2WorkerOutput(record.output) || !Array.isArray(record.acceptanceCriteria) || !Array.isArray(record.unresolvedRisks) || !record.unresolvedRisks.every((risk) => typeof risk === "string")) return undefined;
+  const proposedAt = finiteNumber(record.proposedAt);
+  if (proposedAt === undefined) return undefined;
+  const acceptanceCriteria = record.acceptanceCriteria.flatMap((criterion) => {
+    const item = objectRecord(criterion);
+    if (!item || typeof item.key !== "string" || typeof item.satisfied !== "boolean" || (item.evidence !== undefined && typeof item.evidence !== "string")) return [];
+    return [{ key: item.key, satisfied: item.satisfied, ...(typeof item.evidence === "string" ? { evidence: item.evidence } : {}) }];
+  });
+  if (acceptanceCriteria.length !== record.acceptanceCriteria.length) return undefined;
+  return {
+    output: structuredClone(record.output),
+    acceptanceCriteria,
+    unresolvedRisks: [...record.unresolvedRisks] as string[],
+    proposedAt,
+  };
+}
+
+function restoreWorkflowNodeConversation(value: unknown): WorkflowNodeConversation | undefined {
+  const record = objectRecord(value);
+  if (!record) return undefined;
+  const requiredStrings = ["conversationId", "workflowId", "runId", "nodeId", "configuredAgentId", "modelId", "workDir"] as const;
+  if (requiredStrings.some((key) => typeof record[key] !== "string") || !workflowNodeConversationStatuses.has(record.status as WorkflowNodeConversation["status"]) || !Array.isArray(record.messages)) return undefined;
+  const createdAt = finiteNumber(record.createdAt);
+  const updatedAt = finiteNumber(record.updatedAt);
+  const lastActivityAt = finiteNumber(record.lastActivityAt);
+  if (createdAt === undefined || updatedAt === undefined || lastActivityAt === undefined) return undefined;
+  const completionProposal = restoredCompletionProposal(record.completionProposal);
+  const status = record.status === "completion_proposed" && !completionProposal ? "waiting_for_user" : record.status as WorkflowNodeConversation["status"];
+  return {
+    conversationId: record.conversationId as string,
+    workflowId: record.workflowId as string,
+    runId: record.runId as string,
+    nodeId: record.nodeId as string,
+    configuredAgentId: record.configuredAgentId as string,
+    modelId: record.modelId as string,
+    workDir: record.workDir as string,
+    status,
+    messages: record.messages.flatMap((message) => restoredWorkflowNodeMessage(message) ?? []),
+    ...(completionProposal ? { completionProposal } : {}),
+    createdAt,
+    updatedAt,
+    lastActivityAt,
+  };
 }
 
 function workflowNodeChatEvent(event: AgentEvent, id: string, timestamp: number): ChatEvent | undefined {

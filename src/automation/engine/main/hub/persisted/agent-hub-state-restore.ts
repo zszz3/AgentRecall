@@ -85,15 +85,41 @@ export function restoreConfiguredAgentState(
     : defaultModelForAgent(runtimeAgentId);
   const model = deps.channelById(normalizedChannelId)?.models.find((item) => item.id === normalizedModelId);
   const reasoningEffort = asOptionalString(record.reasoningEffort);
+  const agentType = record.agentType === "execution" || record.agentType === "composed"
+    ? record.agentType
+    : undefined;
+  const instructions = asOptionalString(record.instructions);
+  const baseAgentId = asOptionalString(record.baseAgentId)?.trim();
+  const currentRevisionId = asOptionalString(record.currentRevisionId)?.trim();
+  const revision = typeof record.revision === "number" && Number.isFinite(record.revision) && record.revision > 0
+    ? Math.floor(record.revision)
+    : undefined;
+  const mcpBindings = asArray(record.mcpBindings).flatMap((rawBinding) => {
+    const binding = asRecord(rawBinding);
+    const serverId = asOptionalString(binding?.serverId)?.trim();
+    if (!serverId) return [];
+    const toolAllowlist = [...new Set(
+      asArray(binding?.toolAllowlist)
+        .map((tool) => asOptionalString(tool)?.trim())
+        .filter((tool): tool is string => Boolean(tool)),
+    )];
+    return [{ serverId, toolAllowlist }];
+  });
   return {
     id,
+    ...(agentType ? { agentType } : {}),
     name,
     description: asOptionalString(record.description) ?? "",
+    ...(instructions !== undefined ? { instructions } : {}),
+    ...(baseAgentId ? { baseAgentId } : {}),
     runtimeAgentId,
     channelId: normalizedChannelId,
     modelId: normalizedModelId,
     ...(reasoningEffort && model?.reasoningEfforts?.includes(reasoningEffort) ? { reasoningEffort } : {}),
+    ...(mcpBindings.length > 0 ? { mcpBindings } : {}),
     tags: asArray(record.tags).map((tag) => asOptionalString(tag)).filter((tag): tag is string => Boolean(tag)),
+    ...(currentRevisionId ? { currentRevisionId } : {}),
+    ...(revision !== undefined ? { revision } : {}),
     ...(record.managed === true ? { managed: true } : {}),
     createdAt: asNumber(record.createdAt, now),
     updatedAt: asNumber(record.updatedAt, now),

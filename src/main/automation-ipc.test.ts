@@ -13,12 +13,17 @@ function setup() {
     updateConfiguredAgents: vi.fn((value) => ({ configuredAgents: value })),
     createWorkflowDraft: vi.fn((value) => ({ workflowDraft: value })),
     sendWorkflowDraftReply: vi.fn(async (value) => ({ workflowDraft: value })),
+    setMcpServers: vi.fn(),
+    listConfiguredAgents: vi.fn(() => [{
+      id: "agent-1", name: "Agent", description: "", runtimeAgentId: "codex", channelId: "codex-openai",
+      modelId: "default", tags: [], mcpBindings: [{ serverId: "docs", toolAllowlist: [] }], createdAt: 1, updatedAt: 1,
+    }]),
   };
   const registry = {
     upsert: vi.fn(async (value) => value),
     list: vi.fn(async () => []),
     recordTest: vi.fn(),
-    delete: vi.fn(),
+    delete: vi.fn(async () => true),
   };
   const evaluations = {
     listDatasets: vi.fn(async () => []),
@@ -30,7 +35,8 @@ function setup() {
     listExperiments: vi.fn(async () => []),
     saveExperiment: vi.fn(async (value) => value),
     deleteExperiment: vi.fn(async () => true),
-    listRuns: vi.fn(async () => []),
+    listRuns: vi.fn(async () => ({ items: [], total: 0, offset: 0, limit: 50 })),
+    getRun: vi.fn(async () => undefined),
     deleteRun: vi.fn(async () => true),
     runExperiment: vi.fn(async (experimentId) => ({ experimentId })),
   };
@@ -65,6 +71,33 @@ describe("registerAutomationIpc", () => {
     await expect(invoke(AUTOMATION_CHANNELS.runtimeSaveChannels, [{ id: "" }])).rejects.toThrow(/id/i);
   });
 
+  it("validates Agent instructions and MCP bindings before saving", async () => {
+    const { invoke, hub } = setup();
+    const agent = {
+      id: "agent-1",
+      agentType: "execution",
+      name: "Agent",
+      description: "",
+      instructions: "Follow project policy.",
+      runtimeAgentId: "codex",
+      channelId: "codex-openai",
+      modelId: "default",
+      tags: [],
+      mcpBindings: [{ serverId: "docs", toolAllowlist: ["search"] }],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    await expect(invoke(AUTOMATION_CHANNELS.runtimeSaveAgents, [agent]))
+      .resolves.toEqual({ configuredAgents: [agent] });
+    expect(hub.updateConfiguredAgents).toHaveBeenCalledWith([agent]);
+
+    await expect(invoke(AUTOMATION_CHANNELS.runtimeSaveAgents, [{
+      ...agent,
+      mcpBindings: "not-an-array",
+    }])).rejects.toThrow(/array/i);
+  });
+
   it("rejects unsafe MCP URLs before touching the registry", async () => {
     const { invoke, registry } = setup();
     const server = {
@@ -83,6 +116,18 @@ describe("registerAutomationIpc", () => {
 
     await expect(invoke(AUTOMATION_CHANNELS.mcpSave, server)).rejects.toThrow(/http/i);
     expect(registry.upsert).not.toHaveBeenCalled();
+  });
+
+  it("refreshes runtime MCP state and removes stale Agent bindings after deletion", async () => {
+    const { invoke, hub, registry } = setup();
+
+    await expect(invoke(AUTOMATION_CHANNELS.mcpDelete, "docs")).resolves.toBe(true);
+
+    expect(registry.delete).toHaveBeenCalledWith("docs");
+    expect(hub.setMcpServers).toHaveBeenCalledWith([]);
+    expect(hub.updateConfiguredAgents).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "agent-1", mcpBindings: [] }),
+    ]);
   });
 
   it("bounds workflow planning input at the IPC boundary", async () => {

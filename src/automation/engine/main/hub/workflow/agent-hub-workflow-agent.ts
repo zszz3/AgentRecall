@@ -57,7 +57,7 @@ export async function runWorkflowDraftReply(input: {
 }
 
 export function buildWorkflowAgentExecution<TResolved extends {
-  agent: { id: string; name: string };
+  agent: { id: string; name: string; instructions?: string };
   runtimeAgentId: AgentId;
   runtime: { available: boolean } | undefined;
   channel: { id: string };
@@ -73,6 +73,8 @@ export function buildWorkflowAgentExecution<TResolved extends {
 }): {
   requestId: string;
   planningWorkflowId?: string;
+  configuredAgentId: string;
+  developerInstructions: string;
   runtimeId: AgentId;
   executionMode: WorkflowAgentRequest["executionMode"];
   continuationPolicy: WorkflowAgentRequest["continuationPolicy"];
@@ -103,6 +105,8 @@ export function buildWorkflowAgentExecution<TResolved extends {
   return {
     requestId: input.request.requestId ?? input.createRequestId(),
     ...(input.request.planningWorkflowId ? { planningWorkflowId: input.request.planningWorkflowId } : {}),
+    configuredAgentId: resolved.agent.id,
+    developerInstructions: resolved.agent.instructions?.trim() ?? "",
     runtimeId: input.request.runtimeId,
     executionMode: input.request.executionMode,
     continuationPolicy: input.request.continuationPolicy,

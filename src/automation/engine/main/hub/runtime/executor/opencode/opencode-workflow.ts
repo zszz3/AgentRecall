@@ -2,7 +2,8 @@ import type { AgentRuntime, WorkflowAgentResponse } from "../../../../../shared/
 import { runtimeModelId } from "../../../../../shared/models";
 import { OpenCodeRunner } from "../../../../agents/opencode/opencode-runner";
 import type { RuntimeChannelTestContext, RuntimeWorkflowRequestContext } from "../../../../agents/runtime/runtime-driver";
-import { modelFromRuntimeConfig, type RuntimeWorkflowExecutionOptions } from "../workflow/agent-executor-workflow-shared";
+import { developerInstructionsForWorkflowRequest, modelFromRuntimeConfig, type RuntimeWorkflowExecutionOptions } from "../workflow/agent-executor-workflow-shared";
+import { promptWithDeveloperInstructions } from "../runtime-instructions";
 
 const OPENCODE_AGENT_TEST_PROMPT = "Reply with OK only.";
 
@@ -18,7 +19,10 @@ export async function runOpenCodeWorkflow(
   const runner = new OpenCodeRunner({
     executable: input.runtime.command || options.executables.opencode,
     cwd: input.workDir,
-    prompt: input.prompt,
+    prompt: promptWithDeveloperInstructions(
+      input.prompt,
+      developerInstructionsForWorkflowRequest(input),
+    ),
     modelId: modelFromRuntimeConfig(input.runtimeConfig),
     onEvent: (event) => {
       if (event.type === "delta") {

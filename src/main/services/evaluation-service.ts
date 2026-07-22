@@ -4,6 +4,8 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunPage,
+  ListEvaluationRunsRequest,
 } from "../../automation/engine/shared/types";
 import { runEvaluation } from "../../automation/engine/main/evaluation-runner";
 import type { EvaluationStore } from "../../automation/engine/main/evaluation-store";
@@ -58,8 +60,12 @@ export class EvaluationService {
     return this.dependencies.store.deleteExperiment(id);
   }
 
-  listRuns(experimentId?: string): Promise<EvaluationRun[]> {
-    return this.dependencies.store.listRuns(experimentId);
+  listRuns(input?: ListEvaluationRunsRequest): Promise<EvaluationRunPage> {
+    return this.dependencies.store.listRuns(input);
+  }
+
+  getRun(id: string): Promise<EvaluationRun | undefined> {
+    return this.dependencies.store.getRun(id);
   }
 
   deleteRun(id: string): Promise<unknown> {

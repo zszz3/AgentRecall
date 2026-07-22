@@ -5,6 +5,7 @@ import type {
   RuntimeAgentExecutorFactoryOptions,
 } from "../agent-executor-types";
 import { modelFromRuntimeConfig } from "../agent-executor-types";
+import { promptWithDeveloperInstructions } from "../runtime-instructions";
 
 export class HermesAgentExecutor implements AgentExecutor {
   private runner: HermesRunner | undefined;
@@ -18,7 +19,10 @@ export class HermesAgentExecutor implements AgentExecutor {
     const runner = new HermesRunner({
       executable: this.context.runtime.command || this.options.executables.hermes,
       cwd: this.context.workDir,
-      prompt: this.context.prompt,
+      prompt: promptWithDeveloperInstructions(
+        this.context.prompt,
+        this.context.developerInstructions,
+      ),
       modelId: modelFromRuntimeConfig(this.context.runtimeConfig),
       onEvent: this.context.emit,
       onExit: (code) => {

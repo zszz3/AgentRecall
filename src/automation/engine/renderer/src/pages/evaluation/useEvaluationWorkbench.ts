@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   EvaluationDataset,
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunPage,
+  EvaluationRunSummary,
+  ListEvaluationRunsRequest,
 } from "../../../../shared/types";
 import type { EvaluationEvaluatorTemplate } from "../../../../shared/evaluation-templates";
 import { createBlankEvaluator, createEvaluatorFromTemplate } from "./evaluator-factory";
@@ -18,7 +21,8 @@ export interface EvaluationApi {
   listEvaluationExperiments: () => Promise<EvaluationExperiment[]>;
   saveEvaluationExperiment: (value: EvaluationExperiment) => Promise<EvaluationExperiment>;
   deleteEvaluationExperiment: (id: string) => Promise<boolean>;
-  listEvaluationRuns: (experimentId?: string) => Promise<EvaluationRun[]>;
+  listEvaluationRuns: (request?: ListEvaluationRunsRequest) => Promise<EvaluationRunPage>;
+  getEvaluationRun: (runId: string) => Promise<EvaluationRun | undefined>;
   runEvaluationExperiment: (experimentId: string) => Promise<EvaluationRun>;
 }
 
@@ -32,7 +36,13 @@ export function useEvaluationWorkbench(api: EvaluationApi) {
   const [datasets, setDatasets] = useState<EvaluationDataset[]>([]);
   const [evaluators, setEvaluators] = useState<EvaluationEvaluator[]>([]);
   const [experiments, setExperiments] = useState<EvaluationExperiment[]>([]);
-  const [runs, setRuns] = useState<EvaluationRun[]>([]);
+  const [runs, setRuns] = useState<EvaluationRunSummary[]>([]);
+  const [runTotal, setRunTotal] = useState(0);
+  const [overviewRunDetails, setOverviewRunDetails] = useState<EvaluationRun[]>([]);
+  const [experimentRuns, setExperimentRuns] = useState<EvaluationRunSummary[]>([]);
+  const [experimentRunTotal, setExperimentRunTotal] = useState(0);
+  const [latestExperimentRun, setLatestExperimentRun] = useState<EvaluationRun>();
+  const [runReloadVersion, setRunReloadVersion] = useState(0);
   const [view, setView] = useState<EvaluationView>("overview");
   const [selectedIds, setSelectedIds] = useState<
     Partial<Record<EvaluationView, string>>
@@ -47,17 +57,23 @@ export function useEvaluationWorkbench(api: EvaluationApi) {
     setBusy("load");
     setError(undefined);
     try {
-      const [nextDatasets, nextEvaluators, nextExperiments, nextRuns] =
+      const [nextDatasets, nextEvaluators, nextExperiments, nextRunPage] =
         await Promise.all([
           api.listEvaluationDatasets(),
           api.listEvaluationEvaluators(),
           api.listEvaluationExperiments(),
-          api.listEvaluationRuns(),
+          api.listEvaluationRuns({ limit: 50 }),
         ]);
+      const nextRunDetails = (await Promise.all(
+        nextRunPage.items.slice(0, 6).map((run) => api.getEvaluationRun(run.id)),
+      )).filter((run): run is EvaluationRun => Boolean(run));
       setDatasets(nextDatasets);
       setEvaluators(nextEvaluators);
       setExperiments(nextExperiments);
-      setRuns(nextRuns);
+      setRuns(nextRunPage.items);
+      setRunTotal(nextRunPage.total);
+      setOverviewRunDetails(nextRunDetails);
+      setRunReloadVersion((version) => version + 1);
       setDirty(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -78,6 +94,26 @@ export function useEvaluationWorkbench(api: EvaluationApi) {
   const selectedExperiment =
     experiments.find((item) => item.id === selectedIds.experiments) ??
     experiments[0];
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedExperiment) {
+      setExperimentRuns([]);
+      setExperimentRunTotal(0);
+      setLatestExperimentRun(undefined);
+      return () => { active = false; };
+    }
+    void api.listEvaluationRuns({ experimentId: selectedExperiment.id, limit: 50 }).then(async (page) => {
+      const latest = page.items[0] ? await api.getEvaluationRun(page.items[0].id) : undefined;
+      if (!active) return;
+      setExperimentRuns(page.items);
+      setExperimentRunTotal(page.total);
+      setLatestExperimentRun(latest);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+    return () => { active = false; };
+  }, [api, runReloadVersion, selectedExperiment?.id]);
 
   const select = useCallback((targetView: EvaluationView, id?: string) => {
     setView(targetView);
@@ -212,24 +248,38 @@ export function useEvaluationWorkbench(api: EvaluationApi) {
       setBusy((current) => (current === "run" ? undefined : current));
     }
   }, [api, reload]);
-
-  const experimentRuns = useMemo(
-    () =>
-      selectedExperiment
-        ? runs.filter((run) => run.experimentId === selectedExperiment.id)
-        : [],
-    [runs, selectedExperiment],
-  );
+  const loadMoreExperimentRuns = useCallback(async () => {
+    if (!selectedExperiment || experimentRuns.length >= experimentRunTotal) return;
+    setBusy("load");
+    setError(undefined);
+    try {
+      const page = await api.listEvaluationRuns({
+        experimentId: selectedExperiment.id,
+        offset: experimentRuns.length,
+        limit: 50,
+      });
+      setExperimentRuns((current) => [...current, ...page.items]);
+      setExperimentRunTotal(page.total);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy((current) => current === "load" ? undefined : current);
+    }
+  }, [api, experimentRunTotal, experimentRuns.length, selectedExperiment]);
   return {
     datasets,
     evaluators,
     experiments,
     runs,
+    runTotal,
+    overviewRunDetails,
     view,
     selectedDataset,
     selectedEvaluator,
     selectedExperiment,
     experimentRuns,
+    experimentRunTotal,
+    latestExperimentRun,
     dirty,
     busy,
     error,
@@ -244,5 +294,6 @@ export function useEvaluationWorkbench(api: EvaluationApi) {
     saveExperiment,
     deleteCurrent,
     runExperiment,
+    loadMoreExperimentRuns,
   };
 }

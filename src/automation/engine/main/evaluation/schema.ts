@@ -9,7 +9,10 @@ export function ensureEvaluationSchema(db: EvaluationSchemaDatabase): void {
     create table if not exists evaluation_experiments (id text primary key, name text not null, dataset_id text not null references evaluation_datasets(id), agent_id text not null, repetitions integer not null, created_at integer not null, updated_at integer not null);
     create table if not exists evaluation_experiment_evaluators (experiment_id text not null references evaluation_experiments(id) on delete cascade, evaluator_id text not null references evaluation_evaluators(id), sequence integer not null, primary key(experiment_id, evaluator_id));
     create table if not exists evaluation_runs (id text primary key, experiment_id text not null references evaluation_experiments(id) on delete cascade, status text not null, agent_revision_id text, started_at integer not null, finished_at integer, average_score real, minimum_score real, pass_rate real, total_duration_ms integer, error text);
+    create index if not exists evaluation_runs_started on evaluation_runs(started_at desc);
+    create index if not exists evaluation_runs_experiment_started on evaluation_runs(experiment_id, started_at desc);
     create table if not exists evaluation_case_results (id text primary key, run_id text not null references evaluation_runs(id) on delete cascade, dataset_item_id text not null, repetition integer not null, input text not null, expected_output text, output text not null, error text, duration_ms integer not null);
+    create index if not exists evaluation_case_results_run on evaluation_case_results(run_id);
     create table if not exists evaluation_scores (case_result_id text not null references evaluation_case_results(id) on delete cascade, evaluator_id text not null, score real not null, passed integer not null, reason text, evidence_json text, failed_criteria_json text, duration_ms integer not null, token_count integer, estimated_cost real, primary key(case_result_id, evaluator_id));
   `);
 }

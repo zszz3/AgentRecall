@@ -53,6 +53,7 @@ describe("AcpInteractiveClient", () => {
       args: ["acp"],
       cwd: dir,
       modelId: "custom-model",
+      mcpServers: [{ name: "Filesystem", command: "node", args: ["server.js"], env: [] }],
       onEvent: (event) => events.push(event),
       approvalOwnerId: "chat-1",
       requestApproval: async (request) => {
@@ -85,6 +86,9 @@ describe("AcpInteractiveClient", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, any>);
     expect(calls.some((call) => call.method === "session/new")).toBe(true);
+    expect(calls.find((call) => call.method === "session/new")?.params.mcpServers).toEqual([
+      { name: "Filesystem", command: "node", args: ["server.js"], env: [] },
+    ]);
     expect(calls.some((call) => call.method === "session/set_model" && call.params.modelId === "custom-model")).toBe(true);
     expect(calls.some((call) => call.method === "session/prompt" && call.params.prompt[0].text === "hello")).toBe(true);
     expect(calls.some((call) => call.method === "session/cancel")).toBe(true);

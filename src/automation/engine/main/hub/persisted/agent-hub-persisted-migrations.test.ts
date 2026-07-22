@@ -10,4 +10,8 @@ describe("persisted app state validation", () => {
     expect(isPersistedAppStateV5(state(5))).toBe(true);
     expect(isPersistedAppStateV5(state(4))).toBe(false);
   });
+
+  test("rejects a non-array workflow conversation collection", () => {
+    expect(isPersistedAppStateV5({ ...state(5), workflowNodeConversations: {} })).toBe(false);
+  });
 });

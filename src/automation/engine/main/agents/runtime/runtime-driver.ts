@@ -43,6 +43,9 @@ export interface InteractiveSessionContext extends RuntimeRequest {
 export interface RuntimeWorkflowRequestContext extends RuntimeRequest {
   planningWorkflowId?: string;
   requestId: string;
+  configuredAgentId?: string;
+  developerInstructions?: string;
+  instructionScope?: "workflow" | "agent";
   prompt: string;
   runtime: AgentRuntime;
   channelId: string;

@@ -14,6 +14,7 @@ export function isPersistedAppStateV5(raw: unknown): raw is PersistedAppStateV5 
       && Array.isArray(record.taskMessages)
       && Array.isArray(record.taskEvents)
       && Array.isArray(record.teams)
-      && Array.isArray(record.teamRuns),
+      && Array.isArray(record.teamRuns)
+      && (record.workflowNodeConversations === undefined || Array.isArray(record.workflowNodeConversations)),
   );
 }

@@ -1,5 +1,8 @@
 import type { AgentChannel, AgentId, RuntimeRequest } from "../../../../../shared/types";
+import type { RuntimeWorkflowRequestContext } from "../../../../agents/runtime/runtime-driver";
 import { WORKFLOW_EXECUTION_MODE_POLICY } from "../../../../../shared/workflow-agent";
+import type { BoundMcpServer } from "../runtime-mcp";
+import { combineDeveloperInstructions } from "../runtime-instructions";
 
 export const WORKFLOW_AGENT_IDLE_TIMEOUT_MS = 10 * 60_000;
 export const WORKFLOW_DEVELOPER_INSTRUCTIONS =
@@ -12,10 +15,20 @@ export const WORKFLOW_DEVELOPER_INSTRUCTIONS =
     "During completed workflow review, write a Markdown Final User Report and remain available for follow-up.",
   ].join(" ");
 
+export function developerInstructionsForWorkflowRequest(
+  input: Pick<RuntimeWorkflowRequestContext, "developerInstructions" | "instructionScope">,
+): string {
+  return combineDeveloperInstructions(
+    input.instructionScope === "agent" ? undefined : WORKFLOW_DEVELOPER_INSTRUCTIONS,
+    input.developerInstructions,
+  );
+}
+
 export interface RuntimeWorkflowExecutionOptions {
   executables: Record<AgentId, string>;
   channelById: (channelId: string) => AgentChannel | undefined;
   workflowMcpDiscoveryPath?: () => string | undefined;
+  mcpServersForAgent?: (configuredAgentId: string) => BoundMcpServer[];
 }
 
 export function modelFromRuntimeConfig(runtimeConfig: RuntimeRequest["runtimeConfig"]): string {

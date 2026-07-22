@@ -15,6 +15,8 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunPage,
+  ListEvaluationRunsRequest,
   InterruptWorkflowNodeConversationRequest,
   InterruptWorkflowReviewRequest,
   ListWorkflowOutputsRequest,
@@ -88,7 +90,8 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     listEvaluationExperiments: (): Promise<EvaluationExperiment[]> => ipc.invoke(AUTOMATION_CHANNELS.evaluationExperimentList),
     saveEvaluationExperiment: (experiment: EvaluationExperiment): Promise<EvaluationExperiment> => ipc.invoke(AUTOMATION_CHANNELS.evaluationExperimentSave, experiment),
     deleteEvaluationExperiment: (experimentId: string): Promise<boolean> => ipc.invoke(AUTOMATION_CHANNELS.evaluationExperimentDelete, experimentId),
-    listEvaluationRuns: (experimentId?: string): Promise<EvaluationRun[]> => ipc.invoke(AUTOMATION_CHANNELS.evaluationRunList, experimentId),
+    listEvaluationRuns: (request?: ListEvaluationRunsRequest): Promise<EvaluationRunPage> => ipc.invoke(AUTOMATION_CHANNELS.evaluationRunList, request),
+    getEvaluationRun: (runId: string): Promise<EvaluationRun | undefined> => ipc.invoke(AUTOMATION_CHANNELS.evaluationRunGet, runId),
     deleteEvaluationRun: (runId: string): Promise<boolean> => ipc.invoke(AUTOMATION_CHANNELS.evaluationRunDelete, runId),
     runEvaluationExperiment: (experimentId: string): Promise<EvaluationRun> => ipc.invoke(AUTOMATION_CHANNELS.evaluationExperimentRun, { experimentId }),
 

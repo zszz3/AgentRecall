@@ -58,10 +58,13 @@ export async function runAgentExecution(input: {
   const developerInstructions = input.run.kind === "task"
     ? [
       input.taskDeveloperInstructions,
+      input.resolved.agent.instructions,
       input.run.developerInstructions,
       input.run.contextDocument ? `# Runtime context\n${input.run.contextDocument}` : undefined,
     ].filter(Boolean).join("\n\n")
-    : input.chatDeveloperInstructions;
+    : [input.chatDeveloperInstructions, input.resolved.agent.instructions]
+      .filter(Boolean)
+      .join("\n\n");
   const executionMode =
     input.run.kind === "chat"
       ? input.selectExecutionMode(input.resolved.runtimeAgentId, "chat", "oneshot")
@@ -74,6 +77,7 @@ export async function runAgentExecution(input: {
   const executor = input.executorFactory.create({
     runId: input.run.id,
     runKind: input.run.kind,
+    configuredAgentId: input.resolved.agent.id,
     runtimeId: input.resolved.runtimeAgentId,
     executionMode,
     continuationPolicy,

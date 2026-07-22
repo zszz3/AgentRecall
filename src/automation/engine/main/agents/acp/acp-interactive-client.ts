@@ -18,6 +18,7 @@ export interface AcpInteractiveClientOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   modelId?: string;
+  mcpServers?: acp.McpServer[];
   onEvent: (event: AgentEvent) => void;
   onExit?: (error?: Error) => void;
   approvalOwnerId?: string;
@@ -194,7 +195,7 @@ export class AcpInteractiveClient {
           connection.agent.request(acp.methods.agent.session.resume, {
             sessionId: resumeSessionId,
             cwd: this.options.cwd,
-            mcpServers: [],
+            mcpServers: this.options.mcpServers ?? [],
           }),
           ACP_ATTACH_TIMEOUT_MS,
           "ACP session resume",
@@ -203,7 +204,7 @@ export class AcpInteractiveClient {
         const response = await withTimeout(
           connection.agent.request(acp.methods.agent.session.new, {
             cwd: this.options.cwd,
-            mcpServers: [],
+            mcpServers: this.options.mcpServers ?? [],
           }),
           ACP_ATTACH_TIMEOUT_MS,
           "ACP session create",

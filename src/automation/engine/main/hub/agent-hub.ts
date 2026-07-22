@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import type { McpServerDefinition } from "../../shared/mcp/types";
 import type {
   AgentChannel,
   ConfiguredAgent,
@@ -85,6 +86,7 @@ import type {
   WorkflowStoreState,
   WorkflowRunProgressItem,
 } from "../../shared/types";
+import type { BoundMcpServer } from "./runtime/executor/runtime-mcp";
 import { normalizeConfigChannelsForStorage } from "../../shared/config-channels";
 import { DEFAULT_MODEL_ID, defaultChannelForAgent, defaultModelForAgent, isModelForChannel } from "../../shared/models";
 import type { WorkflowV2Definition } from "../../shared/workflow-v2/definition";
@@ -354,6 +356,7 @@ export class AgentHub {
   private scheduledWorkflowSchedules = new Map<string, ScheduledWorkflowSchedule>();
   private scheduledWorkflowRuns = new Map<string, ScheduledWorkflowRun>();
   private configuredAgents = new Map<string, ConfiguredAgent>();
+  private mcpServers: McpServerDefinition[] = [];
   private activeScheduledWorkflowId: string | undefined;
   private scheduledWorkflowRunnerConfig: ScheduledWorkflowRunnerConfig = { baseUrl: "" };
   private scheduledWorkflowRunnerStatus: ScheduledWorkflowRunnerStatus = { connected: false, connecting: false };
@@ -367,6 +370,7 @@ export class AgentHub {
   private modelConfigPath: string | undefined = undefined;
   private workflowMcpDiscoveryPath: string | undefined = undefined;
   private persistTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+  private streamingEmitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   private idleSweepTimer: ReturnType<typeof setInterval> | undefined = undefined;
   private persistInFlight: Promise<void> | undefined = undefined;
   private persistenceWriteBlocked = false;
@@ -402,6 +406,7 @@ export class AgentHub {
         executables: this.executables,
         channelById: (channelId) => this.channelById(channelId),
         workflowMcpDiscoveryPath: () => this.workflowMcpDiscoveryPath,
+        mcpServersForAgent: (configuredAgentId) => this.boundMcpServersForAgent(configuredAgentId),
         requestApproval: this.runtimeApprovals.request,
       });
     this.runtimeRouter = new RuntimeRouter(this.runtimeDrivers);
@@ -422,7 +427,7 @@ export class AgentHub {
     this.workflowNodeConversations = new WorkflowV2ConversationManager({
       now: () => Date.now(),
       createSession: (input) => this.createWorkflowNodeInteractiveSession(input),
-      onChanged: () => this.emit(),
+      onChanged: (delivery) => delivery === "stream" ? this.emitStreaming() : this.emit(),
       onCompleted: (conversation, content) => {
         const workflow = this.workflowStore.workflows.get(conversation.workflowId);
         const node = workflow?.workflowV2Plan?.definition.nodes.find((candidate) => candidate.id === conversation.nodeId);
@@ -439,7 +444,6 @@ export class AgentHub {
             })),
             unresolvedRisks: output.risks ?? [],
           });
-          void this.workflowNodeConversationService.completeProposed(conversation.conversationId).then(() => this.emit());
         } catch {
           this.workflowNodeConversations.markWaitingForUser(
             conversation.conversationId,
@@ -570,6 +574,15 @@ export class AgentHub {
     this.workflowMcpDiscoveryPath = discoveryPath;
   }
 
+  setMcpServers(servers: McpServerDefinition[]): void {
+    this.mcpServers = servers.map((server) => ({
+      ...server,
+      args: [...server.args],
+      env: { ...server.env },
+      tools: server.tools.map((tool) => ({ ...tool, inputSchema: structuredClone(tool.inputSchema) })),
+    }));
+  }
+
   async saveModelChannels(channels: AgentChannel[]): Promise<AppSnapshot> {
     const normalizedChannels = normalizeConfigChannelsForStorage(normalizeChannels(channels));
     if (this.storagePath) {
@@ -675,7 +688,25 @@ export class AgentHub {
   listConfiguredAgents(): ConfiguredAgent[] {
     return [...this.configuredAgents.values()]
       .sort((left, right) => left.name.localeCompare(right.name))
-      .map((agent) => ({ ...agent, tags: [...agent.tags] }));
+      .map((agent) => ({
+        ...agent,
+        tags: [...agent.tags],
+        ...(agent.mcpBindings ? {
+          mcpBindings: agent.mcpBindings.map((binding) => ({
+            serverId: binding.serverId,
+            toolAllowlist: [...binding.toolAllowlist],
+          })),
+        } : {}),
+      }));
+  }
+
+  private boundMcpServersForAgent(configuredAgentId: string): BoundMcpServer[] {
+    const bindings = this.configuredAgents.get(configuredAgentId)?.mcpBindings ?? [];
+    const servers = new Map(this.mcpServers.filter((server) => server.enabled).map((server) => [server.id, server]));
+    return bindings.flatMap((binding) => {
+      const server = servers.get(binding.serverId);
+      return server ? [{ server, toolAllowlist: [...binding.toolAllowlist] }] : [];
+    });
   }
   private defaultConfiguredAgentId(): string {
     return this.configuredAgents.get("default-agent")?.id
@@ -829,6 +860,10 @@ export class AgentHub {
   }
 
   async shutdown(): Promise<void> {
+    if (this.streamingEmitTimer) {
+      clearTimeout(this.streamingEmitTimer);
+      this.streamingEmitTimer = undefined;
+    }
     if (this.idleSweepTimer) {
       clearInterval(this.idleSweepTimer);
       this.idleSweepTimer = undefined;
@@ -1726,7 +1761,7 @@ export class AgentHub {
       runtime: resolved.runtime,
       channelId: resolved.channel.id,
       workDir: input.workDir,
-      developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, input.developerInstructions, input.contextDocument ? `# Runtime context\n${input.contextDocument}` : undefined].filter(Boolean).join("\n\n"),
+      developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, resolved.agent.instructions, input.developerInstructions, input.contextDocument ? `# Runtime context\n${input.contextDocument}` : undefined].filter(Boolean).join("\n\n"),
       emit: (event) => {
         if (event.type === "runtime_conversation") latestRuntimeConversation = this.runtimeRouter.cloneConversation(event.runtimeConversation);
         input.emit(event);
@@ -1823,7 +1858,9 @@ export class AgentHub {
         channelId: resolved.channel.id,
         workDir: input.workDir,
         planningWorkflowId: input.workflowId,
-        developerInstructions: WORKFLOW_DEVELOPER_INSTRUCTIONS,
+        developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, resolved.agent.instructions]
+          .filter(Boolean)
+          .join("\n\n"),
         emit: (event) => {
           if (settled) return;
           timeout?.refresh();
@@ -1873,6 +1910,19 @@ export class AgentHub {
   }
 
   async askWorkflowAgent(input: WorkflowAgentRequest, onEvent?: (event: WorkflowAgentEvent) => void, signal?: AbortSignal): Promise<WorkflowAgentResponse> {
+    return this.askAgentWithInstructionScope(input, "workflow", onEvent, signal);
+  }
+
+  async askConfiguredAgent(input: WorkflowAgentRequest, onEvent?: (event: WorkflowAgentEvent) => void, signal?: AbortSignal): Promise<WorkflowAgentResponse> {
+    return this.askAgentWithInstructionScope(input, "agent", onEvent, signal);
+  }
+
+  private async askAgentWithInstructionScope(
+    input: WorkflowAgentRequest,
+    instructionScope: "workflow" | "agent",
+    onEvent?: (event: WorkflowAgentEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<WorkflowAgentResponse> {
     return this.runtimeRouter.askWorkflow({
       ...buildWorkflowAgentExecutionValue({
         request: input,
@@ -1883,6 +1933,7 @@ export class AgentHub {
         defaultWorkDir: this.workDir,
         createRequestId: () => randomUUID(),
       }),
+      instructionScope,
       onEvent,
       signal,
     });
@@ -2137,7 +2188,7 @@ export class AgentHub {
 
     if (reduced.type === "delta") {
       this.workflowStore.workflows.set(workflowId, reduced.workflow);
-      this.emit();
+      this.emitStreaming();
       return;
     }
 
@@ -2413,7 +2464,7 @@ export class AgentHub {
         return stop;
       },
       finishTaskRun: (task) => this.finishTeamStepFromTask(task),
-      emit: () => this.emit(),
+      emit: () => event.type === "delta" ? this.emitStreaming() : this.emit(),
     });
   }
 
@@ -2430,6 +2481,22 @@ export class AgentHub {
   }
 
   private emit(): void {
+    if (this.streamingEmitTimer) {
+      clearTimeout(this.streamingEmitTimer);
+      this.streamingEmitTimer = undefined;
+    }
+    this.publishSnapshot();
+  }
+
+  private emitStreaming(): void {
+    if (this.streamingEmitTimer) return;
+    this.streamingEmitTimer = setTimeout(() => {
+      this.streamingEmitTimer = undefined;
+      this.publishSnapshot();
+    }, 32);
+  }
+
+  private publishSnapshot(): void {
     const snapshot = this.snapshot();
     for (const listener of this.listeners) listener(snapshot);
     this.schedulePersist();

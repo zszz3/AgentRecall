@@ -198,6 +198,8 @@ export function EvaluationPage({
             evaluators={model.evaluators}
             experiments={model.experiments}
             runs={model.runs}
+            runDetails={model.overviewRunDetails}
+            runTotal={model.runTotal}
             agents={agents}
             onCreateExperiment={() => model.createExperiment(agents[0]?.id)}
           />
@@ -250,6 +252,8 @@ export function EvaluationPage({
             evaluators={model.evaluators}
             agents={agents}
             runs={model.experimentRuns}
+            latestRun={model.latestExperimentRun}
+            runTotal={model.experimentRunTotal}
             busy={model.busy}
             onSelect={(id) => navigate("experiments", id)}
             onCreate={() => model.createExperiment(agents[0]?.id)}
@@ -264,6 +268,7 @@ export function EvaluationPage({
                 void model.deleteCurrent();
             }}
             onRun={(value) => void model.runExperiment(value)}
+            onLoadMoreRuns={() => void model.loadMoreExperimentRuns()}
           />
         ) : null}
       </div>

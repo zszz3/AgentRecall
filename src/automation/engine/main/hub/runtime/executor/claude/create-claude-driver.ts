@@ -16,6 +16,7 @@ import { ClaudeAgentExecutor } from "./claude-executor";
 import { runClaudeChannelTest } from "./claude-test";
 import { runClaudeWorkflow } from "./claude-workflow";
 import { claudeWorkflowMcpServers } from "./claude-workflow-mcp";
+import { claudeMcpServers } from "../runtime-mcp";
 
 export interface ClaudeDriverDependencies {
   runOneShot?: (input: ClaudeAgentSdkRunInput) => Promise<void>;
@@ -43,6 +44,7 @@ export function createClaudeDriver(
         oneShotAdapter,
         claudeCliModelForChannel(options.channelById(context.channelId), modelFromRuntimeConfig(context.runtimeConfig)),
         options.requestApproval,
+        claudeMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
       ),
     createInteractiveSession: (context) =>
       new ClaudeInteractiveSession(
@@ -54,8 +56,10 @@ export function createClaudeDriver(
               options.channelById(interactiveContext.channelId),
               modelFromRuntimeConfig(interactiveContext.runtimeConfig),
             ) ?? modelFromRuntimeConfig(interactiveContext.runtimeConfig),
-          resolveMcpServers: (interactiveContext) =>
-            claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId),
+          resolveMcpServers: (interactiveContext) => ({
+            ...claudeMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
+            ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId),
+          }),
           sdkInteractive: new ClaudeAgentSdkInteractive(),
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
         },

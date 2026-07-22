@@ -21,6 +21,7 @@ import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
 import { runCodexChannelTest } from "./codex-test";
 import { runCodexWorkflow } from "./codex-workflow";
 import { codexWorkflowMcpArgs } from "./codex-workflow-mcp";
+import { codexMcpLaunchConfig } from "../runtime-mcp";
 
 export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
   const askWorkflowByRuntime = options.askWorkflowByRuntime ?? {};
@@ -38,6 +39,7 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
         capabilities: codexInteractiveSessionCapabilities,
         createCodexClient: ({ context: sessionContext, onEvent, onExit }) => {
           const channel = options.channelById(sessionContext.channelId);
+          const mcp = codexMcpLaunchConfig(options.mcpServersForAgent?.(sessionContext.configuredAgentId) ?? []);
           let client: CodexRpcClient;
           client = new CodexRpcClient({
             executable: sessionContext.runtime.command || options.executables.codex,
@@ -49,8 +51,9 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
                 reasoningEffortFromRuntimeConfig(sessionContext.runtimeConfig),
               ),
               ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), sessionContext.planningWorkflowId),
+              ...mcp.args,
             ],
-            env: codexEnvironmentForChannel(channel),
+            env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
             onEvent,
             onRequest: (id, method, params) => {
               respondToCodexRuntimeServerRequest(client, id, method, params, options.requestApproval ? {

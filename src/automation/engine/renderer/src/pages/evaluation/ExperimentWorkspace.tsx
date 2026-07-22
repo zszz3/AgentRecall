@@ -5,6 +5,7 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunSummary,
 } from "../../../../shared/types";
 import {
   BrowserHeader,
@@ -32,6 +33,8 @@ export function ExperimentWorkspace({
   evaluators,
   agents,
   runs,
+  latestRun,
+  runTotal,
   busy,
   onSelect,
   onCreate,
@@ -39,6 +42,7 @@ export function ExperimentWorkspace({
   onSave,
   onDelete,
   onRun,
+  onLoadMoreRuns,
 }: {
   zh: boolean;
   experiments: EvaluationExperiment[];
@@ -46,7 +50,9 @@ export function ExperimentWorkspace({
   datasets: EvaluationDataset[];
   evaluators: EvaluationEvaluator[];
   agents: ConfiguredAgent[];
-  runs: EvaluationRun[];
+  runs: EvaluationRunSummary[];
+  latestRun: EvaluationRun | undefined;
+  runTotal: number;
   busy: string | undefined;
   onSelect: (id: string) => void;
   onCreate: () => void;
@@ -54,9 +60,10 @@ export function ExperimentWorkspace({
   onSave: (value: EvaluationExperiment) => void;
   onDelete: () => void;
   onRun: (value: EvaluationExperiment) => void;
+  onLoadMoreRuns: () => void;
 }) {
   const [selected, onChange] = useEntityDraft(persistedSelected, onDraftChange);
-  const latest = runs[0];
+  const latest = latestRun;
   const selectedAgent = agents.find((item) => item.id === selected?.agentId);
   return (
     <WorkbenchLayout
@@ -69,10 +76,7 @@ export function ExperimentWorkspace({
           />
           <div className="workbench-browser-list">
             {experiments.map((item) => {
-              const run = runsFor(
-                item.id,
-                item.id === selected?.id ? runs : [],
-              );
+              const run = item.id === selected?.id ? runs[0] : undefined;
               return (
                 <BrowserItem
                   key={item.id}
@@ -393,6 +397,22 @@ export function ExperimentWorkspace({
                     </div>
                   ))}
                 </div>
+                {runs.length < runTotal ? (
+                  <button
+                    className="control-btn compact secondary"
+                    type="button"
+                    disabled={Boolean(busy)}
+                    onClick={onLoadMoreRuns}
+                  >
+                    {busy === "load"
+                      ? zh
+                        ? "加载中"
+                        : "Loading"
+                      : zh
+                        ? `加载更多（${runs.length}/${runTotal}）`
+                        : `Load more (${runs.length}/${runTotal})`}
+                  </button>
+                ) : null}
               </WorkbenchSection>
             ) : null}
           </div>
@@ -412,11 +432,4 @@ export function ExperimentWorkspace({
       )}
     </WorkbenchLayout>
   );
-}
-
-function runsFor(
-  _experimentId: string,
-  runs: EvaluationRun[],
-): EvaluationRun | undefined {
-  return runs[0];
 }
