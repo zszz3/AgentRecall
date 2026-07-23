@@ -21,15 +21,14 @@ function mainHandlerSource(channel: string): string {
 }
 
 describe("detail panel actions", () => {
-  it("loads a separate three-message context and highlights the exact search hit", () => {
+  it("opens the matching Turn instead of rebuilding a flat message context", () => {
     const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
-    expect(openDetail).toContain("Math.max(0, matchHit.messageIndex - 1), 3");
-    expect(openDetail).toContain("setMatchedContextMessages(loadedMatchContext)");
-    expect(openDetail).toContain("setMatchedMessageIndex(matchHit?.messageIndex ?? null)");
-    expect(detailPanelSource).toContain("matchedContextMessages");
-    expect(detailPanelSource).toContain('target={message.index === matchedMessageIndex}');
+    expect(openDetail).toContain("matchHit?.turnId ?? fresh.bestTurn?.turnId ?? null");
+    expect(openDetail).toContain("setMatchedTurnId");
+    expect(openDetail).not.toContain("matchedContextMessages");
+    expect(detailPanelSource).toContain("matchedTurnId");
+    expect(detailPanelSource).toContain("<TurnAccordion");
     expect(detailPanelSource).toContain("HighlightedSearchText");
-    expect(detailPanelSource).toContain('target ? "match-target"');
   });
 
   it("keeps resume routed and removes standalone terminal focus from the detail panel", () => {
@@ -76,13 +75,23 @@ describe("detail panel actions", () => {
     expect(mainSource).toContain("formatSessionMarkdown");
   });
 
-  it("opens detail on the newest message window and pages older messages backward", () => {
-    expect(appSource).toContain("Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT)");
-    expect(appSource).toContain("window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT)");
-    expect(appSource).toContain("const nextOffset = Math.max(0, messageOffset - MESSAGE_PAGE_SIZE)");
-    expect(appSource).toContain("setMessages((current) => [...nextMessages, ...current])");
-    expect(detailPanelSource).toContain("olderMessageCount > 0");
-    expect(detailPanelSource).toContain("Show ${Math.min(messagePageSize, olderMessageCount)} older messages");
+  it("opens standard Session details with lightweight Turn summaries", () => {
+    const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
+    expect(openDetail).toContain("window.sessionSearch.listSessionTurns(sessionKey)");
+    expect(openDetail).toContain("setDetailTurns(loadedTurns)");
+    expect(openDetail).not.toContain("window.sessionSearch.getMessages");
+    expect(openDetail).not.toContain("window.sessionSearch.getTraceEvents");
+    expect(appSource).not.toContain("loadMoreMessages");
+  });
+
+  it("keeps downloaded remote snapshots on the compatible flat reader", () => {
+    const remotePanel = appSource.slice(
+      appSource.indexOf("{remoteDetail ? ("),
+      appSource.indexOf("{contextMenu ? ("),
+    );
+    expect(remotePanel).toContain("turns={null}");
+    expect(remotePanel).toContain("messages={remoteDetail.snapshot.messages}");
+    expect(remotePanel).toContain("traceEvents={remoteDetail.snapshot.traceEvents}");
   });
 
   it("shows the full indexed message total instead of the loaded page size", () => {
@@ -148,18 +157,13 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).toContain("setShowTools");
   });
 
-  it("loads the visible message window before trace events when opening detail", () => {
+  it("loads the latest Session metadata before its derived Turns", () => {
     const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
     const freshIndex = openDetail.indexOf("const fresh = await window.sessionSearch.getSession(sessionKey)");
-    const messagesIndex = openDetail.indexOf(
-      "window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT)",
-    );
-    const traceIndex = openDetail.indexOf("window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(loadedMessages))");
+    const turnsIndex = openDetail.indexOf("window.sessionSearch.listSessionTurns(sessionKey)");
 
     expect(freshIndex).toBeGreaterThanOrEqual(0);
-    expect(messagesIndex).toBeGreaterThan(freshIndex);
-    expect(traceIndex).toBeGreaterThan(messagesIndex);
-    expect(openDetail).not.toContain("const [fresh, loadedTraceEvents] = await Promise.all");
+    expect(turnsIndex).toBeGreaterThan(freshIndex);
   });
 
   it("exposes lazy Turn summaries and details through hydrated Session IPC", () => {

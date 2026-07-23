@@ -635,6 +635,22 @@
   padding: 0 18px 22px;
 }
 
+.turn-conversation {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.turn-conversation > .conversation-header {
+  margin-right: 18px;
+  margin-left: 18px;
+}
+
+.turn-count {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
 .turn-list-loading,
 .turn-list-empty {
   display: flex;

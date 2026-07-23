@@ -53,7 +53,6 @@ import type { RemoteHealthReport } from "../../core/remote-health";
 import type { RemoteSessionDetailSnapshot, RemoteSessionListItem } from "../../core/remote-session-sync";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
-import type { TraceEventQueryOptions } from "../../core/session-store";
 import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import type {
@@ -66,13 +65,12 @@ import type {
   SessionEnvironment,
   SessionMigrationProgress,
   SessionMigrationResult,
-  SessionMessage,
   SessionMatchHit,
   SessionSearchResult,
   SessionSortBy,
   SessionStats,
   SessionStatsPeriod,
-  SessionTraceEvent,
+  SessionTurnSummary,
   UsageQuotaSnapshot,
 } from "../../core/types";
 import { DATE_RANGE_OPTIONS, dateRangeLabel, dateRangeShortLabel, resolveDateRange, type DateRangeFilter } from "./date-range";
@@ -198,9 +196,6 @@ function emptyPendingPersonalSources(): Record<PendingSourceKey, boolean> {
 
 const INITIAL_SESSION_LIMIT = 30;
 const SESSION_PAGE_SIZE = 30;
-const INITIAL_MESSAGE_LIMIT = 20;
-const MESSAGE_PAGE_SIZE = 80;
-const TRACE_EVENT_WINDOW_LIMIT = 300;
 
 const EMPTY_STATS: SessionStats = {
   total: {
@@ -248,25 +243,6 @@ const EMPTY_SKILL_SYNC: SkillSyncSnapshot = {
   bindings: [],
   scannedAt: 0,
 };
-
-function traceWindowForMessages(messages: SessionMessage[]): TraceEventQueryOptions {
-  const times = messages
-    .map((message) => new Date(message.timestamp).getTime())
-    .filter((time) => Number.isFinite(time));
-  if (times.length === 0) return { limit: TRACE_EVENT_WINDOW_LIMIT };
-  return {
-    startTimestamp: new Date(Math.min(...times)).toISOString(),
-    endTimestamp: new Date(Math.max(...times)).toISOString(),
-    limit: TRACE_EVENT_WINDOW_LIMIT,
-  };
-}
-
-function mergeTraceEventsByIndex(current: SessionTraceEvent[], next: SessionTraceEvent[]): SessionTraceEvent[] {
-  if (next.length === 0) return current;
-  const byIndex = new Map(current.map((event) => [event.index, event]));
-  for (const event of next) byIndex.set(event.index, event);
-  return [...byIndex.values()].sort((a, b) => a.index - b.index);
-}
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-recall-sidebar-sections";
 const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-recall-collapsed-project-groups";
@@ -350,12 +326,9 @@ export function App(): ReactElement {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionSearchResult | null>(null);
   const [remoteDetail, setRemoteDetail] = useState<{ snapshot: RemoteSessionDetailSnapshot; query: string } | null>(null);
-  const [messages, setMessages] = useState<SessionMessage[]>([]);
-  const [matchedContextMessages, setMatchedContextMessages] = useState<SessionMessage[]>([]);
-  const [matchedMessageIndex, setMatchedMessageIndex] = useState<number | null>(null);
-  const [messageOffset, setMessageOffset] = useState(0);
-  const [traceEvents, setTraceEvents] = useState<SessionTraceEvent[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [detailTurns, setDetailTurns] = useState<SessionTurnSummary[]>([]);
+  const [matchedTurnId, setMatchedTurnId] = useState<string | null>(null);
+  const [turnsLoading, setTurnsLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [migrationDialog, setMigrationDialog] = useState<SessionMigrationDialogState>(null);
@@ -1283,42 +1256,29 @@ export function App(): ReactElement {
     setContextMenu(null);
     setRemoteDetail(null);
     setDetail(session);
-    setMessages([]);
-    setMatchedContextMessages([]);
-    setMatchedMessageIndex(matchHit?.messageIndex ?? null);
-    setMessageOffset(0);
-    setTraceEvents([]);
-    setMessagesLoading(true);
+    setDetailTurns([]);
+    setMatchedTurnId(matchHit?.turnId ?? session.bestTurn?.turnId ?? null);
+    setTurnsLoading(true);
 
     const sessionKey = session.sessionKey;
     try {
       const fresh = await window.sessionSearch.getSession(sessionKey);
       if (requestId !== detailLoadSeqRef.current) return;
       if (!fresh) {
-        setMessagesLoading(false);
+        setTurnsLoading(false);
         return;
       }
 
-      const initialOffset = Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT);
-      const [loadedMessages, loadedMatchContext] = await Promise.all([
-        window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT),
-        matchHit
-          ? window.sessionSearch.getMessages(sessionKey, Math.max(0, matchHit.messageIndex - 1), 3)
-          : Promise.resolve([]),
-      ]);
-      if (requestId !== detailLoadSeqRef.current) return;
-      const loadedTraceEvents = await window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(loadedMessages));
+      const loadedTurns = await window.sessionSearch.listSessionTurns(sessionKey);
       if (requestId !== detailLoadSeqRef.current) return;
 
       setDetail(fresh);
-      setMessageOffset(initialOffset);
-      setMessages(loadedMessages);
-      setMatchedContextMessages(loadedMatchContext);
-      setTraceEvents(loadedTraceEvents);
-      setMessagesLoading(false);
+      setDetailTurns(loadedTurns);
+      setMatchedTurnId(matchHit?.turnId ?? fresh.bestTurn?.turnId ?? null);
+      setTurnsLoading(false);
     } catch (error) {
       if (requestId === detailLoadSeqRef.current) {
-        setMessagesLoading(false);
+        setTurnsLoading(false);
         setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
       }
     }
@@ -1327,49 +1287,22 @@ export function App(): ReactElement {
   function closeDetail(): void {
     detailLoadSeqRef.current++;
     setDetail(null);
-    setMessages([]);
-    setMatchedContextMessages([]);
-    setMatchedMessageIndex(null);
-    setMessageOffset(0);
-    setTraceEvents([]);
-    setMessagesLoading(false);
+    setDetailTurns([]);
+    setMatchedTurnId(null);
+    setTurnsLoading(false);
   }
 
   function openRemoteDetail(snapshot: RemoteSessionDetailSnapshot, detailQuery: string): void {
     detailLoadSeqRef.current++;
     setDetail(null);
-    setMessages([]);
-    setMessageOffset(0);
-    setTraceEvents([]);
-    setMessagesLoading(false);
+    setDetailTurns([]);
+    setMatchedTurnId(null);
+    setTurnsLoading(false);
     setRemoteDetail({ snapshot, query: detailQuery });
   }
 
   function closeRemoteDetail(): void {
     setRemoteDetail(null);
-  }
-
-  async function loadMoreMessages(): Promise<void> {
-    if (!detail || messagesLoading || messageOffset <= 0) return;
-    const requestId = detailLoadSeqRef.current;
-    const sessionKey = detail.sessionKey;
-    const nextOffset = Math.max(0, messageOffset - MESSAGE_PAGE_SIZE);
-    const limit = messageOffset - nextOffset;
-    setMessagesLoading(true);
-    try {
-      const nextMessages = await window.sessionSearch.getMessages(sessionKey, nextOffset, limit);
-      const nextTraceEvents = await window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(nextMessages));
-      if (requestId !== detailLoadSeqRef.current) return;
-      setMessageOffset(nextOffset);
-      setMessages((current) => [...nextMessages, ...current]);
-      setTraceEvents((current) => mergeTraceEventsByIndex(current, nextTraceEvents));
-    } catch (error) {
-      if (requestId === detailLoadSeqRef.current) {
-        setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-      }
-    } finally {
-      if (requestId === detailLoadSeqRef.current) setMessagesLoading(false);
-    }
   }
 
   async function refreshAfterAction(options: { metadata?: boolean; stats?: boolean } = {}): Promise<void> {
@@ -2323,21 +2256,25 @@ export function App(): ReactElement {
       {detail ? (
         <DetailPanel
           session={detail}
-          messages={messages}
-          matchedContextMessages={matchedContextMessages}
-          matchedMessageIndex={matchedMessageIndex}
-          traceEvents={traceEvents}
-          loading={messagesLoading}
+          turns={detailTurns}
+          turnsLoading={turnsLoading}
+          matchedTurnId={matchedTurnId}
+          onLoadTurn={(turnId) => window.sessionSearch.getSessionTurn(detail.sessionKey, turnId)}
+          messages={[]}
+          matchedContextMessages={[]}
+          matchedMessageIndex={null}
+          traceEvents={[]}
+          loading={false}
           actionStatus={actionStatus}
           query={query}
           liveState={getLiveSessionState(detail, liveSessionKeys, liveDetectionFailed)}
           language={language}
-          messagePageSize={MESSAGE_PAGE_SIZE}
-          olderMessageCount={messageOffset}
+          messagePageSize={0}
+          olderMessageCount={0}
           revealLabel={FILE_MANAGER_LABEL}
           showItermAction={IS_MAC && detail.source !== "codex-app"}
           onClose={closeDetail}
-          onShowMore={() => void loadMoreMessages()}
+          onShowMore={() => undefined}
           onRename={() => beginRename(detail)}
           onAddTag={() => beginAddTag(detail)}
           onRemoveTag={(tagName) => void removeTag(detail, tagName)}
@@ -2385,6 +2322,10 @@ export function App(): ReactElement {
       {remoteDetail ? (
         <DetailPanel
           session={remoteDetail.snapshot.session}
+          turns={null}
+          turnsLoading={false}
+          matchedTurnId={null}
+          onLoadTurn={async () => null}
           messages={remoteDetail.snapshot.messages}
           matchedContextMessages={[]}
           matchedMessageIndex={null}
@@ -2394,7 +2335,7 @@ export function App(): ReactElement {
           query={remoteDetail.query}
           liveState="closed"
           language={language}
-          messagePageSize={MESSAGE_PAGE_SIZE}
+          messagePageSize={0}
           olderMessageCount={0}
           revealLabel={FILE_MANAGER_LABEL}
           showItermAction={false}

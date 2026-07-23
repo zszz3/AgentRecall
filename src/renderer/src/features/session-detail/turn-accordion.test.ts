@@ -139,6 +139,8 @@ describe("TurnAccordion", () => {
 
   it("defines compact Turn, timeline, and nested payload styles", () => {
     for (const selector of [
+      ".turn-conversation",
+      ".turn-count",
       ".turn-card",
       ".turn-card-summary",
       ".turn-card-detail",
