@@ -73,6 +73,36 @@ describe("normalizeCodexNotification", () => {
     ]);
   });
 
+  test("emits OpenAI usage from turn completion", () => {
+    const state = createCodexStreamState();
+
+    expect(normalizeCodexNotification("turn/completed", {
+      turn: {
+        status: "completed",
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          total_tokens: 120,
+          prompt_tokens_details: { cached_tokens: 30 },
+          completion_tokens_details: { reasoning_tokens: 8 },
+        },
+      },
+    }, state)).toEqual([
+      {
+        type: "usage",
+        usage: {
+          provider: "openai",
+          inputTokens: 100,
+          outputTokens: 20,
+          reasoningTokens: 8,
+          cacheReadInputTokens: 30,
+          totalTokens: 120,
+        },
+      },
+      { type: "completed" },
+    ]);
+  });
+
   test("does not duplicate final snapshots after streaming deltas", () => {
     const state = createCodexStreamState();
 

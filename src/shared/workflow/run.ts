@@ -22,6 +22,33 @@ export interface WorkflowRunProgressItem {
   intervention?: WorkflowV2HumanIntervention;
   inputRequest?: WorkflowNodeInputRequest;
   outputs?: Record<string, unknown>;
+  telemetry?: WorkflowRunNodeTelemetry;
+}
+
+export interface WorkflowRunNodeTelemetry {
+  provider?: "openai" | "anthropic" | string;
+  runtimeId?: string;
+  channelId?: string;
+  modelId?: string;
+  attempt: number;
+  startedAt: number;
+  finishedAt?: number;
+  /** Provider-reported input/prompt tokens; OpenAI includes cached prompt tokens here. */
+  inputTokens?: number;
+  /** Provider-reported output/completion tokens. */
+  outputTokens?: number;
+  /** Provider-reported reasoning tokens when exposed separately. */
+  reasoningTokens?: number;
+  /** OpenAI cached prompt tokens or Anthropic cache_read_input_tokens. */
+  cacheReadInputTokens?: number;
+  /** Anthropic cache_creation_input_tokens total. */
+  cacheWriteInputTokens?: number;
+  /** Anthropic cache_creation.ephemeral_5m_input_tokens. */
+  cacheWrite5mInputTokens?: number;
+  /** Anthropic cache_creation.ephemeral_1h_input_tokens. */
+  cacheWrite1hInputTokens?: number;
+  totalTokens?: number;
+  estimatedCost?: number;
 }
 
 export type WorkflowEventType =

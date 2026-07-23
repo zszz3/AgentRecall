@@ -1,4 +1,5 @@
 import type { AgentEvent } from "../../../shared/types";
+import { normalizeAnthropicUsage } from "../../../../../shared/runtime/usage";
 
 export interface ClaudeStreamState {
   lastText: string;
@@ -160,6 +161,8 @@ export function normalizeClaudeStreamEvent(raw: unknown, state?: ClaudeStreamSta
 
   if (type === "result") {
     const events: AgentEvent[] = [];
+    const usage = normalizeAnthropicUsage(record.usage);
+    if (usage) events.push({ type: "usage", usage });
     const sessionId = asString(record.session_id);
     if (sessionId) {
       events.push({

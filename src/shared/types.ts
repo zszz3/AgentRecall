@@ -1,4 +1,6 @@
 import type { RuntimeConversation } from "./runtime/conversation";
+import type { RuntimeUsage } from "./runtime/usage";
+export type { RuntimeUsage } from "./runtime/usage";
 
 // Minimal compatibility barrel for shared workflow modules that still import
 // legacy names from src/shared/types.ts in the source repo.
@@ -33,6 +35,7 @@ export interface TaskRun {
   progress: TaskProgress;
   running: boolean;
   runtimeConversation?: RuntimeConversation;
+  usage?: RuntimeUsage;
   messages: ChatMessage[];
   pendingAssistantMessageId: string | undefined;
   lastError: string | undefined;

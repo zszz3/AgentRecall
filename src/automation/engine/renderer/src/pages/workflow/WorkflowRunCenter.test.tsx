@@ -73,6 +73,83 @@ describe("WorkflowRunCenter", () => {
     expect(html).toContain("Historical research answer");
   });
 
+  test("renders node execution telemetry for runtime, channel, model, attempts, tokens, cost, and duration", () => {
+    const observedRun = run({ runId: "observed-run", status: "completed", startedAt: 2_000, finishedAt: 62_000 });
+    (observedRun.progress[0] as WorkflowRunState["progress"][number] & { telemetry: unknown }).telemetry = {
+      provider: "anthropic",
+      runtimeId: "codex",
+      channelId: "codex-openai",
+      modelId: "gpt-5.5",
+      attempt: 2,
+      startedAt: 10_000,
+      finishedAt: 25_000,
+      inputTokens: 1_200,
+      outputTokens: 340,
+      reasoningTokens: 120,
+      cacheReadInputTokens: 80,
+      cacheWrite5mInputTokens: 40,
+      cacheWrite1hInputTokens: 20,
+      totalTokens: 1_540,
+      estimatedCost: 0.031,
+    };
+
+    const html = renderToStaticMarkup(<WorkflowRunCenter
+      runs={[observedRun]}
+      open
+      selectedRunId="observed-run"
+      onSelectRun={() => undefined}
+      onClose={() => undefined}
+    />);
+
+    expect(html).toContain("Runtime");
+    expect(html).toContain("codex");
+    expect(html).toContain("Channel");
+    expect(html).toContain("codex-openai");
+    expect(html).toContain("Attempts");
+    expect(html).toContain("2");
+    expect(html).toContain("Token usage");
+    expect(html).toContain("Input tokens");
+    expect(html).toContain("1,200");
+    expect(html).toContain("Reasoning tokens");
+    expect(html).toContain("120");
+    expect(html).toContain("Cache read");
+    expect(html).toContain("80");
+    expect(html).toContain("Cache write · 5 min");
+    expect(html).toContain("40");
+    expect(html).toContain("Cache write · 1 hour");
+    expect(html).toContain("20");
+    expect(html).toContain("1,540");
+    expect(html).toContain("$0.031");
+    expect(html).toContain("15s");
+  });
+
+  test("uses OpenAI cached-input semantics separately from Anthropic cache fields", () => {
+    const observedRun = run({ runId: "openai-run", status: "completed", startedAt: 2_000, finishedAt: 62_000 });
+    (observedRun.progress[0] as WorkflowRunState["progress"][number] & { telemetry: unknown }).telemetry = {
+      provider: "openai",
+      attempt: 1,
+      startedAt: 10_000,
+      finishedAt: 20_000,
+      inputTokens: 1_000,
+      cacheReadInputTokens: 400,
+      outputTokens: 200,
+      totalTokens: 1_200,
+    };
+
+    const html = renderToStaticMarkup(<WorkflowRunCenter
+      runs={[observedRun]}
+      open
+      selectedRunId="openai-run"
+      onSelectRun={() => undefined}
+      onClose={() => undefined}
+    />);
+
+    expect(html).toContain("Cached input (OpenAI)");
+    expect(html).toContain("400");
+    expect(html).toContain("Cache read (Anthropic)</b>—");
+    expect(html).toContain("Cache write · 5 min</b>—");
+  });
+
   test("shows persisted interactive conversation messages for the selected run node", () => {
     const html = renderToStaticMarkup(<WorkflowRunCenter
       runs={[run({ runId: "interactive-run", status: "completed", startedAt: 2_000, finishedAt: 62_000 })]}

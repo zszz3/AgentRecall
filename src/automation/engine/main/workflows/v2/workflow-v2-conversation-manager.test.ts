@@ -65,6 +65,32 @@ describe("WorkflowV2ConversationManager", () => {
       expect.objectContaining({ role: "tool", eventType: "tool_result", name: "shell_command" }),
     ]);
   });
+
+  test("aggregates interactive usage and preserves it when the conversation is restored", async () => {
+    let emit!: (event: AgentEvent) => void;
+    const manager = new WorkflowV2ConversationManager({
+      now: () => 100,
+      createSession: (input) => {
+        emit = input.emit;
+        return { sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined };
+      },
+    });
+    const started = await manager.start({
+      workflowId: "w", runId: "r", nodeId: "n", configuredAgentId: "a", modelId: "m", workDir: "C:/workspace", initialPrompt: "Start",
+      provider: "anthropic", runtimeId: "claude", channelId: "channel-1",
+    });
+    emit({ type: "usage", usage: { provider: "anthropic", inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 10 } });
+    emit({ type: "usage", usage: { provider: "anthropic", inputTokens: 50, outputTokens: 5, cacheWrite5mInputTokens: 30 } });
+
+    expect(manager.get(started.conversationId)?.telemetry).toMatchObject({
+      provider: "anthropic", runtimeId: "claude", channelId: "channel-1", inputTokens: 150, outputTokens: 25,
+      cacheReadInputTokens: 10, cacheWrite5mInputTokens: 30,
+    });
+
+    const restored = new WorkflowV2ConversationManager({ now: () => 100, createSession: () => ({ sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined }) });
+    restored.restore([manager.get(started.conversationId)]);
+    expect(restored.get(started.conversationId)?.telemetry).toMatchObject({ inputTokens: 150, outputTokens: 25, cacheWrite5mInputTokens: 30 });
+  });
   test("preserves live approval identity and resolves it after the runtime responds", async () => {
     let emit!: (event: AgentEvent) => void;
     const manager = new WorkflowV2ConversationManager({

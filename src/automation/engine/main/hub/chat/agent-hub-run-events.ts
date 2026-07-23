@@ -83,6 +83,13 @@ export function handleAgentEvent(input: {
     return;
   }
 
+  if (event.type === "usage") {
+    if (run.kind === "task") run.usage = { ...(run.usage ?? {}), ...event.usage };
+    run.updatedAt = Date.now();
+    input.emit();
+    return;
+  }
+
   if (event.type === "delta") {
     touchRuntimeState("running");
     if (!run.pendingAssistantMessageId) {

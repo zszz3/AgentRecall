@@ -110,6 +110,29 @@ export function restoreWorkflowRunProgressItem(raw: unknown): WorkflowRunProgres
   }
   const outputs = asRecord(record.outputs);
   if (outputs) item.outputs = structuredClone(outputs);
+  const telemetry = asRecord(record.telemetry);
+  const telemetryAttempt = telemetry && typeof telemetry.attempt === "number" ? telemetry.attempt : undefined;
+  if (telemetry && telemetryAttempt !== undefined && Number.isSafeInteger(telemetryAttempt) && telemetryAttempt > 0) {
+    const startedAt = asNumber(telemetry.startedAt, Date.now());
+    item.telemetry = {
+      attempt: telemetryAttempt,
+      startedAt,
+      ...(telemetry.provider === "openai" || telemetry.provider === "anthropic" || typeof telemetry.provider === "string" ? { provider: telemetry.provider } : {}),
+      ...(asOptionalString(telemetry.runtimeId) ? { runtimeId: asOptionalString(telemetry.runtimeId) } : {}),
+      ...(asOptionalString(telemetry.channelId) ? { channelId: asOptionalString(telemetry.channelId) } : {}),
+      ...(asOptionalString(telemetry.modelId) ? { modelId: asOptionalString(telemetry.modelId) } : {}),
+      ...(typeof telemetry.finishedAt === "number" ? { finishedAt: telemetry.finishedAt } : {}),
+      ...(typeof telemetry.inputTokens === "number" ? { inputTokens: telemetry.inputTokens } : {}),
+      ...(typeof telemetry.outputTokens === "number" ? { outputTokens: telemetry.outputTokens } : {}),
+      ...(typeof telemetry.reasoningTokens === "number" ? { reasoningTokens: telemetry.reasoningTokens } : {}),
+      ...(typeof telemetry.cacheReadInputTokens === "number" ? { cacheReadInputTokens: telemetry.cacheReadInputTokens } : {}),
+      ...(typeof telemetry.cacheWriteInputTokens === "number" ? { cacheWriteInputTokens: telemetry.cacheWriteInputTokens } : {}),
+      ...(typeof telemetry.cacheWrite5mInputTokens === "number" ? { cacheWrite5mInputTokens: telemetry.cacheWrite5mInputTokens } : {}),
+      ...(typeof telemetry.cacheWrite1hInputTokens === "number" ? { cacheWrite1hInputTokens: telemetry.cacheWrite1hInputTokens } : {}),
+      ...(typeof telemetry.totalTokens === "number" ? { totalTokens: telemetry.totalTokens } : {}),
+      ...(typeof telemetry.estimatedCost === "number" ? { estimatedCost: telemetry.estimatedCost } : {}),
+    };
+  }
   const messages = asArray(record.messages)
     .map((message) => restoreWorkflowNodeHistoryMessage(message))
     .filter((message): message is WorkflowNodeMessage => Boolean(message));

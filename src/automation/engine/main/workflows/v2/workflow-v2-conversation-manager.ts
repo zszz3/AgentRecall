@@ -6,6 +6,8 @@ import type {
 } from "../../../shared/workflow-v2/conversation";
 import { workflowNodeConversationId } from "../../../shared/workflow-v2/conversation";
 import { isWorkflowV2WorkerOutput } from "../../../shared/workflow-v2/packets";
+import type { WorkflowRunNodeTelemetry } from "../../../shared/workflow/run";
+import { mergeRuntimeUsage } from "../../../../../shared/runtime/usage";
 
 export interface WorkflowNodeInteractiveSession {
   sendPrompt(prompt: string): Promise<void>;
@@ -24,6 +26,9 @@ export interface CreateWorkflowNodeConversationInput {
   initialPrompt: string;
   developerInstructions?: string;
   contextDocument?: string;
+  provider?: string;
+  runtimeId?: string;
+  channelId?: string;
 }
 
 export class WorkflowV2ConversationManager {
@@ -57,6 +62,14 @@ export class WorkflowV2ConversationManager {
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
+      telemetry: {
+        ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.runtimeId ? { runtimeId: input.runtimeId } : {}),
+        ...(input.channelId ? { channelId: input.channelId } : {}),
+        modelId: input.modelId,
+        attempt: 1,
+        startedAt: now,
+      },
     };
     const session = this.deps.createSession({ ...input, emit: (event) => this.recordEvent(conversationId, event) });
     this.conversations.set(conversationId, conversation);
@@ -243,11 +256,19 @@ export class WorkflowV2ConversationManager {
       }
     }
     if (event.type === "completed") {
+      if (conversation.telemetry) conversation.telemetry.finishedAt = this.deps.now();
       const completionTool = [...conversation.messages].reverse().find((message) => message.eventType === "tool_call" && message.name?.toLowerCase().includes("workflow_node_complete"));
       const finalContent = (completionTool?.content || event.content || (conversation.messages.at(-1)?.eventType === "delta" ? conversation.messages.at(-1)?.content : "") || "").trim();
       this.deps.onCompleted?.(structuredClone(conversation), finalContent);
     }
-    if (event.type === "error") conversation.status = "failed";
+    if (event.type === "error") {
+      conversation.status = "failed";
+      if (conversation.telemetry) conversation.telemetry.finishedAt = this.deps.now();
+    }
+    if (event.type === "usage") {
+      const current = conversation.telemetry ?? { modelId: conversation.modelId, attempt: 1, startedAt: conversation.createdAt };
+      conversation.telemetry = { ...current, ...mergeRuntimeUsage(current, event.usage) };
+    }
     this.syncRuntimeConversation(conversationId);
     this.changed(conversation, event.type === "delta" ? "stream" : "immediate");
   }
@@ -366,6 +387,7 @@ function restoreWorkflowNodeConversation(value: unknown): WorkflowNodeConversati
   const lastActivityAt = finiteNumber(record.lastActivityAt);
   if (createdAt === undefined || updatedAt === undefined || lastActivityAt === undefined) return undefined;
   const completionProposal = restoredCompletionProposal(record.completionProposal);
+  const telemetry = restoreWorkflowNodeTelemetry(record.telemetry, createdAt);
   const status = record.status === "completion_proposed" && !completionProposal ? "waiting_for_user" : record.status as WorkflowNodeConversation["status"];
   return {
     conversationId: record.conversationId as string,
@@ -378,14 +400,40 @@ function restoreWorkflowNodeConversation(value: unknown): WorkflowNodeConversati
     status,
     messages: record.messages.flatMap((message) => restoredWorkflowNodeMessage(message) ?? []),
     ...(completionProposal ? { completionProposal } : {}),
+    ...(telemetry ? { telemetry } : {}),
     createdAt,
     updatedAt,
     lastActivityAt,
   };
 }
 
+function restoreWorkflowNodeTelemetry(value: unknown, fallbackStartedAt: number): WorkflowRunNodeTelemetry | undefined {
+  const record = objectRecord(value);
+  const attempt = finiteNumber(record?.attempt);
+  if (!record || attempt === undefined || !Number.isSafeInteger(attempt) || attempt < 1) return undefined;
+  const numeric = (key: string): number | undefined => finiteNumber(record[key]);
+  return {
+    attempt,
+    startedAt: numeric("startedAt") ?? fallbackStartedAt,
+    ...(typeof record.provider === "string" ? { provider: record.provider } : {}),
+    ...(typeof record.runtimeId === "string" ? { runtimeId: record.runtimeId } : {}),
+    ...(typeof record.channelId === "string" ? { channelId: record.channelId } : {}),
+    ...(typeof record.modelId === "string" ? { modelId: record.modelId } : {}),
+    ...(numeric("finishedAt") !== undefined ? { finishedAt: numeric("finishedAt") } : {}),
+    ...(numeric("inputTokens") !== undefined ? { inputTokens: numeric("inputTokens") } : {}),
+    ...(numeric("outputTokens") !== undefined ? { outputTokens: numeric("outputTokens") } : {}),
+    ...(numeric("reasoningTokens") !== undefined ? { reasoningTokens: numeric("reasoningTokens") } : {}),
+    ...(numeric("cacheReadInputTokens") !== undefined ? { cacheReadInputTokens: numeric("cacheReadInputTokens") } : {}),
+    ...(numeric("cacheWriteInputTokens") !== undefined ? { cacheWriteInputTokens: numeric("cacheWriteInputTokens") } : {}),
+    ...(numeric("cacheWrite5mInputTokens") !== undefined ? { cacheWrite5mInputTokens: numeric("cacheWrite5mInputTokens") } : {}),
+    ...(numeric("cacheWrite1hInputTokens") !== undefined ? { cacheWrite1hInputTokens: numeric("cacheWrite1hInputTokens") } : {}),
+    ...(numeric("totalTokens") !== undefined ? { totalTokens: numeric("totalTokens") } : {}),
+    ...(numeric("estimatedCost") !== undefined ? { estimatedCost: numeric("estimatedCost") } : {}),
+  };
+}
+
 function workflowNodeChatEvent(event: AgentEvent, id: string, timestamp: number): ChatEvent | undefined {
-  if (event.type === "runtime_conversation" || event.type === "delta" || event.type === "completed") return undefined;
+  if (event.type === "runtime_conversation" || event.type === "usage" || event.type === "delta" || event.type === "completed") return undefined;
   if (event.type === "error") return { id, type: "error", content: event.error, timestamp };
   return {
     id,

@@ -7,6 +7,7 @@ import type {
   ChatRuntimeSessionState,
   RuntimeConversation,
   RuntimeContinuationPolicy,
+  RuntimeUsage,
   TaskProgress,
   TaskRunStatus,
   TeamRunStatus,
@@ -45,6 +46,7 @@ export class TaskState {
   id: string = randomUUID();
   title: string;
   runtimeConversation: RuntimeConversation | undefined = undefined;
+  usage: RuntimeUsage | undefined = undefined;
   planningWorkflowId: string | undefined = undefined;
   workflowRunId: string | undefined = undefined;
   workflowNodeId: string | undefined = undefined;

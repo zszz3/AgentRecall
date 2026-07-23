@@ -1,5 +1,6 @@
 import { DEFAULT_MODEL_ID, runtimeModelId } from "../../../../../shared/models";
 import type { AgentChannel } from "../../../../../shared/types";
+import { normalizeAnthropicUsage, normalizeOpenAIUsage } from "../../../../../../../shared/runtime/usage";
 
 export function resolveApiModel(channel: AgentChannel, modelId: string): string | undefined {
   const model = runtimeModelId(modelId);
@@ -57,6 +58,13 @@ export function extractApiContent(channel: AgentChannel, text: string): string {
   const first = parsed.choices?.[0];
   const content = first?.message?.content ?? first?.text ?? parsed.output_text;
   return typeof content === "string" ? content : JSON.stringify(parsed, null, 2);
+}
+
+export function extractApiUsage(channel: AgentChannel, text: string) {
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  return channel.modelProvider === "anthropic-api"
+    ? normalizeAnthropicUsage(parsed.usage)
+    : normalizeOpenAIUsage(parsed.usage);
 }
 
 function chatCompletionsUrl(baseUrl: string): string {

@@ -98,4 +98,33 @@ describe("agent hub workflow progress restore", () => {
     expect(progress).toMatchObject({ nodeId: "echo", status: "awaiting_input" });
     expect(progress?.inputRequest).toBeUndefined();
   });
+
+  test("restores node execution telemetry without requiring usage fields", () => {
+    const progress = restoreWorkflowRunProgressItem({
+      nodeId: "research",
+      title: "Research",
+      status: "completed",
+      telemetry: {
+        runtimeId: "codex",
+        channelId: "codex-openai",
+        modelId: "gpt-5.5",
+        attempt: 2,
+        startedAt: 10_000,
+        finishedAt: 25_000,
+        totalTokens: 1_540,
+        estimatedCost: 0.031,
+      },
+    });
+
+    expect(progress?.telemetry).toEqual({
+      runtimeId: "codex",
+      channelId: "codex-openai",
+      modelId: "gpt-5.5",
+      attempt: 2,
+      startedAt: 10_000,
+      finishedAt: 25_000,
+      totalTokens: 1_540,
+      estimatedCost: 0.031,
+    });
+  });
 });
