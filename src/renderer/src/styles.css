@@ -8156,6 +8156,126 @@ body.overlay-open .sidebar {
   flex-direction: column;
 }
 
+/* Subagent Session Tree */
+
+.subagent-session-tree {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.subagent-parent {
+  margin-bottom: 14px;
+}
+
+.subagent-relation-label,
+.subagent-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.subagent-tree-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.subagent-tree-list,
+.subagent-tree-children {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subagent-tree-children {
+  margin: 6px 0 0 22px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.subagent-tree-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.subagent-tree-toggle,
+.subagent-tree-toggle-spacer {
+  flex: 0 0 22px;
+}
+
+.subagent-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.subagent-tree-toggle:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.subagent-session-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.subagent-session-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.subagent-session-card strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-session-meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-session-summary {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.subagent-tree-truncated {
+  margin: 8px 0 0 26px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* Related Sessions */
 
 .related-sessions {

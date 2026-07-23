@@ -108,6 +108,17 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).not.toContain('`${messages.length} messages`');
   });
 
+  it("loads and renders the subagent family before heuristic related sessions", () => {
+    expect(appSource).toContain("getSessionFamily(detail.sessionKey)");
+    expect(appSource).toContain("setSessionFamily");
+    expect(appSource).toContain("sessionFamily={sessionFamily}");
+    expect(detailPanelSource).toContain("<SubagentSessionTree");
+    expect(detailPanelSource).toContain("sessionFamily");
+    expect(detailPanelSource.indexOf("<SubagentSessionTree")).toBeLessThan(
+      detailPanelSource.indexOf("<RelatedSessions"),
+    );
+  });
+
   it("renders truncated assistant replies as Markdown before they are expanded", () => {
     const messageBlock = detailPanelSource.slice(
       detailPanelSource.indexOf("function MessageBlock"),

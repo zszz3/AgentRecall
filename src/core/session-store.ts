@@ -25,6 +25,10 @@ import {
   type SkillSyncBinding,
 } from "./store/skills";
 import { findRelatedSessions, type RelatedSession } from "./related-sessions";
+import {
+  findSessionFamily,
+  type SessionFamily,
+} from "./session-family";
 import type {
   EnvironmentSyncState,
   EnvironmentUpsertInput,
@@ -56,6 +60,11 @@ export type {
 export type { SavedSearch } from "./store/saved-searches";
 export type { SearchHistoryEntry } from "./store/search-history-store";
 export type { RelatedSession } from "./related-sessions";
+export type {
+  SessionFamily,
+  SubagentSessionNode,
+  SubagentSessionSummary,
+} from "./session-family";
 export type { TraceEventQueryOptions } from "./store/sessions";
 export type { SkillSyncBinding, SkillSyncDirection } from "./store/skills";
 
@@ -383,6 +392,10 @@ export class SessionStore {
 
   getRelatedSessions(sessionKey: string, limit = 8): RelatedSession[] {
     return findRelatedSessions(this.db, sessionKey, limit);
+  }
+
+  getSessionFamily(sessionKey: string): SessionFamily {
+    return findSessionFamily(this.db, sessionKey);
   }
 }
 

@@ -450,6 +450,7 @@ function createDiscoveryService(): DiscoveryIpcService {
     clearSearchHistory: () => store.clearSearchHistory(),
     recordSearch: (query, resultCount, options) => store.recordSearch(query, resultCount, options),
     getRelatedSessions: (sessionKey, limit) => store.getRelatedSessions(sessionKey, limit),
+    getSessionFamily: (sessionKey) => store.getSessionFamily(sessionKey),
   };
 }
 

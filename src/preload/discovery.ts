@@ -1,5 +1,6 @@
 import type { IpcRenderer } from "electron";
 import type { RelatedSession } from "../core/related-sessions";
+import type { SessionFamily } from "../core/session-family";
 import type { SavedSearch } from "../core/store/saved-searches";
 import type { SearchHistoryEntry } from "../core/store/search-history-store";
 import type { SearchOptions } from "../core/types";
@@ -23,6 +24,8 @@ export function createDiscoveryApi(ipc: DiscoveryIpcRenderer) {
       ipc.invoke(DISCOVERY_IPC.recordSearch.channel, query, resultCount, options ?? null),
     getRelatedSessions: (sessionKey: string, limit?: number): Promise<RelatedSession[]> =>
       ipc.invoke(DISCOVERY_IPC.getRelatedSessions.channel, sessionKey, limit ?? 8),
+    getSessionFamily: (sessionKey: string): Promise<SessionFamily> =>
+      ipc.invoke(DISCOVERY_IPC.getSessionFamily.channel, sessionKey),
   };
 }
 

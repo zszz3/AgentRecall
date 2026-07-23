@@ -49,6 +49,7 @@ import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { RemoteHealthReport } from "../../core/remote-health";
 import type { RemoteSessionDetailSnapshot, RemoteSessionListItem } from "../../core/remote-session-sync";
+import type { SessionFamily } from "../../core/session-family";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type { TraceEventQueryOptions } from "../../core/session-store";
@@ -251,6 +252,12 @@ const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
   sessions: [],
 };
 
+const EMPTY_SESSION_FAMILY: SessionFamily = {
+  parent: null,
+  children: [],
+  truncated: false,
+};
+
 const EMPTY_SKILLS: InstalledSkillsSnapshot = {
   skills: [],
   roots: [],
@@ -378,6 +385,7 @@ export function App(): ReactElement {
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
   const [relatedSessions, setRelatedSessions] = useState<RelatedSession[]>([]);
+  const [sessionFamily, setSessionFamily] = useState<SessionFamily>(EMPTY_SESSION_FAMILY);
   const [rulesSnapshot, setRulesSnapshot] = useState<RulesSyncSnapshot | null>(null);
   const [memoriesSnapshot, setMemoriesSnapshot] = useState<MemoriesSyncSnapshot | null>(null);
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
@@ -843,17 +851,19 @@ export function App(): ReactElement {
   useEffect(() => {
     if (!detail) {
       setRelatedSessions([]);
+      setSessionFamily(EMPTY_SESSION_FAMILY);
       return;
     }
     let cancelled = false;
-    void window.sessionSearch
-      .getRelatedSessions(detail.sessionKey)
-      .then((related) => {
-        if (!cancelled) setRelatedSessions(related);
-      })
-      .catch(() => {
-        if (!cancelled) setRelatedSessions([]);
-      });
+    void Promise.all([
+      window.sessionSearch.getRelatedSessions(detail.sessionKey).catch(() => []),
+      window.sessionSearch.getSessionFamily(detail.sessionKey).catch(() => EMPTY_SESSION_FAMILY),
+    ]).then(([related, family]) => {
+      if (!cancelled) {
+        setRelatedSessions(related);
+        setSessionFamily(family);
+      }
+    });
     return () => {
       cancelled = true;
     };
@@ -2343,6 +2353,7 @@ export function App(): ReactElement {
           revealLabel={FILE_MANAGER_LABEL}
           showItermAction={IS_MAC && detail.source !== "codex-app"}
           onClose={closeDetail}
+          sessionFamily={sessionFamily}
           relatedSessions={relatedSessions}
           onOpenRelatedSession={openRelatedSession}
           onShowMore={() => void loadMoreMessages()}
@@ -2409,6 +2420,7 @@ export function App(): ReactElement {
           revealLabel={FILE_MANAGER_LABEL}
           showItermAction={false}
           backdropClassName="remote-detail-backdrop"
+          sessionFamily={EMPTY_SESSION_FAMILY}
           onClose={closeRemoteDetail}
           onShowMore={() => undefined}
           onRename={() => undefined}
