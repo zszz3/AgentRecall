@@ -5,6 +5,7 @@ import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry
 import type { McpAgentManagementService } from "../../automation/engine/main/mcp/agent-management-service";
 import type { EvaluationService } from "./evaluation-service";
 import type { TeamChatService } from "../team-chat/team-chat-service";
+import type { PostgresDatabase } from "../../core/postgres/database";
 import { NativeAutomationService } from "./automation-service";
 
 function snapshot(workDir = "/repo"): AppSnapshot {
@@ -47,13 +48,12 @@ function fixture() {
   const agents = {} as McpAgentManagementService;
   const service = new NativeAutomationService(
     {
+      database: {} as PostgresDatabase,
       userDataPath: "/user-data",
       homePath: "/home/dev",
       appDataPath: "/app-data",
       bundledWorkflowsPath: "/assets/workflows",
       workflowMcpServerPath: "/app/out/mcp/workflow-entry.js",
-      readTeamChatConnectionUrl: () => "",
-      writeTeamChatConnectionUrl: vi.fn(),
     },
     {
       hub,
@@ -85,7 +85,7 @@ describe("NativeAutomationService", () => {
     expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "runtime", "team-chat-start"]);
     expect(teamChats.connect).toHaveBeenCalledTimes(1);
     expect(hub.loadModelChannels).toHaveBeenCalledWith("/user-data/runtime-channels.json");
-    expect(hub.loadPersistedState).toHaveBeenCalledWith("/user-data/automation.db");
+    expect(hub.loadPersistedState).toHaveBeenCalledWith(expect.any(Object));
     expect(service.health()).toEqual({ state: "ready" });
   });
 

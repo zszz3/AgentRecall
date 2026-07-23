@@ -11,7 +11,6 @@ import type {
   SendTeamChatMessageRequest,
   SendTeamChatMessageResult,
   TeamChatConnectionStatus,
-  TeamChatConnectionMode,
   TeamChatDispatch,
   TeamChatEvent,
   TeamChatMessage,
@@ -21,9 +20,6 @@ import type {
   TeamChatRoomSummary,
   UpdateTeamChatRoomRequest,
 } from "../../shared/team-chat";
-import {
-  PostgresTeamChatStore,
-} from "./postgres-team-chat-store";
 import { buildTeamChatPrompt, resolveTeamChatRoute, resolveTeamChatTargets } from "./team-chat-routing";
 import type { TeamChatAgentSession, TeamChatContextPage, TeamChatStore } from "./team-chat-store";
 
@@ -31,8 +27,6 @@ const MAX_AGENT_EXECUTIONS_PER_TURN = 8;
 const CONTEXT_MESSAGE_LIMIT = 40;
 
 interface TeamChatServiceDependencies {
-  readConnectionUrl: () => string;
-  writeConnectionUrl: (url: string) => void;
   configuredAgents: () => ConfiguredAgent[];
   executeAgent: (
     input: {
@@ -44,8 +38,7 @@ interface TeamChatServiceDependencies {
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
   ) => Promise<{ output: string; durationMs: number; runtimeConversation?: RuntimeConversation }>;
-  storeFactory?: (connectionUrl: string) => TeamChatStore;
-  localStoreFactory?: () => TeamChatStore;
+  storeFactory: () => TeamChatStore;
   emit?: (event: TeamChatEvent) => void;
   idFactory?: () => string;
   now?: () => Date;
@@ -64,15 +57,16 @@ export class TeamChatService {
   private readonly activeTurns = new Map<string, AbortController>();
   private readonly activeTurnPromises = new Set<Promise<void>>();
   private store: TeamChatStore | undefined;
-  private connectedTarget = "";
   private connectionQueue: Promise<void> = Promise.resolve();
-  private pendingConnection: { target: string; promise: Promise<TeamChatConnectionStatus> } | undefined;
+  private pendingConnection: Promise<TeamChatConnectionStatus> | undefined;
   private status: TeamChatConnectionStatus;
 
   constructor(private readonly dependencies: TeamChatServiceDependencies) {
-    this.status = dependencies.readConnectionUrl().trim()
-      ? { state: "unconfigured", mode: "external", databaseLabel: "Configured" }
-      : { state: "unconfigured", mode: "local", databaseLabel: "Local database" };
+    this.status = {
+      state: "unconfigured",
+      mode: "local",
+      databaseLabel: "AgentRecall database",
+    };
   }
 
   subscribe(listener: TeamChatEventListener): () => void {
@@ -84,29 +78,61 @@ export class TeamChatService {
     return { ...this.status };
   }
 
-  async connect(connectionUrl?: string): Promise<TeamChatConnectionStatus> {
-    const rawUrl = connectionUrl ?? this.dependencies.readConnectionUrl();
-    if (!rawUrl.trim()) return this.connectLocal(false);
-    const candidate = normalizePostgresUrl(rawUrl);
-    if (!candidate) throw new Error("Enter a valid PostgreSQL connection URL.");
-    return this.connectTarget({
-      target: `external:${candidate}`,
-      mode: "external",
-      label: postgresDatabaseLabel(candidate),
-      createStore: () => (this.dependencies.storeFactory ?? ((url) => new PostgresTeamChatStore(url)))(candidate),
-      onReady: () => this.dependencies.writeConnectionUrl(candidate),
+  async connect(_connectionUrl?: string): Promise<TeamChatConnectionStatus> {
+    if (this.store && this.status.state === "ready") return this.getConnectionStatus();
+    if (this.pendingConnection) return this.pendingConnection;
+
+    const promise = this.enqueueConnection(async () => {
+      if (this.store && this.status.state === "ready") return this.getConnectionStatus();
+      await this.closeCurrentStore();
+      this.setStatus({
+        state: "connecting",
+        mode: "local",
+        databaseLabel: "AgentRecall database",
+      });
+      let nextStore: TeamChatStore | undefined;
+      try {
+        nextStore = this.dependencies.storeFactory();
+        await nextStore.initialize();
+        this.store = nextStore;
+        this.setStatus({
+          state: "ready",
+          mode: "local",
+          databaseLabel: "AgentRecall database",
+        });
+        return this.getConnectionStatus();
+      } catch (error) {
+        await nextStore?.close().catch(() => undefined);
+        this.store = undefined;
+        const message = "Unable to open Chat data. Restart AgentRecall or retry.";
+        this.setStatus({
+          state: "error",
+          mode: "local",
+          databaseLabel: "AgentRecall database",
+          error: message,
+        });
+        throw new Error(message, { cause: error });
+      }
     });
+    this.pendingConnection = promise;
+    void promise.finally(() => {
+      if (this.pendingConnection === promise) this.pendingConnection = undefined;
+    }).catch(() => undefined);
+    return promise;
   }
 
   async useLocalDatabase(): Promise<TeamChatConnectionStatus> {
-    return this.connectLocal(true);
+    return this.connect();
   }
 
   async disconnect(): Promise<TeamChatConnectionStatus> {
     return this.enqueueConnection(async () => {
       await this.closeCurrentStore();
-      this.dependencies.writeConnectionUrl("");
-      this.setStatus({ state: "unconfigured", mode: "local", databaseLabel: "Local database" });
+      this.setStatus({
+        state: "unconfigured",
+        mode: "local",
+        databaseLabel: "AgentRecall database",
+      });
       return this.getConnectionStatus();
     });
   }
@@ -617,68 +643,7 @@ export class TeamChatService {
     this.activeTurns.clear();
     const current = this.store;
     this.store = undefined;
-    this.connectedTarget = "";
     if (current) await current.close();
-  }
-
-  private connectLocal(clearSavedExternalUrl: boolean): Promise<TeamChatConnectionStatus> {
-    return this.connectTarget({
-      target: "local",
-      mode: "local",
-      label: "Local database",
-      createStore: () => {
-        if (!this.dependencies.localStoreFactory) throw new Error("The managed local database is unavailable.");
-        return this.dependencies.localStoreFactory();
-      },
-      onReady: () => {
-        if (clearSavedExternalUrl) this.dependencies.writeConnectionUrl("");
-      },
-    });
-  }
-
-  private connectTarget(target: {
-    target: string;
-    mode: TeamChatConnectionMode;
-    label: string;
-    createStore: () => TeamChatStore;
-    onReady: () => void;
-  }): Promise<TeamChatConnectionStatus> {
-    if (this.store && this.connectedTarget === target.target && this.status.state === "ready") {
-      return Promise.resolve(this.getConnectionStatus());
-    }
-    if (this.pendingConnection?.target === target.target) return this.pendingConnection.promise;
-
-    const promise = this.enqueueConnection(async () => {
-      if (this.store && this.connectedTarget === target.target && this.status.state === "ready") {
-        return this.getConnectionStatus();
-      }
-      await this.closeCurrentStore();
-      this.setStatus({ state: "connecting", mode: target.mode, databaseLabel: target.label });
-      let nextStore: TeamChatStore | undefined;
-      try {
-        nextStore = target.createStore();
-        await nextStore.initialize();
-        this.store = nextStore;
-        this.connectedTarget = target.target;
-        target.onReady();
-        this.setStatus({ state: "ready", mode: target.mode, databaseLabel: target.label });
-        return this.getConnectionStatus();
-      } catch (error) {
-        await nextStore?.close().catch(() => undefined);
-        this.store = undefined;
-        this.connectedTarget = "";
-        const message = target.mode === "local"
-          ? "Unable to start the local Chat database. Retry or connect an external PostgreSQL database."
-          : "Unable to connect to PostgreSQL. Check the address, credentials, and database.";
-        this.setStatus({ state: "error", mode: target.mode, databaseLabel: target.label, error: message });
-        throw new Error(message, { cause: error });
-      }
-    });
-    this.pendingConnection = { target: target.target, promise };
-    void promise.finally(() => {
-      if (this.pendingConnection?.promise === promise) this.pendingConnection = undefined;
-    }).catch(() => undefined);
-    return promise;
   }
 
   private enqueueConnection(operation: () => Promise<TeamChatConnectionStatus>): Promise<TeamChatConnectionStatus> {
@@ -734,30 +699,6 @@ function agentSessionMatches(session: TeamChatAgentSession, agent: ConfiguredAge
     session.modelId === agent.modelId &&
     session.runtimeConversation.runtimeId === agent.runtimeAgentId
   );
-}
-
-function normalizePostgresUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    throw new Error("Enter a valid PostgreSQL connection URL.");
-  }
-  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
-    throw new Error("Team Chat requires a postgres:// or postgresql:// connection URL.");
-  }
-  if (!parsed.hostname || parsed.pathname.length <= 1) {
-    throw new Error("The PostgreSQL URL must include a host and database name.");
-  }
-  return trimmed;
-}
-
-function postgresDatabaseLabel(connectionUrl: string): string {
-  const parsed = new URL(connectionUrl);
-  const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, "")) || "database";
-  return `${parsed.host}/${database}`;
 }
 
 function sanitizeTeamChatError(error: unknown): string {

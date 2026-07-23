@@ -109,7 +109,7 @@ import {
   saveModelChannels as writeModelChannels,
 } from "../channels/model-config";
 import { loadRuntimeLocalConfig } from "../channels/runtime-local-config";
-import { SqliteAppStore } from "./persisted/sqlite-store";
+import type { AgentHubPersistedStore } from "./persisted/persisted-store";
 import { WorkflowRuntime, parseWorkflowV2WorkerArtifact } from "../workflows/workflow-runtime";
 import { WorkflowV2FileStore } from "../workflows/v2/workflow-v2-store";
 import { WorkflowV2ConversationManager } from "../workflows/v2/workflow-v2-conversation-manager";
@@ -366,7 +366,7 @@ export class AgentHub {
   private artifacts: RegisteredArtifact[] = [];
   private channels: AgentChannel[] = createDefaultChannels();
   private storagePath: string | undefined = undefined;
-  private sqliteStore: SqliteAppStore | undefined = undefined;
+  private persistedStore: AgentHubPersistedStore | undefined = undefined;
   private modelConfigPath: string | undefined = undefined;
   private workflowMcpDiscoveryPath: string | undefined = undefined;
   private persistTimer: ReturnType<typeof setTimeout> | undefined = undefined;
@@ -531,21 +531,21 @@ export class AgentHub {
     this.emit();
   }
 
-  async loadPersistedState(storagePath: string): Promise<void> {
-    this.storagePath = storagePath;
+  async loadPersistedState(storage: string | AgentHubPersistedStore): Promise<void> {
+    this.storagePath = typeof storage === "string" ? storage : storage.fileStoragePath;
     this.persistenceWriteBlocked = false;
     const loaded = await loadPersistedPayloadValue({
-      storagePath,
-      sqliteStoreFactory: (dbPath) => new SqliteAppStore(dbPath),
+      storagePath: this.storagePath,
+      persistedStore: typeof storage === "string" ? undefined : storage,
       warn: (message, error) => console.warn(message, error),
     });
-    this.sqliteStore = loaded.sqliteStore;
+    this.persistedStore = loaded.persistedStore;
 
     if (loaded.payload !== undefined) {
       const restored = this.restorePersistedState(loaded.payload);
       if (!restored) {
         this.persistenceWriteBlocked = true;
-        console.warn(`Persisted state at ${storagePath} could not be fully restored; keeping the database intact and starting with in-memory defaults.`);
+        console.warn(`Persisted AgentRecall state could not be fully restored; keeping the stored data intact and starting with in-memory defaults.`);
         return;
       }
       const reconciledWorkflowV2 = restored
@@ -877,8 +877,8 @@ export class AgentHub {
       this.workflowNodeConversations.shutdown(),
     ]);
     await this.flushPersistence();
-    this.sqliteStore?.close();
-    this.sqliteStore = undefined;
+    await this.persistedStore?.close();
+    this.persistedStore = undefined;
   }
 
   async refreshAgents(): Promise<AppSnapshot> {
@@ -2766,7 +2766,7 @@ export class AgentHub {
   }
 
   private schedulePersist(): void {
-    if (!this.storagePath || this.persistenceWriteBlocked) return;
+    if ((!this.storagePath && !this.persistedStore) || this.persistenceWriteBlocked) return;
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => {
       this.persistTimer = undefined;
@@ -2796,13 +2796,13 @@ export class AgentHub {
   }
 
   private async persistState(): Promise<void> {
-    if (!this.storagePath || this.persistenceWriteBlocked) return;
+    if ((!this.storagePath && !this.persistedStore) || this.persistenceWriteBlocked) return;
     if (this.persistInFlight) await this.persistInFlight;
 
     const payload = this.buildPersistedPayload();
     this.persistInFlight = writePersistedPayload({
       storagePath: this.storagePath,
-      sqliteStore: this.sqliteStore,
+      persistedStore: this.persistedStore,
       payload,
     });
 
@@ -2810,8 +2810,8 @@ export class AgentHub {
       await this.persistInFlight;
     } catch (error) {
       console.warn(
-        this.sqliteStore
-          ? `Failed to persist app state to SQLite ${this.storagePath}:`
+        this.persistedStore
+          ? `Failed to persist app state to ${this.persistedStore.label}:`
           : `Failed to persist chat history to ${this.storagePath}:`,
         error,
       );

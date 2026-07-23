@@ -23,10 +23,10 @@ describe("Team Chat page", () => {
     expect(pageSource).toContain("api.connect()");
     expect(pageSource).toContain("const unsubscribe = api.onEvent");
     expect(pageSource).toContain("unsubscribe();");
-    expect(pageSource).toContain('connection.mode === "local"');
-    expect(pageSource).toContain("api.useLocalDatabase()");
-    expect(pageSource).toContain('type="password"');
-    expect(pageSource).toContain('l("External PostgreSQL", "外部 PostgreSQL")');
+    expect(pageSource).toContain('l("Local data", "本地数据")');
+    expect(pageSource).toContain("No database setup is required.");
+    expect(pageSource).not.toContain("External PostgreSQL");
+    expect(pageSource).not.toContain('type="password"');
   });
 
   it("supports room creation from configured Agents and a chosen work directory", () => {

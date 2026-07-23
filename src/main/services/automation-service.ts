@@ -1,5 +1,6 @@
 import type { AppSnapshot } from "../../automation/engine/shared/types";
 import { AgentHub } from "../../automation/engine/main/hub/agent-hub";
+import { PostgresAppStore } from "../../automation/engine/main/hub/persisted/postgres-store";
 import {
   startCodexChatRouter,
   setCodexChatRouterBaseUrl,
@@ -21,18 +22,17 @@ import { mcpToolDefinitions } from "../../automation/engine/mcp/server";
 import type { AutomationHealth } from "../../shared/ipc/automation";
 import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths";
 import { EvaluationService } from "./evaluation-service";
+import type { PostgresDatabase } from "../../core/postgres/database";
 import { TeamChatService } from "../team-chat/team-chat-service";
-import { PGliteTeamChatStore } from "../team-chat/pglite-team-chat-store";
+import { PostgresTeamChatStore } from "../team-chat/postgres-team-chat-store";
 
 export interface AutomationServiceOptions {
+  database: PostgresDatabase;
   userDataPath: string;
   homePath: string;
   appDataPath: string;
   bundledWorkflowsPath: string;
   workflowMcpServerPath: string;
-  localTeamChatDataPath?: string;
-  readTeamChatConnectionUrl: () => string;
-  writeTeamChatConnectionUrl: (url: string) => void;
 }
 
 interface AutomationServiceDependencies {
@@ -75,7 +75,7 @@ export class NativeAutomationService {
   ) {
     this.paths = resolveAutomationPaths(options.userDataPath);
     this.hubInstance = dependencies.hub ?? new AgentHub();
-    this.registryInstance = dependencies.registry ?? new McpRegistryStore(this.paths.databasePath);
+    this.registryInstance = dependencies.registry ?? new McpRegistryStore(options.database);
     this.loadWorkflows = dependencies.loadBundledWorkflows ?? loadBundledWorkflows;
     this.startBridgeService = dependencies.startBridge ?? startMcpBridge;
     this.startRouterService = dependencies.startRouter ?? startCodexChatRouter;
@@ -87,17 +87,13 @@ export class NativeAutomationService {
       execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
     });
     this.evaluationsInstance = dependencies.evaluations ?? new EvaluationService({
-      store: new EvaluationStore(this.paths.databasePath),
+      store: new EvaluationStore(options.database),
       agents: () => this.hubInstance.snapshot().configuredAgents,
       executeAgent: (configuredAgentId, prompt) =>
         configuredAgentExecutor.runOneShot({ configuredAgentId, prompt }),
     });
     this.teamChatsInstance = dependencies.teamChats ?? new TeamChatService({
-      readConnectionUrl: options.readTeamChatConnectionUrl,
-      writeConnectionUrl: options.writeTeamChatConnectionUrl,
-      localStoreFactory: options.localTeamChatDataPath
-        ? () => new PGliteTeamChatStore(options.localTeamChatDataPath!)
-        : undefined,
+      storeFactory: () => new PostgresTeamChatStore(options.database),
       configuredAgents: () => this.hubInstance.snapshot().configuredAgents,
       executeAgent: (input, onEvent, signal) => configuredAgentExecutor.runConversation(input, onEvent, signal),
     });
@@ -136,7 +132,9 @@ export class NativeAutomationService {
 
   private async initializeInternal(): Promise<void> {
     await this.hubInstance.loadModelChannels(this.paths.channelsPath);
-    await this.hubInstance.loadPersistedState(this.paths.databasePath);
+    await this.hubInstance.loadPersistedState(
+      new PostgresAppStore(this.options.database, this.paths.databasePath),
+    );
     this.hubInstance.setMcpServers(await this.registryInstance.list());
     this.hubInstance.ensureBundledWorkflows(await this.loadWorkflows(this.options.bundledWorkflowsPath));
 

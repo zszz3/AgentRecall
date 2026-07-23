@@ -14,14 +14,6 @@ interface RegisterTeamChatIpcOptions {
 }
 
 const idSchema = z.string().trim().min(1).max(200);
-const connectionUrlSchema = z.string().trim().min(1).max(4_096).refine((value) => {
-  try {
-    const protocol = new URL(value).protocol;
-    return protocol === "postgres:" || protocol === "postgresql:";
-  } catch {
-    return false;
-  }
-}, "A postgres:// or postgresql:// connection URL is required.");
 const agentIdsSchema = z.array(idSchema).min(1).max(24).superRefine((ids, context) => {
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: "custom", message: "Room Agents must be unique." });
@@ -60,11 +52,7 @@ export function registerTeamChatIpc({ ipc, service, send }: RegisterTeamChatIpcO
   };
 
   handle(TEAM_CHAT_CHANNELS.connectionStatus, () => service.getConnectionStatus());
-  handle(TEAM_CHAT_CHANNELS.connectionConnect, (value) => {
-    const request = z.object({ connectionUrl: connectionUrlSchema.optional() }).strict()
-      .parse(value === undefined ? {} : value);
-    return service.connect(request.connectionUrl);
-  });
+  handle(TEAM_CHAT_CHANNELS.connectionConnect, () => service.connect());
   handle(TEAM_CHAT_CHANNELS.connectionUseLocal, () => service.useLocalDatabase());
   handle(TEAM_CHAT_CHANNELS.connectionDisconnect, () => service.disconnect());
   handle(TEAM_CHAT_CHANNELS.roomsList, () => service.listRooms());

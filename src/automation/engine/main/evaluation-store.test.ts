@@ -1,22 +1,28 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PostgresDatabase } from "../../../core/postgres/database";
+import { POSTGRES_MIGRATIONS } from "../../../core/postgres/schema";
+import { PGliteTestPool } from "../../../core/postgres/test-pglite";
+import { PostgresSessionRepository } from "../../../core/postgres/session-repository";
 import { EvaluationStore } from "./evaluation-store";
 
-const tempDirs: string[] = [];
+let database: PostgresDatabase;
+let store: EvaluationStore;
+
+beforeEach(async () => {
+  database = new PostgresDatabase(new PGliteTestPool(), {
+    migrationLock: false,
+    migrations: POSTGRES_MIGRATIONS,
+  });
+  await database.initialize();
+  store = new EvaluationStore(database);
+});
 
 afterEach(async () => {
-  await Promise.all(
-    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true })),
-  );
+  await database.close();
 });
 
 describe("EvaluationStore", () => {
   it("round-trips Judge evidence and failed criteria", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "evaluation-store-"));
-    tempDirs.push(dir);
-    const store = new EvaluationStore(path.join(dir, "app.db"));
     await store.saveDataset({
       id: "dataset",
       name: "Dataset",
@@ -81,13 +87,9 @@ describe("EvaluationStore", () => {
       evidence: ["quoted span"],
       failedCriteria: ["focus"],
     });
-    store.close();
   });
 
   it("pages lightweight run summaries and loads full results only on demand", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "evaluation-store-page-"));
-    tempDirs.push(dir);
-    const store = new EvaluationStore(path.join(dir, "app.db"));
     await store.saveDataset({ id: "dataset", name: "Dataset", description: "", items: [], createdAt: 1, updatedAt: 1 });
     await store.saveExperiment({ id: "experiment", name: "Experiment", datasetId: "dataset", agentId: "agent", evaluatorIds: [], repetitions: 1, createdAt: 1, updatedAt: 1 });
     for (let index = 0; index < 3; index += 1) {
@@ -116,6 +118,77 @@ describe("EvaluationStore", () => {
     expect(page.items[0]).toMatchObject({ resultCount: 1, failedResultCount: 0 });
     expect(page.items[0]).not.toHaveProperty("results");
     expect((await store.getRun("run-0"))?.results[0]?.output).toBe("Answer 0");
-    store.close();
+  });
+
+  it("attaches trajectory evaluations to a Session, Turn, or Span", async () => {
+    const sessions = new PostgresSessionRepository(database);
+    await sessions.upsertIndexedSession(
+      {
+        sessionKey: "codex:evaluation",
+        rawId: "evaluation",
+        source: "codex-cli",
+        projectPath: "/repo",
+        filePath: "/fixture/evaluation.jsonl",
+        originalTitle: "Evaluate trajectory",
+        firstQuestion: "Evaluate this",
+        timestamp: 1_000,
+        fileMtimeMs: 1_000,
+        fileSize: 10,
+        prUrl: null,
+        prNumber: null,
+      },
+      [{
+        role: "user",
+        content: "Run the test",
+        timestamp: new Date(1_000).toISOString(),
+        index: 0,
+      }],
+      [],
+      [{
+        index: 0,
+        kind: "tool_call",
+        source: "codex",
+        title: "shell",
+        detail: "{}",
+        timestamp: new Date(1_100).toISOString(),
+        callId: "call-1",
+        status: "success",
+      }],
+    );
+    const identifiers = (await database.query<{ turn_id: string; span_id: string }>(`
+      select t.id as turn_id, s.id as span_id
+        from agent_recall.session_turns t
+        join agent_recall.trace_spans s on s.turn_id = t.id
+       where t.session_key = 'codex:evaluation'
+    `)).rows[0];
+    const subjects = [
+      { type: "session" as const, sessionKey: "codex:evaluation" },
+      { type: "turn" as const, turnId: identifiers.turn_id },
+      { type: "span" as const, spanId: identifiers.span_id },
+    ];
+    for (const [index, subject] of subjects.entries()) {
+      await store.saveTrajectoryResult({
+        id: `trajectory-${index}`,
+        subject,
+        metric: "quality",
+        score: 0.9,
+        passed: true,
+        evidence: { observed: true },
+        createdAt: 2_000 + index,
+      });
+      expect(await store.listTrajectoryResults(subject)).toEqual([
+        expect.objectContaining({
+          id: `trajectory-${index}`,
+          score: 0.9,
+          evidence: { observed: true },
+        }),
+      ]);
+    }
+
+    await sessions.deleteSessionRecord("codex:evaluation");
+    const remaining = await database.query<{ count: number }>(
+      "select count(*)::integer as count from agent_recall.evaluation_results",
+    );
+    expect(remaining.rows[0].count).toBe(0);
   });
 });

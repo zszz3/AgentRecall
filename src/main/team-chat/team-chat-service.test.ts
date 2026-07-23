@@ -131,8 +131,6 @@ async function createFixture(options: {
     durationMs: 1,
   }));
   const service = new TeamChatService({
-    readConnectionUrl: () => "",
-    writeConnectionUrl: vi.fn(),
     configuredAgents: () => options.configuredAgents ?? agents,
     executeAgent,
     storeFactory: () => store,
@@ -140,7 +138,7 @@ async function createFixture(options: {
     idFactory: () => `019c0000-0000-7000-8000-${String(++sequence).padStart(12, "0")}`,
     now: () => new Date(Date.UTC(2026, 6, 23, 8, 0, sequence)),
   });
-  await service.connect("postgresql://user:secret@localhost/agent_recall_test");
+  await service.connect();
   const room = await service.createRoom({
     name: "Release room",
     workDir: "/synthetic/repo",
@@ -168,68 +166,56 @@ function waitForTurn(events: TeamChatEvent[], rootMessageId: string): Promise<vo
 }
 
 describe("TeamChatService", () => {
-  it("opens the managed local database when no external connection is saved", async () => {
-    const localStore = new MemoryTeamChatStore();
-    const externalStoreFactory = vi.fn(() => new MemoryTeamChatStore());
-    const writeConnectionUrl = vi.fn();
+  it("opens the shared AgentRecall database without user configuration", async () => {
+    const store = new MemoryTeamChatStore();
+    const storeFactory = vi.fn(() => store);
     const service = new TeamChatService({
-      readConnectionUrl: () => "",
-      writeConnectionUrl,
       configuredAgents: () => agents,
       executeAgent: async () => ({ output: "", durationMs: 0 }),
-      localStoreFactory: () => localStore,
-      storeFactory: externalStoreFactory,
+      storeFactory,
     });
 
     await expect(service.connect()).resolves.toEqual({
       state: "ready",
       mode: "local",
-      databaseLabel: "Local database",
+      databaseLabel: "AgentRecall database",
     });
 
-    expect(localStore.initialized).toBe(true);
-    expect(externalStoreFactory).not.toHaveBeenCalled();
-    expect(writeConnectionUrl).not.toHaveBeenCalled();
+    expect(store.initialized).toBe(true);
+    expect(storeFactory).toHaveBeenCalledTimes(1);
   });
 
-  it("coalesces concurrent automatic local database startup", async () => {
-    const localStore = new MemoryTeamChatStore();
-    const initialize = vi.spyOn(localStore, "initialize");
-    const localStoreFactory = vi.fn(() => localStore);
+  it("coalesces concurrent automatic database startup", async () => {
+    const store = new MemoryTeamChatStore();
+    const initialize = vi.spyOn(store, "initialize");
+    const storeFactory = vi.fn(() => store);
     const service = new TeamChatService({
-      readConnectionUrl: () => "",
-      writeConnectionUrl: vi.fn(),
       configuredAgents: () => agents,
       executeAgent: async () => ({ output: "", durationMs: 0 }),
-      localStoreFactory,
-      storeFactory: vi.fn(),
+      storeFactory,
     });
 
     await Promise.all([service.connect(), service.connect()]);
 
-    expect(localStoreFactory).toHaveBeenCalledTimes(1);
+    expect(storeFactory).toHaveBeenCalledTimes(1);
     expect(initialize).toHaveBeenCalledTimes(1);
   });
 
-  it("can return from an external database to the managed local database", async () => {
-    const localStore = new MemoryTeamChatStore();
-    const externalStore = new MemoryTeamChatStore();
-    const writeConnectionUrl = vi.fn();
+  it("reopens the shared database after disconnecting", async () => {
+    const stores = [new MemoryTeamChatStore(), new MemoryTeamChatStore()];
+    let nextStore = 0;
     const service = new TeamChatService({
-      readConnectionUrl: () => "postgresql://localhost/external",
-      writeConnectionUrl,
       configuredAgents: () => agents,
       executeAgent: async () => ({ output: "", durationMs: 0 }),
-      localStoreFactory: () => localStore,
-      storeFactory: () => externalStore,
+      storeFactory: () => stores[nextStore++]!,
     });
     await service.connect();
+    await service.disconnect();
 
-    await expect(service.useLocalDatabase()).resolves.toMatchObject({ state: "ready", mode: "local" });
+    await expect(service.connect()).resolves.toMatchObject({ state: "ready", mode: "local" });
 
-    expect(externalStore.closed).toBe(true);
-    expect(localStore.initialized).toBe(true);
-    expect(writeConnectionUrl).toHaveBeenLastCalledWith("");
+    expect(stores[0]!.closed).toBe(true);
+    expect(stores[1]!.initialized).toBe(true);
   });
 
   it("persists the human message and returns before a pending Agent finishes", async () => {
@@ -636,20 +622,18 @@ describe("TeamChatService", () => {
     expect(fixture.store.dispatches[0]?.status).toBe("interrupted");
   });
 
-  it("sanitizes connection failures before exposing status or events", async () => {
+  it("does not expose database failure details in status or events", async () => {
     const events: TeamChatEvent[] = [];
     const failingStore = new MemoryTeamChatStore();
     failingStore.initialize = async () => { throw new Error("postgresql://user:top-secret@private.example/db"); };
     const service = new TeamChatService({
-      readConnectionUrl: () => "",
-      writeConnectionUrl: vi.fn(),
       configuredAgents: () => agents,
       executeAgent: async () => ({ output: "", durationMs: 0 }),
       storeFactory: () => failingStore,
       emit: (event) => events.push(event),
     });
 
-    await expect(service.connect("postgresql://user:top-secret@private.example/db")).rejects.toThrow("Unable to connect");
+    await expect(service.connect()).rejects.toThrow("Unable to open Chat data");
 
     expect(JSON.stringify(service.getConnectionStatus())).not.toContain("top-secret");
     expect(JSON.stringify(events)).not.toContain("top-secret");

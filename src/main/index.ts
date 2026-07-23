@@ -197,15 +197,6 @@ const settingsStore = new Store<AppSettings>({
   defaults: defaultSettings,
 });
 
-interface TeamChatSettings {
-  postgresUrl: string;
-}
-
-const teamChatSettingsStore = new Store<TeamChatSettings>({
-  name: "team-chat",
-  defaults: { postgresUrl: "" },
-});
-
 type SavedWindowState = {
   width: number;
   height: number;
@@ -237,15 +228,14 @@ function bundledAutomationWorkflowsPath(): string {
 }
 
 function createAutomationService(): NativeAutomationService {
+  if (!postgresDatabase) throw new Error("PostgreSQL must be ready before automation starts.");
   return new NativeAutomationService({
+    database: postgresDatabase,
     userDataPath: app.getPath("userData"),
     homePath: app.getPath("home"),
     appDataPath: app.getPath("appData"),
     bundledWorkflowsPath: bundledAutomationWorkflowsPath(),
     workflowMcpServerPath: path.join(app.getAppPath(), "out", "mcp", "workflow-entry.js"),
-    localTeamChatDataPath: path.join(app.getPath("userData"), "team-chat-pgdata"),
-    readTeamChatConnectionUrl: () => teamChatSettingsStore.get("postgresUrl"),
-    writeTeamChatConnectionUrl: (postgresUrl) => teamChatSettingsStore.set("postgresUrl", postgresUrl),
   });
 }
 

@@ -8,43 +8,49 @@ import type {
   WorkflowDraftState,
   WorkflowRunState,
 } from "../../../shared/types";
-import type { SqliteAppStore } from "./sqlite-store";
+import type { AgentHubPersistedStore } from "./persisted-store";
 import { restoreScheduledWorkflowStoreCollections, restoreWorkflowStoreCollections } from "../workflow/agent-hub-workflow-restore";
 import { asRecord, type PersistedAppStateV5 } from "./agent-hub-persistence";
 
 export async function loadPersistedPayload(input: {
-  storagePath: string;
-  sqliteStoreFactory: (storagePath: string) => SqliteAppStore;
+  storagePath?: string;
+  persistedStore?: AgentHubPersistedStore;
   warn: (message: string, error: unknown) => void;
 }): Promise<{
   payload: unknown | undefined;
-  sqliteStore: SqliteAppStore | undefined;
+  persistedStore: AgentHubPersistedStore | undefined;
   shouldBootstrapPersist: boolean;
 }> {
-  if (path.extname(input.storagePath) === ".db") {
-    const sqliteStore = input.sqliteStoreFactory(input.storagePath);
+  if (input.persistedStore) {
     try {
-      const payload = await sqliteStore.load();
+      const payload = await input.persistedStore.load();
       return {
         payload,
-        sqliteStore,
+        persistedStore: input.persistedStore,
         shouldBootstrapPersist: payload === undefined,
       };
     } catch (error) {
-      input.warn(`Failed to load app state from SQLite ${input.storagePath}:`, error);
+      input.warn(`Failed to load app state from ${input.persistedStore.label}:`, error);
       return {
         payload: undefined,
-        sqliteStore,
+        persistedStore: input.persistedStore,
         shouldBootstrapPersist: true,
       };
     }
   }
 
+  if (!input.storagePath) {
+    return {
+      payload: undefined,
+      persistedStore: undefined,
+      shouldBootstrapPersist: false,
+    };
+  }
   try {
     const raw = await readFile(input.storagePath, "utf8");
     return {
       payload: JSON.parse(raw) as unknown,
-      sqliteStore: undefined,
+      persistedStore: undefined,
       shouldBootstrapPersist: false,
     };
   } catch (error) {
@@ -54,7 +60,7 @@ export async function loadPersistedPayload(input: {
     }
     return {
       payload: undefined,
-      sqliteStore: undefined,
+      persistedStore: undefined,
       shouldBootstrapPersist: false,
     };
   }
@@ -116,15 +122,16 @@ export function restoreScheduledWorkflowStoreState(input: {
 }
 
 export async function writePersistedPayload(input: {
-  storagePath: string;
-  sqliteStore: SqliteAppStore | undefined;
+  storagePath?: string;
+  persistedStore?: AgentHubPersistedStore;
   payload: PersistedAppStateV5;
 }): Promise<void> {
-  if (input.sqliteStore) {
-    await input.sqliteStore.save(input.payload);
+  if (input.persistedStore) {
+    await input.persistedStore.save(input.payload);
     return;
   }
 
+  if (!input.storagePath) return;
   const tempPath = `${input.storagePath}.${process.pid}.${Date.now()}.tmp`;
   await mkdir(path.dirname(input.storagePath), { recursive: true });
   await writeFile(tempPath, `${JSON.stringify(input.payload, null, 2)}\n`, "utf8");

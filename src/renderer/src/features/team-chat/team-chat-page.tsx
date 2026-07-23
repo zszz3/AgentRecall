@@ -52,7 +52,6 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
   const api = useMemo(() => window.sessionSearch.teamChat, []);
   const { api: automationApi, snapshot } = useAutomation();
   const [connection, setConnection] = useState<TeamChatConnectionStatus>(INITIAL_CONNECTION);
-  const [connectionUrl, setConnectionUrl] = useState("");
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [rooms, setRooms] = useState<TeamChatRoomSummary[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string>();
@@ -73,7 +72,6 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
   const [streams, setStreams] = useState<Record<string, StreamDraft>>({});
   const [resettingAgentIds, setResettingAgentIds] = useState<Set<string>>(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
-  const [databaseDialogOpen, setDatabaseDialogOpen] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const skipNextAutoScrollRef = useRef(false);
@@ -124,14 +122,11 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
     }
   }, [api]);
 
-  const connect = useCallback(async (nextUrl?: string): Promise<void> => {
+  const connect = useCallback(async (): Promise<void> => {
     setConnectionBusy(true);
     setFeedback(undefined);
     try {
-      const status = nextUrl === undefined ? await api.connect() : await api.connect(nextUrl);
-      setConnection(status);
-      setConnectionUrl("");
-      setDatabaseDialogOpen(false);
+      setConnection(await api.connect());
       await loadRooms();
     } catch (error) {
       setFeedback(errorMessage(error));
@@ -310,21 +305,6 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
     void sendMessage();
   };
 
-  const useLocalDatabase = async (): Promise<void> => {
-    setConnectionBusy(true);
-    setFeedback(undefined);
-    try {
-      setConnection(await api.useLocalDatabase());
-      setConnectionUrl("");
-      setDatabaseDialogOpen(false);
-      await loadRooms();
-    } catch (error) {
-      setFeedback(errorMessage(error));
-    } finally {
-      setConnectionBusy(false);
-    }
-  };
-
   const archiveRoom = async (): Promise<void> => {
     if (!activeRoom) return;
     if (!window.confirm(l(`Archive “${activeRoom.name}”?`, `归档“${activeRoom.name}”？`))) return;
@@ -368,16 +348,8 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
           <div className="team-chat-database-controls">
             <div className="team-chat-connection-chip" title={connection.databaseLabel}>
               <Database size={13} />
-              <span>{connection.mode === "local" ? l("Local database", "本地数据库") : connection.databaseLabel}</span>
+              <span>{l("Local data", "本地数据")}</span>
             </div>
-            {connection.mode === "external" ? (
-              <button type="button" onClick={() => void useLocalDatabase()} disabled={connectionBusy}>
-                {l("Use local", "使用本地")}
-              </button>
-            ) : null}
-            <button type="button" onClick={() => setDatabaseDialogOpen(true)} disabled={connectionBusy}>
-              {l("External PostgreSQL", "外部 PostgreSQL")}
-            </button>
           </div>
         ) : null}
       </header>
@@ -386,13 +358,9 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
         <ConnectionSetup
           language={language}
           status={connection}
-          connectionUrl={connectionUrl}
           busy={connectionBusy}
           feedback={feedback}
-          onConnectionUrlChange={setConnectionUrl}
-          onConnect={() => void connect(connectionUrl)}
-          onRetrySaved={() => void connect()}
-          onUseLocal={() => void useLocalDatabase()}
+          onRetry={() => void connect()}
         />
       ) : (
         <div className="team-chat-layout">
@@ -590,19 +558,6 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
         />
       ) : null}
 
-      {databaseDialogOpen ? (
-        <ExternalDatabaseDialog
-          language={language}
-          connection={connection}
-          connectionUrl={connectionUrl}
-          busy={connectionBusy}
-          feedback={feedback}
-          onConnectionUrlChange={setConnectionUrl}
-          onConnect={() => void connect(connectionUrl)}
-          onUseLocal={() => void useLocalDatabase()}
-          onClose={() => setDatabaseDialogOpen(false)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -610,23 +565,15 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
 function ConnectionSetup({
   language,
   status,
-  connectionUrl,
   busy,
   feedback,
-  onConnectionUrlChange,
-  onConnect,
-  onRetrySaved,
-  onUseLocal,
+  onRetry,
 }: {
   language: LanguageMode;
   status: TeamChatConnectionStatus;
-  connectionUrl: string;
   busy: boolean;
   feedback?: string;
-  onConnectionUrlChange: (value: string) => void;
-  onConnect: () => void;
-  onRetrySaved: () => void;
-  onUseLocal: () => void;
+  onRetry: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   return (
@@ -635,90 +582,17 @@ function ConnectionSetup({
         <span className="team-chat-setup-icon"><Database size={22} /></span>
         <h3>{status.state === "connecting" ? l("Starting Chat database", "正在启动 Chat 数据库") : l("Chat database unavailable", "Chat 数据库不可用")}</h3>
         <p>{l(
-          "AgentRecall starts a private local database automatically. You can retry it or connect your own PostgreSQL database.",
-          "AgentRecall 会自动启动专用的本地数据库。你可以重试，或连接自己的 PostgreSQL 数据库。",
+          "AgentRecall manages Chat data automatically. No database setup is required.",
+          "AgentRecall 会自动管理 Chat 数据，无需单独安装或配置数据库。",
         )}</p>
-        <label>
-          <span>{l("External PostgreSQL", "外部 PostgreSQL")}</span>
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={connectionUrl}
-            onChange={(event) => onConnectionUrlChange(event.currentTarget.value)}
-            placeholder="postgresql://user:password@localhost/agent_recall"
-          />
-        </label>
         {feedback || status.error ? <div className="team-chat-setup-error" role="alert">{feedback || status.error}</div> : null}
         <div className="team-chat-setup-actions">
-          {status.mode === "external" && status.databaseLabel ? (
-            <button type="button" onClick={onRetrySaved} disabled={busy}>
-              {l("Retry external", "重试外部数据库")}
-            </button>
-          ) : null}
-          <button className="primary" type="button" onClick={onUseLocal} disabled={busy}>
+          <button className="primary" type="button" onClick={onRetry} disabled={busy || status.state === "connecting"}>
             {busy ? <LoaderCircle className="spin" size={14} /> : null}
-            {l("Use local database", "使用本地数据库")}
+            {l("Retry", "重试")}
           </button>
-          <button type="button" onClick={onConnect} disabled={busy || !connectionUrl.trim()}>{l("Connect external", "连接外部数据库")}</button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ExternalDatabaseDialog({
-  language,
-  connection,
-  connectionUrl,
-  busy,
-  feedback,
-  onConnectionUrlChange,
-  onConnect,
-  onUseLocal,
-  onClose,
-}: {
-  language: LanguageMode;
-  connection: TeamChatConnectionStatus;
-  connectionUrl: string;
-  busy: boolean;
-  feedback?: string;
-  onConnectionUrlChange: (value: string) => void;
-  onConnect: () => void;
-  onUseLocal: () => void;
-  onClose: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className="team-chat-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <form className="team-chat-dialog team-chat-database-dialog" onSubmit={(event) => { event.preventDefault(); onConnect(); }}>
-        <header>
-          <div>
-            <h3>{l("External PostgreSQL", "外部 PostgreSQL")}</h3>
-            <p>{l("Use this only when Chat data must live in a PostgreSQL server you manage.", "仅在需要把 Chat 数据保存在自管 PostgreSQL 服务时使用。")}</p>
-          </div>
-          <button type="button" onClick={onClose} disabled={busy} aria-label={l("Close", "关闭")}><X size={16} /></button>
-        </header>
-        <label className="team-chat-field">
-          <span>{l("Connection URL", "连接地址")}</span>
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={connectionUrl}
-            onChange={(event) => onConnectionUrlChange(event.currentTarget.value)}
-            placeholder="postgresql://user:password@localhost/agent_recall"
-          />
-        </label>
-        {feedback ? <div className="team-chat-dialog-error" role="alert">{feedback}</div> : null}
-        <footer>
-          {connection.mode === "external" ? <button type="button" onClick={onUseLocal} disabled={busy}>{l("Use local database", "使用本地数据库")}</button> : null}
-          <button type="button" onClick={onClose} disabled={busy}>{l("Cancel", "取消")}</button>
-          <button className="primary" type="submit" disabled={busy || !connectionUrl.trim()}>
-            {busy ? <LoaderCircle className="spin" size={14} /> : null}{l("Connect", "连接")}
-          </button>
-        </footer>
-      </form>
     </div>
   );
 }
