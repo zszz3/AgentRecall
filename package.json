@@ -44,6 +44,7 @@
     "@agentclientprotocol/sdk": "^1.2.1",
     "@anthropic-ai/claude-agent-sdk": "^0.3.216",
     "@anthropic-ai/claude-code": "^2.1.216",
+    "@electric-sql/pglite": "^0.5.4",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -51,6 +52,7 @@
     "electron": "42.3.0",
     "electron-store": "^10.0.1",
     "lucide-react": "^0.468.0",
+    "pg": "^8.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
@@ -59,6 +61,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",

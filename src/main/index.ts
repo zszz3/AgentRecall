@@ -79,6 +79,7 @@ import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { registerAgentMemoryIpc } from "./ipc/agent-memory";
 import { registerAutomationIpc } from "./ipc/automation";
+import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerProvidersIpc } from "./ipc/providers";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
@@ -175,6 +176,7 @@ bootstrapApplicationPaths({
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
+let disposeTeamChatIpc: (() => void) | null = null;
 let automationQuitReady = false;
 let tray: Tray | null = null;
 let store: SessionStore;
@@ -188,6 +190,15 @@ const remoteDetailLoads = new Map<string, Promise<void>>();
 
 const settingsStore = new Store<AppSettings>({
   defaults: defaultSettings,
+});
+
+interface TeamChatSettings {
+  postgresUrl: string;
+}
+
+const teamChatSettingsStore = new Store<TeamChatSettings>({
+  name: "team-chat",
+  defaults: { postgresUrl: "" },
 });
 
 type SavedWindowState = {
@@ -227,6 +238,9 @@ function createAutomationService(): NativeAutomationService {
     appDataPath: app.getPath("appData"),
     bundledWorkflowsPath: bundledAutomationWorkflowsPath(),
     workflowMcpServerPath: path.join(app.getAppPath(), "out", "mcp", "workflow-entry.js"),
+    localTeamChatDataPath: path.join(app.getPath("userData"), "team-chat-pgdata"),
+    readTeamChatConnectionUrl: () => teamChatSettingsStore.get("postgresUrl"),
+    writeTeamChatConnectionUrl: (postgresUrl) => teamChatSettingsStore.set("postgresUrl", postgresUrl),
   });
 }
 
@@ -1148,6 +1162,11 @@ function registerIpc(): void {
       return resolvedPath;
     },
   });
+  disposeTeamChatIpc = registerTeamChatIpc({
+    ipc: ipcMain,
+    service: automationService.teamChat(),
+    send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
+  });
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
     if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
@@ -1575,6 +1594,8 @@ app.on("before-quit", (event) => {
   void providerService.stopCodexChatProxy();
   disposeAutomationIpc?.();
   disposeAutomationIpc = null;
+  disposeTeamChatIpc?.();
+  disposeTeamChatIpc = null;
   globalShortcut.unregisterAll();
   store?.close();
 });

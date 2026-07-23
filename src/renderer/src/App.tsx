@@ -25,6 +25,7 @@ import {
   Laptop,
   LayoutDashboard,
   MessagesSquare,
+  MessageCircleMore,
   PackageSearch,
   Pin,
   PinOff,
@@ -133,6 +134,7 @@ import { RuntimeFeaturePage } from "./features/automation/runtime-feature-page";
 import { WorkflowFeaturePage } from "./features/automation/workflow-feature-page";
 import { EvaluationFeaturePage } from "./features/automation/evaluation-feature-page";
 import { selectWorkbenchWorkflows } from "./features/automation/workbench-workflows";
+import { TeamChatPage } from "./features/team-chat/team-chat-page";
 import {
   SOURCE_LABEL,
   environmentBadgeLabel,
@@ -179,7 +181,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
 } satisfies MigrationTargetSettings;
 
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
-type AppPage = "workbench" | "sessions" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers";
+type AppPage = "workbench" | "sessions" | "team-chat" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -1843,7 +1845,10 @@ export function App(): ReactElement {
             <LayoutDashboard size={18} /><span>{t("Workbench", "工作台")}</span>
           </button>
           <button data-page="sessions" className={activePage === "sessions" ? "active" : ""} onClick={() => void navigateToPage("sessions")}>
-            <MessagesSquare size={18} /><span>{t("Sessions", "会话")}</span>
+            <MessagesSquare size={18} /><span>Session</span>
+          </button>
+          <button data-page="team-chat" className={activePage === "team-chat" ? "active" : ""} onClick={() => void navigateToPage("team-chat")}>
+            <MessageCircleMore size={18} /><span>Chat</span>
           </button>
           <button data-page="workflows" className={activePage === "workflows" ? "active" : ""} onClick={() => void navigateToPage("workflows")}>
             <Workflow size={18} /><span>Workflow</span>
@@ -1953,9 +1958,22 @@ export function App(): ReactElement {
             <div className="sessions-page" data-page="sessions">
               <header className="app-page-head sessions-page-head">
                 <div>
-                  <h2>{t("Sessions", "会话")}</h2>
+                  <h2>Session</h2>
                   <p>{t("Search, filter, and continue local or remote Agent sessions.", "搜索、筛选并继续本地或远程 Agent 会话。")}</p>
                 </div>
+                <button
+                  type="button"
+                  className={`sessions-page-refresh ${indexStatus?.running ? "is-running" : ""}`}
+                  onClick={() => void refreshNow()}
+                  disabled={indexStatus?.running}
+                  title={indexStatus?.lastIndexedAt
+                    ? `${t("Update index", "更新索引")} · ${formatRelativeTime(indexStatus.lastIndexedAt)}`
+                    : t("Update index", "更新索引")}
+                  aria-label={indexStatus?.running ? t("Updating index", "正在更新索引") : t("Update index", "更新索引")}
+                >
+                  <RefreshCw size={14} />
+                  <span>{indexStatus?.running ? t("Updating...", "更新中...") : t("Update index", "更新索引")}</span>
+                </button>
               </header>
               <section className="sidebar">
                 <div className="session-sidebar-title"><strong>{t("Session scope", "会话范围")}</strong><span>{sessionTotalCount}</span></div>
@@ -2274,6 +2292,8 @@ export function App(): ReactElement {
           ) : null}
 
           {activePage === "workflows" ? <WorkflowFeaturePage language={language} /> : null}
+
+          {activePage === "team-chat" ? <TeamChatPage language={language} /> : null}
 
           {activePage === "evaluation" ? (
             <EvaluationFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />

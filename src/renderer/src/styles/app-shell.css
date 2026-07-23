@@ -234,7 +234,48 @@
 }
 
 .sessions-page-head {
+  display: flex;
   grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sessions-page-head > div {
+  width: auto;
+  min-width: 0;
+  flex: 1;
+}
+
+.sessions-page-refresh {
+  display: inline-flex;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  -webkit-app-region: no-drag;
+}
+
+.sessions-page-refresh:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.sessions-page-refresh:disabled {
+  cursor: default;
+  opacity: .65;
+}
+
+.sessions-page-refresh.is-running svg {
+  animation: spin .9s linear infinite;
 }
 
 .sessions-page .sidebar {

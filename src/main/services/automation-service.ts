@@ -21,6 +21,8 @@ import { mcpToolDefinitions } from "../../automation/engine/mcp/server";
 import type { AutomationHealth } from "../../shared/ipc/automation";
 import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths";
 import { EvaluationService } from "./evaluation-service";
+import { TeamChatService } from "../team-chat/team-chat-service";
+import { PGliteTeamChatStore } from "../team-chat/pglite-team-chat-store";
 
 export interface AutomationServiceOptions {
   userDataPath: string;
@@ -28,6 +30,9 @@ export interface AutomationServiceOptions {
   appDataPath: string;
   bundledWorkflowsPath: string;
   workflowMcpServerPath: string;
+  localTeamChatDataPath?: string;
+  readTeamChatConnectionUrl: () => string;
+  writeTeamChatConnectionUrl: (url: string) => void;
 }
 
 interface AutomationServiceDependencies {
@@ -35,6 +40,7 @@ interface AutomationServiceDependencies {
   registry?: McpRegistryStore;
   agents?: McpAgentManagementService;
   evaluations?: EvaluationService;
+  teamChats?: TeamChatService;
   loadBundledWorkflows?: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
   startBridge?: typeof startMcpBridge;
   startRouter?: typeof startCodexChatRouter;
@@ -49,6 +55,7 @@ export class NativeAutomationService {
   private readonly registryInstance: McpRegistryStore;
   private readonly agentsInstance: McpAgentManagementService;
   private readonly evaluationsInstance: EvaluationService;
+  private readonly teamChatsInstance: TeamChatService;
   private readonly loadWorkflows: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
   private readonly startBridgeService: typeof startMcpBridge;
   private readonly startRouterService: typeof startCodexChatRouter;
@@ -77,13 +84,22 @@ export class NativeAutomationService {
       agents: () => this.hubInstance.snapshot().configuredAgents,
       channels: () => this.hubInstance.snapshot().channels,
       defaultWorkDir: () => this.hubInstance.getWorkDir(),
-      execute: (request) => this.hubInstance.askConfiguredAgent(request),
+      execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
     });
     this.evaluationsInstance = dependencies.evaluations ?? new EvaluationService({
       store: new EvaluationStore(this.paths.databasePath),
       agents: () => this.hubInstance.snapshot().configuredAgents,
       executeAgent: (configuredAgentId, prompt) =>
         configuredAgentExecutor.runOneShot({ configuredAgentId, prompt }),
+    });
+    this.teamChatsInstance = dependencies.teamChats ?? new TeamChatService({
+      readConnectionUrl: options.readTeamChatConnectionUrl,
+      writeConnectionUrl: options.writeTeamChatConnectionUrl,
+      localStoreFactory: options.localTeamChatDataPath
+        ? () => new PGliteTeamChatStore(options.localTeamChatDataPath!)
+        : undefined,
+      configuredAgents: () => this.hubInstance.snapshot().configuredAgents,
+      executeAgent: (input, onEvent, signal) => configuredAgentExecutor.runOneShot(input, onEvent, signal),
     });
     this.agentsInstance = dependencies.agents ?? new McpAgentManagementService({
       homeDir: () => options.homePath,
@@ -132,6 +148,7 @@ export class NativeAutomationService {
     });
     this.hubInstance.setWorkflowMcpDiscoveryPath(this.bridge.discoveryPath);
     await this.hubInstance.initialize();
+    void this.teamChatsInstance.connect().catch(() => undefined);
     void this.hubInstance.refreshDiscoverableModelCatalogs().catch((error) => {
       console.warn("Failed to refresh AgentRecall automation model catalogs:", error);
     });
@@ -175,6 +192,10 @@ export class NativeAutomationService {
     return this.evaluationsInstance;
   }
 
+  teamChat(): TeamChatService {
+    return this.teamChatsInstance;
+  }
+
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownPromise = this.shutdownInternal();
@@ -182,6 +203,7 @@ export class NativeAutomationService {
   }
 
   private async shutdownInternal(): Promise<void> {
+    await this.teamChatsInstance.close();
     await this.hubInstance.shutdown();
     await this.bridge?.stop();
     await this.router?.stop();

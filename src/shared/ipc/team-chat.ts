@@ -1,0 +1,15 @@
+export const TEAM_CHAT_CHANNELS = {
+  connectionStatus: "team-chat:connection:status",
+  connectionConnect: "team-chat:connection:connect",
+  connectionUseLocal: "team-chat:connection:use-local",
+  connectionDisconnect: "team-chat:connection:disconnect",
+  roomsList: "team-chat:rooms:list",
+  roomsGet: "team-chat:rooms:get",
+  roomsCreate: "team-chat:rooms:create",
+  roomsUpdate: "team-chat:rooms:update",
+  roomsArchive: "team-chat:rooms:archive",
+  messagesList: "team-chat:messages:list",
+  messagesSend: "team-chat:messages:send",
+  turnsStop: "team-chat:turns:stop",
+  event: "team-chat:event",
+} as const;

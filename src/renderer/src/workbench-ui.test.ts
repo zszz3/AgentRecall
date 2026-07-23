@@ -15,10 +15,11 @@ const stylesheet = rendererStyleSource;
 
 describe("workbench application shell", () => {
   it("starts on the workbench and exposes every primary navigation page", () => {
-    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers"');
+    expect(appSource).toContain('type AppPage = "workbench" | "sessions" | "team-chat" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers"');
     expect(appSource).toContain('useState<AppPage>("workbench")');
     expect(appSource).toContain("<WorkbenchPage");
     expect(appSource).toContain('data-page="sessions"');
+    expect(appSource).toContain('data-page="team-chat"');
     expect(appSource).toContain('data-page="workflows"');
     expect(appSource).toContain('data-page="evaluation"');
     expect(appSource).toContain('data-page="runtimes"');
@@ -43,6 +44,15 @@ describe("workbench application shell", () => {
     expect(skillsSource).toContain('className="app-page-head skills-page-head"');
     expect(providerSource).toContain('className="app-page-head provider-page-head"');
     expect(appShellSource).toMatch(/\.app-page-head\s*\{[^}]*border-bottom:\s*1px solid var\(--border-subtle\)/);
+  });
+
+  it("names the Session page consistently and exposes an index update action in its header", () => {
+    expect(appSource).toContain('<MessagesSquare size={18} /><span>Session</span>');
+    expect(appSource).toContain('<h2>Session</h2>');
+    expect(appSource).toContain('className={`sessions-page-refresh ${indexStatus?.running ? "is-running" : ""}`}');
+    expect(appSource).toContain('onClick={() => void refreshNow()}');
+    expect(appSource).toContain('disabled={indexStatus?.running}');
+    expect(appSource).toContain('t("Update index", "更新索引")');
   });
 
   it("owns Skills as a page instead of preserving the old modal interface", () => {
