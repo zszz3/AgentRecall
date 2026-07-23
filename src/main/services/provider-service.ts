@@ -21,8 +21,8 @@ import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { CodexModelProbeRequest, ProviderKeyTarget } from "../../shared/ipc/providers";
 
 export interface ProviderKeyStore {
-  get(target: ProviderKeyTarget, providerId: string): string;
-  set(target: ProviderKeyTarget, providerId: string, apiKey: string): void;
+  get(target: ProviderKeyTarget, providerId: string): Promise<string>;
+  set(target: ProviderKeyTarget, providerId: string, apiKey: string): Promise<void>;
 }
 
 export interface ProviderSettingsAccess {
@@ -94,24 +94,24 @@ export class ProviderService {
     });
   }
 
-  addStoredKeys(settings: AppSettings): AppSettings {
+  async addStoredKeys(settings: AppSettings): Promise<AppSettings> {
     const next = { ...settings };
     if (next.apiConfig.activeProvider === "custom") {
       next.apiConfig = {
         ...next.apiConfig,
-        customApiKey: this.dependencies.keys.get("codex", next.apiConfig.customProviderId),
+        customApiKey: await this.dependencies.keys.get("codex", next.apiConfig.customProviderId),
       };
     }
     if (next.claudeApiConfig.activeProvider === "custom") {
       next.claudeApiConfig = {
         ...next.claudeApiConfig,
-        customApiKey: this.dependencies.keys.get("claude", next.claudeApiConfig.customProviderId),
+        customApiKey: await this.dependencies.keys.get("claude", next.claudeApiConfig.customProviderId),
       };
     }
     if (next.summaryApiConfig.activeProvider === "custom") {
       next.summaryApiConfig = {
         ...next.summaryApiConfig,
-        customApiKey: this.dependencies.keys.get("summary", next.summaryApiConfig.customProviderId),
+        customApiKey: await this.dependencies.keys.get("summary", next.summaryApiConfig.customProviderId),
       };
     }
     return next;
@@ -126,27 +126,27 @@ export class ProviderService {
     };
   }
 
-  persistKeysFromUpdate(update: AppSettingsUpdate, next: AppSettings): void {
+  async persistKeysFromUpdate(update: AppSettingsUpdate, next: AppSettings): Promise<void> {
     if (update.apiConfig && next.apiConfig.activeProvider === "custom") {
-      this.dependencies.keys.set("codex", next.apiConfig.customProviderId, next.apiConfig.customApiKey);
+      await this.dependencies.keys.set("codex", next.apiConfig.customProviderId, next.apiConfig.customApiKey);
     }
     if (update.claudeApiConfig && next.claudeApiConfig.activeProvider === "custom") {
-      this.dependencies.keys.set("claude", next.claudeApiConfig.customProviderId, next.claudeApiConfig.customApiKey);
+      await this.dependencies.keys.set("claude", next.claudeApiConfig.customProviderId, next.claudeApiConfig.customApiKey);
     }
     if (update.summaryApiConfig && next.summaryApiConfig.activeProvider === "custom") {
-      this.dependencies.keys.set("summary", next.summaryApiConfig.customProviderId, next.summaryApiConfig.customApiKey);
+      await this.dependencies.keys.set("summary", next.summaryApiConfig.customProviderId, next.summaryApiConfig.customApiKey);
     }
   }
 
-  migrateLegacyKeys(): void {
+  async migrateLegacyKeys(): Promise<void> {
     const settings = this.dependencies.getSettings();
-    this.migrateLegacyKey("codex", settings.apiConfig);
-    this.migrateLegacyKey("claude", settings.claudeApiConfig);
+    await this.migrateLegacyKey("codex", settings.apiConfig);
+    await this.migrateLegacyKey("claude", settings.claudeApiConfig);
     this.dependencies.settings.set("apiConfig.customApiKey", "");
     this.dependencies.settings.set("claudeApiConfig.customApiKey", "");
   }
 
-  getProviderKey(target: ProviderKeyTarget, providerId: string): string {
+  getProviderKey(target: ProviderKeyTarget, providerId: string): Promise<string> {
     return this.dependencies.keys.get(target, providerId);
   }
 
@@ -154,10 +154,13 @@ export class ProviderService {
     return this.operations.loadCodexConfigSnapshot();
   }
 
-  probeCodexModels(input: CodexModelProbeRequest): Promise<CodexModelProbeResult> {
+  async probeCodexModels(input: CodexModelProbeRequest): Promise<CodexModelProbeResult> {
     const settings = this.dependencies.getSettings();
-    const savedKey = (input.providerId ? this.dependencies.keys.get("codex", input.providerId) : "")
-      || this.dependencies.keys.get("codex", settings.apiConfig.customProviderId);
+    const savedKey = (
+      input.providerId
+        ? await this.dependencies.keys.get("codex", input.providerId)
+        : ""
+    ) || await this.dependencies.keys.get("codex", settings.apiConfig.customProviderId);
     return this.operations.probeCodexModels({
       baseUrl: input.baseUrl,
       apiKey: input.apiKey || savedKey,
@@ -196,7 +199,7 @@ export class ProviderService {
     const apiConfig = this.withPresetDefaults({
       ...settings.apiConfig,
       customApiKey: settings.apiConfig.activeProvider === "custom"
-        ? this.dependencies.keys.get("codex", settings.apiConfig.customProviderId)
+        ? await this.dependencies.keys.get("codex", settings.apiConfig.customProviderId)
         : "",
     });
     if (!this.shouldUseChatProxy(apiConfig) || !apiConfig.customApiKey) return;
@@ -207,13 +210,16 @@ export class ProviderService {
     }
   }
 
-  private migrateLegacyKey(target: "codex" | "claude", config: ApiConfig | ClaudeApiConfig): void {
+  private async migrateLegacyKey(
+    target: "codex" | "claude",
+    config: ApiConfig | ClaudeApiConfig,
+  ): Promise<void> {
     if (
       config.activeProvider === "custom"
       && config.customApiKey
-      && !this.dependencies.keys.get(target, config.customProviderId)
+      && !await this.dependencies.keys.get(target, config.customProviderId)
     ) {
-      this.dependencies.keys.set(target, config.customProviderId, config.customApiKey);
+      await this.dependencies.keys.set(target, config.customProviderId, config.customApiKey);
     }
   }
 

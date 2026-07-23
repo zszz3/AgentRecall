@@ -347,7 +347,7 @@ export async function syncRemoteEnvironment(
   options: RemoteSyncOptions = {},
 ): Promise<RemoteSyncStatus> {
   const runSsh = options.runSsh ?? runSystemSsh;
-  store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
+  await store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
   try {
     const enabledOptionalSources = new Set(options.enabledOptionalSources ?? []);
     const output = await runSsh(environment, buildRemoteCollectorCommand([...enabledOptionalSources]));
@@ -357,8 +357,8 @@ export async function syncRemoteEnvironment(
     );
     for (const summary of enabledSummaries) {
       const session = remoteSummaryToIndexedSession(environment, summary);
-      migrateLegacyRemoteSessionRecord(store, session);
-      store.upsertIndexedSessionSummary(
+      await migrateLegacyRemoteSessionRecord(store, session);
+      await store.upsertIndexedSessionSummary(
         session,
         summary.messageCount,
         summary.tokenEvents,
@@ -367,22 +367,22 @@ export async function syncRemoteEnvironment(
     }
     const loaded = loadRemoteSessionPayloads(environment, payloads);
     for (const item of loaded) {
-      migrateLegacyRemoteSessionRecord(store, item.session);
-      store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+      await migrateLegacyRemoteSessionRecord(store, item.session);
+      await store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
     }
-    store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
+    await store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
     return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
+    await store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
     throw error;
   }
 }
 
-function migrateLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): void {
+async function migrateLegacyRemoteSessionRecord(store: SessionStore, session: IndexedSession): Promise<void> {
   const legacyFamily = session.source === "codex-cli" ? "codex" : session.source === "claude-cli" ? "claude" : null;
   if (!legacyFamily || !session.environmentId) return;
-  store.migrateSessionKeyPreservingUserState(
+  await store.migrateSessionKeyPreservingUserState(
     `ssh:${session.environmentId}:${legacyFamily}:${session.rawId}`,
     session.sessionKey,
   );

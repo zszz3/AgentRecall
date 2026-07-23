@@ -46,41 +46,41 @@ export class RemoteEnvironmentLifecycle {
     this.onEnvironmentsUpdated = options.onEnvironmentsUpdated ?? (() => undefined);
   }
 
-  listEnvironments(): SessionEnvironment[] {
+  listEnvironments(): Promise<SessionEnvironment[]> {
     return this.store.listEnvironments();
   }
 
-  saveEnvironment(input: EnvironmentUpsertInput): SessionEnvironment {
-    const environment = this.store.upsertEnvironment(input);
+  async saveEnvironment(input: EnvironmentUpsertInput): Promise<SessionEnvironment> {
+    const environment = await this.store.upsertEnvironment(input);
     this.deletedEnvironmentIds.delete(environment.id);
     this.bumpGeneration(environment.id);
     this.watchManager.stop(environment.id);
     if (isEnabledSshEnvironment(environment)) {
       void this.requestSync(environment).catch(() => undefined);
     }
-    this.emitEnvironmentsUpdated();
+    await this.emitEnvironmentsUpdated();
     return environment;
   }
 
-  deleteEnvironment(environmentId: string): void {
+  async deleteEnvironment(environmentId: string): Promise<void> {
     if (environmentId === "local") throw new Error("Local environment cannot be deleted.");
     this.deletedEnvironmentIds.add(environmentId);
     this.bumpGeneration(environmentId);
     this.pendingLatestSyncs.delete(environmentId);
     this.watchManager.stop(environmentId);
-    this.store.deleteEnvironment(environmentId);
-    this.emitEnvironmentsUpdated();
+    await this.store.deleteEnvironment(environmentId);
+    await this.emitEnvironmentsUpdated();
   }
 
   async refreshEnvironment(environmentId: string): Promise<void> {
-    const environment = this.store.getEnvironment(environmentId);
+    const environment = await this.store.getEnvironment(environmentId);
     if (!environment || !isEnabledSshEnvironment(environment)) return;
     await this.requestSync(environment, { propagateErrors: true });
     await this.waitForIdleOrThrow(environmentId);
   }
 
-  startEnabledEnvironments(): void {
-    for (const environment of this.store.listEnvironments()) {
+  async startEnabledEnvironments(): Promise<void> {
+    for (const environment of await this.store.listEnvironments()) {
       if (isEnabledSshEnvironment(environment)) void this.requestSync(environment).catch(() => undefined);
     }
   }
@@ -101,10 +101,10 @@ export class RemoteEnvironmentLifecycle {
     }
   }
 
-  private requestSync(environment: SessionEnvironment, options: RequestSyncOptions = {}): Promise<void> {
-    if (!isEnabledSshEnvironment(environment)) return Promise.resolve();
-    const current = this.store.getEnvironment(environment.id);
-    if (!current || this.deletedEnvironmentIds.has(environment.id)) return Promise.resolve();
+  private async requestSync(environment: SessionEnvironment, options: RequestSyncOptions = {}): Promise<void> {
+    if (!isEnabledSshEnvironment(environment)) return;
+    const current = await this.store.getEnvironment(environment.id);
+    if (!current || this.deletedEnvironmentIds.has(environment.id)) return;
     if (!sameEnvironmentConfig(current, environment)) return this.requestSync(current, options);
 
     const active = this.activeSyncs.get(environment.id);
@@ -146,78 +146,78 @@ export class RemoteEnvironmentLifecycle {
     let syncErrorValue: unknown;
 
     try {
-      if (!this.isCurrent(environment, record.generation)) return;
+      if (!(await this.isCurrent(environment, record.generation))) return;
       const sync = this.syncEnvironment(environment);
-      this.emitEnvironmentsUpdated();
+      await this.emitEnvironmentsUpdated();
       await sync;
     } catch (error) {
       hasSyncError = true;
       syncErrorValue = error;
     }
 
-    const reconcile = this.reconcileCompletedSync(environment, record.generation, !hasSyncError);
+    const reconcile = await this.reconcileCompletedSync(environment, record.generation, !hasSyncError);
     if (this.activeSyncs.get(environmentId) === record) this.activeSyncs.delete(environmentId);
     if (reconcile.dropPending) this.pendingLatestSyncs.delete(environmentId);
 
     if (hasSyncError && !reconcile.handledStaleCompletion) {
       this.pendingLatestSyncs.delete(environmentId);
-      this.store.updateEnvironmentSyncState(environmentId, "error", { lastError: errorMessage(syncErrorValue) });
-      this.emitEnvironmentsUpdated();
+      await this.store.updateEnvironmentSyncState(environmentId, "error", { lastError: errorMessage(syncErrorValue) });
+      await this.emitEnvironmentsUpdated();
       throw syncErrorValue;
     }
 
     if (reconcile.syncLatest || this.pendingLatestSyncs.has(environmentId)) {
       this.pendingLatestSyncs.delete(environmentId);
-      const latest = this.store.getEnvironment(environmentId);
+      const latest = await this.store.getEnvironment(environmentId);
       if (latest && isEnabledSshEnvironment(latest) && !this.deletedEnvironmentIds.has(environmentId)) {
         await this.requestSync(latest);
       }
     }
   }
 
-  private reconcileCompletedSync(
+  private async reconcileCompletedSync(
     environment: SessionEnvironment,
     generation: number,
     shouldStartWatcher: boolean,
-  ): ReconcileResult {
+  ): Promise<ReconcileResult> {
     const environmentId = environment.id;
-    const current = this.store.getEnvironment(environmentId);
+    const current = await this.store.getEnvironment(environmentId);
 
     if (this.deletedEnvironmentIds.has(environmentId) || !current) {
-      this.store.deleteEnvironment(environmentId);
-      this.emitEnvironmentsUpdated();
+      await this.store.deleteEnvironment(environmentId);
+      await this.emitEnvironmentsUpdated();
       return { handledStaleCompletion: true, syncLatest: false, dropPending: true };
     }
 
     if (current.kind === "ssh" && !current.enabled) {
-      this.store.updateEnvironmentSyncState(environmentId, "idle", { lastError: null });
-      this.emitEnvironmentsUpdated();
+      await this.store.updateEnvironmentSyncState(environmentId, "idle", { lastError: null });
+      await this.emitEnvironmentsUpdated();
       return { handledStaleCompletion: true, syncLatest: false, dropPending: true };
     }
 
     if (generation !== this.generationFor(environmentId) && sameRemoteConnectionConfig(current, environment)) {
       if (shouldStartWatcher) {
-        this.emitEnvironmentsUpdated();
+        await this.emitEnvironmentsUpdated();
         this.watchManager.start(current);
       }
       return { handledStaleCompletion: false, syncLatest: false, dropPending: true };
     }
 
     if (generation !== this.generationFor(environmentId) || !sameEnvironmentConfig(current, environment)) {
-      this.store.deleteEnvironmentSessions(environmentId);
-      this.emitEnvironmentsUpdated();
+      await this.store.deleteEnvironmentSessions(environmentId);
+      await this.emitEnvironmentsUpdated();
       return { handledStaleCompletion: true, syncLatest: true, dropPending: false };
     }
 
     if (shouldStartWatcher) {
-      this.emitEnvironmentsUpdated();
+      await this.emitEnvironmentsUpdated();
       this.watchManager.start(current);
     }
     return { handledStaleCompletion: false, syncLatest: false, dropPending: false };
   }
 
-  private isCurrent(environment: SessionEnvironment, generation: number): boolean {
-    const current = this.store.getEnvironment(environment.id);
+  private async isCurrent(environment: SessionEnvironment, generation: number): Promise<boolean> {
+    const current = await this.store.getEnvironment(environment.id);
     return (
       Boolean(current) &&
       !this.deletedEnvironmentIds.has(environment.id) &&
@@ -234,8 +234,8 @@ export class RemoteEnvironmentLifecycle {
     return this.generations.get(environmentId) ?? 0;
   }
 
-  private emitEnvironmentsUpdated(): void {
-    this.onEnvironmentsUpdated(this.store.listEnvironments());
+  private async emitEnvironmentsUpdated(): Promise<void> {
+    this.onEnvironmentsUpdated(await this.store.listEnvironments());
   }
 }
 

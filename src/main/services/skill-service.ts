@@ -70,15 +70,15 @@ export interface SkillUsageHookSetup {
 }
 
 export interface SkillStorePort {
-  listProjects(): ProjectSummary[];
-  getSkillUsageSnapshot(): SkillUsageSnapshot;
-  isSkillUsageSourceFresh(source: SkillUsageSource): boolean;
-  upsertSkillUsageSource(source: SkillUsageSource, events: SkillUsageEvent[]): void;
-  pruneSkillUsageSources(activePaths: string[]): void;
-  listSkillSyncBindings(): SkillSyncBinding[];
-  getSkillSyncBindingForPortableIdentity(identity: string): SkillSyncBinding | null;
-  upsertSkillSyncBinding(binding: SkillSyncBinding): void;
-  deleteSkillSyncBindingsForRemoteIds(remoteIds: string[]): void;
+  listProjects(): Promise<ProjectSummary[]>;
+  getSkillUsageSnapshot(): Promise<SkillUsageSnapshot>;
+  isSkillUsageSourceFresh(source: SkillUsageSource): Promise<boolean>;
+  upsertSkillUsageSource(source: SkillUsageSource, events: SkillUsageEvent[]): Promise<void>;
+  pruneSkillUsageSources(activePaths: string[]): Promise<void>;
+  listSkillSyncBindings(): Promise<SkillSyncBinding[]>;
+  getSkillSyncBindingForPortableIdentity(identity: string): Promise<SkillSyncBinding | null>;
+  upsertSkillSyncBinding(binding: SkillSyncBinding): Promise<void>;
+  deleteSkillSyncBindingsForRemoteIds(remoteIds: string[]): Promise<void>;
 }
 
 export interface SkillSyncClientPort {
@@ -201,12 +201,12 @@ export class SkillService {
       : null);
   }
 
-  listSkills(): InstalledSkillsSnapshot {
+  async listSkills(): Promise<InstalledSkillsSnapshot> {
     const store = this.dependencies.getStore();
     const snapshot = this.managedLibrary
       ? this.managedLibrary.list()
-      : this.operations.listInstalledSkills({ projectDirs: this.projectDirs() });
-    const usage = store.getSkillUsageSnapshot();
+      : this.operations.listInstalledSkills({ projectDirs: await this.projectDirs() });
+    const usage = await store.getSkillUsageSnapshot();
     const skills = snapshot.skills.map((skill) => {
       const stat = this.managedLibrary
         ? this.operations.usageForSkill(usage, skill.name)
@@ -224,13 +224,13 @@ export class SkillService {
     };
   }
 
-  listImportCandidates(forceRefresh = false): InstalledSkillsSnapshot {
+  async listImportCandidates(forceRefresh = false): Promise<InstalledSkillsSnapshot> {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
     if (forceRefresh || !this.importCandidatesCache) {
-      this.importCandidatesCache = this.managedLibrary.listImportCandidates(this.projectDirs());
+      this.importCandidatesCache = this.managedLibrary.listImportCandidates(await this.projectDirs());
     }
     const snapshot = this.importCandidatesCache;
-    const usage = this.dependencies.getStore().getSkillUsageSnapshot();
+    const usage = await this.dependencies.getStore().getSkillUsageSnapshot();
     return {
       ...snapshot,
       skills: snapshot.skills.map((skill) => {
@@ -240,9 +240,9 @@ export class SkillService {
     };
   }
 
-  importLocalSkills(skillPaths: string[]): ManagedSkillImportResult[] {
+  async importLocalSkills(skillPaths: string[]): Promise<ManagedSkillImportResult[]> {
     if (!this.managedLibrary) throw new Error("The managed Skill library is unavailable.");
-    const projectDirs = this.projectDirs();
+    const projectDirs = await this.projectDirs();
     return this.uniqueValues(skillPaths).map((skillPath) => this.managedLibrary!.importLocalSkill(skillPath, projectDirs));
   }
 
@@ -294,32 +294,32 @@ export class SkillService {
     });
   }
 
-  refreshUsage(): SkillUsageRefreshStatus {
+  async refreshUsage(): Promise<SkillUsageRefreshStatus> {
     const store = this.dependencies.getStore();
     const sources = this.operations.listSkillUsageSources();
     let refreshed = 0;
     let skipped = 0;
     for (const source of sources) {
-      if (store.isSkillUsageSourceFresh(source)) {
+      if (await store.isSkillUsageSourceFresh(source)) {
         skipped += 1;
         continue;
       }
-      store.upsertSkillUsageSource(source, this.operations.readSkillUsageSourceEvents(source));
+      await store.upsertSkillUsageSource(source, this.operations.readSkillUsageSourceEvents(source));
       refreshed += 1;
     }
-    store.pruneSkillUsageSources(sources.map((source) => source.path));
+    await store.pruneSkillUsageSources(sources.map((source) => source.path));
     return {
       refreshed,
       skipped,
       total: sources.length,
-      totalEvents: store.getSkillUsageSnapshot().totalEvents,
+      totalEvents: (await store.getSkillUsageSnapshot()).totalEvents,
       lastRefreshedAt: this.dependencies.now(),
     };
   }
 
-  refreshUsageSafely(): void {
+  async refreshUsageSafely(): Promise<void> {
     try {
-      this.refreshUsage();
+      await this.refreshUsage();
     } catch (error) {
       this.dependencies.logError(`Failed to refresh skill usage: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -329,12 +329,12 @@ export class SkillService {
     if (!this.initialUsageTimer) {
       this.initialUsageTimer = this.timers.setTimeout(() => {
         this.initialUsageTimer = null;
-        this.refreshUsageSafely();
+        void this.refreshUsageSafely();
       }, INITIAL_SKILL_USAGE_REFRESH_DELAY_MS);
     }
     if (this.autoUsageTimer) return;
     this.autoUsageTimer = this.timers.setInterval(
-      () => this.refreshUsageSafely(),
+      () => void this.refreshUsageSafely(),
       AUTO_SKILL_USAGE_REFRESH_INTERVAL_MS,
     );
   }
@@ -362,7 +362,7 @@ export class SkillService {
           message: "Configure Supabase URL and anon key in Settings to sync skills.",
         },
         remoteSkillGroups: [],
-        bindings: store.listSkillSyncBindings(),
+        bindings: await store.listSkillSyncBindings(),
         relations: [],
         scannedAt: this.dependencies.now(),
       };
@@ -372,13 +372,13 @@ export class SkillService {
     const remoteSkillGroups = status.kind === "ready"
       ? this.operations.groupRemoteSkillVersions(await client.listRemoteSkillVersions())
       : [];
-    const bindings = store.listSkillSyncBindings();
+    const bindings = await store.listSkillSyncBindings();
     return {
       status,
       remoteSkillGroups,
       bindings,
       relations: status.kind === "ready"
-        ? await this.buildSyncRelations(this.listSkills().skills, remoteSkillGroups, bindings)
+        ? await this.buildSyncRelations((await this.listSkills()).skills, remoteSkillGroups, bindings)
         : [],
       scannedAt: this.dependencies.now(),
     };
@@ -386,7 +386,7 @@ export class SkillService {
 
   async upload(skillPath: string, force = false): Promise<SkillSyncUploadOutcome> {
     const store = this.dependencies.getStore();
-    const skill = this.findInstalledSkill(skillPath);
+    const skill = await this.findInstalledSkill(skillPath);
     if (!this.operations.isSyncableSkill(skill)) throw new Error("Only user and shared Skills can be uploaded.");
     const location = this.operations.portableSkillLocation(skill);
     if (!location) throw new Error("Only user and shared Skills can be uploaded.");
@@ -397,10 +397,10 @@ export class SkillService {
       .find((group) => group.fingerprint === fingerprint) ?? null;
     const latest = remoteGroup?.latest ?? null;
     if (latest && latest.contentHash === contentHash) {
-      const binding = this.persistBinding(skill.path, location.identity, latest.id, latest.updatedAt, latest.version, contentHash, "upload");
+      const binding = await this.persistBinding(skill.path, location.identity, latest.id, latest.updatedAt, latest.version, contentHash, "upload");
       return { status: "skipped", remoteSkillId: latest.id, binding, version: latest.version };
     }
-    const existingBinding = store.getSkillSyncBindingForPortableIdentity(location.identity);
+    const existingBinding = await store.getSkillSyncBindingForPortableIdentity(location.identity);
     if (latest && !force && (!existingBinding?.lastContentHash || latest.contentHash !== existingBinding.lastContentHash)) {
       return {
         status: "needs-confirmation",
@@ -417,7 +417,7 @@ export class SkillService {
       .filter((version) => version.localFingerprint === fingerprint)
       .map((version) => version.version) ?? [];
     const remoteSkill = await client.uploadSkillVersion(base, Math.max(0, ...existingVersions) + 1);
-    const binding = this.persistBinding(skill.path, location.identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, contentHash, "upload");
+    const binding = await this.persistBinding(skill.path, location.identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, contentHash, "upload");
     return { status: "uploaded", remoteSkill, binding, version: remoteSkill.version };
   }
 
@@ -429,7 +429,7 @@ export class SkillService {
     if (!this.managedLibrary) {
       const installed = this.operations.installRemoteSkillLocally(remoteSkill);
       const identity = `${remoteSkill.portableScope}/${remoteSkill.relativePath}`;
-      const binding = this.persistBinding(installed.installedPath, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
+      const binding = await this.persistBinding(installed.installedPath, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
       return { remoteSkill, binding, installedPath: installed.installedPath, overwritten: installed.overwritten };
     }
     const suggestedId = remoteSkill.relativePath.split("/").filter(Boolean).at(-1) || remoteSkill.name;
@@ -448,7 +448,7 @@ export class SkillService {
     };
     const imported = existing ? this.managedLibrary.replaceFiles(input) : this.managedLibrary.importFiles(input);
     const identity = `agent-recall/${imported.managedId}`;
-    const binding = this.persistBinding(imported.skill.path, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
+    const binding = await this.persistBinding(imported.skill.path, identity, remoteSkill.id, remoteSkill.updatedAt, remoteSkill.version, remoteSkill.contentHash, "download");
     return { remoteSkill, binding, installedPath: imported.skill.path, overwritten: existing };
   }
 
@@ -460,7 +460,7 @@ export class SkillService {
     let localSnapshot: SkillContentSnapshot | null = null;
     let remoteSnapshot: SkillContentSnapshot | null = null;
     if (localSkillPath) {
-      const localSkill = this.findInstalledSkill(localSkillPath);
+      const localSkill = await this.findInstalledSkill(localSkillPath);
       const { base, contentHash } = this.operations.buildSkillVersionBasePayload(localSkill);
       localSnapshot = { contentHash, files: this.operations.skillSyncFilesFromMetadata(base.metadata ?? {}) };
     }
@@ -524,7 +524,7 @@ export class SkillService {
         if (deletedIds.length === 0) {
           result.skipped.push({ id: fingerprint, reason: "Remote Skill no longer exists." });
         } else {
-          this.dependencies.getStore().deleteSkillSyncBindingsForRemoteIds(deletedIds);
+          await this.dependencies.getStore().deleteSkillSyncBindingsForRemoteIds(deletedIds);
           result.succeeded.push(fingerprint);
         }
       } catch (error) {
@@ -538,18 +538,18 @@ export class SkillService {
     this.dependencies.copyText(this.operations.buildSkillSyncSetupSql());
   }
 
-  copyPath(skillPath: string): void {
-    this.dependencies.copyText(this.findInstalledSkill(skillPath).path);
+  async copyPath(skillPath: string): Promise<void> {
+    this.dependencies.copyText((await this.findInstalledSkill(skillPath)).path);
   }
 
-  reveal(skillPath: string): Promise<void> {
-    const skill = this.findInstalledSkill(skillPath);
+  async reveal(skillPath: string): Promise<void> {
+    const skill = await this.findInstalledSkill(skillPath);
     const normalized = path.resolve(skillPath);
     const target = path.resolve(skill.directoryPath) === normalized ? skill.directoryPath : skill.path;
-    return this.dependencies.revealPath(target);
+    await this.dependencies.revealPath(target);
   }
 
-  delete(skillPath: string): DeleteInstalledSkillResult {
+  async delete(skillPath: string): Promise<DeleteInstalledSkillResult> {
     if (this.managedLibrary) {
       const normalized = path.resolve(skillPath);
       const skill = this.managedLibrary.list().skills.find((item) =>
@@ -557,7 +557,9 @@ export class SkillService {
       if (!skill) throw new Error("Skill is no longer installed or is outside the managed library.");
       return this.managedLibrary.delete(skill.managedId);
     }
-    const projectDirs = this.operations.skillProjectDirsFromIndexedProjects(this.dependencies.getStore().listProjects());
+    const projectDirs = this.operations.skillProjectDirsFromIndexedProjects(
+      await this.dependencies.getStore().listProjects(),
+    );
     return this.operations.deleteInstalledSkill(skillPath, { projectDirs });
   }
 
@@ -585,8 +587,10 @@ export class SkillService {
     return Boolean(settings.skillSyncEnabled && settings.skillSyncSupabaseUrl && settings.skillSyncSupabaseAnonKey);
   }
 
-  private projectDirs(): string[] {
-    return this.operations.skillProjectDirsFromIndexedProjects(this.dependencies.getStore().listProjects());
+  private async projectDirs(): Promise<string[]> {
+    return this.operations.skillProjectDirsFromIndexedProjects(
+      await this.dependencies.getStore().listProjects(),
+    );
   }
 
   private requireSkillsShClient(): SkillsShClientPort {
@@ -601,14 +605,14 @@ export class SkillService {
     return this.dependencies.createSyncClient?.(options) ?? new SupabaseSkillSyncClient(options);
   }
 
-  private findInstalledSkill(skillPath: string): InstalledSkill {
+  private async findInstalledSkill(skillPath: string): Promise<InstalledSkill> {
     const normalized = path.resolve(skillPath);
-    const installed = this.listSkills().skills;
+    const installed = (await this.listSkills()).skills;
     const installedSkill = installed.find((item) =>
       path.resolve(item.path) === normalized || path.resolve(item.directoryPath) === normalized);
     if (installedSkill) return installedSkill;
     const localSkill = this.managedLibrary
-      ? this.listImportCandidates().skills.find((item) =>
+      ? (await this.listImportCandidates()).skills.find((item) =>
         path.resolve(item.path) === normalized || path.resolve(item.directoryPath) === normalized)
       : null;
     if (!localSkill) throw new Error("Skill is no longer installed or is outside managed roots.");
@@ -676,7 +680,7 @@ export class SkillService {
     return relations;
   }
 
-  private persistBinding(
+  private async persistBinding(
     localSkillPath: string,
     portableIdentity: string,
     remoteSkillId: string,
@@ -684,7 +688,7 @@ export class SkillService {
     remoteVersion: number,
     lastContentHash: string,
     direction: "upload" | "download",
-  ): SkillSyncBinding {
+  ): Promise<SkillSyncBinding> {
     const binding: SkillSyncBinding = {
       localSkillPath,
       portableIdentity,
@@ -695,7 +699,7 @@ export class SkillService {
       lastSyncedAt: this.dependencies.now(),
       direction,
     };
-    this.dependencies.getStore().upsertSkillSyncBinding(binding);
+    await this.dependencies.getStore().upsertSkillSyncBinding(binding);
     return binding;
   }
 

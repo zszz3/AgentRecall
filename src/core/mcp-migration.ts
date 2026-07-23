@@ -62,21 +62,24 @@ export interface McpMigrationResult {
   warning?: string;
 }
 
-export function loadMcpAppSettings(store: SessionStore): AppSettings {
+export async function loadMcpAppSettings(store: SessionStore): Promise<AppSettings> {
   const settings = readMcpAppSettings();
-  return hydrateMcpSummaryApiKey(settings, (target, providerId) =>
-    store.getApiProviderKey(target, providerId),
+  if (settings.summaryApiConfig.activeProvider !== "custom") return settings;
+  const apiKey = await store.getApiProviderKey(
+    "summary",
+    settings.summaryApiConfig.customProviderId,
   );
+  return hydrateMcpSummaryApiKey(settings, () => apiKey);
 }
 
 // Loads the full source session + all messages directly from SQLite, building a
 // SessionSearchResult with the fields the migration chain requires. Only local
 // sessions are eligible; remote sessions are rejected before any work begins.
-export function loadMcpSourceSession(
+export async function loadMcpSourceSession(
   store: SessionStore,
   sessionKey: string,
-): { source: SessionSearchResult; messages: SessionMessage[] } {
-  const source = store.getSession(sessionKey);
+): Promise<{ source: SessionSearchResult; messages: SessionMessage[] }> {
+  const source = await store.getSession(sessionKey);
   if (!source) {
     throw new Error(`Session not found: ${sessionKey}`);
   }
@@ -86,7 +89,7 @@ export function loadMcpSourceSession(
   if (!source.projectPath.trim()) {
     throw new Error("Session has no project path.");
   }
-  const messages = store.getAllMessages(sessionKey);
+  const messages = await store.getAllMessages(sessionKey);
   return { source, messages };
 }
 
@@ -123,11 +126,9 @@ function buildResumeCommand(
 // exits, this deletes the dirty session record so it does not linger in the DB.
 export function createMcpTemporarySessionCleaner(store: SessionStore): (sessionKey: string) => void {
   return (sessionKey) => {
-    try {
-      store.deleteSessionRecord(sessionKey);
-    } catch {
+    void store.deleteSessionRecord(sessionKey).catch(() => {
       // Best-effort: a temp session that failed to delete must not abort migration.
-    }
+    });
   };
 }
 
@@ -136,7 +137,7 @@ export async function migrateSessionForMcp(
   deps: McpMigrationDeps,
 ): Promise<McpMigrationResult> {
   const { store } = deps;
-  const settings = deps.settings ?? loadMcpAppSettings(store);
+  const settings = deps.settings ?? await loadMcpAppSettings(store);
   if (!isMigrationTarget(input.target)) {
     throw new Error(`Migration target ${String(input.target)} is not supported.`);
   }
@@ -144,7 +145,7 @@ export async function migrateSessionForMcp(
   assertMigrationTargetEnabled(target, settings);
 
   // Load + validate before touching the CLI or any AI provider.
-  const { source, messages } = loadMcpSourceSession(store, input.sessionKey);
+  const { source, messages } = await loadMcpSourceSession(store, input.sessionKey);
   const portable = portableSessionFrom(source, messages);
 
   if (!pathExists(portable.projectPath)) {
@@ -191,14 +192,14 @@ export async function migrateSessionForMcp(
     createdAt: (deps.now ?? Date.now)(),
   };
   try {
-    store.recordSessionMigration(record);
+    await store.recordSessionMigration(record);
   } catch (error) {
     warnings.push(`Failed to record migration metadata: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   let indexed = true;
   try {
-    indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
+    await indexMigratedSessionFile(store, target, written.filePath, written.sessionId);
   } catch (error) {
     indexed = false;
     warnings.push(`Failed to index migrated session: ${error instanceof Error ? error.message : String(error)}`);

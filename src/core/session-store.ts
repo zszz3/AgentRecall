@@ -1,26 +1,27 @@
-import { createRequire } from "node:module";
-import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+import * as fs from "node:fs";
+
 import type {
   SkillUsageEvent,
   SkillUsageSnapshot,
   SkillUsageSource,
 } from "./skill-usage";
-import type { SessionStoreDatabase } from "./store/database";
-import { EnvironmentStore } from "./store/environments";
+import { PostgresDatabase } from "./postgres/database";
+import { PostgresEnvironmentRepository } from "./postgres/environment-repository";
 import {
-  MetadataStore,
+  PostgresMetadataRepository,
   type ApiProviderKeyTarget,
   type SessionSyncBinding,
-} from "./store/metadata";
-import { migrateSessionStore } from "./store/schema";
+} from "./postgres/metadata-repository";
+import { POSTGRES_MIGRATIONS } from "./postgres/schema";
 import {
-  SessionsStore,
+  PostgresSessionRepository,
   type TraceEventQueryOptions,
-} from "./store/sessions";
+} from "./postgres/session-repository";
 import {
-  SkillStore,
+  PostgresSkillRepository,
   type SkillSyncBinding,
-} from "./store/skills";
+} from "./postgres/skill-repository";
+import { PGliteTestPool } from "./postgres/test-pglite";
 import type {
   EnvironmentSyncState,
   EnvironmentUpsertInput,
@@ -47,286 +48,394 @@ export type {
   ApiProviderKeyTarget,
   SessionSyncBinding,
   SessionSyncDirection,
-} from "./store/metadata";
-export type { TraceEventQueryOptions } from "./store/sessions";
-export type { SkillSyncBinding, SkillSyncDirection } from "./store/skills";
-
-const require = createRequire(import.meta.url);
-const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
+} from "./postgres/metadata-repository";
+export type { TraceEventQueryOptions } from "./postgres/session-repository";
+export type {
+  SkillSyncBinding,
+  SkillSyncDirection,
+} from "./postgres/skill-repository";
 
 export class SessionStore {
-  private readonly db: SessionStoreDatabase;
-  private readonly environments: EnvironmentStore;
-  private readonly metadata: MetadataStore;
-  private readonly sessions: SessionsStore;
-  private readonly skills: SkillStore;
+  private readonly sessions: PostgresSessionRepository;
+  private readonly environments: PostgresEnvironmentRepository;
+  private readonly metadata: PostgresMetadataRepository;
+  private readonly skills: PostgresSkillRepository;
 
-  constructor(dbPathOrInstance: string | SessionStoreDatabase) {
-    this.db = typeof dbPathOrInstance === "string" ? new DatabaseSync(dbPathOrInstance) : dbPathOrInstance;
-    migrateSessionStore(this.db);
-    this.environments = new EnvironmentStore(this.db);
-    this.metadata = new MetadataStore(this.db);
-    this.sessions = new SessionsStore(this.db, this.environments);
-    this.skills = new SkillStore(this.db);
+  constructor(
+    private readonly database: PostgresDatabase,
+    private readonly ready: Promise<void> = Promise.resolve(),
+  ) {
+    this.sessions = new PostgresSessionRepository(database);
+    this.environments = new PostgresEnvironmentRepository(database);
+    this.metadata = new PostgresMetadataRepository(database);
+    this.skills = new PostgresSkillRepository(database);
   }
 
-  close(): void {
-    this.db.close();
+  async close(): Promise<void> {
+    await this.ready;
+    await this.database.close();
   }
 
-  upsertIndexedSession(
+  async upsertIndexedSession(
     session: IndexedSession,
-    messages: SessionMessage[],
-    tokenEvents: TokenUsageEvent[] = [],
-    traceEvents: SessionTraceEvent[] = [],
-  ): void {
-    this.sessions.upsertIndexedSession(session, messages, tokenEvents, traceEvents);
+    messages: readonly SessionMessage[],
+    tokenEvents: readonly TokenUsageEvent[] = [],
+    traceEvents: readonly SessionTraceEvent[] = [],
+  ): Promise<void> {
+    await this.ready;
+    await this.sessions.upsertIndexedSession(session, messages, tokenEvents, traceEvents);
   }
 
-  isIndexedSessionFresh(session: IndexedSession): boolean {
+  async isIndexedSessionFresh(session: IndexedSession): Promise<boolean> {
+    await this.ready;
     return this.sessions.isIndexedSessionFresh(session);
   }
 
-  touchIndexedAtIfMissing(sessionKey: string): void {
-    this.sessions.touchIndexedAtIfMissing(sessionKey);
+  async touchIndexedAtIfMissing(sessionKey: string): Promise<void> {
+    await this.ready;
+    await this.sessions.touchIndexedAtIfMissing(sessionKey);
   }
 
-  listIndexedSessionFiles(
+  async listIndexedSessionFiles(
     environmentId = "local",
-  ): Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
+  ): Promise<Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>> {
+    await this.ready;
     return this.sessions.listIndexedSessionFiles(environmentId);
   }
 
-  upsertIndexedSessionSummary(
+  async upsertIndexedSessionSummary(
     session: IndexedSession,
     messageCount: number,
-    tokenEvents?: TokenUsageEvent[],
-    messageEvents?: SessionMessageEvent[],
-  ): void {
-    this.sessions.upsertIndexedSessionSummary(session, messageCount, tokenEvents, messageEvents);
+    tokenEvents?: readonly TokenUsageEvent[],
+    messageEvents?: readonly SessionMessageEvent[],
+  ): Promise<void> {
+    await this.ready;
+    await this.sessions.upsertIndexedSessionSummary(session, messageCount, tokenEvents, messageEvents);
   }
 
-  setCustomTitle(sessionKey: string, title: string | null): void {
-    this.sessions.setCustomTitle(sessionKey, title);
+  async setCustomTitle(sessionKey: string, title: string | null): Promise<void> {
+    await this.ready;
+    await this.sessions.setCustomTitle(sessionKey, title);
   }
 
-  setPinned(sessionKey: string, pinned: boolean): void {
-    this.sessions.setPinned(sessionKey, pinned);
+  async setPinned(sessionKey: string, pinned: boolean): Promise<void> {
+    await this.ready;
+    await this.sessions.setPinned(sessionKey, pinned);
   }
 
-  setFavorited(sessionKey: string, favorited: boolean): void {
-    this.sessions.setFavorited(sessionKey, favorited);
+  async setFavorited(sessionKey: string, favorited: boolean): Promise<void> {
+    await this.ready;
+    await this.sessions.setFavorited(sessionKey, favorited);
   }
 
-  setHidden(sessionKey: string, hidden: boolean): void {
-    this.sessions.setHidden(sessionKey, hidden);
+  async setHidden(sessionKey: string, hidden: boolean): Promise<void> {
+    await this.ready;
+    await this.sessions.setHidden(sessionKey, hidden);
   }
 
-  deleteSession(sessionKey: string): boolean {
-    return this.sessions.deleteSession(sessionKey);
-  }
-
-  deleteSessionRecord(sessionKey: string): boolean {
+  async deleteSession(sessionKey: string): Promise<boolean> {
+    await this.ready;
+    const target = await this.sessions.getSessionDeletionTarget(sessionKey);
+    if (!target) return false;
+    if (target.source === "hermes") throw new Error("Cannot delete shared Hermes source database.");
+    if (target.source === "opencode-cli") throw new Error("Cannot delete shared OpenCode source database.");
+    deleteSessionSourceFile(target.filePath);
     return this.sessions.deleteSessionRecord(sessionKey);
   }
 
-  migrateSessionKeyPreservingUserState(legacyKey: string, targetKey: string): boolean {
+  async deleteSessionRecord(sessionKey: string): Promise<boolean> {
+    await this.ready;
+    return this.sessions.deleteSessionRecord(sessionKey);
+  }
+
+  async migrateSessionKeyPreservingUserState(
+    legacyKey: string,
+    targetKey: string,
+  ): Promise<boolean> {
+    await this.ready;
     return this.sessions.migrateSessionKeyPreservingUserState(legacyKey, targetKey);
   }
 
-  listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
+  async listSessionKeysByFilePath(
+    environmentId: string,
+    filePaths: ReadonlySet<string>,
+  ): Promise<string[]> {
+    await this.ready;
     return this.sessions.listSessionKeysByFilePath(environmentId, filePaths);
   }
 
-  markOpened(sessionKey: string): void {
-    this.sessions.markOpened(sessionKey);
+  async markOpened(sessionKey: string): Promise<void> {
+    await this.ready;
+    await this.sessions.markOpened(sessionKey);
   }
 
-  markResumed(sessionKey: string): void {
-    this.sessions.markResumed(sessionKey);
+  async markResumed(sessionKey: string): Promise<void> {
+    await this.ready;
+    await this.sessions.markResumed(sessionKey);
   }
 
-  addTag(sessionKey: string, tagName: string): void {
-    this.sessions.addTag(sessionKey, tagName);
+  async addTag(sessionKey: string, tagName: string): Promise<void> {
+    await this.ready;
+    await this.sessions.addTag(sessionKey, tagName);
   }
 
-  removeTag(sessionKey: string, tagName: string): void {
-    this.sessions.removeTag(sessionKey, tagName);
+  async removeTag(sessionKey: string, tagName: string): Promise<void> {
+    await this.ready;
+    await this.sessions.removeTag(sessionKey, tagName);
   }
 
-  deleteTag(tagName: string): void {
-    this.sessions.deleteTag(tagName);
+  async deleteTag(tagName: string): Promise<void> {
+    await this.ready;
+    await this.sessions.deleteTag(tagName);
   }
 
-  listTags(options: TagListOptions = {}): string[] {
+  async listTags(options: TagListOptions = {}): Promise<string[]> {
+    await this.ready;
     return this.sessions.listTags(options);
   }
 
-  listTagsByProject(options: { excludeSubagents?: boolean } = {}): ProjectTagEntry[] {
+  async listTagsByProject(
+    options: { excludeSubagents?: boolean } = {},
+  ): Promise<ProjectTagEntry[]> {
+    await this.ready;
     return this.sessions.listTagsByProject(options);
   }
 
-  listEnvironments(): SessionEnvironment[] {
+  async listEnvironments(): Promise<SessionEnvironment[]> {
+    await this.ready;
     return this.environments.listEnvironments();
   }
 
-  upsertEnvironment(input: EnvironmentUpsertInput): SessionEnvironment {
+  async upsertEnvironment(input: EnvironmentUpsertInput): Promise<SessionEnvironment> {
+    await this.ready;
     return this.environments.upsertEnvironment(input);
   }
 
-  getEnvironment(id: string): SessionEnvironment | null {
+  async getEnvironment(id: string): Promise<SessionEnvironment | null> {
+    await this.ready;
     return this.environments.getEnvironment(id);
   }
 
-  updateEnvironmentSyncState(
+  async updateEnvironmentSyncState(
     id: string,
     state: EnvironmentSyncState,
     options: { lastSyncedAt?: number | null; lastError?: string | null } = {},
-  ): void {
-    this.environments.updateEnvironmentSyncState(id, state, options);
+  ): Promise<void> {
+    await this.ready;
+    await this.environments.updateEnvironmentSyncState(id, state, options);
   }
 
-  listProjects(options: ProjectQueryOptions = {}): ProjectSummary[] {
+  async deleteEnvironment(environmentId: string): Promise<void> {
+    await this.ready;
+    await this.environments.deleteEnvironment(environmentId);
+  }
+
+  async deleteEnvironmentSessions(environmentId: string): Promise<void> {
+    await this.ready;
+    await this.environments.deleteEnvironmentSessions(environmentId);
+  }
+
+  async listProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
+    await this.ready;
     return this.sessions.listProjects(options);
   }
 
-  getSession(sessionKey: string): SessionSearchResult | null {
+  async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
+    await this.ready;
     return this.sessions.getSession(sessionKey);
   }
 
-  findByRawId(rawId: string): SessionSearchResult | null {
+  async findByRawId(rawId: string): Promise<SessionSearchResult | null> {
+    await this.ready;
     return this.sessions.findByRawId(rawId);
   }
 
-  setAiSummary(sessionKey: string, summary: string, model: string): boolean {
+  async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {
+    await this.ready;
     return this.sessions.setAiSummary(sessionKey, summary, model);
   }
 
-  listSessionsNeedingSummary(now: number, maxAgeMs: number, limit: number): SessionSearchResult[] {
+  async listSessionsNeedingSummary(
+    now: number,
+    maxAgeMs: number,
+    limit: number,
+  ): Promise<SessionSearchResult[]> {
+    await this.ready;
     return this.sessions.listSessionsNeedingSummary(now, maxAgeMs, limit);
   }
 
-  getMessageCount(sessionKey: string): number {
+  async getMessageCount(sessionKey: string): Promise<number> {
+    await this.ready;
     return this.sessions.getMessageCount(sessionKey);
   }
 
-  getMessages(sessionKey: string, offset = 0, limit = 120): SessionMessage[] {
+  async getMessages(sessionKey: string, offset = 0, limit = 120): Promise<SessionMessage[]> {
+    await this.ready;
     return this.sessions.getMessages(sessionKey, offset, limit);
   }
 
-  getAllMessages(sessionKey: string): SessionMessage[] {
+  async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {
+    await this.ready;
     return this.sessions.getAllMessages(sessionKey);
   }
 
-  getTraceEvents(sessionKey: string, options: TraceEventQueryOptions = {}): SessionTraceEvent[] {
+  async getTraceEvents(
+    sessionKey: string,
+    options: TraceEventQueryOptions = {},
+  ): Promise<SessionTraceEvent[]> {
+    await this.ready;
     return this.sessions.getTraceEvents(sessionKey, options);
   }
 
-  isSkillUsageSourceFresh(source: SkillUsageSource): boolean {
+  async isSkillUsageSourceFresh(source: SkillUsageSource): Promise<boolean> {
+    await this.ready;
     return this.skills.isSkillUsageSourceFresh(source);
   }
 
-  upsertSkillUsageSource(source: SkillUsageSource, events: SkillUsageEvent[]): void {
-    this.skills.upsertSkillUsageSource(source, events);
+  async upsertSkillUsageSource(
+    source: SkillUsageSource,
+    events: readonly SkillUsageEvent[],
+  ): Promise<void> {
+    await this.ready;
+    await this.skills.upsertSkillUsageSource(source, events);
   }
 
-  pruneSkillUsageSources(activePaths: string[]): void {
-    this.skills.pruneSkillUsageSources(activePaths);
+  async pruneSkillUsageSources(activePaths: readonly string[]): Promise<void> {
+    await this.ready;
+    await this.skills.pruneSkillUsageSources(activePaths);
   }
 
-  getSkillUsageSnapshot(): SkillUsageSnapshot {
+  async getSkillUsageSnapshot(): Promise<SkillUsageSnapshot> {
+    await this.ready;
     return this.skills.getSkillUsageSnapshot();
   }
 
-  upsertSkillSyncBinding(binding: SkillSyncBinding): void {
-    this.skills.upsertSkillSyncBinding(binding);
+  async upsertSkillSyncBinding(binding: SkillSyncBinding): Promise<void> {
+    await this.ready;
+    await this.skills.upsertSkillSyncBinding(binding);
   }
 
-  getSkillSyncBindingForLocalPath(localSkillPath: string): SkillSyncBinding | null {
+  async getSkillSyncBindingForLocalPath(localSkillPath: string): Promise<SkillSyncBinding | null> {
+    await this.ready;
     return this.skills.getSkillSyncBindingForLocalPath(localSkillPath);
   }
 
-  getSkillSyncBindingForPortableIdentity(portableIdentity: string): SkillSyncBinding | null {
+  async getSkillSyncBindingForPortableIdentity(
+    portableIdentity: string,
+  ): Promise<SkillSyncBinding | null> {
+    await this.ready;
     return this.skills.getSkillSyncBindingForPortableIdentity(portableIdentity);
   }
 
-  getSkillSyncBindingForRemoteId(remoteSkillId: string): SkillSyncBinding | null {
+  async getSkillSyncBindingForRemoteId(remoteSkillId: string): Promise<SkillSyncBinding | null> {
+    await this.ready;
     return this.skills.getSkillSyncBindingForRemoteId(remoteSkillId);
   }
 
-  listSkillSyncBindings(): SkillSyncBinding[] {
+  async listSkillSyncBindings(): Promise<SkillSyncBinding[]> {
+    await this.ready;
     return this.skills.listSkillSyncBindings();
   }
 
-  deleteSkillSyncBindingsForRemoteIds(remoteSkillIds: string[]): void {
-    this.skills.deleteSkillSyncBindingsForRemoteIds(remoteSkillIds);
+  async deleteSkillSyncBindingsForRemoteIds(remoteSkillIds: readonly string[]): Promise<void> {
+    await this.ready;
+    await this.skills.deleteSkillSyncBindingsForRemoteIds(remoteSkillIds);
   }
 
-  upsertSessionSyncBinding(binding: SessionSyncBinding): void {
-    this.metadata.upsertSessionSyncBinding(binding);
+  async upsertSessionSyncBinding(binding: SessionSyncBinding): Promise<void> {
+    await this.ready;
+    await this.metadata.upsertSessionSyncBinding(binding);
   }
 
-  getSessionSyncBindingForLocalKey(localSessionKey: string): SessionSyncBinding | null {
+  async getSessionSyncBindingForLocalKey(
+    localSessionKey: string,
+  ): Promise<SessionSyncBinding | null> {
+    await this.ready;
     return this.metadata.getSessionSyncBindingForLocalKey(localSessionKey);
   }
 
-  getSessionSyncBindingForRemoteId(remoteSessionId: string): SessionSyncBinding | null {
+  async getSessionSyncBindingForRemoteId(remoteSessionId: string): Promise<SessionSyncBinding | null> {
+    await this.ready;
     return this.metadata.getSessionSyncBindingForRemoteId(remoteSessionId);
   }
 
-  listSessionSyncBindings(): SessionSyncBinding[] {
+  async listSessionSyncBindings(): Promise<SessionSyncBinding[]> {
+    await this.ready;
     return this.metadata.listSessionSyncBindings();
   }
 
-  deleteSessionSyncBindingForRemoteId(remoteSessionId: string): void {
-    this.metadata.deleteSessionSyncBindingForRemoteId(remoteSessionId);
+  async deleteSessionSyncBindingForRemoteId(remoteSessionId: string): Promise<void> {
+    await this.ready;
+    await this.metadata.deleteSessionSyncBindingForRemoteId(remoteSessionId);
   }
 
-  getApiProviderKey(target: ApiProviderKeyTarget, providerId: string): string {
+  async getApiProviderKey(target: ApiProviderKeyTarget, providerId: string): Promise<string> {
+    await this.ready;
     return this.metadata.getApiProviderKey(target, providerId);
   }
 
-  setApiProviderKey(target: ApiProviderKeyTarget, providerId: string, apiKey: string): void {
-    this.metadata.setApiProviderKey(target, providerId, apiKey);
+  async setApiProviderKey(
+    target: ApiProviderKeyTarget,
+    providerId: string,
+    apiKey: string,
+  ): Promise<void> {
+    await this.ready;
+    await this.metadata.setApiProviderKey(target, providerId, apiKey);
   }
 
-  recordSessionMigration(record: SessionMigrationRecord): void {
-    this.metadata.recordSessionMigration(record);
+  async recordSessionMigration(record: SessionMigrationRecord): Promise<void> {
+    await this.ready;
+    await this.metadata.recordSessionMigration(record);
   }
 
-  listSessionMigrations(sourceSessionKey: string): SessionMigrationRecord[] {
+  async listSessionMigrations(sourceSessionKey: string): Promise<SessionMigrationRecord[]> {
+    await this.ready;
     return this.metadata.listSessionMigrations(sourceSessionKey);
   }
 
-  getStats(options: SessionStatsOptions = {}, now = Date.now()): SessionStats {
+  async getStats(options: SessionStatsOptions = {}, now = Date.now()): Promise<SessionStats> {
+    await this.ready;
     return this.sessions.getStats(options, now);
   }
 
-  searchSessions(options: SearchOptions = {}): SessionSearchResult[] {
+  async searchSessions(options: SearchOptions = {}): Promise<SessionSearchResult[]> {
+    await this.ready;
     return this.sessions.searchSessions(options);
   }
 
-  searchSessionPage(options: SearchOptions = {}): SessionSearchPage {
+  async searchSessionPage(options: SearchOptions = {}): Promise<SessionSearchPage> {
+    await this.ready;
     return this.sessions.searchSessionPage(options);
   }
 
-  clearSearchIndex(): void {
-    this.sessions.clearSearchIndex();
+  async clearSearchIndex(): Promise<void> {
+    await this.ready;
+    await this.sessions.clearSearchIndex();
   }
 
-  deleteSessionsBySource(sources: SessionSource[]): void {
-    this.sessions.deleteSessionsBySource(sources);
-  }
-
-  deleteEnvironment(environmentId: string): void {
-    this.environments.deleteEnvironment(environmentId);
-  }
-
-  deleteEnvironmentSessions(environmentId: string): void {
-    this.environments.deleteEnvironmentSessions(environmentId);
+  async deleteSessionsBySource(sources: readonly SessionSource[]): Promise<void> {
+    await this.ready;
+    await this.sessions.deleteSessionsBySource(sources);
   }
 }
 
+function deleteSessionSourceFile(filePath: string): void {
+  const normalized = filePath.trim();
+  if (!normalized) throw new Error("Session source file path is missing.");
+  try {
+    const stat = fs.lstatSync(normalized);
+    if (stat.isDirectory()) throw new Error("Refusing to delete a directory as a session file.");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  fs.rmSync(normalized, { force: true });
+}
+
 export function createInMemoryStore(): SessionStore {
-  return new SessionStore(new DatabaseSync(":memory:"));
+  const database = new PostgresDatabase(new PGliteTestPool(), {
+    migrationLock: false,
+    migrations: POSTGRES_MIGRATIONS,
+  });
+  return new SessionStore(database, database.initialize());
 }

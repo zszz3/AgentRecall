@@ -192,8 +192,8 @@ export class RemoteSessionService {
     const client = this.createClient();
     const store = this.dependencies.getStore();
     await this.dependencies.ensureSessionDetails(sessionKey);
-    const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
-    const { payload, detailJson, portableJson } = this.operations.buildUpload(
+    const binding = await store.getSessionSyncBindingForLocalKey(sessionKey);
+    const { payload, detailJson, portableJson } = await this.operations.buildUpload(
       store,
       sessionKey,
       this.dependencies.now(),
@@ -213,7 +213,7 @@ export class RemoteSessionService {
       }
     }
     const result = await client.uploadSession(payload, detailJson, portableJson);
-    store.upsertSessionSyncBinding({
+    await store.upsertSessionSyncBinding({
       localSessionKey: sessionKey,
       remoteSessionId: result.remoteSession.id,
       lastLocalRevision: payload.content_hash,
@@ -230,27 +230,31 @@ export class RemoteSessionService {
 
   async listSyncItems(): Promise<SessionSyncItem[]> {
     const store = this.dependencies.getStore();
-    const remotes = (await this.createClient().listRemoteSessions())
-      .filter((remote) => store.getSession(remote.sourceSessionKey)?.isSubagent !== true);
+    const remoteCandidates = await this.createClient().listRemoteSessions();
+    const remoteSessions = await Promise.all(
+      remoteCandidates.map((remote) => store.getSession(remote.sourceSessionKey)),
+    );
+    const remotes = remoteCandidates.filter((_, index) => remoteSessions[index]?.isSubagent !== true);
     const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
-    await this.runBounded(store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
+    await this.runBounded(await store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
       if (!migrationAgentForSource(session.source) || !session.projectPath.trim()) return;
       try {
         await this.dependencies.ensureSessionDetails(session.sessionKey);
-        const hydrated = store.getSession(session.sessionKey);
+        const hydrated = await store.getSession(session.sessionKey);
         if (!hydrated) return;
-        const built = this.operations.buildUpload(
+        const binding = await store.getSessionSyncBindingForLocalKey(session.sessionKey);
+        const built = await this.operations.buildUpload(
           store,
           session.sessionKey,
           0,
-          store.getSessionSyncBindingForLocalKey(session.sessionKey)?.remoteSessionId,
+          binding?.remoteSessionId,
         );
         locals.push({ session: hydrated, revision: built.payload.content_hash });
       } catch (error) {
         throw new Error(`Could not load ${session.displayTitle || session.sessionKey} before comparing it with the cloud copy: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
-    return this.operations.buildSyncItems(locals, remotes, store.listSessionSyncBindings());
+    return this.operations.buildSyncItems(locals, remotes, await store.listSessionSyncBindings());
   }
 
   getDetail(remoteId: string): Promise<RemoteSessionDetailSnapshot> {
@@ -285,7 +289,7 @@ export class RemoteSessionService {
     if (remote.sourceEnvironmentKind !== "ssh") {
       throw new Error("This remote session was not saved from an SSH environment.");
     }
-    const environment = this.dependencies.getStore().getEnvironment(remote.sourceEnvironmentId);
+    const environment = await this.dependencies.getStore().getEnvironment(remote.sourceEnvironmentId);
     if (!environment || environment.kind !== "ssh") {
       throw new Error("The SSH environment for this remote session is not configured on this machine.");
     }
@@ -310,7 +314,9 @@ export class RemoteSessionService {
   async deleteMany(remoteIds: string[]): Promise<RemoteSessionDeleteResult> {
     const result = await this.createClient().deleteRemoteSessions(remoteIds);
     const store = this.dependencies.getStore();
-    for (const id of [...result.deletedIds, ...result.missingIds]) store.deleteSessionSyncBindingForRemoteId(id);
+    for (const id of [...result.deletedIds, ...result.missingIds]) {
+      await store.deleteSessionSyncBindingForRemoteId(id);
+    }
     return result;
   }
 
@@ -338,7 +344,7 @@ export class RemoteSessionService {
     try {
       await this.dependencies.runIndexSync();
       const store = this.dependencies.getStore();
-      const localSessions = store.searchSessions({ limit: 100_000, excludeSubagents: false })
+      const localSessions = (await store.searchSessions({ limit: 100_000, excludeSubagents: false }))
         .filter((session) => isLocalSessionEnvironment(session));
       for (const event of coalesced.events) await this.processQueueEvent(event, localSessions);
     } finally {
@@ -361,8 +367,8 @@ export class RemoteSessionService {
     }
     try {
       await this.dependencies.ensureSessionDetails(session.sessionKey);
-      const binding = store.getSessionSyncBindingForLocalKey(session.sessionKey);
-      const built = this.operations.buildUpload(store, session.sessionKey, 0, binding?.remoteSessionId);
+      const binding = await store.getSessionSyncBindingForLocalKey(session.sessionKey);
+      const built = await this.operations.buildUpload(store, session.sessionKey, 0, binding?.remoteSessionId);
       if (!binding || binding.lastLocalRevision !== built.payload.content_hash) {
         await this.upload(session.sessionKey);
       }
@@ -388,11 +394,12 @@ export class RemoteSessionService {
   private async bindRestoredSession(client: RemoteSessionClientPort, remoteId: string, targetSessionId: string): Promise<void> {
     try {
       const store = this.dependencies.getStore();
-      const local = store.searchSessions({ limit: 100_000 }).find((session) => session.rawId === targetSessionId);
+      const local = (await store.searchSessions({ limit: 100_000 }))
+        .find((session) => session.rawId === targetSessionId);
       if (!local) return;
-      const built = this.operations.buildUpload(store, local.sessionKey, 0, remoteId);
+      const built = await this.operations.buildUpload(store, local.sessionKey, 0, remoteId);
       const remote = await client.getRemoteSession(remoteId);
-      store.upsertSessionSyncBinding({
+      await store.upsertSessionSyncBinding({
         localSessionKey: local.sessionKey,
         remoteSessionId: remoteId,
         lastLocalRevision: built.payload.content_hash,

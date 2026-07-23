@@ -24,11 +24,14 @@ export interface IndexStatus {
   error: string | null;
 }
 
-export function syncDefaultSessions(store: SessionStore, loadOptions: SessionLoadOptions = {}): IndexStatus {
+export async function syncDefaultSessions(
+  store: SessionStore,
+  loadOptions: SessionLoadOptions = {},
+): Promise<IndexStatus> {
   const loaded = loadDefaultSessions(loadOptions);
   let indexed = 0;
   for (const item of loaded) {
-    store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+    await store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
     indexed++;
   }
   return {
@@ -61,11 +64,11 @@ export async function syncLoadedSessionsInBatches(
   let pendingInBatch = 0;
 
   for (const item of loaded) {
-    if (store.isIndexedSessionFresh(item.session)) {
-      store.touchIndexedAtIfMissing(item.session.sessionKey);
+    if (await store.isIndexedSessionFresh(item.session)) {
+      await store.touchIndexedAtIfMissing(item.session.sessionKey);
       skipped++;
     } else {
-      store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+      await store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
       indexed++;
     }
     total++;
@@ -93,8 +96,11 @@ export async function syncLoadedSessionsInBatches(
   };
 }
 
-export function syncDefaultSessionsInBatches(store: SessionStore, options: BatchIndexOptions = {}): Promise<IndexStatus> {
-  const indexedFiles = sessionFileSnapshots(store.listIndexedSessionFiles());
+export async function syncDefaultSessionsInBatches(
+  store: SessionStore,
+  options: BatchIndexOptions = {},
+): Promise<IndexStatus> {
+  const indexedFiles = sessionFileSnapshots(await store.listIndexedSessionFiles());
   let fileSkipped = 0;
   const loadOptions = options.loadOptions ?? {};
   const shouldSkipFile = loadOptions.shouldSkipFile;
@@ -120,20 +126,19 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
       yield item;
     }
   })();
-  return syncLoadedSessionsInBatches(store, loaded, {
+  const status = await syncLoadedSessionsInBatches(store, loaded, {
     ...options,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
-  }).then((status) => {
-    // Prune sessions whose source files no longer exist on disk. Only applies to
-    // the local environment — remote sessions are synced independently and their
-    // file paths are not local filesystem paths. scannedFilePaths is collected
-    // from shouldSkipFile (file-based sources) and from yielded LoadedSessions
-    // (DB-backed sources like Hermes/OpenCode whose file_path is the DB path).
-    for (const staleKey of store.listSessionKeysByFilePath("local", scannedFilePaths)) {
-      store.deleteSessionRecord(staleKey);
-    }
-    return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
   });
+  // Prune sessions whose source files no longer exist on disk. Only applies to
+  // the local environment — remote sessions are synced independently and their
+  // file paths are not local filesystem paths. scannedFilePaths is collected
+  // from shouldSkipFile (file-based sources) and from yielded LoadedSessions
+  // (DB-backed sources like Hermes/OpenCode whose file_path is the DB path).
+  for (const staleKey of await store.listSessionKeysByFilePath("local", scannedFilePaths)) {
+    await store.deleteSessionRecord(staleKey);
+  }
+  return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
 }
 
 interface SessionFileSnapshot {
@@ -160,17 +165,17 @@ function findSessionFileSnapshot(
   return snapshots.get(filePath)?.find((snapshot) => snapshot.fileSize === stat.size && Math.abs(snapshot.fileMtimeMs - stat.mtimeMs) < 1);
 }
 
-export function indexMigratedSessionFile(
+export async function indexMigratedSessionFile(
   store: SessionStore,
   target: MigrationTarget,
   filePath: string,
   sessionId?: string,
-): IndexStatus {
+): Promise<IndexStatus> {
   const loaded = loadMigratedSessionFile(target, filePath, sessionId);
   if (!loaded) {
     throw new Error(`Migrated ${target} session could not be loaded from ${filePath}.`);
   }
-  store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
+  await store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
   return {
     running: false,
     indexed: 1,

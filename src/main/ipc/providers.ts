@@ -12,7 +12,7 @@ export interface ProvidersIpcService {
   applyClaudeProfile(apiConfig: Partial<ClaudeApiConfig>): Promise<ApplyClaudeProfileResult>;
   getCodexChatProxyStatus(): CodexChatProxyStatus | null;
   stopCodexChatProxy(): Promise<null>;
-  getProviderKey(target: ProviderKeyTarget, providerId: string): string;
+  getProviderKey(target: ProviderKeyTarget, providerId: string): Promise<string>;
 }
 
 export function registerProvidersIpc(ipc: IpcMainRegistrar, service: ProvidersIpcService): () => void {

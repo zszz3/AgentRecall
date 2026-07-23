@@ -9,15 +9,15 @@ import { SKILLS_IPC } from "../../shared/ipc/skills";
 import { combineIpcDisposers, registerIpcHandler, type IpcMainRegistrar } from "./register-ipc-handler";
 
 export interface SkillsIpcService {
-  listSkills(): InstalledSkillsSnapshot;
-  listImportCandidates(forceRefresh?: boolean): InstalledSkillsSnapshot;
-  importLocalSkills(skillPaths: string[]): ManagedSkillImportResult[];
+  listSkills(): Promise<InstalledSkillsSnapshot>;
+  listImportCandidates(forceRefresh?: boolean): Promise<InstalledSkillsSnapshot>;
+  importLocalSkills(skillPaths: string[]): Promise<ManagedSkillImportResult[]>;
   updateManagedSkillTargets(managedId: string, targets: SkillInstallTarget[]): ManagedSkill;
   listDiscoveredSkills(input: { page: number; query: string }): Promise<SkillsShPage>;
   aiSearchDiscoveredSkills(input: { query: string; language: "en" | "zh" }): Promise<SkillAiSearchResult>;
   getDiscoveredSkill(id: string): Promise<SkillsShDetail>;
   importDiscoveredSkill(id: string): Promise<ManagedSkillImportResult>;
-  refreshUsage(): SkillUsageRefreshStatus;
+  refreshUsage(): Promise<SkillUsageRefreshStatus>;
   getSyncSnapshot(): Promise<SkillSyncSnapshot>;
   upload(skillPath: string, force: boolean): Promise<SkillSyncUploadOutcome>;
   install(remoteSkillId: string): Promise<SkillSyncInstallResult>;
@@ -26,9 +26,9 @@ export interface SkillsIpcService {
   getVersion(remoteSkillId: string): Promise<RemoteSkill>;
   getDiff(localSkillPath: string | null, remoteSkillId: string | null): Promise<SkillDiffSnapshot>;
   copySetupSql(): void;
-  copyPath(skillPath: string): void;
+  copyPath(skillPath: string): Promise<void>;
   reveal(skillPath: string): Promise<void>;
-  delete(skillPath: string): DeleteInstalledSkillResult;
+  delete(skillPath: string): Promise<DeleteInstalledSkillResult>;
   getUsageHookStatus(): boolean;
   installUsageHook(): string;
   uninstallUsageHook(): string;

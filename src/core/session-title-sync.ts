@@ -2,8 +2,8 @@ import { liveSessionPidForSession } from "./session-focus";
 import type { LiveSessionSnapshot, SessionSearchResult } from "./types";
 
 export interface SessionTitleSyncDependencies {
-  getSession(sessionKey: string): SessionSearchResult | null;
-  setCustomTitle(sessionKey: string, title: string | null): void;
+  getSession(sessionKey: string): Promise<SessionSearchResult | null>;
+  setCustomTitle(sessionKey: string, title: string | null): Promise<void>;
   loadLiveSessions(): Promise<LiveSessionSnapshot>;
   setLiveTerminalTitle(pid: number, title: string): Promise<boolean>;
   onSyncError?(error: unknown): void;
@@ -14,11 +14,11 @@ export async function setSessionCustomTitleAndSyncTerminal(
   title: string | null,
   dependencies: SessionTitleSyncDependencies,
 ): Promise<void> {
-  if (!dependencies.getSession(sessionKey)) return;
+  if (!await dependencies.getSession(sessionKey)) return;
 
-  dependencies.setCustomTitle(sessionKey, title);
+  await dependencies.setCustomTitle(sessionKey, title);
 
-  const updated = dependencies.getSession(sessionKey);
+  const updated = await dependencies.getSession(sessionKey);
   if (!updated || updated.environmentKind !== "local") return;
 
   try {

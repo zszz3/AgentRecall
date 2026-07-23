@@ -345,16 +345,18 @@ export function buildRemoteSessionPayload(options: {
   };
 }
 
-export function buildRemoteSessionUploadFromStore(
+export async function buildRemoteSessionUploadFromStore(
   store: Pick<SessionStore, "getSession" | "getAllMessages" | "getTraceEvents">,
   sessionKey: string,
   now = Date.now(),
   remoteId?: string,
-): { session: SessionSearchResult; detail: RemoteSessionDetailSnapshot; portable: PortableSession; payload: RemoteSessionUploadPayload; detailJson: string; portableJson: string } {
-  const session = store.getSession(sessionKey);
+): Promise<{ session: SessionSearchResult; detail: RemoteSessionDetailSnapshot; portable: PortableSession; payload: RemoteSessionUploadPayload; detailJson: string; portableJson: string }> {
+  const [session, messages, traceEvents] = await Promise.all([
+    store.getSession(sessionKey),
+    store.getAllMessages(sessionKey),
+    store.getTraceEvents(sessionKey),
+  ]);
   if (!session) throw new Error("Session not found.");
-  const messages = store.getAllMessages(sessionKey);
-  const traceEvents = store.getTraceEvents(sessionKey);
   const portable = remotePortableSessionFrom(session, messages);
   const detail = buildRemoteSessionSnapshot(session, messages, traceEvents, now);
   const { payload, detailJson, portableJson } = buildRemoteSessionPayload({ session, detail, portable, now, remoteId });

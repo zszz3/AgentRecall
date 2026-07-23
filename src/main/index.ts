@@ -60,7 +60,9 @@ import { applyMigrationLengthPolicy, createMigrationCompressor } from "../core/s
 import { migrateSession } from "../core/session-migration";
 import { runLocalSessionMigration } from "./local-session-migration";
 import { targetFilePath, writeMigratedSession } from "../core/session-migration-writers";
-import { writeDbPointer } from "../core/app-paths";
+import { writeDatabaseUrlPointer } from "../core/app-paths";
+import { PostgresDatabase } from "../core/postgres/database";
+import { POSTGRES_MIGRATIONS } from "../core/postgres/schema";
 import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
 import { buildRemoteSyncSshArgs, fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
@@ -99,6 +101,7 @@ import {
 } from "./services/remote-session-service";
 import { SkillService, type SkillUsageHookSetup } from "./services/skill-service";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
+import { startPostgresRuntime, type PostgresRuntime } from "./postgres/managed-postgres";
 import type {
   EnvironmentUpsertInput,
   MigrationAgent,
@@ -178,6 +181,8 @@ let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
 let disposeTeamChatIpc: (() => void) | null = null;
 let automationQuitReady = false;
+let postgresRuntime: PostgresRuntime | null = null;
+let postgresDatabase: PostgresDatabase | null = null;
 let tray: Tray | null = null;
 let store: SessionStore;
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
@@ -334,9 +339,9 @@ function visibleProjectOptions(): { excludeSubagents: boolean } {
   return { excludeSubagents: getSettings().hideSubagentSessions };
 }
 
-function pruneDisabledOptionalSources(settings: AppSettings): void {
+async function pruneDisabledOptionalSources(settings: AppSettings): Promise<void> {
   const disabledSources = OPTIONAL_SOURCE_SETTINGS.flatMap((item) => (settings[item.key] ? [] : item.sources));
-  store.deleteSessionsBySource(disabledSources);
+  await store.deleteSessionsBySource(disabledSources);
 }
 
 function enabledRemoteOptionalSources(settings: AppSettings): SessionSource[] {
@@ -353,9 +358,9 @@ function markdownExportFileName(title: string): string {
   return `${safeTitle || "session"}.md`;
 }
 
-function sshArgsForSession(session: SessionSearchResult): string[] | undefined {
+async function sshArgsForSession(session: SessionSearchResult): Promise<string[] | undefined> {
   if (isLocalSessionEnvironment(session)) return undefined;
-  const environment = store.getEnvironment(session.environmentId);
+  const environment = await store.getEnvironment(session.environmentId);
   if (!environment || environment.kind !== "ssh") return undefined;
   try {
     const args = buildSshArgs(environment, "");
@@ -365,30 +370,30 @@ function sshArgsForSession(session: SessionSearchResult): string[] | undefined {
   }
 }
 
-function requireSshArgsForRemoteSession(session: SessionSearchResult): string[] | undefined {
-  const sshArgs = sshArgsForSession(session);
+async function requireSshArgsForRemoteSession(session: SessionSearchResult): Promise<string[] | undefined> {
+  const sshArgs = await sshArgsForSession(session);
   if (!isLocalSessionEnvironment(session) && !sshArgs) {
     throw new Error("SSH environment is not available for this remote session.");
   }
   return sshArgs;
 }
 
-function requireRemoteSshEnvironment(session: SessionSearchResult): SessionEnvironment | null {
+async function requireRemoteSshEnvironment(session: SessionSearchResult): Promise<SessionEnvironment | null> {
   if (isLocalSessionEnvironment(session)) return null;
-  const environment = store.getEnvironment(session.environmentId);
+  const environment = await store.getEnvironment(session.environmentId);
   if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
   return environment;
 }
 
-function requireSshEnvironment(environmentId: string): SessionEnvironment {
-  const environment = store.getEnvironment(environmentId);
+async function requireSshEnvironment(environmentId: string): Promise<SessionEnvironment> {
+  const environment = await store.getEnvironment(environmentId);
   if (!environment) throw new Error("SSH environment was not found.");
   if (environment.kind !== "ssh") throw new Error("Diagnostics are only available for SSH environments.");
   return environment;
 }
 
 async function ensureRemoteResumePreflight(session: SessionSearchResult): Promise<void> {
-  const environment = requireRemoteSshEnvironment(session);
+  const environment = await requireRemoteSshEnvironment(session);
   if (!environment) return;
   const report = await preflightRemoteSessionResume(environment, session);
   const errors = report.checks.filter((check) => check.status === "error");
@@ -397,27 +402,29 @@ async function ensureRemoteResumePreflight(session: SessionSearchResult): Promis
   throw new Error(`Remote resume preflight failed: ${detail}`);
 }
 
-function hasHydratedRemoteDetails(sessionKey: string): boolean {
-  return store.getMessages(sessionKey, 0, 1).length > 0;
+async function hasHydratedRemoteDetails(sessionKey: string): Promise<boolean> {
+  return (await store.getMessages(sessionKey, 0, 1)).length > 0;
 }
 
 async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<void> {
-  const session = store.getSession(sessionKey);
+  const session = await store.getSession(sessionKey);
   if (!session || isLocalSessionEnvironment(session)) return;
-  if (hasHydratedRemoteDetails(sessionKey)) return;
+  if (await hasHydratedRemoteDetails(sessionKey)) return;
 
   const active = remoteDetailLoads.get(sessionKey);
   if (active) return active;
 
   const load = (async () => {
-    const latest = store.getSession(sessionKey);
+    const latest = await store.getSession(sessionKey);
     if (!latest || isLocalSessionEnvironment(latest)) return;
     if (latest.source === "codewiz-cli") return;
-    const environment = store.getEnvironment(latest.environmentId);
+    const environment = await store.getEnvironment(latest.environmentId);
     if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
     const payload = await fetchRemoteSessionFilePayload(environment, latest);
     const loaded = loadRemoteSessionDetailPayload(environment, payload, latest);
-    if (loaded) store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
+    if (loaded) {
+      await store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
+    }
   })().finally(() => {
     remoteDetailLoads.delete(sessionKey);
   });
@@ -715,8 +722,8 @@ function createApplicationMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function emitEnvironmentsUpdated(): void {
-  mainWindow?.webContents.send("environments-updated", store.listEnvironments());
+function emitEnvironmentsUpdated(environments: SessionEnvironment[]): void {
+  mainWindow?.webContents.send("environments-updated", environments);
 }
 
 function remoteSyncErrorMessage(error: unknown): string {
@@ -728,8 +735,13 @@ function ensureRemoteWatchManager(): RemoteWatchManager {
     remoteWatchManager = new RemoteWatchManager({
       syncEnvironment: (environment) => ensureRemoteEnvironmentLifecycle().syncFromWatcher(environment),
       onSyncError: (environment, error) => {
-        store.updateEnvironmentSyncState(environment.id, "error", { lastError: remoteSyncErrorMessage(error) });
-        emitEnvironmentsUpdated();
+        void store.updateEnvironmentSyncState(
+          environment.id,
+          "error",
+          { lastError: remoteSyncErrorMessage(error) },
+        ).then(() => store.listEnvironments())
+          .then(emitEnvironmentsUpdated)
+          .catch(() => undefined);
       },
     });
   }
@@ -745,7 +757,7 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
           enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
         }).then(() => undefined),
       watchManager: ensureRemoteWatchManager(),
-      onEnvironmentsUpdated: () => emitEnvironmentsUpdated(),
+      onEnvironmentsUpdated: emitEnvironmentsUpdated,
     });
   }
   return remoteEnvironmentLifecycle;
@@ -755,7 +767,7 @@ async function runIndexSync(): Promise<IndexStatus> {
   if (activeIndexRun) return activeIndexRun;
 
   const settings = getSettings();
-  pruneDisabledOptionalSources(settings);
+  await pruneDisabledOptionalSources(settings);
   indexStatus = { ...indexStatus, running: true, error: null };
   mainWindow?.webContents.send("index-status", indexStatus);
 
@@ -799,7 +811,7 @@ async function runIndexSync(): Promise<IndexStatus> {
       return indexStatus;
     })
     .finally(() => {
-      ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
+      void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
       activeIndexRun = null;
     });
 
@@ -816,11 +828,7 @@ const SUMMARY_PROVIDER_ERROR =
 function buildCodexExecEndpoint(settings: AppSettings): SummaryEndpoint {
   return buildCodexExecEndpointShared(settings, {
     onTemporarySession: (sessionKey) => {
-      try {
-        store.deleteSession(sessionKey);
-      } catch {
-        // Best-effort cleanup if an ephemeral Codex call is indexed before it exits.
-      }
+      void store.deleteSession(sessionKey).catch(() => undefined);
     },
   });
 }
@@ -828,11 +836,7 @@ function buildCodexExecEndpoint(settings: AppSettings): SummaryEndpoint {
 async function resolveSummaryEndpointFromSettings(): Promise<SummaryEndpoint | null> {
   const settings = await providerService.hydrateSettings();
   const onTemporarySession = (sessionKey: string): void => {
-    try {
-      store.deleteSession(sessionKey);
-    } catch {
-      // Best-effort cleanup if an ephemeral summary call is indexed before it exits.
-    }
+    void store.deleteSession(sessionKey).catch(() => undefined);
   };
   if (settings.summarySource === "custom") {
     const endpoint = resolveSummaryEndpointFromSettingsShared(settings, {});
@@ -859,19 +863,23 @@ const SUMMARY_FULL_THRESHOLD = SUMMARY_HEAD_MESSAGES + SUMMARY_TAIL_MESSAGES;
 // Short sessions are summarized in full; long ones use a head + tail excerpt so the
 // original problem and the final resolution both survive, fetching only a bounded slice.
 async function summarizeOneSession(sessionKey: string, endpoint: SummaryEndpoint): Promise<void> {
-  const count = store.getMessageCount(sessionKey);
+  const count = await store.getMessageCount(sessionKey);
   let excerpt;
   if (count <= SUMMARY_FULL_THRESHOLD) {
-    excerpt = { head: store.getMessages(sessionKey, 0, SUMMARY_FULL_THRESHOLD), tail: [], omittedCount: 0 };
+    excerpt = {
+      head: await store.getMessages(sessionKey, 0, SUMMARY_FULL_THRESHOLD),
+      tail: [],
+      omittedCount: 0,
+    };
   } else {
     excerpt = {
-      head: store.getMessages(sessionKey, 0, SUMMARY_HEAD_MESSAGES),
-      tail: store.getMessages(sessionKey, count - SUMMARY_TAIL_MESSAGES, SUMMARY_TAIL_MESSAGES),
+      head: await store.getMessages(sessionKey, 0, SUMMARY_HEAD_MESSAGES),
+      tail: await store.getMessages(sessionKey, count - SUMMARY_TAIL_MESSAGES, SUMMARY_TAIL_MESSAGES),
       omittedCount: count - SUMMARY_HEAD_MESSAGES - SUMMARY_TAIL_MESSAGES,
     };
   }
   const result = await summarizeSession(excerpt, endpoint);
-  store.setAiSummary(sessionKey, result.summary, endpoint.model);
+  await store.setAiSummary(sessionKey, result.summary, endpoint.model);
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {
@@ -918,7 +926,7 @@ async function createLocalRemoteRestoreDependencies(
     write: (target, session) => writeMigratedSession({ target, session }),
     record: (record) => store.recordSessionMigration(record),
     refreshIndex: async (target, writtenFilePath, targetSessionId) => {
-      indexStatus = indexMigratedSessionFile(store, target, writtenFilePath, targetSessionId);
+      indexStatus = await indexMigratedSessionFile(store, target, writtenFilePath, targetSessionId);
       mainWindow?.webContents.send("index-status", indexStatus);
     },
     launch: (target, targetSessionId, projectPath) =>
@@ -952,7 +960,7 @@ async function createSourceRemoteRestoreDependencies(
       await syncRemoteEnvironment(store, environment, {
         enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
       });
-      mainWindow?.webContents.send("environments-updated", store.listEnvironments());
+      mainWindow?.webContents.send("environments-updated", await store.listEnvironments());
     },
     launch: async () => undefined,
     resumeCommand: (target, targetSessionId, projectPath) =>
@@ -981,11 +989,7 @@ function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
   return {
     resolveSummaryEndpoint: (snapshot: AppSettings) => resolveSummaryEndpointFromSettingsShared(snapshot, {
       onTemporarySession: (temporarySessionKey) => {
-        try {
-          store.deleteSession(temporarySessionKey);
-        } catch {
-          // Best-effort cleanup if an ephemeral summary call is indexed before it exits.
-        }
+        void store.deleteSession(temporarySessionKey).catch(() => undefined);
       },
     }) ?? buildCodexExecEndpoint(snapshot),
     createCompressor: (endpoint: SummaryEndpoint, concurrency: number) =>
@@ -998,7 +1002,7 @@ function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
       writeMigratedSession({ target: migrationTarget, session: portable }),
     record: (record: Parameters<SessionStore["recordSessionMigration"]>[0]) => store.recordSessionMigration(record),
     refreshIndex: async (migrationTarget: MigrationTarget, writtenFilePath: string, targetSessionId: string) => {
-      const status = indexMigratedSessionFile(store, migrationTarget, writtenFilePath, targetSessionId);
+      const status = await indexMigratedSessionFile(store, migrationTarget, writtenFilePath, targetSessionId);
       indexStatus = status;
       mainWindow?.webContents.send("index-status", indexStatus);
     },
@@ -1116,7 +1120,7 @@ async function maybeAutoBackfillSummaries(): Promise<void> {
   summaryBackfillRunning = true;
   try {
     const maxAgeMs = settings.summaryMaxAgeDays * 86_400_000;
-    const candidates = store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 25);
+    const candidates = await store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 25);
     for (const candidate of candidates) {
       try {
         await summarizeOneSession(candidate.sessionKey, endpoint);
@@ -1174,17 +1178,17 @@ function registerIpc(): void {
   });
   ipcMain.handle("search:sessions", (_event, options: SearchOptions) => store.searchSessions(visibleSearchOptions(options)));
   ipcMain.handle("search:session-page", (_event, options: SearchOptions) => store.searchSessionPage(visibleSearchOptions(options)));
-  ipcMain.handle("session:get", (_event, sessionKey: string) => {
-    store.markOpened(sessionKey);
+  ipcMain.handle("session:get", async (_event, sessionKey: string) => {
+    await store.markOpened(sessionKey);
     return store.getSession(sessionKey);
   });
   ipcMain.handle("session:messages", async (_event, sessionKey: string, offset?: number, limit?: number) => {
     const pageOffset = offset ?? 0;
     const pageLimit = limit ?? 120;
-    const session = store.getSession(sessionKey);
-    if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) {
+    const session = await store.getSession(sessionKey);
+    if (session && !isLocalSessionEnvironment(session) && !await hasHydratedRemoteDetails(sessionKey)) {
       if (session.messageCount <= 0) return [];
-      const environment = requireRemoteSshEnvironment(session);
+      const environment = await requireRemoteSshEnvironment(session);
       if (!environment) return [];
       return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit);
     }
@@ -1192,8 +1196,8 @@ function registerIpc(): void {
     return store.getMessages(sessionKey, pageOffset, pageLimit);
   });
   ipcMain.handle("session:trace-events", async (_event, sessionKey: string, options?: TraceEventQueryOptions) => {
-    const session = store.getSession(sessionKey);
-    if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) return [];
+    const session = await store.getSession(sessionKey);
+    if (session && !isLocalSessionEnvironment(session) && !await hasHydratedRemoteDetails(sessionKey)) return [];
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getTraceEvents(sessionKey, options);
   });
@@ -1216,7 +1220,7 @@ function registerIpc(): void {
     const maxAgeMs = settings.summaryMaxAgeDays * 86_400_000;
     // Cover all missing/stale sessions in the age window in one run (bounded for
     // safety). Failed ones stay missing and are retried on the next run.
-    const candidates = store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 500);
+    const candidates = await store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 500);
     const total = candidates.length;
     let processed = 0;
     let failed = 0;
@@ -1253,7 +1257,7 @@ function registerIpc(): void {
     // CLI write a grounded answer over the hits.
     if (isLocalCliEndpoint(endpoint)) {
       const search = async (query: string): Promise<FallbackSessionHit[]> => {
-        const sessions = store.searchSessions(visibleSearchOptions({ query, limit: 12 }));
+        const sessions = await store.searchSessions(visibleSearchOptions({ query, limit: 12 }));
         return sessions.map((session) => ({
           sessionKey: session.sessionKey,
           title: session.displayTitle,
@@ -1263,8 +1267,8 @@ function registerIpc(): void {
         }));
       };
       const { reply, sessionKeys } = await runAiAssistantFallback(endpoint, messages, search);
-      const sessions = sessionKeys
-        .map((key) => store.getSession(key))
+      const sessions = (await Promise.all(sessionKeys
+        .map((key) => store.getSession(key))))
         .filter((session): session is SessionSearchResult => session !== null);
       return { reply, sessions };
     }
@@ -1278,7 +1282,7 @@ function registerIpc(): void {
           const source = typeof args.source === "string" && args.source ? args.source : undefined;
           const projectPath = typeof args.project === "string" && args.project ? args.project : undefined;
           const limit = typeof args.limit === "number" ? Math.max(1, Math.min(50, Math.floor(args.limit))) : 20;
-          const sessions = store.searchSessions(visibleSearchOptions({
+          const sessions = await store.searchSessions(visibleSearchOptions({
             query,
             source: source as SearchOptions["source"],
             projectPath,
@@ -1297,24 +1301,24 @@ function registerIpc(): void {
           };
         }
         case "list_projects": {
-          const projects = store.listProjects(visibleProjectOptions());
+          const projects = await store.listProjects(visibleProjectOptions());
           return {
             result: projects.map((project) => ({ project: project.path, sessions: project.sessionCount })),
             sessionKeys: [],
           };
         }
         case "list_tags": {
-          return { result: store.listTags(), sessionKeys: [] };
+          return { result: await store.listTags(), sessionKeys: [] };
         }
         case "get_session": {
           const sessionKey = typeof args.sessionKey === "string" ? args.sessionKey : "";
           if (!sessionKey) return { result: { error: "sessionKey is required." }, sessionKeys: [] };
           await ensureRemoteSessionDetailsLoaded(sessionKey);
-          const session = store.getSession(sessionKey);
+          const session = await store.getSession(sessionKey);
           if (!session) return { result: { error: "Session not found." }, sessionKeys: [] };
           const maxMessages = typeof args.maxMessages === "number" ? Math.max(1, Math.min(200, Math.floor(args.maxMessages))) : 40;
           const offset = typeof args.offset === "number" && args.offset > 0 ? Math.floor(args.offset) : 0;
-          const messageList = store.getMessages(sessionKey, offset, maxMessages);
+          const messageList = await store.getMessages(sessionKey, offset, maxMessages);
           return {
             result: {
               sessionKey: session.sessionKey,
@@ -1335,8 +1339,8 @@ function registerIpc(): void {
     };
 
     const { reply, sessionKeys } = await runAiAssistantTurn(endpoint, messages, executeTool);
-    const sessions = sessionKeys
-      .map((key) => store.getSession(key))
+    const sessions = (await Promise.all(sessionKeys
+      .map((key) => store.getSession(key))))
       .filter((session): session is SessionSearchResult => session !== null);
     return { reply, sessions };
   });
@@ -1379,8 +1383,8 @@ function registerIpc(): void {
   ipcMain.handle("environment:refresh", (_event, environmentId: string) =>
     ensureRemoteEnvironmentLifecycle().refreshEnvironment(environmentId),
   );
-  ipcMain.handle("environment:diagnose", (_event, environmentId: string) =>
-    diagnoseRemoteEnvironment(requireSshEnvironment(environmentId)),
+  ipcMain.handle("environment:diagnose", async (_event, environmentId: string) =>
+    diagnoseRemoteEnvironment(await requireSshEnvironment(environmentId)),
   );
   ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) =>
     setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
@@ -1415,10 +1419,10 @@ function registerIpc(): void {
     if ("remoteSyncEnabled" in settings && !next.remoteSyncEnabled) {
       remoteSessionService.disableSync();
     }
-    providerService.persistKeysFromUpdate(settings, next);
+    await providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
-    pruneDisabledOptionalSources(next);
+    await pruneDisabledOptionalSources(next);
     return providerService.addStoredKeys(next);
   });
   registerSkillsIpc(ipcMain, skillService);
@@ -1432,48 +1436,52 @@ function registerIpc(): void {
   });
   registerRemoteSessionsIpc(ipcMain, remoteSessionService);
   ipcMain.handle("command:copy-resume", async (_event, sessionKey: string) => {
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return;
-    clipboard.writeText(getResumeCommand(session, getSettings(), { sshArgs: requireSshArgsForRemoteSession(session) }));
+    clipboard.writeText(getResumeCommand(
+      session,
+      getSettings(),
+      { sshArgs: await requireSshArgsForRemoteSession(session) },
+    ));
   });
   ipcMain.handle("command:resume", async (_event, sessionKey: string) => {
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return { route: "resume" as const };
-    const sshArgs = requireSshArgsForRemoteSession(session);
+    const sshArgs = await requireSshArgsForRemoteSession(session);
     if (!isLocalSessionEnvironment(session)) {
       await ensureRemoteResumePreflight(session);
       await openResumeInTerminal(session, getSettings(), { sshArgs });
-      store.markResumed(sessionKey);
+      await store.markResumed(sessionKey);
       return { route: "resume" as const };
     }
     const snapshot = await loadCachedLiveSessionSnapshot({ includeTrae: getSettings().includeTrae, includeQoder: getSettings().includeQoder });
     const route = routeResumeSession(session, snapshot.error ? [] : snapshot.sessions);
     if (route.route === "app") {
       await openNativeApp(session, { openExternal: (url) => shell.openExternal(url) });
-      store.markResumed(sessionKey);
+      await store.markResumed(sessionKey);
       return route;
     }
     if (route.route === "focus") {
       await focusLiveSessionTerminal(route.pid);
-      store.markResumed(sessionKey);
+      await store.markResumed(sessionKey);
       return route;
     }
     await openResumeInTerminal(session, getSettings(), { sshArgs });
-    store.markResumed(sessionKey);
+    await store.markResumed(sessionKey);
     return route;
   });
   ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return;
-    const sshArgs = requireSshArgsForRemoteSession(session);
+    const sshArgs = await requireSshArgsForRemoteSession(session);
     await ensureRemoteResumePreflight(session);
     await openResumeInSpecificTerminal(session, getSettings(), "iTerm", { sshArgs });
-    store.markResumed(sessionKey);
+    await store.markResumed(sessionKey);
   });
   ipcMain.handle("session:migrate", async (event, sessionKey: string, target: unknown) => {
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) throw new Error("Session not found.");
-    const messages = store.getAllMessages(sessionKey);
+    const messages = await store.getAllMessages(sessionKey);
     const settings = Object.freeze(await providerService.hydrateSettings());
 
     return runLocalSessionMigration({
@@ -1484,14 +1492,14 @@ function registerIpc(): void {
     }, localSessionMigrationRuntime(event));
   });
   ipcMain.handle("command:open-app", async (_event, sessionKey: string) => {
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return false;
     if (!isLocalSessionEnvironment(session)) return false;
     await openNativeApp(session, { openExternal: (url) => shell.openExternal(url) });
     return true;
   });
   ipcMain.handle("command:reveal", async (_event, sessionKey: string) => {
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return false;
     if (!isLocalSessionEnvironment(session)) return false;
     await revealInFileManager(session.projectPath || session.filePath);
@@ -1499,24 +1507,36 @@ function registerIpc(): void {
   });
   ipcMain.handle("command:copy-markdown", async (_event, sessionKey: string) => {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return;
-    clipboard.writeText(formatSessionMarkdown(session, store.getAllMessages(sessionKey), store.getTraceEvents(sessionKey)));
+    const [messages, traceEvents] = await Promise.all([
+      store.getAllMessages(sessionKey),
+      store.getTraceEvents(sessionKey),
+    ]);
+    clipboard.writeText(formatSessionMarkdown(session, messages, traceEvents));
   });
   ipcMain.handle("command:export-markdown", async (_event, sessionKey: string) => {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return false;
     const exportPath = await chooseMarkdownExportPath(markdownExportFileName(session.displayTitle || session.originalTitle || session.rawId));
     if (!exportPath) return false;
-    await fs.writeFile(exportPath, formatSessionMarkdown(session, store.getAllMessages(sessionKey), store.getTraceEvents(sessionKey)), "utf-8");
+    const [messages, traceEvents] = await Promise.all([
+      store.getAllMessages(sessionKey),
+      store.getTraceEvents(sessionKey),
+    ]);
+    await fs.writeFile(exportPath, formatSessionMarkdown(session, messages, traceEvents), "utf-8");
     return true;
   });
   ipcMain.handle("command:copy-plain", async (_event, sessionKey: string) => {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
-    const session = store.getSession(sessionKey);
+    const session = await store.getSession(sessionKey);
     if (!session) return;
-    clipboard.writeText(formatSessionPlainText(session, store.getAllMessages(sessionKey), store.getTraceEvents(sessionKey)));
+    const [messages, traceEvents] = await Promise.all([
+      store.getAllMessages(sessionKey),
+      store.getTraceEvents(sessionKey),
+    ]);
+    clipboard.writeText(formatSessionPlainText(session, messages, traceEvents));
   });
 }
 
@@ -1530,23 +1550,27 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-app.whenReady().then(() => {
-  void appUpdateService.registerRunningProcess();
-  const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
-  store = new SessionStore(dbPath);
-  // Publish the live database path so the standalone MCP server can find it.
+app.whenReady().then(async () => {
+  await appUpdateService.registerRunningProcess();
+  postgresRuntime = await startPostgresRuntime({ userDataPath: app.getPath("userData") });
+  postgresDatabase = PostgresDatabase.connect(postgresRuntime.connectionUrl, {
+    migrations: POSTGRES_MIGRATIONS,
+  });
+  await postgresDatabase.initialize();
+  store = new SessionStore(postgresDatabase);
+  // Publish the live endpoint so standalone MCP clients use the same store.
   try {
-    writeDbPointer(dbPath);
+    writeDatabaseUrlPointer(postgresRuntime.connectionUrl);
   } catch {
-    // Non-fatal: the MCP server can still be pointed at the DB via env var.
+    // Non-fatal: the MCP server can still use AGENT_RECALL_DATABASE_URL.
   }
   try {
     ensureAgentRecallMcpPreference();
   } catch (error) {
     console.error(`Failed to configure session search MCP: ${error instanceof Error ? error.message : String(error)}`);
   }
-  providerService.migrateLegacyKeys();
-  pruneDisabledOptionalSources(getSettings());
+  await providerService.migrateLegacyKeys();
+  await pruneDisabledOptionalSources(getSettings());
   automationService = createAutomationService();
   registerIpc();
   createApplicationMenu();
@@ -1558,13 +1582,20 @@ app.whenReady().then(() => {
   if (!registerAppGlobalShortcut(shortcut)) {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
   }
-  ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
+  void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
   void providerService.restoreCodexChatProxy();
   setTimeout(() => void runIndexSync(), INITIAL_INDEX_DELAY_MS);
   startAutoIndexRefresh();
   skillService.startUsageRefresh();
   remoteSessionService.startQueue();
   appUpdateService.scheduleInitialCheck();
+}).catch(async (error) => {
+  console.error(`Failed to start AgentRecall: ${error instanceof Error ? error.message : String(error)}`);
+  await postgresDatabase?.close().catch(() => undefined);
+  await postgresRuntime?.stop().catch(() => undefined);
+  postgresDatabase = null;
+  postgresRuntime = null;
+  app.quit();
 });
 
 app.on("window-all-closed", () => {
@@ -1576,26 +1607,32 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (automationService && !automationQuitReady) {
-    event.preventDefault();
-    void automationService.shutdown().catch((error) => {
-      console.error(`Failed to stop AgentRecall automation cleanly: ${error instanceof Error ? error.message : String(error)}`);
-    }).finally(() => {
-      automationQuitReady = true;
-      app.quit();
-    });
-    return;
-  }
-  void appUpdateService.clearRunningProcess();
+  if (automationQuitReady) return;
+  event.preventDefault();
   stopAutoIndexRefresh();
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
   remoteEnvironmentLifecycle?.stopAll();
-  void providerService.stopCodexChatProxy();
   disposeAutomationIpc?.();
   disposeAutomationIpc = null;
   disposeTeamChatIpc?.();
   disposeTeamChatIpc = null;
   globalShortcut.unregisterAll();
-  store?.close();
+  void Promise.allSettled([
+    appUpdateService.clearRunningProcess(),
+    automationService?.shutdown() ?? Promise.resolve(),
+    providerService.stopCodexChatProxy(),
+  ]).then(async () => {
+    await postgresDatabase?.close().catch((error) => {
+      console.error(`Failed to close AgentRecall data store: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    postgresDatabase = null;
+    await postgresRuntime?.stop().catch((error) => {
+      console.error(`Failed to stop AgentRecall PostgreSQL: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    postgresRuntime = null;
+  }).finally(() => {
+    automationQuitReady = true;
+    app.quit();
+  });
 });
