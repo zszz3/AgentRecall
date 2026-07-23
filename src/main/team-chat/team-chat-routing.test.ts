@@ -15,6 +15,8 @@ function member(agentId: string, displayName: string, position: number): TeamCha
     enabled: true,
     position,
     joinedAt,
+    continuationAvailable: true,
+    hasActiveConversation: false,
   };
 }
 

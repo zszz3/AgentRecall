@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { ConfiguredAgent, WorkflowAgentEvent } from "../../automation/engine/shared/types";
+import type {
+  ConfiguredAgent,
+  RuntimeConversation,
+  WorkflowAgentEvent,
+} from "../../automation/engine/shared/types";
+import { supportsConfiguredAgentConversation } from "../../automation/engine/main/platform/configured-agent-execution-service";
 import type {
   CreateTeamChatRoomRequest,
   ListTeamChatMessagesRequest,
@@ -20,7 +25,7 @@ import {
   PostgresTeamChatStore,
 } from "./postgres-team-chat-store";
 import { buildTeamChatPrompt, resolveTeamChatRoute, resolveTeamChatTargets } from "./team-chat-routing";
-import type { TeamChatStore } from "./team-chat-store";
+import type { TeamChatAgentSession, TeamChatContextPage, TeamChatStore } from "./team-chat-store";
 
 const MAX_AGENT_EXECUTIONS_PER_TURN = 8;
 const CONTEXT_MESSAGE_LIMIT = 40;
@@ -30,10 +35,15 @@ interface TeamChatServiceDependencies {
   writeConnectionUrl: (url: string) => void;
   configuredAgents: () => ConfiguredAgent[];
   executeAgent: (
-    input: { configuredAgentId: string; prompt: string; workDir?: string },
+    input: {
+      configuredAgentId: string;
+      prompt: string;
+      workDir?: string;
+      runtimeConversation?: RuntimeConversation;
+    },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
-  ) => Promise<{ output: string; durationMs: number }>;
+  ) => Promise<{ output: string; durationMs: number; runtimeConversation?: RuntimeConversation }>;
   storeFactory?: (connectionUrl: string) => TeamChatStore;
   localStoreFactory?: () => TeamChatStore;
   emit?: (event: TeamChatEvent) => void;
@@ -114,7 +124,8 @@ export class TeamChatService {
   }
 
   async getRoom(roomId: string): Promise<TeamChatRoom | undefined> {
-    return this.requireStore().getRoom(roomId);
+    const room = await this.requireStore().getRoom(roomId);
+    return room ? this.decorateRoom(room) : undefined;
   }
 
   async createRoom(request: CreateTeamChatRoomRequest): Promise<TeamChatRoom> {
@@ -132,7 +143,7 @@ export class TeamChatService {
     };
     const created = await this.requireStore().createRoom(room);
     this.emit({ type: "rooms-changed" });
-    return created;
+    return this.decorateRoom(created);
   }
 
   async updateRoom(request: UpdateTeamChatRoomRequest): Promise<TeamChatRoom> {
@@ -151,9 +162,9 @@ export class TeamChatService {
       agents: members,
       updatedAt,
     };
-    await store.updateRoom(updated);
+    const saved = await store.updateRoom(updated);
     this.emit({ type: "rooms-changed" });
-    return updated;
+    return this.decorateRoom(saved);
   }
 
   async archiveRoom(roomId: string): Promise<void> {
@@ -163,6 +174,18 @@ export class TeamChatService {
 
   async listMessages(request: ListTeamChatMessagesRequest): Promise<TeamChatMessagePage> {
     return this.requireStore().listMessages(request);
+  }
+
+  async resetAgentSession(roomId: string, agentId: string): Promise<TeamChatRoom> {
+    const store = this.requireStore();
+    const room = await store.getRoom(roomId);
+    if (!room || room.archived) throw new Error("Team Chat room is unavailable.");
+    if (!room.agents.some((agent) => agent.agentId === agentId)) {
+      throw new Error("Team Chat room member was not found.");
+    }
+    await store.deleteAgentSession(roomId, agentId);
+    this.emit({ type: "agent-session-changed", roomId, agentId });
+    return this.decorateRoom(room);
   }
 
   async sendMessage(request: SendTeamChatMessageRequest): Promise<SendTeamChatMessageResult> {
@@ -244,14 +267,12 @@ export class TeamChatService {
         if (batchIds.length === 0) continue;
         for (const agentId of batchIds) executedAgentIds.add(agentId);
 
-        const context = await this.requireStore().listMessages({ roomId: room.id, limit: CONTEXT_MESSAGE_LIMIT });
         const completed = await Promise.all(batchIds.map((agentId) => this.runAgent({
           room,
           targetAgentId: agentId,
           sourceMessage: next.sourceMessage,
           rootMessage,
           hop: next.hop,
-          contextMessages: context.messages,
           executedAgentIds: [...executedAgentIds],
           controller,
         })));
@@ -299,13 +320,27 @@ export class TeamChatService {
     sourceMessage: TeamChatMessage;
     rootMessage: TeamChatMessage;
     hop: number;
-    contextMessages: TeamChatMessage[];
     executedAgentIds: string[];
     controller: AbortController;
   }): Promise<TeamChatMessage | undefined> {
     const target = input.room.agents.find((agent) => agent.agentId === input.targetAgentId && agent.enabled);
     if (!target) return undefined;
+    const configured = this.dependencies.configuredAgents()
+      .find((agent) => agent.id === input.targetAgentId);
+    if (!configured) return undefined;
     const store = this.requireStore();
+    const continuationAvailable = supportsConfiguredAgentConversation(configured.runtimeAgentId);
+    let agentSession = (await store.listAgentSessions(input.room.id))
+      .find((session) => session.agentId === target.agentId);
+    if (
+      agentSession &&
+      (!continuationAvailable || !agentSessionMatches(agentSession, configured))
+    ) {
+      await store.deleteAgentSession(input.room.id, target.agentId);
+      this.emit({ type: "agent-session-changed", roomId: input.room.id, agentId: target.agentId });
+      agentSession = undefined;
+    }
+    let context = await this.loadAgentContext(input.room.id, agentSession);
     const dispatchId = this.id();
     const createdAt = this.timestamp();
     const dispatch: TeamChatDispatch = {
@@ -332,32 +367,60 @@ export class TeamChatService {
     });
 
     try {
-      const result = await this.dependencies.executeAgent(
-        {
-          configuredAgentId: target.agentId,
-          prompt: buildTeamChatPrompt({
-            room: input.room,
-            target,
-            messages: input.contextMessages,
-            triggerMessage: input.sourceMessage,
-            executedAgentIds: input.executedAgentIds,
-            remainingExecutions: MAX_AGENT_EXECUTIONS_PER_TURN - input.executedAgentIds.length,
-          }),
-          workDir: input.room.workDir || undefined,
-        },
-        (event) => {
-          if (event.type !== "delta" || input.controller.signal.aborted) return;
-          this.emit({
-            type: "dispatch-delta",
-            roomId: input.room.id,
-            rootMessageId: input.rootMessage.id,
-            dispatchId,
-            agentId: target.agentId,
-            content: event.content,
-          });
-        },
-        input.controller.signal,
-      );
+      let attemptSawDelta = false;
+      const executeAttempt = (
+        currentContext: TeamChatContextPage,
+        currentSession?: TeamChatAgentSession,
+      ) => {
+        attemptSawDelta = false;
+        return this.dependencies.executeAgent(
+          {
+            configuredAgentId: target.agentId,
+            prompt: buildTeamChatPrompt({
+              room: input.room,
+              target,
+              messages: currentContext.messages,
+              triggerMessage: input.sourceMessage,
+              executedAgentIds: input.executedAgentIds,
+              remainingExecutions: MAX_AGENT_EXECUTIONS_PER_TURN - input.executedAgentIds.length,
+              continuing: Boolean(currentSession),
+              contextTruncated: currentContext.truncated,
+            }),
+            workDir: input.room.workDir || undefined,
+            ...(currentSession ? { runtimeConversation: currentSession.runtimeConversation } : {}),
+          },
+          (event) => {
+            if (event.type !== "delta" || input.controller.signal.aborted) return;
+            attemptSawDelta = true;
+            this.emit({
+              type: "dispatch-delta",
+              roomId: input.room.id,
+              rootMessageId: input.rootMessage.id,
+              dispatchId,
+              agentId: target.agentId,
+              content: event.content,
+            });
+          },
+          input.controller.signal,
+        );
+      };
+
+      let result: Awaited<ReturnType<typeof executeAttempt>>;
+      try {
+        result = await executeAttempt(context, agentSession);
+      } catch (error) {
+        const canRetryFresh =
+          Boolean(agentSession) &&
+          !attemptSawDelta &&
+          !input.controller.signal.aborted &&
+          isNativeConversationUnavailable(error);
+        if (!canRetryFresh) throw error;
+        await store.deleteAgentSession(input.room.id, target.agentId);
+        this.emit({ type: "agent-session-changed", roomId: input.room.id, agentId: target.agentId });
+        agentSession = undefined;
+        context = await this.loadAgentContext(input.room.id);
+        result = await executeAttempt(context);
+      }
       if (input.controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
       const content = result.output.trim() || "Agent completed without a text response.";
       const messageAt = this.timestamp();
@@ -376,6 +439,25 @@ export class TeamChatService {
         updatedAt: messageAt,
       };
       await store.insertMessage(message);
+
+      const nextConversation =
+        result.runtimeConversation?.runtimeId === configured.runtimeAgentId
+          ? result.runtimeConversation
+          : agentSession?.runtimeConversation;
+      if (continuationAvailable && nextConversation) {
+        await store.upsertAgentSession({
+          roomId: input.room.id,
+          agentId: target.agentId,
+          runtimeId: configured.runtimeAgentId,
+          channelId: configured.channelId,
+          modelId: configured.modelId,
+          runtimeConversation: nextConversation,
+          lastContextMessageId: context.messages.at(-1)?.id ?? input.sourceMessage.id,
+          updatedAt: messageAt,
+        });
+        this.emit({ type: "agent-session-changed", roomId: input.room.id, agentId: target.agentId });
+      }
+
       const finishedAt = this.timestamp();
       await store.updateDispatch(dispatchId, {
         status: "completed",
@@ -429,6 +511,21 @@ export class TeamChatService {
     }
   }
 
+  private async loadAgentContext(
+    roomId: string,
+    agentSession?: TeamChatAgentSession,
+  ): Promise<TeamChatContextPage> {
+    const store = this.requireStore();
+    if (agentSession?.lastContextMessageId) {
+      return store.listMessagesAfter(roomId, agentSession.lastContextMessageId, CONTEXT_MESSAGE_LIMIT);
+    }
+    const page = await store.listMessages({ roomId, limit: CONTEXT_MESSAGE_LIMIT });
+    return {
+      messages: page.messages,
+      truncated: Boolean(page.nextBefore),
+    };
+  }
+
   private async insertSystemMessage(
     roomId: string,
     rootMessageId: string,
@@ -473,6 +570,38 @@ export class TeamChatService {
     return room.agents.map((member) => availableAgentIds.has(member.agentId)
       ? member
       : { ...member, enabled: false });
+  }
+
+  private async decorateRoom(room: TeamChatRoom): Promise<TeamChatRoom> {
+    const store = this.requireStore();
+    const configuredById = new Map(this.dependencies.configuredAgents().map((agent) => [agent.id, agent]));
+    const sessionsByAgentId = new Map(
+      (await store.listAgentSessions(room.id)).map((session) => [session.agentId, session]),
+    );
+    const agents = await Promise.all(room.agents.map(async (member): Promise<TeamChatRoomAgent> => {
+      const configured = configuredById.get(member.agentId);
+      const continuationAvailable = Boolean(
+        configured && supportsConfiguredAgentConversation(configured.runtimeAgentId),
+      );
+      const storedSession = sessionsByAgentId.get(member.agentId);
+      const compatibleSession =
+        configured &&
+        continuationAvailable &&
+        storedSession &&
+        agentSessionMatches(storedSession, configured)
+          ? storedSession
+          : undefined;
+      if (storedSession && configured && !compatibleSession) {
+        await store.deleteAgentSession(room.id, member.agentId);
+      }
+      return {
+        ...member,
+        continuationAvailable,
+        hasActiveConversation: Boolean(compatibleSession),
+        ...(compatibleSession ? { conversationUpdatedAt: compatibleSession.updatedAt } : {}),
+      };
+    }));
+    return { ...room, agents };
   }
 
   private requireStore(): TeamChatStore {
@@ -593,7 +722,18 @@ function roomAgentSnapshot(
     enabled: true,
     position,
     joinedAt,
+    continuationAvailable: supportsConfiguredAgentConversation(agent.runtimeAgentId),
+    hasActiveConversation: false,
   };
+}
+
+function agentSessionMatches(session: TeamChatAgentSession, agent: ConfiguredAgent): boolean {
+  return (
+    session.runtimeId === agent.runtimeAgentId &&
+    session.channelId === agent.channelId &&
+    session.modelId === agent.modelId &&
+    session.runtimeConversation.runtimeId === agent.runtimeAgentId
+  );
 }
 
 function normalizePostgresUrl(value: string): string {
@@ -631,4 +771,18 @@ function sanitizeTeamChatError(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
+}
+
+function isNativeConversationUnavailable(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+  const conversation = "(?:conversation|session|thread|rollout)";
+  const unavailable = "(?:not found|does not exist|missing|expired|invalid|unavailable)";
+  return (
+    new RegExp(`${conversation}.{0,80}${unavailable}`, "u").test(message) ||
+    new RegExp(`${unavailable}.{0,80}${conversation}`, "u").test(message) ||
+    /no rollout found/u.test(message)
+  );
 }

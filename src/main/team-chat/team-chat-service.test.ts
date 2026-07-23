@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ConfiguredAgent, WorkflowAgentEvent } from "../../automation/engine/shared/types";
+import type {
+  ConfiguredAgent,
+  RuntimeConversation,
+  WorkflowAgentEvent,
+} from "../../automation/engine/shared/types";
 import type {
   ListTeamChatMessagesRequest,
   TeamChatDispatch,
@@ -109,10 +113,15 @@ const agents = [agent("builder", "Builder"), agent("reviewer", "Reviewer")];
 async function createFixture(options: {
   configuredAgents?: ConfiguredAgent[];
   executeAgent?: (
-    input: { configuredAgentId: string; prompt: string; workDir?: string },
+    input: {
+      configuredAgentId: string;
+      prompt: string;
+      workDir?: string;
+      runtimeConversation?: RuntimeConversation;
+    },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
-  ) => Promise<{ output: string; durationMs: number }>;
+  ) => Promise<{ output: string; durationMs: number; runtimeConversation?: RuntimeConversation }>;
 } = {}) {
   const store = new MemoryTeamChatStore();
   const events: TeamChatEvent[] = [];
@@ -323,6 +332,238 @@ describe("TeamChatService", () => {
       senderName: "Builder",
       content: "正在处理",
     }));
+  });
+
+  it("persists a room Agent conversation and reuses it with only incremental context", async () => {
+    const firstConversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "thread-1" } },
+    };
+    const secondConversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "thread-2" } },
+    };
+    const calls: Array<{
+      configuredAgentId: string;
+      prompt: string;
+      runtimeConversation?: RuntimeConversation;
+    }> = [];
+    const fixture = await createFixture({
+      executeAgent: async (input) => {
+        calls.push(structuredClone(input));
+        return {
+          output: calls.length === 1 ? "first answer" : "second answer",
+          durationMs: 1,
+          runtimeConversation: calls.length === 1 ? firstConversation : secondConversation,
+        };
+      },
+    });
+
+    const first = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "@Builder first request" });
+    await waitForTurn(fixture.events, first.rootMessageId);
+    const roomAfterFirst = await fixture.service.getRoom(fixture.room.id);
+
+    expect(fixture.store.sessions).toContainEqual(expect.objectContaining({
+      roomId: fixture.room.id,
+      agentId: "builder",
+      runtimeConversation: firstConversation,
+    }));
+    expect(roomAfterFirst?.agents[0]).toMatchObject({
+      continuationAvailable: true,
+      hasActiveConversation: true,
+    });
+    expect(Object.prototype.hasOwnProperty.call(roomAfterFirst?.agents[0] ?? {}, "runtimeConversation")).toBe(false);
+
+    const second = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "@Builder second request" });
+    await waitForTurn(fixture.events, second.rootMessageId);
+
+    expect(calls[0]?.runtimeConversation).toBeUndefined();
+    expect(calls[1]?.runtimeConversation).toEqual(firstConversation);
+    expect(calls[1]?.prompt).toContain("Room updates since your previous turn:");
+    expect(calls[1]?.prompt.match(/second request/g)).toHaveLength(1);
+    expect(calls[1]?.prompt).not.toContain("first request");
+    expect(fixture.store.sessions[0]?.runtimeConversation).toEqual(secondConversation);
+  });
+
+  it("keeps the same configured Agent conversation isolated between rooms", async () => {
+    const conversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "room-one-thread" } },
+    };
+    const calls: Array<{ runtimeConversation?: RuntimeConversation }> = [];
+    const fixture = await createFixture({
+      configuredAgents: [agents[0]!],
+      executeAgent: async (input) => {
+        calls.push(structuredClone(input));
+        return { output: "done", durationMs: 1, runtimeConversation: conversation };
+      },
+    });
+    const first = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "first room" });
+    await waitForTurn(fixture.events, first.rootMessageId);
+    const otherRoom = await fixture.service.createRoom({
+      name: "Other room",
+      workDir: "/synthetic/repo",
+      agentIds: ["builder"],
+    });
+
+    const second = await fixture.service.sendMessage({ roomId: otherRoom.id, content: "second room" });
+    await waitForTurn(fixture.events, second.rootMessageId);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.runtimeConversation).toBeUndefined();
+    expect(calls[1]?.runtimeConversation).toBeUndefined();
+    expect(fixture.store.sessions.map((session) => session.roomId).sort())
+      .toEqual([fixture.room.id, otherRoom.id].sort());
+  });
+
+  it("drops an incompatible conversation when the configured Agent Runtime settings change", async () => {
+    const configuredAgents = [structuredClone(agents[0]!)];
+    const conversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "old-thread" } },
+    };
+    const calls: Array<{ runtimeConversation?: RuntimeConversation }> = [];
+    const fixture = await createFixture({
+      configuredAgents,
+      executeAgent: async (input) => {
+        calls.push(structuredClone(input));
+        return { output: "done", durationMs: 1, runtimeConversation: conversation };
+      },
+    });
+    const first = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "first" });
+    await waitForTurn(fixture.events, first.rootMessageId);
+    configuredAgents[0] = {
+      ...configuredAgents[0]!,
+      channelId: "codex-next",
+      modelId: "gpt-5-next",
+    };
+
+    const second = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "second" });
+    await waitForTurn(fixture.events, second.rootMessageId);
+
+    expect(calls[1]?.runtimeConversation).toBeUndefined();
+    expect(fixture.store.sessions[0]).toMatchObject({
+      channelId: "codex-next",
+      modelId: "gpt-5-next",
+    });
+  });
+
+  it("lets a user start a fresh conversation for one room Agent without removing room history", async () => {
+    const conversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "thread-to-reset" } },
+    };
+    const fixture = await createFixture({
+      configuredAgents: [agents[0]!],
+      executeAgent: async () => ({ output: "done", durationMs: 1, runtimeConversation: conversation }),
+    });
+    const sent = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "remember this" });
+    await waitForTurn(fixture.events, sent.rootMessageId);
+    const messageCount = fixture.store.messages.length;
+
+    const room = await fixture.service.resetAgentSession(fixture.room.id, "builder");
+
+    expect(fixture.store.sessions).toEqual([]);
+    expect(fixture.store.messages).toHaveLength(messageCount);
+    expect(room.agents[0]).toMatchObject({
+      continuationAvailable: true,
+      hasActiveConversation: false,
+    });
+  });
+
+  it("retries fresh once when an untouched native conversation is no longer available", async () => {
+    const expiredConversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "expired-thread" } },
+    };
+    const replacementConversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "replacement-thread" } },
+    };
+    const calls: Array<{ runtimeConversation?: RuntimeConversation }> = [];
+    const fixture = await createFixture({
+      configuredAgents: [agents[0]!],
+      executeAgent: async (input) => {
+        calls.push(structuredClone(input));
+        if (calls.length === 1) {
+          return { output: "first", durationMs: 1, runtimeConversation: expiredConversation };
+        }
+        if (input.runtimeConversation) throw new Error("Runtime conversation not found");
+        return { output: "fresh retry", durationMs: 1, runtimeConversation: replacementConversation };
+      },
+    });
+    const first = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "first" });
+    await waitForTurn(fixture.events, first.rootMessageId);
+
+    const second = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "continue" });
+    await waitForTurn(fixture.events, second.rootMessageId);
+
+    expect(calls).toHaveLength(3);
+    expect(calls[1]?.runtimeConversation).toEqual(expiredConversation);
+    expect(calls[2]?.runtimeConversation).toBeUndefined();
+    expect(fixture.store.messages).toContainEqual(expect.objectContaining({
+      senderType: "agent",
+      content: "fresh retry",
+    }));
+    expect(fixture.store.sessions[0]?.runtimeConversation).toEqual(replacementConversation);
+  });
+
+  it("does not retry an unavailable conversation after text has already streamed", async () => {
+    const conversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "streaming-thread" } },
+    };
+    let calls = 0;
+    const fixture = await createFixture({
+      configuredAgents: [agents[0]!],
+      executeAgent: async (input, onEvent) => {
+        calls += 1;
+        if (calls === 1) return { output: "first", durationMs: 1, runtimeConversation: conversation };
+        onEvent?.({ requestId: "request-2", type: "delta", content: "partial" });
+        throw new Error("Runtime conversation not found");
+      },
+    });
+    const first = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "first" });
+    await waitForTurn(fixture.events, first.rootMessageId);
+
+    const second = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "continue" });
+    await waitForTurn(fixture.events, second.rootMessageId);
+
+    expect(calls).toBe(2);
+    expect(fixture.store.dispatches.at(-1)?.status).toBe("failed");
+  });
+
+  it("does not retry a generic failure from a continued conversation", async () => {
+    const conversation: RuntimeConversation = {
+      runtimeId: "codex",
+      codecVersion: "1",
+      payload: { native: { threadId: "healthy-thread" } },
+    };
+    let calls = 0;
+    const fixture = await createFixture({
+      configuredAgents: [agents[0]!],
+      executeAgent: async () => {
+        calls += 1;
+        if (calls === 1) return { output: "first", durationMs: 1, runtimeConversation: conversation };
+        throw new Error("Network unavailable");
+      },
+    });
+    const first = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "first" });
+    await waitForTurn(fixture.events, first.rootMessageId);
+
+    const second = await fixture.service.sendMessage({ roomId: fixture.room.id, content: "continue" });
+    await waitForTurn(fixture.events, second.rootMessageId);
+
+    expect(calls).toBe(2);
+    expect(fixture.store.dispatches.at(-1)?.status).toBe("failed");
   });
 
   it("allows one Agent handoff while executing each Agent at most once", async () => {

@@ -27,6 +27,9 @@ export interface TeamChatRoomAgent {
   enabled: boolean;
   position: number;
   joinedAt: string;
+  continuationAvailable: boolean;
+  hasActiveConversation: boolean;
+  conversationUpdatedAt?: string;
 }
 
 export interface TeamChatRoomSummary {
@@ -110,6 +113,11 @@ export interface SendTeamChatMessageRequest {
   content: string;
 }
 
+export interface ResetTeamChatAgentSessionRequest {
+  roomId: string;
+  agentId: string;
+}
+
 export interface SendTeamChatMessageResult {
   message: TeamChatMessage;
   rootMessageId: string;
@@ -118,6 +126,7 @@ export interface SendTeamChatMessageResult {
 export type TeamChatEvent =
   | { type: "connection-changed"; status: TeamChatConnectionStatus }
   | { type: "rooms-changed" }
+  | { type: "agent-session-changed"; roomId: string; agentId: string }
   | { type: "message-created"; roomId: string; rootMessageId: string; message: TeamChatMessage }
   | {
       type: "dispatch-started";

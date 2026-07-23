@@ -37,6 +37,8 @@ describe("PGliteTeamChatStore", () => {
         enabled: true,
         position: 0,
         joinedAt: createdAt,
+        continuationAvailable: true,
+        hasActiveConversation: false,
       }],
       createdAt,
       updatedAt: createdAt,

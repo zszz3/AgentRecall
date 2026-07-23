@@ -76,6 +76,8 @@ function roomFixture(): TeamChatRoom {
         enabled: true,
         position: 0,
         joinedAt: timestamp,
+        continuationAvailable: false,
+        hasActiveConversation: false,
       },
       {
         roomId: "019c0000-0000-7000-8000-000000000001",
@@ -87,6 +89,8 @@ function roomFixture(): TeamChatRoom {
         enabled: true,
         position: 1,
         joinedAt: timestamp,
+        continuationAvailable: false,
+        hasActiveConversation: false,
       },
     ],
   };

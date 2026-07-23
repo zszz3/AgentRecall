@@ -537,6 +537,8 @@ function mapRoomAgentRow(row: RoomAgentRow): TeamChatRoomAgent {
     enabled: Boolean(row.enabled),
     position: Number(row.position),
     joinedAt: toIsoString(row.joined_at),
+    continuationAvailable: false,
+    hasActiveConversation: false,
   };
 }
 

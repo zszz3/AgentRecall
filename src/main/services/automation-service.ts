@@ -99,7 +99,7 @@ export class NativeAutomationService {
         ? () => new PGliteTeamChatStore(options.localTeamChatDataPath!)
         : undefined,
       configuredAgents: () => this.hubInstance.snapshot().configuredAgents,
-      executeAgent: (input, onEvent, signal) => configuredAgentExecutor.runOneShot(input, onEvent, signal),
+      executeAgent: (input, onEvent, signal) => configuredAgentExecutor.runConversation(input, onEvent, signal),
     });
     this.agentsInstance = dependencies.agents ?? new McpAgentManagementService({
       homeDir: () => options.homePath,
