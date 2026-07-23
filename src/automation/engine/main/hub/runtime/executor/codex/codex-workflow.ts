@@ -18,7 +18,7 @@ import {
 } from "../workflow/agent-executor-workflow-shared";
 import { reasoningEffortFromRuntimeConfig } from "../agent-executor-types";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
-import { codexWorkflowMcpArgs } from "./codex-workflow-mcp";
+import { codexWorkflowMcpConfig } from "./codex-workflow-mcp";
 import { codexMcpLaunchConfig } from "../runtime-mcp";
 
 export async function runCodexWorkflow(
@@ -36,6 +36,7 @@ export async function runCodexWorkflow(
   const mcp = codexMcpLaunchConfig(input.configuredAgentId
     ? options.mcpServersForAgent?.(input.configuredAgentId) ?? []
     : []);
+  const workflowMcp = codexWorkflowMcpConfig(options.workflowMcpDiscoveryPath?.(), input.planningWorkflowId, undefined, undefined, options.workflowMcpManagedToken?.());
   const developerInstructions = developerInstructionsForWorkflowRequest(input);
 
   return new Promise<WorkflowAgentResponse>((resolve, reject) => {
@@ -67,10 +68,10 @@ export async function runCodexWorkflow(
           modelFromRuntimeConfig(input.runtimeConfig),
           reasoningEffortFromRuntimeConfig(input.runtimeConfig),
         ),
-        ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), input.planningWorkflowId),
+        ...workflowMcp.args,
         ...mcp.args,
       ],
-      env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
+      env: { ...codexEnvironmentForChannel(channel), ...mcp.env, ...workflowMcp.env },
       onEvent: (event) => {
         timeout?.refresh();
         if (event.type === "delta") {

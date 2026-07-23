@@ -28,6 +28,7 @@ export interface RuntimeWorkflowExecutionOptions {
   executables: Record<AgentId, string>;
   channelById: (channelId: string) => AgentChannel | undefined;
   workflowMcpDiscoveryPath?: () => string | undefined;
+  workflowMcpManagedToken?: () => string | undefined;
   mcpServersForAgent?: (configuredAgentId: string) => BoundMcpServer[];
 }
 

@@ -12,7 +12,7 @@ import type {
 import { modelFromRuntimeConfig, reasoningEffortFromRuntimeConfig } from "../agent-executor-types";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
 import { codexMcpLaunchConfig } from "../runtime-mcp";
-import { codexWorkflowMcpArgs } from "./codex-workflow-mcp";
+import { codexWorkflowMcpConfig } from "./codex-workflow-mcp";
 
 export class CodexAgentExecutor implements AgentExecutor {
   private client: CodexRpcClient | undefined;
@@ -30,6 +30,7 @@ export class CodexAgentExecutor implements AgentExecutor {
     const mcp = codexMcpLaunchConfig(this.context.configuredAgentId
       ? this.options.mcpServersForAgent?.(this.context.configuredAgentId) ?? []
       : []);
+    const workflowMcp = codexWorkflowMcpConfig(this.options.workflowMcpDiscoveryPath?.(), this.context.planningWorkflowId, this.context.workflowRunId, this.context.workflowNodeId, this.options.workflowMcpManagedToken?.());
     let client: CodexRpcClient;
     client = new CodexRpcClient({
       executable,
@@ -41,9 +42,9 @@ export class CodexAgentExecutor implements AgentExecutor {
           reasoningEffortFromRuntimeConfig(this.context.runtimeConfig),
         ),
         ...mcp.args,
-        ...codexWorkflowMcpArgs(this.options.workflowMcpDiscoveryPath?.(), this.context.planningWorkflowId, this.context.workflowRunId, this.context.workflowNodeId),
+        ...workflowMcp.args,
       ],
-      env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
+      env: { ...codexEnvironmentForChannel(channel), ...mcp.env, ...workflowMcp.env },
       onEvent: this.context.emit,
       onRequest: (id, method, params) => {
         respondToCodexRuntimeServerRequest(client, id, method, params, this.options.requestApproval ? {

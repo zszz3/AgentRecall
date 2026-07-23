@@ -7,35 +7,48 @@ import { RUNTIME_IDS } from "../shared/runtime-catalog";
 import { callMcpTool, mcpToolDefinitions, resolveBridgeDiscoveryPath } from "./server";
 
 const originalEnv = process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
+const originalManagedToken = process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
 describe("MCP server tools", () => {
   afterEach(() => {
     if (originalEnv === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
     else process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE = originalEnv;
+    if (originalManagedToken === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
+    else process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = originalManagedToken;
     vi.restoreAllMocks();
   });
 
-  test("exposes workflow tools from the agent-level MCP service", () => {
+  test("exposes only read tools to standalone discovery clients", () => {
+    delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
     expect(mcpToolDefinitions().map((tool) => tool.name)).toEqual([
       "agent_templates_list",
       "skill_templates_list",
       "agents_list",
-      "agents_create",
-      "agents_update",
-      "agents_delete",
-      "agents_test",
       "channels_list",
       "models_list",
-      "workflow_create",
       "workflow_list",
       "workflow_get",
-      "workflow_update",
       "workflow_validate",
-      "workflow_context_append",
-      "workflow_run_context_append",
+      "workflow_run_list",
+      "workflow_run_get",
+      "workflow_outputs_list",
     ]);
   });
 
+  test("exposes lifecycle writes only to managed MCP sessions", () => {
+    process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = "managed-token";
+
+    expect(mcpToolDefinitions().map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      "workflow_create",
+      "workflow_confirm",
+      "workflow_run",
+      "workflow_stop",
+      "workflow_intervention_resolve",
+      "workflow_script_input_submit",
+    ]));
+  });
+
   test("derives runtime enums from the canonical runtime catalog", () => {
+    process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = "managed-token";
     const tools = mcpToolDefinitions();
     for (const toolName of ["agents_create", "agents_update", "channels_list", "models_list", "workflow_create"]) {
       const tool = tools.find((item) => item.name === toolName);
@@ -46,6 +59,7 @@ describe("MCP server tools", () => {
   });
 
   test("requires workflow_create to submit an explicit Workflow V2 definition with execution modes", () => {
+    process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = "managed-token";
     const tool = mcpToolDefinitions().find((item) => item.name === "workflow_create")!;
     expect(tool.inputSchema.required).toContain("workflowId");
     expect(tool.inputSchema.required).toContain("definition");
@@ -67,7 +81,7 @@ describe("MCP server tools", () => {
     const serverPath = path.resolve("src", "automation", "engine", "mcp", "server.ts");
     const child = spawn(process.execPath, [tsxCli, serverPath], {
       cwd: process.cwd(),
-      env: { ...process.env, AGENT_RECALL_WORKFLOW_MCP_BRIDGE: path.join(os.tmpdir(), "missing-mcp-bridge.json") },
+      env: { ...process.env, AGENT_RECALL_WORKFLOW_MCP_BRIDGE: path.join(os.tmpdir(), "missing-mcp-bridge.json"), AGENT_RECALL_WORKFLOW_MCP_TOKEN: "" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     const response = await new Promise<Record<string, any>>((resolve, reject) => {
@@ -85,7 +99,8 @@ describe("MCP server tools", () => {
       child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })}\n`);
     }).finally(() => child.kill());
 
-    expect(response.result.tools.map((tool: { name: string }) => tool.name)).toContain("workflow_create");
+    expect(response.result.tools.map((tool: { name: string }) => tool.name)).toContain("workflow_run_list");
+    expect(response.result.tools.map((tool: { name: string }) => tool.name)).not.toContain("workflow_create");
   });
 
   test("calls bridge endpoints with discovery token", async () => {
@@ -99,11 +114,11 @@ describe("MCP server tools", () => {
       json: async () => ({ ok: true, workflowId: "wf_1" }),
     } as Response);
 
-    const result = await callMcpTool("agents_create", { id: "reviewer", name: "Reviewer" });
+    const result = await callMcpTool("workflow_run_list", {});
 
     expect(result).toEqual({ ok: true, workflowId: "wf_1" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:48123/mcp/agents/create",
+      "http://127.0.0.1:48123/mcp/workflow/run/list",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ authorization: "Bearer secret" }),

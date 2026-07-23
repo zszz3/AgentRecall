@@ -6,6 +6,7 @@ import type { AgentEvent, RuntimeConversation } from "../../../../../shared/type
 import { writeNodeCliLauncher } from "../../../../platform/test-cli-fixtures";
 import { hermesRuntimeStateCodec } from "../../../../agents/hermes/hermes-runtime-state-codec";
 import { createHermesDriver } from "./create-hermes-driver";
+import { AcpWorkflowOneShotExecutor } from "../acp-workflow-one-shot-executor";
 
 async function createHermesAcpFake(dir: string): Promise<{ executable: string; callsPath: string }> {
   const callsPath = path.join(dir, "calls.jsonl");
@@ -36,6 +37,36 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 }
 
 describe("createHermesDriver interactive integration", () => {
+  test("uses ACP for one-shot workflow nodes so scoped MCP tools are available", () => {
+    const driver = createHermesDriver({
+      executables: { codex: "codex", claude: "claude", api: "api", hermes: "hermes", opencode: "opencode", openclaw: "openclaw" },
+      channelById: () => undefined,
+      workflowMcpDiscoveryPath: () => "C:/app/mcp-bridge.json",
+      workflowMcpManagedToken: () => "managed-token",
+    });
+    const executor = driver.createOneShotExecutor?.({
+      runId: "task-1",
+      runKind: "task",
+      configuredAgentId: "agent-1",
+      planningWorkflowId: "wf-1",
+      workflowRunId: "run-1",
+      workflowNodeId: "node-1",
+      runtimeId: "hermes",
+      executionMode: "oneshot",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: "default" },
+      runtime: { id: "hermes", label: "Hermes", command: "hermes", version: "test", available: true },
+      channelId: "hermes-default",
+      prompt: "Complete",
+      workDir: process.cwd(),
+      developerInstructions: "Complete structurally",
+      emit: vi.fn(),
+      onExit: vi.fn(),
+    });
+
+    expect(executor).toBeInstanceOf(AcpWorkflowOneShotExecutor);
+  });
+
   test("starts Hermes ACP, persists the session, and resumes it after detach", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-hermes-driver-"));
     const fake = await createHermesAcpFake(dir);

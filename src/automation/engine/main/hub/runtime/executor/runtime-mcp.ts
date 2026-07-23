@@ -103,7 +103,7 @@ export function acpMcpServers(
   return result;
 }
 
-export function acpWorkflowMcpServers(discoveryPath: string | undefined, workflowId: string | undefined, runId?: string, nodeId?: string): acp.McpServer[] {
-  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId });
+export function acpWorkflowMcpServers(discoveryPath: string | undefined, workflowId: string | undefined, runId?: string, nodeId?: string, managedToken?: string): acp.McpServer[] {
+  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId, managedToken });
   return config ? [{ name: "agent_recall_workflow", command: config.command, args: config.args, env: Object.entries(config.env).map(([name, value]) => ({ name, value })) }] : [];
 }

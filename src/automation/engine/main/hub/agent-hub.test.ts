@@ -469,7 +469,7 @@ const readline = require("readline");
 const callsPath = ${JSON.stringify(callsPath)};
 const counterPath = ${JSON.stringify(counterPath)};
 let threadIndex = 0;
-fs.appendFileSync(callsPath, JSON.stringify({ method: "process/argv", params: { args: process.argv.slice(2) } }) + "\\n");
+fs.appendFileSync(callsPath, JSON.stringify({ method: "process/argv", params: { args: process.argv.slice(2), workflowId: process.env.AGENT_RECALL_WORKFLOW_ID, managedToken: process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN } }) + "\\n");
 
 function write(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -2887,6 +2887,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     });
 
     hub.setWorkflowMcpDiscoveryPath(path.join(dir, "mcp-bridge.json"));
+    hub.setWorkflowMcpManagedToken("managed-token");
     await (hub as any).askWorkflowAgent({
       requestId: "workflow-mcp-config-test",
       planningWorkflowId: "wf-codex-planning",
@@ -2903,7 +2904,10 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     const argv = calls.find((call) => call.method === "process/argv")?.params.args as string[];
     expect(argv.join("\n")).toContain("mcp_servers.agent_recall.command");
     expect(argv.join("\n")).toContain("AGENT_RECALL_WORKFLOW_MCP_BRIDGE");
-    expect(argv.join("\n")).toContain("wf-codex-planning");
+    const processConfig = calls.find((call) => call.method === "process/argv")?.params;
+    expect(processConfig.workflowId).toBe("wf-codex-planning");
+    expect(processConfig.managedToken).toBe("managed-token");
+    expect(argv.join("\n")).not.toContain("managed-token");
   });
 
   test("injects only the custom MCP servers bound to the selected Codex Agent", async () => {

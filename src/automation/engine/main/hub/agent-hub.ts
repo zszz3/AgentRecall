@@ -369,6 +369,7 @@ export class AgentHub {
   private sqliteStore: SqliteAppStore | undefined = undefined;
   private modelConfigPath: string | undefined = undefined;
   private workflowMcpDiscoveryPath: string | undefined = undefined;
+  private workflowMcpManagedToken: string | undefined = undefined;
   private persistTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   private streamingEmitTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   private idleSweepTimer: ReturnType<typeof setInterval> | undefined = undefined;
@@ -406,6 +407,7 @@ export class AgentHub {
         executables: this.executables,
         channelById: (channelId) => this.channelById(channelId),
         workflowMcpDiscoveryPath: () => this.workflowMcpDiscoveryPath,
+        workflowMcpManagedToken: () => this.workflowMcpManagedToken,
         mcpServersForAgent: (configuredAgentId) => this.boundMcpServersForAgent(configuredAgentId),
         requestApproval: this.runtimeApprovals.request,
       });
@@ -584,6 +586,10 @@ export class AgentHub {
 
   setWorkflowMcpDiscoveryPath(discoveryPath: string | undefined): void {
     this.workflowMcpDiscoveryPath = discoveryPath;
+  }
+
+  setWorkflowMcpManagedToken(managedToken: string | undefined): void {
+    this.workflowMcpManagedToken = managedToken;
   }
 
   setMcpServers(servers: McpServerDefinition[]): void {

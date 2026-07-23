@@ -46,7 +46,7 @@ export function createClaudeDriver(
         options.requestApproval,
         {
           ...claudeMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
-          ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), context.planningWorkflowId, context.workflowRunId, context.workflowNodeId),
+          ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), context.planningWorkflowId, context.workflowRunId, context.workflowNodeId, options.workflowMcpManagedToken?.()),
         },
       ),
     createInteractiveSession: (context) =>
@@ -61,7 +61,7 @@ export function createClaudeDriver(
             ) ?? modelFromRuntimeConfig(interactiveContext.runtimeConfig),
           resolveMcpServers: (interactiveContext) => ({
             ...claudeMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
-            ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId, interactiveContext.workflowRunId, interactiveContext.workflowNodeId),
+            ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId, interactiveContext.workflowRunId, interactiveContext.workflowNodeId, options.workflowMcpManagedToken?.()),
           }),
           sdkInteractive: new ClaudeAgentSdkInteractive(),
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),

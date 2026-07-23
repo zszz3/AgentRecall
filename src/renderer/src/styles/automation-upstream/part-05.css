@@ -1212,6 +1212,12 @@
 
 .workflow-node-agent-runtime-details .workflow-node-agent-message { max-width: 100%; }
 
+.workflow-node-agent-tool-payload { margin-top: 6px; }
+
+.workflow-node-agent-tool-payload > summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
+
+.workflow-node-agent-tool-payload > :not(summary) { margin-top: 8px; }
+
 .workflow-node-completion-proposal { margin: 0 18px 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--ok) 46%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
 
 .workflow-node-agent-actions { display: flex; gap: 8px; flex-wrap: wrap; }

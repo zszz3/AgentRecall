@@ -35,4 +35,21 @@ describe("workflowMcpLaunchConfig", () => {
   test("does not expose workflow tools outside a planning workflow", () => {
     expect(workflowMcpLaunchConfig("C:/app/mcp-bridge.json", undefined)).toBeUndefined();
   });
+
+  test("passes managed credentials and node identity without writing them to discovery", () => {
+    const config = workflowMcpLaunchConfig("C:/app/mcp-bridge.json", "wf-1", {
+      cwd: process.cwd(),
+      mainBundlePath: path.join(process.cwd(), "missing", "index.js"),
+      serverScriptPath: path.join(process.cwd(), "src", "automation", "engine", "mcp", "server.ts"),
+      runId: "run-1",
+      nodeId: "node-1",
+      managedToken: "managed-token",
+    });
+
+    expect(config?.env).toMatchObject({
+      AGENT_RECALL_WORKFLOW_RUN_ID: "run-1",
+      AGENT_RECALL_WORKFLOW_NODE_ID: "node-1",
+      AGENT_RECALL_WORKFLOW_MCP_TOKEN: "managed-token",
+    });
+  });
 });

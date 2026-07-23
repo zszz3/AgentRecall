@@ -147,6 +147,7 @@ export class NativeAutomationService {
       bundledSkillsRoot: this.paths.bundledSkillsPath,
     });
     this.hubInstance.setWorkflowMcpDiscoveryPath(this.bridge.discoveryPath);
+    this.hubInstance.setWorkflowMcpManagedToken(this.bridge.token);
     await this.hubInstance.initialize();
     void this.teamChatsInstance.connect().catch(() => undefined);
     void this.hubInstance.refreshDiscoverableModelCatalogs().catch((error) => {

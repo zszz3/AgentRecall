@@ -11,7 +11,7 @@ export interface WorkflowMcpLaunchConfig {
 export function workflowMcpLaunchConfig(
   discoveryPath: string | undefined,
   workflowId: string | undefined,
-  options: { mainBundlePath?: string; cwd?: string; serverScriptPath?: string; runId?: string; nodeId?: string } = {},
+  options: { mainBundlePath?: string; cwd?: string; serverScriptPath?: string; runId?: string; nodeId?: string; managedToken?: string } = {},
 ): WorkflowMcpLaunchConfig | undefined {
   if (!discoveryPath || !workflowId) return undefined;
   const mainBundlePath = options.mainBundlePath ?? fileURLToPath(import.meta.url);
@@ -29,6 +29,7 @@ export function workflowMcpLaunchConfig(
         AGENT_RECALL_WORKFLOW_ID: workflowId,
         ...(options.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: options.runId } : {}),
         ...(options.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: options.nodeId } : {}),
+        ...(options.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: options.managedToken } : {}),
         ELECTRON_RUN_AS_NODE: "1",
       },
     };
@@ -49,6 +50,7 @@ export function workflowMcpLaunchConfig(
       AGENT_RECALL_WORKFLOW_ID: workflowId,
       ...(options.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: options.runId } : {}),
       ...(options.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: options.nodeId } : {}),
+      ...(options.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: options.managedToken } : {}),
       ELECTRON_RUN_AS_NODE: "1",
     },
   };

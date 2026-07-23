@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { runtimeDefinition } from "../../shared/runtime-catalog";
 import { AgentHub } from "../hub/agent-hub";
 import { startMcpBridge, type McpBridgeServer } from "./mcp-bridge";
@@ -40,12 +40,114 @@ describe("MCP bridge", () => {
     expect(bridge.host).toBe("127.0.0.1");
     expect(bridge.port).toBeGreaterThan(0);
     expect(bridge.token).toHaveLength(64);
+    expect(bridge.readToken).toHaveLength(64);
+    expect(bridge.readToken).not.toBe(bridge.token);
     const discovery = JSON.parse(await readFile(discoveryPath, "utf8")) as any;
     expect(discovery).toMatchObject({
       host: "127.0.0.1",
       port: bridge.port,
-      token: bridge.token,
+      token: bridge.readToken,
     });
+    expect(JSON.stringify(discovery)).not.toContain(bridge.token);
+  });
+
+  test("allows discovery clients to read but rejects workflow writes", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-mcp-read-only-"));
+    bridge = await startMcpBridge(new AgentHub(), { discoveryPath: path.join(dir, "bridge.json") });
+
+    const read = await bridgeRequest("/mcp/workflow/list", bridge.readToken, {});
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({ ok: true });
+
+    const write = await bridgeRequest("/mcp/workflow/update", bridge.readToken, { workflowId: "wf-1" });
+    expect(write.status).toBe(403);
+    expect(await write.json()).toEqual({
+      ok: false,
+      error: {
+        code: "READ_ONLY_CLIENT",
+        message: "This MCP client has read-only access.",
+      },
+    });
+  });
+
+  test("routes managed lifecycle commands and projects runs for read-only clients", async () => {
+    const run = {
+      runId: "run-1",
+      workflowId: "wf-1",
+      status: "waiting_for_user",
+      triggerSource: "mcp",
+      workflowV2Plan: { definition: { graphVersion: 3 } },
+      progress: [{ nodeId: "approve", title: "Approve", status: "awaiting_input", inputRequest: { kind: "agent_message", prompt: "Approve?" } }],
+      events: [],
+      contextDocument: "",
+      startedAt: 10,
+      finishedAt: undefined,
+      lastError: undefined,
+    };
+    const hub = {
+      snapshot: vi.fn(() => ({
+        workflowStore: {
+          workflows: [{ workflowId: "wf-1", revision: 3 }],
+          runs: [run],
+        },
+      })),
+      confirmWorkflow: vi.fn(() => ({ ok: true, workflowId: "wf-1", revision: 3 })),
+      runWorkflow: vi.fn(() => ({ ok: true, workflowId: "wf-1", runId: "run-2", revision: 3 })),
+      stopWorkflowRun: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
+      resolveWorkflowV2Intervention: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
+      submitWorkflowScriptInput: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
+      listWorkflowOutputs: vi.fn(async () => [{ name: "report.md", path: "C:/private/workflow/report.md" }]),
+    } as unknown as AgentHub;
+    const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-mcp-lifecycle-"));
+    bridge = await startMcpBridge(hub, { discoveryPath: path.join(dir, "bridge.json") });
+
+    const listed = await bridgeRequest("/mcp/workflow/run/list", bridge.readToken, { workflowId: "wf-1" });
+    expect(await listed.json()).toEqual({ ok: true, data: { runs: [expect.objectContaining({ runId: "run-1", status: "waiting_for_user", graphVersion: 3 })] } });
+
+    const detail = await bridgeRequest("/mcp/workflow/run/get", bridge.readToken, { workflowId: "wf-1", runId: "run-1" });
+    expect(await detail.json()).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        run: expect.objectContaining({ runId: "run-1" }),
+        pendingActions: [expect.objectContaining({ nodeId: "approve", kind: "agent_message" })],
+      }),
+    });
+
+    const confirmed = await bridgeRequest("/mcp/workflow/confirm", bridge.token, { workflowId: "wf-1", expectedRevision: 3 });
+    expect(await confirmed.json()).toEqual({ ok: true, data: { workflowId: "wf-1", revision: 3 } });
+
+    const started = await bridgeRequest("/mcp/workflow/run", bridge.token, { workflowId: "wf-1", expectedRevision: 3 });
+    expect(await started.json()).toEqual({ ok: true, data: { workflowId: "wf-1", runId: "run-2", revision: 3 } });
+    expect(hub.runWorkflow).toHaveBeenCalledWith({ workflowId: "wf-1", triggerSource: "mcp" });
+
+    const outputs = await bridgeRequest("/mcp/workflow/outputs/list", bridge.readToken, { workflowId: "wf-1", runId: "run-1" });
+    expect(JSON.stringify(await outputs.json())).not.toContain("C:/private");
+
+    const wrongNode = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "missing", summary: "Done", outputs: {}, proposals: [],
+    });
+    expect(await wrongNode.json()).toEqual({
+      ok: false,
+      error: { code: "NODE_NOT_FOUND", message: "Workflow node missing was not found in run run-1." },
+    });
+
+    const completion = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [],
+    });
+    expect(await completion.json()).toEqual({
+      ok: true,
+      data: { output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
+    });
+
+    expect(await (await bridgeRequest("/mcp/workflow/intervention/resolve", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", action: "continue",
+    })).json()).toMatchObject({ ok: true });
+    expect(await (await bridgeRequest("/mcp/workflow/script-input/submit", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", values: { approved: true },
+    })).json()).toMatchObject({ ok: true });
+    expect(await (await bridgeRequest("/mcp/workflow/run/stop", bridge.token, {
+      workflowId: "wf-1", runId: "run-1",
+    })).json()).toMatchObject({ ok: true });
   });
 
   test("registers an artifact for a validated file via the bridge", async () => {

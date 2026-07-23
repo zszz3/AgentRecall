@@ -21,6 +21,7 @@ function fixture() {
     ensureBundledWorkflows: vi.fn(() => { calls.push("bundled"); }),
     setMcpServers: vi.fn(() => { calls.push("mcp"); }),
     setWorkflowMcpDiscoveryPath: vi.fn(() => { calls.push("discovery"); }),
+    setWorkflowMcpManagedToken: vi.fn(() => { calls.push("managed-token"); }),
     initialize: vi.fn(async () => { calls.push("runtime"); }),
     refreshDiscoverableModelCatalogs: vi.fn(async () => undefined),
     snapshot: vi.fn(() => current),
@@ -68,6 +69,7 @@ function fixture() {
         host: "127.0.0.1",
         port: 2,
         token: "test-token",
+        readToken: "read-token",
         discoveryPath: "/user-data/automation-mcp-bridge.json",
         stop: async () => { calls.push("bridge-stop"); },
       })),
@@ -77,15 +79,24 @@ function fixture() {
 }
 
 describe("NativeAutomationService", () => {
+  it("keeps the managed MCP write token inside the native runtime", async () => {
+    const { service, hub } = fixture();
+
+    await service.initialize();
+
+    expect(hub.setWorkflowMcpManagedToken).toHaveBeenCalledWith("test-token");
+  });
+
   it("initializes the native engine once in dependency order", async () => {
     const { service, calls, hub, teamChats } = fixture();
 
     await Promise.all([service.initialize(), service.initialize()]);
 
-    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "runtime", "team-chat-start"]);
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "managed-token", "runtime", "team-chat-start"]);
     expect(teamChats.connect).toHaveBeenCalledTimes(1);
     expect(hub.loadModelChannels).toHaveBeenCalledWith("/user-data/runtime-channels.json");
     expect(hub.loadPersistedState).toHaveBeenCalledWith("/user-data/automation.db");
+    expect(hub.setWorkflowMcpManagedToken).toHaveBeenCalledWith("test-token");
     expect(service.health()).toEqual({ state: "ready" });
   });
 

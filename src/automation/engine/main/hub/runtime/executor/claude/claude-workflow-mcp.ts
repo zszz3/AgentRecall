@@ -6,8 +6,9 @@ export function claudeWorkflowMcpServers(
   workflowId: string | undefined,
   runId?: string,
   nodeId?: string,
+  managedToken?: string,
 ): ClaudeAgentSdkRunInput["mcpServers"] | undefined {
-  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId });
+  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId, managedToken });
   if (!config) return undefined;
   return { agent_recall: { type: "stdio", ...config } };
 }

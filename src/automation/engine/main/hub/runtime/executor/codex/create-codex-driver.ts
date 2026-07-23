@@ -20,7 +20,7 @@ import { CodexAgentExecutor } from "./codex-executor";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
 import { runCodexChannelTest } from "./codex-test";
 import { runCodexWorkflow } from "./codex-workflow";
-import { codexWorkflowMcpArgs } from "./codex-workflow-mcp";
+import { codexWorkflowMcpConfig } from "./codex-workflow-mcp";
 import { codexMcpLaunchConfig } from "../runtime-mcp";
 
 export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
@@ -40,6 +40,7 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
         createCodexClient: ({ context: sessionContext, onEvent, onExit }) => {
           const channel = options.channelById(sessionContext.channelId);
           const mcp = codexMcpLaunchConfig(options.mcpServersForAgent?.(sessionContext.configuredAgentId) ?? []);
+          const workflowMcp = codexWorkflowMcpConfig(options.workflowMcpDiscoveryPath?.(), sessionContext.planningWorkflowId, sessionContext.workflowRunId, sessionContext.workflowNodeId, options.workflowMcpManagedToken?.());
           let client: CodexRpcClient;
           client = new CodexRpcClient({
             executable: sessionContext.runtime.command || options.executables.codex,
@@ -50,10 +51,10 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
                 modelFromRuntimeConfig(sessionContext.runtimeConfig),
                 reasoningEffortFromRuntimeConfig(sessionContext.runtimeConfig),
               ),
-              ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), sessionContext.planningWorkflowId, sessionContext.workflowRunId, sessionContext.workflowNodeId),
+              ...workflowMcp.args,
               ...mcp.args,
             ],
-            env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
+            env: { ...codexEnvironmentForChannel(channel), ...mcp.env, ...workflowMcp.env },
             onEvent,
             onRequest: (id, method, params) => {
               respondToCodexRuntimeServerRequest(client, id, method, params, options.requestApproval ? {
