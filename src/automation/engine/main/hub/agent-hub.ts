@@ -479,7 +479,19 @@ export class AgentHub {
       stopTask: (taskId) => this.stopTask(taskId),
       deleteTask: (taskId, options) => this.deleteTask(taskId, options),
       executeWorkflowV2Script: (input) => executeWorkflowV2Script(input),
-      startWorkflowNodeConversation: (input) => this.workflowNodeConversations.start(input),
+      startWorkflowNodeConversation: (input) => {
+        const resolved = this.resolveConfiguredAgent(input.configuredAgentId, input.modelId);
+        return this.workflowNodeConversations.start({
+          ...input,
+          ...(resolved?.runtimeAgentId ? { runtimeId: resolved.runtimeAgentId } : {}),
+          ...(resolved?.channel.id ? { channelId: resolved.channel.id } : {}),
+          ...(resolved?.channel.apiFormat === "anthropic" || resolved?.runtimeAgentId === "claude"
+            ? { provider: "anthropic" }
+            : resolved?.channel.apiFormat?.startsWith("openai")
+              ? { provider: "openai" }
+              : {}),
+        });
+      },
       markWorkflowNodeConversationWaiting: (conversationId, question) => this.workflowNodeConversations.markWaitingForUser(conversationId, question),
       stopWorkflowNodeConversations: (workflowId, runId) => this.workflowNodeConversations.stopRun(workflowId, runId),
       createWorkflowV2Store: () => this.storagePath

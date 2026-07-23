@@ -1,5 +1,6 @@
 import type { AgentEvent, ChatEvent, RuntimeConversation } from "../types";
 import type { WorkflowV2WorkerOutput } from "./packets";
+import type { WorkflowRunNodeTelemetry } from "../workflow/run";
 
 export type WorkflowNodeConversationStatus =
   | "starting"
@@ -35,6 +36,7 @@ export interface WorkflowNodeConversation {
   modelId: string;
   workDir: string;
   runtimeConversation?: RuntimeConversation;
+  telemetry?: WorkflowRunNodeTelemetry;
   status: WorkflowNodeConversationStatus;
   messages: WorkflowNodeMessage[];
   completionProposal?: WorkflowNodeCompletionProposal;

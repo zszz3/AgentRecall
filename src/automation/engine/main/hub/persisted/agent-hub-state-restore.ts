@@ -238,5 +238,7 @@ export function restoreTaskState(raw: unknown, deps: RestoreTaskStateDeps): Task
     record.runtimeConversation === undefined ? undefined : deps.restoreRuntimeConversation(record.runtimeConversation);
   if (record.runtimeConversation !== undefined && !restoredRuntimeConversation) return null;
   task.runtimeConversation = restoredRuntimeConversation ? deps.cloneRuntimeConversation(restoredRuntimeConversation) : undefined;
+  const usage = record.usage;
+  if (usage && typeof usage === "object") task.usage = structuredClone(usage) as TaskState["usage"];
   return task;
 }

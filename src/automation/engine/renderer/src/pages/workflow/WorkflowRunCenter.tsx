@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CalendarClock, CheckCircle2, ChevronRight, CircleAlert, CircleStop, Clock3, GitBranch, History, MessageSquareText, X } from "lucide-react";
 import type { WorkflowRunState, WorkflowStatus } from "../../../../shared/types";
+import type { WorkflowRunNodeTelemetry } from "../../../../shared/workflow/run";
 import type { WorkflowNodeConversation } from "../../../../shared/workflow-v2/conversation";
 
 interface WorkflowRunCenterProps {
@@ -38,6 +39,22 @@ function formatDuration(run: WorkflowRunState): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${minutes}m ${remainder}s`;
+}
+
+function formatNodeDuration(telemetry: WorkflowRunNodeTelemetry | undefined): string {
+  if (!telemetry) return "—";
+  const end = telemetry.finishedAt ?? Date.now();
+  const seconds = Math.max(0, Math.round((end - telemetry.startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function formatMetric(value: number | undefined): string {
+  return value === undefined ? "—" : value.toLocaleString();
+}
+
+function formatCost(telemetry: WorkflowRunNodeTelemetry | undefined, language: "en" | "zh"): string {
+  return telemetry?.estimatedCost === undefined ? (language === "zh" ? "未提供" : "Not provided") : `$${telemetry.estimatedCost.toFixed(3)}`;
 }
 
 function statusLabel(status: WorkflowStatus, language: "en" | "zh"): string {
@@ -102,8 +119,8 @@ export function WorkflowRunCenter({ runs, conversations = [], open, selectedRunI
   if (!open) return null;
 
   const labels = language === "zh"
-    ? { title: "运行历史", close: "关闭运行历史", empty: "还没有运行记录", choose: "选择一条运行记录查看详情", back: "返回运行列表", detail: "运行详情", timeline: "节点时间线", messages: "消息历史", config: "冻结配置", graph: "图版本", started: "开始", duration: "耗时", approvedBy: "确认人", nodes: "节点", noEvents: "暂无事件记录", notStarted: "未开始" }
-    : { title: "Run history", close: "Close run history", empty: "No runs yet", choose: "Select a run to view its details", back: "Back to run list", detail: "Run details", timeline: "Node timeline", messages: "Message history", config: "Frozen configuration", graph: "Graph version", started: "Started", duration: "Duration", approvedBy: "Approved by", nodes: "Nodes", noEvents: "No events recorded", notStarted: "Not started" };
+    ? { title: "运行历史", close: "关闭运行历史", empty: "还没有运行记录", choose: "选择一条运行记录查看详情", back: "返回运行列表", detail: "运行详情", timeline: "节点时间线", messages: "消息历史", config: "冻结配置", graph: "图版本", started: "开始", duration: "耗时", approvedBy: "确认人", nodes: "节点", noEvents: "暂无事件记录", notStarted: "未开始", runtime: "Runtime", channel: "Channel", model: "模型", attempts: "尝试次数", executionDetails: "执行明细", tokenUsage: "Token 用量", provider: "计量风格", inputTokens: "输入 tokens", outputTokens: "输出 tokens", reasoningTokens: "推理 tokens", cachedInput: "缓存输入（OpenAI）", cacheRead: "缓存读取（Anthropic）", cacheWrite: "缓存写入（Anthropic）", cacheWrite5m: "缓存写入 · 5 分钟", cacheWrite1h: "缓存写入 · 1 小时", totalTokens: "总 tokens", cost: "成本" }
+    : { title: "Run history", close: "Close run history", empty: "No runs yet", choose: "Select a run to view its details", back: "Back to run list", detail: "Run details", timeline: "Node timeline", messages: "Message history", config: "Frozen configuration", graph: "Graph version", started: "Started", duration: "Duration", approvedBy: "Approved by", nodes: "Nodes", noEvents: "No events recorded", notStarted: "Not started", runtime: "Runtime", channel: "Channel", model: "Model", attempts: "Attempts", executionDetails: "Execution details", tokenUsage: "Token usage", provider: "Accounting style", inputTokens: "Input tokens", outputTokens: "Output tokens", reasoningTokens: "Reasoning tokens", cachedInput: "Cached input (OpenAI)", cacheRead: "Cache read (Anthropic)", cacheWrite: "Cache write (Anthropic)", cacheWrite5m: "Cache write · 5 min", cacheWrite1h: "Cache write · 1 hour", totalTokens: "Total tokens", cost: "Cost" };
 
   return (
     <div className="workflow-run-center-backdrop" role="presentation" onClick={onClose}>
@@ -150,6 +167,7 @@ export function WorkflowRunCenter({ runs, conversations = [], open, selectedRunI
                       const eventError = [...events].reverse().find((event) => event.error)?.error;
                       const conversation = conversations.find((item) => item.runId === selectedRun.runId && item.nodeId === node.nodeId);
                       const messages = conversation?.messages.length ? conversation.messages : progress?.messages ?? [];
+                      const telemetry = progress?.telemetry ?? conversation?.telemetry;
                       return (
                         <article key={node.nodeId} className={`workflow-run-center-node ${progress ? `is-${progress.status}` : ""}`}>
                           <div className="workflow-run-center-node-head">
@@ -157,6 +175,32 @@ export function WorkflowRunCenter({ runs, conversations = [], open, selectedRunI
                             <strong>{node.title}</strong>
                             <small>{node.execModel} · {node.modelId ?? node.modelProfile}</small>
                           </div>
+                          <details className="workflow-run-center-node-telemetry">
+                            <summary><span>{labels.executionDetails}</span><em>{telemetry?.attempt ?? "—"} · {formatNodeDuration(telemetry)}</em></summary>
+                            <div className="workflow-run-center-node-telemetry-grid">
+                              <span><b>{labels.runtime}</b>{telemetry?.runtimeId ?? "—"}</span>
+                              <span><b>{labels.channel}</b>{telemetry?.channelId ?? "—"}</span>
+                              <span><b>{labels.model}</b>{telemetry?.modelId ?? node.modelId ?? node.modelProfile ?? "—"}</span>
+                              <span><b>{labels.attempts}</b>{telemetry?.attempt ?? "—"}</span>
+                              <span><b>{labels.duration}</b>{formatNodeDuration(telemetry)}</span>
+                              <span><b>{labels.cost}</b>{formatCost(telemetry, language)}</span>
+                            </div>
+                            <div className="workflow-run-center-node-token-usage">
+                              <strong>{labels.tokenUsage}</strong>
+                              <span className="workflow-run-center-node-token-provider">{labels.provider}: {telemetry?.provider ?? "—"}</span>
+                              <div className="workflow-run-center-node-telemetry-grid">
+                                <span><b>{labels.inputTokens}</b>{formatMetric(telemetry?.inputTokens)}</span>
+                                <span><b>{labels.outputTokens}</b>{formatMetric(telemetry?.outputTokens)}</span>
+                                <span><b>{labels.reasoningTokens}</b>{formatMetric(telemetry?.reasoningTokens)}</span>
+                                <span><b>{labels.cachedInput}</b>{telemetry?.provider === "openai" ? formatMetric(telemetry.cacheReadInputTokens) : "—"}</span>
+                                <span><b>{labels.cacheRead}</b>{telemetry?.provider === "anthropic" ? formatMetric(telemetry.cacheReadInputTokens) : "—"}</span>
+                                <span><b>{labels.cacheWrite}</b>{telemetry?.provider === "anthropic" ? formatMetric(telemetry.cacheWriteInputTokens) : "—"}</span>
+                                <span><b>{labels.cacheWrite5m}</b>{telemetry?.provider === "anthropic" ? formatMetric(telemetry.cacheWrite5mInputTokens) : "—"}</span>
+                                <span><b>{labels.cacheWrite1h}</b>{telemetry?.provider === "anthropic" ? formatMetric(telemetry.cacheWrite1hInputTokens) : "—"}</span>
+                                <span><b>{labels.totalTokens}</b>{formatMetric(telemetry?.totalTokens)}</span>
+                              </div>
+                            </div>
+                          </details>
                           {progress?.detail ? <p>{progress.detail}</p> : null}
                           {eventError ? <p className="is-error">{eventError}</p> : null}
                           {events.length > 0 ? (

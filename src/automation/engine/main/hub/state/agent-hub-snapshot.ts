@@ -64,6 +64,7 @@ export function serializeTask(input: {
     progress: task.progress,
     running: task.running,
     ...(task.runtimeConversation ? { runtimeConversation: cloneConversation(task.runtimeConversation) } : {}),
+    ...(task.usage ? { usage: { ...task.usage } } : {}),
     messages: task.messages.map((message) => serializeMessage(message)),
     pendingAssistantMessageId: task.pendingAssistantMessageId,
     lastError: task.lastError,

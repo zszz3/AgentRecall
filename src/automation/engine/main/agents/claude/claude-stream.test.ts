@@ -34,6 +34,35 @@ describe("normalizeClaudeStreamEvent", () => {
     ]);
   });
 
+  test("normalizes Anthropic result usage including cache tiers", () => {
+    const events = normalizeClaudeStreamEvent({
+      type: "result",
+      result: "Final answer",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 60,
+        cache_creation: { ephemeral_5m_input_tokens: 40, ephemeral_1h_input_tokens: 20 },
+      },
+      modelUsage: { "claude-sonnet": { costUSD: 0.123 } },
+    });
+
+    expect(events[0]).toEqual({
+      type: "usage",
+      usage: {
+        provider: "anthropic",
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadInputTokens: 30,
+        cacheWriteInputTokens: 60,
+        cacheWrite5mInputTokens: 40,
+        cacheWrite1hInputTokens: 20,
+        estimatedCost: 0.123,
+      },
+    });
+  });
+
   test("emits only new text when Claude partial messages are snapshots", () => {
     const state = createClaudeStreamState();
 

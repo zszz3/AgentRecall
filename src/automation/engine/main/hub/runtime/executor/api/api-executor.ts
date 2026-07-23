@@ -1,4 +1,4 @@
-import { apiRequestBody, apiRequestUrl, extractApiContent, resolveApiModel } from "./api-protocol";
+import { apiRequestBody, apiRequestUrl, extractApiContent, extractApiUsage, resolveApiModel } from "./api-protocol";
 import type {
   AgentExecutionContext,
   AgentExecutor,
@@ -53,7 +53,9 @@ export class ApiAgentExecutor implements AgentExecutor {
       }
 
       const content = extractApiContent(channel, text);
+      const usage = extractApiUsage(channel, text);
       this.context.emit({ type: "delta", content });
+      if (usage) this.context.emit({ type: "usage", usage });
       this.context.emit({ type: "completed", content });
       this.context.onExit(0);
     } catch (error) {
