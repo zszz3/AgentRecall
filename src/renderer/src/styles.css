@@ -540,10 +540,11 @@ select:focus-visible {
 .stats-token-popover::after {
   content: "";
   position: absolute;
-  right: 30px;
+  left: var(--stats-popover-arrow-left, calc(100% - 35px));
   top: -6px;
   width: 10px;
   height: 10px;
+  margin-left: -5px;
   border-left: 1px solid var(--border-subtle);
   border-top: 1px solid var(--border-subtle);
   background: var(--panel-bg);

@@ -2760,7 +2760,7 @@ function UsageTokenMetric({
   tokensLabel: string;
 }): ReactElement {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; arrowLeft: number } | null>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const interactive = period !== "allTime";
@@ -2783,9 +2783,12 @@ function UsageTokenMetric({
     const rect = anchorRef.current?.getBoundingClientRect();
     if (rect) {
       const popoverWidth = 280;
-      const left = Math.max(8, Math.min(window.innerWidth - popoverWidth - 8, rect.right - popoverWidth));
+      const anchorCenter = rect.left + rect.width / 2;
+      const desiredLeft = anchorCenter - (popoverWidth - 40);
+      const left = Math.max(8, Math.min(window.innerWidth - popoverWidth - 8, desiredLeft));
       const top = rect.bottom + 8;
-      setPosition({ top, left });
+      const arrowLeft = Math.max(14, Math.min(popoverWidth - 14, anchorCenter - left));
+      setPosition({ top, left, arrowLeft });
     }
     onEnsureTrend();
     setOpen(true);
@@ -2850,7 +2853,7 @@ function UsageTokenTrendPopover({
   loading: boolean;
   period: SessionStatsPeriod;
   language: LanguageMode;
-  position: { top: number; left: number };
+  position: { top: number; left: number; arrowLeft: number };
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }): ReactElement {
@@ -2924,7 +2927,11 @@ function UsageTokenTrendPopover({
     <div
       className="stats-token-popover"
       role="tooltip"
-      style={{ top: `${position.top}px`, left: `${position.left}px` }}
+      style={{
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        ["--stats-popover-arrow-left" as string]: `${position.arrowLeft}px`,
+      } as CSSProperties}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
