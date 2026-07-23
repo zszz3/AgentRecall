@@ -100,6 +100,29 @@ const artifactsSchema = {
   },
 };
 
+const workflowProposalSchema = {
+  oneOf: [
+    objectSchema({
+      kind: { type: "string", const: "continue" },
+      reason: { type: "string", minLength: 1 },
+      targetNodeIds: { type: "array", items: { type: "string", minLength: 1 } },
+    }, ["kind", "reason"]),
+    objectSchema({
+      kind: { type: "string", const: "retry" },
+      reason: { type: "string", minLength: 1 },
+      targetNodeId: { type: "string", minLength: 1 },
+    }, ["kind", "reason"]),
+    objectSchema({
+      kind: { type: "string", const: "escalate" },
+      reason: { type: "string", minLength: 1 },
+    }, ["kind", "reason"]),
+    objectSchema({
+      kind: { type: "string", const: "graph-revision" },
+      reason: { type: "string", minLength: 1 },
+    }, ["kind", "reason"]),
+  ],
+};
+
 const READ_ONLY_TOOL_NAMES = new Set([
   "agent_templates_list",
   "skill_templates_list",
@@ -285,9 +308,9 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
       description: "List workflow runs with optional workflow and status filters.",
       inputSchema: objectSchema({
         workflowId: { type: "string" },
-        status: { type: "string" },
-        startedAfter: { type: "number" },
-        startedBefore: { type: "number" },
+        status: { type: "string", enum: ["draft", "running", "waiting_for_user", "completed", "failed", "stopped"] },
+        startedAfter: { type: "number", minimum: 0 },
+        startedBefore: { type: "number", minimum: 0 },
       }),
     },
     {
@@ -348,7 +371,7 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
         evidence: { type: "array", items: { type: "string" } },
         risks: { type: "array", items: { type: "string" } },
         nextStepSuggestions: { type: "array", items: { type: "string" } },
-        proposals: { type: "array" },
+        proposals: { type: "array", items: workflowProposalSchema },
       }, ["nodeId", "summary", "outputs", "proposals"]),
     });
   }

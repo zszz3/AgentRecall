@@ -40,7 +40,13 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
         createCodexClient: ({ context: sessionContext, onEvent, onExit }) => {
           const channel = options.channelById(sessionContext.channelId);
           const mcp = codexMcpLaunchConfig(options.mcpServersForAgent?.(sessionContext.configuredAgentId) ?? []);
-          const workflowMcp = codexWorkflowMcpConfig(options.workflowMcpDiscoveryPath?.(), sessionContext.planningWorkflowId, sessionContext.workflowRunId, sessionContext.workflowNodeId, options.workflowMcpManagedToken?.());
+          const workflowMcp = codexWorkflowMcpConfig({
+            discoveryPath: options.workflowMcpDiscoveryPath?.(),
+            workflowId: sessionContext.planningWorkflowId,
+            runId: sessionContext.workflowRunId,
+            nodeId: sessionContext.workflowNodeId,
+            managedToken: options.workflowMcpManagedToken?.(),
+          });
           let client: CodexRpcClient;
           client = new CodexRpcClient({
             executable: sessionContext.runtime.command || options.executables.codex,

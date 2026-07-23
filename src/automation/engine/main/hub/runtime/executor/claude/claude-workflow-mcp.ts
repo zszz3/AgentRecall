@@ -1,14 +1,10 @@
 import type { ClaudeAgentSdkRunInput } from "../../../../agents/claude/claude-agent-sdk";
-import { workflowMcpLaunchConfig } from "../workflow/workflow-mcp-launch";
+import { workflowMcpLaunchConfig, type WorkflowMcpBinding } from "../workflow/workflow-mcp-launch";
 
 export function claudeWorkflowMcpServers(
-  discoveryPath: string | undefined,
-  workflowId: string | undefined,
-  runId?: string,
-  nodeId?: string,
-  managedToken?: string,
+  binding: WorkflowMcpBinding,
 ): ClaudeAgentSdkRunInput["mcpServers"] | undefined {
-  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId, managedToken });
+  const config = workflowMcpLaunchConfig(binding);
   if (!config) return undefined;
   return { agent_recall: { type: "stdio", ...config } };
 }

@@ -8,12 +8,18 @@ import { callMcpTool, mcpToolDefinitions, resolveBridgeDiscoveryPath } from "./s
 
 const originalEnv = process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
 const originalManagedToken = process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
+const originalRunId = process.env.AGENT_RECALL_WORKFLOW_RUN_ID;
+const originalNodeId = process.env.AGENT_RECALL_WORKFLOW_NODE_ID;
 describe("MCP server tools", () => {
   afterEach(() => {
     if (originalEnv === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
     else process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE = originalEnv;
     if (originalManagedToken === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
     else process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = originalManagedToken;
+    if (originalRunId === undefined) delete process.env.AGENT_RECALL_WORKFLOW_RUN_ID;
+    else process.env.AGENT_RECALL_WORKFLOW_RUN_ID = originalRunId;
+    if (originalNodeId === undefined) delete process.env.AGENT_RECALL_WORKFLOW_NODE_ID;
+    else process.env.AGENT_RECALL_WORKFLOW_NODE_ID = originalNodeId;
     vi.restoreAllMocks();
   });
 
@@ -45,6 +51,22 @@ describe("MCP server tools", () => {
       "workflow_intervention_resolve",
       "workflow_script_input_submit",
     ]));
+  });
+
+  test("publishes strict lifecycle filter and completion schemas", () => {
+    process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = "managed-token";
+    process.env.AGENT_RECALL_WORKFLOW_RUN_ID = "run-1";
+    process.env.AGENT_RECALL_WORKFLOW_NODE_ID = "node-1";
+    const tools = mcpToolDefinitions();
+    const runList = tools.find((tool) => tool.name === "workflow_run_list")!;
+    const runProperties = runList.inputSchema.properties as Record<string, any>;
+    expect(runProperties.status.enum).toEqual(["draft", "running", "waiting_for_user", "completed", "failed", "stopped"]);
+    expect(runProperties.startedAfter.minimum).toBe(0);
+    expect(runProperties.startedBefore.minimum).toBe(0);
+
+    const completion = tools.find((tool) => tool.name === "workflow_node_complete")!;
+    const proposals = (completion.inputSchema.properties as Record<string, any>).proposals;
+    expect(proposals.items.oneOf).toHaveLength(4);
   });
 
   test("derives runtime enums from the canonical runtime catalog", () => {

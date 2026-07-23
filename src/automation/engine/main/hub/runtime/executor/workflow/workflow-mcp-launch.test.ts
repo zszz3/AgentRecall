@@ -7,7 +7,10 @@ import { workflowMcpLaunchConfig } from "./workflow-mcp-launch";
 describe("workflowMcpLaunchConfig", () => {
   test("builds a development stdio server scoped to one workflow", () => {
     const serverScriptPath = path.join(process.cwd(), "src", "automation", "engine", "mcp", "server.ts");
-    const config = workflowMcpLaunchConfig("C:/app/mcp-bridge.json", "wf-1", {
+    const config = workflowMcpLaunchConfig({
+      discoveryPath: "C:/app/mcp-bridge.json",
+      workflowId: "wf-1",
+    }, {
       cwd: process.cwd(),
       mainBundlePath: path.join(process.cwd(), "missing", "index.js"),
       serverScriptPath,
@@ -28,22 +31,25 @@ describe("workflowMcpLaunchConfig", () => {
     const mainBundlePath = path.join(dir, "index.js");
     const serverPath = path.join(dir, "mcp-server.js");
     await writeFile(serverPath, "", "utf8");
-    const config = workflowMcpLaunchConfig("C:/app/mcp-bridge.json", "wf-2", { mainBundlePath });
+    const config = workflowMcpLaunchConfig({ discoveryPath: "C:/app/mcp-bridge.json", workflowId: "wf-2" }, { mainBundlePath });
     expect(config?.args).toEqual([serverPath]);
   });
 
   test("does not expose workflow tools outside a planning workflow", () => {
-    expect(workflowMcpLaunchConfig("C:/app/mcp-bridge.json", undefined)).toBeUndefined();
+    expect(workflowMcpLaunchConfig({ discoveryPath: "C:/app/mcp-bridge.json" })).toBeUndefined();
   });
 
   test("passes managed credentials and node identity without writing them to discovery", () => {
-    const config = workflowMcpLaunchConfig("C:/app/mcp-bridge.json", "wf-1", {
-      cwd: process.cwd(),
-      mainBundlePath: path.join(process.cwd(), "missing", "index.js"),
-      serverScriptPath: path.join(process.cwd(), "src", "automation", "engine", "mcp", "server.ts"),
+    const config = workflowMcpLaunchConfig({
+      discoveryPath: "C:/app/mcp-bridge.json",
+      workflowId: "wf-1",
       runId: "run-1",
       nodeId: "node-1",
       managedToken: "managed-token",
+    }, {
+      cwd: process.cwd(),
+      mainBundlePath: path.join(process.cwd(), "missing", "index.js"),
+      serverScriptPath: path.join(process.cwd(), "src", "automation", "engine", "mcp", "server.ts"),
     });
 
     expect(config?.env).toMatchObject({

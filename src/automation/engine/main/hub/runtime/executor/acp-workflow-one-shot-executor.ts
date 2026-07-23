@@ -24,6 +24,7 @@ interface AcpWorkflowOneShotOptions {
 
 export class AcpWorkflowOneShotExecutor implements AgentExecutor {
   private client: AcpOneShotClient | undefined;
+  private detachPromise: Promise<unknown | undefined> | undefined;
 
   constructor(
     private readonly context: AgentExecutionContext,
@@ -43,6 +44,7 @@ export class AcpWorkflowOneShotExecutor implements AgentExecutor {
       ...(this.options.requestApproval ? { requestApproval: this.options.requestApproval } : {}),
     });
     this.client = client;
+    this.detachPromise = undefined;
     try {
       await client.attach();
       await client.prompt(promptWithDeveloperInstructions(this.context.prompt, this.context.developerInstructions));
@@ -52,14 +54,40 @@ export class AcpWorkflowOneShotExecutor implements AgentExecutor {
       this.context.onExit(null);
       throw error;
     } finally {
-      await client.detach();
-      this.client = undefined;
+      await this.detachWithReporting(client);
+      if (this.client === client) this.client = undefined;
     }
   }
 
   async stop(): Promise<void> {
-    await this.client?.interrupt();
-    await this.client?.detach();
-    this.client = undefined;
+    const client = this.client;
+    if (!client) return;
+    let interruptError: unknown;
+    try {
+      await client.interrupt();
+    } catch (error) {
+      interruptError = error;
+    }
+    const detachError = await this.detachWithReporting(client);
+    if (this.client === client) this.client = undefined;
+    if (interruptError) throw interruptError;
+    if (detachError) throw detachError;
+  }
+
+  private detachWithReporting(client: AcpOneShotClient): Promise<unknown | undefined> {
+    if (this.detachPromise) return this.detachPromise;
+    this.detachPromise = (async () => {
+      try {
+        await client.detach();
+        return undefined;
+      } catch (error) {
+        this.context.emit({
+          type: "system",
+          content: `ACP one-shot cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        return error;
+      }
+    })();
+    return this.detachPromise;
   }
 }

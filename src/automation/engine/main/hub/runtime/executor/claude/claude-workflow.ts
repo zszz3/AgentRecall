@@ -29,7 +29,11 @@ export async function runClaudeWorkflow(
   let errorMessage: string | undefined;
   const mcpServers = {
     ...claudeMcpServers(input.configuredAgentId ? options.mcpServersForAgent?.(input.configuredAgentId) ?? [] : []),
-    ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), input.planningWorkflowId, undefined, undefined, options.workflowMcpManagedToken?.()),
+    ...claudeWorkflowMcpServers({
+      discoveryPath: options.workflowMcpDiscoveryPath?.(),
+      workflowId: input.planningWorkflowId,
+      managedToken: options.workflowMcpManagedToken?.(),
+    }),
   };
   const abortController = new AbortController();
   const abort = () => abortController.abort(input.signal?.reason);

@@ -8,11 +8,25 @@ export interface WorkflowMcpLaunchConfig {
   env: Record<string, string>;
 }
 
+export interface WorkflowMcpBinding {
+  discoveryPath?: string;
+  workflowId?: string;
+  runId?: string;
+  nodeId?: string;
+  managedToken?: string;
+}
+
+interface WorkflowMcpLaunchOptions {
+  mainBundlePath?: string;
+  cwd?: string;
+  serverScriptPath?: string;
+}
+
 export function workflowMcpLaunchConfig(
-  discoveryPath: string | undefined,
-  workflowId: string | undefined,
-  options: { mainBundlePath?: string; cwd?: string; serverScriptPath?: string; runId?: string; nodeId?: string; managedToken?: string } = {},
+  binding: WorkflowMcpBinding,
+  options: WorkflowMcpLaunchOptions = {},
 ): WorkflowMcpLaunchConfig | undefined {
+  const { discoveryPath, workflowId } = binding;
   if (!discoveryPath || !workflowId) return undefined;
   const mainBundlePath = options.mainBundlePath ?? fileURLToPath(import.meta.url);
   const compiledServer = [
@@ -27,9 +41,9 @@ export function workflowMcpLaunchConfig(
       env: {
         AGENT_RECALL_WORKFLOW_MCP_BRIDGE: discoveryPath,
         AGENT_RECALL_WORKFLOW_ID: workflowId,
-        ...(options.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: options.runId } : {}),
-        ...(options.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: options.nodeId } : {}),
-        ...(options.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: options.managedToken } : {}),
+        ...(binding.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: binding.runId } : {}),
+        ...(binding.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: binding.nodeId } : {}),
+        ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
         ELECTRON_RUN_AS_NODE: "1",
       },
     };
@@ -48,9 +62,9 @@ export function workflowMcpLaunchConfig(
     env: {
       AGENT_RECALL_WORKFLOW_MCP_BRIDGE: discoveryPath,
       AGENT_RECALL_WORKFLOW_ID: workflowId,
-      ...(options.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: options.runId } : {}),
-      ...(options.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: options.nodeId } : {}),
-      ...(options.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: options.managedToken } : {}),
+      ...(binding.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: binding.runId } : {}),
+      ...(binding.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: binding.nodeId } : {}),
+      ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
       ELECTRON_RUN_AS_NODE: "1",
     },
   };

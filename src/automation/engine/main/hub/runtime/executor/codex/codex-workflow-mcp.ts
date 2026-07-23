@@ -1,12 +1,12 @@
-import { workflowMcpLaunchConfig } from "../workflow/workflow-mcp-launch";
+import { workflowMcpLaunchConfig, type WorkflowMcpBinding } from "../workflow/workflow-mcp-launch";
 
 export interface CodexWorkflowMcpConfig {
   args: string[];
   env: Record<string, string>;
 }
 
-export function codexWorkflowMcpConfig(discoveryPath: string | undefined, workflowId: string | undefined, runId?: string, nodeId?: string, managedToken?: string): CodexWorkflowMcpConfig {
-  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId, managedToken });
+export function codexWorkflowMcpConfig(binding: WorkflowMcpBinding): CodexWorkflowMcpConfig {
+  const config = workflowMcpLaunchConfig(binding);
   if (!config) return { args: [], env: {} };
   const envNames = Object.keys(config.env);
   return {
@@ -19,6 +19,6 @@ export function codexWorkflowMcpConfig(discoveryPath: string | undefined, workfl
   };
 }
 
-export function codexWorkflowMcpArgs(discoveryPath: string | undefined, workflowId: string | undefined, runId?: string, nodeId?: string, managedToken?: string): string[] {
-  return codexWorkflowMcpConfig(discoveryPath, workflowId, runId, nodeId, managedToken).args;
+export function codexWorkflowMcpArgs(binding: WorkflowMcpBinding): string[] {
+  return codexWorkflowMcpConfig(binding).args;
 }

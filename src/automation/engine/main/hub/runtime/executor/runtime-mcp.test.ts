@@ -1,7 +1,11 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import type { BoundMcpServer } from "./runtime-mcp";
 import {
   acpMcpServers,
+  acpWorkflowMcpServers,
   claudeMcpServers,
   codexMcpLaunchConfig,
 } from "./runtime-mcp";
@@ -81,5 +85,28 @@ describe("runtime MCP configuration", () => {
 
     expect(new Set(names).size).toBe(duplicateNames.length);
     expect(names.every((name) => name.startsWith("agent_recall_"))).toBe(true);
+  });
+
+  test("projects the complete workflow binding into ACP environment entries", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "workflow-acp-mcp-"));
+    const serverScriptPath = path.join(dir, "server.js");
+    await writeFile(serverScriptPath, "", "utf8");
+    const previousServer = process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER;
+    process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER = serverScriptPath;
+    const [server] = acpWorkflowMcpServers({
+      discoveryPath: "C:/app/mcp-bridge.json", workflowId: "wf-1", runId: "run-1", nodeId: "node-1", managedToken: "managed-token",
+    });
+    if (previousServer === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER;
+    else process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER = previousServer;
+
+    expect(server).toMatchObject({
+      name: "agent_recall_workflow",
+      env: expect.arrayContaining([
+        { name: "AGENT_RECALL_WORKFLOW_ID", value: "wf-1" },
+        { name: "AGENT_RECALL_WORKFLOW_RUN_ID", value: "run-1" },
+        { name: "AGENT_RECALL_WORKFLOW_NODE_ID", value: "node-1" },
+        { name: "AGENT_RECALL_WORKFLOW_MCP_TOKEN", value: "managed-token" },
+      ]),
+    });
   });
 });

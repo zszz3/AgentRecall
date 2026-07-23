@@ -1,6 +1,7 @@
+import { open } from "node:fs/promises";
 import path from "node:path";
 import type { AgentHub } from "../hub/agent-hub";
-import type { WorkflowOperationResult, WorkflowRunState } from "../../shared/types";
+import type { WorkflowOperationResult, WorkflowRunState, WorkflowStatus } from "../../shared/types";
 import type { WorkflowV2InterventionAction } from "../../shared/workflow-v2/review";
 
 type McpLifecycleErrorCode =
@@ -11,7 +12,8 @@ type McpLifecycleErrorCode =
   | "WORKFLOW_REVISION_CONFLICT"
   | "RUN_IDENTITY_MISMATCH"
   | "INTERVENTION_ALREADY_RESOLVED"
-  | "INVALID_STATE";
+  | "INVALID_STATE"
+  | "INTERNAL_ERROR";
 
 type McpLifecycleResult =
   | { ok: true; data: unknown }
@@ -26,6 +28,33 @@ const INTERVENTION_ACTIONS = new Set<WorkflowV2InterventionAction>([
   "approve_once",
   "reject",
 ]);
+const WORKFLOW_STATUSES = new Set<WorkflowStatus>(["draft", "running", "waiting_for_user", "completed", "failed", "stopped"]);
+const OUTPUT_PREVIEW_BYTES = 4_096;
+const TEXT_OUTPUT_TYPES = new Map([
+  [".csv", "text/csv"],
+  [".html", "text/html"],
+  [".json", "application/json"],
+  [".md", "text/markdown"],
+  [".txt", "text/plain"],
+  [".xml", "application/xml"],
+  [".yaml", "application/yaml"],
+  [".yml", "application/yaml"],
+]);
+const WORKFLOW_MCP_LIFECYCLE_ROUTES = new Set([
+  "/mcp/workflow/run/list",
+  "/mcp/workflow/run/get",
+  "/mcp/workflow/outputs/list",
+  "/mcp/workflow/confirm",
+  "/mcp/workflow/run",
+  "/mcp/workflow/run/stop",
+  "/mcp/workflow/intervention/resolve",
+  "/mcp/workflow/script-input/submit",
+  "/mcp/workflow/node/complete",
+]);
+
+export function isWorkflowMcpLifecycleRoute(route: string): boolean {
+  return WORKFLOW_MCP_LIFECYCLE_ROUTES.has(route);
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -40,6 +69,39 @@ function fail(code: McpLifecycleErrorCode, message: string): McpLifecycleResult 
   return { ok: false, error: { code, message } };
 }
 
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/(\bauthorization\s*:\s*)[^\r\n]+/gi, "$1[REDACTED]")
+    .replace(/(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)[A-Z0-9_]*\b\s*=\s*)[^\s\r\n]+/gi, "$1[REDACTED]")
+    .replace(/("(?:authorization|[^"\r\n]*(?:token|secret|password|api_key)[^"\r\n]*)"\s*:\s*")[^"]*(")/gi, "$1[REDACTED]$2");
+}
+
+function validStringArray(value: unknown): boolean {
+  return value === undefined || Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function validProposal(value: unknown): boolean {
+  const proposal = asRecord(value);
+  if (typeof proposal.reason !== "string" || !proposal.reason.trim()) return false;
+  if (proposal.kind === "continue") {
+    return proposal.targetNodeIds === undefined
+      || Array.isArray(proposal.targetNodeIds) && proposal.targetNodeIds.every((item) => typeof item === "string" && item.trim());
+  }
+  if (proposal.kind === "retry") return proposal.targetNodeId === undefined || typeof proposal.targetNodeId === "string" && Boolean(proposal.targetNodeId.trim());
+  return proposal.kind === "escalate" || proposal.kind === "graph-revision";
+}
+
+function operationErrorCode(message: string): McpLifecycleErrorCode {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("not found")) return normalized.includes("run") ? "RUN_NOT_FOUND" : "WORKFLOW_NOT_FOUND";
+  if (normalized.includes("revision") || normalized.includes("changed")) return "WORKFLOW_REVISION_CONFLICT";
+  if (normalized.includes("no pending human intervention")
+    || normalized.includes("already") && (normalized.includes("resolv") || normalized.includes("resolved"))) {
+    return "INTERVENTION_ALREADY_RESOLVED";
+  }
+  return "INVALID_STATE";
+}
+
 function operationResult(result: WorkflowOperationResult): McpLifecycleResult {
   if (result.ok) {
     return {
@@ -52,15 +114,7 @@ function operationResult(result: WorkflowOperationResult): McpLifecycleResult {
     };
   }
   const message = result.error || "Workflow operation was rejected.";
-  const normalized = message.toLowerCase();
-  const code: McpLifecycleErrorCode = normalized.includes("not found")
-    ? normalized.includes("run") ? "RUN_NOT_FOUND" : "WORKFLOW_NOT_FOUND"
-    : normalized.includes("revision") || normalized.includes("changed")
-      ? "WORKFLOW_REVISION_CONFLICT"
-      : normalized.includes("already") && normalized.includes("resolv")
-        ? "INTERVENTION_ALREADY_RESOLVED"
-        : "INVALID_STATE";
-  return fail(code, message);
+  return fail(operationErrorCode(message), message);
 }
 
 function workflowAndRun(hub: AgentHub, workflowId: string, runId: string):
@@ -114,7 +168,32 @@ function pendingActions(run: WorkflowRunState): unknown[] {
   return actions;
 }
 
-export async function routeWorkflowMcpLifecycle(
+async function publicOutput(output: { name: string; path: string }): Promise<Record<string, unknown>> {
+  const name = path.basename(output.name || output.path);
+  const type = TEXT_OUTPUT_TYPES.get(path.extname(name).toLowerCase()) ?? "application/octet-stream";
+  const projected: Record<string, unknown> = { name, type };
+  try {
+    const file = await open(output.path, "r");
+    try {
+      const stats = await file.stat();
+      projected.size = stats.size;
+      if (!TEXT_OUTPUT_TYPES.has(path.extname(name).toLowerCase())) return projected;
+      const bytesToRead = Math.min(stats.size, OUTPUT_PREVIEW_BYTES + 1);
+      const buffer = Buffer.alloc(bytesToRead);
+      const { bytesRead } = await file.read(buffer, 0, bytesToRead, 0);
+      const previewBytes = buffer.subarray(0, Math.min(bytesRead, OUTPUT_PREVIEW_BYTES));
+      projected.preview = redactSensitiveText(new TextDecoder().decode(previewBytes, { stream: true }));
+      projected.previewTruncated = stats.size > OUTPUT_PREVIEW_BYTES;
+    } finally {
+      await file.close();
+    }
+  } catch {
+    // Outputs can disappear between directory enumeration and projection.
+  }
+  return projected;
+}
+
+async function routeWorkflowMcpLifecycleInternal(
   hub: AgentHub,
   route: string,
   body: unknown,
@@ -128,6 +207,14 @@ export async function routeWorkflowMcpLifecycle(
     const status = stringField(record, "status");
     const startedAfter = typeof record.startedAfter === "number" ? record.startedAfter : undefined;
     const startedBefore = typeof record.startedBefore === "number" ? record.startedBefore : undefined;
+    if (status && !WORKFLOW_STATUSES.has(status as WorkflowStatus)) {
+      return fail("INVALID_ARGUMENT", "workflow_run_list status is invalid.");
+    }
+    if ((record.startedAfter !== undefined && (!Number.isFinite(startedAfter) || startedAfter! < 0))
+      || (record.startedBefore !== undefined && (!Number.isFinite(startedBefore) || startedBefore! < 0))
+      || (startedAfter !== undefined && startedBefore !== undefined && startedAfter > startedBefore)) {
+      return fail("INVALID_ARGUMENT", "workflow_run_list time range is invalid.");
+    }
     const runs = hub.snapshot().workflowStore.runs
       .filter((run) => !workflowId || run.workflowId === workflowId)
       .filter((run) => !status || run.status === status)
@@ -150,7 +237,7 @@ export async function routeWorkflowMcpLifecycle(
     const resolved = workflowAndRun(hub, workflowId, runId);
     if (!("run" in resolved)) return resolved;
     const outputs = await hub.listWorkflowOutputs({ workflowId, runId });
-    return { ok: true, data: { outputs: outputs.map((output) => ({ name: path.basename(output.name || output.path) })) } };
+    return { ok: true, data: { outputs: await Promise.all(outputs.map(publicOutput)) } };
   }
 
   if (route === "/mcp/workflow/confirm" || route === "/mcp/workflow/run") {
@@ -180,6 +267,9 @@ export async function routeWorkflowMcpLifecycle(
     if (!workflowId || !runId || !nodeId || !action || !INTERVENTION_ACTIONS.has(action)) {
       return fail("INVALID_ARGUMENT", "workflow_intervention_resolve requires workflowId, runId, nodeId, and a valid action.");
     }
+    if (record.reason !== undefined && (typeof record.reason !== "string" || record.reason.trim().length > 2_000)) {
+      return fail("INVALID_ARGUMENT", "workflow_intervention_resolve reason is invalid.");
+    }
     const resolved = workflowAndRun(hub, workflowId, runId);
     if (!("run" in resolved)) return resolved;
     if (!resolved.run.progress.some((node) => node.nodeId === nodeId)) return fail("NODE_NOT_FOUND", `Workflow node ${nodeId} was not found in run ${runId}.`);
@@ -206,6 +296,10 @@ export async function routeWorkflowMcpLifecycle(
     if (!summary || !record.outputs || typeof record.outputs !== "object" || Array.isArray(record.outputs) || !Array.isArray(record.proposals)) {
       return fail("INVALID_ARGUMENT", "workflow_node_complete requires nodeId, summary, outputs, and proposals.");
     }
+    if (!validStringArray(record.evidence) || !validStringArray(record.risks) || !validStringArray(record.nextStepSuggestions)
+      || !record.proposals.every(validProposal)) {
+      return fail("INVALID_ARGUMENT", "workflow_node_complete output is invalid.");
+    }
     return {
       ok: true,
       data: {
@@ -223,4 +317,16 @@ export async function routeWorkflowMcpLifecycle(
   }
 
   return undefined;
+}
+
+export async function routeWorkflowMcpLifecycle(
+  hub: AgentHub,
+  route: string,
+  body: unknown,
+): Promise<McpLifecycleResult | undefined> {
+  try {
+    return await routeWorkflowMcpLifecycleInternal(hub, route, body);
+  } catch {
+    return fail("INTERNAL_ERROR", "The Workflow MCP request could not be completed.");
+  }
 }

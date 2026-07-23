@@ -36,7 +36,11 @@ export async function runCodexWorkflow(
   const mcp = codexMcpLaunchConfig(input.configuredAgentId
     ? options.mcpServersForAgent?.(input.configuredAgentId) ?? []
     : []);
-  const workflowMcp = codexWorkflowMcpConfig(options.workflowMcpDiscoveryPath?.(), input.planningWorkflowId, undefined, undefined, options.workflowMcpManagedToken?.());
+  const workflowMcp = codexWorkflowMcpConfig({
+    discoveryPath: options.workflowMcpDiscoveryPath?.(),
+    workflowId: input.planningWorkflowId,
+    managedToken: options.workflowMcpManagedToken?.(),
+  });
   const developerInstructions = developerInstructionsForWorkflowRequest(input);
 
   return new Promise<WorkflowAgentResponse>((resolve, reject) => {

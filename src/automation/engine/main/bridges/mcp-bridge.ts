@@ -13,7 +13,7 @@ import type { WorkflowV2Definition } from "../../shared/workflow-v2/definition";
 import { validateWorkflowV2Definition } from "../../shared/workflow-v2/validation";
 import { normalizeWorkflowV2TerminalNode } from "../../shared/workflow-v2/topology";
 import { DEFAULT_MODEL_ID, defaultChannelForAgent, defaultModelForAgent, isModelForChannel } from "../../shared/models";
-import { routeWorkflowMcpLifecycle } from "./workflow-mcp-lifecycle";
+import { isWorkflowMcpLifecycleRoute, routeWorkflowMcpLifecycle } from "./workflow-mcp-lifecycle";
 
 export interface McpBridgeServer {
   host: string;
@@ -414,7 +414,13 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
       }
       const access = requestAccess(request, token, readToken);
       if (!access) {
-        jsonResponse(response, 401, { ok: false, error: "Unauthorized." });
+        jsonResponse(response, 401, {
+          ok: false,
+          error: {
+            code: "UNAUTHORIZED",
+            message: "A valid MCP bridge token is required.",
+          },
+        });
         return;
       }
       if (access === "read_only" && !READ_ONLY_ROUTES.has(request.url ?? "")) {
@@ -435,6 +441,16 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
         const payload = await routeWorkflowRequest(hub, request.url ?? "", body, runtimeOptions);
         jsonResponse(response, 200, payload);
       } catch (error) {
+        if (error instanceof SyntaxError && isWorkflowMcpLifecycleRoute(request.url ?? "")) {
+          jsonResponse(response, 400, {
+            ok: false,
+            error: {
+              code: "INVALID_ARGUMENT",
+              message: "The Workflow MCP request body must be valid JSON.",
+            },
+          });
+          return;
+        }
         jsonResponse(response, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
       }
     })();

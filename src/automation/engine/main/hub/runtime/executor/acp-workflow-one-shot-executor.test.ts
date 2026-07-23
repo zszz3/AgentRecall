@@ -44,4 +44,87 @@ describe("AcpWorkflowOneShotExecutor", () => {
     expect(calls).toEqual(["attach", "prompt:Use workflow_node_complete.\n\nUser request:\nComplete the node", "detach"]);
     expect(context.onExit).toHaveBeenCalledWith(0);
   });
+
+  test("does not turn a completed node into a failure when ACP detach cleanup fails", async () => {
+    const context = {
+      runId: "task-1",
+      prompt: "Complete",
+      workDir: "C:/workspace",
+      developerInstructions: "Submit result",
+      emit: vi.fn(),
+      onExit: vi.fn(),
+    } as unknown as AgentExecutionContext;
+    const executor = new AcpWorkflowOneShotExecutor(context, {
+      executable: "hermes",
+      args: ["acp"],
+      mcpServers: [],
+      createClient: () => ({
+        attach: async () => "session-1",
+        prompt: async () => undefined,
+        interrupt: async () => undefined,
+        detach: async () => { throw new Error("detach failed"); },
+      }),
+    });
+
+    await expect(executor.start()).resolves.toBeUndefined();
+    expect(context.onExit).toHaveBeenCalledWith(0);
+    expect(context.emit).toHaveBeenCalledWith({ type: "system", content: "ACP one-shot cleanup failed: detach failed" });
+  });
+
+  test("always detaches when interrupting an active ACP one-shot session", async () => {
+    const detached = vi.fn(async () => undefined);
+    let releasePrompt!: () => void;
+    const promptBlocked = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    const context = {
+      runId: "task-1",
+      prompt: "Complete",
+      workDir: "C:/workspace",
+      developerInstructions: "Submit result",
+      emit: vi.fn(),
+      onExit: vi.fn(),
+    } as unknown as AgentExecutionContext;
+    const executor = new AcpWorkflowOneShotExecutor(context, {
+      executable: "hermes",
+      args: ["acp"],
+      mcpServers: [],
+      createClient: () => ({
+        attach: async () => "session-1",
+        prompt: async () => promptBlocked,
+        interrupt: async () => { throw new Error("interrupt failed"); },
+        detach: detached,
+      }),
+    });
+    const started = executor.start();
+    await Promise.resolve();
+
+    await expect(executor.stop()).rejects.toThrow("interrupt failed");
+    expect(detached).toHaveBeenCalled();
+    releasePrompt();
+    await started;
+    expect(detached).toHaveBeenCalledTimes(1);
+  });
+
+  test("reports detach failure from an explicit stop after attempting cleanup", async () => {
+    let releasePrompt!: () => void;
+    const promptBlocked = new Promise<void>((resolve) => { releasePrompt = resolve; });
+    const context = {
+      runId: "task-1", prompt: "Complete", workDir: "C:/workspace", developerInstructions: "Submit result",
+      emit: vi.fn(), onExit: vi.fn(),
+    } as unknown as AgentExecutionContext;
+    const executor = new AcpWorkflowOneShotExecutor(context, {
+      executable: "hermes", args: ["acp"], mcpServers: [],
+      createClient: () => ({
+        attach: async () => "session-1",
+        prompt: async () => promptBlocked,
+        interrupt: async () => undefined,
+        detach: async () => { throw new Error("detach failed"); },
+      }),
+    });
+    const started = executor.start();
+    await Promise.resolve();
+
+    await expect(executor.stop()).rejects.toThrow("detach failed");
+    releasePrompt();
+    await started;
+  });
 });

@@ -29,7 +29,10 @@ export function createHermesDriver(options: RuntimeAgentExecutorFactoryOptions):
           modelId: context.runtimeConfig.model,
           mcpServers: [
             ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
-            ...acpWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), context.planningWorkflowId, context.workflowRunId, context.workflowNodeId, options.workflowMcpManagedToken?.()),
+            ...acpWorkflowMcpServers({
+              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
+              runId: context.workflowRunId, nodeId: context.workflowNodeId, managedToken: options.workflowMcpManagedToken?.(),
+            }),
           ],
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
         })
@@ -43,7 +46,10 @@ export function createHermesDriver(options: RuntimeAgentExecutorFactoryOptions):
             args: ["acp"],
             cwd: interactiveContext.workDir,
             modelId: interactiveContext.runtimeConfig.model,
-            mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId, interactiveContext.workflowRunId, interactiveContext.workflowNodeId, options.workflowMcpManagedToken?.())],
+            mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers({
+              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
+              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, managedToken: options.workflowMcpManagedToken?.(),
+            })],
             onEvent,
             onExit,
             approvalOwnerId: interactiveContext.chatId,

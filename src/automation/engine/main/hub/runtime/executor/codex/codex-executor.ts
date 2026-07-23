@@ -30,7 +30,13 @@ export class CodexAgentExecutor implements AgentExecutor {
     const mcp = codexMcpLaunchConfig(this.context.configuredAgentId
       ? this.options.mcpServersForAgent?.(this.context.configuredAgentId) ?? []
       : []);
-    const workflowMcp = codexWorkflowMcpConfig(this.options.workflowMcpDiscoveryPath?.(), this.context.planningWorkflowId, this.context.workflowRunId, this.context.workflowNodeId, this.options.workflowMcpManagedToken?.());
+    const workflowMcp = codexWorkflowMcpConfig({
+      discoveryPath: this.options.workflowMcpDiscoveryPath?.(),
+      workflowId: this.context.planningWorkflowId,
+      runId: this.context.workflowRunId,
+      nodeId: this.context.workflowNodeId,
+      managedToken: this.options.workflowMcpManagedToken?.(),
+    });
     let client: CodexRpcClient;
     client = new CodexRpcClient({
       executable,

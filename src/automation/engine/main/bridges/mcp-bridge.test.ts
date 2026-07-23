@@ -71,6 +71,11 @@ describe("MCP bridge", () => {
   });
 
   test("routes managed lifecycle commands and projects runs for read-only clients", async () => {
+    const outputDir = await mkdtemp(path.join(os.tmpdir(), "workflow-mcp-output-"));
+    const outputPath = path.join(outputDir, "report.md");
+    const secretOutputPath = path.join(outputDir, "secrets.txt");
+    await writeFile(outputPath, "# Result\nSafe preview", "utf8");
+    await writeFile(secretOutputPath, "Authorization: Bearer super-secret\nAPI_TOKEN=private-token", "utf8");
     const run = {
       runId: "run-1",
       workflowId: "wf-1",
@@ -87,7 +92,7 @@ describe("MCP bridge", () => {
     const hub = {
       snapshot: vi.fn(() => ({
         workflowStore: {
-          workflows: [{ workflowId: "wf-1", revision: 3 }],
+          workflows: [{ workflowId: "wf-1", revision: 3 }, { workflowId: "wf-2", revision: 1 }],
           runs: [run],
         },
       })),
@@ -96,13 +101,35 @@ describe("MCP bridge", () => {
       stopWorkflowRun: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
       resolveWorkflowV2Intervention: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
       submitWorkflowScriptInput: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
-      listWorkflowOutputs: vi.fn(async () => [{ name: "report.md", path: "C:/private/workflow/report.md" }]),
+      listWorkflowOutputs: vi.fn(async () => [
+        { name: "report.md", path: outputPath },
+        { name: "secrets.txt", path: secretOutputPath },
+      ]),
     } as unknown as AgentHub;
     const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-mcp-lifecycle-"));
     bridge = await startMcpBridge(hub, { discoveryPath: path.join(dir, "bridge.json") });
 
     const listed = await bridgeRequest("/mcp/workflow/run/list", bridge.readToken, { workflowId: "wf-1" });
     expect(await listed.json()).toEqual({ ok: true, data: { runs: [expect.objectContaining({ runId: "run-1", status: "waiting_for_user", graphVersion: 3 })] } });
+
+    const invalidFilter = await bridgeRequest("/mcp/workflow/run/list", bridge.readToken, { status: "not-a-status" });
+    expect(await invalidFilter.json()).toEqual({
+      ok: false,
+      error: { code: "INVALID_ARGUMENT", message: "workflow_run_list status is invalid." },
+    });
+
+    const revisionConflict = await bridgeRequest("/mcp/workflow/confirm", bridge.token, { workflowId: "wf-1", expectedRevision: 2 });
+    expect(await revisionConflict.json()).toEqual({
+      ok: false,
+      error: { code: "WORKFLOW_REVISION_CONFLICT", message: "Workflow wf-1 is at revision 3, not 2." },
+    });
+    expect(hub.confirmWorkflow).not.toHaveBeenCalled();
+
+    const identityMismatch = await bridgeRequest("/mcp/workflow/run/stop", bridge.token, { workflowId: "wf-2", runId: "run-1" });
+    expect(await identityMismatch.json()).toEqual({
+      ok: false,
+      error: { code: "RUN_IDENTITY_MISMATCH", message: "Run run-1 does not belong to workflow wf-2." },
+    });
 
     const detail = await bridgeRequest("/mcp/workflow/run/get", bridge.readToken, { workflowId: "wf-1", runId: "run-1" });
     expect(await detail.json()).toEqual({
@@ -121,7 +148,26 @@ describe("MCP bridge", () => {
     expect(hub.runWorkflow).toHaveBeenCalledWith({ workflowId: "wf-1", triggerSource: "mcp" });
 
     const outputs = await bridgeRequest("/mcp/workflow/outputs/list", bridge.readToken, { workflowId: "wf-1", runId: "run-1" });
-    expect(JSON.stringify(await outputs.json())).not.toContain("C:/private");
+    expect(await outputs.json()).toEqual({
+      ok: true,
+      data: {
+        outputs: [
+          { name: "report.md", type: "text/markdown", size: 21, preview: "# Result\nSafe preview", previewTruncated: false },
+          expect.objectContaining({ name: "secrets.txt", preview: "Authorization: [REDACTED]\nAPI_TOKEN=[REDACTED]" }),
+        ],
+      },
+    });
+    expect(JSON.stringify(await (await bridgeRequest("/mcp/workflow/outputs/list", bridge.readToken, {
+      workflowId: "wf-1", runId: "run-1",
+    })).json())).not.toContain("super-secret");
+
+    vi.mocked(hub.listWorkflowOutputs).mockRejectedValueOnce(new Error("C:/private/output failure"));
+    expect(await (await bridgeRequest("/mcp/workflow/outputs/list", bridge.readToken, {
+      workflowId: "wf-1", runId: "run-1",
+    })).json()).toEqual({
+      ok: false,
+      error: { code: "INTERNAL_ERROR", message: "The Workflow MCP request could not be completed." },
+    });
 
     const wrongNode = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
       workflowId: "wf-1", runId: "run-1", nodeId: "missing", summary: "Done", outputs: {}, proposals: [],
@@ -138,10 +184,45 @@ describe("MCP bridge", () => {
       ok: true,
       data: { output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
     });
+    expect(await (await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [],
+    })).json()).toEqual({
+      ok: true,
+      data: { output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
+    });
+
+    const malformedCompletion = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", summary: "Done", outputs: {}, proposals: [{ kind: "unknown" }],
+    });
+    expect(await malformedCompletion.json()).toEqual({
+      ok: false,
+      error: { code: "INVALID_ARGUMENT", message: "workflow_node_complete output is invalid." },
+    });
 
     expect(await (await bridgeRequest("/mcp/workflow/intervention/resolve", bridge.token, {
       workflowId: "wf-1", runId: "run-1", nodeId: "approve", action: "continue",
     })).json()).toMatchObject({ ok: true });
+    expect(await (await bridgeRequest("/mcp/workflow/intervention/resolve", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", action: "continue", reason: "x".repeat(2_001),
+    })).json()).toEqual({
+      ok: false,
+      error: { code: "INVALID_ARGUMENT", message: "workflow_intervention_resolve reason is invalid." },
+    });
+    vi.mocked(hub.resolveWorkflowV2Intervention).mockResolvedValueOnce({
+      ok: false,
+      workflowId: "wf-1",
+      runId: "run-1",
+      error: "Workflow V2 node approve has no pending human intervention.",
+    });
+    expect(await (await bridgeRequest("/mcp/workflow/intervention/resolve", bridge.token, {
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", action: "continue",
+    })).json()).toEqual({
+      ok: false,
+      error: {
+        code: "INTERVENTION_ALREADY_RESOLVED",
+        message: "Workflow V2 node approve has no pending human intervention.",
+      },
+    });
     expect(await (await bridgeRequest("/mcp/workflow/script-input/submit", bridge.token, {
       workflowId: "wf-1", runId: "run-1", nodeId: "approve", values: { approved: true },
     })).json()).toMatchObject({ ok: true });
@@ -227,6 +308,21 @@ describe("MCP bridge", () => {
 
     const unauthorized = await fetch(`http://${bridge.host}:${bridge.port}/mcp/workflow/list`, { method: "POST" });
     expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.json()).toEqual({
+      ok: false,
+      error: { code: "UNAUTHORIZED", message: "A valid MCP bridge token is required." },
+    });
+
+    const malformedJson = await fetch(`http://${bridge.host}:${bridge.port}/mcp/workflow/run/list`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bridge.readToken}`, "content-type": "application/json" },
+      body: "{",
+    });
+    expect(malformedJson.status).toBe(400);
+    expect(await malformedJson.json()).toEqual({
+      ok: false,
+      error: { code: "INVALID_ARGUMENT", message: "The Workflow MCP request body must be valid JSON." },
+    });
 
     const agents = (await (await bridgeRequest("/mcp/agents/list", bridge.token, {})).json()) as any;
     expect(agents).toMatchObject({ ok: true });
