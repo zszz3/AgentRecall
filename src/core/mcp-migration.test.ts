@@ -172,6 +172,36 @@ describe("migrateSessionForMcp — happy path", () => {
     }
   });
 
+  it("migrates a Claude source to Codex and registers the native Codex index entry", async () => {
+    const store = createInMemoryStore();
+    const projectPath = makeProjectDir();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-claude-to-codex-"));
+    const { sessionKey } = seedLocalSession(store, {
+      sessionKey: "claude:source-1",
+      rawId: "source-1",
+      source: "claude-cli",
+      projectPath,
+    });
+    try {
+      const result = await migrateSessionForMcp(
+        { sessionKey, target: "codex" },
+        { store, settings: defaultSettings, inspectCli: noOpInspect, homeDir },
+      );
+
+      expect(result.indexed).toBe(true);
+      expect(fs.readFileSync(path.join(homeDir, ".codex", "session_index.jsonl"), "utf8"))
+        .toContain(result.targetSessionId);
+      expect(store.listSessionMigrations(sessionKey)[0]).toMatchObject({
+        sourceAgent: "claude",
+        targetAgent: "codex",
+      });
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a disabled optional target before CLI inspection or file writes", async () => {
     const store = createInMemoryStore();
     const { sessionKey, projectPath } = seedLocalSession(store);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
@@ -139,6 +139,7 @@ export function DetailPanel({
   onCopyResume,
   onCopyMarkdown,
   onExportMarkdown,
+  onExportJson,
   onCopyPlain,
   onDelete,
   onReveal,
@@ -180,6 +181,7 @@ export function DetailPanel({
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
+  onExportJson: () => void;
   onCopyPlain: () => void;
   onDelete: () => void;
   onReveal: () => void;
@@ -389,7 +391,7 @@ export function DetailPanel({
                 {localizedLiveStateLabel(liveState, language)}
               </span>
               <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-                {isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
+                {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
                 {environmentBadgeLabel(session, language)}
               </span>
             </div>
@@ -454,7 +456,7 @@ export function DetailPanel({
               <button
                 onClick={onUploadRemote}
                 disabled={actionRunning || remoteUploadDisabled}
-                title={remoteUploadDisabled ? l("ZCode remote saving is not supported yet.", "ZCode 暂不支持保存到远程。") : undefined}
+                title={remoteUploadDisabled ? l("This session cannot be saved to cloud.", "此会话不能保存到云端。") : undefined}
               >
                 <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
               </button>
@@ -469,6 +471,9 @@ export function DetailPanel({
             <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
             <button onClick={onExportMarkdown} disabled={actionRunning}>
               <Download size={15} /> {l("Export MD", "导出 MD")}
+            </button>
+            <button onClick={onExportJson} disabled={actionRunning}>
+              <Download size={15} /> {l("Export JSON", "导出 JSON")}
             </button>
             <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
           </div>

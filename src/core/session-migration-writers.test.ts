@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { extractCursorUserQuery } from "./format-adapters";
@@ -12,8 +13,13 @@ import {
   parseCursorTranscriptPath,
   parseJsonlText,
 } from "./session-loader";
-import { writeMigratedSession } from "./session-migration-writers";
+import { targetFilePath, writeMigratedSession } from "./session-migration-writers";
 import type { LoadedSession, MigrationTarget, PortableSession, SessionSource } from "./types";
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite") as {
+  DatabaseSync: new (path: string) => import("node:sqlite").DatabaseSync;
+};
 
 const SESSION_ID = "10000000-0000-4000-8000-000000000001";
 const MESSAGE_IDS = [
@@ -197,6 +203,7 @@ describe("writeMigratedSession", () => {
 
   it("writes a native Codex rollout and round-trips it through the existing loader", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-codex-"));
+    const includesVsCodeEvents = process.platform === "win32";
 
     const pending = writeMigratedSession({
       target: "codex",
@@ -220,10 +227,12 @@ describe("writeMigratedSession", () => {
         `rollout-2026-06-23T06-07-08-901Z-${SESSION_ID}.jsonl`,
       ),
     });
-    expect(fs.existsSync(path.join(homeDir, ".codex", "session_index.jsonl"))).toBe(false);
+    expect(readRows(path.join(homeDir, ".codex", "session_index.jsonl"))).toEqual([
+      { id: SESSION_ID, thread_name: portable().title, updated_at: NOW.toISOString() },
+    ]);
 
     const rows = readRows(result.filePath);
-    expect(rows[0]).toEqual({
+    expect(rows[0]).toMatchObject({
       type: "session_meta",
       timestamp: portable().startedAt,
       payload: {
@@ -236,11 +245,36 @@ describe("writeMigratedSession", () => {
         model_provider: "openai",
       },
     });
-    expect(rows.slice(1).map((row) => row.payload.content[0].type)).toEqual([
+    if (includesVsCodeEvents) {
+      expect(rows[0]).toMatchObject({
+        payload: {
+          session_id: SESSION_ID,
+          source: "vscode",
+          thread_source: "user",
+          history_mode: "legacy",
+        },
+      });
+      expect(rows[1]).toMatchObject({
+        type: "event_msg",
+        payload: {
+          type: "task_started",
+          turn_id: SESSION_ID,
+        },
+      });
+    }
+    const messageRows = rows.filter((row) => row.type === "response_item");
+    expect(messageRows.map((row) => row.payload.content[0].type)).toEqual([
       "input_text",
       "output_text",
       "input_text",
     ]);
+    if (includesVsCodeEvents) {
+      expect(rows.filter((row) => row.type === "event_msg").slice(1).map((row) => [row.payload.type, row.payload.message])).toEqual([
+        ["user_message", portable().messages[0].content],
+        ["agent_message", portable().messages[1].content],
+        ["user_message", portable().messages[2].content],
+      ]);
+    }
     expectRoundTrip("codex", "codex-cli", result.sessionId, result.filePath, rows);
 
     fs.rmSync(homeDir, { recursive: true, force: true });
@@ -263,6 +297,126 @@ describe("writeMigratedSession", () => {
 
       const rows = readRows(result.filePath);
       expect(rows[0]?.payload?.model_provider).toBe(modelProvider);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["codex", ".codex"],
+    ["tcodex", ".tcodex"],
+    ["codex-internal", ".codex-internal"],
+  ] as const)("updates the native session index for $target", async (target, root) => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), `migration-writer-index-${target}-`));
+    try {
+      const targetHome = path.join(homeDir, root);
+      fs.mkdirSync(targetHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(targetHome, "session_index.jsonl"),
+        `${JSON.stringify({ id: SESSION_ID, thread_name: "old title", updated_at: "2026-06-22T00:00:00.000Z" })}\n` +
+        `${JSON.stringify({ id: "other-session", thread_name: "Other", updated_at: "2026-06-22T00:00:00.000Z" })}\n`,
+      );
+
+      await writeMigratedSession({
+        target,
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory([SESSION_ID]),
+      });
+
+      expect(readRows(path.join(targetHome, "session_index.jsonl"))).toEqual([
+        { id: "other-session", thread_name: "Other", updated_at: "2026-06-22T00:00:00.000Z" },
+        { id: SESSION_ID, thread_name: portable().title, updated_at: NOW.toISOString() },
+      ]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== "win32")("registers a Codex migration in the VS Code app-server state database", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-vscode-state-"));
+    const statePath = path.join(homeDir, ".codex", "state_1.sqlite");
+    try {
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      const db = new DatabaseSync(statePath);
+      db.exec(`
+        CREATE TABLE threads (
+          id TEXT PRIMARY KEY,
+          rollout_path TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          source TEXT NOT NULL,
+          model_provider TEXT NOT NULL,
+          cwd TEXT NOT NULL,
+          title TEXT NOT NULL,
+          sandbox_policy TEXT NOT NULL,
+          approval_mode TEXT NOT NULL,
+          tokens_used INTEGER NOT NULL DEFAULT 0,
+          has_user_event INTEGER NOT NULL DEFAULT 0,
+          archived INTEGER NOT NULL DEFAULT 0,
+          cli_version TEXT NOT NULL DEFAULT '',
+          first_user_message TEXT NOT NULL DEFAULT '',
+          memory_mode TEXT NOT NULL DEFAULT 'enabled',
+          model TEXT,
+          reasoning_effort TEXT,
+          agent_path TEXT,
+          created_at_ms INTEGER,
+          updated_at_ms INTEGER,
+          thread_source TEXT,
+          preview TEXT NOT NULL DEFAULT '',
+          recency_at INTEGER NOT NULL DEFAULT 0,
+          recency_at_ms INTEGER NOT NULL DEFAULT 0,
+          history_mode TEXT NOT NULL DEFAULT 'legacy'
+        )
+      `);
+      db.close();
+
+      const result = await writeMigratedSession({
+        target: "codex",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory([SESSION_ID]),
+      });
+
+      const stateDb = new DatabaseSync(statePath);
+      const row = stateDb.prepare("SELECT * FROM threads WHERE id = ?").get(SESSION_ID) as Record<string, unknown>;
+      stateDb.close();
+      expect(row).toMatchObject({
+        rollout_path: path.toNamespacedPath(path.resolve(result.filePath)),
+        cwd: path.toNamespacedPath(path.resolve(portable().projectPath)),
+        title: portable().title,
+        preview: portable().title,
+        first_user_message: portable().messages[0].content,
+        source: "vscode",
+        thread_source: "user",
+        has_user_event: 1,
+        cli_version: "migration",
+      });
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not report a Codex migration when its native index is malformed", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-index-invalid-"));
+    const targetHome = path.join(homeDir, ".codex");
+    const finalFile = targetFilePath("codex", portable().projectPath, SESSION_ID, homeDir, NOW);
+    try {
+      fs.mkdirSync(targetHome, { recursive: true });
+      fs.writeFileSync(path.join(targetHome, "session_index.jsonl"), "not-json\n");
+
+      await expect(
+        writeMigratedSession({
+          target: "codex",
+          session: portable(),
+          homeDir,
+          now: NOW,
+          idFactory: idFactory([SESSION_ID]),
+        }),
+      ).rejects.toThrow("Codex session index could not be read");
+      expect(fs.existsSync(finalFile)).toBe(false);
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }

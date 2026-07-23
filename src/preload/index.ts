@@ -70,6 +70,7 @@ const api = {
   listTagsByProject: (): Promise<ProjectTagEntry[]> => ipcRenderer.invoke("tags:by-project"),
   listEnvironments: (): Promise<SessionEnvironment[]> => ipcRenderer.invoke("environments:list"),
   listSshConfigHosts: (): Promise<SshConfigHost[]> => ipcRenderer.invoke("ssh-config:list-hosts"),
+  listWslDistributions: (): Promise<string[]> => ipcRenderer.invoke("wsl:list-distributions"),
   saveEnvironment: (environment: EnvironmentUpsertInput): Promise<SessionEnvironment> =>
     ipcRenderer.invoke("environment:save", environment),
   deleteEnvironment: (environmentId: string): Promise<void> => ipcRenderer.invoke("environment:delete", environmentId),
@@ -105,6 +106,10 @@ const api = {
   revealSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:reveal", sessionKey),
   copyMarkdown: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-markdown", sessionKey),
   exportMarkdown: (sessionKey: string): Promise<boolean> => ipcRenderer.invoke("command:export-markdown", sessionKey),
+  exportJson: (sessionKey: string): Promise<{
+    exported: boolean;
+    fidelity?: "exact-trace" | "reconstructed" | "normalized";
+  }> => ipcRenderer.invoke("command:export-json", sessionKey),
   copyPlainText: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-plain", sessionKey),
   openExternalLink: (url: string): Promise<void> => ipcRenderer.invoke("markdown:open-external", url),
   onIndexStatus: (callback: (status: IndexStatus) => void): (() => void) => {

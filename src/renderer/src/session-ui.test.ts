@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { defaultSettings } from "../../core/platform";
 import {
+  environmentBadgeLabel,
   migrationTargetsForSession,
   migrationTargetsForSource,
   projectDisplayLabel,
@@ -18,8 +19,15 @@ import {
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
 const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
+const wslEnvironmentDialogSource = readFileSync(new URL("./features/settings/wsl-environment-dialog.tsx", import.meta.url), "utf8");
 
 describe("session source labels", () => {
+  it("keeps the WSL distribution label unprefixed before adding its badge prefix", () => {
+    expect(environmentBadgeLabel({ environmentKind: "wsl", environmentLabel: "Ubuntu" }, "en")).toBe("WSL · Ubuntu");
+    expect(wslEnvironmentDialogSource).toContain("label: distribution,");
+    expect(wslEnvironmentDialogSource).not.toContain("label: `WSL · ${distribution}`");
+  });
+
   it("renders structured project labels in both languages", () => {
     expect(projectDisplayLabel({ label: "app", labelKind: "path", labelSuffix: "Local" }, "zh")).toBe("app · Local");
     expect(projectDisplayLabel({ label: "Hermes 重写", labelKind: "codex-task-title", labelSuffix: "07-18" }, "zh")).toBe(
