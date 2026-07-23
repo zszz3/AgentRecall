@@ -11,5 +11,6 @@ export const TEAM_CHAT_CHANNELS = {
   messagesList: "team-chat:messages:list",
   messagesSend: "team-chat:messages:send",
   turnsStop: "team-chat:turns:stop",
+  agentSessionReset: "team-chat:agent-session:reset",
   event: "team-chat:event",
 } as const;

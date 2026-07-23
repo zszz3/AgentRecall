@@ -47,6 +47,10 @@ const messageSendSchema = z.object({
   roomId: idSchema,
   content: z.string().trim().min(1).max(100_000),
 }).strict();
+const agentSessionResetSchema = z.object({
+  roomId: idSchema,
+  agentId: idSchema,
+}).strict();
 
 export function registerTeamChatIpc({ ipc, service, send }: RegisterTeamChatIpcOptions): () => void {
   const channels: string[] = [];
@@ -71,6 +75,10 @@ export function registerTeamChatIpc({ ipc, service, send }: RegisterTeamChatIpcO
   handle(TEAM_CHAT_CHANNELS.messagesList, (value) => service.listMessages(messageListSchema.parse(value)));
   handle(TEAM_CHAT_CHANNELS.messagesSend, (value) => service.sendMessage(messageSendSchema.parse(value)));
   handle(TEAM_CHAT_CHANNELS.turnsStop, (value) => service.stopTurn(idSchema.parse(value)));
+  handle(TEAM_CHAT_CHANNELS.agentSessionReset, (value) => {
+    const request = agentSessionResetSchema.parse(value);
+    return service.resetAgentSession(request.roomId, request.agentId);
+  });
 
   const unsubscribe = service.subscribe((event) => send(TEAM_CHAT_CHANNELS.event, event));
   return () => {

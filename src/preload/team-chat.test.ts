@@ -19,6 +19,7 @@ describe("createTeamChatApi", () => {
     await api.listMessages({ roomId: "room-1", limit: 50 });
     await api.sendMessage({ roomId: "room-1", content: "hello" });
     await api.stopTurn("message-1");
+    await api.resetAgentSession({ roomId: "room-1", agentId: "builder" });
 
     expect(ipc.invoke.mock.calls).toEqual([
       [TEAM_CHAT_CHANNELS.connectionStatus],
@@ -33,6 +34,7 @@ describe("createTeamChatApi", () => {
       [TEAM_CHAT_CHANNELS.messagesList, { roomId: "room-1", limit: 50 }],
       [TEAM_CHAT_CHANNELS.messagesSend, { roomId: "room-1", content: "hello" }],
       [TEAM_CHAT_CHANNELS.turnsStop, "message-1"],
+      [TEAM_CHAT_CHANNELS.agentSessionReset, { roomId: "room-1", agentId: "builder" }],
     ]);
   });
 

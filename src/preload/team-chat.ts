@@ -2,6 +2,7 @@ import type { IpcRenderer } from "electron";
 import type {
   CreateTeamChatRoomRequest,
   ListTeamChatMessagesRequest,
+  ResetTeamChatAgentSessionRequest,
   SendTeamChatMessageRequest,
   SendTeamChatMessageResult,
   TeamChatConnectionStatus,
@@ -39,6 +40,8 @@ export function createTeamChatApi(ipc: TeamChatIpcRenderer) {
       ipc.invoke(TEAM_CHAT_CHANNELS.messagesSend, request),
     stopTurn: (rootMessageId: string): Promise<boolean> =>
       ipc.invoke(TEAM_CHAT_CHANNELS.turnsStop, rootMessageId),
+    resetAgentSession: (request: ResetTeamChatAgentSessionRequest): Promise<TeamChatRoom> =>
+      ipc.invoke(TEAM_CHAT_CHANNELS.agentSessionReset, request),
     onEvent: (callback: (event: TeamChatEvent) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: TeamChatEvent) => callback(event);
       ipc.on(TEAM_CHAT_CHANNELS.event, listener);

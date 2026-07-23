@@ -24,6 +24,7 @@ function setup() {
     listMessages: vi.fn(async () => ({ messages: [] })),
     sendMessage: vi.fn(async (request) => ({ rootMessageId: "message-1", message: request })),
     stopTurn: vi.fn(async () => true),
+    resetAgentSession: vi.fn(async (roomId, agentId) => ({ id: roomId, resetAgentId: agentId })),
     subscribe: vi.fn((listener) => {
       eventListener = listener;
       return () => { eventListener = undefined; };
@@ -42,7 +43,7 @@ describe("registerTeamChatIpc", () => {
 
     fixture.emit(event);
 
-    expect([...fixture.handlers.keys()]).toHaveLength(12);
+    expect([...fixture.handlers.keys()]).toHaveLength(13);
     expect([...fixture.handlers.keys()].every((channel) => channel.startsWith("team-chat:"))).toBe(true);
     expect(fixture.send).toHaveBeenCalledWith(TEAM_CHAT_CHANNELS.event, event);
   });
@@ -93,13 +94,33 @@ describe("registerTeamChatIpc", () => {
     expect(service.sendMessage).toHaveBeenCalledWith({ roomId: "room-1", content: "hello" });
   });
 
+  it("validates and delegates a room Agent conversation reset", async () => {
+    const { invoke, service } = setup();
+
+    await expect(invoke(TEAM_CHAT_CHANNELS.agentSessionReset, {
+      roomId: "",
+      agentId: "builder",
+    })).rejects.toThrow();
+    await expect(invoke(TEAM_CHAT_CHANNELS.agentSessionReset, {
+      roomId: "room-1",
+      agentId: "builder",
+      runtimeConversation: { payload: "must not cross IPC" },
+    })).rejects.toThrow();
+    await expect(invoke(TEAM_CHAT_CHANNELS.agentSessionReset, {
+      roomId: "room-1",
+      agentId: "builder",
+    })).resolves.toMatchObject({ id: "room-1", resetAgentId: "builder" });
+
+    expect(service.resetAgentSession).toHaveBeenCalledWith("room-1", "builder");
+  });
+
   it("removes registered handlers and the service listener on dispose", () => {
     const fixture = setup();
 
     fixture.dispose();
     fixture.emit({ type: "rooms-changed" });
 
-    expect(fixture.ipc.removeHandler).toHaveBeenCalledTimes(12);
+    expect(fixture.ipc.removeHandler).toHaveBeenCalledTimes(13);
     expect(fixture.send).not.toHaveBeenCalled();
   });
 });
