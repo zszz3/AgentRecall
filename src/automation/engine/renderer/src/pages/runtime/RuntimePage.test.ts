@@ -52,6 +52,14 @@ describe("RuntimePage", () => {
     expect(markup).not.toContain('class="runtime-config-toolbar"');
     expect(markup).toContain('class="runtime-config-sidebar"');
     expect(markup).toContain('<strong>当前配置</strong>');
+    expect(markup).toContain('aria-haspopup="dialog"');
+    expect(markup).toContain('aria-label="选择执行器类型"');
+    expect(markup).toContain('data-runtime-choice="codex"');
+    expect(markup).toContain('data-runtime-choice="claude"');
+    expect(markup).toContain('data-runtime-choice="api"');
+    expect(markup).toContain('data-runtime-choice="hermes"');
+    expect(markup).toContain('data-runtime-choice="opencode"');
+    expect(markup).toContain('data-runtime-choice="openclaw"');
     expect(markup).toContain('class="runtime-sidebar-item is-active"');
     expect(markup).toContain("Codex OpenAI");
     expect(markup).toContain("Claude Code");

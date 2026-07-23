@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { CheckCircle2, Eye, EyeOff, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Eye, EyeOff, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { selectConfigChannelsForDisplay } from "../../../../shared/config-channels";
 import { DEFAULT_MODEL_ID } from "../../../../shared/models";
 import {
@@ -10,7 +10,7 @@ import {
   OPENCLAW_DEFAULT_PRESET_ID,
   type AgentProviderPreset,
 } from "../../../../shared/provider-presets";
-import { runtimeDefinition } from "../../../../shared/runtime-catalog";
+import { RUNTIME_DEFINITIONS, runtimeDefinition } from "../../../../shared/runtime-catalog";
 import type {
   AgentChannel,
   ClaudeDefaultConfig,
@@ -109,7 +109,7 @@ interface RuntimePageProps {
   onLoadCodexPluginCatalog: () => Promise<void>;
   onSelectChannel: (channelId: string) => void | Promise<void>;
   onSelectRuntime: (runtimeId: AgentId) => void;
-  onAddConfig: () => void;
+  onAddConfig: (runtimeId: AgentId) => void;
   onImportLocalConfig?: (runtimeId: AgentId, channelId?: string) => Promise<void>;
   onDeleteConfig: (channelId: string) => void;
   onTestChannel: (channelId: string) => Promise<void>;
@@ -161,6 +161,11 @@ export function RuntimePage({
   const [showProviderKey, setShowProviderKey] = useState(false);
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const [providerQuery, setProviderQuery] = useState("");
+  const [runtimePickerOpen, setRuntimePickerOpen] = useState(false);
+  const firstRuntimeChoiceRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (runtimePickerOpen) firstRuntimeChoiceRef.current?.focus();
+  }, [runtimePickerOpen]);
   const runtimeTitle = language === "zh" ? "配置" : "Config";
   const runtimeDescription =
     language === "zh"
@@ -288,6 +293,14 @@ export function RuntimePage({
     setProviderPickerOpen(false);
     setProviderQuery("");
   };
+  const openRuntimePicker = (): void => {
+    closeProviderPicker();
+    setRuntimePickerOpen(true);
+  };
+  const selectRuntimeForNewConfig = (runtimeId: AgentId): void => {
+    onAddConfig(runtimeId);
+    setRuntimePickerOpen(false);
+  };
   const selectRuntimeProvider = async (preset: AgentProviderPreset): Promise<void> => {
     await applyRuntimePreset(preset);
     closeProviderPicker();
@@ -342,7 +355,15 @@ export function RuntimePage({
                 <small>{visibleRuntimeChannels.length}</small>
               </div>
               <div className="runtime-sidebar-actions">
-                <button className="icon-btn" type="button" aria-label={addConfigText} title={addConfigText} onClick={onAddConfig}>
+                <button
+                  className="icon-btn"
+                  type="button"
+                  aria-label={addConfigText}
+                  title={addConfigText}
+                  aria-haspopup="dialog"
+                  aria-expanded={runtimePickerOpen}
+                  onClick={openRuntimePicker}
+                >
                   <Plus size={13} />
                 </button>
                 <button
@@ -731,7 +752,7 @@ export function RuntimePage({
                     <span>{language === "zh" ? "一键导入本地默认配置" : "Import local defaults"}</span>
                   </button>
                 ) : null}
-                <button className="control-btn compact secondary" type="button" onClick={onAddConfig}>
+                <button className="control-btn compact secondary" type="button" onClick={openRuntimePicker}>
                   <Plus size={13} />
                   <span>{language === "zh" ? "新建配置" : "Create config"}</span>
                 </button>
@@ -740,6 +761,73 @@ export function RuntimePage({
           )}
           </section>
         </div>
+      </div>
+
+      <div
+        className="runtime-provider-picker-backdrop runtime-type-picker-backdrop"
+        role="presentation"
+        hidden={!runtimePickerOpen}
+        aria-hidden={!runtimePickerOpen}
+        onMouseDown={() => setRuntimePickerOpen(false)}
+      >
+        <section
+          className="runtime-provider-picker runtime-type-picker"
+          role="dialog"
+          aria-modal="true"
+          aria-label={language === "zh" ? "选择执行器类型" : "Choose executor type"}
+          onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setRuntimePickerOpen(false);
+          }}
+        >
+          <header className="runtime-provider-picker-head">
+            <div>
+              <strong>{addConfigText}</strong>
+              <span>
+                {language === "zh"
+                  ? "先选择执行器，创建后再配置 Provider 和模型。"
+                  : "Choose an executor first, then configure its provider and models."}
+              </span>
+            </div>
+            <button
+              className="icon-btn"
+              type="button"
+              aria-label={language === "zh" ? "关闭" : "Close"}
+              onClick={() => setRuntimePickerOpen(false)}
+            >
+              <X size={15} />
+            </button>
+          </header>
+
+          <div className="runtime-provider-picker-body runtime-type-picker-body">
+            <div className="runtime-type-picker-options">
+              {RUNTIME_DEFINITIONS.map((definition, index) => (
+                <button
+                  key={definition.id}
+                  type="button"
+                  className="runtime-type-picker-option"
+                  data-runtime-choice={definition.id}
+                  ref={index === 0 ? firstRuntimeChoiceRef : undefined}
+                  onClick={() => selectRuntimeForNewConfig(definition.id)}
+                >
+                  <span className={`runtime-choice-dot ${agentAccent(definition.id)}`} aria-hidden="true" />
+                  <span>
+                    <strong>{definition.label}</strong>
+                    <small>
+                      {definition.id === "api"
+                        ? language === "zh"
+                          ? "连接 OpenAI 兼容 HTTP API"
+                          : "Connect an OpenAI-compatible HTTP API"
+                        : language === "zh"
+                          ? `使用 ${definition.executable} CLI`
+                          : `Use the ${definition.executable} CLI`}
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
       </div>
     </section>
   );

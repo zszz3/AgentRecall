@@ -74,7 +74,7 @@ export interface RuntimeConfigManager {
   selectConfigChannel: (channelId: string) => void;
   selectRuntime: (runtimeId: AgentId) => void;
   setConfigContextMenu: React.Dispatch<React.SetStateAction<{ channelId: string; x: number; y: number } | undefined>>;
-  addConfigChannel: () => void;
+  addConfigChannel: (runtimeId: AgentId) => void;
   openConfigContextMenu: (event: MouseEvent, channelId: string, closeOtherMenus?: () => void) => void;
   deleteConfigChannel: (channelId: string) => void;
   saveChannelConfig: () => Promise<void>;
@@ -189,11 +189,18 @@ export function useRuntimeConfigManager({
     setConfigStatus("");
   }, []);
 
-  const addConfigChannel = useCallback(() => {
-    const next = [...configChannels, createChannel(selectedRuntimeId, configChannels.map((channel) => channel.id))];
-    updateConfigChannels(next);
-    setSelectedConfigChannelId(next[next.length - 1]?.id ?? "");
-  }, [configChannels, selectedRuntimeId, updateConfigChannels]);
+  const addConfigChannel = useCallback((runtimeId: AgentId) => {
+    const currentChannels = configChannelsRef.current;
+    const channel = createChannel(runtimeId, currentChannels.map((item) => item.id));
+    const next = [...currentChannels, channel];
+    configChannelsRef.current = next;
+    setConfigChannels(next);
+    setConfigDirty(true);
+    setConfigStatus("");
+    setConfigContextMenu(undefined);
+    setSelectedRuntimeId(runtimeId);
+    setSelectedConfigChannelId(channel.id);
+  }, []);
 
   const openConfigContextMenu = useCallback((event: MouseEvent, channelId: string, closeOtherMenus?: () => void) => {
     event.preventDefault();
