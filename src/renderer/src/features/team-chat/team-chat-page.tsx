@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   MessageCircleMore,
   Plus,
+  RotateCcw,
   Send,
   UsersRound,
   X,
@@ -70,6 +71,7 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
   const [sending, setSending] = useState(false);
   const [activeRootMessageId, setActiveRootMessageId] = useState<string>();
   const [streams, setStreams] = useState<Record<string, StreamDraft>>({});
+  const [resettingAgentIds, setResettingAgentIds] = useState<Set<string>>(() => new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const [databaseDialogOpen, setDatabaseDialogOpen] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -169,6 +171,11 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
         setStreams,
         setActiveRootMessageId,
         refreshRooms: () => void loadRooms(),
+        refreshActiveRoom: (roomId) => {
+          void api.getRoom(roomId).then((room) => {
+            if (selectedRoomIdRef.current === roomId) setActiveRoom(room);
+          }).catch((error) => setFeedback(errorMessage(error)));
+        },
       });
     });
     return () => {
@@ -179,6 +186,7 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
   useEffect(() => {
     setActiveRootMessageId(undefined);
     setStreams({});
+    setResettingAgentIds(new Set());
     setMentionMenuOpen(false);
     if (!selectedRoomId || connection.state !== "ready") {
       setActiveRoom(undefined);
@@ -325,6 +333,27 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
       await loadRooms();
     } catch (error) {
       setFeedback(errorMessage(error));
+    }
+  };
+
+  const resetAgentConversation = async (member: TeamChatRoomAgent): Promise<void> => {
+    if (!activeRoom || activeRootMessageId || resettingAgentIds.has(member.agentId)) return;
+    setResettingAgentIds((current) => new Set(current).add(member.agentId));
+    setFeedback(undefined);
+    try {
+      const room = await api.resetAgentSession({
+        roomId: activeRoom.id,
+        agentId: member.agentId,
+      });
+      if (selectedRoomIdRef.current === room.id) setActiveRoom(room);
+    } catch (error) {
+      setFeedback(errorMessage(error));
+    } finally {
+      setResettingAgentIds((current) => {
+        const next = new Set(current);
+        next.delete(member.agentId);
+        return next;
+      });
     }
   };
 
@@ -511,11 +540,34 @@ export function TeamChatPage({ language }: { language: LanguageMode }): ReactEle
             <div className="team-chat-member-list">
               {activeRoom?.agents.map((member) => {
                 const available = snapshot.configuredAgents.some((agent) => agent.id === member.agentId);
+                const continuity = member.hasActiveConversation
+                  ? l("Persistent context", "持续会话")
+                  : member.continuationAvailable
+                    ? l("Continues after first reply", "首次回复后持续")
+                    : l("New context each time", "每次新会话");
+                const resetting = resettingAgentIds.has(member.agentId);
                 return (
-                  <button type="button" key={member.agentId} disabled={!available || !member.enabled} onClick={() => insertMention(member)} title={available ? l(`Mention ${member.displayName}`, `提及 ${member.displayName}`) : l("Agent configuration is unavailable", "Agent 配置不可用")}>
-                    <span className={`team-chat-member-avatar ${available ? "available" : "missing"}`}><Bot size={14} /></span>
-                    <span><strong>{member.displayName}</strong><small>{available ? member.runtimeId : l("Unavailable", "配置不可用")}</small></span>
-                  </button>
+                  <div className="team-chat-member-row" key={member.agentId}>
+                    <button className="team-chat-member-main" type="button" disabled={!available || !member.enabled} onClick={() => insertMention(member)} title={available ? l(`Mention ${member.displayName}`, `提及 ${member.displayName}`) : l("Agent configuration is unavailable", "Agent 配置不可用")}>
+                      <span className={`team-chat-member-avatar ${available ? "available" : "missing"}`}><Bot size={14} /></span>
+                      <span>
+                        <strong>{member.displayName}</strong>
+                        <small>{available ? `${member.runtimeId} · ${continuity}` : l("Unavailable", "配置不可用")}</small>
+                      </span>
+                    </button>
+                    {available && member.hasActiveConversation ? (
+                      <button
+                        className="team-chat-member-reset"
+                        type="button"
+                        disabled={Boolean(activeRootMessageId) || resetting}
+                        onClick={() => void resetAgentConversation(member)}
+                        title={l("Start new conversation", "开始新会话")}
+                        aria-label={l(`Start a new conversation for ${member.displayName}`, `为 ${member.displayName} 开始新会话`)}
+                      >
+                        {resetting ? <LoaderCircle className="spin" size={13} /> : <RotateCcw size={13} />}
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
@@ -801,6 +853,7 @@ function handleTeamChatEvent(event: TeamChatEvent, handlers: {
   setStreams: React.Dispatch<React.SetStateAction<Record<string, StreamDraft>>>;
   setActiveRootMessageId: React.Dispatch<React.SetStateAction<string | undefined>>;
   refreshRooms: () => void;
+  refreshActiveRoom: (roomId: string) => void;
 }): void {
   if (event.type === "connection-changed") {
     handlers.setConnection(event.status);
@@ -808,6 +861,10 @@ function handleTeamChatEvent(event: TeamChatEvent, handlers: {
   }
   if (event.type === "rooms-changed") {
     handlers.refreshRooms();
+    return;
+  }
+  if (event.type === "agent-session-changed") {
+    if (event.roomId === handlers.selectedRoomId) handlers.refreshActiveRoom(event.roomId);
     return;
   }
   if (event.type === "message-created") {

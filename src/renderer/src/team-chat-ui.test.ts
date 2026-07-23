@@ -69,6 +69,18 @@ describe("Team Chat page", () => {
     expect(pageSource).toContain("setActiveRootMessageId(undefined)");
   });
 
+  it("shows safe per-Agent continuity state and can start a new conversation", () => {
+    expect(pageSource).toContain("member.continuationAvailable");
+    expect(pageSource).toContain("member.hasActiveConversation");
+    expect(pageSource).toContain("api.resetAgentSession");
+    expect(pageSource).toContain('event.type === "agent-session-changed"');
+    expect(pageSource).toContain('l("Persistent context", "持续会话")');
+    expect(pageSource).toContain('l("Start new conversation", "开始新会话")');
+    expect(pageSource).not.toContain("runtimeConversation");
+    expect(styleSource).toContain(".team-chat-member-row");
+    expect(styleSource).toContain(".team-chat-member-reset");
+  });
+
   it("uses a compact responsive three-pane layout", () => {
     expect(mainSource).toContain('import "./styles/team-chat.css";');
     expect(styleSource).toMatch(/\.team-chat-layout\s*\{[^}]*grid-template-columns:\s*208px\s+minmax\(0,\s*1fr\)\s+184px/);
