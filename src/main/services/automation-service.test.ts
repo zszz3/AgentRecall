@@ -4,6 +4,7 @@ import type { AgentHub } from "../../automation/engine/main/hub/agent-hub";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type { McpAgentManagementService } from "../../automation/engine/main/mcp/agent-management-service";
 import type { EvaluationService } from "./evaluation-service";
+import type { TeamChatService } from "../team-chat/team-chat-service";
 import { NativeAutomationService } from "./automation-service";
 
 function snapshot(workDir = "/repo"): AppSnapshot {
@@ -36,6 +37,13 @@ function fixture() {
     close: vi.fn(() => { calls.push("registry-close"); }),
   } as unknown as McpRegistryStore;
   const evaluations = { close: vi.fn(() => { calls.push("evaluations-close"); }) } as unknown as EvaluationService;
+  const teamChats = {
+    connect: vi.fn(async () => {
+      calls.push("team-chat-start");
+      return { state: "ready", mode: "local", databaseLabel: "Local database" } as const;
+    }),
+    close: vi.fn(async () => { calls.push("team-chat-close"); }),
+  } as unknown as TeamChatService;
   const agents = {} as McpAgentManagementService;
   const service = new NativeAutomationService(
     {
@@ -44,11 +52,14 @@ function fixture() {
       appDataPath: "/app-data",
       bundledWorkflowsPath: "/assets/workflows",
       workflowMcpServerPath: "/app/out/mcp/workflow-entry.js",
+      readTeamChatConnectionUrl: () => "",
+      writeTeamChatConnectionUrl: vi.fn(),
     },
     {
       hub,
       registry,
       evaluations,
+      teamChats,
       agents,
       loadBundledWorkflows: vi.fn(async () => [{ workflowId: "wf", title: "One", objective: "One", definition: {} as never }]),
       startRouter: vi.fn(async () => ({ host: "127.0.0.1", port: 1, baseUrl: "http://127.0.0.1:1", stop: async () => { calls.push("router-stop"); } })),
@@ -62,16 +73,17 @@ function fixture() {
       })),
     },
   );
-  return { service, calls, hub, registry, evaluations, emit: (value: AppSnapshot) => { current = value; listener?.(value); } };
+  return { service, calls, hub, registry, evaluations, teamChats, emit: (value: AppSnapshot) => { current = value; listener?.(value); } };
 }
 
 describe("NativeAutomationService", () => {
   it("initializes the native engine once in dependency order", async () => {
-    const { service, calls, hub } = fixture();
+    const { service, calls, hub, teamChats } = fixture();
 
     await Promise.all([service.initialize(), service.initialize()]);
 
-    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "runtime"]);
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "runtime", "team-chat-start"]);
+    expect(teamChats.connect).toHaveBeenCalledTimes(1);
     expect(hub.loadModelChannels).toHaveBeenCalledWith("/user-data/runtime-channels.json");
     expect(hub.loadPersistedState).toHaveBeenCalledWith("/user-data/automation.db");
     expect(service.health()).toEqual({ state: "ready" });
@@ -90,13 +102,14 @@ describe("NativeAutomationService", () => {
   });
 
   it("flushes runtime state before bridge and registry shutdown", async () => {
-    const { service, calls, evaluations } = fixture();
+    const { service, calls, evaluations, teamChats } = fixture();
     await service.initialize();
 
     await service.shutdown();
     await service.shutdown();
 
-    expect(calls.slice(-5)).toEqual(["hub-stop", "bridge-stop", "router-stop", "evaluations-close", "registry-close"]);
+    expect(calls.slice(-6)).toEqual(["team-chat-close", "hub-stop", "bridge-stop", "router-stop", "evaluations-close", "registry-close"]);
     expect(service.evaluations()).toBe(evaluations);
+    expect(service.teamChat()).toBe(teamChats);
   });
 });

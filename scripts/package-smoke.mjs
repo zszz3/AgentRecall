@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -100,6 +100,16 @@ try {
   await access(path.join(installedRoot, "out", "main", "index.js"));
   await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
+  const pgliteEntry = path.join(installedRoot, "node_modules", "@electric-sql", "pglite", "dist", "index.js");
+  await access(pgliteEntry);
+  const { PGlite } = await import(pathToFileURL(pgliteEntry).href);
+  const localDatabase = new PGlite(path.join(tempRoot, "team-chat-pgdata"));
+  try {
+    const result = await localDatabase.query("SELECT 1 AS ready");
+    if (result.rows[0]?.ready !== 1) throw new Error("Packaged local Chat database did not execute a query.");
+  } finally {
+    await localDatabase.close();
+  }
   const workflowMcpEntry = path.join(installedRoot, "bin", "agent-recall-workflow-mcp.mjs");
   await access(workflowMcpEntry);
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });

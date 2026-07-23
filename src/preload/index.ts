@@ -32,6 +32,7 @@ import { createAutomationApi } from "./automation";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createSkillsApi } from "./skills";
+import { createTeamChatApi } from "./team-chat";
 
 export interface AiAssistantReply {
   reply: string;
@@ -41,6 +42,7 @@ export interface AiAssistantReply {
 const api = {
   platform: process.platform as NodeJS.Platform,
   automation: createAutomationApi(ipcRenderer),
+  teamChat: createTeamChatApi(ipcRenderer),
   askAiAssistant: (messages: AiChatMessage[]): Promise<AiAssistantReply> => ipcRenderer.invoke("ai:assistant-chat", messages),
   searchSessions: (options: SearchOptions): Promise<SessionSearchResult[]> => ipcRenderer.invoke("search:sessions", options),
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),
