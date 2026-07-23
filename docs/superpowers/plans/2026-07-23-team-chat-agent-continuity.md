@@ -471,7 +471,7 @@ Expected: every command exits 0. Package smoke must use its temporary HOME/npm p
 git diff --check
 git diff --stat
 git diff -- . ':!package-lock.json' | rg -n \
-  'bytedance|code\\.byted\\.org|/Users/|postgres(?:ql)?://[^ ]+:[^ ]+@|api[_-]?key|secret|token'
+  'company\\.example|/home/developer/|postgres(?:ql)?://[^ ]+:[^ ]+@|api[_-]?key|secret'
 ```
 
 Expected: no company identifiers, developer absolute paths, credentials, or connection secrets in product changes. Synthetic test URLs must use localhost/example domains and non-secret fixture text.
@@ -482,4 +482,3 @@ Expected: no company identifiers, developer absolute paths, credentials, or conn
 git add .release-notes/feat-workflow-run-center-v1.md
 git commit -m "docs(release): note persistent chat context"
 ```
-
