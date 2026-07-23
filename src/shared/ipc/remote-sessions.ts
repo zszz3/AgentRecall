@@ -13,6 +13,12 @@ const optionalQuery = z
 const uploadInput = z
   .union([z.tuple([sessionKey]), z.tuple([sessionKey, z.boolean().optional()])])
   .transform((input): [string, boolean] => [input[0], input[1] ?? false]);
+const attachmentPreviewInput = z.tuple([
+  z.string().regex(/^sessions\/[a-f0-9]{32}\//).max(2_048),
+  z.string().regex(/^[a-f0-9]{64}$/),
+  z.string().min(1).max(200),
+  z.enum(["image", "pdf", "text", "file"]),
+]);
 
 export const REMOTE_SESSIONS_IPC = {
   getStatus: defineIpcRequest("remote-session:status", noInput),
@@ -24,6 +30,7 @@ export const REMOTE_SESSIONS_IPC = {
   list: defineIpcRequest("remote-session:list", optionalQuery),
   listSyncItems: defineIpcRequest("remote-session:sync-items", noInput),
   getDetail: defineIpcRequest("remote-session:detail", z.tuple([identifier])),
+  previewAttachment: defineIpcRequest("remote-session:preview-attachment", attachmentPreviewInput),
   chooseProject: defineIpcRequest("remote-session:choose-project", noInput),
   restore: defineIpcRequest("remote-session:restore", z.tuple([identifier, migrationAgent, projectPath])),
   restoreToSource: defineIpcRequest("remote-session:restore-to-source-environment", z.tuple([identifier, migrationAgent])),

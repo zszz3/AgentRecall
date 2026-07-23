@@ -954,6 +954,97 @@ select:focus-visible {
   color: var(--danger);
 }
 
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.message-attachments button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-subtle);
+  color: var(--text-dim);
+}
+
+.message-attachments button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--accent-bright);
+}
+
+.message-attachments button:disabled {
+  opacity: 0.55;
+}
+
+.message-attachments span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-attachments small {
+  color: var(--text-faint);
+}
+
+.attachment-preview-backdrop {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(3, 8, 18, 0.64);
+}
+
+.attachment-preview-dialog {
+  overflow: hidden;
+  width: min(900px, 92vw);
+  max-height: 88vh;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.attachment-preview-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.attachment-preview-dialog header button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.attachment-preview-dialog img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(88vh - 48px);
+  margin: auto;
+  object-fit: contain;
+}
+
+.attachment-preview-dialog > pre {
+  overflow: auto;
+  max-height: calc(88vh - 48px);
+  margin: 0;
+  padding: 16px;
+  white-space: pre-wrap;
+}
+
 .quota-feedback.running {
   color: var(--running-text);
 }

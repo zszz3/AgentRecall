@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
@@ -507,6 +507,7 @@ export function DetailPanel({
                 <MessageBlock
                   key={message.index}
                   timelineKey={`ctx-${message.index}`}
+                  sessionKey={session.sessionKey}
                   message={message}
                   query={query}
                   language={language}
@@ -612,6 +613,7 @@ export function DetailPanel({
                 <MessageBlock
                   key={item.key}
                   timelineKey={item.key}
+                  sessionKey={session.sessionKey}
                   message={item.message}
                   query={panelSearchQuery || query}
                   language={language}
@@ -635,6 +637,7 @@ const MESSAGE_TRUNCATE_LIMIT = 3000;
 
 function MessageBlock({
   message,
+  sessionKey,
   query,
   language,
   highlight = false,
@@ -642,6 +645,7 @@ function MessageBlock({
   timelineKey,
 }: {
   message: SessionMessage;
+  sessionKey: string;
   query: string;
   language: LanguageMode;
   highlight?: boolean;
@@ -650,6 +654,7 @@ function MessageBlock({
 }): ReactElement {
   const truncated = message.content.length > MESSAGE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; kind: "image" | "text"; data: string } | null>(null);
   const content = useMemo(() => {
     if (!truncated || expanded) return message.content;
     return markdownPreview(
@@ -675,11 +680,57 @@ function MessageBlock({
       ) : (
         <pre>{highlight ? <HighlightedSearchText text={content} terms={highlightTerms} /> : content}</pre>
       )}
+      {(message.attachments?.length ?? 0) > 0 ? (
+        <div className="message-attachments">
+          {message.attachments?.map((attachment) => (
+            <button
+              type="button"
+              key={attachment.id}
+              disabled={attachment.status !== "available"}
+              title={attachment.status === "available" ? attachment.fileName : localize(language, "Attachment unavailable", "附件不可用")}
+              onClick={() => {
+                const previewRequest = attachment.remoteObjectKey && attachment.sha256
+                  ? window.sessionSearch.previewRemoteSessionAttachment(
+                    attachment.remoteObjectKey,
+                    attachment.sha256,
+                    attachment.mimeType,
+                    attachment.previewKind,
+                  )
+                  : window.sessionSearch.previewAttachment(sessionKey, attachment.id);
+                void previewRequest.then((preview) => {
+                  if ((preview.kind === "image" || preview.kind === "text") && preview.data) {
+                    setAttachmentPreview({ name: attachment.fileName, kind: preview.kind, data: preview.data });
+                  }
+                });
+              }}
+            >
+              <Paperclip size={14} />
+              <span>{attachment.fileName}</span>
+              {attachment.sizeBytes ? <small>{Math.ceil(attachment.sizeBytes / 1024)} KB</small> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {truncated ? (
         <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full content", "展开全文")}
         </button>
+      ) : null}
+      {attachmentPreview ? (
+        <div className="attachment-preview-backdrop" onClick={() => setAttachmentPreview(null)}>
+          <div className="attachment-preview-dialog" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <strong>{attachmentPreview.name}</strong>
+              <button type="button" onClick={() => setAttachmentPreview(null)} aria-label={localize(language, "Close", "关闭")}>
+                <X size={16} />
+              </button>
+            </header>
+            {attachmentPreview.kind === "image"
+              ? <img src={attachmentPreview.data} alt={attachmentPreview.name} />
+              : <pre>{attachmentPreview.data}</pre>}
+          </div>
+        </div>
       ) : null}
     </div>
   );

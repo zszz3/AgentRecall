@@ -19,6 +19,7 @@ describe("session store schema", () => {
       expect(tables).toEqual(expect.arrayContaining([
         "sessions",
         "messages",
+        "message_attachments",
         "trace_events",
         "environments",
         "skill_usage_events",

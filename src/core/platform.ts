@@ -104,6 +104,7 @@ export interface AppSettings {
   skillSyncSupabaseUrl: string;
   skillSyncSupabaseAnonKey: string;
   remoteSyncEnabled: boolean;
+  syncSessionAttachments: boolean;
   remoteSyncSupabaseUrl: string;
   remoteSyncSupabaseAnonKey: string;
   apiConfig: ApiConfig;
@@ -165,6 +166,7 @@ export const defaultSettings: AppSettings = {
   skillSyncSupabaseUrl: "",
   skillSyncSupabaseAnonKey: "",
   remoteSyncEnabled: false,
+  syncSessionAttachments: true,
   remoteSyncSupabaseUrl: "",
   remoteSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
@@ -187,6 +189,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),
     remoteSyncEnabled: Boolean(merged.remoteSyncEnabled),
+    syncSessionAttachments: merged.syncSessionAttachments !== false,
     remoteSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.remoteSyncSupabaseUrl),
     remoteSyncSupabaseAnonKey: String(merged.remoteSyncSupabaseAnonKey ?? "").trim(),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),

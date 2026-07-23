@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import path from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type {
   SkillUsageEvent,
@@ -75,7 +76,10 @@ export class SessionStore {
     migrateSessionStore(this.db);
     this.environments = new EnvironmentStore(this.db);
     this.metadata = new MetadataStore(this.db);
-    this.sessions = new SessionsStore(this.db, this.environments);
+    const attachmentCacheRoot = typeof dbPathOrInstance === "string"
+      ? path.join(path.dirname(dbPathOrInstance), "attachments")
+      : null;
+    this.sessions = new SessionsStore(this.db, this.environments, attachmentCacheRoot);
     this.skills = new SkillStore(this.db);
     this.savedSearches = new SavedSearchStore(this.db);
     this.historyStore = new SearchHistoryStore(this.db);
@@ -227,6 +231,10 @@ export class SessionStore {
 
   getAllMessages(sessionKey: string): SessionMessage[] {
     return this.sessions.getAllMessages(sessionKey);
+  }
+
+  getAttachmentFile(sessionKey: string, attachmentId: string) {
+    return this.sessions.getAttachmentFile(sessionKey, attachmentId);
   }
 
   getTraceEvents(sessionKey: string, options: TraceEventQueryOptions = {}): SessionTraceEvent[] {

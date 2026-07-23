@@ -50,6 +50,35 @@ describe("format adapters", () => {
     ).toBeNull();
   });
 
+  it("keeps explicit image attachments without treating tool paths as files", () => {
+    const parsed = codexAdapter.parseLine({
+      type: "response_item",
+      timestamp: "2026-06-01T10:00:00Z",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "看一下这张图" },
+          { type: "input_image", image_url: "data:image/png;base64,aGVsbG8=" },
+          { type: "tool_use", input: { path: "/private/secret.txt" } },
+        ],
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      content: "看一下这张图",
+      attachments: [
+        expect.objectContaining({
+          fileName: "image.png",
+          mimeType: "image/png",
+          previewKind: "image",
+          status: "available",
+        }),
+      ],
+    });
+    expect(JSON.stringify(parsed)).not.toContain("/private/secret.txt");
+  });
+
   it("extracts visible CodeBuddy CLI messages", () => {
     expect(
       codebuddyAdapter.parseLine({

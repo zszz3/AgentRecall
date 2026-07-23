@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { migrationAgentForSource } from "./session-migration";
 import type { SessionStore, SessionSyncBinding } from "./session-store";
 import type { MigrationAgent, PortableSession, SessionMessage, SessionSearchResult, SessionTraceEvent } from "./types";
@@ -11,11 +12,17 @@ const REMOTE_SESSION_LEGACY_COLUMNS =
   "id,source_session_key,source_agent,source_source,title,project_path,started_at,updated_at,content_hash,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 
 export interface RemoteSessionDetailSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   exportedAt: number;
   session: SessionSearchResult;
   messages: SessionMessage[];
   traceEvents: SessionTraceEvent[];
+}
+
+export interface RemoteSessionAttachmentUpload {
+  objectKey: string;
+  bytes: Uint8Array;
+  mimeType: string;
 }
 
 export interface RemoteSessionListItem {
@@ -304,12 +311,13 @@ export function buildRemoteSessionPayload(options: {
   portable: PortableSession;
   now?: number;
   remoteId?: string;
+  uploadId?: string;
 }): { payload: RemoteSessionUploadPayload; detailJson: string; portableJson: string } {
   const now = integerTimestamp(options.now ?? Date.now());
   const detailJson = stableJson(options.detail);
   const portableJson = stableJson(options.portable);
   const id = options.remoteId || remoteSessionId(options.session.sessionKey);
-  const uploadId = randomUUID();
+  const uploadId = options.uploadId ?? randomUUID();
   const detailObjectKey = `sessions/${id}/${uploadId}.detail.json`;
   const portableObjectKey = `sessions/${id}/${uploadId}.portable.json`;
   const contentHash = remoteSessionContentHash(options.detail, options.portable);
@@ -346,19 +354,61 @@ export function buildRemoteSessionPayload(options: {
 }
 
 export function buildRemoteSessionUploadFromStore(
-  store: Pick<SessionStore, "getSession" | "getAllMessages" | "getTraceEvents">,
+  store: Pick<SessionStore, "getSession" | "getAllMessages" | "getTraceEvents">
+    & Partial<Pick<SessionStore, "getAttachmentFile">>,
   sessionKey: string,
   now = Date.now(),
   remoteId?: string,
-): { session: SessionSearchResult; detail: RemoteSessionDetailSnapshot; portable: PortableSession; payload: RemoteSessionUploadPayload; detailJson: string; portableJson: string } {
+  includeAttachments = true,
+): {
+  session: SessionSearchResult;
+  detail: RemoteSessionDetailSnapshot;
+  portable: PortableSession;
+  payload: RemoteSessionUploadPayload;
+  detailJson: string;
+  portableJson: string;
+  attachmentObjects: RemoteSessionAttachmentUpload[];
+} {
   const session = store.getSession(sessionKey);
   if (!session) throw new Error("Session not found.");
   const messages = store.getAllMessages(sessionKey);
   const traceEvents = store.getTraceEvents(sessionKey);
   const portable = remotePortableSessionFrom(session, messages);
-  const detail = buildRemoteSessionSnapshot(session, messages, traceEvents, now);
-  const { payload, detailJson, portableJson } = buildRemoteSessionPayload({ session, detail, portable, now, remoteId });
-  return { session, detail, portable, payload, detailJson, portableJson };
+  const resolvedRemoteId = remoteId || remoteSessionId(session.sessionKey);
+  const uploadId = randomUUID();
+  const attachmentObjects: RemoteSessionAttachmentUpload[] = [];
+  const remoteMessages = messages.map((message) => ({
+    ...message,
+    attachments: message.attachments?.map((attachment) => {
+      const local = includeAttachments && attachment.status === "available"
+        ? store.getAttachmentFile?.(sessionKey, attachment.id)
+        : null;
+      if (!local) {
+        const { source: _source, remoteObjectKey: _remoteObjectKey, sha256: _sha256, ...metadata } = attachment;
+        return { ...metadata, status: attachment.status === "available" ? "missing" as const : attachment.status };
+      }
+      const bytes = readFileSync(local.cachePath);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      const safeName = attachment.fileName.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-120) || "attachment";
+      const objectKey = `sessions/${resolvedRemoteId}/attachments/${digest}-${safeName}`;
+      attachmentObjects.push({ objectKey, bytes, mimeType: attachment.mimeType });
+      const { source: _source, ...metadata } = attachment;
+      return { ...metadata, remoteObjectKey: objectKey, sha256: digest };
+    }),
+  }));
+  const detail: RemoteSessionDetailSnapshot = {
+    ...buildRemoteSessionSnapshot(session, remoteMessages, traceEvents, now),
+    schemaVersion: 2,
+  };
+  const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
+    session,
+    detail,
+    portable,
+    now,
+    remoteId: resolvedRemoteId,
+    uploadId,
+  });
+  return { session, detail, portable, payload, detailJson, portableJson, attachmentObjects };
 }
 
 export function buildSessionSyncItems(
@@ -581,11 +631,22 @@ export class SupabaseRemoteSessionClient {
     return session;
   }
 
-  async uploadSession(payload: RemoteSessionUploadPayload, detailJson: string, portableJson: string): Promise<RemoteSessionUploadResult> {
+  async uploadSession(
+    payload: RemoteSessionUploadPayload,
+    detailJson: string,
+    portableJson: string,
+    attachmentObjects: RemoteSessionAttachmentUpload[] = [],
+  ): Promise<RemoteSessionUploadResult> {
     const existing = await this.getRemoteSessionOrNull(payload.id);
     if (existing?.contentHash === payload.content_hash) return { status: "skipped", remoteSession: existing };
+    const previousAttachmentKeys = existing
+      ? await this.getDetailSnapshot(existing).then(remoteAttachmentObjectKeys).catch(() => [])
+      : [];
 
     try {
+      for (const attachment of attachmentObjects) {
+        await this.uploadStorageObject(attachment.objectKey, attachment.bytes, attachment.mimeType);
+      }
       await this.uploadStorageObject(payload.detail_object_key, detailJson);
       await this.uploadStorageObject(payload.portable_object_key, portableJson);
 
@@ -612,6 +673,9 @@ export class SupabaseRemoteSessionClient {
           existing.portableObjectKey === payload.portable_object_key
             ? undefined
             : this.deleteStorageObject(existing.portableObjectKey).catch(() => undefined),
+          ...previousAttachmentKeys
+            .filter((key) => !attachmentObjects.some((attachment) => attachment.objectKey === key))
+            .map((key) => this.deleteStorageObject(key).catch(() => undefined)),
         ]);
       }
       return result;
@@ -619,9 +683,20 @@ export class SupabaseRemoteSessionClient {
       await Promise.all([
         this.deleteStorageObject(payload.detail_object_key).catch(() => undefined),
         this.deleteStorageObject(payload.portable_object_key).catch(() => undefined),
+        ...attachmentObjects.map((attachment) => this.deleteStorageObject(attachment.objectKey).catch(() => undefined)),
       ]);
       throw error;
     }
+  }
+
+  async downloadAttachment(objectKey: string): Promise<Uint8Array> {
+    if (!/^sessions\/[a-f0-9]{32}\/[A-Za-z0-9._/-]+$/.test(objectKey)) {
+      throw new Error("Remote attachment key is invalid.");
+    }
+    const response = await this.storageRequest(objectKey, { method: "GET" });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!response.ok) throw new Error(supabaseErrorMessage(response.status, Buffer.from(bytes).toString("utf8")));
+    return bytes;
   }
 
   async getDetailSnapshot(remoteIdOrSession: string | RemoteSessionListItem): Promise<RemoteSessionDetailSnapshot> {
@@ -646,9 +721,11 @@ export class SupabaseRemoteSessionClient {
       if (error instanceof Error && error.message === "Remote session was not found.") return false;
       throw error;
     }
+    const attachmentKeys = await this.getDetailSnapshot(remote).then(remoteAttachmentObjectKeys).catch(() => []);
     await Promise.all([
       this.deleteStorageObject(remote.detailObjectKey),
       this.deleteStorageObject(remote.portableObjectKey),
+      ...attachmentKeys.map((key) => this.deleteStorageObject(key)),
     ]);
     const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?id=eq.${encodeURIComponent(remoteId)}`, { method: "DELETE" });
     const body = await readResponseBody(response);
@@ -759,15 +836,19 @@ export class SupabaseRemoteSessionClient {
     });
   }
 
-  private async uploadStorageObject(key: string, body: string): Promise<void> {
+  private async uploadStorageObject(
+    key: string,
+    body: string | Uint8Array,
+    contentType = "application/json",
+  ): Promise<void> {
     const response = await this.storageRequest(key, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": contentType,
         "Cache-Control": "no-cache",
         "x-upsert": "true",
       },
-      body,
+      body: body as BodyInit,
     });
     const responseBody = await readResponseBody(response);
     if (!response.ok) throw new Error(supabaseErrorMessage(response.status, responseBody));
@@ -801,6 +882,12 @@ export class SupabaseRemoteSessionClient {
       clearTimeout(timer);
     }
   }
+}
+
+function remoteAttachmentObjectKeys(snapshot: RemoteSessionDetailSnapshot): string[] {
+  return [...new Set(snapshot.messages.flatMap((message) =>
+    (message.attachments ?? []).flatMap((attachment) =>
+      attachment.remoteObjectKey ? [attachment.remoteObjectKey] : [])))];
 }
 
 function parseRows(body: unknown): RemoteSessionListItem[] {
@@ -863,12 +950,14 @@ function fromRow(row: RemoteSessionRow): RemoteSessionListItem {
 export function parseDetailSnapshot(value: unknown): RemoteSessionDetailSnapshot {
   if (!value || typeof value !== "object") throw new Error("Remote detail snapshot was not an object.");
   const snapshot = value as Partial<RemoteSessionDetailSnapshot>;
-  if (snapshot.schemaVersion !== 1) throw new Error("Remote detail snapshot schema version is unsupported.");
+  if (snapshot.schemaVersion !== 1 && snapshot.schemaVersion !== 2) {
+    throw new Error("Remote detail snapshot schema version is unsupported.");
+  }
   if (!snapshot.session || typeof snapshot.session !== "object") throw new Error("Remote detail snapshot has no session.");
   if (!Array.isArray(snapshot.messages)) throw new Error("Remote detail snapshot has no messages.");
   if (!Array.isArray(snapshot.traceEvents)) throw new Error("Remote detail snapshot has no trace events.");
   return {
-    schemaVersion: 1,
+    schemaVersion: snapshot.schemaVersion,
     exportedAt: typeof snapshot.exportedAt === "number" ? snapshot.exportedAt : 0,
     session: snapshot.session as SessionSearchResult,
     messages: snapshot.messages.filter(isSessionMessage),

@@ -71,6 +71,21 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS message_attachments (
+      session_key TEXT NOT NULL,
+      message_index INTEGER NOT NULL,
+      attachment_id TEXT NOT NULL,
+      attachment_index INTEGER NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER,
+      preview_kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      cache_path TEXT,
+      PRIMARY KEY (session_key, message_index, attachment_id),
+      FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS message_events (
       session_key TEXT NOT NULL,
       message_index INTEGER NOT NULL,
@@ -224,6 +239,8 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       ON token_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_message_events_timestamp
       ON message_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_message_attachments_session_message
+      ON message_attachments(session_key, message_index, attachment_index);
     CREATE INDEX IF NOT EXISTS idx_token_events_dedupe
       ON token_events(dedupe_key, total_tokens, timestamp);
     CREATE INDEX IF NOT EXISTS idx_trace_events_session

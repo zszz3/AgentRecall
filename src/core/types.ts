@@ -60,6 +60,25 @@ export interface SessionMessage {
   content: string;
   timestamp: string;
   index: number;
+  attachments?: SessionAttachment[];
+}
+
+export type SessionAttachmentStatus = "available" | "unsafe" | "missing" | "too_large";
+export type SessionAttachmentPreviewKind = "image" | "pdf" | "text" | "file";
+
+export interface SessionAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+  previewKind: SessionAttachmentPreviewKind;
+  status: SessionAttachmentStatus;
+  source?: {
+    kind: "inline" | "path";
+    value: string;
+  };
+  remoteObjectKey?: string;
+  sha256?: string;
 }
 
 export interface SessionMessageEvent {

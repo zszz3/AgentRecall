@@ -1418,6 +1418,27 @@ function registerIpc(): void {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getMessages(sessionKey, pageOffset, pageLimit);
   });
+  ipcMain.handle("attachment:preview", async (_event, sessionKey: string, attachmentId: string) => {
+    const attachment = store.getAttachmentFile(sessionKey, attachmentId);
+    if (!attachment) throw new Error("Attachment is unavailable.");
+    if (attachment.previewKind === "image") {
+      const bytes = await fs.readFile(attachment.cachePath);
+      return { kind: "image", data: `data:${attachment.mimeType};base64,${bytes.toString("base64")}` };
+    }
+    if (attachment.previewKind === "text") {
+      const text = await fs.readFile(attachment.cachePath, "utf8");
+      return { kind: "text", data: text.slice(0, 256 * 1024) };
+    }
+    const error = await shell.openPath(attachment.cachePath);
+    if (error) throw new Error(error);
+    return { kind: "external" };
+  });
+  ipcMain.handle("attachment:open", async (_event, sessionKey: string, attachmentId: string) => {
+    const attachment = store.getAttachmentFile(sessionKey, attachmentId);
+    if (!attachment) throw new Error("Attachment is unavailable.");
+    const error = await shell.openPath(attachment.cachePath);
+    if (error) throw new Error(error);
+  });
   ipcMain.handle("session:trace-events", async (_event, sessionKey: string, options?: TraceEventQueryOptions) => {
     const session = store.getSession(sessionKey);
     if (session && !isLocalSessionStorage(session) && !hasHydratedRemoteDetails(sessionKey)) return [];

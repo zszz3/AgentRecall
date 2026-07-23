@@ -13,6 +13,8 @@ describe("remote session sync settings", () => {
     expect(section.indexOf("remoteSyncEnabled")).toBeGreaterThan(-1);
     expect(section.indexOf("remoteSyncEnabled")).toBeLessThan(section.indexOf("remoteSyncSupabaseUrl"));
     expect(section).toContain("settings?.remoteSyncEnabled ? (");
+    expect(section).toContain('l("Sync session attachments", "同步会话附件")');
+    expect(section).toContain("settings.syncSessionAttachments !== false");
   });
 
   it("shows install and remove controls only inside the enabled session section", () => {

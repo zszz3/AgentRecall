@@ -87,6 +87,7 @@ describe("platform application resolution", () => {
     expect(defaultSettings.hideSubagentSessions).toBe(true);
     expect(defaultSettings.autoCheckUpdates).toBe(true);
     expect(defaultSettings.showInDock).toBe(true);
+    expect(defaultSettings.syncSessionAttachments).toBe(true);
     const {
       hideSubagentSessions: _missingSubagentsInOlderSettings,
       autoCheckUpdates: _missingUpdatesInOlderSettings,

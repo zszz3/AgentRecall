@@ -3,6 +3,7 @@ import type {
   ClaudeConversationLine,
   CodexConversationLine,
   SessionFormat,
+  SessionAttachment,
   SessionMessage,
   SessionSource,
 } from "./types";
@@ -15,17 +16,84 @@ export interface FormatAdapter {
   parseLine(raw: unknown): ParsedLine;
 }
 
-function extractTextBlocks(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+function attachmentPreviewKind(mimeType: string): SessionAttachment["previewKind"] {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType.startsWith("text/") || /json|xml|yaml/.test(mimeType)) return "text";
+  return "file";
+}
 
-  return content
-    .map((block: { type?: string; text?: string }) => {
-      if (block.type === "tool_use" || block.type === "tool_result" || block.type === "input_image") return "";
-      return block.text || "";
-    })
-    .filter(Boolean)
-    .join("\n");
+function attachmentFileName(mimeType: string, index: number, explicit?: unknown): string {
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim().split(/[\\/]/).pop() || `attachment-${index + 1}`;
+  const extension = mimeType === "image/png"
+    ? "png"
+    : mimeType === "image/jpeg"
+      ? "jpg"
+      : mimeType === "application/pdf"
+        ? "pdf"
+        : "bin";
+  return index === 0 ? `image.${extension}` : `attachment-${index + 1}.${extension}`;
+}
+
+function attachmentFromBlock(block: Record<string, unknown>, index: number): SessionAttachment | null {
+  const type = typeof block.type === "string" ? block.type : "";
+  if (!["input_image", "image", "input_file", "file_attachment"].includes(type)) return null;
+  const source = block.source && typeof block.source === "object"
+    ? block.source as Record<string, unknown>
+    : null;
+  const rawValue = block.image_url
+    ?? block.file_path
+    ?? block.path
+    ?? source?.data
+    ?? source?.path;
+  if (typeof rawValue !== "string" || !rawValue.trim()) return null;
+  const value = rawValue.trim();
+  const dataMatch = value.match(/^data:([^;,]+);base64,(.+)$/s);
+  const sourceMime = typeof source?.media_type === "string" ? source.media_type : undefined;
+  const mimeType = dataMatch?.[1]
+    || sourceMime
+    || (type.includes("image") ? "image/png" : "application/octet-stream");
+  const sourceKind = dataMatch || source?.type === "base64" ? "inline" : "path";
+  const sourceValue = dataMatch?.[2] ?? value;
+  const fileName = attachmentFileName(
+    mimeType,
+    index,
+    block.filename ?? block.name ?? block.file_name ?? (sourceKind === "path" ? sourceValue : undefined),
+  );
+  return {
+    id: `attachment-${index + 1}`,
+    fileName,
+    mimeType,
+    previewKind: attachmentPreviewKind(mimeType),
+    status: "available",
+    source: { kind: sourceKind, value: sourceValue },
+  };
+}
+
+function extractContentBlocks(content: unknown): { text: string; attachments?: SessionAttachment[] } {
+  if (typeof content === "string") return { text: content };
+  if (!Array.isArray(content)) return { text: "" };
+  const texts: string[] = [];
+  const attachments: SessionAttachment[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue;
+    const block = item as Record<string, unknown>;
+    const attachment = attachmentFromBlock(block, attachments.length);
+    if (attachment) {
+      attachments.push(attachment);
+      continue;
+    }
+    if (block.type === "tool_use" || block.type === "tool_result") continue;
+    if (typeof block.text === "string" && block.text) texts.push(block.text);
+  }
+  return {
+    text: texts.join("\n") || (attachments.length > 0 ? "[Attachment]" : ""),
+    ...(attachments.length > 0 ? { attachments } : {}),
+  };
+}
+
+function extractTextBlocks(content: unknown): string {
+  return extractContentBlocks(content).text;
 }
 
 export const claudeAdapter: FormatAdapter = {
@@ -36,13 +104,14 @@ export const claudeAdapter: FormatAdapter = {
     if (line.type !== "user" && line.type !== "assistant") return null;
     if (!line.message?.content) return null;
 
-    const content = extractTextBlocks(line.message.content);
-    if (!content) return null;
+    const parsed = extractContentBlocks(line.message.content);
+    if (!parsed.text) return null;
 
     return {
       role: line.type,
-      content,
+      content: parsed.text,
       timestamp: line.timestamp || "",
+      ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
     };
   },
 };
@@ -55,23 +124,25 @@ export const codexAdapter: FormatAdapter = {
 
     if (line.type === "response_item" && line.payload?.type === "message" && line.payload.role) {
       if (line.payload.role !== "user" && line.payload.role !== "assistant") return null;
-      const content = extractTextBlocks(line.payload.content);
-      if (!content) return null;
+      const parsed = extractContentBlocks(line.payload.content);
+      if (!parsed.text) return null;
       return {
         role: line.payload.role,
-        content,
+        content: parsed.text,
         timestamp: line.timestamp || "",
+        ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
       };
     }
 
     if (line.type === "message" && line.role && line.content) {
       if (line.role !== "user" && line.role !== "assistant") return null;
-      const content = extractTextBlocks(line.content);
-      if (!content) return null;
+      const parsed = extractContentBlocks(line.content);
+      if (!parsed.text) return null;
       return {
         role: line.role,
-        content,
+        content: parsed.text,
         timestamp: line.timestamp || "",
+        ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
       };
     }
 
@@ -87,7 +158,8 @@ export const codebuddyAdapter: FormatAdapter = {
     if (line.type !== "message" || !line.role || !line.content) return null;
     if (line.role !== "user" && line.role !== "assistant") return null;
 
-    const content = extractTextBlocks(line.content);
+    const parsed = extractContentBlocks(line.content);
+    const content = parsed.text;
     if (!content) return null;
 
     // The CodeBuddy CLI injects a root user message whose text is the literal
@@ -100,6 +172,7 @@ export const codebuddyAdapter: FormatAdapter = {
       role: line.role,
       content,
       timestamp: typeof line.timestamp === "number" ? new Date(line.timestamp).toISOString() : "",
+      ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
     };
   },
 };
@@ -133,12 +206,13 @@ function genericAdapter(format: SessionFormat): FormatAdapter {
     parseLine(raw) {
       const role = roleFromRaw(raw);
       if (!role) return null;
-      const content = extractTextBlocks(contentFromRaw(raw));
-      if (!content) return null;
+      const parsed = extractContentBlocks(contentFromRaw(raw));
+      if (!parsed.text) return null;
       return {
         role,
-        content,
+        content: parsed.text,
         timestamp: timestampFromRaw(raw),
+        ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
       };
     },
   };

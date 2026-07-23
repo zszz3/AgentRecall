@@ -48,6 +48,13 @@ const api = {
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   getMessages: (sessionKey: string, offset?: number, limit?: number): Promise<SessionMessage[]> =>
     ipcRenderer.invoke("session:messages", sessionKey, offset, limit),
+  previewAttachment: (
+    sessionKey: string,
+    attachmentId: string,
+  ): Promise<{ kind: "image" | "text" | "external"; data?: string }> =>
+    ipcRenderer.invoke("attachment:preview", sessionKey, attachmentId),
+  openAttachment: (sessionKey: string, attachmentId: string): Promise<void> =>
+    ipcRenderer.invoke("attachment:open", sessionKey, attachmentId),
   getTraceEvents: (sessionKey: string, options?: TraceEventQueryOptions): Promise<SessionTraceEvent[]> =>
     ipcRenderer.invoke("session:trace-events", sessionKey, options),
   getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),

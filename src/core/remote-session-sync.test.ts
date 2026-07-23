@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   buildRemoteSessionPayload,
   buildRemoteSessionSetupSql,
@@ -181,6 +184,47 @@ describe("remote session sync model", () => {
     expect(payload.source_environment_label).toBe("SSH dev");
   });
 
+  it("adds managed attachments to schema 2 snapshots without exposing local paths", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-recall-remote-attachment-"));
+    try {
+      const cachePath = path.join(directory, "shot.png");
+      writeFileSync(cachePath, "image", "utf8");
+      const store = {
+        getSession: () => SESSION,
+        getAllMessages: () => [{
+          ...MESSAGES[0],
+          attachments: [{
+            id: "0-0-image",
+            fileName: "shot.png",
+            mimeType: "image/png",
+            previewKind: "image" as const,
+            status: "available" as const,
+          }],
+        }],
+        getTraceEvents: () => [],
+        getAttachmentFile: () => ({
+          cachePath,
+          fileName: "shot.png",
+          mimeType: "image/png",
+          previewKind: "image" as const,
+        }),
+      };
+
+      const built = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
+
+      expect(built.detail.schemaVersion).toBe(2);
+      expect(built.attachmentObjects).toHaveLength(1);
+      expect(built.attachmentObjects[0].objectKey).toMatch(/^sessions\/[a-f0-9]{32}\/attachments\/[a-f0-9]{64}-shot\.png$/);
+      expect(built.detail.messages[0].attachments?.[0]).toMatchObject({
+        remoteObjectKey: built.attachmentObjects[0].objectKey,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      });
+      expect(JSON.stringify(built.detail)).not.toContain(directory);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rounds timestamp fields for Supabase bigint columns", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000.9);
     const { payload } = buildRemoteSessionPayload({
@@ -312,7 +356,7 @@ describe("remote session sync model", () => {
         const method = init?.method ?? "GET";
         if (String(url).includes("/storage/v1/object/")) {
           calls.push(`storage-${method}`);
-          return new Response("{}", { status: 200 });
+          return new Response(method === "GET" ? JSON.stringify(detail) : "{}", { status: 200 });
         }
         if (method === "DELETE") {
           calls.push("row-DELETE");
@@ -330,8 +374,9 @@ describe("remote session sync model", () => {
       failures: [],
     });
     expect(calls[0]).toBe("row-GET");
-    expect(calls.slice(1, 3).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
-    expect(calls[3]).toBe("row-DELETE");
+    expect(calls[1]).toBe("storage-GET");
+    expect(calls.slice(2, 4).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
+    expect(calls[4]).toBe("row-DELETE");
   });
 
   it("keeps a selected session as failed when its delete preflight cannot reach Supabase", async () => {

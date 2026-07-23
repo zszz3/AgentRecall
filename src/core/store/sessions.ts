@@ -1,5 +1,9 @@
 import * as fs from "node:fs";
 import type { SQLInputValue } from "node:sqlite";
+import {
+  materializeSessionAttachment,
+  MAX_SESSION_ATTACHMENT_BYTES,
+} from "../session-attachments";
 import { truncateTraceDetail } from "../trace-detail";
 import type {
   IndexedSession,
@@ -139,6 +143,7 @@ export class SessionsStore {
   constructor(
     private readonly db: SessionStoreDatabase,
     private readonly environments: EnvironmentStore,
+    private readonly attachmentCacheRoot: string | null = null,
   ) {}
 
   private transaction(run: () => void): void {
@@ -226,6 +231,7 @@ export class SessionsStore {
         );
 
       this.db.prepare("DELETE FROM messages WHERE session_key = ?").run(session.sessionKey);
+      this.db.prepare("DELETE FROM message_attachments WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM message_events WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM token_events WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM trace_events WHERE session_key = ?").run(session.sessionKey);
@@ -236,6 +242,40 @@ export class SessionsStore {
       );
       for (const message of messages) {
         insertMessage.run(session.sessionKey, message.index, message.role, message.content, message.timestamp);
+      }
+
+      const insertAttachment = this.db.prepare(
+        `INSERT INTO message_attachments (
+          session_key, message_index, attachment_id, attachment_index, file_name,
+          mime_type, size_bytes, preview_kind, status, cache_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let sessionAttachmentBytes = 0;
+      for (const message of messages) {
+        for (const [attachmentIndex, attachment] of (message.attachments ?? []).entries()) {
+          const attachmentId = `${message.index}-${attachmentIndex}-${attachment.id}`;
+          const materialized = materializeSessionAttachment(attachment, {
+            cacheRoot: this.attachmentCacheRoot,
+            sessionFilePath: session.filePath,
+            attachmentId,
+            remainingSessionBytes: MAX_SESSION_ATTACHMENT_BYTES - sessionAttachmentBytes,
+          });
+          if (materialized.status === "available") {
+            sessionAttachmentBytes += materialized.sizeBytes ?? 0;
+          }
+          insertAttachment.run(
+            session.sessionKey,
+            message.index,
+            materialized.id,
+            attachmentIndex,
+            materialized.fileName,
+            materialized.mimeType,
+            materialized.sizeBytes ?? null,
+            materialized.previewKind,
+            materialized.status,
+            materialized.cachePath,
+          );
+        }
       }
 
       const insertMessageEvent = this.db.prepare(
@@ -955,7 +995,7 @@ export class SessionsStore {
   }
 
   getMessages(sessionKey: string, offset = 0, limit = 120): SessionMessage[] {
-    return (
+    const messages: SessionMessage[] = (
       this.db
         .prepare(
           `
@@ -973,6 +1013,59 @@ export class SessionsStore {
         timestamp: string;
       }>
     ).map((row) => ({ index: row.message_index, role: row.role, content: row.content, timestamp: row.timestamp }));
+    if (messages.length === 0) return messages;
+    const messageIndexes = new Set(messages.map((message) => message.index));
+    const attachments = this.db.prepare(
+      `SELECT message_index, attachment_id, file_name, mime_type, size_bytes, preview_kind, status
+       FROM message_attachments
+       WHERE session_key = ?
+       ORDER BY message_index, attachment_index`,
+    ).all(sessionKey) as Array<{
+      message_index: number;
+      attachment_id: string;
+      file_name: string;
+      mime_type: string;
+      size_bytes: number | null;
+      preview_kind: "image" | "pdf" | "text" | "file";
+      status: "available" | "unsafe" | "missing" | "too_large";
+    }>;
+    for (const message of messages) {
+      const matching = attachments
+        .filter((attachment) => attachment.message_index === message.index && messageIndexes.has(attachment.message_index))
+        .map((attachment) => ({
+          id: attachment.attachment_id,
+          fileName: attachment.file_name,
+          mimeType: attachment.mime_type,
+          sizeBytes: attachment.size_bytes ?? undefined,
+          previewKind: attachment.preview_kind,
+          status: attachment.status,
+        }));
+      if (matching.length > 0) message.attachments = matching;
+    }
+    return messages;
+  }
+
+  getAttachmentFile(
+    sessionKey: string,
+    attachmentId: string,
+  ): { cachePath: string; fileName: string; mimeType: string; previewKind: "image" | "pdf" | "text" | "file" } | null {
+    const row = this.db.prepare(
+      `SELECT cache_path, file_name, mime_type, preview_kind
+       FROM message_attachments
+       WHERE session_key = ? AND attachment_id = ? AND status = 'available'`,
+    ).get(sessionKey, attachmentId) as {
+      cache_path: string | null;
+      file_name: string;
+      mime_type: string;
+      preview_kind: "image" | "pdf" | "text" | "file";
+    } | undefined;
+    if (!row?.cache_path) return null;
+    return {
+      cachePath: row.cache_path,
+      fileName: row.file_name,
+      mimeType: row.mime_type,
+      previewKind: row.preview_kind,
+    };
   }
 
   getAllMessages(sessionKey: string): SessionMessage[] {

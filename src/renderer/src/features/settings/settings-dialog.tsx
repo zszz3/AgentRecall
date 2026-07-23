@@ -908,6 +908,24 @@ export function SettingsDialog({
                         onChange={(event) => onSettingsChange({ remoteSyncSupabaseAnonKey: event.currentTarget.value })}
                       />
                     </label>
+                    <label className="settings-field settings-toggle">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">{l("Sync session attachments", "同步会话附件")}</span>
+                        <span className="settings-field-sub">
+                          {l(
+                            "Upload available attachments with remote sessions. Enabled by default.",
+                            "远程同步会话时一并上传可用附件，默认开启。",
+                          )}
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        className="switch"
+                        checked={settings.syncSessionAttachments !== false}
+                        disabled={saving}
+                        onChange={(event) => onSettingsChange({ syncSessionAttachments: event.currentTarget.checked })}
+                      />
+                    </label>
                     <SupabaseSetupGuide
                       language={language}
                       tone="info"
