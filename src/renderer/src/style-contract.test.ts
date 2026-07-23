@@ -106,7 +106,9 @@ describe("stylesheet theme contract", () => {
     const codexProviderSwitch = stylesheet.match(/\.codex-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
     const summaryProviderSwitch = stylesheet.match(/\.summary-provider-switch\s*\{[^}]*\}/)?.[0] ?? "";
     const detectButton = stylesheet.match(/\.codex-model-detect-button\s*\{[^}]*\}/)?.[0] ?? "";
-    const modelConflict = stylesheet.match(/\.codex-model-conflict\s*\{[^}]*\}/)?.[0] ?? "";
+    const modelInput = stylesheet.match(/\.codex-model-input\s*\{[^}]*\}/)?.[0] ?? "";
+    const modelCombo = stylesheet.match(/\.codex-model-combo\s*\{[^}]*\}/)?.[0] ?? "";
+    const modelMenu = stylesheet.match(/\.codex-model-menu\s*\{[^}]*\}/)?.[0] ?? "";
     const apiField = stylesheet.match(/\.api-settings-form\s+\.settings-field\s*\{[^}]*\}/)?.[0] ?? "";
     const apiInput = stylesheet.match(/\.api-settings-form\s+\.settings-field\s+(?:input|select)[^{]*\{[^}]*\}/)?.[0] ?? "";
 
@@ -120,8 +122,11 @@ describe("stylesheet theme contract", () => {
     expect(detectButton).toMatch(/border:\s*1px\s+solid\s+var\(--accent-line\)/);
     expect(detectButton).toMatch(/background:\s*var\(--accent-soft\)/);
     expect(detectButton).toMatch(/font-weight:\s*650/);
-    expect(modelConflict).toMatch(/grid-template-columns:/);
-    expect(modelConflict).toMatch(/border:\s*1px\s+solid\s+var\(--accent-line\)/);
+    expect(modelInput).toMatch(/display:\s*grid/);
+    expect(modelInput).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+max-content/);
+    expect(modelCombo).toMatch(/position:\s*relative/);
+    expect(modelMenu).toMatch(/position:\s*absolute/);
+    expect(modelMenu).toMatch(/overflow-y:\s*auto/);
     expect(apiField).toMatch(/display:\s*grid/);
     expect(apiField).toMatch(/grid-template-columns:\s*minmax\(140px,\s*180px\)\s+minmax\(0,\s*1fr\)/);
     expect(apiInput).toMatch(/width:\s*100%/);
@@ -162,15 +167,10 @@ describe("stylesheet theme contract", () => {
     expect(tools).not.toMatch(/border-left/);
   });
 
-  it("keeps toolbar action buttons isolated from remote environment filter chips", () => {
+  it("keeps toolbar action buttons isolated from the filter row", () => {
     const toolbar = stylesheet.match(/\.toolbar\s*\{[^}]*\}/)?.[0] ?? "";
     const toolbarFilters = stylesheet.match(/\.toolbar-filters\s*\{[^}]*\}/)?.[0] ?? "";
     const searchbox = stylesheet.match(/\.searchbox\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeFilter = stylesheet.match(/\.scope-filter\s*\{[^}]*\}/)?.[0] ?? "";
-    const singleScopeFilter = stylesheet.match(/\.scope-filter\[data-count="1"\]\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeFilterChip = stylesheet.match(/\.scope-filter-chip\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeFilterLabelText = stylesheet.match(/\.scope-filter-label > span:last-child\s*\{[^}]*\}/)?.[0] ?? "";
-    const scopeTooltip = stylesheet.match(/\.scope-filter-tooltip\s*\{[^}]*\}/)?.[0] ?? "";
     const dateFilter = stylesheet.match(/\.date-filter\s*\{[^}]*\}/)?.[0] ?? "";
     const dateFilterButton = stylesheet.match(/\.date-filter button\s*\{[^}]*\}/)?.[0] ?? "";
     const liveFilterButton = stylesheet.match(/\.live-filter button\s*\{[^}]*\}/)?.[0] ?? "";
@@ -190,31 +190,6 @@ describe("stylesheet theme contract", () => {
     expect(toolbarFilters).toMatch(/flex-wrap:\s*nowrap/);
     expect(toolbarFilters).toMatch(/justify-content:\s*flex-start/);
     expect(toolbarFilters).toMatch(/overflow:\s*visible/);
-    expect(scopeFilter).toMatch(/--scope-filter-max:\s*240px/);
-    expect(scopeFilter).toMatch(/width:\s*fit-content/);
-    expect(scopeFilter).toMatch(/max-width:\s*var\(--scope-filter-max\)/);
-    expect(scopeFilter).toMatch(/flex:\s*0\s+1\s+auto/);
-    expect(scopeFilter).toMatch(/position:\s*relative/);
-    expect(singleScopeFilter).toMatch(/--scope-filter-max:\s*160px/);
-    expect(scopeFilterChip).toMatch(/position:\s*relative/);
-    expect(scopeFilterChip).toMatch(/justify-content:\s*space-between/);
-    expect(scopeFilterChip).toMatch(/flex:\s*1\s+1\s+0/);
-    expect(scopeFilterChip).toMatch(/max-width:\s*100%/);
-    expect(scopeFilterChip).toMatch(/min-width:\s*0/);
-    expect(scopeFilterChip).toMatch(/overflow:\s*visible/);
-    expect(scopeFilterLabelText).toMatch(/text-overflow:\s*ellipsis/);
-    expect(scopeFilterLabelText).toMatch(/white-space:\s*nowrap/);
-    expect(scopeTooltip).toMatch(/box-shadow:\s*var\(--shadow-popover\)/);
-    expect(scopeTooltip).toMatch(/background:\s*var\(--panel-bg\)/);
-    expect(scopeTooltip).toMatch(/pointer-events:\s*none/);
-    expect(scopeTooltip).toMatch(/width:\s*max-content/);
-    expect(scopeTooltip).toMatch(/max-width:\s*min\(720px,\s*calc\(100vw - 48px\)\)/);
-    expect(scopeTooltip).toMatch(/overflow-wrap:\s*break-word/);
-    expect(scopeTooltip).not.toMatch(/overflow-wrap:\s*anywhere/);
-    const scopeFilterRender = appSource.slice(appSource.indexOf('className="scope-filter"'), appSource.indexOf('className="live-filter"'));
-    expect(scopeFilterRender).not.toContain("onFocus={() => setHoveredScopeFilter");
-    expect(scopeFilterRender).toContain('{hoveredScopeFilter === filter.key ? (');
-    expect(scopeFilterRender.indexOf('className="scope-filter-tooltip"')).toBeGreaterThan(scopeFilterRender.indexOf('className="scope-filter-chip"'));
     expect(dateFilter).toMatch(/height:\s*38px/);
     expect(dateFilter).toMatch(/width:\s*fit-content/);
     expect(dateFilter).toMatch(/max-width:\s*var\(--date-filter-width\)/);
@@ -268,6 +243,20 @@ describe("stylesheet theme contract", () => {
     expect(dark).toMatch(/--codewiz-badge-text:\s*#ff8d9d/);
     expect(badge).toMatch(/background:\s*var\(--codewiz-badge-bg\)/);
     expect(badge).toMatch(/color:\s*var\(--codewiz-badge-text\)/);
+  });
+
+  it("uses a distinct blue accent for ZCode badges", () => {
+    const root = stylesheet.match(/:root\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const dark = stylesheet.match(/:root\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const badge = stylesheet.match(/\.source-badge\.zcode\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(root).toMatch(/--zcode:\s*#2563eb/);
+    expect(root).toMatch(/--zcode-badge-bg:\s*#eaf2ff/);
+    expect(root).toMatch(/--zcode-badge-text:\s*#1d4ed8/);
+    expect(dark).toMatch(/--zcode-badge-bg:\s*rgba\(59,\s*130,\s*246,\s*0\.18\)/);
+    expect(dark).toMatch(/--zcode-badge-text:\s*#93c5fd/);
+    expect(badge).toMatch(/background:\s*var\(--zcode-badge-bg\)/);
+    expect(badge).toMatch(/color:\s*var\(--zcode-badge-text\)/);
   });
 
   it("uses one desktop toolbar and the available viewport height for session sync", () => {

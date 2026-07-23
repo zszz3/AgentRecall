@@ -134,4 +134,33 @@ describe("SessionsStore", () => {
       db.close();
     }
   });
+
+  it("reports the previous comparable period for day/week/month and none for allTime", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = new Date("2026-07-20T12:00:00.000Z").getTime();
+      const at = (offsetMs: number): string => new Date(now - offsetMs).toISOString();
+
+      // Two messages "today", one message "yesterday".
+      store.upsertIndexedSession(indexedSession({ sessionKey: "codex:today", rawId: "today", filePath: "/tmp/today.jsonl" }), [
+        { role: "user", content: "a", timestamp: at(1 * 60 * 60 * 1000), index: 0 },
+        { role: "assistant", content: "b", timestamp: at(2 * 60 * 60 * 1000), index: 1 },
+      ]);
+      store.upsertIndexedSession(indexedSession({ sessionKey: "codex:yesterday", rawId: "yesterday", filePath: "/tmp/yesterday.jsonl" }), [
+        { role: "user", content: "c", timestamp: at(DAY + 1 * 60 * 60 * 1000), index: 0 },
+      ]);
+
+      const today = store.getStats({ period: "today" }, now);
+      expect(today.total.messageCount).toBe(2);
+      expect(today.previousTotal?.messageCount).toBe(1);
+
+      const allTime = store.getStats({ period: "allTime" }, now);
+      expect(allTime.previousTotal).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
 });

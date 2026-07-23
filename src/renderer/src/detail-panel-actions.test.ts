@@ -37,6 +37,7 @@ describe("detail panel actions", () => {
 
     expect(detailPanel).toContain("onResume");
     expect(detailPanel).toContain("onExportMarkdown");
+    expect(detailPanel).toContain("onExportJson");
     expect(detailPanel).not.toContain("onFocusTerminal");
     expect(detailPanel).not.toMatch(/Bring to Front/);
     expect(detailPanel).toMatch(/Export MD/);
@@ -55,6 +56,7 @@ describe("detail panel actions", () => {
     expect(contextMenu).not.toMatch(/Bring to Front/);
     expect(contextMenu).not.toContain("onFocusTerminal");
     expect(contextMenu).toMatch(/Export Markdown/);
+    expect(contextMenu).toMatch(/Export JSON/);
     expect(contextMenu).not.toMatch(/Copy Plain Text/);
   });
 
@@ -74,6 +76,22 @@ describe("detail panel actions", () => {
     expect(mainSource).toContain("command:export-markdown");
     expect(mainSource).toContain("showSaveDialog");
     expect(mainSource).toContain("formatSessionMarkdown");
+  });
+
+  it("wires API request JSON export through format selection and a save dialog", () => {
+    expect(preloadSource).toContain("exportJson");
+    expect(preloadSource).toContain("command:export-json");
+    const handler = mainHandlerSource("command:export-json");
+    expect(handler).toContain("chooseJsonExportFormat");
+    expect(handler).toContain("chooseJsonExportPath");
+    expect(handler).toContain("formatSessionJson");
+    expect(handler).toContain("resolveCodexResponsesRequest");
+    expect(handler).toContain("CODEX_ROLLOUT_TRACE_ROOT");
+    expect(handler).toContain("JSON Export Complete");
+    expect(handler).toContain("Exact Codex request body");
+    expect(mainSource).toContain("OpenAI Chat Completions");
+    expect(mainSource).toContain("OpenAI Responses");
+    expect(mainSource).toContain("Anthropic Messages");
   });
 
   it("opens detail on the newest message window and pages older messages backward", () => {
@@ -188,6 +206,14 @@ describe("detail panel actions", () => {
     expect(lastGroup).not.toContain("onReveal");
   });
 
+  it("deletes WSL source files remotely before removing the local record", () => {
+    const handler = mainHandlerSource("session:delete");
+    expect(handler).toContain('session.environmentKind !== "wsl"');
+    expect(handler).toContain("await deleteWslSessionFile(requireWslEnvironment(session), session.filePath)");
+    expect(handler).toContain("return store.deleteSessionRecord(sessionKey)");
+    expect(handler).toContain("return store.deleteSession(sessionKey)");
+  });
+
   it("exposes remote environment management IPC through preload and main", () => {
     for (const channel of [
       "environments:list",
@@ -217,6 +243,12 @@ describe("detail panel actions", () => {
     expect(sessionUiSource).toContain("remote paths cannot be revealed locally");
     expect(detailPanel).toContain("disabled={actionRunning || localOnlyDisabled}");
     expect(detailPanel).toContain("environment-badge");
+  });
+
+  it("keeps ZCode remote saving visible but disabled until snapshot-only upload is supported", () => {
+    expect(appSource).toContain('remoteUploadDisabled={detail.source === "zcode-cli" || detail.environmentKind === "wsl"}');
+    expect(detailPanelSource).toContain("disabled={actionRunning || remoteUploadDisabled}");
+    expect(detailPanelSource).toContain("This session cannot be saved to cloud.");
   });
 
   it("marks local-only context menu actions disabled for remote sessions", () => {

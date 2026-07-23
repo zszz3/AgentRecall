@@ -45,6 +45,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
       label TEXT NOT NULL,
+      wsl_distribution TEXT,
       host_alias TEXT,
       host TEXT,
       user TEXT,
@@ -176,6 +177,31 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       created_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS data_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS saved_searches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      options_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      use_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS search_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query TEXT NOT NULL,
+      result_count INTEGER NOT NULL DEFAULT 0,
+      searched_at INTEGER NOT NULL,
+      options_json TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_search_history_searched_at
+      ON search_history(searched_at DESC);
+
     CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
       session_key UNINDEXED,
       title,
@@ -226,6 +252,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   addColumnIfMissing(db, "sessions", "indexed_at", "INTEGER NOT NULL DEFAULT 0");
   const addedSubagentColumn = addColumnIfMissing(db, "sessions", "is_subagent", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "parent_session_id", "TEXT");
+  addColumnIfMissing(db, "environments", "wsl_distribution", "TEXT");
   if (addedSubagentColumn) {
     db
       .prepare(
@@ -233,6 +260,9 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       )
       .run();
   }
+  runCodexDesktopOriginatorMigration(db);
+  runCodeBuddyTokenEventsMigration(db);
+  runCursorComposerMetadataMigration(db);
   addColumnIfMissing(db, "skill_sync_bindings", "remote_version", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "skill_sync_bindings", "portable_identity", "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, "skill_sync_bindings", "last_content_hash", "TEXT NOT NULL DEFAULT ''");
@@ -259,6 +289,54 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   `);
   upgradeFtsTokenizer(db);
   ensureLocalEnvironment(db);
+}
+
+function runCodexDesktopOriginatorMigration(db: SessionStoreDatabase): void {
+  const migrationId = "codex-work-desktop-originator-v1";
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare("UPDATE sessions SET file_mtime_ms = 0 WHERE source = 'codex-cli' AND environment_id = 'local'").run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function runCodeBuddyTokenEventsMigration(db: SessionStoreDatabase): void {
+  const migrationId = "codebuddy-token-events-function-calls-v1";
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare("UPDATE sessions SET file_mtime_ms = 0 WHERE source = 'codebuddy-cli'").run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function runCursorComposerMetadataMigration(db: SessionStoreDatabase): void {
+  const migrationId = "cursor-composer-metadata-v1";
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare("UPDATE sessions SET file_mtime_ms = 0 WHERE source = 'cursor-agent' AND environment_id = 'local'").run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 
@@ -299,13 +377,14 @@ function ensureLocalEnvironment(db: SessionStoreDatabase): void {
   db.prepare(
     `
       INSERT INTO environments (
-        id, kind, label, host_alias, host, user, port, auth_mode, identity_file,
+        id, kind, label, wsl_distribution, host_alias, host, user, port, auth_mode, identity_file,
         enabled, sync_state, last_synced_at, last_error, created_at, updated_at
       )
-      VALUES ('local', 'local', 'Local', NULL, NULL, NULL, NULL, 'none', NULL, 1, 'idle', NULL, NULL, ?, ?)
+      VALUES ('local', 'local', 'Local', NULL, NULL, NULL, NULL, NULL, 'none', NULL, 1, 'idle', NULL, NULL, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         kind = excluded.kind,
         label = excluded.label,
+        wsl_distribution = excluded.wsl_distribution,
         host_alias = excluded.host_alias,
         host = excluded.host,
         user = excluded.user,
@@ -347,4 +426,3 @@ function refreshFtsForSession(db: SessionStoreDatabase, sessionKey: string): voi
     "INSERT INTO session_fts (session_key, title, first_question, content_text, project_path) VALUES (?, ?, ?, ?, ?)",
   ).run(sessionKey, title, row.first_question, ftsContent, row.project_path);
 }
-

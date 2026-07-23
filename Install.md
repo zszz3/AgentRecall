@@ -30,6 +30,8 @@ agent-recall
 
 如果要使用 SSH 远程会话，请确保本机可以用系统 `ssh` 非交互连接远端机器，远端安装了 `python3`。实时监听需要远端有 `inotifywait` 或 `fswatch`；没有时应用会退化为轮询同步。
 
+Windows 用户还可以在设置中添加已安装的 WSL 发行版。WSL 会话搜索和 Resume 需要发行版可运行 `bash`、`python3`，并在 WSL 内安装对应的 Codex 或 Claude Code CLI。WSL 发行版中安装 `inotifywait` 或 `fswatch` 后可以实时监听会话变化；如果两者都没有，应用会自动退化为定时轮询同步。WSL 会话目前支持搜索、查看和 Resume，暂不支持会话迁移。
+
 ### 后续启动还要 `nvm use 22` 吗？
 
 不需要重新执行 `npm ci`、`npm run build` 或 `npm install -g .`。日常启动只需要：
@@ -81,6 +83,7 @@ $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 - macOS 或 Windows
 - Node.js 22.13 或更高版本（含 npm）
 - SSH 远程会话可选依赖：本机 `ssh`，远端 `python3`，远端 `inotifywait` 或 `fswatch` 用于实时监听
+- Windows WSL 会话可选依赖：已安装的 WSL 发行版、发行版内的 `bash` 和 `python3`；Resume 还需要对应的 Codex 或 Claude Code CLI
 
 温馨提示：Electron binary 默认从 GitHub release 下载。如果下载很慢或失败，可在安装前设置镜像后再执行安装命令：
 

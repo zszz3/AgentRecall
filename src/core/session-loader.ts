@@ -24,7 +24,7 @@ import type {
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
 
-const CODEX_APP_ORIGINATOR = "Codex Desktop";
+const CODEX_APP_ORIGINATORS = new Set(["Codex Desktop", "codex_work_desktop"]);
 const CLAUDE_INTERNAL_DIR = ".claude-internal";
 const CODEX_INTERNAL_DIR = ".codex-internal";
 const TCLAUDE_DIR = ".tclaude";
@@ -32,6 +32,7 @@ const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
 const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 const QODER_DIR = ".qoder";
+const TRAE_DIR_NAMES = [".trae", ".trae-cn"] as const;
 
 export interface SessionLoadOptions {
   homeDir?: string;
@@ -44,9 +45,11 @@ export interface SessionLoadOptions {
   includeOpenClaw?: boolean;
   includeHermes?: boolean;
   includeOpenCode?: boolean;
+  includeZcode?: boolean;
   includeCursorAgent?: boolean;
   includeTrae?: boolean;
   includeQoder?: boolean;
+  cursorStateDbPath?: string;
   cursorWorkspacePathMap?: ReadonlyMap<string, string>;
   shouldSkipFile?: (filePath: string, stat: VirtualSessionFileStat, dependencyMtimeMs?: number) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
@@ -655,7 +658,18 @@ function extractCodeBuddyTokenEvents(rows: unknown[]): TokenUsageEvent[] {
   const entries = new Map<string, TokenUsageEvent>();
 
   rows.forEach((row, index) => {
-    if (!isRecord(row) || row.type !== "message" || row.role !== "assistant") return;
+    if (!isRecord(row)) return;
+    // CodeBuddy attaches per-request usage to the record that carried the API
+    // call. Assistant text turns keep it on the message; tool turns keep it on
+    // each `function_call` record, and a single assistant turn can fan out into
+    // several parallel tool calls that were each a separately billed request.
+    // Scan both so the summed total reflects real consumption, and key each
+    // function_call by its unique `callId` so parallel requests are not
+    // collapsed into one.
+    const isAssistantMessage = row.type === "message" && row.role === "assistant";
+    const isFunctionCall = row.type === "function_call";
+    if (!isAssistantMessage && !isFunctionCall) return;
+
     const providerData = objectField(row, "providerData");
     if (!providerData) return;
 
@@ -663,7 +677,9 @@ function extractCodeBuddyTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     if (!usage) return;
 
     const entry = createTokenUsage(usage.inputTokens, usage.outputTokens, usage.cachedInputTokens, usage.reasoningOutputTokens);
-    const key = stringField(providerData, "messageId") || stringField(row, "id") || `${index}:${usage.inputTokens}:${usage.outputTokens}`;
+    const key = isFunctionCall
+      ? stringField(row, "callId") || stringField(row, "id") || `${index}:${usage.inputTokens}:${usage.outputTokens}`
+      : stringField(providerData, "messageId") || stringField(row, "id") || `${index}:${usage.inputTokens}:${usage.outputTokens}`;
     putTokenEvent(entries, {
       ...entry,
       timestamp: parseTimestampMs(row.timestamp),
@@ -725,7 +741,7 @@ function firstClaudeGitBranch(rows: unknown[]): string | null {
 }
 
 function createIndexedSession(input: {
-  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae" | "qoder";
+  keyPrefix: "claude" | "codex" | "claude-internal" | "codex-internal" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -807,7 +823,7 @@ export function loadCodexSessionRows(
   const traceEvents = extractTraceEvents(rows, "codex");
   const tokenUsage = tokenUsageFromEvents(tokenEvents);
   const question = firstQuestion(messages);
-  const source: SessionSource = options.sourceOverride || (meta.originator === CODEX_APP_ORIGINATOR ? "codex-app" : "codex-cli");
+  const source: SessionSource = options.sourceOverride || (CODEX_APP_ORIGINATORS.has(meta.originator || "") ? "codex-app" : "codex-cli");
   const session = createIndexedSession({
     keyPrefix: source === "codex-internal" ? "codex-internal" : source === "tcodex-cli" ? "tcodex" : "codex",
     rawId: meta.id,
@@ -1308,8 +1324,45 @@ export function* loadOpenClawSessionsIterator(
 
 function decodeTraeProjectDir(value: string): string {
   if (!value) return "";
-  if (value.startsWith("-")) return value.replace(/-/g, "/");
-  return value;
+  if (!value.startsWith("-")) return value;
+
+  const decoded = value.replace(/-/g, "/");
+  if (fs.existsSync(decoded)) return decoded;
+
+  // Trae's legacy directory encoding is lossy: "/" and "_" both become "-".
+  // Prefer a candidate that exists on disk when the session has no raw cwd.
+  const slashIndexes: number[] = [];
+  for (let index = 1; index < decoded.length; index += 1) {
+    if (decoded[index] === "/") slashIndexes.push(index);
+  }
+
+  const maxCandidates = 4096;
+  let attempts = 0;
+  const chars = decoded.split("");
+  const findExistingCandidate = (index: number): string | null => {
+    if (attempts >= maxCandidates) return null;
+    if (index >= slashIndexes.length) {
+      attempts += 1;
+      const candidate = chars.join("");
+      return fs.existsSync(candidate) ? candidate : null;
+    }
+
+    const slashIndex = slashIndexes[index];
+    const slashCandidate = findExistingCandidate(index + 1);
+    if (slashCandidate) return slashCandidate;
+
+    chars[slashIndex] = "_";
+    const underscoreCandidate = findExistingCandidate(index + 1);
+    chars[slashIndex] = "/";
+    return underscoreCandidate;
+  };
+
+  const existingCandidate = findExistingCandidate(0);
+  if (existingCandidate) {
+    return existingCandidate;
+  }
+
+  return decoded;
 }
 
 function traeAssistantSummary(row: Record<string, unknown>): string {
@@ -1353,11 +1406,11 @@ function loadTraeMemoryFile(filePath: string, traeDir: string, stat = safeStat(f
   };
 }
 
-export function loadTraeSessions(traeDir = path.join(os.homedir(), ".trae-cn")): LoadedSession[] {
+export function loadTraeSessions(traeDir = path.join(os.homedir(), ".trae")): LoadedSession[] {
   return [...loadTraeSessionsIterator(traeDir)];
 }
 
-export function* loadTraeSessionsIterator(traeDir = path.join(os.homedir(), ".trae-cn"), options: SessionLoadOptions = {}): Generator<LoadedSession> {
+export function* loadTraeSessionsIterator(traeDir = path.join(os.homedir(), ".trae"), options: SessionLoadOptions = {}): Generator<LoadedSession> {
   const memoryDir = path.join(traeDir, "memory", "projects");
   if (!fs.existsSync(memoryDir)) return;
   for (const filePath of walkJsonlFiles(memoryDir)) {
@@ -1701,6 +1754,215 @@ function loadOpenCodeSessionRow(
   };
 }
 
+function zcodeDatabaseStat(dbPath: string): VirtualSessionFileStat {
+  const database = safeStat(dbPath);
+  const wal = safeStat(`${dbPath}-wal`);
+  return {
+    mtimeMs: Math.max(database.mtimeMs, wal.mtimeMs),
+    size: database.size + wal.size,
+  };
+}
+
+function zcodeToolStatus(value: string): "success" | "failure" | "unknown" {
+  if (value === "completed") return "success";
+  if (value === "error") return "failure";
+  return "unknown";
+}
+
+function zcodeMessagesFromParts(
+  db: import("node:sqlite").DatabaseSync,
+  rawId: string,
+): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[]; assistantMessageIds: Set<string> } {
+  const rows = db
+    .prepare(
+      `
+        SELECT message.id AS message_id, message.time_created AS message_time_created, message.data AS message_data,
+          part.id AS part_id, part.time_created AS part_time_created, part.data AS part_data
+        FROM message
+        LEFT JOIN part ON part.message_id = message.id
+        WHERE message.session_id = ?
+        ORDER BY message.time_created, message.id, part.time_created, part.id
+      `,
+    )
+    .all(rawId) as Array<Record<string, unknown>>;
+
+  const drafts = new Map<string, { role: "user" | "assistant"; timestamp: string; text: string[] }>();
+  const assistantMessageIds = new Set<string>();
+  const traceDrafts: TraceEventDraft[] = [];
+  for (const row of rows) {
+    const messageId = stringField(row, "message_id");
+    const messageData = parseJsonText(unknownField(row, "message_data"));
+    const role = roleFromValue(messageData);
+    if (!messageId || !role) continue;
+    if (role === "assistant") assistantMessageIds.add(messageId);
+
+    let draft = drafts.get(messageId);
+    if (!draft) {
+      draft = {
+        role,
+        timestamp: timestampString(unknownField(row, "message_time_created")),
+        text: [],
+      };
+      drafts.set(messageId, draft);
+    }
+
+    const partData = parseJsonText(unknownField(row, "part_data"));
+    if (!isRecord(partData)) continue;
+    const partType = stringField(partData, "type");
+    if (partType === "text") {
+      const text = stringField(partData, "text").trim();
+      if (text) draft.text.push(text);
+      continue;
+    }
+    if (partType !== "tool") continue;
+
+    const state = objectField(partData, "state");
+    const input = state ? unknownField(state, "input") : undefined;
+    const output = state ? unknownField(state, "output") : undefined;
+    const time = state ? objectField(state, "time") : null;
+    const toolName = stringField(partData, "tool") || "tool";
+    const summary = firstStringField(input, ["command", "path", "file_path", "query", "url", "description"]);
+    traceDrafts.push({
+      kind: "tool_call",
+      source: "zcode",
+      title: normalizeTraceTitle(toolName, summary),
+      detail: stringifyDetail({ input, output }),
+      timestamp: timestampString(unknownField(time, "start") || unknownField(row, "part_time_created")),
+      callId: stringField(partData, "callID") || null,
+      eventType: "tool",
+      status: zcodeToolStatus(stringField(state, "status")),
+    });
+  }
+
+  const messages: SessionMessage[] = [];
+  for (const draft of drafts.values()) {
+    const content = draft.text.join("\n");
+    if (!content || (draft.role === "user" && !isMeaningfulUserMessage(content))) continue;
+    messages.push(messageFromParts(draft.role, content, draft.timestamp, messages.length));
+  }
+  return { messages, traceEvents: dedupeTraceEvents(traceDrafts), assistantMessageIds };
+}
+
+function zcodeTokenEventsFromModelUsage(
+  db: import("node:sqlite").DatabaseSync,
+  rawId: string,
+  assistantMessageIds: ReadonlySet<string>,
+): TokenUsageEvent[] {
+  if (!sqliteTableExists(db, "model_usage")) return [];
+  if (
+    !sqliteHasColumns(db, "model_usage", [
+      "id",
+      "session_id",
+      "assistant_message_id",
+      "query_source",
+      "status",
+      "started_at",
+      "completed_at",
+      "input_tokens",
+      "output_tokens",
+      "reasoning_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    ])
+  ) {
+    return [];
+  }
+
+  try {
+    const rows = db
+      .prepare(
+        `
+          SELECT id, assistant_message_id, started_at, completed_at, input_tokens, output_tokens,
+            reasoning_tokens, cache_creation_input_tokens, cache_read_input_tokens
+          FROM model_usage
+          WHERE session_id = ? AND status = 'completed' AND query_source <> 'session_title'
+          ORDER BY COALESCE(completed_at, started_at), started_at, id
+        `,
+      )
+      .all(rawId) as Array<Record<string, unknown>>;
+    const events: TokenUsageEvent[] = [];
+    for (const row of rows) {
+      const id = stringField(row, "id");
+      const assistantMessageId = stringField(row, "assistant_message_id");
+      if (!id || !assistantMessageIds.has(assistantMessageId)) continue;
+      const cached = Math.max(0, numberField(row, "cache_read_input_tokens")) + Math.max(0, numberField(row, "cache_creation_input_tokens"));
+      const freshInput = Math.max(0, numberField(row, "input_tokens") - cached);
+      events.push(
+        tokenEvent(
+          timestampMs(unknownField(row, "completed_at")) || timestampMs(unknownField(row, "started_at")),
+          id,
+          freshInput,
+          Math.max(0, numberField(row, "output_tokens")),
+          cached,
+          Math.max(0, numberField(row, "reasoning_tokens")),
+        ),
+      );
+    }
+    return events;
+  } catch {
+    return [];
+  }
+}
+
+function loadZcodeSessionRow(
+  db: import("node:sqlite").DatabaseSync,
+  dbPath: string,
+  stat: VirtualSessionFileStat,
+  session: Record<string, unknown>,
+): LoadedSession | null {
+  const rawId = stringField(session, "id");
+  if (!rawId) return null;
+  const { messages, traceEvents, assistantMessageIds } = zcodeMessagesFromParts(db, rawId);
+  const tokenEvents = zcodeTokenEventsFromModelUsage(db, rawId, assistantMessageIds);
+  const question = firstQuestion(messages);
+  const parentSessionId = stringField(session, "parent_id") || null;
+  return {
+    session: createIndexedSession({
+      keyPrefix: "zcode",
+      rawId,
+      source: "zcode-cli",
+      projectPath: stringField(session, "directory"),
+      filePath: dbPath,
+      originalTitle: stringField(session, "title") || cleanTitle(question) || rawId,
+      firstQuestion: cleanTitle(question),
+      timestamp: timestampMs(unknownField(session, "time_updated")) || timestampMs(unknownField(session, "time_created")) || stat.mtimeMs,
+      tokenUsage: tokenUsageFromEvents(tokenEvents),
+      stat,
+      isSubagent: parentSessionId !== null,
+      parentSessionId,
+    }),
+    messages,
+    tokenEvents,
+    traceEvents,
+  };
+}
+
+export function loadZcodeSessions(zcodeDir = path.join(os.homedir(), ".zcode")): LoadedSession[] {
+  const dbPath = path.join(zcodeDir, "cli", "db", "db.sqlite");
+  const db = readOnlyDatabase(dbPath);
+  if (!db) return [];
+  try {
+    if (!sqliteHasColumns(db, "session", ["id", "title", "directory", "time_created", "time_updated", "parent_id"])) return [];
+    if (!sqliteHasColumns(db, "message", ["id", "session_id", "time_created", "data"])) return [];
+    if (!sqliteHasColumns(db, "part", ["id", "message_id", "session_id", "time_created", "data"])) return [];
+    const stat = zcodeDatabaseStat(dbPath);
+    const sessions = db.prepare("SELECT * FROM session ORDER BY time_updated DESC, time_created DESC, id").all() as Array<Record<string, unknown>>;
+    return sessions
+      .map((session) => {
+        try {
+          return loadZcodeSessionRow(db, dbPath, stat, session);
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is LoadedSession => Boolean(item));
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
 function traceEventsFromCursorRows(rows: unknown[]): SessionTraceEvent[] {
   const events: TraceEventDraft[] = [];
   for (const row of rows) {
@@ -1732,8 +1994,25 @@ function traceEventsFromCursorRows(rows: unknown[]): SessionTraceEvent[] {
   return dedupeTraceEvents(events);
 }
 
-function cursorWorkspaceStateDbPath(): string {
-  return path.join(os.homedir(), "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb");
+function cursorWorkspaceStateDbPath(cursorDir: string, override?: string): string {
+  if (override) return override;
+  const homeDir = path.basename(cursorDir) === ".cursor" ? path.dirname(cursorDir) : cursorDir;
+  if (process.platform === "win32") {
+    return path.join(homeDir, "AppData", "Roaming", "Cursor", "User", "globalStorage", "state.vscdb");
+  }
+  if (process.platform === "darwin") {
+    return path.join(homeDir, "Library", "Application Support", "Cursor", "User", "globalStorage", "state.vscdb");
+  }
+  return path.join(homeDir, ".config", "Cursor", "User", "globalStorage", "state.vscdb");
+}
+
+function cursorDatabaseStat(stateDbPath: string): VirtualSessionFileStat {
+  const databaseStat = safeStat(stateDbPath);
+  const walStat = safeStat(`${stateDbPath}-wal`);
+  return {
+    mtimeMs: Math.max(databaseStat.mtimeMs, walStat.mtimeMs),
+    size: databaseStat.size + walStat.size,
+  };
 }
 
 function folderPathFromWorkspaceMetadataEntry(entry: Record<string, unknown>): string {
@@ -1750,11 +2029,13 @@ function folderPathFromWorkspaceMetadataEntry(entry: Record<string, unknown>): s
   return "";
 }
 
-export function loadCursorWorkspacePathMap(cursorDir = path.join(os.homedir(), ".cursor")): Map<string, string> {
+export function loadCursorWorkspacePathMap(
+  cursorDir = path.join(os.homedir(), ".cursor"),
+  stateDbPath = cursorWorkspaceStateDbPath(cursorDir),
+): Map<string, string> {
   const map = new Map<string, string>();
 
   try {
-    const stateDbPath = cursorWorkspaceStateDbPath();
     if (fs.existsSync(stateDbPath)) {
       const db = new DatabaseSync(stateDbPath, { readOnly: true });
       try {
@@ -1848,6 +2129,103 @@ function cursorTimestampMsFromRows(rows: unknown[]): number {
   return 0;
 }
 
+interface CursorComposerMetadata {
+  composerId: string;
+  title: string;
+  projectPath: string;
+  createdAt: number;
+  isDraft: boolean;
+  isSubagent: boolean;
+  parentSessionId: string | null;
+  messages: SessionMessage[];
+}
+
+function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComposerMetadata> {
+  const metadata = new Map<string, CursorComposerMetadata>();
+  const db = readOnlyDatabase(stateDbPath);
+  if (!db) return metadata;
+
+  try {
+    if (!sqliteHasColumns(db, "composerHeaders", ["composerId", "createdAt", "isSubagent", "value"])) return metadata;
+
+    const messageDrafts = new Map<
+      string,
+      Array<{ key: string; role: "user" | "assistant"; content: string; timestamp: string }>
+    >();
+    if (sqliteHasColumns(db, "cursorDiskKV", ["key", "value"])) {
+      const bubbleRows = db
+        .prepare("SELECT key, CAST(value AS TEXT) AS value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'")
+        .all() as Array<{ key?: string; value?: string }>;
+      for (const row of bubbleRows) {
+        const key = row.key || "";
+        const separator = key.indexOf(":", "bubbleId:".length);
+        if (separator < 0) continue;
+        const composerId = key.slice("bubbleId:".length, separator);
+        const bubble = parseJsonText(row.value);
+        if (!composerId || !isRecord(bubble)) continue;
+        const type = numberField(bubble, "type");
+        const role = type === 1 ? "user" : type === 2 ? "assistant" : null;
+        if (!role) continue;
+        const plainText = stringField(bubble, "text").trim();
+        const content = plainText || extractText(parseJsonText(stringField(bubble, "richText"))).trim();
+        if (!content || (role === "user" && !isMeaningfulUserMessage(content))) continue;
+        const drafts = messageDrafts.get(composerId) ?? [];
+        drafts.push({
+          key,
+          role,
+          content,
+          timestamp: timestampString(unknownField(bubble, "createdAt")),
+        });
+        messageDrafts.set(composerId, drafts);
+      }
+    }
+
+    const headerRows = db.prepare("SELECT composerId, createdAt, isSubagent, value FROM composerHeaders").all() as Array<
+      Record<string, unknown>
+    >;
+    for (const row of headerRows) {
+      const composerId = stringField(row, "composerId");
+      const header = parseJsonText(unknownField(row, "value"));
+      if (!composerId || !isRecord(header)) continue;
+
+      const workspaceIdentifier = objectField(header, "workspaceIdentifier");
+      const workspaceUri = objectField(workspaceIdentifier, "uri");
+      const agentLocation = objectField(header, "agentLocation");
+      const agentEnvironment = objectField(agentLocation, "environment");
+      const agentUri = objectField(agentEnvironment, "uri");
+      const draftTarget = objectField(header, "draftTarget");
+      const draftEnvironment = objectField(draftTarget, "environment");
+      const draftUri = objectField(draftEnvironment, "uri");
+      const subagentInfo = objectField(header, "subagentInfo");
+      const drafts = messageDrafts.get(composerId) ?? [];
+      drafts.sort((left, right) => {
+        const timestampDelta = timestampMs(left.timestamp) - timestampMs(right.timestamp);
+        return timestampDelta || left.key.localeCompare(right.key);
+      });
+
+      metadata.set(composerId, {
+        composerId,
+        title: cleanTitle(stringField(header, "name")),
+        projectPath:
+          firstStringField(workspaceUri, ["fsPath", "path"]) ||
+          firstStringField(agentUri, ["fsPath", "path"]) ||
+          firstStringField(draftUri, ["fsPath", "path"]),
+        createdAt: numberField(row, "createdAt") || numberField(header, "createdAt"),
+        isDraft: unknownField(header, "isDraft") === true,
+        isSubagent: numberField(row, "isSubagent") === 1 || Boolean(subagentInfo),
+        parentSessionId: stringField(subagentInfo, "parentComposerId") || null,
+        messages: drafts.map((draft, index) => messageFromParts(draft.role, draft.content, draft.timestamp, index)),
+      });
+    }
+  } catch {
+    return new Map();
+  } finally {
+    db.close();
+  }
+
+  return metadata;
+}
+
 export function loadCursorTranscriptFile(
   filePath: string,
   stat = safeStat(filePath),
@@ -1895,14 +2273,64 @@ export function loadCursorAgentSessions(cursorDir = path.join(os.homedir(), ".cu
 
 export function* loadCursorAgentSessionsIterator(cursorDir = path.join(os.homedir(), ".cursor"), options: SessionLoadOptions = {}): Generator<LoadedSession> {
   const projectsDir = path.join(cursorDir, "projects");
-  if (!fs.existsSync(projectsDir)) return;
-  const workspacePathMap = options.cursorWorkspacePathMap ?? loadCursorWorkspacePathMap(cursorDir);
-  for (const filePath of walkJsonlFiles(projectsDir)) {
-    if (!filePath.includes(`${path.sep}agent-transcripts${path.sep}`)) continue;
-    const stat = safeStat(filePath);
-    if (shouldSkipFile(options, filePath, stat)) continue;
-    const loaded = loadCursorTranscriptFile(filePath, stat, workspacePathMap);
-    if (loaded) yield loaded;
+  const stateDbPath = cursorWorkspaceStateDbPath(cursorDir, options.cursorStateDbPath);
+  const stateDbStat = cursorDatabaseStat(stateDbPath);
+  const composerMetadata = loadCursorComposerMetadata(stateDbPath);
+  const workspacePathMap = options.cursorWorkspacePathMap ?? loadCursorWorkspacePathMap(cursorDir, stateDbPath);
+  const transcriptSessionIds = new Set<string>();
+
+  if (fs.existsSync(projectsDir)) {
+    for (const filePath of walkJsonlFiles(projectsDir)) {
+      if (!filePath.includes(`${path.sep}agent-transcripts${path.sep}`)) continue;
+      const transcriptPath = parseCursorTranscriptPath(filePath);
+      const stat = safeStat(filePath);
+      if (shouldSkipFile(options, filePath, stat, stateDbStat.mtimeMs)) {
+        transcriptSessionIds.add(transcriptPath.sessionId);
+        continue;
+      }
+      const loaded = loadCursorTranscriptFile(filePath, stat, workspacePathMap);
+      if (!loaded) continue;
+      transcriptSessionIds.add(transcriptPath.sessionId);
+      const header = composerMetadata.get(transcriptPath.sessionId);
+      if (header) {
+        loaded.session = {
+          ...loaded.session,
+          projectPath: header.projectPath || loaded.session.projectPath,
+          originalTitle: header.title || loaded.session.originalTitle,
+          timestamp: header.createdAt || loaded.session.timestamp,
+          isSubagent: header.isSubagent || loaded.session.isSubagent,
+          parentSessionId: header.parentSessionId || loaded.session.parentSessionId,
+        };
+      }
+      yield loaded;
+    }
+  }
+
+  for (const header of composerMetadata.values()) {
+    if (transcriptSessionIds.has(header.composerId)) continue;
+    const question = cleanTitle(firstQuestion(header.messages));
+    if (header.isDraft && !header.title && !question) continue;
+    const workspaceSlug = encodeCursorWorkspaceSlug(header.projectPath);
+    const session = createIndexedSession({
+      keyPrefix: "cursor",
+      rawId: header.composerId,
+      source: "cursor-agent",
+      projectPath: header.projectPath,
+      filePath: stateDbPath,
+      originalTitle: header.title || question || header.composerId,
+      firstQuestion: question,
+      timestamp: header.createdAt,
+      stat: stateDbStat,
+      isSubagent: header.isSubagent,
+      parentSessionId: header.parentSessionId,
+    });
+    yield {
+      session: {
+        ...session,
+        sessionKey: `cursor:${workspaceSlug}:${header.composerId}`,
+      },
+      messages: header.messages,
+    };
   }
 }
 
@@ -1925,9 +2353,12 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   }
   if (options.includeHermes) yield* loadHermesSessions();
   if (options.includeOpenCode) yield* loadOpenCodeSessions();
+  if (options.includeZcode) yield* loadZcodeSessions(path.join(homeDir, ".zcode"));
   if (options.includeCodeWizCli) yield* loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR));
   if (options.includeCursorAgent) yield* loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options);
-  if (options.includeTrae) yield* loadTraeSessionsIterator(path.join(homeDir, ".trae-cn"), options);
+  if (options.includeTrae) {
+    for (const dirName of TRAE_DIR_NAMES) yield* loadTraeSessionsIterator(path.join(homeDir, dirName), options);
+  }
   if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
   if (options.includeClaudeInternal) yield* loadClaudeCliSessionsIterator(path.join(homeDir, CLAUDE_INTERNAL_DIR), "claude-internal", options);
   if (options.includeCodexInternal) yield* loadCodexSessionsIterator(path.join(homeDir, CODEX_INTERNAL_DIR), "codex-internal", options);

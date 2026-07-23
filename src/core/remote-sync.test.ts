@@ -38,6 +38,16 @@ function upsertSshEnvironment(store: ReturnType<typeof createInMemoryStore>) {
   });
 }
 
+function upsertWslEnvironment(store: ReturnType<typeof createInMemoryStore>) {
+  return store.upsertEnvironment({
+    id: "wsl-ubuntu",
+    kind: "wsl",
+    label: "WSL · Ubuntu",
+    wslDistribution: "Ubuntu",
+    enabled: true,
+  });
+}
+
 function validCodexPayload(rawId = "remote-codex"): RemoteSessionFilePayload {
   return {
     kind: "codex-session",
@@ -66,6 +76,33 @@ describe("remote sync", () => {
     ["qoder", "qoder"],
   ] as const)("maps %s to the %s remote family", (source, family) => {
     expect(remoteFamilyForSource(source)).toBe(family);
+  });
+
+  it("limits WSL indexing to Codex and Claude and uses a WSL-scoped session key", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertWslEnvironment(store);
+    let collectorCommand = "";
+    try {
+      await syncRemoteEnvironment(store, environment, {
+        enabledOptionalSources: ["codebuddy-cli", "tclaude-cli"],
+        runSsh: async (_environment, command) => {
+          collectorCommand = command;
+          return [
+            JSON.stringify({ kind: "codex-session", source: "codex-cli", path: "/home/me/.codex/sessions/a.jsonl", mtimeMs: 1, size: 1, rawId: "same", projectPath: "/repo", timestamp: 1, originalTitle: "Codex", firstQuestion: "q", messageCount: 1 }),
+            JSON.stringify({ kind: "claude-project", source: "claude-cli", path: "/home/me/.claude/projects/repo/same.jsonl", mtimeMs: 1, size: 1, rawId: "same-claude", projectPath: "/repo", timestamp: 1, originalTitle: "Claude", firstQuestion: "q", messageCount: 1 }),
+            JSON.stringify({ kind: "codebuddy-project", source: "codebuddy-cli", path: "/home/me/.codebuddy/projects/repo/same.jsonl", mtimeMs: 1, size: 1, rawId: "same-codebuddy", projectPath: "/repo", timestamp: 1, originalTitle: "CodeBuddy", firstQuestion: "q", messageCount: 1 }),
+          ].join("\n");
+        },
+      });
+      const collectorScript = decodeCollectorScript(collectorCommand);
+      expect(collectorScript).not.toContain("codewiz_db = home");
+      expect(collectorScript).not.toContain("emit_codewiz_summaries(codewiz_db");
+      expect(store.getSession("wsl:wsl-ubuntu:codex-cli:same")).toBeTruthy();
+      expect(store.getSession("wsl:wsl-ubuntu:claude-cli:same-claude")).toBeTruthy();
+      expect(store.searchSessions({ environmentId: environment.id }).map((session) => session.source)).not.toContain("codebuddy-cli");
+    } finally {
+      store.close();
+    }
   });
 
   it("collects summaries from all five CLI sources and keeps same raw IDs isolated by source", async () => {
@@ -106,6 +143,38 @@ describe("remote sync", () => {
               inputTokensDetails: [{ cached_tokens: 20 }],
               outputTokensDetails: [{ reasoning_tokens: 10 }],
               totalTokens: 140,
+            },
+          },
+        },
+        {
+          id: "codebuddy-fc-a",
+          type: "function_call",
+          callId: "call-a",
+          messageId: "m-tool",
+          timestamp: 1_752_573_603_000,
+          providerData: {
+            usage: {
+              inputTokens: 200,
+              outputTokens: 50,
+              inputTokensDetails: [{ cached_tokens: 0 }],
+              outputTokensDetails: [{ reasoning_tokens: 0 }],
+              totalTokens: 250,
+            },
+          },
+        },
+        {
+          id: "codebuddy-fc-b",
+          type: "function_call",
+          callId: "call-b",
+          messageId: "m-tool",
+          timestamp: 1_752_573_604_000,
+          providerData: {
+            usage: {
+              inputTokens: 300,
+              outputTokens: 60,
+              inputTokensDetails: [{ cached_tokens: 0 }],
+              outputTokensDetails: [{ reasoning_tokens: 0 }],
+              totalTokens: 360,
             },
           },
         },
@@ -164,11 +233,11 @@ describe("remote sync", () => {
       expect(store.getSession("ssh:ssh-devbox:claude-cli:same-id")).not.toBeNull();
       expect(store.getSession("ssh:ssh-devbox:tclaude-cli:same-id")).not.toBeNull();
       expect(store.getSession("ssh:ssh-devbox:codebuddy-cli:codebuddy-1")?.tokenUsage).toEqual({
-        inputTokens: 80,
-        outputTokens: 30,
+        inputTokens: 580,
+        outputTokens: 140,
         cachedInputTokens: 20,
         reasoningOutputTokens: 10,
-        totalTokens: 140,
+        totalTokens: 750,
       });
     } finally {
       store.close();

@@ -67,6 +67,7 @@ describe("format adapters", () => {
 
   it("resolves Qoder through its declared format instead of the Codex fallback", () => {
     expect(getFormatForSource("qoder")).toBe("qoder");
+    expect(getFormatForSource("zcode-cli")).toBe("zcode");
     expect(getAdapter("qoder").parseLine({
       role: "assistant",
       message: { content: [{ type: "text", text: "Qoder reply" }] },

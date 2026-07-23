@@ -73,9 +73,9 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 ### 核心功能
 
 - **统一搜索和管理多种 AI Coding Agent 会话**：
-  搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder 等会话；支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；也支持本地环境和 SSH 远程环境，远程机器无需安装本应用。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
+  搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder 等会话；支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；支持本地环境、Windows WSL 发行版和 SSH 远程环境。Windows 用户可以添加 WSL 发行版，搜索、查看并 Resume 其中的 Codex 与 Claude Code 会话；WSL 会话暂不支持迁移。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
 - **完整查看会话上下文**：
-  详情页展示完整消息、tool call 与 Markdown / code block，并支持查看 AI 摘要和导出 Markdown。
+  详情页展示完整消息、tool call 与 Markdown / code block，并支持查看 AI 摘要、导出 Markdown，以及导出 OpenAI Chat、OpenAI Responses 或 Anthropic 请求体 JSON。Codex 会话会从 rollout 重建模型、指令、工具调用、推理参数、流式开关和请求 metadata；如果启动 Codex 与 AgentRecall 时均设置了 `CODEX_ROLLOUT_TRACE_ROOT`，OpenAI Responses 导出还会优先使用 Codex trace 中捕获的原始请求体。trace 可能包含完整提示词、工具参数与响应，请只保存到受信任的本地目录并妥善清理。
 - **AI / Agent 辅助检索历史会话**：
   可以使用 AI 摘要增强历史会话检索，也支持自然语言找会话；同时开放 MCP 能力,让 Claude Code / Codex / CodeBuddy 可以在对话里直接搜索、读取历史会话,并对会话打标签、收藏、设置可见性。
 - **跨 Agent 迁移会话**：
@@ -85,7 +85,9 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 - **统一查看 Agent 用量和额度**：
   统计今日、近 7 天、近 30 天和全部时间的各 Agent token 使用量；同时查看 Claude Code / Codex 的当前额度状态。
 - **统一管理 Skills 和 API Provider**：
-  查看和管理 Claude Code / Codex skills，统计 skill 使用情况；支持使用自己的 Supabase 项目同步 Skills，在不同机器之间上传、更新和安装；也可以在界面里切换 Codex / Claude Code 的官方账号或第三方 API Provider。
+  查看和管理 Claude Code / Codex / Qoder skills，统计 skill 使用情况；支持使用自己的 Supabase 项目同步 Skills，在不同机器之间上传、更新和安装；也可以在界面里切换 Codex / Claude Code 的官方账号或第三方 API Provider。
+- **数字资产跨设备同步**：
+  通过数字资产面板统一管理 Rules（CLAUDE.md / .qoder/rules）和 Memories（Qoder 长期记忆 / Codex 记忆）的跨设备同步，查看同步状态、一键上传或按条管理，复用 Skills 同步的 Supabase 配置。
 
 ## 支持的数据源
 
@@ -104,18 +106,20 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 | OpenClaw | 可在设置中开启，读取 `~/.openclaw/agents/*/sessions/*.jsonl`，兼容 `~/.clawdbot/agents/*/sessions/*.jsonl`，排除 `*.trajectory.jsonl` |
 | Hermes | 可在设置中开启，读取 `~/.hermes/state.db` |
 | OpenCode | 可在设置中开启，读取 `~/.local/share/opencode/opencode.db` |
+| ZCode | 可在设置中开启，以只读方式读取 `~/.zcode/cli/db/db.sqlite`，支持工具记录和 Token 统计；详情中可明确确认后删除单个本地会话 |
 | Cursor Agent | 可在设置中开启，读取 `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` |
-| Trae | 可在设置中开启，读取 `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`；打开状态会读取 Trae workspace 的本地状态库 |
+| Trae | 可在设置中开启，读取 `~/.trae/memory/projects/**/session_memory_*.jsonl` 和 `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`；打开状态会读取 Trae workspace 的本地状态库 |
 | Qoder | 可在设置中开启，读取 `~/.qoder/cache/projects/*/conversation-history/*/*.jsonl`；支持 Live 检测和远程同步 |
 | SSH 远程环境 | 通过 SSH 读取远端用户目录下同样的 Codex / Claude Code session 路径 |
+| WSL 环境 | Windows 专用；读取 WSL 发行版中的 Codex / Claude Code session 路径，支持搜索、详情查看和 Resume |
 
 当 `~/.codex/session_index.jsonl` 存在时，应用会读取 Codex 的标题元数据。没有上游标题时，会使用第一个有效用户问题作为默认标题。
 
-CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Internal、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae 和 Qoder 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地只读索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令），CodeWiz 支持本机和 SSH 远程会话索引、详情查看、Resume、迁移与恢复。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 和 Qoder 额外支持打开状态检测。
+CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Internal、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae 和 Qoder 默认关闭，可在 Settings -> Optional sources 里选择监测。开启后支持本地索引、搜索、详情查看和来源过滤；其中 TClaude / TCodex 因为与 Claude Code / Codex 格式一致，额外支持 Resume 和一键启动（分别调用 `tclaude` / `tcodex` 命令），CodeWiz 支持本机和 SSH 远程会话索引、详情查看、Resume、迁移与恢复，ZCode 额外支持本地工具调用记录和按时间范围统计 Token。WSL 环境仅支持 Codex 与 Claude Code 的搜索、详情查看和 Resume，暂不支持会话迁移。ZCode 不支持 Resume、会话迁移、SSH、远程同步、打开 ZCode 或额度查询；删除 ZCode 会话时只删除明确选中的会话及其关联记录，不删除共享数据库文件。OpenClaw 等其他来源的 Resume、远程 SSH 同步和专属用量统计会后续按来源单独补齐。Trae 和 Qoder 额外支持打开状态检测。
 
 ## 远程会话同步
 
-远程会话同步用于把本机某段会话保存到你自己的 Supabase 项目里。另一台设备配置同一个 Supabase URL 和 anon key 后，可以打开远程会话列表，搜索、按来源筛选、查看详情，并把远程会话恢复到本机任意支持的 Agent 中。比如设备 A 上传了一段 Codex 会话，设备 B 可以在远程会话列表里查看这段会话，并选择恢复到 Claude Code、Codex 或 CodeBuddy。
+远程会话同步用于把本机会话保存到你自己的 Supabase 项目里。另一台设备配置同一个 Supabase URL 和 anon key 后，可以打开会话同步窗口，搜索、按来源筛选、查看详情，并把远程会话恢复到本机任意支持的 Agent 中。比如设备 A 上传了一段 Codex 会话，设备 B 可以在会话同步窗口里查看这段会话，并选择恢复到 Claude Code、Codex、CodeBuddy、CodeWiz 或 Cursor。
 
 当前版本按**单人使用、由用户控制同步**设计：
 
@@ -161,7 +165,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 点击顶部工具栏的云图标打开 Remote Sessions：
 
 - 使用搜索框按标题、项目路径、摘要、标签和全文搜索远程会话。
-- 使用 Source / 来源筛选只看 Claude、Codex 或 CodeBuddy 上传的会话。
+- 使用 Source / 来源筛选只看 Claude、Codex、CodeBuddy、CodeWiz 或 Cursor 上传的会话。
 - 点击 View / 查看可以打开远程详情页；这个详情页是只读的。
 - 在 Restore to / 恢复到 中选择目标 Agent，再点击某条会话的 Restore。
 - 第一次恢复时需要选择当前设备上的本地项目目录；恢复完成后会写入目标 Agent 的本机会话目录，并尝试启动对应 Agent 继续工作。
@@ -206,6 +210,15 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 当前 Supabase 同步按个人项目设计，不会自动创建表，也不会使用 service role key。应用只保存 Project URL 和 anon key 到本地设置，并通过 Supabase REST API 访问 `agent_recall_skills` 表。初始化 SQL 会为 anon role 创建可读写策略，适合个人私有项目或仅自己掌握 URL/key 的项目；如果要多人共享或公开分发，请先按自己的 Supabase 安全模型调整 RLS policy。
 
+## 数字资产管理面板
+
+工具栏点击数据库图标打开数字资产面板，统一管理 Rules 和 Memories 的跨设备同步：
+
+- **Rules 同步**：扫描本地 Claude `CLAUDE.md`（全局）和 Qoder `.qoder/rules/*.md`（项目级），通过 Supabase 上传/下载实现跨设备同步。
+- **Memories 同步**：扫描本地 Qoder 长期记忆（`~/.qoder/memories/`）和 Codex 记忆（`~/.codex/memories_1.sqlite`），通过 Supabase 上传/下载实现跨设备同步。
+
+每个 tab 显示本地资产列表（含同步状态标记：已同步 / 已修改 / 未同步）和远端资产列表，支持一键上传全部、按条上传、删除远端。复用 Settings 中 Skills 同步的 Supabase URL 和 anon key 配置，无需额外配置。在 Settings 中分别启用「Rules 同步」和「Memories 同步」开关后即可使用。
+
 ## 开发者本地运行
 
 开发环境需要 macOS 或 Windows、Git、Node.js 22.13+ 和 npm。首次准备仓库：
@@ -248,6 +261,183 @@ npm run package:smoke
 ## 开源协议
 
 本项目基于 [MIT License](./LICENSE) 开源。你可以自由使用、修改和分发本项目，但需要保留原始版权声明和许可声明。
+
+## 贡献者
+
+### Collaborators
+
+<!-- readme: collaborators -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/Blue-Berrys">
+                    <img src="https://avatars.githubusercontent.com/u/75206464?v=4" width="80;" alt="Blue-Berrys"/>
+                    <br />
+                    <sub><b>Blue-Berrys</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/G-Pegasus">
+                    <img src="https://avatars.githubusercontent.com/u/87853009?v=4" width="80;" alt="G-Pegasus"/>
+                    <br />
+                    <sub><b>G-Pegasus</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/zszz3">
+                    <img src="https://avatars.githubusercontent.com/u/91608029?v=4" width="80;" alt="zszz3"/>
+                    <br />
+                    <sub><b>zszz3</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/mesakurax">
+                    <img src="https://avatars.githubusercontent.com/u/140772694?v=4" width="80;" alt="mesakurax"/>
+                    <br />
+                    <sub><b>mesakurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/LANSGANBS">
+                    <img src="https://avatars.githubusercontent.com/u/144577410?v=4" width="80;" alt="LANSGANBS"/>
+                    <br />
+                    <sub><b>LANSGANBS</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/forbbiden1">
+                    <img src="https://avatars.githubusercontent.com/u/153357541?v=4" width="80;" alt="forbbiden1"/>
+                    <br />
+                    <sub><b>forbbiden1</b></sub>
+                </a>
+            </td>
+		</tr>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/MeloMei">
+                    <img src="https://avatars.githubusercontent.com/u/225048942?v=4" width="80;" alt="MeloMei"/>
+                    <br />
+                    <sub><b>MeloMei</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
+<!-- readme: collaborators -end -->
+
+### Contributors
+
+<!-- readme: contributors -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/Blue-Berrys">
+                    <img src="https://avatars.githubusercontent.com/u/75206464?v=4" width="80;" alt="Blue-Berrys"/>
+                    <br />
+                    <sub><b>Blue-Berrys</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/zszz3">
+                    <img src="https://avatars.githubusercontent.com/u/91608029?v=4" width="80;" alt="zszz3"/>
+                    <br />
+                    <sub><b>zszz3</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/mesakurax">
+                    <img src="https://avatars.githubusercontent.com/u/140772694?v=4" width="80;" alt="mesakurax"/>
+                    <br />
+                    <sub><b>mesakurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/MeloMei">
+                    <img src="https://avatars.githubusercontent.com/u/225048942?v=4" width="80;" alt="MeloMei"/>
+                    <br />
+                    <sub><b>MeloMei</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/LANSGANBS">
+                    <img src="https://avatars.githubusercontent.com/u/144577410?v=4" width="80;" alt="LANSGANBS"/>
+                    <br />
+                    <sub><b>LANSGANBS</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/G-Pegasus">
+                    <img src="https://avatars.githubusercontent.com/u/87853009?v=4" width="80;" alt="G-Pegasus"/>
+                    <br />
+                    <sub><b>G-Pegasus</b></sub>
+                </a>
+            </td>
+		</tr>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/MSHLD">
+                    <img src="https://avatars.githubusercontent.com/u/102949095?v=4" width="80;" alt="MSHLD"/>
+                    <br />
+                    <sub><b>MSHLD</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/wlh26">
+                    <img src="https://avatars.githubusercontent.com/u/145627315?v=4" width="80;" alt="wlh26"/>
+                    <br />
+                    <sub><b>wlh26</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/vinkiYu">
+                    <img src="https://avatars.githubusercontent.com/u/239156258?v=4" width="80;" alt="vinkiYu"/>
+                    <br />
+                    <sub><b>vinkiYu</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/wanglongze123">
+                    <img src="https://avatars.githubusercontent.com/u/278380769?v=4" width="80;" alt="wanglongze123"/>
+                    <br />
+                    <sub><b>wanglongze123</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/CuSO41108">
+                    <img src="https://avatars.githubusercontent.com/u/177388097?v=4" width="80;" alt="CuSO41108"/>
+                    <br />
+                    <sub><b>CuSO41108</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/forbbiden1">
+                    <img src="https://avatars.githubusercontent.com/u/153357541?v=4" width="80;" alt="forbbiden1"/>
+                    <br />
+                    <sub><b>forbbiden1</b></sub>
+                </a>
+            </td>
+		</tr>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/275145">
+                    <img src="https://avatars.githubusercontent.com/u/79244504?v=4" width="80;" alt="275145"/>
+                    <br />
+                    <sub><b>275145</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/puppyben1">
+                    <img src="https://avatars.githubusercontent.com/u/136492871?v=4" width="80;" alt="puppyben1"/>
+                    <br />
+                    <sub><b>puppyben1</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
+<!-- readme: contributors -end -->
 
 ## Star History
 

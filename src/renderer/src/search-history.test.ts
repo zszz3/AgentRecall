@@ -46,6 +46,19 @@ describe("recent search history", () => {
     expect(readSearchHistory(storage)).toEqual(history);
   });
 
+  it("normalizes internal whitespace and deduplicates case-insensitively", () => {
+    const storage = memoryStorage();
+    let history: string[] = [];
+    history = recordSearch(storage, history, "  Find   Login  Flow  ");
+    expect(history).toEqual(["Find Login Flow"]);
+    history = recordSearch(storage, history, "find login flow");
+    expect(history).toEqual(["find login flow"]);
+    expect(readSearchHistory(memoryStorage(JSON.stringify(["Find   Login Flow", "find login flow", "other"])))).toEqual([
+      "Find Login Flow",
+      "other",
+    ]);
+  });
+
   it("deletes one entry and clears persisted history", () => {
     const storage = memoryStorage();
     let history = recordSearch(storage, [], "first");

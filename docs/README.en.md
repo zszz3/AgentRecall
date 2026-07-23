@@ -24,7 +24,7 @@
 ### Core Features
 
 - **Unified search and management for AI coding-agent sessions**:
-  Search, filter, inspect, organize, and quick launch Claude Code, Codex, and optional sessions from tclaude, tcodex, CodeBuddy, OpenClaw, Hermes, OpenCode, Cursor Agent, Trae, and Qoder; add custom titles, tags, favorites, pinned state, and hidden state; local and SSH remote environments are supported without installing this app on the remote machine. Sidebar projects are grouped by environment, each group can be collapsed, and projects within a group are ordered by recent activity. Sessions can be filtered across all time or the last 7, 30, or 90 days; search results are sorted by smart ranking (relevance mixed with time decay) by default, with options to sort by newest or oldest activity.
+  Search, filter, inspect, organize, and quick launch Claude Code, Codex, and optional sessions from tclaude, tcodex, CodeBuddy, OpenClaw, Hermes, OpenCode, ZCode, Cursor Agent, Trae, and Qoder; add custom titles, tags, favorites, pinned state, and hidden state; local, Windows WSL, and SSH remote environments are supported without installing this app on SSH remote machines. On Windows, add a WSL distribution to search, inspect, and resume Codex and Claude Code sessions inside it. WSL session migration is not supported yet. Sidebar projects are grouped by environment, each group can be collapsed, and projects within a group are ordered by recent activity. Sessions can be filtered across all time or the last 7, 30, or 90 days; search results are sorted by smart ranking (relevance mixed with time decay) by default, with options to sort by newest or oldest activity.
 - **Full session context view**:
   The detail view shows complete messages, tool calls, Markdown / code blocks, and supports AI summaries plus Markdown export.
 - **AI / Agent-assisted session retrieval**:
@@ -36,7 +36,9 @@
 - **Unified agent usage and quota view**:
   Track token usage by agent for today, 7 days, 30 days, and all time; also view current Claude Code / Codex quota status.
 - **Unified Skills and API Provider management**:
-  View and manage Claude Code / Codex skills, track skill usage, sync personal skills across machines through your own Supabase project, and switch Codex / Claude Code between official accounts and third-party API providers.
+  View and manage Claude Code / Codex / Qoder skills, track skill usage, sync personal skills across machines through your own Supabase project, and switch Codex / Claude Code between official accounts and third-party API providers.
+- **Digital assets cross-device sync**:
+  A unified Digital Assets panel manages Rules (CLAUDE.md / .qoder/rules) and Memories (Qoder long-term memories / Codex memories) sync across devices — view sync status, upload all or per-item, reusing the same Supabase configuration as Skills sync.
 
 ## Supported Sources
 
@@ -54,24 +56,29 @@
 | OpenClaw | Optional in settings; reads `~/.openclaw/agents/*/sessions/*.jsonl`, legacy `~/.clawdbot/agents/*/sessions/*.jsonl`, excluding `*.trajectory.jsonl` |
 | Hermes | Optional in settings; reads `~/.hermes/state.db` |
 | OpenCode | Optional in settings; reads `~/.local/share/opencode/opencode.db` |
+| ZCode | Optional in settings; reads `~/.zcode/cli/db/db.sqlite`, including tool records and token statistics; a single local session can be permanently deleted after explicit confirmation |
 | Cursor Agent | Optional in settings; reads `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` |
-| Trae | Optional in settings; reads `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`; open-state detection reads Trae's local workspace state database |
+| Trae | Optional in settings; reads `~/.trae/memory/projects/**/session_memory_*.jsonl` and `~/.trae-cn/memory/projects/**/session_memory_*.jsonl`; open-state detection reads Trae's local workspace state database |
 | Qoder | Optional in settings; reads `~/.qoder/cache/projects/*/conversation-history/*/*.jsonl`; supports live detection and remote sync |
 | SSH remote environment | Reads the same Codex / Claude Code session paths under the remote user's home directory over SSH |
+| WSL environment | Windows only; reads Codex / Claude Code session paths inside a selected WSL distribution and supports search, details, and Resume |
 
 Codex title metadata is read from `~/.codex/session_index.jsonl` when that file exists. If no upstream title is available, the app uses the first meaningful user question as the default title.
 
-CodeBuddy CLI, TClaude, TCodex, Claude Code Internal, Codex Internal, OpenClaw, Hermes, OpenCode, Cursor Agent, Trae, and Qoder are off by default and can be selected from Settings -> Optional sources. Once enabled, they support local read-only indexing, search, details, and source filtering. Because TClaude / TCodex share the Claude Code / Codex formats, they additionally support Resume and one-click launch (invoking the `tclaude` / `tcodex` commands respectively). For the other sources, Resume, SSH remote sync, and provider-specific usage stats are intentionally separate follow-up work. Trae and Qoder also support open-state detection.
+CodeBuddy CLI, TClaude, TCodex, Claude Code Internal, Codex Internal, OpenClaw, Hermes, OpenCode, ZCode, Cursor Agent, Trae, and Qoder are off by default and can be selected from Settings -> Optional sources. Once enabled, they support local indexing, search, details, and source filtering. Because TClaude / TCodex share the Claude Code / Codex formats, they additionally support Resume and one-click launch (invoking the `tclaude` / `tcodex` commands respectively). WSL environments support only Codex and Claude Code search, details, and Resume; WSL session migration is not supported yet. ZCode also includes local tool-call records and time-ranged token statistics; it does not support Resume, migration, SSH, remote sync, opening ZCode, or quota lookup. Deleting a ZCode session removes only the explicitly selected session and its related records, never the shared database file. For the other sources, Resume, SSH remote sync, and provider-specific usage stats are intentionally separate follow-up work. Trae and Qoder also support open-state detection.
 
 ## Remote Session Sync
 
-Remote session sync saves a selected local session into your own Supabase project. After configuring the same Supabase URL and anon key on another device, you can open the remote session list, search, filter by source, inspect details, and restore the remote session into any supported local agent. For example, device A can upload a Codex session, and device B can view that session from Remote Sessions and restore it into Claude Code, Codex, or CodeBuddy.
+Remote session sync saves local sessions into your own Supabase project. After configuring the same Supabase URL and anon key on another device, you can open the Session sync window, search, filter by source, inspect details, and restore a remote session into any supported local agent. For example, device A can upload a Codex session, and device B can view it and restore it into Claude Code, Codex, CodeBuddy, CodeWiz, or Cursor.
 
-This version is designed for **single-user, manual snapshot sync**:
+This version is designed for **single-user, user-controlled sync**:
 
 - There is no user isolation or app login. It assumes you control the Supabase project and anon key.
-- There is no automatic background sync. If you continue a local session after uploading it, the remote copy stays at the last uploaded snapshot until you upload it again.
+- Manual upload is available by default. You can also install Claude Code and Codex session hooks in Settings. After each response, a hook only records the pending session; the tray app updates the cloud copy using a stable content revision. Pending work is processed the next time the app starts if it was not running.
 - Re-uploading the same local session updates the latest remote snapshot. If the content has not changed, the upload is skipped. Remote sessions do not keep version history.
+- Automatic sync never overwrites a conflict. If both the local and cloud copies changed, resolve the conflict in the Session sync window. Turning off remote session sync or removing hooks only removes this app's hooks and does not delete cloud data.
+- The Session sync window compares all syncable local sessions with cloud copies and labels them as Local only, Upload available, Synced, Cloud newer, Cloud only, or Conflict. The comparison uses stable content revisions instead of device paths, upload times, or file modification times.
+- Batch upload skips conflicts. Only an explicit overwrite action can replace a changed cloud copy. You can select visible sessions for batch upload or cloud deletion; deleting a cloud copy never deletes the local session, and restore always creates a new local copy.
 - Remote details include the session metadata, messages, tool calls / trace events, tags, AI summary, and the other information currently supported by the detail view.
 - Restore uses the stored portable session and asks you to choose a local project directory on the current device as the target project path.
 
@@ -82,6 +89,7 @@ This version is designed for **single-user, manual snapshot sync**:
 3. In the app, open Settings -> Remote sync and paste the Supabase URL and anon key.
 4. Under First-time setup, click Copy latest SQL and then Open SQL Editor. The app opens the SQL Editor for the configured project.
 5. Paste and run the SQL, return to the app, and enable remote sync. If Session sync or Skills later reports that the schema or permissions need an update, run the latest SQL offered there and click Refresh.
+6. To enable automatic sync, click Install hooks. Codex prompts you to review its hook the first time; run `/hooks` in Codex and confirm that you trust it. Existing Claude Code and Codex hook configuration remains unchanged.
 
 The first-time script initializes both session and Skill sync. For session sync it creates:
 
@@ -93,11 +101,9 @@ The first-time script initializes both session and Skill sync. For session sync 
 
 The script is idempotent and can be run more than once. It creates anon-role read/write policies suitable for a personal project. Those policies are convenient for single-user sync, but they are not a multi-user isolation model. If you plan to share the project with other users or expose it more broadly, adjust the RLS policies for your own Supabase security model first.
 
-### Upload A Session
+### Upload Sessions
 
-1. Open a local session from the search results.
-2. Click the Upload button with the cloud-upload icon at the top of the detail view.
-3. After upload succeeds, the session appears in the Remote Sessions list.
+Open the Session sync window from the top toolbar, select sessions marked Local only or Upload available, then click Upload to cloud. The window compares all syncable local sessions, independent of the main window's current search, filters, or selection.
 
 If the same session has already been uploaded:
 
@@ -106,10 +112,10 @@ If the same session has already been uploaded:
 
 ### Search, Inspect, And Restore Remote Sessions
 
-Click the cloud icon in the top toolbar to open Remote Sessions:
+Click the cloud icon in the top toolbar to open Session sync:
 
 - Search remote sessions by title, project path, summary, tags, and full text.
-- Use Source to filter uploaded sessions by Claude, Codex, or CodeBuddy.
+- Use Source to filter uploaded sessions by Claude, Codex, CodeBuddy, CodeWiz, or Cursor.
 - Click View to open a read-only remote detail view.
 - Choose the target agent under Restore to, then click Restore on a session row.
 - On first restore, choose a local project directory on the current device. The app writes the session into the target agent's local session directory and attempts to launch that agent so you can continue working.
@@ -133,6 +139,15 @@ If you created the `agent_recall_skills` table with an earlier version, re-run t
 
 Supabase sync is designed for personal projects. It does not create tables automatically and does not require a service role key. The app stores only the Project URL and anon key locally, then uses the Supabase REST API to access the `agent_recall_skills` table. The copied setup SQL grants anon read/write access through RLS for personal sync convenience; adjust the RLS policy first if you plan to share the project with other users or expose it more broadly.
 
+## Digital Assets Panel
+
+Click the database icon in the toolbar to open the Digital Assets panel, which manages Rules and Memories sync across devices:
+
+- **Rules sync**: Scans local Claude `CLAUDE.md` (global) and Qoder `.qoder/rules/*.md` (project-level), uploads/downloads via Supabase.
+- **Memories sync**: Scans local Qoder long-term memories (`~/.qoder/memories/`) and Codex memories (`~/.codex/memories_1.sqlite`), uploads/downloads via Supabase.
+
+Each tab shows local assets (with sync status: synced / modified / not synced) and remote assets, supporting upload all, per-item upload, and remote deletion. Reuses the Supabase URL and anon key from Skills sync settings. Enable the "Rules sync" and "Memories sync" toggles in Settings to get started.
+
 ## Installation
 
 ### Regular users
@@ -146,9 +161,9 @@ agent-recall
 
 The first installation downloads the Electron runtime for the current operating system. See the Development Setup section and [Install.md](../Install.md) for source-based installation.
 
-Once installed, run `agent-recall` from any terminal to launch it. The app stays in the background (with a menu bar icon); press **⌥ Option + Space** by default to open the search window. If it conflicts with Raycast or another launcher, change or disable the global shortcut in Settings. The app uses a single-instance lock, so launching it again focuses the existing window instead of opening another instance.
+Once installed, run `agent-recall` from any terminal to launch it. The app stays in the background with a menu bar icon on macOS or a system tray icon on Windows. Press **⌥ Option + Space** on macOS or **Ctrl + Alt + Space** on Windows to open the search window. If the shortcut conflicts with another launcher, change or disable the global shortcut in Settings. The app uses a single-instance lock, so launching it again focuses the existing window instead of opening another instance.
 
-Settings can also be opened with `Cmd+,`. Use Appearance to switch the color theme and English / Chinese UI.
+On macOS, Settings can also be opened with `Cmd+,`. Use Appearance to switch the color theme and English / Chinese UI.
 
 For daily use, you do not need to reinstall dependencies or rebuild. Just run:
 
@@ -173,8 +188,6 @@ If you do not use nvm and have Node.js 22.13+ installed system-wide, daily start
 
 The terminal checks the latest GitHub Release automatically. When an update is available, it shows the release's new features and bug fixes and asks whether to install it. The same version, release notes, and **Update now** action are available under **Settings → About**. Use `agent-recall --check-update` to check without launching the App or `agent-recall --update` to install immediately. If an automatic update fails, the external updater attempts to reopen the installed version and uses an operating-system dialog to offer actions for copying the manual installation command or opening the latest Release page.
 
-On macOS, press **⌥ Option + Space** by default to open the search window. On Windows, use **Ctrl + Alt + Space**. Both shortcuts can be changed in Settings.
-
 See [Install.md](../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.
 
 ## Development Setup
@@ -182,6 +195,7 @@ See [Install.md](../Install.md) for updating, uninstalling, installing from a fr
 Requirements:
 
 - macOS or Windows
+- Git
 - Node.js 22.13 or newer
 - npm
 

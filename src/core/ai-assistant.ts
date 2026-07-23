@@ -11,7 +11,7 @@
 // and Anthropic /v1/messages) but adds tool support. Network functions are
 // injectable so the tool-call loop is unit-testable without a real provider.
 
-import { requestSummaryCompletion, type ChatMessage, type SummaryEndpoint } from "./session-summarizer";
+import { isTemperatureUnsupported, requestSummaryCompletion, type ChatMessage, type SummaryEndpoint } from "./session-summarizer";
 
 export type { SummaryEndpoint } from "./session-summarizer";
 
@@ -412,12 +412,22 @@ async function openaiToolCompletion(
   messages: AiChatMessage[],
   signal?: AbortSignal,
 ): Promise<{ content: string; toolCalls: AiToolCall[] }> {
-  const response = await postJson(
-    `${endpoint.baseUrl}/chat/completions`,
-    { Authorization: `Bearer ${endpoint.apiKey}` },
-    { model: endpoint.model, messages: toOpenAiMessages(messages), tools: openaiTools(), temperature: 0.2, stream: false },
-    signal,
-  );
+  const request = (includeTemperature: boolean) =>
+    postJson(
+      `${endpoint.baseUrl}/chat/completions`,
+      { Authorization: `Bearer ${endpoint.apiKey}` },
+      { model: endpoint.model, messages: toOpenAiMessages(messages), tools: openaiTools(), ...(includeTemperature ? { temperature: 0.2 } : {}), stream: false },
+      signal,
+    );
+  let response = await request(true);
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    if (isTemperatureUnsupported(response.status, detail)) {
+      response = await request(false);
+    } else {
+      throw new Error(`AI assistant request failed (HTTP ${response.status}). ${detail}`.trim());
+    }
+  }
   if (!response.ok) {
     const detail = await safeReadText(response);
     throw new Error(`AI assistant request failed (HTTP ${response.status}). ${detail}`.trim());

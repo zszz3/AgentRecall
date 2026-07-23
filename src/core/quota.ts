@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
-import type { UsageQuota, UsageQuotaCard, UsageQuotaSnapshot } from "./types";
+import type { UsageQuota, UsageQuotaCard, UsageQuotaProvider, UsageQuotaSnapshot } from "./types";
 
 const CODEX_USAGE_PRIMARY_URL = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_USAGE_FALLBACK_URL = "https://chatgpt.com/api/codex/usage";
@@ -103,14 +103,19 @@ interface ClaudeStatuslineQuota {
 
 export async function loadUsageQuotaSnapshot(options: UsageQuotaLoadOptions = {}): Promise<UsageQuotaSnapshot> {
   const now = options.now ?? new Date();
-  // Hidden providers are skipped at the source: no HTTP/file load and no card.
+  // Hidden providers are skipped at the source: no HTTP/file load and no card. They are still
+  // reported in hiddenProviders so the UI can distinguish "user hid everything" from a real failure.
   const [codex, claudeCode] = await Promise.all([
     options.hideCodexQuota ? Promise.resolve(null) : loadCodexQuotaCard({ ...options, now }),
     options.hideClaudeQuota ? Promise.resolve(null) : Promise.resolve(loadClaudeQuotaCard({ ...options, now })),
   ]);
+  const hiddenProviders: UsageQuotaProvider[] = [];
+  if (options.hideCodexQuota) hiddenProviders.push("codex");
+  if (options.hideClaudeQuota) hiddenProviders.push("claude-code");
   return {
     generatedAt: now.toISOString(),
     providers: [codex, claudeCode].filter((card): card is UsageQuotaCard => card !== null),
+    hiddenProviders,
   };
 }
 
