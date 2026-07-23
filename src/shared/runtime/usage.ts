@@ -9,11 +9,12 @@ export interface RuntimeUsage {
   cacheWrite5mInputTokens?: number;
   cacheWrite1hInputTokens?: number;
   totalTokens?: number;
+  estimatedCost?: number;
 }
 
 export function mergeRuntimeUsage(current: RuntimeUsage, next: RuntimeUsage): RuntimeUsage {
   const merged: RuntimeUsage = { ...current, ...(next.provider ? { provider: next.provider } : {}) };
-  for (const key of ["inputTokens", "outputTokens", "reasoningTokens", "cacheReadInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "totalTokens"] as const) {
+  for (const key of ["inputTokens", "outputTokens", "reasoningTokens", "cacheReadInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "totalTokens", "estimatedCost"] as const) {
     if (next[key] !== undefined) merged[key] = (current[key] ?? 0) + next[key];
   }
   return merged;

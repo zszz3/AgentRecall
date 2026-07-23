@@ -115,6 +115,19 @@ function extractItemText(item: Record<string, unknown> | undefined): string {
   return "";
 }
 
+function normalizeCodexUsage(value: unknown): ReturnType<typeof normalizeOpenAIUsage> {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const source = (record.last && typeof record.last === "object" ? record.last : record.usage && typeof record.usage === "object" ? record.usage : record) as Record<string, unknown>;
+  return normalizeOpenAIUsage({
+    input_tokens: source.input_tokens ?? source.prompt_tokens ?? source.inputTokens,
+    output_tokens: source.output_tokens ?? source.completion_tokens ?? source.outputTokens,
+    total_tokens: source.total_tokens ?? source.totalTokens,
+    prompt_tokens_details: source.prompt_tokens_details ?? { cached_tokens: source.cached_tokens ?? source.cachedInputTokens },
+    completion_tokens_details: source.completion_tokens_details ?? { reasoning_tokens: source.reasoning_tokens ?? source.reasoningOutputTokens },
+  });
+}
+
 export function normalizeCodexNotification(
   method: string,
   params: Record<string, unknown>,
@@ -153,7 +166,7 @@ export function normalizeCodexNotification(
 
   if (method === "turn/completed") {
     const turn = params.turn as Record<string, unknown> | undefined;
-    const usage = normalizeOpenAIUsage(turn?.usage ?? params.usage);
+    const usage = normalizeCodexUsage(turn?.usage ?? turn?.tokenUsage ?? params.usage ?? params.tokenUsage);
     const usageEvents: AgentEvent[] = usage ? [{ type: "usage", usage }] : [];
     const status = asString(turn?.status) || "completed";
     if (status === "failed") {
@@ -167,6 +180,11 @@ export function normalizeCodexNotification(
       return [...usageEvents, { type: "completed", content: text }];
     }
     return [...usageEvents, { type: "completed" }];
+  }
+
+  if (method === "thread/tokenUsage/updated" || method === "turn/tokenUsage/updated" || method === "tokenUsage/updated") {
+    const usage = normalizeCodexUsage(params.tokenUsage ?? params.usage);
+    return usage ? [{ type: "usage", usage }] : [];
   }
 
   if (method === "error") {

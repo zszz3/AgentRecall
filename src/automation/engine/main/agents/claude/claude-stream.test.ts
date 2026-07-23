@@ -45,6 +45,7 @@ describe("normalizeClaudeStreamEvent", () => {
         cache_creation_input_tokens: 60,
         cache_creation: { ephemeral_5m_input_tokens: 40, ephemeral_1h_input_tokens: 20 },
       },
+      modelUsage: { "claude-sonnet": { costUSD: 0.123 } },
     });
 
     expect(events[0]).toEqual({
@@ -57,6 +58,7 @@ describe("normalizeClaudeStreamEvent", () => {
         cacheWriteInputTokens: 60,
         cacheWrite5mInputTokens: 40,
         cacheWrite1hInputTokens: 20,
+        estimatedCost: 0.123,
       },
     });
   });

@@ -14,6 +14,7 @@
 - Workflow 运行历史的每个节点现在可展开查看实际使用的 Runtime、Channel、模型、尝试次数和执行耗时；Token 用量会按输入、输出、推理和缓存拆分，并区分 OpenAI 缓存输入与 Anthropic 的缓存读取、5 分钟/1 小时缓存写入，运行时提供数据时同时显示成本。
 - Workflow 运行历史会采集 OpenAI、Anthropic 和直连 API 返回的真实 Token usage；Provider 未返回的字段保持未提供，不会用估算值覆盖实际数据。
 - Workflow 节点在失败、重试、暂停恢复和交互式对话后仍会保留并汇总真实用量；成本没有 Provider 上报时会明确显示“未提供”。
+- 修复 Codex Workflow 未显示真实 Token 用量的问题；现在会读取 Codex app-server 的独立 Token usage 通知，并保留缓存输入与推理输出拆分。
 - Workflow 节点的历史消息会随运行记录持久保存；重新打开应用后，仍可在运行历史的对应节点中查看用户、Agent 与工具消息。
 - Workflow Agent 现在可通过专用完成工具提交结构化节点结果，普通对话内容与下游节点数据分开处理，减少格式误判。
 - 新增 Agent 评测工作区：可维护测试数据集，组合确定性规则或 LLM Judge，针对 Runtime 中的 Agent 重复运行实验，并查看每个 Case 的输出、评分理由、通过率、耗时和历史结果；历史记录较多时仍可按需继续加载。

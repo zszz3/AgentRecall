@@ -103,6 +103,28 @@ describe("normalizeCodexNotification", () => {
     ]);
   });
 
+  test("emits usage from Codex tokenUsage update notifications", () => {
+    const state = createCodexStreamState();
+
+    expect(normalizeCodexNotification("thread/tokenUsage/updated", {
+      tokenUsage: {
+        total: { inputTokens: 900, cachedInputTokens: 400, outputTokens: 120, reasoningOutputTokens: 30 },
+        last: { inputTokens: 120, cachedInputTokens: 40, outputTokens: 20, reasoningOutputTokens: 6 },
+      },
+    }, state)).toEqual([
+      {
+        type: "usage",
+        usage: {
+          provider: "openai",
+          inputTokens: 120,
+          outputTokens: 20,
+          reasoningTokens: 6,
+          cacheReadInputTokens: 40,
+        },
+      },
+    ]);
+  });
+
   test("does not duplicate final snapshots after streaming deltas", () => {
     const state = createCodexStreamState();
 
