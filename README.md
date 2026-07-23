@@ -34,6 +34,16 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/age
 agent-recall
 ```
 
+国内网络可以直接使用 npm 与 Electron 镜像安装：
+
+```bash
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz \
+  --registry=https://registry.npmmirror.com
+```
+
+Release 安装包仍从 GitHub 下载；依赖包和 Electron 运行时会使用上面的镜像。该命令只影响本次安装，不会修改全局 npm 配置。
+
 这条命令安装的是 Release 中已经编译好的应用，不需要克隆仓库，也不需要执行 `npm run build`。应用会安装到当前 Node.js 的全局 npm 目录，首次启动时会准备当前系统对应的 Electron 运行时；它与本地源码开发目录相互独立，不会覆盖你的代码修改。
 
 | 系统 | 启动命令 | 默认唤起快捷键 |
@@ -75,13 +85,13 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 - **统一搜索和管理多种 AI Coding Agent 会话**：
   搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder 等会话；支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；支持本地环境、Windows WSL 发行版和 SSH 远程环境。Windows 用户可以添加 WSL 发行版，搜索、查看并 Resume 其中的 Codex 与 Claude Code 会话；WSL 会话暂不支持迁移。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
 - **完整查看会话上下文**：
-  详情页展示完整消息、tool call 与 Markdown / code block，并支持查看 AI 摘要、导出 Markdown，以及导出 OpenAI Chat、OpenAI Responses 或 Anthropic 请求体 JSON。Codex 会话会从 rollout 重建模型、指令、工具调用、推理参数、流式开关和请求 metadata；如果启动 Codex 与 AgentRecall 时均设置了 `CODEX_ROLLOUT_TRACE_ROOT`，OpenAI Responses 导出还会优先使用 Codex trace 中捕获的原始请求体。trace 可能包含完整提示词、工具参数与响应，请只保存到受信任的本地目录并妥善清理。
+  详情页展示完整消息、tool call 与 Markdown / code block；消息中的显式图片和文件附件会保存到受管缓存，图片和文本可直接预览，PDF 与其他文件可用系统应用打开。还支持查看 AI 摘要、导出 Markdown，以及导出 OpenAI Chat、OpenAI Responses 或 Anthropic 请求体 JSON。Codex 会话会从 rollout 重建模型、指令、工具调用、推理参数、流式开关和请求 metadata；如果启动 Codex 与 AgentRecall 时均设置了 `CODEX_ROLLOUT_TRACE_ROOT`，OpenAI Responses 导出还会优先使用 Codex trace 中捕获的原始请求体。trace 可能包含完整提示词、工具参数与响应，请只保存到受信任的本地目录并妥善清理。
 - **AI / Agent 辅助检索历史会话**：
   可以使用 AI 摘要增强历史会话检索，也支持自然语言找会话；同时开放 MCP 能力,让 Claude Code / Codex / CodeBuddy 可以在对话里直接搜索、读取历史会话,并对会话打标签、收藏、设置可见性。
 - **跨 Agent 迁移会话**：
   支持在 Claude Code、Codex、CodeBuddy、CodeWiz 及已启用的扩展 CLI 间迁移本地会话；远程恢复支持 Claude Code、Codex、CodeBuddy 和 CodeWiz。
 - **远程保存和跨设备恢复会话**：
-  支持使用自己的 Supabase 项目手动或自动上传会话快照，在另一台设备搜索远程会话、查看完整详情，并恢复到 Claude Code / Codex / CodeBuddy 中继续工作。
+  支持使用自己的 Supabase 项目手动或自动上传会话快照和附件，在另一台设备搜索远程会话、查看完整详情和附件，并恢复到 Claude Code / Codex / CodeBuddy 中继续工作。附件同步默认开启，也可在远程同步设置中关闭。
 - **统一查看 Agent 用量和额度**：
   统计今日、近 7 天、近 30 天和全部时间的各 Agent token 使用量；同时查看 Claude Code / Codex 的当前额度状态。
 - **统一管理 Skills 和 API Provider**：
@@ -146,8 +156,9 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 - 表：`public.agent_session_remote_sessions`
 - Storage bucket：`agent-session-remote`
 - Storage 对象路径：
-  - `sessions/{id}/detail.json`：用于远程详情查看
-  - `sessions/{id}/portable.json`：用于跨设备、跨 Agent 恢复
+  - `sessions/{id}/*.detail.json`：用于远程详情查看
+  - `sessions/{id}/*.portable.json`：用于跨设备、跨 Agent 恢复
+  - `sessions/{id}/attachments/*`：用于按需查看已同步附件
 
 脚本是幂等的，可以重复执行。它会为 anon role 创建适合个人项目的读写策略。这个策略方便单人同步，但不是多用户隔离方案；如果要多人共享或公开分发，请先按自己的 Supabase 安全模型调整 RLS policy。
 
