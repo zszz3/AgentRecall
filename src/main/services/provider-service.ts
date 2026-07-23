@@ -91,6 +91,15 @@ export class ProviderService {
         this.getSavedClaudeConfigPatch(),
         claudeDefaults,
       ),
+      // The summary/search endpoint reads summaryApiConfig, so it must be hydrated
+      // from the persisted patch too — otherwise a saved Custom summary provider is
+      // ignored and the endpoint falls back to stale defaults. Summary reuses the
+      // local Codex profile defaults as its baseline.
+      summaryApiConfig: mergeApiConfigWithProfileDefaults(
+        settings.summaryApiConfig,
+        this.getSavedSummaryConfigPatch(),
+        codexDefaults,
+      ),
     });
   }
 
@@ -293,6 +302,18 @@ export class ProviderService {
       "customOpusModel",
       "customApiFormat",
       "customApiKeyField",
+    ]);
+  }
+
+  private getSavedSummaryConfigPatch(): Partial<ApiConfig> {
+    return this.readSavedPatch<ApiConfig>("summaryApiConfig", [
+      "activeProvider",
+      "customProviderId",
+      "customProviderName",
+      "customBaseUrl",
+      "customApiKey",
+      "customModel",
+      "customApiFormat",
     ]);
   }
 

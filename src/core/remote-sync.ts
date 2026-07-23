@@ -1,10 +1,13 @@
-import { execFile, type ExecFileOptions } from "node:child_process";
 import {
   loadRemoteSessionPayloads,
+  loadWslSessionPayloads,
   type RemoteSessionFileKind,
   type RemoteSessionFilePayload,
 } from "./remote-session-loader";
 import type { SessionStore } from "./session-store";
+import { remoteSessionKey } from "./session-environment";
+import { execFile, type ExecFileOptions } from "node:child_process";
+import { runRemoteCommand } from "./remote-process";
 import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "./session-sources";
 import { buildSshArgs } from "./ssh-config";
 import type {
@@ -346,6 +349,7 @@ export async function syncRemoteEnvironment(
   environment: SessionEnvironment,
   options: RemoteSyncOptions = {},
 ): Promise<RemoteSyncStatus> {
+  if (environment.kind === "wsl") return syncWslEnvironment(store, environment, options);
   const runSsh = options.runSsh ?? runSystemSsh;
   store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
   try {
@@ -368,6 +372,41 @@ export async function syncRemoteEnvironment(
     const loaded = loadRemoteSessionPayloads(environment, payloads);
     for (const item of loaded) {
       migrateLegacyRemoteSessionRecord(store, item.session);
+      store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+    }
+    store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
+    return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
+    throw error;
+  }
+}
+
+async function syncWslEnvironment(
+  store: SessionStore,
+  environment: SessionEnvironment,
+  options: RemoteSyncOptions,
+): Promise<RemoteSyncStatus> {
+  const runWsl = options.runSsh ?? runSystemRemote;
+  store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
+  try {
+    const output = await runWsl(environment, buildRemoteCollectorCommand([], { includeCodeWiz: false }));
+    const { payloads, summaries } = decodeRemoteSyncOutput(output);
+    const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary)));
+    for (const summary of enabledSummaries) {
+      store.upsertIndexedSessionSummary(
+        wslSummaryToIndexedSession(environment, summary),
+        summary.messageCount,
+        summary.tokenEvents,
+        summary.messageEvents,
+      );
+    }
+    const loaded = loadWslSessionPayloads(
+      environment,
+      payloads.filter((payload) => isSupportedWslSource(payloadSourceForPayload(payload))),
+    );
+    for (const item of loaded) {
       store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
     }
     store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
@@ -412,12 +451,33 @@ function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary:
   };
 }
 
+function wslSummaryToIndexedSession(environment: SessionEnvironment, summary: RemoteSessionSummaryPayload): IndexedSession {
+  const source = summarySource(summary);
+  return {
+    ...remoteSummaryToIndexedSession(environment, summary),
+    sessionKey: remoteSessionKey(environment, source, summary.rawId),
+  };
+}
+
 function summarySource(summary: RemoteSessionSummaryPayload): SessionSource {
   if (summary.source) return summary.source;
   if (summary.kind === "codex-session") return "codex-cli";
   if (summary.kind === "codebuddy-project") return "codebuddy-cli";
   if (summary.kind === "codewiz-session") return "codewiz-cli";
   return "claude-cli";
+}
+
+function payloadSourceForPayload(payload: RemoteSessionFilePayload): SessionSource {
+  if (payload.source) return payload.source;
+  if (payload.kind === "codex-session" || payload.kind === "codex-index") return "codex-cli";
+  if (payload.kind === "codebuddy-project") return "codebuddy-cli";
+  if (payload.kind === "codewiz-session") return "codewiz-cli";
+  if (payload.kind === "qoder-project") return "qoder";
+  return "claude-cli";
+}
+
+function isSupportedWslSource(source: SessionSource): boolean {
+  return source === "codex-cli" || source === "claude-cli";
 }
 
 function isOptionalRemoteSource(source: SessionSource): boolean {
@@ -475,6 +535,11 @@ export function buildRemoteSyncSshArgs(environment: SessionEnvironment, remoteCo
   return [...baseArgs.slice(0, separatorIndex), ...REMOTE_SYNC_SSH_OPTIONS, ...baseArgs.slice(separatorIndex)];
 }
 
+async function runSystemRemote(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
+  if (environment.kind === "wsl") return runRemoteCommand(environment, remoteCommand, REMOTE_SYNC_EXEC_OPTIONS);
+  return runSystemSsh(environment, remoteCommand);
+}
+
 async function runSystemSsh(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
   const args = buildRemoteSyncSshArgs(environment, remoteCommand);
   return new Promise((resolve, reject) => {
@@ -490,9 +555,24 @@ export async function fetchRemoteSessionFilePayload(
   session: SessionSearchResult,
   options: RemoteSessionFileFetchOptions = {},
 ): Promise<RemoteSessionFilePayload> {
+  if (environment.kind === "wsl") return fetchWslSessionFilePayload(environment, session, options);
   const runSsh = options.runSsh ?? runSystemSsh;
   const kind = remoteKindForSource(session.source);
   const output = await runSsh(environment, buildRemoteFileFetchCommand({ path: session.filePath, source: session.source, kind }));
+  const payloads = decodeRemotePayload(output);
+  const payload = payloads.find((item) => item.path === session.filePath && item.kind === kind) ?? payloads[0];
+  if (!payload) throw new Error("Remote session file fetch returned no payload.");
+  return payload;
+}
+
+async function fetchWslSessionFilePayload(
+  environment: SessionEnvironment,
+  session: SessionSearchResult,
+  options: RemoteSessionFileFetchOptions,
+): Promise<RemoteSessionFilePayload> {
+  const runWsl = options.runSsh ?? runSystemRemote;
+  const kind = remoteKindForSource(session.source);
+  const output = await runWsl(environment, buildRemoteFileFetchCommand({ path: session.filePath, source: session.source, kind }));
   const payloads = decodeRemotePayload(output);
   const payload = payloads.find((item) => item.path === session.filePath && item.kind === kind) ?? payloads[0];
   if (!payload) throw new Error("Remote session file fetch returned no payload.");
@@ -506,8 +586,21 @@ export async function fetchRemoteSessionMessagePage(
   limit = 120,
   options: RemoteSessionFileFetchOptions = {},
 ): Promise<SessionMessage[]> {
+  if (environment.kind === "wsl") return fetchWslSessionMessagePage(environment, session, offset, limit, options);
   const runSsh = options.runSsh ?? runSystemSsh;
   const output = await runSsh(environment, buildRemoteMessagePageCommand(session, offset, limit));
+  return decodeRemoteMessagePage(output);
+}
+
+async function fetchWslSessionMessagePage(
+  environment: SessionEnvironment,
+  session: SessionSearchResult,
+  offset: number,
+  limit: number,
+  options: RemoteSessionFileFetchOptions,
+): Promise<SessionMessage[]> {
+  const runWsl = options.runSsh ?? runSystemRemote;
+  const output = await runWsl(environment, buildRemoteMessagePageCommand(session, offset, limit));
   return decodeRemoteMessagePage(output);
 }
 
@@ -1228,6 +1321,15 @@ def emit_codebuddy_summary(path, stat):
             if not key.startswith("codebuddy:"):
               key = "codebuddy:" + key
             _tok_put(token_entries, key, _tok_event(row_timestamp, key, usage))
+        elif row.get("type") == "function_call":
+          provider_data = row.get("providerData")
+          usage = _codebuddy_usage(provider_data) if isinstance(provider_data, dict) else None
+          if usage:
+            key_value = row.get("callId") or row.get("id") or "%s:%s:%s" % (index, usage["inputTokens"], usage["outputTokens"])
+            key = str(key_value)
+            if not key.startswith("codebuddy:"):
+              key = "codebuddy:" + key
+            _tok_put(token_entries, key, _tok_event(row_timestamp, key, usage))
         parsed = parse_message(row, "codebuddy")
         if parsed:
           message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
@@ -1321,12 +1423,7 @@ for kind, source, root, pattern in sources:
     except Exception:
       pass
 
-codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
-try:
-  if codewiz_db.exists():
-    emit_codewiz_summaries(codewiz_db, codewiz_db.stat())
-except Exception:
-  pass
+__CODEWIZ_COLLECTION__
 codex_titles = {
   "codex-cli": load_codex_titles(".codex"),
   __OPTIONAL_CODEX_TITLE_INDEXES__
@@ -1349,7 +1446,10 @@ for _mtime, kind, source, path, _size in sorted(candidates, key=lambda item: ite
   except Exception:
     pass`;
 
-function buildRemoteCollectorCommand(enabledOptionalSources: SessionSource[]): string {
+function buildRemoteCollectorCommand(
+  enabledOptionalSources: SessionSource[],
+  options: { includeCodeWiz?: boolean } = {},
+): string {
   const descriptors: Record<string, string> = {
     "tclaude-cli": '("claude-project", "tclaude-cli", home / ".tclaude" / "projects", "*.jsonl")',
     "tcodex-cli": '("codex-session", "tcodex-cli", home / ".tcodex" / "sessions", "*.jsonl")',
@@ -1363,11 +1463,20 @@ function buildRemoteCollectorCommand(enabledOptionalSources: SessionSource[]): s
   const optionalClaudeIndexes = optionalSources.includes("tclaude-cli")
     ? '"tclaude-cli": load_claude_index(".tclaude"),'
     : "";
+  const codewizCollection = options.includeCodeWiz === false
+    ? ""
+    : String.raw`codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
+try:
+  if codewiz_db.exists():
+    emit_codewiz_summaries(codewiz_db, codewiz_db.stat())
+except Exception:
+  pass`;
   const script = REMOTE_COLLECTOR_SCRIPT
     .replace("__ENABLED_OPTIONAL_SOURCES__", JSON.stringify(optionalSources))
     .replace("__OPTIONAL_SOURCE_DESCRIPTORS__", optionalSources.map((source) => descriptors[source]).join(",\n  "))
     .replace("__OPTIONAL_CODEX_TITLE_INDEXES__", optionalCodexTitleIndexes)
-    .replace("__OPTIONAL_CLAUDE_INDEXES__", optionalClaudeIndexes);
+    .replace("__OPTIONAL_CLAUDE_INDEXES__", optionalClaudeIndexes)
+    .replace("__CODEWIZ_COLLECTION__", codewizCollection);
   return buildPythonBase64Command(script);
 }
 

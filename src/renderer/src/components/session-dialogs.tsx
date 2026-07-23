@@ -72,10 +72,15 @@ export function DeleteSessionDialog({
           {l(" permanently?", "？")}
         </p>
         <p className="dialog-copy danger-copy">
-          {l(
-            "This deletes the original Codex or Claude Code session file and removes it from this app. This cannot be undone.",
-            "这会删除 Codex 或 Claude Code 的原始会话文件，并从本应用移除，无法撤销。",
-          )}
+          {session.source === "zcode-cli"
+            ? l(
+                "This permanently deletes this ZCode session, its messages, tool calls, and usage records from the local ZCode database. This cannot be undone.",
+                "这会从本地 ZCode 数据库永久删除该会话及其消息、工具调用和用量记录，无法撤销。",
+              )
+            : l(
+                "This deletes the original Codex or Claude Code session file and removes it from this app. This cannot be undone.",
+                "这会删除 Codex 或 Claude Code 的原始会话文件，并从本应用移除，无法撤销。",
+              )}
         </p>
         <div className="delete-session-path" title={session.filePath}>
           {session.filePath}

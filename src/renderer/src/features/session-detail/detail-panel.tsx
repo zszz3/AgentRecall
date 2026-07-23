@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
@@ -22,6 +22,8 @@ import {
   sourceUiFamily,
 } from "../../session-ui";
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
+import type { RelatedSession } from "../../../../core/related-sessions";
+import { RelatedSessions } from "./related-sessions";
 
 export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
@@ -133,14 +135,18 @@ export function DetailPanel({
   onResumeIterm,
   onMigrate,
   onUploadRemote,
+  remoteUploadDisabled = false,
   onCopyResume,
   onCopyMarkdown,
   onExportMarkdown,
+  onExportJson,
   onCopyPlain,
   onDelete,
   onReveal,
   readOnly = false,
   backdropClassName = "",
+  relatedSessions = [],
+  onOpenRelatedSession,
 }: {
   session: SessionSearchResult;
   messages: SessionMessage[];
@@ -171,14 +177,18 @@ export function DetailPanel({
   onResumeIterm: () => void;
   onMigrate: () => void;
   onUploadRemote?: () => void;
+  remoteUploadDisabled?: boolean;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
+  onExportJson: () => void;
   onCopyPlain: () => void;
   onDelete: () => void;
   onReveal: () => void;
   readOnly?: boolean;
   backdropClassName?: string;
+  relatedSessions?: RelatedSession[];
+  onOpenRelatedSession?: (sessionKey: string) => void;
 }): ReactElement {
   const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
@@ -381,7 +391,7 @@ export function DetailPanel({
                 {localizedLiveStateLabel(liveState, language)}
               </span>
               <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-                {isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
+                {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
                 {environmentBadgeLabel(session, language)}
               </span>
             </div>
@@ -443,7 +453,11 @@ export function DetailPanel({
               <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
             </button>
             {onUploadRemote ? (
-              <button onClick={onUploadRemote} disabled={actionRunning}>
+              <button
+                onClick={onUploadRemote}
+                disabled={actionRunning || remoteUploadDisabled}
+                title={remoteUploadDisabled ? l("This session cannot be saved to cloud.", "此会话不能保存到云端。") : undefined}
+              >
                 <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
               </button>
             ) : null}
@@ -457,6 +471,9 @@ export function DetailPanel({
             <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
             <button onClick={onExportMarkdown} disabled={actionRunning}>
               <Download size={15} /> {l("Export MD", "导出 MD")}
+            </button>
+            <button onClick={onExportJson} disabled={actionRunning}>
+              <Download size={15} /> {l("Export JSON", "导出 JSON")}
             </button>
             <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
           </div>
@@ -605,6 +622,9 @@ export function DetailPanel({
               )
             ))}
           </section>
+          {onOpenRelatedSession ? (
+            <RelatedSessions related={relatedSessions} language={language} onOpen={onOpenRelatedSession} />
+          ) : null}
         </div>
       </aside>
     </div>

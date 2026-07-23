@@ -4,8 +4,8 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { skillSyncFilesFromMetadata, type RemoteSkill, type SkillSyncFile } from "./skill-sync";
 
-export type SkillAgent = "codex" | "claude";
-export type SkillPortableScope = "agent-recall" | "codex-user" | "claude-user" | "shared";
+export type SkillAgent = "codex" | "claude" | "qoder";
+export type SkillPortableScope = "agent-recall" | "codex-user" | "claude-user" | "qoder-user" | "shared";
 export type SkillSource =
   | "agent-recall"
   | "codex-user"
@@ -14,7 +14,9 @@ export type SkillSource =
   | "codex-project"
   | "claude-user"
   | "claude-project"
-  | "claude-plugin";
+  | "claude-plugin"
+  | "qoder-user"
+  | "qoder-project";
 
 export interface InstalledSkill {
   id: string;
@@ -107,6 +109,7 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
     { agent: "codex", source: "codex-system", path: path.join(codexHome, "skills", ".system") },
     { agent: "codex", source: "codex-shared", path: path.join(homeDir, ".agents", "skills") },
     { agent: "claude", source: "claude-user", path: path.join(homeDir, ".claude", "skills") },
+    { agent: "qoder", source: "qoder-user", path: path.join(homeDir, ".qoder", "skills") },
     ...projectDirs.map((projectDir): SkillRootConfig => ({
       agent: "codex",
       source: "codex-project",
@@ -116,6 +119,11 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
       agent: "claude",
       source: "claude-project",
       path: path.join(projectDir, ".claude", "skills"),
+    })),
+    ...projectDirs.map((projectDir): SkillRootConfig => ({
+      agent: "qoder",
+      source: "qoder-project",
+      path: path.join(projectDir, ".qoder", "skills"),
     })),
   ];
   const roots: SkillRootConfig[] = [
@@ -167,6 +175,7 @@ export function portableScopeForSkillSource(source: SkillSource): SkillPortableS
   if (source === "agent-recall") return "agent-recall";
   if (source === "codex-user") return "codex-user";
   if (source === "claude-user") return "claude-user";
+  if (source === "qoder-user") return "qoder-user";
   if (source === "codex-shared") return "shared";
   return null;
 }
@@ -200,7 +209,7 @@ function isCandidateProjectDir(projectDir: string, homeDir: string): boolean {
   const normalized = normalizePathKey(projectDir);
   const normalizedHome = normalizePathKey(homeDir);
   if (normalized === normalizedHome) return false;
-  return ![".codex", ".claude", ".agents"].some((dirName) => normalized === path.join(normalizedHome, dirName) || normalized.startsWith(`${path.join(normalizedHome, dirName)}${path.sep}`));
+  return ![".codex", ".claude", ".agents", ".qoder"].some((dirName) => normalized === path.join(normalizedHome, dirName) || normalized.startsWith(`${path.join(normalizedHome, dirName)}${path.sep}`));
 }
 
 export function deleteInstalledSkill(skillPath: string, options: SkillManagerOptions = {}): DeleteInstalledSkillResult {
@@ -273,6 +282,7 @@ function skillRootForPortableScope(
   }
   if (scope === "codex-user") return path.join(options.codexHome, "skills");
   if (scope === "claude-user") return path.join(options.homeDir, ".claude", "skills");
+  if (scope === "qoder-user") return path.join(options.homeDir, ".qoder", "skills");
   return path.join(options.homeDir, ".agents", "skills");
 }
 

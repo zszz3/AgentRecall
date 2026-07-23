@@ -229,14 +229,31 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   }
 }
 
+// Some newer models (GPT-5 / o-series and compatible providers) reject a `temperature`
+// parameter outright with an HTTP 400. Detect that specific failure so callers can retry
+// the request once without the sampling knob instead of surfacing an error to the user.
+export function isTemperatureUnsupported(status: number, detail: string): boolean {
+  return status === 400 && /temperature/i.test(detail) && /(deprecated|unsupported|not support|does not support|only the default)/i.test(detail);
+}
+
 // OpenAI-compatible /chat/completions (DeepSeek, GLM pay-as-you-go, Kimi, etc.).
 async function openaiChatCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
-  const response = await postJson(
-    `${endpoint.baseUrl}/chat/completions`,
-    { Authorization: `Bearer ${endpoint.apiKey}` },
-    { model: endpoint.model, messages, temperature: 0.2, stream: false },
-    signal,
-  );
+  const request = (includeTemperature: boolean) =>
+    postJson(
+      `${endpoint.baseUrl}/chat/completions`,
+      { Authorization: `Bearer ${endpoint.apiKey}` },
+      { model: endpoint.model, messages, ...(includeTemperature ? { temperature: 0.2 } : {}), stream: false },
+      signal,
+    );
+  let response = await request(true);
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    if (isTemperatureUnsupported(response.status, detail)) {
+      response = await request(false);
+    } else {
+      throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
+    }
+  }
   if (!response.ok) {
     const detail = await safeReadText(response);
     throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
@@ -249,12 +266,28 @@ async function openaiChatCompletion(endpoint: SummaryEndpoint, messages: ChatMes
 
 // OpenAI-compatible Responses API (/responses), used by Codex-style providers.
 async function openaiResponsesCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
-  const response = await postJson(
-    `${endpoint.baseUrl}/responses`,
-    { Authorization: `Bearer ${endpoint.apiKey}` },
-    { model: endpoint.model, instructions: responsesInstructions(messages), input: toResponsesInput(messages), temperature: 0.2, stream: false },
-    signal,
-  );
+  const request = (includeTemperature: boolean) =>
+    postJson(
+      `${endpoint.baseUrl}/responses`,
+      { Authorization: `Bearer ${endpoint.apiKey}` },
+      {
+        model: endpoint.model,
+        instructions: responsesInstructions(messages),
+        input: toResponsesInput(messages),
+        ...(includeTemperature ? { temperature: 0.2 } : {}),
+        stream: false,
+      },
+      signal,
+    );
+  let response = await request(true);
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    if (isTemperatureUnsupported(response.status, detail)) {
+      response = await request(false);
+    } else {
+      throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
+    }
+  }
   if (!response.ok) {
     const detail = await safeReadText(response);
     throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
@@ -363,6 +396,14 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
         }
       }
       if (code !== 0) {
+        // A null exit code means the process was killed by a signal — this is how an
+        // aborted/timed-out run terminates. Treat it as a timeout/cancellation and stop;
+        // do NOT fall back to claude, which would silently launch a second full summary
+        // run after the caller already cancelled or the deadline already passed.
+        if (code === null) {
+          reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
+          return;
+        }
         // If codex exited with error, try falling back to claude exec
         // This handles cases where codex command doesn't exist or fails to run
         // We check for ENOENT-like patterns in stderr, and also fallback when
@@ -372,12 +413,11 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
                                   stderr.toLowerCase().includes("no such file") ||
                                   stderr.toLowerCase().includes("cannot find");
         const isEmptyError = code === 1 && (!content.trim() || stdoutBuffer.length < 100);
-        if (hasNotFoundError || isEmptyError || code === null) {
+        if (hasNotFoundError || isEmptyError) {
           resolve(claudeExecCompletion(endpoint, messages, signal));
           return;
         }
-        const status = code === null ? `unknown${signalName ? ` (${signalName})` : ""}` : String(code);
-        reject(new Error(`Codex summary exited with ${status}. ${stderr.trim().slice(-1000)}`.trim()));
+        reject(new Error(`Codex summary exited with ${String(code)}. ${stderr.trim().slice(-1000)}`.trim()));
         return;
       }
       if (!content.trim()) {

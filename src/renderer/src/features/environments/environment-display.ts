@@ -19,6 +19,7 @@ export function environmentStatusLabel(environment: SessionEnvironment, language
 
 export function environmentTarget(environment: SessionEnvironment, language: LanguageMode): string {
   if (environment.kind === "local") return localize(language, "This computer", "这台电脑");
+  if (environment.kind === "wsl") return `${localize(language, "Windows Subsystem for Linux", "Windows Subsystem for Linux")} · ${localize(language, "Local Linux", "本地 Linux")}`;
   const destination = environment.hostAlias || environment.host || environment.label;
   const userPrefix = environment.user && !environment.hostAlias ? `${environment.user}@` : "";
   const portSuffix = environment.port ? `:${environment.port}` : "";

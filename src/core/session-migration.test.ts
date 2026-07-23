@@ -187,6 +187,7 @@ describe("session migration model", () => {
     ["openclaw", null],
     ["hermes", null],
     ["opencode-cli", null],
+    ["zcode-cli", null],
     ["cursor-agent", "cursor"],
     ["trae", null],
     ["qoder", null],

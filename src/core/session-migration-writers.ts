@@ -19,7 +19,9 @@ import { migrationTargetDescriptor } from "./migration-targets";
 import type { LoadedSession, MigrationTarget, PortableSession } from "./types";
 
 const require = createRequire(import.meta.url);
-const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
+const { DatabaseSync } = require("node:sqlite") as {
+  DatabaseSync: new (path: string, options?: { readOnly?: boolean; timeout?: number }) => import("node:sqlite").DatabaseSync;
+};
 
 export interface WriteMigratedSessionOptions {
   target: MigrationTarget;
@@ -54,6 +56,7 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
   const runtimeMetadata = await loadMigrationTargetRuntimeMetadata(options.target, targetHome);
   const rows = serializeSession(options.target, options.session, sessionId, createId, runtimeMetadata);
   const tempPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+  let finalFileCreated = false;
 
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   try {
@@ -70,9 +73,13 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
     await fs.promises.chmod(tempPath, 0o600);
     if (options.rename) await options.rename(tempPath, filePath);
     else await fs.promises.rename(tempPath, filePath);
+    finalFileCreated = true;
+    await updateCodexSessionIndex(options.target, targetHome, options.session, sessionId, now);
+    updateCodexAppServerState(options.target, targetHome, filePath, options.session, sessionId, now, runtimeMetadata);
     return { sessionId, filePath };
   } catch (error) {
     await fs.promises.rm(tempPath, { force: true });
+    if (finalFileCreated) await fs.promises.rm(filePath, { force: true });
     throw error;
   }
 }
@@ -111,7 +118,12 @@ function serializeSession(
   if (target === "cursor") return serializeCursor(session);
   const family = migrationTargetDescriptor(target).family;
   if (family === "codex") {
-    return serializeCodex(session, sessionId, requiredRuntimeValue(runtimeMetadata.codexModelProvider, "Codex model provider"));
+    return serializeCodex(
+      session,
+      sessionId,
+      requiredRuntimeValue(runtimeMetadata.codexModelProvider, "Codex model provider"),
+      target === "codex" && process.platform === "win32",
+    );
   }
   if (family === "claude") {
     return serializeClaude(session, sessionId, createId, requiredRuntimeValue(runtimeMetadata.claudeModel, "Claude model"));
@@ -119,22 +131,44 @@ function serializeSession(
   return serializeCodeBuddy(session, sessionId, createId);
 }
 
-function serializeCodex(session: PortableSession, sessionId: string, modelProvider: string): unknown[] {
-  return [
-    {
-      type: "session_meta",
+function serializeCodex(
+  session: PortableSession,
+  sessionId: string,
+  modelProvider: string,
+  includeVsCodeEvents: boolean,
+): unknown[] {
+  const rows: unknown[] = [{
+    type: "session_meta",
+    timestamp: session.startedAt,
+    payload: {
+      ...(includeVsCodeEvents ? { session_id: sessionId } : {}),
+      id: sessionId,
+      timestamp: session.startedAt,
+      cwd: session.projectPath,
+      title: session.title,
+      originator: "agent-recall",
+      cli_version: "migration",
+      ...(includeVsCodeEvents ? { source: "vscode", thread_source: "user", history_mode: "legacy" } : {}),
+      model_provider: modelProvider,
+    },
+  }];
+
+  if (includeVsCodeEvents) {
+    rows.push({
+      type: "event_msg",
       timestamp: session.startedAt,
       payload: {
-        id: sessionId,
-        timestamp: session.startedAt,
-        cwd: session.projectPath,
-        title: session.title,
-        originator: "agent-recall",
-        cli_version: "migration",
-        model_provider: modelProvider,
+        type: "task_started",
+        turn_id: sessionId,
+        started_at: Math.floor(new Date(session.startedAt).getTime() / 1000),
+        model_context_window: 0,
+        collaboration_mode_kind: "default",
       },
-    },
-    ...session.messages.map((message) => ({
+    });
+  }
+
+  for (const message of session.messages) {
+    rows.push({
       type: "response_item",
       timestamp: message.timestamp,
       payload: {
@@ -145,8 +179,19 @@ function serializeCodex(session: PortableSession, sessionId: string, modelProvid
           text: message.content,
         }],
       },
-    })),
-  ];
+    });
+    if (includeVsCodeEvents) {
+      rows.push({
+        type: "event_msg",
+        timestamp: message.timestamp,
+        payload: message.role === "user"
+          ? { type: "user_message", message: message.content, images: [], local_images: [], text_elements: [] }
+          : { type: "agent_message", message: message.content, phase: "final_answer" },
+      });
+    }
+  }
+
+  return rows;
 }
 
 function serializeClaude(
@@ -479,6 +524,179 @@ async function writeJsonlAndSync(filePath: string, rows: unknown[]): Promise<voi
   }
 }
 
+async function updateCodexSessionIndex(
+  target: MigrationTarget,
+  targetHome: string,
+  session: PortableSession,
+  sessionId: string,
+  now: Date,
+): Promise<void> {
+  if (migrationTargetDescriptor(target).family !== "codex") return;
+
+  const indexPath = path.join(targetHome, "session_index.jsonl");
+  let existingRows: unknown[] = [];
+  try {
+    existingRows = readCodexSessionIndex(indexPath);
+  } catch (error) {
+    throw new Error(
+      `Codex session index could not be read from ${indexPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const rows = existingRows.filter((row) => !isRecord(row) || row.id !== sessionId);
+  rows.push({
+    id: sessionId,
+    thread_name: session.title || sessionId,
+    updated_at: now.toISOString(),
+  });
+
+  const tempPath = `${indexPath}.tmp-${crypto.randomUUID()}`;
+  try {
+    await writeJsonlAndSync(tempPath, rows);
+    await fs.promises.rename(tempPath, indexPath);
+  } catch (error) {
+    await fs.promises.rm(tempPath, { force: true });
+    throw new Error(
+      `Codex session index could not be updated at ${indexPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function updateCodexAppServerState(
+  target: MigrationTarget,
+  targetHome: string,
+  filePath: string,
+  session: PortableSession,
+  sessionId: string,
+  now: Date,
+  runtimeMetadata: MigrationTargetRuntimeMetadata,
+): void {
+  if (target !== "codex" || process.platform !== "win32") return;
+
+  const statePath = findCodexStateDatabase(targetHome);
+  if (!statePath) return;
+
+  let db: import("node:sqlite").DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(statePath, { timeout: 5_000 });
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(threads)").all() as Array<{ name?: unknown }>)
+        .map((column) => typeof column.name === "string" ? column.name : ""),
+    );
+    const requiredColumns = [
+      "id",
+      "rollout_path",
+      "created_at",
+      "updated_at",
+      "source",
+      "model_provider",
+      "cwd",
+      "title",
+      "sandbox_policy",
+      "approval_mode",
+    ];
+    if (!requiredColumns.every((column) => columns.has(column))) return;
+
+    const firstUserMessage = session.messages.find((message) => message.role === "user")?.content ?? "";
+    const title = session.title || firstUserMessage || "Migrated session";
+    const createdAtMs = timestampMs(session.startedAt);
+    const updatedAtMs = now.getTime();
+    const createdAt = Math.floor(createdAtMs / 1000);
+    const updatedAt = Math.floor(updatedAtMs / 1000);
+    const rolloutPath = path.toNamespacedPath(path.resolve(filePath));
+    const cwd = path.toNamespacedPath(path.resolve(session.projectPath));
+    const existing = db.prepare("SELECT * FROM threads WHERE id = ?").get(sessionId) as Record<string, unknown> | undefined;
+    const template = existing ?? db.prepare("SELECT * FROM threads ORDER BY updated_at_ms DESC, updated_at DESC LIMIT 1").get() as Record<string, unknown> | undefined;
+    const values: Record<string, unknown> = {
+      id: sessionId,
+      rollout_path: rolloutPath,
+      created_at: existing?.created_at ?? createdAt,
+      updated_at: updatedAt,
+      source: "vscode",
+      model_provider: requiredRuntimeValue(runtimeMetadata.codexModelProvider, "Codex model provider"),
+      cwd,
+      title,
+      sandbox_policy: existing?.sandbox_policy ?? template?.sandbox_policy ?? "{}",
+      approval_mode: existing?.approval_mode ?? template?.approval_mode ?? "on-request",
+      tokens_used: existing?.tokens_used ?? 0,
+      has_user_event: 1,
+      archived: existing?.archived ?? 0,
+      cli_version: "migration",
+      first_user_message: firstUserMessage,
+      memory_mode: existing?.memory_mode ?? template?.memory_mode ?? "enabled",
+      model: existing?.model ?? template?.model ?? null,
+      reasoning_effort: existing?.reasoning_effort ?? template?.reasoning_effort ?? null,
+      agent_path: existing?.agent_path ?? template?.agent_path ?? null,
+      created_at_ms: existing?.created_at_ms ?? createdAtMs,
+      updated_at_ms: updatedAtMs,
+      thread_source: "user",
+      preview: title,
+      recency_at: updatedAt,
+      recency_at_ms: updatedAtMs,
+      history_mode: "legacy",
+    };
+
+    if (existing) {
+      const updates = Object.keys(values).filter((column) => column !== "id" && columns.has(column));
+      const assignments = updates.map((column) => `${column} = ?`).join(", ");
+      db.prepare(`UPDATE threads SET ${assignments} WHERE id = ?`).run(
+        ...(updates.map((column) => values[column]) as import("node:sqlite").SQLInputValue[]),
+        sessionId,
+      );
+      return;
+    }
+
+    const insertColumns = Object.keys(values).filter((column) => columns.has(column));
+    const placeholders = insertColumns.map(() => "?").join(", ");
+    db.prepare(`INSERT INTO threads (${insertColumns.join(", ")}) VALUES (${placeholders})`).run(
+      ...(insertColumns.map((column) => values[column]) as import("node:sqlite").SQLInputValue[]),
+    );
+  } catch {
+    // The Codex app-server may hold the state database open. The rollout file
+    // and native session index remain authoritative when this best-effort
+    // display registration cannot acquire the database.
+  } finally {
+    db?.close();
+  }
+}
+
+function findCodexStateDatabase(targetHome: string): string | null {
+  try {
+    const candidates = fs.readdirSync(targetHome, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /^state_\d+\.sqlite$/i.test(entry.name))
+      .map((entry) => path.join(targetHome, entry.name));
+    candidates.sort((left, right) => fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs);
+    return candidates[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readCodexSessionIndex(indexPath: string): unknown[] {
+  let content: string;
+  try {
+    content = fs.readFileSync(indexPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+
+  const rows: unknown[] = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      throw new Error("contains invalid JSONL");
+    }
+  }
+  return rows;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function readJsonlStrict(filePath: string, target: MigrationTarget): unknown[] {
   const rows: unknown[] = [];
   const content = fs.readFileSync(filePath, "utf8");
@@ -507,6 +725,7 @@ function validateNativeStructure(
       sessionId,
       session,
       requiredRuntimeValue(runtimeMetadata.codexModelProvider, "Codex model provider"),
+      target === "codex" && process.platform === "win32",
     );
   } else if (family === "claude") {
     validateClaudeStructure(rows, sessionId, session, requiredRuntimeValue(runtimeMetadata.claudeModel, "Claude model"));
@@ -522,8 +741,10 @@ function validateCodexStructure(
   sessionId: string,
   session: PortableSession,
   modelProvider: string,
+  includeVsCodeEvents: boolean,
 ): void {
-  if (rows.length !== session.messages.length + 1) failValidation("codex", "has an unexpected row count");
+  const expectedRows = 1 + session.messages.length * (includeVsCodeEvents ? 2 : 1) + (includeVsCodeEvents ? 1 : 0);
+  if (rows.length !== expectedRows) failValidation("codex", "has an unexpected row count");
   const meta = record(rows[0]);
   const payload = record(meta?.payload);
   if (
@@ -533,12 +754,31 @@ function validateCodexStructure(
     || payload.title !== session.title
     || payload.cwd !== session.projectPath
     || payload.model_provider !== modelProvider
+    || (includeVsCodeEvents && (
+      payload.session_id !== sessionId
+      || payload.source !== "vscode"
+      || payload.thread_source !== "user"
+      || payload.history_mode !== "legacy"
+    ))
   ) {
     failValidation("codex", "has invalid session metadata");
   }
 
-  session.messages.forEach((message, index) => {
-    const row = record(rows[index + 1]);
+  let rowIndex = 1;
+  if (includeVsCodeEvents) {
+    const taskStarted = record(rows[rowIndex++]);
+    const taskPayload = record(taskStarted?.payload);
+    if (
+      taskStarted?.type !== "event_msg"
+      || taskPayload?.type !== "task_started"
+      || taskPayload.turn_id !== sessionId
+    ) {
+      failValidation("codex", "has invalid app-server task metadata");
+    }
+  }
+
+  session.messages.forEach((message) => {
+    const row = record(rows[rowIndex++]);
     const messagePayload = record(row?.payload);
     const content = Array.isArray(messagePayload?.content) ? messagePayload.content : [];
     const block = record(content[0]);
@@ -552,7 +792,19 @@ function validateCodexStructure(
       || block?.type !== expectedBlockType
       || block.text !== message.content
     ) {
-      failValidation("codex", `has invalid message structure at index ${index}`);
+      failValidation("codex", `has invalid message structure at index ${rowIndex}`);
+    }
+    if (includeVsCodeEvents) {
+      const event = record(rows[rowIndex++]);
+      const eventPayload = record(event?.payload);
+      const expectedEventType = message.role === "user" ? "user_message" : "agent_message";
+      if (
+        event?.type !== "event_msg"
+        || eventPayload?.type !== expectedEventType
+        || eventPayload.message !== message.content
+      ) {
+        failValidation("codex", `has invalid app-server message event at index ${rowIndex}`);
+      }
     }
   });
 }

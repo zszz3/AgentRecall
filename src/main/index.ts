@@ -22,8 +22,19 @@ import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
+import {
+  reconstructCodexResponsesRequest,
+  resolveCodexResponsesRequest,
+  type CodexRequestExport,
+  type CodexRequestFidelity,
+} from "../core/codex-request-export";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
-import { formatSessionMarkdown, formatSessionPlainText } from "../core/format-session";
+import {
+  formatSessionJson,
+  formatSessionMarkdown,
+  formatSessionPlainText,
+  type SessionJsonExportFormat,
+} from "../core/format-session";
 import { normalizeExternalLink } from "../core/external-link";
 import {
   defaultSettings,
@@ -64,13 +75,16 @@ import { writeDbPointer } from "../core/app-paths";
 import { routeResumeSession } from "../core/resume-router";
 import { diagnoseRemoteEnvironment, preflightRemoteSessionResume } from "../core/remote-health";
 import { buildRemoteSyncSshArgs, fetchRemoteSessionFilePayload, fetchRemoteSessionMessagePage, syncRemoteEnvironment } from "../core/remote-sync";
-import { loadRemoteSessionDetailPayload } from "../core/remote-session-loader";
+import { REMOTE_PROCESS_EXEC_OPTIONS, runRemoteCommandWithInput } from "../core/remote-process";
+import { loadRemoteSessionDetailPayload, loadWslSessionDetailPayload } from "../core/remote-session-loader";
 import type { RemoteSessionRestoreDependencies } from "../core/remote-session-restore";
 import { RemoteEnvironmentLifecycle } from "../core/remote-environment-lifecycle";
 import { RemoteWatchManager } from "../core/remote-watch";
 import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { buildSshArgs, readUserSshConfig } from "../core/ssh-config";
+import { listWslDistributions } from "../core/wsl";
+import { deleteWslSessionFile } from "../core/wsl-session-actions";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
 import { isLocalSessionEnvironment } from "../core/session-environment";
@@ -83,6 +97,9 @@ import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerProvidersIpc } from "./ipc/providers";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
+import { registerMemoriesIpc, type MemoriesIpcService } from "./ipc/memories";
+import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
+import { registerRulesIpc, type RulesIpcService } from "./ipc/rules";
 import { registerSkillsIpc } from "./ipc/skills";
 import {
   AppUpdateService,
@@ -97,6 +114,8 @@ import {
   RemoteSessionService,
   type SessionSyncHookSetup,
 } from "./services/remote-session-service";
+import { buildMemoriesSyncSetupSql, memoryIdentity, scanLocalMemories, SupabaseMemoriesSyncClient } from "../core/memories-sync";
+import { buildRulesSyncSetupSql, restoreGlobalRules, ruleIdentity, scanLocalRules, SupabaseRulesSyncClient } from "../core/rules-sync";
 import { SkillService, type SkillUsageHookSetup } from "./services/skill-service";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
 import type {
@@ -326,6 +345,124 @@ function visibleSearchOptions(options: SearchOptions = {}): SearchOptions {
   return { ...options, excludeSubagents: getSettings().hideSubagentSessions };
 }
 
+function createRulesSyncService(): RulesIpcService {
+  const projectDirs = () => store.listProjects(visibleProjectOptions()).map((p) => p.path);
+  const createClient = () => {
+    const settings = getSettings();
+    return new SupabaseRulesSyncClient({ url: settings.skillSyncSupabaseUrl, anonKey: settings.skillSyncSupabaseAnonKey });
+  };
+  return {
+    async getSyncSnapshot() {
+      const settings = getSettings();
+      const localRules = scanLocalRules({ projectDirs: projectDirs() });
+      if (!settings.rulesSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
+        return { status: { kind: "unconfigured" as const, setupSql: buildRulesSyncSetupSql() }, localRules, remoteRules: [], scannedAt: Date.now() };
+      }
+      const client = createClient();
+      const status = await client.checkStatus();
+      const remoteRules = status.kind === "ready" ? await client.listRemoteRules() : [];
+      return { status, localRules, remoteRules, scannedAt: Date.now() };
+    },
+    async upload(identity) {
+      const localRules = scanLocalRules({ projectDirs: projectDirs() });
+      const rule = localRules.find((r) => ruleIdentity(r) === identity);
+      if (!rule) throw new Error("Rule not found locally.");
+      return createClient().uploadRule(rule);
+    },
+    async uploadAll() {
+      const localRules = scanLocalRules({ projectDirs: projectDirs() });
+      const client = createClient();
+      const remoteRules = await client.listRemoteRules();
+      let uploaded = 0;
+      let skipped = 0;
+      for (const rule of localRules) {
+        const remote = remoteRules.find((r) => r.agent === rule.agent && r.scope === rule.scope && r.name === rule.name && r.project_path === rule.projectPath);
+        if (remote && remote.content_hash === rule.contentHash) {
+          skipped++;
+          continue;
+        }
+        await client.uploadRule(rule);
+        uploaded++;
+      }
+      return { uploaded, skipped };
+    },
+    async deleteRemote(remoteId) {
+      return createClient().deleteRule(remoteId);
+    },
+    copySetupSql() {
+      clipboard.writeText(buildRulesSyncSetupSql());
+    },
+    async restoreGlobal() {
+      const client = createClient();
+      const remoteRules = await client.listRemoteRules();
+      return restoreGlobalRules(remoteRules);
+    },
+  };
+}
+
+function createMemoriesSyncService(): MemoriesIpcService {
+  const createClient = () => {
+    const settings = getSettings();
+    return new SupabaseMemoriesSyncClient({ url: settings.skillSyncSupabaseUrl, anonKey: settings.skillSyncSupabaseAnonKey });
+  };
+  return {
+    async getSyncSnapshot() {
+      const settings = getSettings();
+      const localMemories = scanLocalMemories();
+      if (!settings.memoriesSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
+        return { status: { kind: "unconfigured" as const, setupSql: buildMemoriesSyncSetupSql() }, localMemories, remoteMemories: [], scannedAt: Date.now() };
+      }
+      const client = createClient();
+      const status = await client.checkStatus();
+      const remoteMemories = status.kind === "ready" ? await client.listRemoteMemories() : [];
+      return { status, localMemories, remoteMemories, scannedAt: Date.now() };
+    },
+    async upload(identity) {
+      const localMemories = scanLocalMemories();
+      const memory = localMemories.find((m) => memoryIdentity(m) === identity);
+      if (!memory) throw new Error("Memory not found locally.");
+      return createClient().uploadMemory(memory);
+    },
+    async uploadAll() {
+      const localMemories = scanLocalMemories();
+      const client = createClient();
+      const remoteMemories = await client.listRemoteMemories();
+      let uploaded = 0;
+      let skipped = 0;
+      for (const memory of localMemories) {
+        const remote = remoteMemories.find((r) => r.agent === memory.agent && r.scope === memory.scope && r.name === memory.name && r.project_path === memory.projectPath);
+        if (remote && remote.content_hash === memory.contentHash) {
+          skipped++;
+          continue;
+        }
+        await client.uploadMemory(memory);
+        uploaded++;
+      }
+      return { uploaded, skipped };
+    },
+    async deleteRemote(remoteId) {
+      return createClient().deleteMemory(remoteId);
+    },
+    copySetupSql() {
+      clipboard.writeText(buildMemoriesSyncSetupSql());
+    },
+  };
+}
+
+function createDiscoveryService(): DiscoveryIpcService {
+  return {
+    listSavedSearches: () => store.listSavedSearches(),
+    createSavedSearch: (name, options) => store.createSavedSearch(name, options),
+    deleteSavedSearch: (id) => store.deleteSavedSearch(id),
+    touchSavedSearch: (id) => store.touchSavedSearch(id),
+    listRecentSearches: (limit) => store.listRecentSearches(limit),
+    searchHistory: (query, limit) => store.searchHistory(query, limit),
+    clearSearchHistory: () => store.clearSearchHistory(),
+    recordSearch: (query, resultCount, options) => store.recordSearch(query, resultCount, options),
+    getRelatedSessions: (sessionKey, limit) => store.getRelatedSessions(sessionKey, limit),
+  };
+}
+
 function visibleStatsOptions(options: SessionStatsOptions = {}): SessionStatsOptions {
   return { ...options, excludeSubagents: getSettings().hideSubagentSessions };
 }
@@ -345,12 +482,12 @@ function enabledRemoteOptionalSources(settings: AppSettings): SessionSource[] {
     .map((descriptor) => descriptor.id);
 }
 
-function markdownExportFileName(title: string): string {
+function exportFileName(title: string, extension: "md" | "json"): string {
   const safeTitle = title
     .replace(/[\\/:*?"<>|\x00-\x1f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return `${safeTitle || "session"}.md`;
+  return `${safeTitle || "session"}.${extension}`;
 }
 
 function sshArgsForSession(session: SessionSearchResult): string[] | undefined {
@@ -371,6 +508,18 @@ function requireSshArgsForRemoteSession(session: SessionSearchResult): string[] 
     throw new Error("SSH environment is not available for this remote session.");
   }
   return sshArgs;
+}
+
+function requireWslEnvironment(session: SessionSearchResult): SessionEnvironment {
+  const environment = store.getEnvironment(session.environmentId);
+  if (environment?.kind !== "wsl") throw new Error("WSL environment is not available for this remote session.");
+  return environment;
+}
+
+function requireWslResumeOptions(session: SessionSearchResult): { wslDistribution: string } {
+  const environment = requireWslEnvironment(session);
+  if (!environment.wslDistribution) throw new Error("WSL distribution is not configured for this remote session.");
+  return { wslDistribution: environment.wslDistribution };
 }
 
 function requireRemoteSshEnvironment(session: SessionSearchResult): SessionEnvironment | null {
@@ -414,6 +563,12 @@ async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<voi
     if (!latest || isLocalSessionEnvironment(latest)) return;
     if (latest.source === "codewiz-cli") return;
     const environment = store.getEnvironment(latest.environmentId);
+    if (environment?.kind === "wsl") {
+      const payload = await fetchRemoteSessionFilePayload(environment, latest);
+      const loaded = loadWslSessionDetailPayload(environment, payload, latest);
+      if (loaded) store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
+      return;
+    }
     if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
     const payload = await fetchRemoteSessionFilePayload(environment, latest);
     const loaded = loadRemoteSessionDetailPayload(environment, payload, latest);
@@ -435,6 +590,32 @@ async function chooseMarkdownExportPath(defaultFileName: string): Promise<string
   const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return null;
   return path.extname(result.filePath) ? result.filePath : `${result.filePath}.md`;
+}
+
+async function chooseJsonExportFormat(): Promise<SessionJsonExportFormat | null> {
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    title: "Export JSON",
+    message: "Choose an API request format",
+    detail: "Codex exports use an exact captured request when available, otherwise a reconstructed request. Other sessions use normalized messages.",
+    buttons: ["OpenAI Chat Completions", "OpenAI Responses", "Anthropic Messages", "Cancel"],
+    defaultId: 0,
+    cancelId: 3,
+    noLink: true,
+  };
+  const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+  return (["openai_chat", "openai_responses", "anthropic"] as const)[result.response] ?? null;
+}
+
+async function chooseJsonExportPath(defaultFileName: string): Promise<string | null> {
+  const options = {
+    title: "Export JSON",
+    defaultPath: path.join(app.getPath("documents"), defaultFileName),
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  };
+  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return null;
+  return path.extname(result.filePath) ? result.filePath : `${result.filePath}.json`;
 }
 
 async function chooseLocalProjectDirectory(): Promise<string | null> {
@@ -566,6 +747,29 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
+}
+
+async function ensureWslResumePreflight(session: SessionSearchResult): Promise<void> {
+  const environment = requireWslEnvironment(session);
+  const report = await preflightRemoteSessionResume(environment, session);
+  const errors = report.checks.filter((check) => check.status === "error");
+  if (errors.length > 0) {
+    throw new Error(errors.map((check) => `${check.label}: ${check.message}`).join("\n"));
+  }
+}
+
+async function resumeWslSession(session: SessionSearchResult): Promise<{ route: "resume" }> {
+  const wslOptions = requireWslResumeOptions(session);
+  await ensureWslResumePreflight(session);
+  await openResumeInTerminal(session, getSettings(), wslOptions);
+  store.markResumed(session.sessionKey);
+  return { route: "resume" };
+}
+
+async function resumeWslSessionInIterm(session: SessionSearchResult): Promise<void> {
+  await ensureWslResumePreflight(session);
+  await openResumeInSpecificTerminal(session, getSettings(), "iTerm", requireWslResumeOptions(session));
+  store.markResumed(session.sessionKey);
 }
 
 function toggleWindow(): void {
@@ -771,6 +975,7 @@ async function runIndexSync(): Promise<IndexStatus> {
       includeOpenClaw: settings.includeOpenClaw,
       includeHermes: settings.includeHermes,
       includeOpenCode: settings.includeOpenCode,
+      includeZcode: settings.includeZcode,
       includeCursorAgent: settings.includeCursorAgent,
       includeTrae: settings.includeTrae,
       includeQoder: settings.includeQoder,
@@ -1072,7 +1277,7 @@ async function runRemotePathCheck(environment: SessionEnvironment, targetPath: s
 
 function runRemotePython(environment: SessionEnvironment, script: string, payload: unknown): Promise<string> {
   const remoteCommand = buildPythonBase64Command(script);
-  return runSshWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
+  return runRemoteWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
 }
 
 function runSshWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
@@ -1084,6 +1289,12 @@ function runSshWithInput(environment: SessionEnvironment, remoteCommand: string,
     });
     child.stdin?.end(input);
   });
+}
+
+function runRemoteWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
+  return environment.kind === "wsl"
+    ? runRemoteCommandWithInput(environment, remoteCommand, input, REMOTE_PROCESS_EXEC_OPTIONS)
+    : runSshWithInput(environment, remoteCommand, input);
 }
 
 function buildPythonBase64Command(script: string): string {
@@ -1184,7 +1395,9 @@ function registerIpc(): void {
     const session = store.getSession(sessionKey);
     if (session && !isLocalSessionEnvironment(session) && !hasHydratedRemoteDetails(sessionKey)) {
       if (session.messageCount <= 0) return [];
-      const environment = requireRemoteSshEnvironment(session);
+      const environment = session.environmentKind === "wsl"
+        ? requireWslEnvironment(session)
+        : requireRemoteSshEnvironment(session);
       if (!environment) return [];
       return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit);
     }
@@ -1354,6 +1567,7 @@ function registerIpc(): void {
     return setup.status();
   });
   ipcMain.handle("stats:get", (_event, options?: SessionStatsOptions) => store.getStats(visibleStatsOptions(options)));
+  ipcMain.handle("stats:trend", (_event, options?: SessionStatsOptions) => store.getStatsTrend(visibleStatsOptions(options)));
   ipcMain.handle("quota:get", () => {
     const settings = getSettings();
     return loadUsageQuotaSnapshot({
@@ -1370,6 +1584,7 @@ function registerIpc(): void {
   ipcMain.handle("tags:by-project", () => store.listTagsByProject(visibleProjectOptions()));
   ipcMain.handle("environments:list", () => store.listEnvironments());
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
+  ipcMain.handle("wsl:list-distributions", () => listWslDistributions());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>
     ensureRemoteEnvironmentLifecycle().saveEnvironment(input),
   );
@@ -1379,9 +1594,11 @@ function registerIpc(): void {
   ipcMain.handle("environment:refresh", (_event, environmentId: string) =>
     ensureRemoteEnvironmentLifecycle().refreshEnvironment(environmentId),
   );
-  ipcMain.handle("environment:diagnose", (_event, environmentId: string) =>
-    diagnoseRemoteEnvironment(requireSshEnvironment(environmentId)),
-  );
+  ipcMain.handle("environment:diagnose", (_event, environmentId: string) => {
+    const environment = store.getEnvironment(environmentId);
+    if (environment?.kind === "wsl") return diagnoseRemoteEnvironment(environment);
+    return diagnoseRemoteEnvironment(requireSshEnvironment(environmentId));
+  });
   ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) =>
     setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
       getSession: (key) => store.getSession(key),
@@ -1397,7 +1614,12 @@ function registerIpc(): void {
   ipcMain.handle("favorite:set", (_event, sessionKey: string, favorited: boolean) => store.setFavorited(sessionKey, favorited));
   ipcMain.handle("pin:set", (_event, sessionKey: string, pinned: boolean) => store.setPinned(sessionKey, pinned));
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
-  ipcMain.handle("session:delete", (_event, sessionKey: string) => store.deleteSession(sessionKey));
+  ipcMain.handle("session:delete", async (_event, sessionKey: string) => {
+    const session = store.getSession(sessionKey);
+    if (!session || session.environmentKind !== "wsl") return store.deleteSession(sessionKey);
+    await deleteWslSessionFile(requireWslEnvironment(session), session.filePath);
+    return store.deleteSessionRecord(sessionKey);
+  });
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);
   registerAppUpdateIpc(ipcMain, appUpdateService);
@@ -1422,6 +1644,9 @@ function registerIpc(): void {
     return providerService.addStoredKeys(next);
   });
   registerSkillsIpc(ipcMain, skillService);
+  registerRulesIpc(ipcMain, createRulesSyncService());
+  registerMemoriesIpc(ipcMain, createMemoriesSyncService());
+  registerDiscoveryIpc(ipcMain, createDiscoveryService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {
     clipboard.writeText(buildCombinedSupabaseSetupSql());
   });
@@ -1434,11 +1659,16 @@ function registerIpc(): void {
   ipcMain.handle("command:copy-resume", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return;
+    if (session.environmentKind === "wsl") {
+      clipboard.writeText(getResumeCommand(session, getSettings(), requireWslResumeOptions(session)));
+      return;
+    }
     clipboard.writeText(getResumeCommand(session, getSettings(), { sshArgs: requireSshArgsForRemoteSession(session) }));
   });
   ipcMain.handle("command:resume", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return { route: "resume" as const };
+    if (session.environmentKind === "wsl") return resumeWslSession(session);
     const sshArgs = requireSshArgsForRemoteSession(session);
     if (!isLocalSessionEnvironment(session)) {
       await ensureRemoteResumePreflight(session);
@@ -1465,6 +1695,7 @@ function registerIpc(): void {
   ipcMain.handle("command:resume-iterm", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (!session) return;
+    if (session.environmentKind === "wsl") return resumeWslSessionInIterm(session);
     const sshArgs = requireSshArgsForRemoteSession(session);
     await ensureRemoteResumePreflight(session);
     await openResumeInSpecificTerminal(session, getSettings(), "iTerm", { sshArgs });
@@ -1507,10 +1738,61 @@ function registerIpc(): void {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     const session = store.getSession(sessionKey);
     if (!session) return false;
-    const exportPath = await chooseMarkdownExportPath(markdownExportFileName(session.displayTitle || session.originalTitle || session.rawId));
+    const exportPath = await chooseMarkdownExportPath(exportFileName(session.displayTitle || session.originalTitle || session.rawId, "md"));
     if (!exportPath) return false;
     await fs.writeFile(exportPath, formatSessionMarkdown(session, store.getAllMessages(sessionKey), store.getTraceEvents(sessionKey)), "utf-8");
     return true;
+  });
+  ipcMain.handle("command:export-json", async (_event, sessionKey: string) => {
+    await ensureRemoteSessionDetailsLoaded(sessionKey);
+    const session = store.getSession(sessionKey);
+    if (!session) return { exported: false };
+    const format = await chooseJsonExportFormat();
+    if (!format) return { exported: false };
+    const exportPath = await chooseJsonExportPath(exportFileName(session.displayTitle || session.originalTitle || session.rawId, "json"));
+    if (!exportPath) return { exported: false };
+
+    let codexRequest: CodexRequestExport | null = null;
+    const isCodexSession = ["codex-cli", "codex-app", "codex-internal", "tcodex-cli"].includes(session.source);
+    if (isCodexSession && isLocalSessionEnvironment(session)) {
+      if (format === "openai_responses") {
+        codexRequest = await resolveCodexResponsesRequest({
+          filePath: session.filePath,
+          rawId: session.rawId,
+          traceRoot: process.env.CODEX_ROLLOUT_TRACE_ROOT?.trim() || undefined,
+        });
+      } else {
+        const reconstructed = await reconstructCodexResponsesRequest(session.filePath);
+        if (reconstructed) codexRequest = { body: reconstructed, fidelity: "reconstructed" };
+      }
+    }
+    const fidelity: CodexRequestFidelity = codexRequest?.fidelity ?? "normalized";
+    await fs.writeFile(
+      exportPath,
+      formatSessionJson(store.getAllMessages(sessionKey), format, codexRequest?.body),
+      "utf-8",
+    );
+    const fidelityMessage = fidelity === "exact-trace"
+      ? "Exact Codex request body captured from CODEX_ROLLOUT_TRACE_ROOT."
+      : fidelity === "reconstructed"
+        ? "Request body reconstructed from the Codex rollout history."
+        : "Request body exported in normalized message format.";
+    const fidelityMessageZh = fidelity === "exact-trace"
+      ? "已从 CODEX_ROLLOUT_TRACE_ROOT 导出 Codex 原始请求体。"
+      : fidelity === "reconstructed"
+        ? "已根据 Codex rollout 历史重建请求体。"
+        : "已按标准消息格式导出请求体。";
+    const notice: Electron.MessageBoxOptions = {
+      type: "info",
+      title: "JSON Export Complete",
+      message: fidelityMessage,
+      detail: `${fidelityMessageZh}\n\n${exportPath}`,
+      buttons: ["OK"],
+      noLink: true,
+    };
+    if (mainWindow) await dialog.showMessageBox(mainWindow, notice);
+    else await dialog.showMessageBox(notice);
+    return { exported: true, fidelity };
   });
   ipcMain.handle("command:copy-plain", async (_event, sessionKey: string) => {
     await ensureRemoteSessionDetailsLoaded(sessionKey);

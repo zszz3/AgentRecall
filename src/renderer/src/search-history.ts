@@ -7,6 +7,10 @@ export interface SearchHistoryStorage {
   removeItem(key: string): void;
 }
 
+export function normalizeSearchQuery(query: string): string {
+  return query.trim().replace(/\s+/g, " ");
+}
+
 export function readSearchHistory(storage: SearchHistoryStorage): string[] {
   try {
     const raw = storage.getItem(SEARCH_HISTORY_STORAGE_KEY);
@@ -14,10 +18,13 @@ export function readSearchHistory(storage: SearchHistoryStorage): string[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) return [];
     const unique: string[] = [];
+    const seen = new Set<string>();
     for (const value of parsed) {
-      const normalized = value.trim();
-      if (!normalized || unique.includes(normalized)) continue;
+      const normalized = normalizeSearchQuery(value);
+      const key = searchHistoryKey(normalized);
+      if (!normalized || seen.has(key)) continue;
       unique.push(normalized);
+      seen.add(key);
       if (unique.length === SEARCH_HISTORY_LIMIT) break;
     }
     return unique;
@@ -27,15 +34,20 @@ export function readSearchHistory(storage: SearchHistoryStorage): string[] {
 }
 
 export function recordSearch(storage: SearchHistoryStorage, current: string[], query: string): string[] {
-  const normalized = query.trim();
+  const normalized = normalizeSearchQuery(query);
   if (!normalized) return current;
-  const next = [normalized, ...current.filter((value) => value !== normalized)].slice(0, SEARCH_HISTORY_LIMIT);
+  const key = searchHistoryKey(normalized);
+  const next = [
+    normalized,
+    ...current.filter((value) => searchHistoryKey(normalizeSearchQuery(value)) !== key),
+  ].slice(0, SEARCH_HISTORY_LIMIT);
   persist(storage, next);
   return next;
 }
 
 export function deleteSearch(storage: SearchHistoryStorage, current: string[], query: string): string[] {
-  const next = current.filter((value) => value !== query);
+  const key = searchHistoryKey(normalizeSearchQuery(query));
+  const next = current.filter((value) => searchHistoryKey(normalizeSearchQuery(value)) !== key);
   persist(storage, next);
   return next;
 }
@@ -55,4 +67,8 @@ function persist(storage: SearchHistoryStorage, history: string[]): void {
   } catch {
     // Keep the returned in-memory state even if persistence is unavailable.
   }
+}
+
+function searchHistoryKey(query: string): string {
+  return query.toLocaleLowerCase();
 }

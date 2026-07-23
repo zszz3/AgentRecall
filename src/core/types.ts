@@ -12,12 +12,13 @@ export type SessionSource =
   | "openclaw"
   | "hermes"
   | "opencode-cli"
+  | "zcode-cli"
   | "cursor-agent"
   | "trae"
   | "qoder";
-export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae" | "qoder";
+export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder";
 export type SessionSortBy = "smart" | "activity" | "created";
-export type EnvironmentKind = "local" | "ssh";
+export type EnvironmentKind = "local" | "wsl" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";
 export type SshAuthMode = "none" | "identityFile";
 
@@ -25,6 +26,7 @@ export interface SessionEnvironment {
   id: string;
   kind: EnvironmentKind;
   label: string;
+  wslDistribution?: string | null;
   hostAlias: string | null;
   host: string | null;
   user: string | null;
@@ -43,6 +45,7 @@ export interface EnvironmentUpsertInput {
   id?: string;
   kind: EnvironmentKind;
   label: string;
+  wslDistribution?: string | null;
   hostAlias?: string | null;
   host?: string | null;
   user?: string | null;
@@ -221,9 +224,13 @@ export interface ProjectTagEntry {
   tags: string[];
 }
 
+export type ProjectLabelKind = "path" | "codex-task-title" | "codex-task-untitled";
+
 export interface ProjectSummary {
   path: string;
   label: string;
+  labelKind: ProjectLabelKind;
+  labelSuffix: string | null;
   sessionCount: number;
   environmentId: string;
   environmentLabel: string;
@@ -283,10 +290,24 @@ export interface SessionDailyTokenUsage extends TokenUsage {
 }
 
 export type SessionStatsPeriod = "today" | "sevenDay" | "thirtyDay" | "allTime";
+export type SessionStatsTrendGranularity = "day" | "week" | "month";
 
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
   excludeSubagents?: boolean;
+}
+
+export interface SessionStatsTrendBucket {
+  start: number;
+  end: number;
+  label: string;
+  totalTokens: number;
+}
+
+export interface SessionStatsTrend {
+  period: SessionStatsPeriod;
+  granularity: SessionStatsTrendGranularity | null;
+  buckets: SessionStatsTrendBucket[];
 }
 
 export interface SessionStats {
@@ -298,6 +319,9 @@ export interface SessionStats {
     since: number | null;
     until: number;
   };
+  // Totals for the immediately preceding comparable period (today→yesterday,
+  // 7d→prior 7d, 30d→prior 30d). Null for allTime, which has no comparison.
+  previousTotal: SessionStatsSummary | null;
 }
 
 export type UsageQuotaProvider = "codex" | "claude-code";
@@ -327,6 +351,7 @@ export interface UsageQuotaCard {
 export interface UsageQuotaSnapshot {
   generatedAt: string;
   providers: UsageQuotaCard[];
+  hiddenProviders?: UsageQuotaProvider[];
 }
 
 export type LiveSessionFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "trae" | "qoder";

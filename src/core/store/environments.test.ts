@@ -72,4 +72,24 @@ describe("EnvironmentStore", () => {
       db.close();
     }
   });
+
+  it("persists WSL distributions independently from SSH fields", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new EnvironmentStore(db);
+      const ubuntu = store.upsertEnvironment({ kind: "wsl", label: "WSL · Ubuntu", wslDistribution: " Ubuntu " });
+      const debian = store.upsertEnvironment({ kind: "wsl", label: "WSL · Debian", wslDistribution: "Debian" });
+      const updated = store.upsertEnvironment({ kind: "wsl", label: "Ubuntu updated", wslDistribution: "Ubuntu" });
+
+      expect(updated.id).toBe(ubuntu.id);
+      expect(store.listEnvironments()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: ubuntu.id, kind: "wsl", wslDistribution: "Ubuntu", host: null, hostAlias: null }),
+        expect.objectContaining({ id: debian.id, kind: "wsl", wslDistribution: "Debian" }),
+      ]));
+      expect(() => store.upsertEnvironment({ kind: "wsl", label: "Missing" })).toThrow("WSL distribution is required");
+    } finally {
+      db.close();
+    }
+  });
 });

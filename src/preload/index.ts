@@ -22,6 +22,7 @@ import type {
   SessionSearchResult,
   SessionStats,
   SessionStatsOptions,
+  SessionStatsTrend,
   SessionTraceEvent,
   TagListOptions,
   UsageQuotaSnapshot,
@@ -31,6 +32,9 @@ import { createAgentMemoryApi } from "./agent-memory";
 import { createAutomationApi } from "./automation";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
+import { createMemoriesApi } from "./memories";
+import { createDiscoveryApi } from "./discovery";
+import { createRulesApi } from "./rules";
 import { createSkillsApi } from "./skills";
 import { createTeamChatApi } from "./team-chat";
 
@@ -62,6 +66,7 @@ const api = {
     return () => ipcRenderer.removeListener("summary:progress", listener);
   },
   getStats: (options?: SessionStatsOptions): Promise<SessionStats> => ipcRenderer.invoke("stats:get", options),
+  getStatsTrend: (options?: SessionStatsOptions): Promise<SessionStatsTrend> => ipcRenderer.invoke("stats:trend", options),
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),
   getQuotas: (): Promise<UsageQuotaSnapshot> => ipcRenderer.invoke("quota:get"),
@@ -70,6 +75,7 @@ const api = {
   listTagsByProject: (): Promise<ProjectTagEntry[]> => ipcRenderer.invoke("tags:by-project"),
   listEnvironments: (): Promise<SessionEnvironment[]> => ipcRenderer.invoke("environments:list"),
   listSshConfigHosts: (): Promise<SshConfigHost[]> => ipcRenderer.invoke("ssh-config:list-hosts"),
+  listWslDistributions: (): Promise<string[]> => ipcRenderer.invoke("wsl:list-distributions"),
   saveEnvironment: (environment: EnvironmentUpsertInput): Promise<SessionEnvironment> =>
     ipcRenderer.invoke("environment:save", environment),
   deleteEnvironment: (environmentId: string): Promise<void> => ipcRenderer.invoke("environment:delete", environmentId),
@@ -91,6 +97,9 @@ const api = {
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   ...createProvidersApi(ipcRenderer),
   ...createSkillsApi(ipcRenderer),
+  ...createRulesApi(ipcRenderer),
+  ...createMemoriesApi(ipcRenderer),
+  ...createDiscoveryApi(ipcRenderer),
   ...createRemoteSessionsApi(ipcRenderer),
   copyCombinedSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("supabase:copy-combined-setup-sql"),
   openSupabaseSqlEditor: (target: "sessions" | "skills"): Promise<void> => ipcRenderer.invoke("supabase:open-sql-editor", target),
@@ -103,6 +112,10 @@ const api = {
   revealSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:reveal", sessionKey),
   copyMarkdown: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-markdown", sessionKey),
   exportMarkdown: (sessionKey: string): Promise<boolean> => ipcRenderer.invoke("command:export-markdown", sessionKey),
+  exportJson: (sessionKey: string): Promise<{
+    exported: boolean;
+    fidelity?: "exact-trace" | "reconstructed" | "normalized";
+  }> => ipcRenderer.invoke("command:export-json", sessionKey),
   copyPlainText: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-plain", sessionKey),
   openExternalLink: (url: string): Promise<void> => ipcRenderer.invoke("markdown:open-external", url),
   onIndexStatus: (callback: (status: IndexStatus) => void): (() => void) => {

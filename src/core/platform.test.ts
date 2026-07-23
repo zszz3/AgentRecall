@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { mergeApiConfigWithProfileDefaults, mergeClaudeApiConfigWithProfileDefaults } from "./api-config";
@@ -105,6 +105,7 @@ describe("platform application resolution", () => {
     expect(defaultSettings.includeOpenClaw).toBe(false);
     expect(defaultSettings.includeHermes).toBe(false);
     expect(defaultSettings.includeOpenCode).toBe(false);
+    expect(defaultSettings.includeZcode).toBe(false);
     expect(defaultSettings.includeCursorAgent).toBe(false);
     expect(defaultSettings.includeTrae).toBe(false);
     expect(defaultSettings.includeQoder).toBe(false);
@@ -971,6 +972,32 @@ describe("resume process specs", () => {
     );
   });
 
+  it("builds WSL resume as wsl.exe argv with a Linux project path", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "claude-1",
+      projectPath: "/home/me/project",
+    } as SessionSearchResult;
+
+    expect(getResumeProcessSpec(session, defaultSettings, { platform: "win32", wslDistribution: "Ubuntu" })).toMatchObject({
+      command: "wsl.exe",
+      args: ["--distribution", "Ubuntu", "--exec", "bash", "-lc", "cd /home/me/project && claude --resume claude-1"],
+      cwd: undefined,
+    });
+  });
+
+  it("keeps both Windows terminal launch variants inside WSL", () => {
+    const session = { source: "codex-cli", rawId: "codex-1", projectPath: "/home/me/project", displayTitle: "WSL task" } as SessionSearchResult;
+    const plan = buildWindowsResumeLaunchPlan(session, { ...defaultSettings, defaultTerminal: "WindowsTerminal" }, {
+      platform: "win32",
+      terminal: "WindowsTerminal",
+      wslDistribution: "Ubuntu",
+    });
+    expect(plan[0]?.args.join(" ")).toContain("wsl.exe");
+    expect(plan.some((launch) => launch.args.join(" ").includes("/home/me/project"))).toBe(true);
+    expect(plan.every((launch) => launch.cwd === undefined || launch.cwd === "")).toBe(true);
+  });
+
   it("preserves manual ssh args separately in remote process specs", () => {
     const session = {
       source: "codex-cli",
@@ -1363,6 +1390,37 @@ describe("migration cli process specs", () => {
     await expect(
       inspectMigrationCli("cursor", defaultSettings, async () => "2025.12.17-996666f"),
     ).resolves.toBeUndefined();
+  });
+
+  it.skipIf(process.platform !== "win32")("runs Windows .cmd shims for default and custom CLI paths", async () => {
+    const tempRoot = mkdtempSync(path.join(tmpdir(), "agent-recall-cli-"));
+    const originalPath = process.env.PATH;
+    const claudeShim = path.join(tempRoot, "claude.cmd");
+    const claudePowerShellShim = path.join(tempRoot, "claude.ps1");
+    const codexShim = path.join(tempRoot, "codex.cmd");
+    const specialPathRoot = path.join(tempRoot, "cli & it's space");
+    const customClaudeShim = path.join(specialPathRoot, "fake claude.cmd");
+    try {
+      mkdirSync(specialPathRoot);
+      writeFileSync(claudeShim, "@echo off\r\necho 2.1.186 (Claude Code)\r\n");
+      writeFileSync(claudePowerShellShim, "Write-Error 'PowerShell shim should not run'\r\n");
+      writeFileSync(codexShim, "@echo off\r\necho codex 0.141.0\r\n");
+      writeFileSync(customClaudeShim, "@echo off\r\necho 2.1.186 (Claude Code)\r\n");
+      process.env.PATH = [tempRoot, originalPath].filter(Boolean).join(path.delimiter);
+
+      await expect(inspectMigrationCli("claude", defaultSettings)).resolves.toBeUndefined();
+      await expect(inspectMigrationCli("codex", defaultSettings)).resolves.toBeUndefined();
+      await expect(
+        inspectMigrationCli("claude", { ...defaultSettings, claudeBinary: customClaudeShim }),
+      ).resolves.toBeUndefined();
+      await expect(
+        inspectMigrationCli("claude", { ...defaultSettings, claudeBinary: path.join(tempRoot, "missing cli.cmd") }),
+      ).rejects.toThrow("Claude CLI binary not found");
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("validates every wrapper and upstream version rule regardless of line order or extra text", async () => {

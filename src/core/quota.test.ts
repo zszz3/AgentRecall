@@ -359,7 +359,7 @@ describe("usage quota loader", () => {
     }
   });
 
-  it("returns an empty provider list when both quotas are hidden", async () => {
+  it("returns an empty provider list but records hidden providers when both quotas are hidden", async () => {
     const homeDir = makeHome();
     try {
       const snapshot = await loadUsageQuotaSnapshot({
@@ -372,6 +372,7 @@ describe("usage quota loader", () => {
       });
 
       expect(snapshot.providers).toEqual([]);
+      expect(snapshot.hiddenProviders).toEqual(["codex", "claude-code"]);
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }

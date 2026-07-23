@@ -1,4 +1,5 @@
 import { execFile, type ExecFileOptions } from "node:child_process";
+import { runRemoteCommand } from "./remote-process";
 import { buildRemoteSyncSshArgs, formatRemoteSyncProcessError } from "./remote-sync";
 import type { SessionEnvironment, SessionSearchResult, SessionSource } from "./types";
 import { sessionSourceDescriptor } from "./session-sources";
@@ -33,6 +34,7 @@ export async function diagnoseRemoteEnvironment(
   environment: SessionEnvironment,
   options: RemoteHealthOptions = {},
 ): Promise<RemoteHealthReport> {
+  if (environment.kind === "wsl") return diagnoseWslEnvironment(environment, options);
   const runSsh = options.runSsh ?? runHealthSsh;
   try {
     const output = await runSsh(environment, buildRemoteHealthCommand());
@@ -63,12 +65,37 @@ export async function diagnoseRemoteEnvironment(
   }
 }
 
+async function diagnoseWslEnvironment(
+  environment: SessionEnvironment,
+  options: RemoteHealthOptions,
+): Promise<RemoteHealthReport> {
+  const runWsl = options.runSsh ?? runHealthRemote;
+  try {
+    const output = await runWsl(environment, buildRemoteHealthCommand());
+    const payload = parseHealthPayload(output);
+    return buildReport([
+      { id: "connectivity", label: "WSL connection", status: "ok", message: `Connected as ${payload.user || "remote user"}.` },
+      cliCheck("codex-cli", "Codex CLI", payload.codexCli),
+      cliCheck("claude-cli", "Claude CLI", payload.claudeCli),
+      directoryCheck("codex-sessions", "Codex sessions", payload.codexSessionsExists, payload.codexSessionsReadable),
+      directoryCheck("claude-projects", "Claude projects", payload.claudeProjectsExists, payload.claudeProjectsReadable),
+    ]);
+  } catch (error) {
+    return buildReport([{
+      id: "connectivity",
+      label: "WSL connection",
+      status: "error",
+      message: errorMessage(error),
+    }]);
+  }
+}
+
 export async function preflightRemoteSessionResume(
   environment: SessionEnvironment,
   session: SessionSearchResult,
   options: RemoteHealthOptions = {},
 ): Promise<RemoteHealthReport> {
-  const runSsh = options.runSsh ?? runHealthSsh;
+  const runSsh = options.runSsh ?? (environment.kind === "wsl" ? runHealthRemote : runHealthSsh);
   try {
     const output = await runSsh(environment, buildRemoteResumePreflightCommand(session));
     const payload = parseResumePreflightPayload(output);
@@ -88,7 +115,7 @@ export async function preflightRemoteSessionResume(
     return buildReport([
       {
         id: "connectivity",
-        label: "SSH connection",
+        label: environment.kind === "wsl" ? "WSL connection" : "SSH connection",
         status: "error",
         message: errorMessage(error),
       },
@@ -243,6 +270,12 @@ async function runHealthSsh(environment: SessionEnvironment, remoteCommand: stri
       else resolve(stdout);
     });
   });
+}
+
+function runHealthRemote(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
+  return environment.kind === "wsl"
+    ? runRemoteCommand(environment, remoteCommand, REMOTE_HEALTH_EXEC_OPTIONS)
+    : runHealthSsh(environment, remoteCommand);
 }
 
 function errorMessage(error: unknown): string {

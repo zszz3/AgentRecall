@@ -22,6 +22,7 @@ const ALL_SOURCES = [
   "openclaw",
   "hermes",
   "opencode-cli",
+  "zcode-cli",
   "cursor-agent",
   "trae",
   "qoder",
@@ -56,6 +57,7 @@ describe("session source capability registry", () => {
       "includeOpenClaw",
       "includeHermes",
       "includeOpenCode",
+      "includeZcode",
       "includeCursorAgent",
       "includeTrae",
       "includeQoder",
@@ -63,6 +65,12 @@ describe("session source capability registry", () => {
     expect(sessionSourceDescriptor("tclaude-cli")).toMatchObject({ liveFamily: "tclaude", migrationAgent: "claude" });
     expect(sessionSourceDescriptor("tcodex-cli")).toMatchObject({ liveFamily: "tcodex", migrationAgent: "codex" });
     expect(sessionSourceDescriptor("qoder")).toMatchObject({ format: "qoder", liveFamily: "qoder", remoteFamily: "qoder" });
+    expect(sessionSourceDescriptor("zcode-cli")).toMatchObject({
+      format: "zcode",
+      uiFamily: "zcode",
+      optionalSetting: "includeZcode",
+      capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+    });
     expect(OPTIONAL_SESSION_SOURCE_DESCRIPTORS.filter(({ remoteCollectorOptional }) => remoteCollectorOptional).map(({ id }) => id)).toEqual([
       "tclaude-cli",
       "tcodex-cli",

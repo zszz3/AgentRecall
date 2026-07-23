@@ -28,6 +28,13 @@ test("global command marks npm-installed launches as release builds", () => {
   assert.match(commandSource, /environment\.AGENT_RECALL_SOURCE_BUILD !== "1"/);
 });
 
+test("normal launch falls back to a ready Electron runtime after validation errors", () => {
+  assert.match(commandSource, /isElectronRuntimeReady/);
+  assert.match(commandSource, /try \{\s*await ensureElectronRuntimeForLaunch\(/);
+  assert.match(commandSource, /if \(!isElectronRuntimeReady\(packagePath\)\) throw error;/);
+  assert.match(commandSource, /继续启动应用/);
+});
+
 test("launcher detects installed and local app instances", () => {
   assert.match(source, /APP_PROCESS_FILE="\$HOME\/\.agent-recall\/app-process\.json"/);
   assert.match(source, /USER_DATA_PATTERN="\$HOME\/Library\/Application Support\/AgentRecall"/);

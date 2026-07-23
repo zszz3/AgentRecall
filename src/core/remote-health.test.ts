@@ -29,6 +29,16 @@ const session = {
   source: "codex-cli",
 } as SessionSearchResult;
 
+const wslEnvironment: SessionEnvironment = {
+  ...environment,
+  id: "wsl-ubuntu",
+  kind: "wsl",
+  label: "WSL · Ubuntu",
+  wslDistribution: "Ubuntu",
+  hostAlias: null,
+  host: null,
+};
+
 function decodePythonCommand(command: string): string {
   const match = command.match(/base64\.b64decode\("([A-Za-z0-9+/=]+)"\)/);
   if (!match?.[1]) throw new Error("Expected an encoded Python command");
@@ -36,6 +46,27 @@ function decodePythonCommand(command: string): string {
 }
 
 describe("remote health checks", () => {
+  it("checks only Codex and Claude for WSL", async () => {
+    const report = await diagnoseRemoteEnvironment(wslEnvironment, {
+      runSsh: async (_environment, command) => {
+        expect(command).toMatch(/^bash -lc /);
+        return JSON.stringify({
+          user: "me",
+          codexCli: "/bin/codex",
+          claudeCli: "/bin/claude",
+          codexSessionsExists: true,
+          codexSessionsReadable: true,
+          claudeProjectsExists: true,
+          claudeProjectsReadable: true,
+        });
+      },
+    });
+    expect(report.ok).toBe(true);
+    expect(report.checks.map((check) => check.id)).toEqual([
+      "connectivity", "codex-cli", "claude-cli", "codex-sessions", "claude-projects",
+    ]);
+  });
+
   it("returns structured health checks for ssh connectivity, CLIs, and session directories", async () => {
     const report = await diagnoseRemoteEnvironment(environment, {
       runSsh: async (_environment, command) => {
@@ -118,6 +149,21 @@ describe("remote health checks", () => {
         status: "error",
       }),
     );
+  });
+
+  it("labels WSL resume connectivity errors as WSL", async () => {
+    const report = await preflightRemoteSessionResume(
+      wslEnvironment,
+      { ...session, environmentId: "wsl-ubuntu", environmentKind: "wsl" } as SessionSearchResult,
+      { runSsh: async () => { throw new Error("wsl.exe was not found"); } },
+    );
+
+    expect(report.checks[0]).toMatchObject({
+      id: "connectivity",
+      label: "WSL connection",
+      status: "error",
+      message: "wsl.exe was not found",
+    });
   });
 
   it("passes resume preflight with a readable session file, existing project, and matching CLI", async () => {

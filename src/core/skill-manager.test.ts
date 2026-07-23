@@ -452,4 +452,59 @@ describe("skill manager", () => {
     };
     expect(() => installRemoteSkillLocally(base, { homeDir: os.tmpdir() })).toThrow(/project|plugin/i);
   });
+
+  it("lists Qoder user and project skills alongside Codex and Claude", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-qoder-"));
+    const projectDir = path.join(homeDir, "project");
+    const codexHome = path.join(homeDir, ".codex");
+    writeSkill(
+      path.join(homeDir, ".qoder", "skills"),
+      "qoder-helper",
+      ["---", "name: qoder-helper", "description: Qoder user skill", "---", "", "# Qoder Help"].join("\n"),
+    );
+    writeSkill(
+      path.join(projectDir, ".qoder", "skills"),
+      "qoder-project-guide",
+      ["---", "name: qoder-project-guide", "description: Qoder project conventions", "---", "", "# Qoder Project"].join("\n"),
+    );
+    writeSkill(
+      path.join(homeDir, ".claude", "skills"),
+      "claude-helper",
+      ["---", "name: claude-helper", "description: Claude user skill", "---", "", "# Claude Help"].join("\n"),
+    );
+
+    const snapshot = listInstalledSkills({ homeDir, codexHome, projectDirs: [projectDir] });
+
+    expect(snapshot.skills.map((skill) => ({ name: skill.name, agent: skill.agent, source: skill.source }))).toEqual([
+      { name: "claude-helper", agent: "claude", source: "claude-user" },
+      { name: "qoder-helper", agent: "qoder", source: "qoder-user" },
+      { name: "qoder-project-guide", agent: "qoder", source: "qoder-project" },
+    ]);
+    expect(snapshot.roots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ source: "qoder-user", exists: true, skillCount: 1 }),
+        expect.objectContaining({ source: "qoder-project", exists: true, skillCount: 1 }),
+      ]),
+    );
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
+  it("maps Qoder user skills to a portable scope and installs them to ~/.qoder/skills", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skills-qoder-install-"));
+    const remoteSkill: RemoteSkill = {
+      id: "remote-qoder", name: "qoder-skill", description: "A Qoder skill", agent: "qoder", source: "qoder-user",
+      markdown: "# Qoder Skill", localFingerprint: "qoder-user/my-skill", contentHash: "hash",
+      uploadedFromPath: "", portableScope: "qoder-user", relativePath: "my-skill",
+      createdAt: "x", updatedAt: "x", version: 1, metadata: {},
+    };
+
+    const result = installRemoteSkillLocally(remoteSkill, { homeDir, codexHome: path.join(homeDir, ".codex") });
+
+    expect(result.installedPath).toBe(path.join(homeDir, ".qoder", "skills", "my-skill", "SKILL.md"));
+    expect(fs.existsSync(result.installedPath)).toBe(true);
+    expect(fs.readFileSync(result.installedPath, "utf8")).toBe("# Qoder Skill");
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
 });
