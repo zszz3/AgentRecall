@@ -1,5 +1,6 @@
 import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import { createPortal } from "react-dom";
 import {
   AppWindow,
   Archive,
@@ -71,6 +72,7 @@ import type {
   SessionStats,
   SessionStatsPeriod,
   SessionStatsTrend,
+  SessionStatsTrendBucket,
   SessionTraceEvent,
   UsageQuotaCard,
   UsageQuotaSnapshot,
@@ -341,6 +343,7 @@ export function App(): ReactElement {
   const [environments, setEnvironments] = useState<SessionEnvironment[]>([]);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
   const [statsTrend, setStatsTrend] = useState<SessionStatsTrend>(EMPTY_STATS_TREND);
+  const [statsTrendLoadedFor, setStatsTrendLoadedFor] = useState<SessionStatsPeriod | null>(null);
   const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
   const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [statsTrendLoading, setStatsTrendLoading] = useState(false);
@@ -485,28 +488,47 @@ export function App(): ReactElement {
 
   const loadStats = useCallback(async () => {
     const requestId = ++statsLoadSeqRef.current;
-    const trendRequestId = ++statsTrendLoadSeqRef.current;
-    setStatsTrendLoading(statsPeriod !== "allTime");
+    const nextStats = await window.sessionSearch.getStats({ period: statsPeriod });
+    if (requestId !== statsLoadSeqRef.current) return;
+    setStats(nextStats);
+  }, [statsPeriod]);
+
+  const fetchStatsTrend = useCallback(async () => {
+    if (statsPeriod === "allTime") return;
+    const requestId = ++statsTrendLoadSeqRef.current;
+    setStatsTrendLoading(true);
     try {
-      const [nextStats, nextTrend] = await Promise.all([
-        window.sessionSearch.getStats({ period: statsPeriod }),
-        statsPeriod === "allTime"
-          ? Promise.resolve<SessionStatsTrend>({ period: statsPeriod, granularity: null, buckets: [] })
-          : window.sessionSearch.getStatsTrend({ period: statsPeriod }).catch(() => ({ period: statsPeriod, granularity: null, buckets: [] })),
-      ]);
-      if (requestId !== statsLoadSeqRef.current) return;
-      setStats(nextStats);
-      if (trendRequestId === statsTrendLoadSeqRef.current) setStatsTrend(nextTrend);
+      const nextTrend = await window.sessionSearch
+        .getStatsTrend({ period: statsPeriod })
+        .catch(() => ({ period: statsPeriod, granularity: null, buckets: [] }) as SessionStatsTrend);
+      if (requestId !== statsTrendLoadSeqRef.current) return;
+      setStatsTrend(nextTrend);
+      setStatsTrendLoadedFor(statsPeriod);
     } finally {
-      if (trendRequestId === statsTrendLoadSeqRef.current) setStatsTrendLoading(false);
+      if (requestId === statsTrendLoadSeqRef.current) setStatsTrendLoading(false);
     }
+  }, [statsPeriod]);
+
+  const ensureStatsTrend = useCallback(() => {
+    if (statsPeriod === "allTime") return;
+    if (statsTrendLoadedFor === statsPeriod) return;
+    void fetchStatsTrend();
+  }, [statsPeriod, statsTrendLoadedFor, fetchStatsTrend]);
+
+  useEffect(() => {
+    setStatsTrend(EMPTY_STATS_TREND);
+    setStatsTrendLoadedFor(null);
+    ++statsTrendLoadSeqRef.current;
   }, [statsPeriod]);
 
   const refreshStats = useCallback(async () => {
     setStatsRefreshing(true);
     setStatsFeedback({ kind: "running", message: t("Refreshing usage...", "正在刷新用量...") });
     try {
-      await loadStats();
+      await Promise.all([
+        loadStats(),
+        statsPeriod === "allTime" ? Promise.resolve() : fetchStatsTrend(),
+      ]);
       const successMessage = t("Usage refreshed.", "用量已刷新。");
       setStatsFeedback({ kind: "success", message: successMessage });
       window.setTimeout(() => {
@@ -517,7 +539,7 @@ export function App(): ReactElement {
     } finally {
       setStatsRefreshing(false);
     }
-  }, [loadStats, t]);
+  }, [fetchStatsTrend, loadStats, statsPeriod, t]);
 
   const loadQuotas = useCallback(async (mode: "initial" | "manual" | "background" = "initial") => {
     const background = mode === "background";
@@ -1917,14 +1939,16 @@ export function App(): ReactElement {
               {t("Messages", "消息")}
             </span>
             {hasTokenUsage(stats.total) ? (
-              <span className={statsPeriod === "allTime" ? "" : "stats-token-metric"} tabIndex={statsPeriod === "allTime" ? undefined : 0}>
-                <span className="stats-metric-value">
-                  <strong>{formatTokenCount(stats.total.totalTokens)}</strong>
-                  <UsageDeltaBadge delta={usageDelta(stats.total.totalTokens, stats.previousTotal?.totalTokens ?? null)} />
-                </span>
-                {t("Tokens", "Token")}
-                <UsageTokenTrendPopover trend={statsTrend} loading={statsTrendLoading} period={statsPeriod} language={language} />
-              </span>
+              <UsageTokenMetric
+                totalTokens={stats.total.totalTokens}
+                previousTotalTokens={stats.previousTotal?.totalTokens ?? null}
+                period={statsPeriod}
+                language={language}
+                trend={statsTrend}
+                trendLoading={statsTrendLoading}
+                onEnsureTrend={ensureStatsTrend}
+                tokensLabel={t("Tokens", "Token")}
+              />
             ) : null}
           </div>
           <div className="stats-breakdown">
@@ -2716,18 +2740,120 @@ export function App(): ReactElement {
   );
 }
 
+function UsageTokenMetric({
+  totalTokens,
+  previousTotalTokens,
+  period,
+  language,
+  trend,
+  trendLoading,
+  onEnsureTrend,
+  tokensLabel,
+}: {
+  totalTokens: number;
+  previousTotalTokens: number | null;
+  period: SessionStatsPeriod;
+  language: LanguageMode;
+  trend: SessionStatsTrend;
+  trendLoading: boolean;
+  onEnsureTrend: () => void;
+  tokensLabel: string;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const interactive = period !== "allTime";
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+  }, [cancelClose]);
+
+  const openPopover = useCallback(() => {
+    if (!interactive) return;
+    cancelClose();
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (rect) {
+      const popoverWidth = 216;
+      const left = Math.max(8, Math.min(window.innerWidth - popoverWidth - 8, rect.right - popoverWidth));
+      const top = rect.bottom + 8;
+      setPosition({ top, left });
+    }
+    onEnsureTrend();
+    setOpen(true);
+  }, [interactive, cancelClose, onEnsureTrend]);
+
+  useEffect(() => () => cancelClose(), [cancelClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (): void => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={anchorRef}
+      className={interactive ? "stats-token-metric" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onMouseEnter={openPopover}
+      onMouseLeave={scheduleClose}
+      onFocus={openPopover}
+      onBlur={() => setOpen(false)}
+    >
+      <span className="stats-metric-value">
+        <strong>{formatTokenCount(totalTokens)}</strong>
+        <UsageDeltaBadge delta={usageDelta(totalTokens, previousTotalTokens)} />
+      </span>
+      {tokensLabel}
+      {interactive && open && position
+        ? createPortal(
+            <UsageTokenTrendPopover
+              trend={trend}
+              loading={trendLoading}
+              period={period}
+              language={language}
+              position={position}
+              onMouseEnter={cancelClose}
+              onMouseLeave={() => setOpen(false)}
+            />,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
 function UsageTokenTrendPopover({
   trend,
   loading,
   period,
   language,
+  position,
+  onMouseEnter,
+  onMouseLeave,
 }: {
   trend: SessionStatsTrend;
   loading: boolean;
   period: SessionStatsPeriod;
   language: LanguageMode;
-}): ReactElement | null {
-  if (period === "allTime") return null;
+  position: { top: number; left: number };
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}): ReactElement {
   const title =
     period === "today"
       ? localize(language, "Last 30 days", "近 30 天")
@@ -2751,33 +2877,43 @@ function UsageTokenTrendPopover({
     return { x, y, bucket };
   });
   const pathData = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
-  const latest = buckets.at(-1);
+  let lastNonZero: SessionStatsTrendBucket | undefined;
+  for (let i = buckets.length - 1; i >= 0; i -= 1) {
+    if (buckets[i].totalTokens > 0) {
+      lastNonZero = buckets[i];
+      break;
+    }
+  }
 
   return (
-    <div className="stats-token-popover" role="tooltip">
+    <div
+      className="stats-token-popover"
+      role="tooltip"
+      style={{ top: `${position.top}px`, left: `${position.left}px` }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       <div className="stats-token-popover-header">
         <span>{title}</span>
-        {latest ? <em>{formatTokenCount(latest.totalTokens)}</em> : null}
+        {lastNonZero ? <em>{formatTokenCount(lastNonZero.totalTokens)}</em> : null}
       </div>
       {loading ? (
         <div className="stats-token-popover-empty">{localize(language, "Loading trend...", "正在加载趋势...")}</div>
       ) : buckets.length === 0 ? (
         <div className="stats-token-popover-empty">{localize(language, "No token usage yet", "暂无 Token 用量")}</div>
       ) : (
-        <>
-          <svg className="stats-token-chart" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-            <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${chartTop + plotHeight / 2}H${width - chartRight}`} />
-            <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
-            <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
-            <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
-            <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
-            <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{latest?.label}</text>
-            <path className="stats-token-chart-line" d={pathData} />
-            {points.map((point) => (
-              <circle key={point.bucket.start} className="stats-token-chart-point" cx={point.x} cy={point.y} r="2" />
-            ))}
-          </svg>
-        </>
+        <svg className="stats-token-chart" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+          <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${chartTop + plotHeight / 2}H${width - chartRight}`} />
+          <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
+          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
+          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
+          <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
+          <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{buckets.at(-1)?.label}</text>
+          <path className="stats-token-chart-line" d={pathData} />
+          {points.map((point) => (
+            <circle key={point.bucket.start} className="stats-token-chart-point" cx={point.x} cy={point.y} r="2" />
+          ))}
+        </svg>
       )}
     </div>
   );

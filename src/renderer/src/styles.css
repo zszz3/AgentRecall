@@ -290,7 +290,6 @@ select:focus-visible {
 /* ============================================================ SIDEBAR */
 .sidebar {
   position: relative;
-  z-index: 9;
   display: flex;
   min-width: 0;
   height: calc(100vh - 40px);
@@ -402,8 +401,6 @@ select:focus-visible {
 }
 
 .stats-panel {
-  position: relative;
-  z-index: 5;
   display: grid;
   gap: 7px;
   padding: 8px 9px 9px;
@@ -506,7 +503,8 @@ select:focus-visible {
   gap: 6px;
 }
 
-.stats-metrics > span {
+.stats-metrics > span,
+.stats-metrics > .stats-token-metric {
   display: grid;
   gap: 2px;
   color: var(--text-muted);
@@ -514,25 +512,21 @@ select:focus-visible {
 }
 
 .stats-token-metric {
-  position: relative;
-  z-index: 1;
   border-radius: 7px;
   outline: none;
 }
 
 .stats-token-metric:hover,
 .stats-token-metric:focus-visible {
-  z-index: 2147483646;
   color: var(--text);
 }
 
 .stats-token-popover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
+  position: fixed;
   z-index: 2147483647;
   box-sizing: border-box;
-  display: none;
+  display: grid;
+  gap: 7px;
   width: 216px;
   padding: 9px 10px 10px;
   border: 1px solid var(--border-subtle);
@@ -541,13 +535,6 @@ select:focus-visible {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
   color: var(--text);
   text-transform: none;
-}
-
-.stats-token-metric:hover .stats-token-popover,
-.stats-token-metric:focus-visible .stats-token-popover,
-.stats-token-metric:focus-within .stats-token-popover {
-  display: grid;
-  gap: 7px;
 }
 
 .stats-token-popover::after {
@@ -563,8 +550,7 @@ select:focus-visible {
   transform: rotate(45deg);
 }
 
-.stats-token-popover-header,
-.stats-token-popover-axis {
+.stats-token-popover-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -621,11 +607,6 @@ select:focus-visible {
 
 .stats-token-chart-point {
   fill: var(--accent);
-}
-
-.stats-token-popover-axis {
-  color: var(--text-faint);
-  font-family: var(--mono);
 }
 
 .stats-token-popover-empty {

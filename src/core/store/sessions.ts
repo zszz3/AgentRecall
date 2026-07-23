@@ -2038,8 +2038,8 @@ function startOfLocalDay(timestamp: number): number {
 }
 
 function resolveStatsTrendWindow(period: SessionStatsPeriod, now: number): StatsTrendWindow | null {
-  if (period === "allTime") return null;
-  const granularity: SessionStatsTrendGranularity = period === "today" ? "day" : period === "sevenDay" ? "week" : "month";
+  const granularity = TREND_GRANULARITY_BY_PERIOD[period];
+  if (!granularity) return null;
   const currentStart = startOfTrendBucket(now, granularity);
   const firstStart = addTrendBuckets(currentStart, granularity, -29);
   const buckets: SessionStatsTrendBucket[] = [];
@@ -2056,14 +2056,21 @@ function resolveStatsTrendWindow(period: SessionStatsPeriod, now: number): Stats
   return { since: buckets[0]?.start ?? currentStart, until: now, granularity, buckets };
 }
 
+const TREND_GRANULARITY_BY_PERIOD: Record<SessionStatsPeriod, SessionStatsTrendGranularity | null> = {
+  today: "day",
+  sevenDay: "week",
+  thirtyDay: "month",
+  allTime: null,
+};
+
 function startOfTrendBucket(timestamp: number, granularity: SessionStatsTrendGranularity): number {
-  const date = new Date(timestamp);
-  date.setHours(0, 0, 0, 0);
+  if (granularity === "day") return startOfLocalDay(timestamp);
+  const date = new Date(startOfLocalDay(timestamp));
   if (granularity === "week") {
     const day = date.getDay();
     const mondayOffset = day === 0 ? -6 : 1 - day;
     date.setDate(date.getDate() + mondayOffset);
-  } else if (granularity === "month") {
+  } else {
     date.setDate(1);
   }
   return date.getTime();
