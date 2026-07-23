@@ -11,7 +11,7 @@ export interface WorkflowMcpLaunchConfig {
 export function workflowMcpLaunchConfig(
   discoveryPath: string | undefined,
   workflowId: string | undefined,
-  options: { mainBundlePath?: string; cwd?: string; serverScriptPath?: string } = {},
+  options: { mainBundlePath?: string; cwd?: string; serverScriptPath?: string; runId?: string; nodeId?: string } = {},
 ): WorkflowMcpLaunchConfig | undefined {
   if (!discoveryPath || !workflowId) return undefined;
   const mainBundlePath = options.mainBundlePath ?? fileURLToPath(import.meta.url);
@@ -27,6 +27,8 @@ export function workflowMcpLaunchConfig(
       env: {
         AGENT_RECALL_WORKFLOW_MCP_BRIDGE: discoveryPath,
         AGENT_RECALL_WORKFLOW_ID: workflowId,
+        ...(options.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: options.runId } : {}),
+        ...(options.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: options.nodeId } : {}),
         ELECTRON_RUN_AS_NODE: "1",
       },
     };
@@ -45,6 +47,8 @@ export function workflowMcpLaunchConfig(
     env: {
       AGENT_RECALL_WORKFLOW_MCP_BRIDGE: discoveryPath,
       AGENT_RECALL_WORKFLOW_ID: workflowId,
+      ...(options.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: options.runId } : {}),
+      ...(options.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: options.nodeId } : {}),
       ELECTRON_RUN_AS_NODE: "1",
     },
   };

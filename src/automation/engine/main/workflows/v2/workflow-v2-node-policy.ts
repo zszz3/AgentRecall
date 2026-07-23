@@ -128,7 +128,8 @@ export function workflowV2LlmNodePrompt(input: {
     "",
     "Populate outputs using the exact keys and value types declared in taskPacket.outputFields.",
     "When taskPacket.downstreamRequirements is present, satisfy every listed downstream script parameter contract. These bindings read only outputs[upstreamOutputKey], never summary.",
-    "Return only one structured JSON worker-output packet when the node can complete:",
+    "Completion protocol: when workflow_node_complete (or its namespaced MCP equivalent) is available, you MUST call that tool exactly once when the node can complete. Do not print the worker-output JSON in assistant content; use the tool arguments as the structured result and keep any explanation as ordinary text.",
+    "Only if the completion tool is genuinely unavailable, fall back to returning one structured JSON worker-output packet when the node can complete:",
     JSON.stringify({
       nodeId: input.node.id,
       summary: "concise summary",

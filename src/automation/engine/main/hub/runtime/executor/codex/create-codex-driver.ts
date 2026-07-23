@@ -50,7 +50,7 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
                 modelFromRuntimeConfig(sessionContext.runtimeConfig),
                 reasoningEffortFromRuntimeConfig(sessionContext.runtimeConfig),
               ),
-              ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), sessionContext.planningWorkflowId),
+              ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), sessionContext.planningWorkflowId, sessionContext.workflowRunId, sessionContext.workflowNodeId),
               ...mcp.args,
             ],
             env: { ...codexEnvironmentForChannel(channel), ...mcp.env },

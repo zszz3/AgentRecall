@@ -1761,6 +1761,9 @@ export class AgentHub {
       runtime: resolved.runtime,
       channelId: resolved.channel.id,
       workDir: input.workDir,
+      planningWorkflowId: input.workflowId,
+      workflowRunId: input.runId,
+      workflowNodeId: input.nodeId,
       developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, resolved.agent.instructions, input.developerInstructions, input.contextDocument ? `# Runtime context\n${input.contextDocument}` : undefined].filter(Boolean).join("\n\n"),
       emit: (event) => {
         if (event.type === "runtime_conversation") latestRuntimeConversation = this.runtimeRouter.cloneConversation(event.runtimeConversation);
@@ -2135,6 +2138,9 @@ export class AgentHub {
     task.developerInstructions = input.developerInstructions?.trim() || undefined;
     task.contextDocument = input.contextDocument?.trim() || undefined;
     task.runtimeConversation = this.cloneConversationForPolicy(task.continuationPolicy, input.runtimeConversation);
+    task.planningWorkflowId = input.planningWorkflowId;
+    task.workflowRunId = input.workflowRunId;
+    task.workflowNodeId = input.workflowNodeId;
     return task;
   }
 

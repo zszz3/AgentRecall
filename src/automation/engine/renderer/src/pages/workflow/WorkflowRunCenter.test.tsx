@@ -100,6 +100,27 @@ describe("WorkflowRunCenter", () => {
     expect(html).not.toContain("Historical research answer");
   });
 
+  test("distinguishes archived tool calls from their results", () => {
+    const archivedRun = run({ runId: "tool-run", status: "completed", startedAt: 2_000, finishedAt: 62_000 });
+    archivedRun.progress[0].messages = [
+      { id: "tool-call", role: "tool", eventType: "tool_call", name: "read_file", content: '{"path":"README.md"}', at: 3_000 },
+      { id: "tool-result", role: "tool", eventType: "tool_result", name: "read_file", content: "README contents", at: 4_000 },
+    ];
+    const html = renderToStaticMarkup(<WorkflowRunCenter
+      runs={[archivedRun]}
+      open
+      selectedRunId="tool-run"
+      language="zh"
+      onSelectRun={() => undefined}
+      onClose={() => undefined}
+    />);
+
+    expect(html).toContain("工具调用 · read_file");
+    expect(html).toContain("工具结果 · read_file");
+    expect(html).toContain("{&quot;path&quot;:&quot;README.md&quot;}");
+    expect(html).toContain("README contents");
+  });
+
   test("opens as a history list before a run is selected", () => {
     const html = renderToStaticMarkup(<WorkflowRunCenter
       runs={[run({ runId: "latest", status: "completed", startedAt: 2_000, finishedAt: 62_000 })]}

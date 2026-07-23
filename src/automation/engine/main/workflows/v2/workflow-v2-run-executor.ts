@@ -100,6 +100,7 @@ function workflowNodeHistoryMessages(task: TaskRun): WorkflowNodeMessage[] {
         role: event.type === "tool_call" || event.type === "tool_result" ? "tool" : "system",
         content: event.content || event.type.replaceAll("_", " "),
         at: event.timestamp,
+        eventType: event.type,
         ...(event.name ? { name: event.name } : {}),
         event: structuredClone(event),
       });
@@ -290,7 +291,12 @@ export class WorkflowV2RunExecutor {
 
     const startModelTask = async (nodeId: string, request: RunTaskRequest, allowOutputWrite = false): Promise<TaskRun> => {
       consumeModelCallBudget(nodeId);
-      const task = await startWorkflowTask(request, allowOutputWrite);
+      const task = await startWorkflowTask({
+        ...request,
+        planningWorkflowId: workflow.workflowId,
+        workflowRunId: runId,
+        workflowNodeId: nodeId,
+      }, allowOutputWrite);
       this.runRegistry.get(runId)?.taskIdByNodeId.set(nodeId, task.id);
       return task;
     };
@@ -663,7 +669,7 @@ export class WorkflowV2RunExecutor {
             effectiveDeveloperInstructions,
             "This is a persistent multi-turn conversation. Ask concise questions whenever required information is incomplete.",
             "Do not claim the node is complete until all acceptance criteria are satisfied.",
-            "When complete, return the structured worker-output packet for explicit user confirmation.",
+            "When complete, call workflow_node_complete (or its namespaced MCP equivalent) exactly once with the structured worker output for explicit user confirmation. Do not print the worker-output JSON as ordinary assistant content.",
           ].join("\n\n"),
           contextDocument: effectiveContextDocument,
         });
@@ -718,9 +724,19 @@ export class WorkflowV2RunExecutor {
           supervisorTaskIds,
         });
         archiveTaskId = completedTask.id;
+        // Message history is an execution artifact, independent from whether the
+        // worker output passes structured validation. Archive it before parsing so
+        // failed or malformed one-shot responses remain inspectable in run history.
+        const historyMessages = workflowNodeHistoryMessages(completedTask);
+        updateNode(request.node.id, {
+          status: "running",
+          detail: "Task output received",
+          taskId: task.id,
+          ...(historyMessages.length > 0 ? { messages: historyMessages } : {}),
+        });
         const artifact = taskArtifact(completedTask);
         const output = parseWorkflowV2WorkerArtifact(request.node, artifact);
-        updateNode(request.node.id, { status: "running", detail: output.summary, taskId: task.id, messages: workflowNodeHistoryMessages(completedTask) }, {
+        updateNode(request.node.id, { status: "running", detail: output.summary, taskId: task.id }, {
           type: "node_output",
           nodeId: request.node.id,
           taskId: task.id,
@@ -729,6 +745,22 @@ export class WorkflowV2RunExecutor {
         });
         return output;
       } catch (error) {
+        const taskForHistory = error instanceof WorkflowV2OneShotInputRequestSignal
+          ? error.task
+          : [...taskIds]
+              .map((taskId) => latestSnapshot.tasks.find((item) => item.id === taskId))
+              .find((item): item is TaskRun => Boolean(item));
+        if (taskForHistory) {
+          const historyMessages = workflowNodeHistoryMessages(taskForHistory);
+          if (historyMessages.length > 0) {
+            updateNode(request.node.id, {
+              status: "running",
+              detail: "Task history archived",
+              taskId: taskForHistory.id,
+              messages: historyMessages,
+            });
+          }
+        }
         if (error instanceof WorkflowV2OneShotInputRequestSignal) {
           await this.deps.stopTask(error.task.id);
           archiveTaskId = undefined;

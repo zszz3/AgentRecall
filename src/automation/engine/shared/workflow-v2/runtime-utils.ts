@@ -105,6 +105,11 @@ export function workflowProgressAfterFailure(progress: WorkflowRunProgressItem[]
 }
 
 export function taskArtifact(task: TaskRun): string {
+  const completionTool = [...task.messages]
+    .reverse()
+    .flatMap((message) => [...(message.events ?? [])].reverse())
+    .find((event) => event.type === "tool_call" && event.name?.toLowerCase().includes("workflow_node_complete"));
+  if (completionTool?.content?.trim()) return completionTool.content.trim();
   const assistantMessage = [...task.messages].reverse().find((message) => message.role === "assistant" && message.content.trim());
   if (assistantMessage) return assistantMessage.content.trim();
   const errorMessage = [...task.messages].reverse().find((message) => message.role === "error" && message.content.trim());

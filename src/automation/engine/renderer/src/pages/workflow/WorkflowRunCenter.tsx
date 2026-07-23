@@ -70,6 +70,16 @@ function runIcon(status: WorkflowStatus) {
   return Clock3;
 }
 
+function messageLabel(message: WorkflowNodeConversation["messages"][number], language: "en" | "zh"): string {
+  const toolLabel = message.eventType === "tool_call"
+    ? (language === "zh" ? "工具调用" : "Tool call")
+    : message.eventType === "tool_result"
+      ? (language === "zh" ? "工具结果" : "Tool result")
+      : undefined;
+  if (toolLabel) return message.name ? `${toolLabel} · ${message.name}` : toolLabel;
+  return message.name || message.role;
+}
+
 export function WorkflowRunCenter({ runs, conversations = [], open, selectedRunId, language = "en", onSelectRun, onClose }: WorkflowRunCenterProps) {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(selectedRunId);
   const selectedRun = activeRunId ? runs.find((run) => run.runId === activeRunId) : undefined;
@@ -157,8 +167,8 @@ export function WorkflowRunCenter({ runs, conversations = [], open, selectedRunI
                           {messages.length > 0 ? <details className="workflow-run-center-messages">
                             <summary><MessageSquareText size={13} /><span>{labels.messages}</span><em>{messages.length}</em></summary>
                             <div className="workflow-run-center-message-list">
-                              {messages.map((message) => <article key={message.id} className={`is-${message.role}`}>
-                                <header><strong>{message.name || message.role}</strong><time>{formatDate(message.at, language)}</time></header>
+                              {messages.map((message) => <article key={message.id} className={`is-${message.role}${message.eventType ? ` is-${message.eventType}` : ""}`}>
+                                <header><strong>{messageLabel(message, language)}</strong><time>{formatDate(message.at, language)}</time></header>
                                 <p>{message.content}</p>
                               </article>)}
                             </div>

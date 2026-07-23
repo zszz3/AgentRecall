@@ -2060,7 +2060,8 @@ describe("WorkflowRuntime Workflow V2 bridge", () => {
     });
     expect(fixture.taskRequests[0]?.prompt).toBe("Produce the implementation draft from the approved packet.");
     expect(fixture.taskRequests[0]?.developerInstructions).toContain("Workflow Storage Plan");
-    expect(fixture.taskRequests[0]?.developerInstructions).toContain("Return only one structured JSON worker-output packet");
+    expect(fixture.taskRequests[0]?.developerInstructions).toContain("MUST call that tool exactly once");
+    expect(fixture.taskRequests[0]?.developerInstructions).toContain("Do not print the worker-output JSON");
     expect(fixture.taskRequests[0]?.contextDocument).toContain("Workflow V2 task packet");
     expect(fixture.taskRequests[0]?.contextDocument).toContain('"nodeId": "draft"');
     expect(fixture.taskRequests[0]?.contextDocument).toContain('"upstreamOutputs": []');
@@ -2115,6 +2116,54 @@ describe("WorkflowRuntime Workflow V2 bridge", () => {
       "node_started",
       "node_output",
       "node_completed",
+    ]);
+  });
+
+  test("keeps one-shot message history when structured output parsing fails", async () => {
+    const fixture = await workflowV2RuntimeFixture({
+      taskFactory: (request) => ({
+        id: "task-malformed-output",
+        title: "Workflow V2 LLM node",
+        status: "completed",
+        prompt: request.prompt,
+        configuredAgentId: request.configuredAgentId,
+        messages: [{
+          id: "assistant-malformed-output",
+          role: "assistant",
+          content: '{"nodeId":"draft","summary":',
+          timestamp: 2,
+          events: [
+            { id: "tool-call", type: "tool_call", name: "read_file", content: '{"path":"README.md"}', timestamp: 3 },
+            { id: "tool-result", type: "tool_result", name: "read_file", content: "README contents", timestamp: 4 },
+          ],
+        }],
+        createdAt: 1,
+        updatedAt: 4,
+      } as TaskRun),
+      executeScript: async () => ({ nodeId: "verify", summary: "not reached", outputs: { verified: false }, proposals: [] }),
+    });
+
+    fixture.runtime.runWorkflow({ workflowId: fixture.workflow.workflowId });
+    const finished = await fixture.finished;
+
+    expect(finished.status).toBe("failed");
+    expect(finished.progress?.find((item) => item.nodeId === "draft")?.messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: '{"nodeId":"draft","summary":',
+      }),
+      expect.objectContaining({
+        role: "tool",
+        eventType: "tool_call",
+        name: "read_file",
+        content: '{"path":"README.md"}',
+      }),
+      expect.objectContaining({
+        role: "tool",
+        eventType: "tool_result",
+        name: "read_file",
+        content: "README contents",
+      }),
     ]);
   });
 
