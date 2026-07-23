@@ -1287,6 +1287,43 @@ export function mergeProcessEnvOverrides(overrides?: Record<string, string>): No
 }
 
 function runCliVersion(command: string, args: string[], env?: Record<string, string>): Promise<string> {
+  if (process.platform === "win32") {
+    // npm installs Windows CLI shims as .cmd files. PowerShell invokes those
+    // shims, while single-quoted arguments keep paths and values literal.
+    const childEnv = mergeProcessEnvOverrides(env);
+    return resolveWindowsCliCommand(command, childEnv).then(
+      (resolvedCommand) => new Promise((resolve, reject) => {
+        const commandLine = ["&", quotePowerShellCliArg(resolvedCommand), ...args.map(quotePowerShellCliArg)].join(" ");
+        const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", commandLine], {
+          env: childEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk: string) => {
+          stdout += chunk;
+        });
+        child.stderr?.on("data", (chunk: string) => {
+          stderr += chunk;
+        });
+        child.once("error", (error) => {
+          reject(Object.assign(error instanceof Error ? error : new Error(String(error)), { stdout, stderr }));
+        });
+        child.once("close", (code) => {
+          if (code === 0) {
+            resolve(stdout);
+            return;
+          }
+          const failure = new Error(`CLI exited with code ${code ?? "unknown"}`);
+          reject(Object.assign(failure, { stdout, stderr }));
+        });
+      }),
+    );
+  }
+
   return new Promise((resolve, reject) => {
     execFile(command, args, { env: mergeProcessEnvOverrides(env) }, (error, stdout, stderr) => {
       if (!error) {
@@ -1295,6 +1332,33 @@ function runCliVersion(command: string, args: string[], env?: Record<string, str
       }
       const failure = error instanceof Error ? error : new Error(String(error));
       reject(Object.assign(failure, { stdout, stderr }));
+    });
+  });
+}
+
+function quotePowerShellCliArg(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function resolveWindowsCliCommand(command: string, env: NodeJS.ProcessEnv): Promise<string> {
+  if (path.win32.isAbsolute(command) || /[\\/]/.test(command)) {
+    if (existsSync(command)) return Promise.resolve(command);
+    return Promise.reject(Object.assign(new Error(`CLI binary not found: ${command}`), { code: "ENOENT" }));
+  }
+  // where.exe gives a consistent missing-binary result even when cmd.exe is localized.
+  return new Promise((resolve, reject) => {
+    execFile("where.exe", [command], { env }, (error, stdout) => {
+      if (!error) {
+        const candidates = stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+        const resolved = candidates.find((value) => /\.cmd$/i.test(value)) ?? candidates[0];
+        if (resolved) {
+          resolve(resolved);
+          return;
+        }
+        reject(Object.assign(new Error(`CLI binary not found: ${command}`), { code: "ENOENT" }));
+        return;
+      }
+      reject(Object.assign(error instanceof Error ? error : new Error(String(error)), { code: "ENOENT" }));
     });
   });
 }
