@@ -2782,7 +2782,7 @@ function UsageTokenMetric({
     cancelClose();
     const rect = anchorRef.current?.getBoundingClientRect();
     if (rect) {
-      const popoverWidth = 216;
+      const popoverWidth = 280;
       const left = Math.max(8, Math.min(window.innerWidth - popoverWidth - 8, rect.right - popoverWidth));
       const top = rect.bottom + 8;
       setPosition({ top, left });
@@ -2861,9 +2861,9 @@ function UsageTokenTrendPopover({
         ? localize(language, "Last 30 weeks", "近 30 周")
         : localize(language, "Last 30 months", "近 30 个月");
   const buckets = trend.buckets;
-  const width = 220;
-  const height = 96;
-  const chartLeft = 36;
+  const width = 280;
+  const height = 118;
+  const chartLeft = 34;
   const chartRight = 8;
   const chartTop = 8;
   const chartBottom = 22;
@@ -2871,19 +2871,54 @@ function UsageTokenTrendPopover({
   const plotHeight = height - chartTop - chartBottom;
   const maxTokens = Math.max(...buckets.map((bucket) => bucket.totalTokens), 0);
   const yMax = Math.max(maxTokens, 1);
+  const yMid = chartTop + plotHeight / 2;
   const points = buckets.map((bucket, index) => {
     const x = buckets.length <= 1 ? chartLeft + plotWidth / 2 : chartLeft + (index * plotWidth) / (buckets.length - 1);
     const y = chartTop + (1 - bucket.totalTokens / yMax) * plotHeight;
-    return { x, y, bucket };
+    return { x, y, bucket, index };
   });
   const pathData = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
-  let lastNonZero: SessionStatsTrendBucket | undefined;
+  const totalTokens = buckets.reduce((sum, bucket) => sum + bucket.totalTokens, 0);
+  const nonZeroBuckets = buckets.filter((bucket) => bucket.totalTokens > 0);
+  const peakBucket = nonZeroBuckets.reduce<SessionStatsTrendBucket | undefined>(
+    (best, bucket) => (!best || bucket.totalTokens > best.totalTokens ? bucket : best),
+    undefined,
+  );
+  const avgTokens = nonZeroBuckets.length > 0 ? Math.round(totalTokens / nonZeroBuckets.length) : 0;
+  let lastNonZeroIndex = -1;
   for (let i = buckets.length - 1; i >= 0; i -= 1) {
     if (buckets[i].totalTokens > 0) {
-      lastNonZero = buckets[i];
+      lastNonZeroIndex = i;
       break;
     }
   }
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const focusIndex = hoveredIndex ?? lastNonZeroIndex;
+  const focusPoint = focusIndex >= 0 && focusIndex < points.length ? points[focusIndex] : null;
+  const focusBucket = focusPoint?.bucket ?? null;
+  const midLabelIndex = Math.floor(buckets.length / 2);
+  const handleChartMove = useCallback(
+    (event: ReactMouseEvent<SVGSVGElement>) => {
+      const svg = svgRef.current;
+      if (!svg || points.length === 0) return;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const relativeX = ((event.clientX - rect.left) / rect.width) * width;
+      let nearest = points[0];
+      let nearestDistance = Math.abs(nearest.x - relativeX);
+      for (let i = 1; i < points.length; i += 1) {
+        const distance = Math.abs(points[i].x - relativeX);
+        if (distance < nearestDistance) {
+          nearest = points[i];
+          nearestDistance = distance;
+        }
+      }
+      setHoveredIndex(nearest.index);
+    },
+    [points, width],
+  );
+  const clearHover = useCallback(() => setHoveredIndex(null), []);
 
   return (
     <div
@@ -2895,26 +2930,73 @@ function UsageTokenTrendPopover({
     >
       <div className="stats-token-popover-header">
         <span>{title}</span>
-        {lastNonZero ? <em>{formatTokenCount(lastNonZero.totalTokens)}</em> : null}
+        <em>
+          {localize(language, "Total", "合计")} {formatTokenCount(totalTokens)}
+        </em>
       </div>
+      {peakBucket ? (
+        <div className="stats-token-popover-summary">
+          <span>
+            {localize(language, "Peak", "峰值")} <em>{formatTokenCount(peakBucket.totalTokens)}</em>
+            <i>{peakBucket.label}</i>
+          </span>
+          <span>
+            {localize(language, "Avg", "平均")} <em>{formatTokenCount(avgTokens)}</em>
+          </span>
+        </div>
+      ) : null}
       {loading ? (
         <div className="stats-token-popover-empty">{localize(language, "Loading trend...", "正在加载趋势...")}</div>
       ) : buckets.length === 0 ? (
         <div className="stats-token-popover-empty">{localize(language, "No token usage yet", "暂无 Token 用量")}</div>
       ) : (
-        <svg className="stats-token-chart" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-          <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${chartTop + plotHeight / 2}H${width - chartRight}`} />
+        <svg
+          ref={svgRef}
+          className="stats-token-chart"
+          viewBox={`0 0 ${width} ${height}`}
+          onMouseMove={handleChartMove}
+          onMouseLeave={clearHover}
+        >
+          <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${yMid}H${width - chartRight}`} />
           <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
           <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
+          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={yMid + 3} textAnchor="end">{formatCompactNumber(Math.round(yMax / 2))}</text>
           <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
           <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
+          {buckets.length > 2 ? (
+            <text className="stats-token-chart-x-label" x={chartLeft + plotWidth / 2} y={height - 5} textAnchor="middle">
+              {buckets[midLabelIndex]?.label}
+            </text>
+          ) : null}
           <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{buckets.at(-1)?.label}</text>
           <path className="stats-token-chart-line" d={pathData} />
+          {focusPoint ? (
+            <path
+              className="stats-token-chart-focus-line"
+              d={`M${focusPoint.x.toFixed(1)} ${chartTop}V${height - chartBottom}`}
+            />
+          ) : null}
           {points.map((point) => (
-            <circle key={point.bucket.start} className="stats-token-chart-point" cx={point.x} cy={point.y} r="2" />
+            <circle
+              key={point.bucket.start}
+              className={
+                point.index === focusIndex
+                  ? "stats-token-chart-point stats-token-chart-point--focus"
+                  : "stats-token-chart-point"
+              }
+              cx={point.x}
+              cy={point.y}
+              r={point.index === focusIndex ? 2.8 : 1.6}
+            />
           ))}
         </svg>
       )}
+      {focusBucket ? (
+        <div className="stats-token-popover-focus">
+          <span>{focusBucket.label}</span>
+          <em>{formatTokenCount(focusBucket.totalTokens)}</em>
+        </div>
+      ) : null}
     </div>
   );
 }

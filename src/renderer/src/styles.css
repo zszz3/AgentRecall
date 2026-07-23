@@ -526,8 +526,8 @@ select:focus-visible {
   z-index: 2147483647;
   box-sizing: border-box;
   display: grid;
-  gap: 7px;
-  width: 216px;
+  gap: 6px;
+  width: 280px;
   padding: 9px 10px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
@@ -571,9 +571,40 @@ select:focus-visible {
   font-weight: 700;
 }
 
+.stats-token-popover-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.stats-token-popover-summary span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stats-token-popover-summary em {
+  color: var(--text);
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.stats-token-popover-summary i {
+  color: var(--text-faint);
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stats-token-chart {
   width: 100%;
-  height: 96px;
+  height: 118px;
   overflow: visible;
 }
 
@@ -607,6 +638,37 @@ select:focus-visible {
 
 .stats-token-chart-point {
   fill: var(--accent);
+}
+
+.stats-token-chart-point--focus {
+  fill: var(--accent);
+  stroke: var(--panel-bg);
+  stroke-width: 1;
+}
+
+.stats-token-chart-focus-line {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-dasharray: 2 2;
+  stroke-width: 1;
+}
+
+.stats-token-popover-focus {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.stats-token-popover-focus em {
+  color: var(--text);
+  font-family: var(--mono);
+  font-style: normal;
+  font-weight: 700;
 }
 
 .stats-token-popover-empty {
