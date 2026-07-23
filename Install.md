@@ -18,7 +18,7 @@ agent-recall
 
 `--registry` 只影响本次命令，不会修改 npm 的全局镜像配置。安装包仍从 GitHub Release 下载；如果 Electron 运行时下载较慢，请继续使用下文的 `ELECTRON_MIRROR`。
 
-该方式不会克隆仓库，也不需要在本机执行构建。npm 会把编译后的应用安装到当前 Node.js 的全局目录，并下载当前操作系统对应的 Electron 运行时。
+该方式不会克隆仓库，也不需要在本机执行构建。npm 会把编译后的应用安装到当前 Node.js 的全局目录，并下载当前操作系统对应的 Electron 和本地数据运行时。**不需要单独安装、启动或配置 PostgreSQL**；应用会在启动和退出时自动管理它。
 
 装好后，在任意终端运行即可启动：
 
@@ -80,6 +80,7 @@ $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 
 - macOS 或 Windows
 - Node.js 22.13 或更高版本（含 npm）
+- 不需要预装 PostgreSQL
 - SSH 远程会话可选依赖：本机 `ssh`，远端 `python3`，远端 `inotifywait` 或 `fswatch` 用于实时监听
 
 温馨提示：Electron binary 默认从 GitHub release 下载。如果下载很慢或失败，可在安装前设置镜像后再执行安装命令：
@@ -176,7 +177,7 @@ Default preference:
 - `npm run build` passes when the user wants a build verification.
 - The user receives the exact command to launch the development app.
 - No Claude or Codex source session files are modified.
-- No runtime SQLite database is committed to git.
+- No runtime database, connection pointer, or generated credential is committed to git.
 
 ## Operating Rules
 
@@ -184,7 +185,7 @@ Default preference:
 - Prefer package scripts over ad hoc shell commands.
 - Do not use `sudo` or install system packages without explicit user approval.
 - Do not run `npm audit fix`, dependency upgrades, formatters, or broad refactors unless the user asks.
-- Do not delete `node_modules/`, build output, Electron user data, or existing SQLite databases unless the user asks.
+- Do not delete `node_modules/`, build output, Electron user data, the managed PostgreSQL directory, or upstream Agent databases unless the user asks.
 - Do not read or print secret-bearing files such as `.env`, shell profiles, or private Claude/Codex configuration files.
 - Treat Claude and Codex session files as read-only input.
 - If a command fails, stop, report the smallest blocker, and provide the next command that would unblock setup.
@@ -201,9 +202,10 @@ Expected tools:
 
 Important dependency note:
 
-- The app depends on Electron 42+ because the runtime must expose built-in `node:sqlite`.
+- The app installs a platform-specific PostgreSQL runtime automatically. Do not require users to install a system PostgreSQL service.
+- Electron 42+ still provides `node:sqlite` for reading supported Agent products whose own session format is SQLite; those files are external inputs, not AgentRecall's internal store.
 - Do not add `better-sqlite3` or other native SQLite packages as an install workaround.
-- A first-time install may download an Electron binary around 100MB+. This is expected and does not require Xcode.
+- A first-time install downloads Electron and the current platform's data runtime. This is expected and does not require Xcode.
 
 Check versions:
 
@@ -219,7 +221,7 @@ If nvm is available, use the repository version before installing dependencies:
 nvm use
 ```
 
-The project uses Electron's built-in `node:sqlite`, so it does not need native SQLite npm rebuilds.
+The project uses Electron's built-in `node:sqlite` only for supported external session formats, so it does not need native SQLite npm rebuilds.
 
 ## Install Steps
 
@@ -269,7 +271,7 @@ The project uses Electron's built-in `node:sqlite`, so it does not need native S
 
 ### `No such built-in module: node:sqlite`
 
-This means the app is running under an Electron version that is too old for the current SQLite implementation.
+This means the app is running under an Electron version that is too old to read Agent products that use SQLite session files.
 
 Fix:
 
@@ -295,15 +297,17 @@ Do not fix this by installing `better-sqlite3`; that reintroduces native build t
 
 ## Runtime Data Boundary
 
-The app creates a local SQLite database at Electron's `userData` path:
+The app automatically creates and manages a PostgreSQL data directory inside Electron's `userData` path:
 
 ```text
-<Electron userData>/session-search.sqlite
+<Electron userData>/postgres/
 ```
 
-This database contains the search index and app-only metadata such as custom titles, tags, pinned state, and hidden state. It is runtime state, not source code.
+It listens only on the local loopback interface, uses a random app-owned credential, and starts and stops with AgentRecall. The search index and app-only metadata such as custom titles, tags, favorite state, and hidden state live there. Users do not need a system PostgreSQL installation.
 
-SSH remote sessions are read-only inputs. The app stores remote summaries and on-demand details in the local SQLite index, but it does not install a remote daemon or create a remote database.
+The standalone MCP server discovers the running app through `~/.agent-recall/database-url`. For isolated development or advanced deployments, `AGENT_RECALL_DATABASE_URL` can point to a separately managed PostgreSQL instance.
+
+SSH remote sessions and local Agent session files remain external inputs. AgentRecall indexes them locally but does not install a remote daemon or create a database on remote machines.
 
 Never commit:
 
@@ -312,6 +316,8 @@ Never commit:
 *.sqlite-shm
 *.sqlite-wal
 *.db
+database-url
+runtime.json
 ```
 
 The app should read upstream sessions from these locations when they exist:
@@ -333,9 +339,10 @@ Do not edit, rewrite, or delete those source files during installation.
 - [ ] Run `npm test`.
 - [ ] Run `npm run typecheck`.
 - [ ] Run `npm run build` if build verification is requested.
-- [ ] Confirm `node:sqlite` is available in Electron if startup fails.
+- [ ] Confirm the managed PostgreSQL runtime can start if application data initialization fails.
+- [ ] Confirm `node:sqlite` is available when a SQLite-backed external Agent source cannot be read.
 - [ ] Report the exact development launch command: `npm run dev`.
-- [ ] Confirm no SQLite database files are staged for commit.
+- [ ] Confirm no runtime database, pointer, or generated credential is staged for commit.
 
 ## EXECUTE NOW
 

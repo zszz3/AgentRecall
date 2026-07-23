@@ -73,7 +73,7 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
 ### 核心功能
 
 - **统一搜索和管理多种 AI Coding Agent 会话**：
-  搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder 等会话；支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；也支持本地环境和 SSH 远程环境，远程机器无需安装本应用。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
+  搜索、过滤、查看、整理和快速启动 Claude Code、Codex，以及可选的 TClaude、TCodex、CodeBuddy、CodeWiz、OpenClaw、Hermes、OpenCode、Cursor Agent、Trae、Qoder 等会话；搜索会定位到命中的具体对话轮次并展示附近上下文，同时仍以完整 Session 作为打开和 Resume 的入口。支持自定义标题、标签、收藏、置顶、隐藏和一键快速启动；也支持本地环境和 SSH 远程环境，远程机器无需安装本应用。侧边栏项目按环境分组展示，每组可折叠，组内按最近活跃时间排序。会话可按全部时间或最近 7 天、30 天或 90 天过滤；搜索结果默认按智能排序（相关性与时间衰减混合），也可切换为按最新或最早活跃时间排序。
 - **完整查看会话上下文**：
   详情页展示完整消息、tool call 与 Markdown / code block，并支持查看 AI 摘要和导出 Markdown。
 - **AI / Agent 辅助检索历史会话**：
@@ -168,7 +168,7 @@ CodeBuddy CLI、CodeWiz、TClaude、TCodex、Claude Code Internal、Codex Intern
 
 ## MCP 工具
 
-应用内置一个 stdio MCP 服务器（`agent-recall-mcp`），让 Claude Code / Codex / CodeBuddy 在对话里直接搜索、读取历史会话，并管理标签、收藏、可见性，以及跨 Agent 迁移会话。首次打开应用后会自动写入数据库指针（`~/.agent-recall/db-path`），MCP 服务器据此找到当前数据库；也可用 `AGENT_RECALL_DB` 环境变量覆盖。
+应用内置一个 stdio MCP 服务器（`agent-recall-mcp`），让 Claude Code / Codex / CodeBuddy 在对话里直接搜索、读取历史会话，并管理标签、收藏、可见性，以及跨 Agent 迁移会话。应用会自动安装并管理本地数据运行时，不需要用户另外安装 PostgreSQL。首次打开后会写入权限受限的连接指针（`~/.agent-recall/database-url`），MCP 服务器据此连接同一份数据；高级部署也可用 `AGENT_RECALL_DATABASE_URL` 环境变量覆盖。
 
 读取工具：
 
