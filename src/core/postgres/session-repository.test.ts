@@ -183,4 +183,46 @@ describe("PostgresSessionRepository", () => {
       indexedAt: expect.any(Number),
     }]);
   });
+
+  it("counts remote summary messages and deduplicates synchronized Token events", async () => {
+    await repository.upsertIndexedSession(session(), messages, tokens, traces);
+    const remote = session({
+      sessionKey: "codex:remote-a",
+      rawId: "remote-a",
+      source: "codex-app",
+      environmentId: "remote",
+      environmentKind: "ssh",
+      environmentLabel: "Remote",
+      filePath: "/remote/session-a.jsonl",
+    });
+    await repository.upsertIndexedSessionSummary(
+      remote,
+      2,
+      tokens,
+      [
+        { index: 0, timestamp: Date.parse("2026-07-20T08:00:00.000Z") },
+        { index: 1, timestamp: Date.parse("2026-07-20T08:00:01.000Z") },
+      ],
+    );
+
+    const stats = await repository.getStats(
+      { period: "allTime" },
+      Date.parse("2026-07-23T12:00:00.000Z"),
+    );
+    expect(stats.total).toEqual({
+      sessionCount: 2,
+      messageCount: messages.length + 2,
+      inputTokens: 100,
+      outputTokens: 20,
+      cachedInputTokens: 40,
+      reasoningOutputTokens: 5,
+      totalTokens: 165,
+    });
+    expect(stats.bySource).toEqual([
+      expect.objectContaining({ source: "codex-app", sessionCount: 1, messageCount: 2 }),
+      expect.objectContaining({ source: "codex-cli", sessionCount: 1, messageCount: messages.length }),
+    ]);
+    expect(stats.dailyTokenUsage).toHaveLength(7);
+    expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(165);
+  });
 });

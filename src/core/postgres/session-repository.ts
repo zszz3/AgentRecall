@@ -1,13 +1,23 @@
 import type {
   IndexedSession,
+  ProjectQueryOptions,
+  ProjectSummary,
+  ProjectTagEntry,
   SearchOptions,
+  SessionDailyTokenUsage,
   SessionMatchHit,
   SessionMessage,
+  SessionMessageEvent,
   SessionSearchPage,
   SessionSearchResult,
   SessionSource,
+  SessionStats,
+  SessionStatsOptions,
+  SessionStatsPeriod,
+  SessionStatsSummary,
   SessionTraceEvent,
   SessionTurnMatch,
+  TagListOptions,
   TokenUsage,
   TokenUsageEvent,
 } from "../types";
@@ -162,6 +172,61 @@ function tokenUsageFromEvents(events: readonly TokenUsageEvent[], fallback?: Tok
 function branchTagName(branch: string | null | undefined): string | null {
   const normalized = branch?.trim();
   return normalized ? `branch:${normalized}` : null;
+}
+
+function projectParts(projectPath: string): string[] {
+  return projectPath.split(/[\\/]+/u).filter(Boolean);
+}
+
+function projectBasename(projectPath: string): string {
+  return projectParts(projectPath).at(-1) || projectPath;
+}
+
+function projectParentLabel(projectPath: string): string {
+  const parts = projectParts(projectPath);
+  return parts.length >= 2 ? `${parts.at(-2)}/${parts.at(-1)}` : projectBasename(projectPath);
+}
+
+interface StatsRange {
+  period: SessionStatsPeriod;
+  since: number | null;
+  until: number;
+}
+
+function resolveStatsRange(options: SessionStatsOptions, now: number): StatsRange {
+  const period = options.period ?? "allTime";
+  if (period === "allTime") return { period, since: null, until: now };
+  if (period === "today") {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    return { period, since: date.getTime(), until: now };
+  }
+  const days = period === "thirtyDay" ? 30 : 7;
+  return { period, since: now - days * 24 * 60 * 60 * 1000, until: now };
+}
+
+function dailyRanges(now: number): Array<Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive">> {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return Array.from({ length: 7 }, (_, index) => {
+    const start = new Date(today);
+    start.setDate(today.getDate() - (6 - index));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 1);
+    return { dayStart: start.getTime(), dayEndExclusive: end.getTime() };
+  });
+}
+
+function emptyStatsSummary(): SessionStatsSummary {
+  return {
+    sessionCount: 0,
+    messageCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    reasoningOutputTokens: 0,
+    totalTokens: 0,
+  };
 }
 
 function jsonValue(value: unknown): Record<string, unknown> {
@@ -505,10 +570,27 @@ export class PostgresSessionRepository {
       );
 
       await client.query("delete from agent_recall.session_raw_events where session_key = $1", [session.sessionKey]);
+      await client.query("delete from agent_recall.session_message_events where session_key = $1", [session.sessionKey]);
       await client.query("delete from agent_recall.session_turns where session_key = $1", [session.sessionKey]);
       await client.query("delete from agent_recall.token_events where session_key = $1", [session.sessionKey]);
 
       for (const event of timeline.rawEvents) await insertRawEvent(client, session.sessionKey, event);
+      for (const message of messages) {
+        const occurredAt = Date.parse(message.timestamp);
+        await client.query(
+          `
+            insert into agent_recall.session_message_events (
+              session_key, message_index, occurred_at
+            )
+            values ($1, $2, $3)
+          `,
+          [
+            session.sessionKey,
+            message.index,
+            new Date(Number.isFinite(occurredAt) && occurredAt >= 0 ? occurredAt : 0).toISOString(),
+          ],
+        );
+      }
       for (const turn of timeline.turns) await insertTurn(client, session.sessionKey, turn);
       for (const event of tokenEvents) {
         await client.query(
@@ -537,21 +619,161 @@ export class PostgresSessionRepository {
     });
   }
 
+  async upsertIndexedSessionSummary(
+    session: IndexedSession,
+    messageCount: number,
+    tokenEvents?: readonly TokenUsageEvent[],
+    messageEvents?: readonly SessionMessageEvent[],
+  ): Promise<void> {
+    const tokenUsage = tokenUsageFromEvents(tokenEvents ?? [], session.tokenUsage);
+    const environmentId = session.environmentId || "local";
+    await this.database.transaction(async (client) => {
+      await client.query(
+        `
+          insert into agent_recall.environments (
+            id, kind, label, auth_mode, enabled, sync_state, created_at, updated_at
+          )
+          values ($1, $2, $3, 'none', true, 'idle', now(), now())
+          on conflict (id) do nothing
+        `,
+        [
+          environmentId,
+          session.environmentKind || (environmentId === "local" ? "local" : "ssh"),
+          session.environmentLabel || (environmentId === "local" ? "Local" : environmentId),
+        ],
+      );
+      await client.query(
+        `
+          insert into agent_recall.sessions (
+            session_key, raw_id, source, environment_id, project_path, file_path,
+            original_title, first_question, started_at, file_mtime_ms, file_size,
+            pr_url, pr_number, message_count, turn_count, input_tokens, output_tokens,
+            cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
+            is_subagent, parent_session_id
+          )
+          values (
+            $1, $2, $3, $4, $5, $6,
+            $7, $8, $9, $10, $11,
+            $12, $13, $14, 0, $15, $16,
+            $17, $18, $19, now(), $20, $21
+          )
+          on conflict (session_key) do update set
+            raw_id = excluded.raw_id,
+            source = excluded.source,
+            environment_id = excluded.environment_id,
+            project_path = excluded.project_path,
+            file_path = excluded.file_path,
+            original_title = excluded.original_title,
+            first_question = excluded.first_question,
+            started_at = excluded.started_at,
+            file_mtime_ms = excluded.file_mtime_ms,
+            file_size = excluded.file_size,
+            pr_url = excluded.pr_url,
+            pr_number = excluded.pr_number,
+            message_count = excluded.message_count,
+            input_tokens = excluded.input_tokens,
+            output_tokens = excluded.output_tokens,
+            cached_input_tokens = excluded.cached_input_tokens,
+            reasoning_output_tokens = excluded.reasoning_output_tokens,
+            total_tokens = excluded.total_tokens,
+            indexed_at = excluded.indexed_at,
+            is_subagent = excluded.is_subagent,
+            parent_session_id = excluded.parent_session_id
+        `,
+        [
+          session.sessionKey,
+          session.rawId,
+          session.source,
+          environmentId,
+          session.projectPath,
+          session.filePath,
+          session.originalTitle,
+          session.firstQuestion,
+          new Date(Math.max(0, session.timestamp)).toISOString(),
+          session.fileMtimeMs,
+          session.fileSize,
+          session.prUrl,
+          session.prNumber,
+          Math.max(0, Math.floor(messageCount)),
+          tokenUsage.inputTokens,
+          tokenUsage.outputTokens,
+          tokenUsage.cachedInputTokens,
+          tokenUsage.reasoningOutputTokens,
+          tokenUsage.totalTokens,
+          Boolean(session.isSubagent),
+          session.parentSessionId ?? null,
+        ],
+      );
+
+      if (tokenEvents !== undefined) {
+        await client.query("delete from agent_recall.token_events where session_key = $1", [session.sessionKey]);
+        for (const event of tokenEvents) {
+          await client.query(
+            `
+              insert into agent_recall.token_events (
+                session_key, dedupe_key, occurred_at, input_tokens, output_tokens,
+                cached_input_tokens, reasoning_output_tokens, total_tokens
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8)
+            `,
+            [
+              session.sessionKey,
+              event.dedupeKey,
+              new Date(Math.max(0, event.timestamp)).toISOString(),
+              event.inputTokens,
+              event.outputTokens,
+              event.cachedInputTokens,
+              event.reasoningOutputTokens,
+              event.totalTokens,
+            ],
+          );
+        }
+      }
+      if (messageEvents !== undefined) {
+        await client.query("delete from agent_recall.session_message_events where session_key = $1", [session.sessionKey]);
+        for (const event of messageEvents) {
+          await client.query(
+            `
+              insert into agent_recall.session_message_events (
+                session_key, message_index, occurred_at
+              )
+              values ($1, $2, $3)
+            `,
+            [
+              session.sessionKey,
+              event.index,
+              new Date(Math.max(0, event.timestamp)).toISOString(),
+            ],
+          );
+        }
+      }
+      const branchTag = branchTagName(session.gitBranch);
+      if (branchTag) await this.addTagWithClient(client, session.sessionKey, branchTag);
+    });
+  }
+
   async isIndexedSessionFresh(session: IndexedSession): Promise<boolean> {
     if (session.fileMtimeMs <= 0 && session.fileSize <= 0) return false;
     const result = await this.database.query<{
       raw_id: string;
       source: SessionSource;
       environment_id: string;
+      project_path: string;
       file_path: string;
+      original_title: string;
+      first_question: string;
+      started_at: Date | string;
       file_mtime_ms: number | string;
       file_size: number | string;
+      pr_url: string | null;
+      pr_number: number | string | null;
       is_subagent: boolean;
       parent_session_id: string | null;
     }>(
       `
-        select raw_id, source, environment_id, file_path, file_mtime_ms, file_size,
-          is_subagent, parent_session_id
+        select raw_id, source, environment_id, project_path, file_path,
+          original_title, first_question, started_at, file_mtime_ms, file_size,
+          pr_url, pr_number, is_subagent, parent_session_id
         from agent_recall.sessions
         where session_key = $1
       `,
@@ -563,11 +785,28 @@ export class PostgresSessionRepository {
       && row.raw_id === session.rawId
       && row.source === session.source
       && row.environment_id === (session.environmentId || "local")
+      && row.project_path === session.projectPath
       && row.file_path === session.filePath
-      && numberValue(row.file_mtime_ms) === session.fileMtimeMs
+      && row.original_title === session.originalTitle
+      && row.first_question === session.firstQuestion
+      && timeValue(row.started_at) === session.timestamp
+      && Math.abs(numberValue(row.file_mtime_ms) - session.fileMtimeMs) < 0.001
       && numberValue(row.file_size) === session.fileSize
+      && (row.pr_url ?? null) === (session.prUrl ?? null)
+      && (row.pr_number === null ? null : numberValue(row.pr_number)) === (session.prNumber ?? null)
       && Boolean(row.is_subagent) === Boolean(session.isSubagent)
       && (row.parent_session_id ?? null) === (session.parentSessionId ?? null),
+    );
+  }
+
+  async touchIndexedAtIfMissing(sessionKey: string): Promise<void> {
+    await this.database.query(
+      `
+        update agent_recall.sessions
+        set indexed_at = now()
+        where session_key = $1 and indexed_at <= to_timestamp(0)
+      `,
+      [sessionKey],
     );
   }
 
@@ -667,6 +906,304 @@ export class PostgresSessionRepository {
     });
   }
 
+  async deleteTag(tagName: string): Promise<void> {
+    await this.database.query(
+      "delete from agent_recall.tags where name = $1",
+      [tagName.trim()],
+    );
+  }
+
+  async listTags(options: TagListOptions = {}): Promise<string[]> {
+    const values: unknown[] = [];
+    const conditions: string[] = [];
+    const bind = (value: unknown) => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+    if (options.environmentId && options.environmentId !== "all") {
+      conditions.push(`sessions.environment_id = ${bind(options.environmentId)}`);
+    }
+    if (options.projectPath) conditions.push(`sessions.project_path = ${bind(options.projectPath)}`);
+    if (options.projectEnvironmentId) {
+      conditions.push(`sessions.environment_id = ${bind(options.projectEnvironmentId)}`);
+    }
+    if (options.excludeSubagents) conditions.push("sessions.is_subagent = false");
+    const result = await this.database.query<{ name: string }>(
+      `
+        select distinct tags.name
+        from agent_recall.tags
+        join agent_recall.session_tags on session_tags.tag_id = tags.id
+        join agent_recall.sessions sessions on sessions.session_key = session_tags.session_key
+        ${conditions.length > 0 ? `where ${conditions.join(" and ")}` : ""}
+        order by lower(tags.name)
+      `,
+      values,
+    );
+    return result.rows.map((row) => row.name);
+  }
+
+  async listTagsByProject(
+    options: { excludeSubagents?: boolean } = {},
+  ): Promise<ProjectTagEntry[]> {
+    const result = await this.database.query<{
+      environment_id: string;
+      project_path: string;
+      tag_name: string;
+    }>(
+      `
+        select
+          sessions.environment_id,
+          sessions.project_path,
+          tags.name as tag_name
+        from agent_recall.tags
+        join agent_recall.session_tags on session_tags.tag_id = tags.id
+        join agent_recall.sessions sessions on sessions.session_key = session_tags.session_key
+        where trim(sessions.project_path) <> ''
+          ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
+        order by sessions.environment_id, sessions.project_path, lower(tags.name)
+      `,
+    );
+    const entries = new Map<string, ProjectTagEntry>();
+    for (const row of result.rows) {
+      const key = `${row.environment_id}\0${row.project_path}`;
+      const entry = entries.get(key) ?? {
+        environmentId: row.environment_id,
+        projectPath: row.project_path,
+        tags: [],
+      };
+      if (!entry.tags.includes(row.tag_name)) entry.tags.push(row.tag_name);
+      entries.set(key, entry);
+    }
+    return [...entries.values()];
+  }
+
+  async listProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
+    const values: unknown[] = [];
+    const conditions = ["trim(sessions.project_path) <> ''"];
+    if (options.excludeSubagents) conditions.push("sessions.is_subagent = false");
+    if (options.environmentId && options.environmentId !== "all") {
+      values.push(options.environmentId);
+      conditions.push(`sessions.environment_id = $${values.length}`);
+    }
+    const result = await this.database.query<{
+      project_path: string;
+      environment_id: string;
+      environment_label: string;
+      session_count: number | string;
+      created_at: Date | string;
+      last_activity_at: Date | string;
+    }>(
+      `
+        select
+          sessions.project_path,
+          sessions.environment_id,
+          environments.label as environment_label,
+          count(*) as session_count,
+          max(sessions.started_at) as created_at,
+          max(${SESSION_ACTIVITY_SQL}) as last_activity_at
+        from agent_recall.sessions sessions
+        join agent_recall.environments environments on environments.id = sessions.environment_id
+        where ${conditions.join(" and ")}
+        group by sessions.project_path, sessions.environment_id, environments.label
+      `,
+      values,
+    );
+    const summaries = result.rows.map<ProjectSummary>((row) => ({
+      path: row.project_path,
+      label: projectBasename(row.project_path),
+      sessionCount: numberValue(row.session_count),
+      environmentId: row.environment_id,
+      environmentLabel: row.environment_label,
+      createdAt: timeValue(row.created_at),
+      lastActivityAt: timeValue(row.last_activity_at),
+    }));
+    const basenameCounts = new Map<string, number>();
+    const environmentsByPath = new Map<string, Set<string>>();
+    for (const summary of summaries) {
+      const basename = projectBasename(summary.path);
+      basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+      const environments = environmentsByPath.get(summary.path) ?? new Set<string>();
+      environments.add(summary.environmentId);
+      environmentsByPath.set(summary.path, environments);
+    }
+    return summaries
+      .map((summary) => ({
+        ...summary,
+        label:
+          (environmentsByPath.get(summary.path)?.size ?? 0) > 1
+            ? `${summary.label} · ${summary.environmentLabel}`
+            : (basenameCounts.get(projectBasename(summary.path)) ?? 0) > 1
+              ? projectParentLabel(summary.path)
+              : summary.label,
+      }))
+      .sort(
+        (left, right) =>
+          (left.environmentId === "local" ? 0 : 1) - (right.environmentId === "local" ? 0 : 1)
+          || right.lastActivityAt - left.lastActivityAt
+          || left.label.localeCompare(right.label),
+      );
+  }
+
+  async deleteSessionRecord(sessionKey: string): Promise<boolean> {
+    return this.database.transaction(async (client) => {
+      const existing = await client.query<{ session_key: string }>(
+        "select session_key from agent_recall.sessions where session_key = $1",
+        [sessionKey],
+      );
+      if (existing.rows.length === 0) return false;
+      await client.query("delete from agent_recall.sessions where session_key = $1", [sessionKey]);
+      await client.query(`
+        delete from agent_recall.tags
+        where not exists (
+          select 1 from agent_recall.session_tags where session_tags.tag_id = tags.id
+        )
+      `);
+      return true;
+    });
+  }
+
+  async migrateSessionKeyPreservingUserState(
+    legacyKey: string,
+    targetKey: string,
+  ): Promise<boolean> {
+    if (!legacyKey || !targetKey || legacyKey === targetKey) return false;
+    return this.database.transaction(async (client) => {
+      const legacyResult = await client.query<{
+        custom_title: string | null;
+        favorited: boolean;
+        pinned: boolean;
+        hidden: boolean;
+        last_opened_at: Date | string | null;
+        last_resumed_at: Date | string | null;
+        ai_summary: string | null;
+        ai_summary_model: string | null;
+        ai_summary_at: Date | string | null;
+        ai_summary_basis: number | string | null;
+      }>(
+        `
+          select custom_title, favorited, pinned, hidden, last_opened_at, last_resumed_at,
+            ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
+          from agent_recall.sessions
+          where session_key = $1
+        `,
+        [legacyKey],
+      );
+      const legacy = legacyResult.rows[0];
+      if (!legacy) return false;
+      const targetResult = await client.query<{ session_key: string }>(
+        "select session_key from agent_recall.sessions where session_key = $1",
+        [targetKey],
+      );
+
+      if (targetResult.rows.length === 0) {
+        await client.query(
+          `
+            insert into agent_recall.sessions (
+              session_key, raw_id, source, environment_id, project_path, file_path,
+              original_title, first_question, started_at, file_mtime_ms, file_size,
+              pr_url, pr_number, custom_title, favorited, pinned, hidden,
+              last_opened_at, last_resumed_at, message_count, turn_count,
+              input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+              total_tokens, indexed_at, is_subagent, parent_session_id,
+              ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
+            )
+            select
+              $2, raw_id, source, environment_id, project_path, file_path,
+              original_title, first_question, started_at, file_mtime_ms, file_size,
+              pr_url, pr_number, custom_title, favorited, pinned, hidden,
+              last_opened_at, last_resumed_at, message_count, turn_count,
+              input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+              total_tokens, indexed_at, is_subagent, parent_session_id,
+              ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
+            from agent_recall.sessions
+            where session_key = $1
+          `,
+          [legacyKey, targetKey],
+        );
+        for (const table of [
+          "session_raw_events",
+          "session_message_events",
+          "session_turns",
+          "token_events",
+          "session_tags",
+        ]) {
+          await client.query(
+            `update agent_recall.${table} set session_key = $2 where session_key = $1`,
+            [legacyKey, targetKey],
+          );
+        }
+      } else {
+        await client.query(
+          `
+            update agent_recall.sessions
+            set
+              custom_title = coalesce(custom_title, $2),
+              favorited = favorited or $3,
+              pinned = pinned or $4,
+              hidden = hidden or $5,
+              last_opened_at = greatest(last_opened_at, $6),
+              last_resumed_at = greatest(last_resumed_at, $7),
+              ai_summary = coalesce(ai_summary, $8),
+              ai_summary_model = case when ai_summary is null then $9 else ai_summary_model end,
+              ai_summary_at = case when ai_summary is null then $10 else ai_summary_at end,
+              ai_summary_basis = case when ai_summary is null then $11 else ai_summary_basis end
+            where session_key = $1
+          `,
+          [
+            targetKey,
+            legacy.custom_title,
+            legacy.favorited,
+            legacy.pinned,
+            legacy.hidden,
+            legacy.last_opened_at,
+            legacy.last_resumed_at,
+            legacy.ai_summary,
+            legacy.ai_summary_model,
+            legacy.ai_summary_at,
+            legacy.ai_summary_basis,
+          ],
+        );
+        await client.query(
+          `
+            insert into agent_recall.session_tags (session_key, tag_id)
+            select $2, tag_id
+            from agent_recall.session_tags
+            where session_key = $1
+            on conflict (session_key, tag_id) do nothing
+          `,
+          [legacyKey, targetKey],
+        );
+      }
+      await client.query(
+        `
+          update agent_recall.session_migrations
+          set source_session_key = $2
+          where source_session_key = $1
+        `,
+        [legacyKey, targetKey],
+      );
+      await client.query("delete from agent_recall.sessions where session_key = $1", [legacyKey]);
+      return true;
+    });
+  }
+
+  async listSessionKeysByFilePath(
+    environmentId: string,
+    filePaths: ReadonlySet<string>,
+  ): Promise<string[]> {
+    const result = await this.database.query<{ session_key: string; file_path: string }>(
+      `
+        select session_key, file_path
+        from agent_recall.sessions
+        where environment_id = $1 and file_path <> ''
+      `,
+      [environmentId],
+    );
+    return result.rows
+      .filter((row) => !filePaths.has(row.file_path))
+      .map((row) => row.session_key);
+  }
+
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
     const result = await this.database.query<SessionRow>(
       `
@@ -693,6 +1230,50 @@ export class PostgresSessionRepository {
       [rawId],
     );
     return result.rows[0] ? hydrateSession(result.rows[0]) : null;
+  }
+
+  async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {
+    const result = await this.database.query<{ file_mtime_ms: number | string }>(
+      "select file_mtime_ms from agent_recall.sessions where session_key = $1",
+      [sessionKey],
+    );
+    const row = result.rows[0];
+    if (!row) return false;
+    await this.database.query(
+      `
+        update agent_recall.sessions
+        set ai_summary = $2,
+          ai_summary_model = $3,
+          ai_summary_at = now(),
+          ai_summary_basis = $4
+        where session_key = $1
+      `,
+      [sessionKey, summary.trim(), model.trim(), numberValue(row.file_mtime_ms)],
+    );
+    return true;
+  }
+
+  async listSessionsNeedingSummary(
+    now: number,
+    maxAgeMs: number,
+    limit: number,
+  ): Promise<SessionSearchResult[]> {
+    const result = await this.database.query<SessionRow>(
+      `
+        select ${SESSION_SELECT_SQL}
+        from agent_recall.sessions sessions
+        join agent_recall.environments environments on environments.id = sessions.environment_id
+        where sessions.file_mtime_ms >= $1
+          and (
+            sessions.ai_summary is null
+            or sessions.file_mtime_ms > coalesce(sessions.ai_summary_basis, 0)
+          )
+        order by sessions.file_mtime_ms desc
+        limit $2
+      `,
+      [now - maxAgeMs, Math.max(0, limit)],
+    );
+    return result.rows.map((row) => hydrateSession(row));
   }
 
   async getMessageCount(sessionKey: string): Promise<number> {
@@ -775,6 +1356,229 @@ export class PostgresSessionRepository {
         ...(payload.status ? { status: payload.status as SessionTraceEvent["status"] } : {}),
       };
     });
+  }
+
+  async getStats(options: SessionStatsOptions = {}, now = Date.now()): Promise<SessionStats> {
+    const range = resolveStatsRange(options, now);
+    const subagentPredicate = options.excludeSubagents ? "and sessions.is_subagent = false" : "";
+    const rangeValues = range.since === null
+      ? []
+      : [
+          new Date(range.since).toISOString(),
+          new Date(range.until).toISOString(),
+        ];
+    const sessionsSql = range.since === null
+      ? `
+        select source, count(*) as session_count
+        from agent_recall.sessions sessions
+        ${options.excludeSubagents ? "where sessions.is_subagent = false" : ""}
+        group by source
+      `
+      : `
+        with active as (
+          select sessions.source, sessions.session_key
+          from agent_recall.sessions sessions
+          join agent_recall.session_message_events events on events.session_key = sessions.session_key
+          where events.occurred_at >= $1 and events.occurred_at <= $2 ${subagentPredicate}
+          union
+          select sessions.source, sessions.session_key
+          from agent_recall.sessions sessions
+          join agent_recall.token_events events on events.session_key = sessions.session_key
+          where events.occurred_at >= $1 and events.occurred_at <= $2 ${subagentPredicate}
+        )
+        select source, count(distinct session_key) as session_count
+        from active
+        group by source
+      `;
+    const messagesSql = range.since === null
+      ? `
+        select source, coalesce(sum(message_count), 0) as message_count
+        from agent_recall.sessions sessions
+        ${options.excludeSubagents ? "where sessions.is_subagent = false" : ""}
+        group by source
+      `
+      : `
+        select sessions.source, count(*) as message_count
+        from agent_recall.session_message_events events
+        join agent_recall.sessions sessions on sessions.session_key = events.session_key
+        where events.occurred_at >= $1 and events.occurred_at <= $2 ${subagentPredicate}
+        group by sessions.source
+      `;
+    const tokenWhere = [
+      ...(range.since === null ? [] : ["events.occurred_at >= $1 and events.occurred_at <= $2"]),
+      ...(options.excludeSubagents ? ["sessions.is_subagent = false"] : []),
+    ];
+    const tokensSql = `
+      with ranked as (
+        select
+          sessions.source,
+          events.dedupe_key,
+          events.occurred_at,
+          events.input_tokens,
+          events.output_tokens,
+          events.cached_input_tokens,
+          events.reasoning_output_tokens,
+          events.total_tokens,
+          row_number() over (
+            partition by events.dedupe_key
+            order by
+              events.total_tokens desc,
+              case sessions.source
+                when 'codex-cli' then 1
+                when 'claude-cli' then 1
+                when 'codex-app' then 2
+                when 'claude-app' then 2
+                else 9
+              end,
+              events.occurred_at
+          ) as row_rank
+        from agent_recall.token_events events
+        join agent_recall.sessions sessions on sessions.session_key = events.session_key
+        ${tokenWhere.length > 0 ? `where ${tokenWhere.join(" and ")}` : ""}
+      )
+      select
+        source,
+        coalesce(sum(input_tokens), 0) as input_tokens,
+        coalesce(sum(output_tokens), 0) as output_tokens,
+        coalesce(sum(cached_input_tokens), 0) as cached_input_tokens,
+        coalesce(sum(reasoning_output_tokens), 0) as reasoning_output_tokens,
+        coalesce(sum(total_tokens), 0) as total_tokens
+      from ranked
+      where row_rank = 1
+      group by source
+    `;
+    const [sessionRows, messageRows, tokenRows] = await Promise.all([
+      this.database.query<{ source: SessionSource; session_count: number | string }>(
+        sessionsSql,
+        rangeValues,
+      ),
+      this.database.query<{ source: SessionSource; message_count: number | string }>(
+        messagesSql,
+        rangeValues,
+      ),
+      this.database.query<{
+        source: SessionSource;
+        input_tokens: number | string;
+        output_tokens: number | string;
+        cached_input_tokens: number | string;
+        reasoning_output_tokens: number | string;
+        total_tokens: number | string;
+      }>(tokensSql, rangeValues),
+    ]);
+    let effectiveTokenRows = tokenRows.rows;
+    if (range.since === null && effectiveTokenRows.length === 0) {
+      const fallback = await this.database.query<{
+        source: SessionSource;
+        input_tokens: number | string;
+        output_tokens: number | string;
+        cached_input_tokens: number | string;
+        reasoning_output_tokens: number | string;
+        total_tokens: number | string;
+      }>(
+        `
+          select
+            source,
+            coalesce(sum(input_tokens), 0) as input_tokens,
+            coalesce(sum(output_tokens), 0) as output_tokens,
+            coalesce(sum(cached_input_tokens), 0) as cached_input_tokens,
+            coalesce(sum(reasoning_output_tokens), 0) as reasoning_output_tokens,
+            coalesce(sum(total_tokens), 0) as total_tokens
+          from agent_recall.sessions sessions
+          ${options.excludeSubagents ? "where sessions.is_subagent = false" : ""}
+          group by source
+        `,
+      );
+      effectiveTokenRows = fallback.rows;
+    }
+
+    const summaries = new Map<SessionSource, SessionStatsSummary>();
+    const getSummary = (source: SessionSource) => {
+      const existing = summaries.get(source);
+      if (existing) return existing;
+      const created = emptyStatsSummary();
+      summaries.set(source, created);
+      return created;
+    };
+    for (const row of sessionRows.rows) getSummary(row.source).sessionCount = numberValue(row.session_count);
+    for (const row of messageRows.rows) getSummary(row.source).messageCount = numberValue(row.message_count);
+    for (const row of effectiveTokenRows) {
+      const summary = getSummary(row.source);
+      summary.inputTokens = numberValue(row.input_tokens);
+      summary.outputTokens = numberValue(row.output_tokens);
+      summary.cachedInputTokens = numberValue(row.cached_input_tokens);
+      summary.reasoningOutputTokens = numberValue(row.reasoning_output_tokens);
+      summary.totalTokens = numberValue(row.total_tokens);
+    }
+    const bySource = [...summaries.entries()]
+      .map(([source, summary]) => ({ source, ...summary }))
+      .filter((summary) => summary.sessionCount > 0 || summary.messageCount > 0 || summary.totalTokens > 0)
+      .sort((left, right) => left.source.localeCompare(right.source));
+    const total = bySource.reduce<SessionStatsSummary>(
+      (summary, source) => ({
+        sessionCount: summary.sessionCount + source.sessionCount,
+        messageCount: summary.messageCount + source.messageCount,
+        inputTokens: summary.inputTokens + source.inputTokens,
+        outputTokens: summary.outputTokens + source.outputTokens,
+        cachedInputTokens: summary.cachedInputTokens + source.cachedInputTokens,
+        reasoningOutputTokens: summary.reasoningOutputTokens + source.reasoningOutputTokens,
+        totalTokens: summary.totalTokens + source.totalTokens,
+      }),
+      emptyStatsSummary(),
+    );
+
+    const days = dailyRanges(now);
+    const dailyRows = await this.database.query<{
+      occurred_at: Date | string;
+      input_tokens: number | string;
+      output_tokens: number | string;
+      cached_input_tokens: number | string;
+      reasoning_output_tokens: number | string;
+      total_tokens: number | string;
+    }>(
+      `
+        with ranked as (
+          select
+            events.*,
+            row_number() over (
+              partition by events.dedupe_key
+              order by events.total_tokens desc, events.occurred_at
+            ) as row_rank
+          from agent_recall.token_events events
+          join agent_recall.sessions sessions on sessions.session_key = events.session_key
+          where events.occurred_at >= $1 and events.occurred_at <= $2
+            ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
+        )
+        select
+          occurred_at, input_tokens, output_tokens, cached_input_tokens,
+          reasoning_output_tokens, total_tokens
+        from ranked
+        where row_rank = 1
+      `,
+      [
+        new Date(days[0].dayStart).toISOString(),
+        new Date(now).toISOString(),
+      ],
+    );
+    const dailyTokenUsage = days.map<SessionDailyTokenUsage>((day) => {
+      const usage = dailyRows.rows
+        .filter((row) => {
+          const timestamp = timeValue(row.occurred_at);
+          return timestamp >= day.dayStart && timestamp < day.dayEndExclusive;
+        })
+        .reduce<TokenUsage>(
+          (sum, row) => ({
+            inputTokens: sum.inputTokens + numberValue(row.input_tokens),
+            outputTokens: sum.outputTokens + numberValue(row.output_tokens),
+            cachedInputTokens: sum.cachedInputTokens + numberValue(row.cached_input_tokens),
+            reasoningOutputTokens: sum.reasoningOutputTokens + numberValue(row.reasoning_output_tokens),
+            totalTokens: sum.totalTokens + numberValue(row.total_tokens),
+          }),
+          normalizedTokenUsage(),
+        );
+      return { ...day, ...usage };
+    });
+
+    return { total, bySource, dailyTokenUsage, range };
   }
 
   async searchSessions(options: SearchOptions = {}): Promise<SessionSearchResult[]> {
@@ -940,6 +1744,57 @@ export class PostgresSessionRepository {
       totalCount,
       hasMore: totalCount > sessions.length,
     };
+  }
+
+  async clearSearchIndex(): Promise<void> {
+    await this.database.transaction(async (client) => {
+      await client.query("delete from agent_recall.session_raw_events");
+      await client.query("delete from agent_recall.session_message_events");
+      await client.query("delete from agent_recall.session_turns");
+      await client.query("delete from agent_recall.token_events");
+      await client.query(`
+        update agent_recall.sessions
+        set file_mtime_ms = 0,
+          file_size = 0,
+          message_count = 0,
+          turn_count = 0,
+          input_tokens = 0,
+          output_tokens = 0,
+          cached_input_tokens = 0,
+          reasoning_output_tokens = 0,
+          total_tokens = 0,
+          original_title = '',
+          first_question = ''
+      `);
+    });
+  }
+
+  async deleteSessionsBySource(sources: readonly SessionSource[]): Promise<void> {
+    if (sources.length === 0) return;
+    await this.database.transaction(async (client) => {
+      await client.query(
+        "delete from agent_recall.sessions where source = any($1::text[])",
+        [[...sources]],
+      );
+      await client.query(`
+        delete from agent_recall.tags
+        where not exists (
+          select 1 from agent_recall.session_tags where session_tags.tag_id = tags.id
+        )
+      `);
+    });
+  }
+
+  async getSessionDeletionTarget(
+    sessionKey: string,
+  ): Promise<{ source: SessionSource; filePath: string } | null> {
+    const result = await this.database.query<{ source: SessionSource; file_path: string }>(
+      "select source, file_path from agent_recall.sessions where session_key = $1",
+      [sessionKey],
+    );
+    return result.rows[0]
+      ? { source: result.rows[0].source, filePath: result.rows[0].file_path }
+      : null;
   }
 
   private async addTagWithClient(

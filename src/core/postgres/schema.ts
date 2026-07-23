@@ -82,6 +82,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         PRIMARY KEY (session_key, event_index)
       );
 
+      CREATE TABLE agent_recall.session_message_events (
+        session_key text NOT NULL REFERENCES agent_recall.sessions(session_key) ON DELETE CASCADE,
+        message_index integer NOT NULL,
+        occurred_at timestamptz NOT NULL,
+        PRIMARY KEY (session_key, message_index)
+      );
+
       CREATE TABLE agent_recall.session_turns (
         id text PRIMARY KEY,
         session_key text NOT NULL REFERENCES agent_recall.sessions(session_key) ON DELETE CASCADE,
@@ -226,6 +233,8 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ON agent_recall.sessions (project_path);
       CREATE INDEX sessions_environment_source_idx
         ON agent_recall.sessions (environment_id, source);
+      CREATE INDEX session_message_events_time_idx
+        ON agent_recall.session_message_events (occurred_at);
       CREATE INDEX session_turns_session_idx
         ON agent_recall.session_turns (session_key, turn_index);
       CREATE INDEX session_turns_started_idx
