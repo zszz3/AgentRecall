@@ -58,7 +58,7 @@ describe("Codex chat router", () => {
     expect(captured.body).toMatchObject({ model: "model-a", service_tier: "priority" });
   });
 
-  test("advertises tool search for deferred MCP tools", async () => {
+  test("keeps scoped MCP tools eager for Chat Completions providers", async () => {
     const upstream = await startJsonUpstream(async () => ({}));
     const router = await startRouter(upstream.baseUrl);
 
@@ -70,7 +70,7 @@ describe("Codex chat router", () => {
       expect.objectContaining({
         slug: "deepseek-v4-flash",
         experimental_supported_tools: [],
-        supports_search_tool: true,
+        supports_search_tool: false,
       }),
     ]);
   });
@@ -136,6 +136,69 @@ describe("Codex chat router", () => {
         arguments: "{\"path\":\"README.md\"}",
       },
     ]);
+  });
+
+  test("sends eager Workflow MCP namespace tools directly to Chat providers", async () => {
+    let capturedBody: unknown;
+    const upstream = await startJsonUpstream(async (body) => {
+      capturedBody = body;
+      return {
+        id: "chatcmpl_workflow_create",
+        model: "deepseek-v4-flash",
+        choices: [{
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call_create",
+              type: "function",
+              function: {
+                name: "mcp__agent_recall__workflow_create",
+                arguments: "{\"workflowId\":\"wf_test\"}",
+              },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+      };
+    });
+    const router = await startRouter(upstream.baseUrl);
+
+    const response = await fetch(`${router.baseUrl}/codex-test/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "deepseek-v4-flash",
+        input: "Create the workflow",
+        tools: [{
+          type: "namespace",
+          name: "mcp__agent_recall",
+          tools: [{
+            type: "function",
+            name: "workflow_create",
+            description: "Create or update a workflow draft.",
+            parameters: { type: "object", properties: { workflowId: { type: "string" } } },
+          }],
+        }],
+      }),
+    });
+    const payload = await response.json();
+
+    expect(capturedBody).toMatchObject({
+      tools: [{
+        type: "function",
+        function: expect.objectContaining({ name: "mcp__agent_recall__workflow_create" }),
+      }],
+    });
+    expect(payload.output).toEqual([{
+      id: "fc_call_create",
+      type: "function_call",
+      status: "completed",
+      call_id: "call_create",
+      namespace: "mcp__agent_recall",
+      name: "workflow_create",
+      arguments: "{\"workflowId\":\"wf_test\"}",
+    }]);
   });
 
   test("converts deferred MCP tool search and discovered namespace tools", async () => {

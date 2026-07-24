@@ -183,7 +183,11 @@ function codexModelsPayload(models: AgentModelOption[]): unknown {
         input_modalities: ["text"],
         prefer_websockets: false,
         experimental_supported_tools: [],
-        supports_search_tool: true,
+        // Chat Completions providers cannot reliably participate in Codex's
+        // client-side tool_search round trip. Keep the scoped MCP tools eager
+        // so workflow_create/workflow_node_complete are sent to the model on
+        // the first request instead of depending on model-initiated discovery.
+        supports_search_tool: false,
         base_instructions: "",
       })),
   };
