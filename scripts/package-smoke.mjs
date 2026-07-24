@@ -51,6 +51,7 @@ try {
   }
   if (!installedRoot) throw new Error("Could not locate the package installed into the temporary npm prefix.");
   await access(path.join(installedRoot, "out", "main", "index.js"));
+  await access(path.join(installedRoot, "dist", "main", "index.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;

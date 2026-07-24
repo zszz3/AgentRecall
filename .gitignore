@@ -1,6 +1,9 @@
 node_modules/
 out/
-dist/
+dist/*
+!dist/main/
+dist/main/*
+!dist/main/index.js
 *.log
 .DS_Store
 *.sqlite
