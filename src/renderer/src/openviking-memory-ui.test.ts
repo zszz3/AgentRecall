@@ -50,6 +50,8 @@ describe("OpenViking directory memory UI", () => {
     expect(source).toContain("downloadedBytes");
     expect(source).toContain("totalBytes");
     expect(source).toContain("bytesPerSecond");
+    expect(source).toContain("installedBytes");
+    expect(source).toContain("runtimeInstalledSize");
     expect(source).toContain("/s");
     expect(source).toContain("window.setInterval");
     expect(source).toContain('&& action !== "start"');

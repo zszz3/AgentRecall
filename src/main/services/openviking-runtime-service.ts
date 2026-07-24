@@ -136,22 +136,38 @@ export class OpenVikingRuntimeService {
     if (this.transientStatus) return this.transientStatus;
     const manifest = await this.readActiveManifest();
     if (!manifest) return { state: "not-installed" };
+    let installedBytes: number | undefined;
+    try {
+      installedBytes = (await stat(this.runtimeArchivePath(manifest))).size;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     if (this.child?.exitCode === null) {
       const state = await this.readRuntimeState();
       return {
         state: "running",
         version: manifest.version,
+        ...(installedBytes === undefined ? {} : { installedBytes }),
         ...(state ? { port: state.port } : {}),
       };
     }
     const persisted = await this.readRuntimeState();
     if (persisted) {
       if (this.isProcessAlive(persisted.pid)) {
-        return { state: "running", version: manifest.version, port: persisted.port };
+        return {
+          state: "running",
+          version: manifest.version,
+          port: persisted.port,
+          ...(installedBytes === undefined ? {} : { installedBytes }),
+        };
       }
       await rm(this.runtimeStatePath(), { force: true });
     }
-    return { state: "stopped", version: manifest.version };
+    return {
+      state: "stopped",
+      version: manifest.version,
+      ...(installedBytes === undefined ? {} : { installedBytes }),
+    };
   }
 
   async install(
@@ -170,7 +186,7 @@ export class OpenVikingRuntimeService {
     reportProgress({ phase: "downloading-runtime" });
     const downloadsDir = this.resolveOwnedPath("downloads");
     const runtimeDir = this.resolveOwnedPath("runtime");
-    const archivePath = path.join(downloadsDir, `openviking-${manifest.version}-${manifest.platform}-${manifest.arch}.tar.gz`);
+    const archivePath = this.runtimeArchivePath(manifest);
     const partialPath = `${archivePath}.part`;
     const stagingPath = path.join(runtimeDir, `.staging-${manifest.version}-${randomUUID()}`);
     const targetPath = path.join(runtimeDir, manifest.version);
@@ -222,7 +238,11 @@ export class OpenVikingRuntimeService {
     const manifest = await this.readActiveManifest();
     if (!manifest) throw new Error("OpenViking runtime is not installed.");
     this.validateManifest(manifest);
-    this.transientStatus = { state: "starting", version: manifest.version };
+    this.transientStatus = {
+      state: "starting",
+      version: manifest.version,
+      ...(current.installedBytes === undefined ? {} : { installedBytes: current.installedBytes }),
+    };
     const runtimePath = this.resolveOwnedPath("runtime", manifest.version);
     const executable = resolveArchivePath(runtimePath, manifest.executablePath);
     await access(executable);
@@ -380,6 +400,13 @@ export class OpenVikingRuntimeService {
 
   private runtimeStatePath(): string {
     return this.resolveOwnedPath("runtime-state.json");
+  }
+
+  private runtimeArchivePath(manifest: OpenVikingRuntimeManifest): string {
+    return path.join(
+      this.resolveOwnedPath("downloads"),
+      `openviking-${manifest.version}-${manifest.platform}-${manifest.arch}.tar.gz`,
+    );
   }
 
   private resolveOwnedPath(...segments: string[]): string {

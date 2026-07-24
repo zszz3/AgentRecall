@@ -84,6 +84,9 @@ export function OpenVikingMemorySettings({
   const runtimeDownloadSpeed = runtimeProgress?.bytesPerSecond
     ? `${(runtimeProgress.bytesPerSecond / 1_000_000).toFixed(1)} MB/s`
     : null;
+  const runtimeInstalledSize = snapshot?.runtime.installedBytes === undefined
+    ? null
+    : `${(snapshot.runtime.installedBytes / 1_000_000).toFixed(1)} MB`;
   const modelInstalled = Boolean(snapshot?.model.installed);
   const controlsDisabled = !enabled || saving || action !== null;
 
@@ -119,10 +122,15 @@ export function OpenVikingMemorySettings({
           <span className="openviking-component-icon"><Box size={18} /></span>
           <div>
             <strong>OpenViking {snapshot?.runtime.version ?? "0.4.11"}</strong>
-            <span>{l(
-              "Managed runtime · about 260–320 MB download · no system Python required",
-              "托管运行时 · 下载约 260–320 MB · 不依赖系统 Python",
-            )}</span>
+            <span>{runtimeInstalledSize
+              ? l(
+                `Managed runtime · ${runtimeInstalledSize} downloaded · no system Python required`,
+                `托管运行时 · 已下载 ${runtimeInstalledSize} · 不依赖系统 Python`,
+              )
+              : l(
+                "Managed runtime · about 260–320 MB download · no system Python required",
+                "托管运行时 · 下载约 260–320 MB · 不依赖系统 Python",
+              )}</span>
             {runtimeState === "installing" ? (
               <div className="openviking-runtime-progress">
                 <div className="openviking-runtime-progress-meta">

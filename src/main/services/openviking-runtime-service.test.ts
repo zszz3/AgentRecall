@@ -111,6 +111,7 @@ describe("OpenVikingRuntimeService", () => {
     await expect(service.getStatus()).resolves.toMatchObject({
       state: "stopped",
       version: "0.4.11",
+      installedBytes: Buffer.byteLength("runtime archive"),
     });
 
     await service.start({

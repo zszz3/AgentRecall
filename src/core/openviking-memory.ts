@@ -60,6 +60,7 @@ export interface OpenVikingRuntimeStatus {
   state: OpenVikingRuntimeState;
   version?: string;
   port?: number;
+  installedBytes?: number;
   progress?: OpenVikingRuntimeInstallProgress;
   error?: string;
 }
