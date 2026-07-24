@@ -3,7 +3,7 @@ import type {
   ConfiguredAgent,
   RuntimeConversation,
   WorkflowAgentEvent,
-} from "../../automation/engine/shared/types";
+} from "../../automation/contracts";
 import { supportsConfiguredAgentConversation } from "../../automation/engine/main/platform/configured-agent-execution-service";
 import type {
   CreateTeamChatRoomRequest,

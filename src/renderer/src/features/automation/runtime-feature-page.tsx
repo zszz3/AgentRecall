@@ -4,7 +4,7 @@ import { createConfiguredAgent } from "../../../../automation/engine/renderer/sr
 import { AgentPage } from "../../../../automation/engine/renderer/src/pages/agent/AgentPage";
 import { RuntimePage } from "../../../../automation/engine/renderer/src/pages/runtime/RuntimePage";
 import { useRuntimeConfigManager } from "../../../../automation/engine/renderer/src/pages/runtime/hooks/useRuntimeConfigManager";
-import type { ConfiguredAgent } from "../../../../automation/engine/shared/types";
+import type { ConfiguredAgent } from "../../../../automation/contracts";
 import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
 import { AutomationPageState } from "./automation-page-state";

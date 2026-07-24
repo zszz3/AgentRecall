@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AppSnapshot } from "../../automation/engine/shared/types";
+import type { AppSnapshot } from "../../automation/contracts";
 import type { AgentHub } from "../../automation/engine/main/hub/agent-hub";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type { McpAgentManagementService } from "../../automation/engine/main/mcp/agent-management-service";

@@ -31,6 +31,7 @@ import type {
   ReviseWorkflowV2RunRequest,
   RunWorkflowRequest,
   RuntimeLocalConfigImportResult,
+  ResolveRuntimeApprovalRequest,
   SendWorkflowDraftReplyRequest,
   SendWorkflowNodeMessageRequest,
   StartWorkflowNodeRequest,
@@ -38,9 +39,8 @@ import type {
   SubmitWorkflowScriptInputRequest,
   UpdateWorkflowRequest,
   WorkflowOperationResult,
-} from "../automation/engine/shared/types";
-import type { ResolveRuntimeApprovalRequest } from "../automation/engine/shared/runtime-approval";
-import type { McpServerDefinition } from "../automation/engine/shared/mcp/types";
+  McpServerDefinition,
+} from "../automation/contracts";
 import type {
   McpAgentDiagnostic,
   McpInstallRequest,

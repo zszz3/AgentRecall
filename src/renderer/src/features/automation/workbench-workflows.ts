@@ -2,7 +2,7 @@ import type {
   WorkflowDraftState,
   WorkflowRunState,
   WorkflowStatus,
-} from "../../../../automation/engine/shared/types";
+} from "../../../../automation/contracts";
 
 export interface WorkbenchWorkflowItem {
   workflow: WorkflowDraftState;

@@ -16,6 +16,7 @@ import type {
   PauseWorkflowNodeRequest,
   RejectWorkflowNodeCompletionRequest,
   ResolveWorkflowV2InterventionRequest,
+  ResolveRuntimeApprovalRequest,
   ReviewWorkflowRequest,
   ReviseWorkflowV2RunRequest,
   RunWorkflowRequest,
@@ -25,9 +26,8 @@ import type {
   StopWorkflowRunRequest,
   SubmitWorkflowScriptInputRequest,
   UpdateWorkflowRequest,
-} from "../../automation/engine/shared/types";
-import type { ResolveRuntimeApprovalRequest } from "../../automation/engine/shared/runtime-approval";
-import type { McpServerDefinition } from "../../automation/engine/shared/mcp/types";
+  McpServerDefinition,
+} from "../../automation/contracts";
 import type { McpInstallRequest } from "../../automation/engine/shared/mcp-config";
 import { loadClaudeDefaultConfig, loadCodexDefaultConfig } from "../../automation/engine/main/channels/model-config";
 import { discoverMcpTools } from "../../automation/engine/main/mcp-client";

@@ -10,7 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { DEFAULT_SNAPSHOT } from "../../../../automation/engine/renderer/src/app/app-state";
-import type { AppSnapshot } from "../../../../automation/engine/shared/types";
+import type { AppSnapshot } from "../../../../automation/contracts";
 import type { AutomationApi } from "../../../../preload/automation";
 import type { AutomationHealth } from "../../../../shared/ipc/automation";
 

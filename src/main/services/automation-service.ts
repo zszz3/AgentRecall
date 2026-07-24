@@ -1,4 +1,4 @@
-import type { AppSnapshot } from "../../automation/engine/shared/types";
+import type { AppSnapshot } from "../../automation/contracts";
 import { AgentHub } from "../../automation/engine/main/hub/agent-hub";
 import { PostgresAppStore } from "../../automation/engine/main/hub/persisted/postgres-store";
 import {

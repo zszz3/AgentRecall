@@ -1,60 +1,16 @@
 import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
-import {
-  AppWindow,
-  Archive,
-  ArrowRightLeft,
-  Beaker,
-  BrainCircuit,
-  CalendarDays,
-  ChevronDown,
-  ChevronRight,
-  Clipboard,
-  Cloud,
-  Code2,
-  Copy,
-  Cpu,
-  Download,
-  Edit3,
-  Eye,
-  EyeOff,
-  Folder,
-  FolderOpen,
-  GitBranch,
-  KeyRound,
-  Laptop,
-  LayoutDashboard,
-  MessagesSquare,
-  MessageCircleMore,
-  PackageSearch,
-  Pin,
-  PinOff,
-  Play,
-  PlugZap,
-  RefreshCw,
-  Server,
-  Settings,
-  Sparkles,
-  Star,
-  Tag,
-  Terminal as TerminalIcon,
-  Trash2,
-  Workflow,
-  X,
-} from "lucide-react";
+import { GitBranch } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
 import type { AppUpdateStatus } from "../../core/app-update-types";
-import { formatRelativeTime } from "../../core/format-session";
 import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { RemoteHealthReport } from "../../core/remote-health";
-import type { RemoteSessionDetailSnapshot, RemoteSessionListItem } from "../../core/remote-session-sync";
+import type { RemoteSessionDetailSnapshot } from "../../core/remote-session-sync";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
-import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
-import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import type {
   EnvironmentUpsertInput,
   LiveSessionSnapshot,
@@ -73,11 +29,10 @@ import type {
   SessionTurnSummary,
   UsageQuotaSnapshot,
 } from "../../core/types";
-import { DATE_RANGE_OPTIONS, dateRangeLabel, dateRangeShortLabel, resolveDateRange, type DateRangeFilter } from "./date-range";
+import { resolveDateRange, type DateRangeFilter } from "./date-range";
 import {
   filterSessionsByLiveStatus,
   getLiveSessionState,
-  type LiveSessionState,
   type LiveStatusFilter,
 } from "./live-filter";
 import {
@@ -89,12 +44,6 @@ import {
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
-import { loadSkillsPanelData } from "./skills-load";
-import {
-  applyRemoteSessionDeletion,
-  applyRemoteSessionUpload,
-  EMPTY_REMOTE_SESSIONS_CACHE,
-} from "./remote-sessions-cache";
 import type {
   ActionStatus,
   ContextMenuState,
@@ -103,22 +52,28 @@ import type {
   RefreshFeedback,
   SettingsFeedback,
   SessionMigrationDialogState,
-  SkillsFeedback,
   StatsFeedback,
 } from "./app-types";
 import { ProviderPage } from "./features/providers/provider-page";
-import { DetailPanel } from "./features/session-detail/detail-panel";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
+import { AppNavigation, type AppPage } from "./components/app-navigation";
+import { ActionToast } from "./components/action-toast";
 import { SkillsPage } from "./features/skills/skills-page";
+import { useSkillsController } from "./features/skills/use-skills-controller";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
 import { RemoteSessionsDialog } from "./features/remote-sessions/remote-sessions-dialog";
+import { useRemoteSessionsCache } from "./features/remote-sessions/use-remote-sessions-cache";
 import { SupabaseSetupGuide } from "./components/supabase-setup-guide";
-import { useClampedContextMenuStyle } from "./context-menu-position";
 import { environmentTarget } from "./features/environments/environment-display";
-import { SearchBox } from "./features/search/search-box";
 import { resolveSearchScope } from "./features/search/search-scope";
-import { SessionRow } from "./features/search/session-row";
+import { SessionsPage } from "./features/sessions/sessions-page";
+import { SessionContextMenu } from "./features/sessions/session-context-menu";
+import { SessionDetails } from "./features/sessions/session-details";
+import {
+  migrationProgressMessage,
+  migrationStrategyLabel,
+} from "./features/sessions/session-migration-copy";
 import {
   SettingsDialog,
   type SettingsSection,
@@ -134,27 +89,14 @@ import { EvaluationFeaturePage } from "./features/automation/evaluation-feature-
 import { selectWorkbenchWorkflows } from "./features/automation/workbench-workflows";
 import { TeamChatPage } from "./features/team-chat/team-chat-page";
 import {
-  SOURCE_LABEL,
-  environmentBadgeLabel,
-  environmentBadgeTitle,
   isBranchTag,
   displayTagName,
   isRemoteSession,
-  liveStatusFilterLabel,
-  localizedLiveStateLabel,
-  projectSortTimestamp,
-  remoteOpenAppTitle,
-  remoteMigrationTitle,
-  remoteRevealTitle,
   resumeActionLabel,
   resumeRouteMessage,
-  sessionSortTimestamp,
-  sourceFilterLabel,
   sourceFilters,
-  sourceUiFamily,
   supportsMigrationSource,
   supportsResumeSource,
-  unsupportedMigrationTitle,
   WORKBENCH_SESSION_LIMIT,
   migrationAgentLabel,
   migrationTargetsForSession,
@@ -163,13 +105,6 @@ import {
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
-const BRAND_LOGO_URL = new URL("../../../assets/logo.png", import.meta.url).href;
-
-const LIVE_STATUS_FILTERS: Array<{ label: string; value: LiveStatusFilter }> = [
-  { label: "All", value: "all" },
-  { label: "Open", value: "open" },
-  { label: "Closed", value: "closed" },
-];
 
 const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeTclaude: false,
@@ -179,7 +114,6 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
 } satisfies MigrationTargetSettings;
 
 type ViewMode = "default" | "favorites" | "pinned" | "hidden";
-type AppPage = "workbench" | "sessions" | "team-chat" | "workflows" | "evaluation" | "runtimes" | "mcp" | "memories" | "skills" | "providers";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -227,24 +161,6 @@ const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
   sessions: [],
 };
 
-const EMPTY_SKILLS: InstalledSkillsSnapshot = {
-  skills: [],
-  roots: [],
-  scannedAt: 0,
-};
-
-const EMPTY_SKILL_SYNC: SkillSyncSnapshot = {
-  status: {
-    kind: "unconfigured",
-    setupSql: "",
-    remediation: "settings",
-    message: "Configure Supabase URL and anon key in Settings to sync skills.",
-  },
-  remoteSkillGroups: [],
-  bindings: [],
-  scannedAt: 0,
-};
-
 const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-recall-sidebar-sections";
 const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-recall-collapsed-project-groups";
 
@@ -269,6 +185,8 @@ export function App(): ReactElement {
   const automation = useAutomation();
   const [theme, setTheme] = useState<ThemeMode>(() => readInitialTheme());
   const [language, setLanguage] = useState<LanguageMode>(() => readInitialLanguage());
+  const skills = useSkillsController(language);
+  const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
   const pageNavigationGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const setPageNavigationGuard = useCallback((guard: (() => Promise<boolean>) | null): void => {
@@ -305,7 +223,6 @@ export function App(): ReactElement {
   const [customDateRange, setCustomDateRange] = useState<Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive"> | null>(null);
   const sortBy: SessionSortBy = "smart";
   const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
-  const [hoveredScopeFilter, setHoveredScopeFilter] = useState<string | null>(null);
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
   const [sessionTotalCount, setSessionTotalCount] = useState(0);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
@@ -349,14 +266,6 @@ export function App(): ReactElement {
   const [sshDialogOpen, setSshDialogOpen] = useState(false);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
-  const [remoteSessionsCache, setRemoteSessionsCache] = useState(EMPTY_REMOTE_SESSIONS_CACHE);
-  const [installedSkills, setInstalledSkills] = useState<InstalledSkillsSnapshot>(EMPTY_SKILLS);
-  const [skillSyncSnapshot, setSkillSyncSnapshot] = useState<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
-  const [skillsLoading, setSkillsLoading] = useState(false);
-  const [skillsFeedback, setSkillsFeedback] = useState<SkillsFeedback>(null);
-  const skillSyncSnapshotRef = useRef<SkillSyncSnapshot>(EMPTY_SKILL_SYNC);
-  const skillsLoadedRef = useRef(false);
-  const skillsLoadSeqRef = useRef(0);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [environmentHealthReports, setEnvironmentHealthReports] = useState<Record<string, RemoteHealthReport>>({});
@@ -372,9 +281,7 @@ export function App(): ReactElement {
   const metadataLoadSeqRef = useRef(0);
   const statsLoadSeqRef = useRef(0);
   const detailLoadSeqRef = useRef(0);
-  const remoteSessionsLoadSeqRef = useRef(0);
   const workbenchSessionsLoadSeqRef = useRef(0);
-  const remoteSessionsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const environmentIdRef = useRef(environmentId);
   const projectPathRef = useRef(projectPath);
@@ -547,255 +454,6 @@ export function App(): ReactElement {
     }
   }, [t]);
 
-  const loadSkills = useCallback(async (options: { refreshUsage?: boolean; silent?: boolean } = {}) => {
-    const requestId = ++skillsLoadSeqRef.current;
-    const refreshUsage = options.refreshUsage ?? false;
-    const silent = options.silent ?? false;
-    setSkillsLoading(true);
-    setSkillsFeedback(refreshUsage && !silent ? { kind: "running", message: t("Refreshing skill usage...", "正在刷新 Skill 使用统计...") } : null);
-    try {
-      let usageStatus = null;
-      let usageError: unknown = null;
-      if (refreshUsage) {
-        try {
-          usageStatus = await window.sessionSearch.refreshSkillUsage();
-        } catch (error) {
-          usageError = error;
-        }
-      }
-      const {
-        skillSyncSnapshot: nextSkillSync,
-        syncError,
-      } = await loadSkillsPanelData({
-        listSkills: () => window.sessionSearch.listSkills(),
-        getSkillSyncSnapshot: () => window.sessionSearch.getSkillSyncSnapshot(),
-        fallbackSyncSnapshot: skillSyncSnapshotRef.current,
-        onInstalledSkillsLoaded: (snapshot) => {
-          if (requestId !== skillsLoadSeqRef.current) return;
-          skillsLoadedRef.current = true;
-          setInstalledSkills(snapshot);
-          setSkillsLoading(false);
-        },
-      });
-      if (requestId !== skillsLoadSeqRef.current) return;
-      skillsLoadedRef.current = true;
-      setSkillSyncSnapshot(nextSkillSync);
-      if (usageError) {
-        if (!silent) setSkillsFeedback({ kind: "error", message: usageError instanceof Error ? usageError.message : String(usageError) });
-        return;
-      }
-      if (syncError) {
-        if (!silent) setSkillsFeedback({ kind: "error", message: syncError.message });
-        return;
-      }
-      if (usageStatus && !silent) {
-        const message = t(
-          `Skill usage refreshed. ${usageStatus.refreshed} changed, ${usageStatus.skipped} skipped.`,
-          `Skill 使用统计已刷新：${usageStatus.refreshed} 个文件有变化，${usageStatus.skipped} 个未变化。`,
-        );
-        setSkillsFeedback({ kind: "success", message });
-        window.setTimeout(() => {
-          setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-        }, 2200);
-      }
-    } catch (error) {
-      if (requestId !== skillsLoadSeqRef.current) return;
-      if (!refreshUsage) {
-        setInstalledSkills(EMPTY_SKILLS);
-        setSkillSyncSnapshot(EMPTY_SKILL_SYNC);
-      }
-      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      if (requestId === skillsLoadSeqRef.current) setSkillsLoading(false);
-    }
-  }, [t]);
-
-  const loadRemoteSessionsCache = useCallback((): Promise<void> => {
-    if (remoteSessionsLoadPromiseRef.current) return remoteSessionsLoadPromiseRef.current;
-    const requestId = ++remoteSessionsLoadSeqRef.current;
-    const request = (async () => {
-      setRemoteSessionsCache((current) => ({ ...current, loading: true, error: null }));
-      try {
-        const status = await window.sessionSearch.getRemoteSessionStatus();
-        const items = status.kind === "ready" ? await window.sessionSearch.listSessionSyncItems() : [];
-        if (requestId !== remoteSessionsLoadSeqRef.current) return;
-        setRemoteSessionsCache({ status, items, loading: false, error: null });
-      } catch (error) {
-        if (requestId !== remoteSessionsLoadSeqRef.current) return;
-        setRemoteSessionsCache((current) => ({
-          ...current,
-          loading: false,
-          error: error instanceof Error ? error.message : String(error),
-        }));
-      }
-    })();
-    remoteSessionsLoadPromiseRef.current = request;
-    void request.finally(() => {
-      if (remoteSessionsLoadPromiseRef.current === request) remoteSessionsLoadPromiseRef.current = null;
-    });
-    return request;
-  }, []);
-
-  const cacheRemoteSessionUpload = useCallback((localSessionKey: string, remote: RemoteSessionListItem) => {
-    setRemoteSessionsCache((current) => ({
-      ...current,
-      items: applyRemoteSessionUpload(current.items, localSessionKey, remote),
-    }));
-  }, []);
-
-  const cacheRemoteSessionDeletion = useCallback((remoteIds: string[]) => {
-    setRemoteSessionsCache((current) => ({
-      ...current,
-      items: applyRemoteSessionDeletion(current.items, remoteIds),
-    }));
-  }, []);
-
-  useEffect(() => {
-    skillSyncSnapshotRef.current = skillSyncSnapshot;
-  }, [skillSyncSnapshot]);
-
-  const deleteSkill = useCallback(async (skill: InstalledSkill) => {
-    setSkillsLoading(true);
-    setSkillsFeedback({ kind: "running", message: t(`Deleting ${skill.name}...`, `正在删除 ${skill.name}...`) });
-    try {
-      const result = await window.sessionSearch.deleteSkill(skill.path);
-      const [nextSkills, nextSkillSync] = await Promise.all([
-        window.sessionSearch.listSkills(),
-        window.sessionSearch.getSkillSyncSnapshot(),
-      ]);
-      setInstalledSkills(nextSkills);
-      setSkillSyncSnapshot(nextSkillSync);
-      const message = t(`Deleted ${result.skillName}.`, `已删除 ${result.skillName}。`);
-      setSkillsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 2200);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setSkillsFeedback({ kind: "error", message });
-      throw error;
-    } finally {
-      setSkillsLoading(false);
-    }
-  }, [t]);
-
-  const uploadSkillToSync = useCallback(
-    async (skill: InstalledSkill, force = false): Promise<SkillSyncUploadOutcome | null> => {
-      setSkillsLoading(true);
-      setSkillsFeedback({ kind: "running", message: t(`Uploading ${skill.name}...`, `正在上传 ${skill.name}...`) });
-      try {
-        const result = await window.sessionSearch.uploadSkillToSync(skill.path, force);
-        if (result.status === "needs-confirmation") {
-          setSkillsFeedback(null);
-          return result;
-        }
-        await loadSkills({ silent: true });
-        const message =
-          result.status === "skipped"
-            ? t(`${skill.name} is already the latest version (v${result.version}).`, `${skill.name} 已是最新版本（v${result.version}）。`)
-            : t(`Uploaded ${result.remoteSkill.name} v${result.version}.`, `已上传 ${result.remoteSkill.name} v${result.version}。`);
-        setSkillsFeedback({ kind: "success", message });
-        window.setTimeout(() => {
-          setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-        }, 2200);
-        return result;
-      } catch (error) {
-        setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-        return null;
-      } finally {
-        setSkillsLoading(false);
-      }
-    },
-    [loadSkills, t],
-  );
-
-  const uploadSelectedSkillsToSync = useCallback(
-    async (skills: InstalledSkill[]): Promise<{ remainingSkillIds: string[] }> => {
-      const uploadable = skills.filter((skill) => skill.source !== "codex-system");
-      if (uploadable.length === 0) {
-        setSkillsFeedback({ kind: "error", message: t("No selected non-system skills to upload.", "没有选中可上传的非系统 Skill。") });
-        return { remainingSkillIds: [] };
-      }
-
-      setSkillsLoading(true);
-      setSkillsFeedback({ kind: "running", message: t(`Uploading ${uploadable.length} selected skills...`, `正在上传 ${uploadable.length} 个选中 Skill...`) });
-      let uploaded = 0;
-      let skipped = 0;
-      let conflicts = 0;
-      let failed = 0;
-      const remainingSkillIds: string[] = [];
-      const failureDetails: string[] = [];
-      try {
-        for (const skill of uploadable) {
-          try {
-            const result = await window.sessionSearch.uploadSkillToSync(skill.path, false);
-            if (result.status === "uploaded") uploaded += 1;
-            else if (result.status === "skipped") skipped += 1;
-            else {
-              conflicts += 1;
-              remainingSkillIds.push(skill.id);
-              failureDetails.push(t(`${skill.name}: confirm before replacing the existing remote source.`, `${skill.name}：需要确认是否替换现有远程来源。`));
-            }
-          } catch (error) {
-            failed += 1;
-            remainingSkillIds.push(skill.id);
-            failureDetails.push(`${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
-        await loadSkills({ silent: true });
-        const summary = t(
-          `Selected skills upload finished: ${uploaded} uploaded, ${skipped} skipped, ${conflicts} need confirmation, ${failed} failed.`,
-          `选中 Skills 上传完成：${uploaded} 个已上传，${skipped} 个已跳过，${conflicts} 个需要确认，${failed} 个失败。`,
-        );
-        const shownFailures = failureDetails.slice(0, 3).join(" · ");
-        const hiddenFailureCount = Math.max(0, failureDetails.length - 3);
-        const message = shownFailures
-          ? `${summary} ${t("Details", "详情")}：${shownFailures}${hiddenFailureCount ? t(` · ${hiddenFailureCount} more`, ` · 另有 ${hiddenFailureCount} 个`) : ""}`
-          : summary;
-        setSkillsFeedback({ kind: failed > 0 || conflicts > 0 ? "error" : "success", message });
-        window.setTimeout(() => {
-          setSkillsFeedback((current) => (current?.message === message ? null : current));
-        }, 4200);
-        return { remainingSkillIds };
-      } finally {
-        setSkillsLoading(false);
-      }
-    },
-    [loadSkills, t],
-  );
-
-  const installSyncedSkill = useCallback(async (remoteSkillId: string) => {
-    setSkillsLoading(true);
-    setSkillsFeedback({ kind: "running", message: t("Installing remote skill...", "正在安装远程 Skill...") });
-    try {
-      const result = await window.sessionSearch.installSyncedSkill(remoteSkillId);
-      await loadSkills({ silent: true });
-      const verb = result.overwritten ? t("Updated", "已更新") : t("Installed", "已安装");
-      const message = `${verb} ${result.remoteSkill.name} v${result.remoteSkill.version}.`;
-      setSkillsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
-        setSkillsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current));
-      }, 2200);
-    } catch (error) {
-      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setSkillsLoading(false);
-    }
-  }, [loadSkills, t]);
-
-  const fetchSyncedSkillVersion = useCallback((remoteSkillId: string): Promise<RemoteSkill> => {
-    return window.sessionSearch.getSyncedSkillVersion(remoteSkillId);
-  }, []);
-
-  const copySkillSyncSetupSql = useCallback(async () => {
-    try {
-      await window.sessionSearch.copySkillSyncSetupSql();
-      setSkillsFeedback({ kind: "success", message: t("Supabase setup SQL copied.", "Supabase 初始化 SQL 已复制。") });
-    } catch (error) {
-      setSkillsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }, [t]);
-
   const refreshLiveSessions = useCallback(async () => {
     try {
       setLiveSessions(await window.sessionSearch.getLiveSessions());
@@ -835,14 +493,12 @@ export function App(): ReactElement {
   }, [loadQuotas]);
 
   useEffect(() => {
-    void loadRemoteSessionsCache();
-  }, [loadRemoteSessionsCache]);
+    void remoteSessions.load();
+  }, [remoteSessions.load]);
 
   useEffect(() => {
-    if (activePage === "skills") {
-      if (!skillsLoadedRef.current) void loadSkills({ silent: true });
-    }
-  }, [activePage, loadSkills]);
+    if (activePage === "skills") skills.ensureLoaded();
+  }, [activePage, skills.ensureLoaded]);
 
   useEffect(() => {
     void loadWorkbenchSessions();
@@ -861,7 +517,7 @@ export function App(): ReactElement {
       if (enabled) await window.sessionSearch.installSkillUsageHook();
       else await window.sessionSearch.uninstallSkillUsageHook();
       setSkillHookInstalled(await window.sessionSearch.getSkillUsageHookStatus());
-      if (activePage === "skills") void loadSkills({ refreshUsage: true, silent: true });
+      if (activePage === "skills") void skills.load({ refreshUsage: true, silent: true });
       const message = enabled ? t("Skill usage tracking on.", "已开启 Skill 使用统计。") : t("Skill usage tracking off.", "已关闭 Skill 使用统计。");
       setSettingsFeedback({ kind: "success", message });
       window.setTimeout(() => setSettingsFeedback((current) => (current?.kind === "success" && current.message === message ? null : current)), 1600);
@@ -870,7 +526,7 @@ export function App(): ReactElement {
     } finally {
       setSkillHookBusy(false);
     }
-  }, [activePage, loadSkills, t]);
+  }, [activePage, skills.load, t]);
 
   const toggleSessionSyncHook = useCallback(async (enabled: boolean) => {
     setSessionHookBusy(true);
@@ -1790,66 +1446,19 @@ export function App(): ReactElement {
   return (
     <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
-      <aside className="app-navigation">
-        <button className="app-navigation-brand" onClick={() => void navigateToPage("workbench")} aria-label="AgentRecall">
-          <span className="app-navigation-brand-mark" aria-hidden="true">
-            <svg viewBox="75 240 280 280"><image href={BRAND_LOGO_URL} width="1800" height="796" /></svg>
-          </span>
-          <strong>AgentRecall</strong>
-        </button>
-        <nav aria-label={t("Main navigation", "主导航")}>
-          <button data-page="workbench" className={activePage === "workbench" ? "active" : ""} onClick={() => void navigateToPage("workbench")}>
-            <LayoutDashboard size={18} /><span>{t("Workbench", "工作台")}</span>
-          </button>
-          <button data-page="sessions" className={activePage === "sessions" ? "active" : ""} onClick={() => void navigateToPage("sessions")}>
-            <MessagesSquare size={18} /><span>Session</span>
-          </button>
-          <button data-page="team-chat" className={activePage === "team-chat" ? "active" : ""} onClick={() => void navigateToPage("team-chat")}>
-            <MessageCircleMore size={18} /><span>Chat</span>
-          </button>
-          <button data-page="workflows" className={activePage === "workflows" ? "active" : ""} onClick={() => void navigateToPage("workflows")}>
-            <Workflow size={18} /><span>Workflow</span>
-          </button>
-          <button data-page="evaluation" className={activePage === "evaluation" ? "active" : ""} onClick={() => void navigateToPage("evaluation")}>
-            <Beaker size={18} /><span>Eval</span>
-          </button>
-          <button data-page="runtimes" className={activePage === "runtimes" ? "active" : ""} onClick={() => void navigateToPage("runtimes")}>
-            <Cpu size={18} /><span>Runtime</span>
-          </button>
-          <button data-page="mcp" className={activePage === "mcp" ? "active" : ""} onClick={() => void navigateToPage("mcp")}>
-            <PlugZap size={18} /><span>MCP</span>
-          </button>
-          <button data-page="memories" className={activePage === "memories" ? "active" : ""} onClick={() => void navigateToPage("memories")}>
-            <BrainCircuit size={18} /><span>Memory</span>
-          </button>
-          <button data-page="skills" className={activePage === "skills" ? "active" : ""} onClick={() => void navigateToPage("skills")}>
-            <PackageSearch size={18} /><span>Skills</span>
-          </button>
-          <button data-page="providers" className={activePage === "providers" ? "active" : ""} onClick={() => void navigateToPage("providers")}>
-            <KeyRound size={18} /><span>Provider</span>
-          </button>
-        </nav>
-        <button
-          className={`app-navigation-refresh ${indexStatus?.running ? "is-running" : ""} ${indexStatus?.error ? "error" : ""}`}
-          onClick={() => void refreshNow()}
-          disabled={indexStatus?.running}
-          title={indexStatus?.error
-            ? t("Index update failed. Click to retry.", "索引更新失败，点击重试。")
-            : indexStatus?.lastIndexedAt
-              ? `${t("Refresh index", "刷新索引")} · ${formatRelativeTime(indexStatus.lastIndexedAt)}`
-              : t("Refresh index", "刷新索引")}
-          aria-label={indexStatus?.running ? t("Refreshing index", "正在刷新索引") : t("Refresh index", "刷新索引")}
-        >
-          <RefreshCw size={15} />
-        </button>
-        <button
-          className={`app-navigation-settings ${settingsOpen ? "active" : ""}`}
-          onClick={() => { setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal"); setSettingsOpen(true); }}
-        >
-          <Settings size={18} /><span>{t("Settings", "设置")}</span>
-          {shouldSignalAppUpdate ? <i aria-label={t("Update available", "有新版本可用")} /> : null}
-        </button>
-      </aside>
+      <AppNavigation
+        activePage={activePage}
+        indexStatus={indexStatus}
+        settingsOpen={settingsOpen}
+        signalUpdate={shouldSignalAppUpdate}
+        language={language}
+        onNavigate={(page) => void navigateToPage(page)}
+        onRefresh={() => void refreshNow()}
+        onOpenSettings={() => {
+          setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
+          setSettingsOpen(true);
+        }}
+      />
 
       <section className="app-workspace">
         <div className="app-page-host">
@@ -1912,331 +1521,109 @@ export function App(): ReactElement {
           ) : null}
 
           {activePage === "sessions" ? (
-            <div className="sessions-page" data-page="sessions">
-              <header className="app-page-head sessions-page-head">
-                <div>
-                  <h2>Session</h2>
-                  <p>{t("Search, filter, and continue local or remote Agent sessions.", "搜索、筛选并继续本地或远程 Agent 会话。")}</p>
-                </div>
-                <button
-                  type="button"
-                  className={`sessions-page-refresh ${indexStatus?.running ? "is-running" : ""}`}
-                  onClick={() => void refreshNow()}
-                  disabled={indexStatus?.running}
-                  title={indexStatus?.lastIndexedAt
-                    ? `${t("Update index", "更新索引")} · ${formatRelativeTime(indexStatus.lastIndexedAt)}`
-                    : t("Update index", "更新索引")}
-                  aria-label={indexStatus?.running ? t("Updating index", "正在更新索引") : t("Update index", "更新索引")}
-                >
-                  <RefreshCw size={14} />
-                  <span>{indexStatus?.running ? t("Updating...", "更新中...") : t("Update index", "更新索引")}</span>
-                </button>
-              </header>
-              <section className="sidebar">
-                <div className="session-sidebar-title"><strong>{t("Session scope", "会话范围")}</strong><span>{sessionTotalCount}</span></div>
-        <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
-        {sidebarSections.environments ? (
-          <nav className="sidebar-tree">
-            <button
-              className={`tree-row tree-root ${environmentId === "all" && !projectPath && !tag ? "active" : ""}`}
-              onClick={() => { selectEnvironment("all"); clearProjectFilter(); setTag(undefined); }}
-            >
-              <span>{t("All Sessions", "全部会话")}</span>
-            </button>
-            {sidebarTree.map((group) => {
-              const groupId = group.projects[0]?.environmentId ?? "unknown";
-              const envCollapsed = collapsedProjectGroups.has(groupId);
-              const envActive = environmentId === groupId && !projectPath && !tag;
-              return (
-                <div key={groupId} className="tree-group">
-                  <div className="tree-row tree-env-row">
-                    <button
-                      className="tree-chevron"
-                      onClick={() => toggleProjectGroup(groupId)}
-                      aria-expanded={!envCollapsed}
-                      aria-label={envCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
-                    >
-                      {envCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                    </button>
-                    <button
-                      className={`tree-label ${envActive ? "active" : ""}`}
-                      onClick={() => { selectEnvironment(groupId); clearProjectFilter(); setTag(undefined); }}
-                      title={group.environment ? environmentTarget(group.environment, language) : t("Unknown", "未知")}
-                    >
-                      {group.environment?.kind === "local" ? <Laptop size={13} /> : <Server size={13} />}
-                      <span>{group.environment?.label ?? t("Unknown", "未知")}</span>
-                      <em className="tree-count">{group.projects.length}</em>
-                    </button>
-                  </div>
-                  {!envCollapsed && group.projects.map((project) => {
-                    const projectKey = `${project.environmentId}:${project.path}`;
-                    const projExpanded = collapsedTreeProjects.has(projectKey);
-                    const projCollapsed = !projExpanded;
-                    const projActive = projectPath === project.path && projectEnvironmentId === project.environmentId && !tag;
-                    return (
-                      <div key={projectKey} className="tree-group">
-                        <div className="tree-row tree-proj-row">
-                          {project.tags.length > 0 ? (
-                            <button
-                              className="tree-chevron"
-                              onClick={() => toggleTreeProject(projectKey)}
-                              aria-expanded={projExpanded}
-                              aria-label={projCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
-                            >
-                              {projCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                            </button>
-                          ) : (
-                            <span className="tree-chevron-spacer" />
-                          )}
-                          <button
-                            className={`tree-label ${projActive ? "active" : ""}`}
-                            onClick={() => {
-                              setProjectPath(project.path);
-                              setProjectEnvironmentId(project.environmentId);
-                              projectPathRef.current = project.path;
-                              projectEnvironmentIdRef.current = project.environmentId;
-                              setTag(undefined);
-                            }}
-                            title={project.path}
-                          >
-                            <Folder size={13} />
-                            <span>{project.label}</span>
-                            <em>{formatRelativeTime(projectSortTimestamp(project))}</em>
-                          </button>
-                        </div>
-                        {!projCollapsed && project.tags.map((tagName) => (
-                          <div
-                            key={tagName}
-                            className={`tree-row tree-tag-row ${tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
-                          >
-                            <button
-                              className="tree-label"
-                              onClick={() => {
-                                if (tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId) {
-                                  setTag(undefined);
-                                } else {
-                                  setTag(tagName);
-                                  setProjectPath(project.path);
-                                  setProjectEnvironmentId(project.environmentId);
-                                  projectPathRef.current = project.path;
-                                  projectEnvironmentIdRef.current = project.environmentId;
-                                }
-                              }}
-                              title={t(`Filter by ${displayTagName(tagName)}`, `按 ${displayTagName(tagName)} 过滤`)}
-                            >
-                              {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
-                              <span>{displayTagName(tagName)}</span>
-                            </button>
-                            <button
-                              className="tag-delete"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setDeleteTagName(tagName);
-                              }}
-                              title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                              aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </nav>
-        ) : null}
-
-        <SidebarSectionHeader title={t("Sources", "来源")} expanded={sidebarSections.sources} onToggle={() => toggleSidebarSectionById("sources")} />
-        {sidebarSections.sources ? (
-          <nav className="nav-group">
-            {visibleSourceFilters.map((item) => (
-              <button key={item.label} className={source === item.value ? "active" : ""} onClick={() => setSource(item.value)}>
-                {sourceFilterLabel(item, language)}
-              </button>
-            ))}
-          </nav>
-        ) : null}
-
-        <SidebarSectionHeader title={t("Views", "视图")} expanded={sidebarSections.views} onToggle={() => toggleSidebarSectionById("views")} />
-        {sidebarSections.views ? (
-          <nav className="nav-group">
-            <button className={visibility === "default" ? "active" : ""} onClick={() => setVisibility("default")}>
-              {t("All", "全部")}
-            </button>
-            <button className={visibility === "favorites" ? "active" : ""} onClick={() => setVisibility("favorites")}>
-              <Star size={14} />
-              {t("Favorites", "收藏")}
-            </button>
-            <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
-              <Pin size={14} />
-              {t("Pinned", "置顶")}
-            </button>
-            <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
-              <EyeOff size={14} />
-              {t("Hidden", "隐藏")}
-            </button>
-          </nav>
-        ) : null}
-      </section>
-
-      <section className="content">
-        <header className="toolbar">
-          <SearchBox
-            platform={RUNTIME_PLATFORM}
-            ref={searchRef}
-            placeholder={searchPlaceholder}
-            recentLabel={t("Recent searches", "最近搜索")}
-            clearRecentLabel={t("Clear", "清空")}
-            deleteRecentLabel={t("Delete recent search", "删除最近搜索")}
-            submittedValue={query}
-            onSearch={setQuery}
-          />
-          <div className="toolbar-filters">
-            {activeScopeFilters.length ? (
-              <div className="scope-filter" data-count={activeScopeFilters.length} aria-label={t("Active search scope", "当前搜索范围")}>
-                {activeScopeFilters.map((filter) => (
-                  <button
-                    key={filter.key}
-                    className="scope-filter-chip"
-                    onClick={filter.onClear}
-                    onMouseEnter={() => setHoveredScopeFilter(filter.key)}
-                    onMouseLeave={() => setHoveredScopeFilter((current) => (current === filter.key ? null : current))}
-                    aria-describedby={hoveredScopeFilter === filter.key ? "scope-filter-tooltip" : undefined}
-                  >
-                    <span className="scope-filter-label">
-                      {filter.prefix ? <span className="scope-filter-prefix">{filter.prefix}</span> : null}
-                      <span>{filter.label}</span>
-                    </span>
-                    <span className="scope-filter-clear" aria-hidden="true">×</span>
-                    {hoveredScopeFilter === filter.key ? (
-                      <span id="scope-filter-tooltip" className="scope-filter-tooltip" role="tooltip">
-                        {filter.title}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <div className="live-filter" role="group" aria-label="Live session status">
-              {LIVE_STATUS_FILTERS.map((option) => (
-                <button
-                  key={option.value}
-                  className={liveStatus === option.value ? "active" : ""}
-                  onClick={() => setLiveStatus(option.value)}
-                >
-                  {liveStatusFilterLabel(option.value, language)}
-                </button>
-              ))}
-            </div>
-            <div className="date-filter" role="group" aria-label={t("Session time range", "会话时间范围")}>
-              <CalendarDays size={14} aria-hidden="true" />
-              {customDateRange ? (
-                <button
-                  className="date-filter-custom active"
-                  onClick={() => setCustomDateRange(null)}
-                  title={t("Clear exact day filter", "清除单日筛选")}
-                  aria-label={t("Clear exact day filter", "清除单日筛选")}
-                >
-                  <span>{new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", { month: "short", day: "numeric" }).format(customDateRange.dayStart)}</span>
-                  <b aria-hidden="true">×</b>
-                </button>
-              ) : null}
-              {DATE_RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={!customDateRange && dateRange === option.value ? "active" : ""}
-                  onClick={() => {
-                    setCustomDateRange(null);
-                    setDateRange(option.value);
-                  }}
-                  title={dateRangeLabel(option.value, language)}
-                  aria-label={dateRangeLabel(option.value, language)}
-                >
-                  {dateRangeShortLabel(option.value, language)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="top-actions">
-            <button
-              className={`icon-button toolbar-icon-button ${aiAssistantOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setRemoteSessionsOpen(false);
-                setAiAssistantOpen(true);
+            <SessionsPage
+              model={{
+                language,
+                indexStatus,
+                sessionTotalCount,
+                sidebarSections,
+                environmentId,
+                projectPath,
+                projectEnvironmentId,
+                tag,
+                sidebarTree,
+                collapsedProjectGroups,
+                expandedTreeProjects: collapsedTreeProjects,
+                source,
+                sourceFilters: visibleSourceFilters,
+                visibility,
+                searchRef,
+                searchPlaceholder,
+                query,
+                activeScopeFilters,
+                liveStatus,
+                customDateRange,
+                dateRange,
+                aiAssistantOpen,
+                remoteSessionsOpen,
+                selected,
+                sessions: displayedResults,
+                hasMoreSessions,
+                pageSize: SESSION_PAGE_SIZE,
+                liveSessionKeys,
+                liveDetectionFailed,
               }}
-              title={t("AI session finder", "AI 找会话")}
-              aria-label={t("AI session finder", "AI 找会话")}
-            >
-              <Sparkles size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${remoteSessionsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setRemoteSessionsOpen(true);
+              actions={{
+                refresh: () => void refreshNow(),
+                toggleSidebarSection: toggleSidebarSectionById,
+                selectAllSessions: () => {
+                  selectEnvironment("all");
+                  clearProjectFilter();
+                  setTag(undefined);
+                },
+                toggleEnvironment: toggleProjectGroup,
+                selectEnvironment: (nextEnvironmentId) => {
+                  selectEnvironment(nextEnvironmentId);
+                  clearProjectFilter();
+                  setTag(undefined);
+                },
+                toggleProject: toggleTreeProject,
+                selectProject,
+                toggleProjectTag: (project, tagName) => {
+                  const isActive = tag === tagName
+                    && projectPath === project.path
+                    && projectEnvironmentId === project.environmentId;
+                  if (isActive) {
+                    setTag(undefined);
+                    return;
+                  }
+                  selectProject(project);
+                  setTag(tagName);
+                },
+                deleteTag: setDeleteTagName,
+                setSource,
+                setVisibility,
+                search: setQuery,
+                setLiveStatus,
+                clearCustomDateRange: () => setCustomDateRange(null),
+                setDateRange: (nextRange) => {
+                  setCustomDateRange(null);
+                  setDateRange(nextRange);
+                },
+                openAiAssistant: () => {
+                  setSettingsOpen(false);
+                  setRemoteSessionsOpen(false);
+                  setAiAssistantOpen(true);
+                },
+                openRemoteSessions: () => {
+                  setSettingsOpen(false);
+                  setRemoteSessionsOpen(true);
+                },
+                selectSession: handleRowSelect,
+                openSession: handleRowOpen,
+                openMatch: handleRowOpenMatch,
+                renameSession: handleRowRename,
+                toggleFavorite: handleRowFavorite,
+                openContextMenu: handleRowContextMenu,
+                loadMore: () => setSessionLimit((current) => current + SESSION_PAGE_SIZE),
               }}
-              title={t("Remote sessions", "远程会话")}
-              aria-label={t("Remote sessions", "远程会话")}
-            >
-              <Cloud size={15} />
-            </button>
-          </div>
-        </header>
-
-        <div className="result-count">
-          <span>
-            {t(`${sessionTotalCount} sessions`, `${sessionTotalCount} 个会话`)}
-          </span>
-          {selected ? <span className="selected-path">{selected.projectPath || selected.rawId}</span> : null}
-        </div>
-
-        <div className="results">
-          {displayedResults.map((session) => (
-            <SessionRow
-              key={session.sessionKey}
-              session={session}
-              selected={selected?.sessionKey === session.sessionKey}
-              liveState={getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
-              language={language}
-              onOpenMatch={handleRowOpenMatch}
-              onSelect={handleRowSelect}
-              onOpen={handleRowOpen}
-              onRename={handleRowRename}
-              onFavorite={handleRowFavorite}
-              onContextMenu={handleRowContextMenu}
             />
-          ))}
-          {displayedResults.length === 0 && !hasMoreSessions ? <div className="empty">{t("No sessions found.", "没有找到会话。")}</div> : null}
-          {hasMoreSessions ? (
-            <button className="load-more-sessions" onClick={() => setSessionLimit((current) => current + SESSION_PAGE_SIZE)}>
-              <ChevronDown size={14} />
-              {t(`Load ${SESSION_PAGE_SIZE} more`, `再加载 ${SESSION_PAGE_SIZE} 个`)}
-            </button>
           ) : null}
-        </div>
-      </section>
-            </div>
-          ) : null}
-
           {activePage === "skills" ? (
             <SkillsPage
-              snapshot={installedSkills}
-              syncSnapshot={skillSyncSnapshot}
-              loading={skillsLoading}
-              feedback={skillsFeedback}
+              snapshot={skills.snapshot}
+              syncSnapshot={skills.syncSnapshot}
+              loading={skills.loading}
+              feedback={skills.feedback}
               language={language}
               revealLabel={FILE_MANAGER_LABEL}
-              onRefresh={() => void loadSkills({ refreshUsage: true })}
-              onUpload={(skill, force) => uploadSkillToSync(skill, force)}
-              onUploadSelected={(skills) => uploadSelectedSkillsToSync(skills)}
-              onInstallRemote={(remoteSkillId) => installSyncedSkill(remoteSkillId)}
-              onFetchVersion={(remoteSkillId) => fetchSyncedSkillVersion(remoteSkillId)}
-              onRefreshRemote={() => void loadSkills({ silent: true })}
-              onCopySetupSql={() => void copySkillSyncSetupSql()}
+              onRefresh={() => void skills.load({ refreshUsage: true })}
+              onUpload={(skill, force) => skills.upload(skill, force)}
+              onUploadSelected={(selectedSkills) => skills.uploadSelected(selectedSkills)}
+              onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
+              onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
+              onRefreshRemote={() => void skills.load({ silent: true })}
+              onCopySetupSql={() => void skills.copySetupSql()}
               onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
               onCopyPath={(skillPath) =>
                 void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
@@ -2244,7 +1631,7 @@ export function App(): ReactElement {
               onReveal={(skillPath) =>
                 void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
               }
-              onDelete={(skill) => deleteSkill(skill)}
+              onDelete={(skill) => skills.deleteSkill(skill)}
             />
           ) : null}
 
@@ -2277,122 +1664,70 @@ export function App(): ReactElement {
         </div>
       </section>
 
-      {detail ? (
-        <DetailPanel
-          session={detail}
-          turns={detailTurns}
-          turnsLoading={turnsLoading}
-          matchedTurnId={matchedTurnId}
-          onLoadTurn={(turnId) => window.sessionSearch.getSessionTurn(detail.sessionKey, turnId)}
-          messages={[]}
-          matchedContextMessages={[]}
-          matchedMessageIndex={null}
-          traceEvents={[]}
-          loading={false}
-          actionStatus={actionStatus}
-          query={query}
-          liveState={getLiveSessionState(detail, liveSessionKeys, liveDetectionFailed)}
-          language={language}
-          messagePageSize={0}
-          olderMessageCount={0}
-          revealLabel={FILE_MANAGER_LABEL}
-          showItermAction={IS_MAC && detail.source !== "codex-app"}
-          onClose={closeDetail}
-          onShowMore={() => undefined}
-          onRename={() => beginRename(detail)}
-          onAddTag={() => beginAddTag(detail)}
-          onRemoveTag={(tagName) => void removeTag(detail, tagName)}
-          onFavorite={() => void toggleFavorite(detail)}
-          onSummarize={() => void summarizeDetail(detail)}
-          summarizing={summarizing}
-          canResume={supportsResumeSource(detail.source)}
-          canMigrate={!isRemoteSession(detail) && supportsMigrationSource(detail.source)}
-          migrationTitle={
-            isRemoteSession(detail)
-              ? remoteMigrationTitle(language)
-              : supportsMigrationSource(detail.source)
-                ? t("Migrate session to…", "迁移会话到…")
-                : unsupportedMigrationTitle(language)
-          }
-          onResume={() =>
-            void runAction(resumeActionLabel(detail.source, language), () => window.sessionSearch.resumeSession(detail.sessionKey), (result) => resumeRouteMessage(result, language))
-          }
-          onResumeIterm={() =>
-            void runAction(t("Opening iTerm", "正在打开 iTerm"), () => window.sessionSearch.resumeSessionInIterm(detail.sessionKey), t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"))
-          }
-          onMigrate={() => beginMigrate(detail)}
-          onUploadRemote={() => void uploadRemoteSession(detail)}
-          remoteUploadDisabled={detail.source === "zcode-cli" || detail.environmentKind === "wsl"}
-          onCopyResume={() =>
-            void runAction(t("Copying resume command", "正在复制 Resume 命令"), () => window.sessionSearch.copyResumeCommand(detail.sessionKey), t("Resume command copied.", "Resume 命令已复制。"))
-          }
-          onCopyMarkdown={() =>
-            void runAction(t("Copying markdown", "正在复制 Markdown"), () => window.sessionSearch.copyMarkdown(detail.sessionKey), t("Markdown copied.", "Markdown 已复制。"))
-          }
-          onExportMarkdown={() => void exportMarkdown(detail.sessionKey)}
-          onExportJson={() => void exportJson(detail.sessionKey)}
-          onCopyPlain={() =>
-            void runAction(t("Copying plain text", "正在复制纯文本"), () => window.sessionSearch.copyPlainText(detail.sessionKey), t("Plain text copied.", "纯文本已复制。"))
-          }
-          onDelete={() => requestDeleteSession(detail)}
-          onReveal={() =>
-            void runAction(
-              `Opening ${FILE_MANAGER_LABEL}`,
-              () => window.sessionSearch.revealSession(detail.sessionKey),
-              `${FILE_MANAGER_LABEL} opened.`,
-            )
-          }
-        />
-      ) : null}
-
-      {remoteDetail ? (
-        <DetailPanel
-          session={remoteDetail.snapshot.session}
-          turns={null}
-          turnsLoading={false}
-          matchedTurnId={null}
-          onLoadTurn={async () => null}
-          messages={remoteDetail.snapshot.messages}
-          matchedContextMessages={[]}
-          matchedMessageIndex={null}
-          traceEvents={remoteDetail.snapshot.traceEvents}
-          loading={false}
-          actionStatus={null}
-          query={remoteDetail.query}
-          liveState="closed"
-          language={language}
-          messagePageSize={0}
-          olderMessageCount={0}
-          revealLabel={FILE_MANAGER_LABEL}
-          showItermAction={false}
-          backdropClassName="remote-detail-backdrop"
-          onClose={closeRemoteDetail}
-          onShowMore={() => undefined}
-          onRename={() => undefined}
-          onAddTag={() => undefined}
-          onRemoveTag={() => undefined}
-          onFavorite={() => undefined}
-          onSummarize={() => undefined}
-          summarizing={false}
-          canResume={false}
-          canMigrate={false}
-          migrationTitle={t("Use Restore from the remote session list.", "请从远程会话列表点击恢复。")}
-          onResume={() => undefined}
-          onResumeIterm={() => undefined}
-          onMigrate={() => undefined}
-          onCopyResume={() => undefined}
-          onCopyMarkdown={() => undefined}
-          onExportMarkdown={() => undefined}
-          onExportJson={() => undefined}
-          onCopyPlain={() => undefined}
-          onDelete={() => undefined}
-          onReveal={() => undefined}
-          readOnly
-        />
-      ) : null}
-
+      <SessionDetails
+        detail={detail}
+        remoteDetail={remoteDetail}
+        turns={detailTurns}
+        turnsLoading={turnsLoading}
+        matchedTurnId={matchedTurnId}
+        actionStatus={actionStatus}
+        query={query}
+        liveState={detail
+          ? getLiveSessionState(detail, liveSessionKeys, liveDetectionFailed)
+          : "closed"}
+        language={language}
+        revealLabel={FILE_MANAGER_LABEL}
+        showItermAction={IS_MAC}
+        summarizing={summarizing}
+        actions={{
+          loadTurn: (session, turnId) =>
+            window.sessionSearch.getSessionTurn(session.sessionKey, turnId),
+          closeLocal: closeDetail,
+          closeRemote: closeRemoteDetail,
+          rename: beginRename,
+          addTag: beginAddTag,
+          removeTag: (session, tagName) => void removeTag(session, tagName),
+          toggleFavorite: (session) => void toggleFavorite(session),
+          summarize: (session) => void summarizeDetail(session),
+          resume: (session) => void runAction(
+            resumeActionLabel(session.source, language),
+            () => window.sessionSearch.resumeSession(session.sessionKey),
+            (result) => resumeRouteMessage(result, language),
+          ),
+          resumeInIterm: (session) => void runAction(
+            t("Opening iTerm", "正在打开 iTerm"),
+            () => window.sessionSearch.resumeSessionInIterm(session.sessionKey),
+            t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
+          ),
+          migrate: beginMigrate,
+          uploadRemote: (session) => void uploadRemoteSession(session),
+          copyResume: (session) => void runAction(
+            t("Copying resume command", "正在复制 Resume 命令"),
+            () => window.sessionSearch.copyResumeCommand(session.sessionKey),
+            t("Resume command copied.", "Resume 命令已复制。"),
+          ),
+          copyMarkdown: (session) => void runAction(
+            t("Copying markdown", "正在复制 Markdown"),
+            () => window.sessionSearch.copyMarkdown(session.sessionKey),
+            t("Markdown copied.", "Markdown 已复制。"),
+          ),
+          exportMarkdown: (session) => void exportMarkdown(session.sessionKey),
+          exportJson: (session) => void exportJson(session.sessionKey),
+          copyPlain: (session) => void runAction(
+            t("Copying plain text", "正在复制纯文本"),
+            () => window.sessionSearch.copyPlainText(session.sessionKey),
+            t("Plain text copied.", "纯文本已复制。"),
+          ),
+          deleteSession: requestDeleteSession,
+          reveal: (session) => void runAction(
+            `Opening ${FILE_MANAGER_LABEL}`,
+            () => window.sessionSearch.revealSession(session.sessionKey),
+            `${FILE_MANAGER_LABEL} opened.`,
+          ),
+        }}
+      />
       {contextMenu ? (
-        <ContextMenu
+        <SessionContextMenu
           state={contextMenu}
           language={language}
           revealLabel={FILE_MANAGER_LABEL}
@@ -2566,11 +1901,11 @@ export function App(): ReactElement {
 
       {remoteSessionsOpen ? (
         <RemoteSessionsDialog
-          cache={remoteSessionsCache}
+          cache={remoteSessions.cache}
           language={language}
-          onRefresh={loadRemoteSessionsCache}
-          onRemoteSessionUploaded={cacheRemoteSessionUpload}
-          onRemoteSessionsDeleted={cacheRemoteSessionDeletion}
+          onRefresh={remoteSessions.load}
+          onRemoteSessionUploaded={remoteSessions.recordUpload}
+          onRemoteSessionsDeleted={remoteSessions.recordDeletion}
           onRestored={(result) => {
             if (!result.launched) setActionStatus({ kind: "error", message: result.warning || result.resumeCommand });
             void Promise.all([load(), loadSidebarMetadata()]);
@@ -2591,166 +1926,5 @@ export function App(): ReactElement {
         />
       ) : null}
     </main>
-  );
-}
-
-function SidebarSectionHeader({
-  title,
-  expanded,
-  onToggle,
-}: {
-  title: string;
-  expanded: boolean;
-  onToggle: () => void;
-}): ReactElement {
-  return (
-    <button className="section-header" onClick={onToggle} aria-expanded={expanded}>
-      <span>{title}</span>
-      {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-    </button>
-  );
-}
-
-function ActionToast({ status, onClose }: { status: ActionStatus; onClose: () => void }): ReactElement {
-  return (
-    <div className={`action-toast ${status.kind}`} role="status" aria-live="polite">
-      <span>{status.message}</span>
-      {status.kind === "error" ? (
-        <button type="button" className="action-toast-close" onClick={onClose} aria-label="Close">
-          <X size={14} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function migrationStrategyLabel(strategy: SessionMigrationResult["strategy"], language: LanguageMode): string {
-  if (strategy === "complete") return localize(language, "complete", "完整迁移");
-  if (strategy === "ai-compressed") return localize(language, "AI compressed", "AI 压缩");
-  return localize(language, "locally truncated", "本地截断");
-}
-
-function migrationProgressMessage(progress: SessionMigrationProgress, language: LanguageMode): string {
-  const target = migrationAgentLabel(progress.target);
-  if (progress.stage === "reading") return localize(language, `Reading session for ${target}...`, `正在读取会话，准备迁移到 ${target}...`);
-  if (progress.stage === "compressing") {
-    const base = localize(language, `Compressing long session for ${target}...`, `正在压缩长会话，准备迁移到 ${target}...`);
-    return progress.percent != null ? `${base} ${progress.percent}%` : base;
-  }
-  if (progress.stage === "writing") return localize(language, `Writing ${target} session...`, `正在写入 ${target} 会话...`);
-  if (progress.stage === "indexing") return localize(language, "Refreshing index...", "正在刷新索引...");
-  return localize(language, `Opening ${target}...`, `正在打开 ${target}...`);
-}
-
-function ContextMenu({
-  state,
-  language,
-  revealLabel,
-  showMacActions,
-  canResume,
-  canMigrate,
-  onRename,
-  onAddTag,
-  onFavorite,
-  onPin,
-  onHide,
-  onResume,
-  onResumeIterm,
-  onOpenApp,
-  onMigrate,
-  onCopyResume,
-  onCopyMarkdown,
-  onExportMarkdown,
-  onExportJson,
-  onDelete,
-  onReveal,
-}: {
-  state: ContextMenuState;
-  language: LanguageMode;
-  revealLabel: string;
-  showMacActions: boolean;
-  canResume: boolean;
-  canMigrate: boolean;
-  onRename: () => void;
-  onAddTag: () => void;
-  onFavorite: () => void;
-  onPin: () => void;
-  onHide: () => void;
-  onResume: () => void;
-  onResumeIterm: () => void;
-  onOpenApp: () => void;
-  onMigrate: () => void;
-  onCopyResume: () => void;
-  onCopyMarkdown: () => void;
-  onExportMarkdown: () => void;
-  onExportJson: () => void;
-  onDelete: () => void;
-  onReveal: () => void;
-}): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const menu = useClampedContextMenuStyle(state);
-  const localOnlyDisabled = isRemoteSession(state.session);
-  const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
-  const openAppTitle = localOnlyDisabled ? remoteOpenAppTitle(language) : l("Open native app", "打开原生应用");
-  const migrateTitle = localOnlyDisabled
-    ? remoteMigrationTitle(language)
-    : canMigrate
-      ? l("Migrate session to…", "迁移会话到…")
-      : unsupportedMigrationTitle(language);
-  return (
-    <div ref={menu.ref} className="context-menu" style={menu.style} onClick={(event) => event.stopPropagation()}>
-      <button onClick={onRename}>
-        <Clipboard size={14} /> {l("Rename", "重命名")}
-      </button>
-      <button onClick={onAddTag}>
-        <Tag size={14} /> {l("Add Tag", "添加标签")}
-      </button>
-      <button onClick={onFavorite}>
-        <Star size={14} fill={state.session.favorited ? "currentColor" : "none"} />{" "}
-        {state.session.favorited ? l("Unfavorite", "取消收藏") : l("Favorite", "收藏")}
-      </button>
-      <button onClick={onPin}>{state.session.pinned ? <PinOff size={14} /> : <Pin size={14} />} {state.session.pinned ? l("Unpin", "取消置顶") : l("Pin", "置顶")}</button>
-      <button onClick={onHide}>
-        {state.session.hidden ? <Eye size={14} /> : <Archive size={14} />} {state.session.hidden ? l("Unhide", "取消隐藏") : l("Hide", "隐藏")}
-      </button>
-      <hr />
-      {canResume ? (
-        <button onClick={onResume}>
-          <Play size={14} /> {state.session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : l("Resume in Terminal", "在终端恢复")}
-        </button>
-      ) : null}
-      {canResume && showMacActions && state.session.source !== "codex-app" ? (
-        <button onClick={onResumeIterm}>
-          <TerminalIcon size={14} /> Resume in iTerm
-        </button>
-      ) : null}
-      {canResume && showMacActions ? (
-        <button onClick={onOpenApp} disabled={localOnlyDisabled} title={openAppTitle}>
-          <AppWindow size={14} /> Open App
-        </button>
-      ) : null}
-      <button onClick={onMigrate} disabled={!canMigrate || localOnlyDisabled} title={migrateTitle}>
-        <ArrowRightLeft size={14} /> {l("Migrate to…", "迁移到…")}
-      </button>
-      {canResume ? (
-        <button onClick={onCopyResume}>
-          <Copy size={14} /> {l("Copy Resume Cmd", "复制 Resume 命令")}
-        </button>
-      ) : null}
-      <button onClick={onCopyMarkdown}>{l("Copy Markdown", "复制 Markdown")}</button>
-      <button onClick={onExportMarkdown}>
-        <Download size={14} /> {l("Export Markdown", "导出 Markdown")}
-      </button>
-      <button onClick={onExportJson}>
-        <Download size={14} /> {l("Export JSON", "导出 JSON")}
-      </button>
-      <button onClick={onReveal} disabled={localOnlyDisabled} title={revealTitle}>
-        <FolderOpen size={14} /> Show in {revealLabel}
-      </button>
-      <hr />
-      <button className="danger" onClick={onDelete}>
-        <Trash2 size={14} /> {l("Delete Session", "删除会话")}
-      </button>
-    </div>
   );
 }

@@ -5,7 +5,7 @@ import type {
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
-} from "../../automation/engine/shared/types";
+} from "../../automation/contracts";
 import type { EvaluationStore } from "../../automation/engine/main/evaluation-store";
 import { EvaluationService } from "./evaluation-service";
 

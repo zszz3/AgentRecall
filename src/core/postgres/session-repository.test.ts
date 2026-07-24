@@ -8,6 +8,8 @@ import type {
 } from "../types";
 import { PostgresDatabase } from "./database";
 import { PostgresSessionRepository } from "./session-repository";
+import { PostgresSessionStatsRepository } from "./session-stats-repository";
+import { PostgresSessionTurnRepository } from "./session-turn-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
 
@@ -87,6 +89,8 @@ const tokens: TokenUsageEvent[] = [{
 describe("PostgresSessionRepository", () => {
   let database: PostgresDatabase;
   let repository: PostgresSessionRepository;
+  let statsRepository: PostgresSessionStatsRepository;
+  let turnsRepository: PostgresSessionTurnRepository;
 
   beforeEach(async () => {
     database = new PostgresDatabase(new PGliteTestPool(), {
@@ -95,6 +99,8 @@ describe("PostgresSessionRepository", () => {
     });
     await database.initialize();
     repository = new PostgresSessionRepository(database);
+    statsRepository = new PostgresSessionStatsRepository(database);
+    turnsRepository = new PostgresSessionTurnRepository(database);
   });
 
   afterEach(async () => {
@@ -172,9 +178,9 @@ describe("PostgresSessionRepository", () => {
   it("paginates messages and reconstructs the original trace events", async () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
 
-    await expect(repository.getMessages("codex:session-a", 1, 1)).resolves.toEqual([messages[1]]);
-    await expect(repository.getTraceEvents("codex:session-a")).resolves.toEqual(traces);
-    await expect(repository.getTraceEvents("codex:session-a", {
+    await expect(turnsRepository.getMessages("codex:session-a", 1, 1)).resolves.toEqual([messages[1]]);
+    await expect(turnsRepository.getTraceEvents("codex:session-a")).resolves.toEqual(traces);
+    await expect(turnsRepository.getTraceEvents("codex:session-a", {
       startTimestamp: "2026-07-20T08:00:02.500Z",
     })).resolves.toEqual([traces[1]]);
   });
@@ -189,10 +195,10 @@ describe("PostgresSessionRepository", () => {
 
     await repository.upsertIndexedSession(session(), messagesWithNul, tokens, tracesWithNul);
 
-    await expect(repository.getMessages("codex:session-a", 1, 1)).resolves.toEqual([
+    await expect(turnsRepository.getMessages("codex:session-a", 1, 1)).resolves.toEqual([
       { ...messagesWithNul[1], content: "The cache\u2400key is stale." },
     ]);
-    await expect(repository.getTraceEvents("codex:session-a")).resolves.toEqual([
+    await expect(turnsRepository.getTraceEvents("codex:session-a")).resolves.toEqual([
       tracesWithNul[0],
       { ...tracesWithNul[1], detail: "login\u2400test failed" },
     ]);
@@ -201,7 +207,7 @@ describe("PostgresSessionRepository", () => {
   it("lists lightweight Turn summaries in conversation order", async () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
 
-    await expect(repository.listSessionTurns("codex:session-a")).resolves.toMatchObject([
+    await expect(turnsRepository.listSessionTurns("codex:session-a")).resolves.toMatchObject([
       {
         turnIndex: 0,
         sourceMessageIndex: 0,
@@ -233,9 +239,9 @@ describe("PostgresSessionRepository", () => {
 
   it("loads one Turn trajectory and rejects a mismatched Session", async () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
-    const [turn] = await repository.listSessionTurns("codex:session-a");
+    const [turn] = await turnsRepository.listSessionTurns("codex:session-a");
 
-    await expect(repository.getSessionTurn("codex:session-a", turn.id)).resolves.toMatchObject({
+    await expect(turnsRepository.getSessionTurn("codex:session-a", turn.id)).resolves.toMatchObject({
       id: turn.id,
       turnIndex: 0,
       messages: [
@@ -270,8 +276,8 @@ describe("PostgresSessionRepository", () => {
         },
       ],
     });
-    await expect(repository.getSessionTurn("codex:another-session", turn.id)).resolves.toBeNull();
-    await expect(repository.getSessionTurn("codex:session-a", "missing-turn")).resolves.toBeNull();
+    await expect(turnsRepository.getSessionTurn("codex:another-session", turn.id)).resolves.toBeNull();
+    await expect(turnsRepository.getSessionTurn("codex:session-a", "missing-turn")).resolves.toBeNull();
   });
 
   it("checks index freshness and lists indexed files without reading source files", async () => {
@@ -308,7 +314,7 @@ describe("PostgresSessionRepository", () => {
       ],
     );
 
-    const stats = await repository.getStats(
+    const stats = await statsRepository.getStats(
       { period: "allTime" },
       Date.parse("2026-07-23T12:00:00.000Z"),
     );
@@ -333,18 +339,18 @@ describe("PostgresSessionRepository", () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
 
     const currentDay = Date.parse("2026-07-20T12:00:00.000Z");
-    const currentStats = await repository.getStats({ period: "today" }, currentDay);
+    const currentStats = await statsRepository.getStats({ period: "today" }, currentDay);
     expect(currentStats.total.totalTokens).toBe(165);
     expect(currentStats.previousTotal?.totalTokens).toBe(0);
 
     const followingDay = Date.parse("2026-07-21T12:00:00.000Z");
-    const followingStats = await repository.getStats({ period: "today" }, followingDay);
+    const followingStats = await statsRepository.getStats({ period: "today" }, followingDay);
     expect(followingStats.total.totalTokens).toBe(0);
     expect(followingStats.previousTotal?.totalTokens).toBe(165);
-    expect((await repository.getStats({ period: "allTime" }, followingDay)).previousTotal)
+    expect((await statsRepository.getStats({ period: "allTime" }, followingDay)).previousTotal)
       .toBeNull();
 
-    await expect(repository.getStatsTrend({ period: "today" }, currentDay))
+    await expect(statsRepository.getStatsTrend({ period: "today" }, currentDay))
       .resolves.toMatchObject({
         period: "today",
         granularity: "day",

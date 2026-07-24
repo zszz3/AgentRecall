@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { IndexedSession, SessionMessage } from "../types";
 import { PostgresDatabase } from "./database";
 import { PostgresSessionRepository } from "./session-repository";
+import { PostgresSessionSearchRepository } from "./session-search-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
 
@@ -41,6 +42,7 @@ function message(
 describe("PostgreSQL Turn search", () => {
   let database: PostgresDatabase;
   let repository: PostgresSessionRepository;
+  let searchRepository: PostgresSessionSearchRepository;
 
   beforeEach(async () => {
     database = new PostgresDatabase(new PGliteTestPool(), {
@@ -49,6 +51,7 @@ describe("PostgreSQL Turn search", () => {
     });
     await database.initialize();
     repository = new PostgresSessionRepository(database);
+    searchRepository = new PostgresSessionSearchRepository(database);
 
     await repository.upsertIndexedSession(
       session("codex:one", "登录故障排查", "2026-07-20T08:00:00.000Z"),
@@ -102,7 +105,7 @@ describe("PostgreSQL Turn search", () => {
   });
 
   it("returns one Session with the best matching Turn and the number of matching Turns", async () => {
-    const page = await repository.searchSessionPage({
+    const page = await searchRepository.searchSessionPage({
       query: "retry",
       excludeSubagents: true,
       limit: 10,
@@ -127,14 +130,14 @@ describe("PostgreSQL Turn search", () => {
   });
 
   it("requires every AND term to occur in the same Turn", async () => {
-    const page = await repository.searchSessionPage({
+    const page = await searchRepository.searchSessionPage({
       query: "登录 AND 失败",
       excludeSubagents: true,
     });
 
     expect(page.sessions.map((item) => item.sessionKey).sort()).toEqual(["codex:one", "codex:two"]);
 
-    const noCrossTurnMatch = await repository.searchSessionPage({
+    const noCrossTurnMatch = await searchRepository.searchSessionPage({
       query: "登录 AND timeout",
       excludeSubagents: true,
     });
@@ -142,7 +145,7 @@ describe("PostgreSQL Turn search", () => {
   });
 
   it("searches Chinese conversation text without returning tool-result hits", async () => {
-    const page = await repository.searchSessionPage({
+    const page = await searchRepository.searchSessionPage({
       query: "中文关键词",
       excludeSubagents: true,
     });
@@ -154,7 +157,7 @@ describe("PostgreSQL Turn search", () => {
       snippet: expect.stringContaining("中文关键词"),
     });
 
-    const toolOnly = await repository.searchSessionPage({
+    const toolOnly = await searchRepository.searchSessionPage({
       query: "工具结果中",
       excludeSubagents: true,
     });
@@ -162,13 +165,13 @@ describe("PostgreSQL Turn search", () => {
   });
 
   it("supports exact phrases, source/date filters, and paginated Session totals", async () => {
-    const phrase = await repository.searchSessionPage({
+    const phrase = await searchRepository.searchSessionPage({
       query: "\"retry timeout\"",
       excludeSubagents: true,
     });
     expect(phrase.sessions.map((item) => item.sessionKey)).toEqual(["codex:one"]);
 
-    const filtered = await repository.searchSessionPage({
+    const filtered = await searchRepository.searchSessionPage({
       source: "claude",
       dateFrom: Date.parse("2026-07-21T00:00:00.000Z"),
       limit: 1,
@@ -177,7 +180,7 @@ describe("PostgreSQL Turn search", () => {
     expect(filtered.totalCount).toBe(1);
     expect(filtered.hasMore).toBe(false);
 
-    const limited = await repository.searchSessionPage({
+    const limited = await searchRepository.searchSessionPage({
       excludeSubagents: false,
       limit: 2,
     });

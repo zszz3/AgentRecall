@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   WorkflowDraftState,
   WorkflowRunState,
-} from "../../../../automation/engine/shared/types";
+} from "../../../../automation/contracts";
 import { selectWorkbenchWorkflows } from "./workbench-workflows";
 
 function workflow(workflowId: string, updatedAt: number): WorkflowDraftState {

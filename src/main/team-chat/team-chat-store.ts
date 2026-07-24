@@ -1,4 +1,4 @@
-import type { RuntimeConversation } from "../../automation/engine/shared/types";
+import type { RuntimeConversation } from "../../automation/contracts";
 import type {
   ListTeamChatMessagesRequest,
   TeamChatDispatch,

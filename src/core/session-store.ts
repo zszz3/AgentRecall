@@ -14,10 +14,13 @@ import {
 } from "./postgres/metadata-repository";
 import { SavedSearchStore, type SavedSearch } from "./store/saved-searches";
 import { SearchHistoryStore, type SearchHistoryEntry } from "./store/search-history-store";
+import { PostgresSessionRepository } from "./postgres/session-repository";
+import { PostgresSessionSearchRepository } from "./postgres/session-search-repository";
+import { PostgresSessionStatsRepository } from "./postgres/session-stats-repository";
 import {
-  PostgresSessionRepository,
+  PostgresSessionTurnRepository,
   type TraceEventQueryOptions,
-} from "./postgres/session-repository";
+} from "./postgres/session-turn-repository";
 import {
   PostgresSkillRepository,
   type SkillSyncBinding,
@@ -56,7 +59,7 @@ export type {
 export type { SavedSearch } from "./store/saved-searches";
 export type { SearchHistoryEntry } from "./store/search-history-store";
 export type { RelatedSession } from "./related-sessions";
-export type { TraceEventQueryOptions } from "./postgres/session-repository";
+export type { TraceEventQueryOptions } from "./postgres/session-turn-repository";
 export type {
   SkillSyncBinding,
   SkillSyncDirection,
@@ -64,6 +67,9 @@ export type {
 
 export class SessionStore {
   private readonly sessions: PostgresSessionRepository;
+  private readonly search: PostgresSessionSearchRepository;
+  private readonly stats: PostgresSessionStatsRepository;
+  private readonly turns: PostgresSessionTurnRepository;
   private readonly environments: PostgresEnvironmentRepository;
   private readonly metadata: PostgresMetadataRepository;
   private readonly skills: PostgresSkillRepository;
@@ -75,6 +81,9 @@ export class SessionStore {
     private readonly ready: Promise<void> = Promise.resolve(),
   ) {
     this.sessions = new PostgresSessionRepository(database);
+    this.search = new PostgresSessionSearchRepository(database);
+    this.stats = new PostgresSessionStatsRepository(database);
+    this.turns = new PostgresSessionTurnRepository(database);
     this.environments = new PostgresEnvironmentRepository(database);
     this.metadata = new PostgresMetadataRepository(database);
     this.skills = new PostgresSkillRepository(database);
@@ -277,27 +286,27 @@ export class SessionStore {
 
   async getMessageCount(sessionKey: string): Promise<number> {
     await this.ready;
-    return this.sessions.getMessageCount(sessionKey);
+    return this.turns.getMessageCount(sessionKey);
   }
 
   async getMessages(sessionKey: string, offset = 0, limit = 120): Promise<SessionMessage[]> {
     await this.ready;
-    return this.sessions.getMessages(sessionKey, offset, limit);
+    return this.turns.getMessages(sessionKey, offset, limit);
   }
 
   async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {
     await this.ready;
-    return this.sessions.getAllMessages(sessionKey);
+    return this.turns.getAllMessages(sessionKey);
   }
 
   async listSessionTurns(sessionKey: string): Promise<SessionTurnSummary[]> {
     await this.ready;
-    return this.sessions.listSessionTurns(sessionKey);
+    return this.turns.listSessionTurns(sessionKey);
   }
 
   async getSessionTurn(sessionKey: string, turnId: string): Promise<SessionTurnDetail | null> {
     await this.ready;
-    return this.sessions.getSessionTurn(sessionKey, turnId);
+    return this.turns.getSessionTurn(sessionKey, turnId);
   }
 
   async getTraceEvents(
@@ -305,7 +314,7 @@ export class SessionStore {
     options: TraceEventQueryOptions = {},
   ): Promise<SessionTraceEvent[]> {
     await this.ready;
-    return this.sessions.getTraceEvents(sessionKey, options);
+    return this.turns.getTraceEvents(sessionKey, options);
   }
 
   async isSkillUsageSourceFresh(source: SkillUsageSource): Promise<boolean> {
@@ -416,22 +425,22 @@ export class SessionStore {
 
   async getStats(options: SessionStatsOptions = {}, now = Date.now()): Promise<SessionStats> {
     await this.ready;
-    return this.sessions.getStats(options, now);
+    return this.stats.getStats(options, now);
   }
 
   async getStatsTrend(options: SessionStatsOptions = {}, now = Date.now()): Promise<SessionStatsTrend> {
     await this.ready;
-    return this.sessions.getStatsTrend(options, now);
+    return this.stats.getStatsTrend(options, now);
   }
 
   async searchSessions(options: SearchOptions = {}): Promise<SessionSearchResult[]> {
     await this.ready;
-    return this.sessions.searchSessions(options);
+    return this.search.searchSessions(options);
   }
 
   async searchSessionPage(options: SearchOptions = {}): Promise<SessionSearchPage> {
     await this.ready;
-    return this.sessions.searchSessionPage(options);
+    return this.search.searchSessionPage(options);
   }
 
   async clearSearchIndex(): Promise<void> {

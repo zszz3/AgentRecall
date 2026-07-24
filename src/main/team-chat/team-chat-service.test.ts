@@ -3,7 +3,7 @@ import type {
   ConfiguredAgent,
   RuntimeConversation,
   WorkflowAgentEvent,
-} from "../../automation/engine/shared/types";
+} from "../../automation/contracts";
 import type {
   ListTeamChatMessagesRequest,
   TeamChatDispatch,

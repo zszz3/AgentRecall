@@ -6,7 +6,7 @@ import type {
   EvaluationRun,
   EvaluationRunPage,
   ListEvaluationRunsRequest,
-} from "../../automation/engine/shared/types";
+} from "../../automation/contracts";
 import { runEvaluation } from "../../automation/engine/main/evaluation-runner";
 import type { EvaluationStore } from "../../automation/engine/main/evaluation-store";
 
