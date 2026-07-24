@@ -284,12 +284,67 @@ export class SessionStore {
     return this.openVikingMemory.getWorkspace(id);
   }
 
+  async findOpenVikingWorkspaceByRootPath(rootPath: string): Promise<OpenVikingWorkspace | null> {
+    await this.ready;
+    return this.openVikingMemory.findWorkspaceByRootPath(rootPath);
+  }
+
+  async findOpenVikingWorkspaceByIdentity(identity: string): Promise<OpenVikingWorkspace | null> {
+    await this.ready;
+    return this.openVikingMemory.findWorkspaceByIdentity(identity);
+  }
+
+  async relinkOpenVikingWorkspace(
+    id: string,
+    rootPath: string,
+    displayName: string,
+  ): Promise<OpenVikingWorkspace> {
+    await this.ready;
+    return this.openVikingMemory.relinkWorkspace(id, rootPath, displayName);
+  }
+
+  async setOpenVikingWorkspaceManaged(
+    id: string,
+    managed: boolean,
+  ): Promise<OpenVikingWorkspace> {
+    await this.ready;
+    return this.openVikingMemory.setWorkspaceManaged(id, managed);
+  }
+
+  async deleteOpenVikingWorkspace(id: string): Promise<boolean> {
+    await this.ready;
+    return this.openVikingMemory.deleteWorkspace(id);
+  }
+
   async updateOpenVikingImportJob(
     workspaceId: string,
     input: UpdateOpenVikingImportJobInput,
   ): Promise<OpenVikingImportJob> {
     await this.ready;
     return this.openVikingMemory.updateImportJob(workspaceId, input);
+  }
+
+  async getOpenVikingImportJob(workspaceId: string): Promise<OpenVikingImportJob | null> {
+    await this.ready;
+    return this.openVikingMemory.getImportJob(workspaceId);
+  }
+
+  async hasOpenVikingImportedTurn(
+    workspaceId: string,
+    sourceTurnId: string,
+    fingerprint: string,
+  ): Promise<boolean> {
+    await this.ready;
+    return this.openVikingMemory.hasImportedTurn(workspaceId, sourceTurnId, fingerprint);
+  }
+
+  async recordOpenVikingImportedTurn(
+    workspaceId: string,
+    sourceTurnId: string,
+    fingerprint: string,
+  ): Promise<void> {
+    await this.ready;
+    await this.openVikingMemory.recordImportedTurn(workspaceId, sourceTurnId, fingerprint);
   }
 
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {

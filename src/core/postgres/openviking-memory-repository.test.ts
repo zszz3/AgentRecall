@@ -62,6 +62,10 @@ describe("PostgresOpenVikingMemoryRepository", () => {
       rootPath: "/projects/new",
       displayName: "new",
     });
+    await expect(repository.setWorkspaceManaged("workspace-1", false)).resolves.toMatchObject({
+      id: "workspace-1",
+      managed: false,
+    });
   });
 
   it("persists resumable import state and deduplicates accepted turns", async () => {
@@ -122,6 +126,11 @@ describe("PostgresOpenVikingMemoryRepository", () => {
     });
 
     await expect(store.listOpenVikingWorkspaces()).resolves.toEqual([created]);
+    await expect(store.findOpenVikingWorkspaceByRootPath("/projects/app")).resolves.toEqual(created);
+    await expect(store.findOpenVikingWorkspaceByIdentity("path:workspace-1")).resolves.toEqual(created);
+    await expect(store.setOpenVikingWorkspaceManaged("workspace-1", false)).resolves.toMatchObject({
+      managed: false,
+    });
     await store.updateOpenVikingImportJob("workspace-1", {
       state: "paused",
       importedTurns: 1,

@@ -27,6 +27,7 @@ export interface SaveOpenVikingMemoryInput {
 export interface OpenVikingClientPort {
   health(): Promise<void>;
   ensureWorkspaceUser(input: { accountId: string; userId: string }): Promise<OpenVikingWorkspaceAuth>;
+  deleteWorkspaceUser(accountId: string, userId: string): Promise<void>;
   appendMessages(
     auth: OpenVikingWorkspaceAuth,
     sessionId: string,
@@ -116,6 +117,12 @@ export class OpenVikingGateway implements OpenVikingClientPort {
         userId: input.userId,
         apiKey: extractApiKey(result),
       };
+    });
+  }
+
+  async deleteWorkspaceUser(accountId: string, userId: string): Promise<void> {
+    await this.normalize(async () => {
+      await this.rootClient.adminRemoveUser(accountId, userId);
     });
   }
 

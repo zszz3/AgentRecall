@@ -134,6 +134,21 @@ export class PostgresOpenVikingMemoryRepository {
     return workspace;
   }
 
+  async setWorkspaceManaged(id: string, managed: boolean): Promise<OpenVikingWorkspace> {
+    const result = await this.database.query(
+      `
+        update agent_recall.openviking_workspaces
+        set managed = $2, updated_at = $3
+        where id = $1
+      `,
+      [id, managed, new Date().toISOString()],
+    );
+    if (result.rowCount === 0) throw new Error("OpenViking workspace was not found.");
+    const workspace = await this.getWorkspace(id);
+    if (!workspace) throw new Error("OpenViking workspace was not found after updating management.");
+    return workspace;
+  }
+
   async updateImportJob(
     workspaceId: string,
     input: UpdateOpenVikingImportJobInput,

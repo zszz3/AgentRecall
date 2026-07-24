@@ -181,6 +181,19 @@ describe("OpenVikingGateway", () => {
     });
   });
 
+  it("removes workspace user data through the root administration client", async () => {
+    const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
+
+    await gateway.deleteWorkspaceUser("agent-recall", "workspace_abcd");
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      method: "DELETE",
+      path: "/api/v1/admin/accounts/agent-recall/users/workspace_abcd",
+    });
+    expect(requests[0].headers["x-api-key"]).toBe("root-key");
+  });
+
   function route(url: URL, request: IncomingMessage, response: ServerResponse): void {
     if (url.pathname === "/health") return sendJson(response, 200, { status: "ok" });
     if (url.pathname === "/api/v1/admin/accounts" && request.method === "GET") {
@@ -210,6 +223,9 @@ describe("OpenVikingGateway", () => {
         status: "ok",
         result: { api_key: "workspace-key" },
       });
+    }
+    if (url.pathname === "/api/v1/admin/accounts/agent-recall/users/workspace_abcd" && request.method === "DELETE") {
+      return sendJson(response, 200, { status: "ok", result: {} });
     }
     if (url.pathname === "/api/v1/sessions/session-1" && request.method === "GET") {
       return sendJson(response, 200, { status: "ok", result: { session_id: "session-1" } });
