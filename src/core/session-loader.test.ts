@@ -591,6 +591,35 @@ describe("Codex session loading", () => {
     });
   });
 
+  it("reuses previously resolved Codex metadata instead of rescanning the rows", () => {
+    const loaded = loadCodexSessionRows(
+      "/tmp/pre-resolved-meta.jsonl",
+      [
+        {
+          type: "response_item",
+          timestamp: "2026-06-01T10:01:00Z",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "reuse metadata" }] },
+        },
+      ],
+      {
+        sessionMeta: {
+          id: "pre-resolved-meta",
+          projectPath: "/repo",
+          ts: Date.parse("2026-06-01T10:00:00Z"),
+          gitBranch: "feat/pre-resolved",
+          isSubagent: false,
+          parentSessionId: null,
+        },
+      },
+    );
+
+    expect(loaded?.session).toMatchObject({
+      rawId: "pre-resolved-meta",
+      projectPath: "/repo",
+      gitBranch: "feat/pre-resolved",
+    });
+  });
+
   it("prefers an explicit Codex title over the embedded metadata title", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-title-"));
     const filePath = path.join(dir, "rollout.jsonl");

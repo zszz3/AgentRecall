@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { performance } from "node:perf_hooks";
 import {
   loadClaudeCliSessionRows,
   loadCodeBuddyCliSessionFile,
@@ -43,10 +44,12 @@ export function syncDefaultSessions(store: SessionStore, loadOptions: SessionLoa
 
 export interface BatchIndexOptions {
   batchSize?: number;
+  timeBudgetMs?: number;
   loadOptions?: SessionLoadOptions;
   onProgress?: (status: IndexStatus) => void;
   onEnvironmentsChanged?: () => void;
   yieldToEventLoop?: () => Promise<void>;
+  now?: () => number;
 }
 
 export async function syncLoadedSessionsInBatches(
@@ -55,11 +58,14 @@ export async function syncLoadedSessionsInBatches(
   options: BatchIndexOptions = {},
 ): Promise<IndexStatus> {
   const batchSize = Math.max(1, options.batchSize ?? 3);
+  const timeBudgetMs = Math.max(1, options.timeBudgetMs ?? Number.POSITIVE_INFINITY);
   const yieldToEventLoop = options.yieldToEventLoop ?? (() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  const now = options.now ?? (() => performance.now());
   let indexed = 0;
   let skipped = 0;
   let total = 0;
   let pendingInBatch = 0;
+  let sliceStartedAt = now();
   const sshEnvironmentByHostAlias = new Map(
     store
       .listEnvironments()
@@ -84,10 +90,11 @@ export async function syncLoadedSessionsInBatches(
     total++;
     pendingInBatch++;
 
-    if (pendingInBatch >= batchSize) {
+    if (pendingInBatch >= batchSize || now() - sliceStartedAt >= timeBudgetMs) {
       pendingInBatch = 0;
       options.onProgress?.({ running: true, indexed, skipped, total, lastIndexedAt: null, error: null });
       await yieldToEventLoop();
+      sliceStartedAt = now();
     }
   }
 

@@ -30,6 +30,7 @@ import {
   type CodexRequestFidelity,
 } from "../core/codex-request-export";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
+import { createIndexProgressPublisher } from "./index-progress";
 import {
   formatSessionJson,
   formatSessionMarkdown,
@@ -215,6 +216,10 @@ let tray: Tray | null = null;
 let store: SessionStore;
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
 let activeIndexRun: Promise<IndexStatus> | null = null;
+const indexProgressPublisher = createIndexProgressPublisher(
+  (status) => mainWindow?.webContents.send("index-status", status),
+  { minIntervalMs: 200 },
+);
 let autoIndexTimer: ReturnType<typeof setInterval> | null = null;
 let registeredGlobalShortcut: string | null = null;
 let remoteWatchManager: RemoteWatchManager | null = null;
@@ -998,10 +1003,11 @@ async function runIndexSync(): Promise<IndexStatus> {
   const settings = getSettings();
   pruneDisabledOptionalSources(settings);
   indexStatus = { ...indexStatus, running: true, error: null };
-  mainWindow?.webContents.send("index-status", indexStatus);
+  indexProgressPublisher.publish(indexStatus, true);
 
   activeIndexRun = syncDefaultSessionsInBatches(store, {
-    batchSize: 2,
+    batchSize: 50,
+    timeBudgetMs: 8,
     loadOptions: {
       includeClaudeInternal: settings.includeClaudeInternal,
       includeCodexInternal: settings.includeCodexInternal,
@@ -1020,12 +1026,12 @@ async function runIndexSync(): Promise<IndexStatus> {
     onEnvironmentsChanged: emitEnvironmentsUpdated,
     onProgress: (status) => {
       indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
-      mainWindow?.webContents.send("index-status", indexStatus);
+      indexProgressPublisher.publish(indexStatus);
     },
   })
     .then((status) => {
       indexStatus = status;
-      mainWindow?.webContents.send("index-status", indexStatus);
+      indexProgressPublisher.publish(indexStatus, true);
       void maybeAutoBackfillSummaries();
       return indexStatus;
     })
@@ -1038,7 +1044,7 @@ async function runIndexSync(): Promise<IndexStatus> {
         lastIndexedAt: indexStatus.lastIndexedAt,
         error: String(error),
       };
-      mainWindow?.webContents.send("index-status", indexStatus);
+      indexProgressPublisher.publish(indexStatus, true);
       return indexStatus;
     })
     .finally(() => {

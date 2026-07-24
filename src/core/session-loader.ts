@@ -835,11 +835,17 @@ function firstAiTitle(rows: unknown[]): string {
 export function loadCodexSessionRows(
   filePath: string,
   rows: unknown[],
-  options: { title?: string; updatedAt?: string; sourceOverride?: SessionSource; stat?: VirtualSessionFileStat } = {},
+  options: {
+    title?: string;
+    updatedAt?: string;
+    sourceOverride?: SessionSource;
+    stat?: VirtualSessionFileStat;
+    sessionMeta?: NonNullable<ReturnType<typeof parseCodexSessionMetaLine>>;
+  } = {},
 ): LoadedSession | null {
   if (rows.length === 0) return null;
 
-  const meta = findCodexSessionMeta(rows);
+  const meta = options.sessionMeta ?? findCodexSessionMeta(rows);
   if (!meta) return null;
 
   const messages = extractMessages(rows, "codex");
@@ -921,6 +927,7 @@ export function* loadCodexSessionsIterator(
       updatedAt: indexedTitle?.updatedAt,
       sourceOverride,
       stat,
+      sessionMeta: meta,
     });
     if (loaded) yield loaded;
   }
