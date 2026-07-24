@@ -39,7 +39,6 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const MAX_TURN_CONTENT = 12_000;
-const MAX_TASK_POLLS = 1_200;
 
 export interface OpenVikingDirectoryPreview {
   rootPath: string;
@@ -114,6 +113,7 @@ export class OpenVikingMemoryService {
   private readonly resolveIdentity: NonNullable<OpenVikingMemoryServiceOptions["resolveIdentity"]>;
   private readonly createId: NonNullable<OpenVikingMemoryServiceOptions["createId"]>;
   private readonly sleep: NonNullable<OpenVikingMemoryServiceOptions["sleep"]>;
+  private readonly activeImports = new Map<string, Promise<OpenVikingImportJob>>();
 
   constructor(private readonly options: OpenVikingMemoryServiceOptions) {
     this.inspectDirectory = options.inspectDirectory ?? inspectDirectory;
@@ -196,7 +196,21 @@ export class OpenVikingMemoryService {
     }
   }
 
-  async importWorkspace(workspaceId: string): Promise<OpenVikingImportJob> {
+  importWorkspace(workspaceId: string): Promise<OpenVikingImportJob> {
+    const existing = this.activeImports.get(workspaceId);
+    if (existing) return existing;
+    const pending = this.performImportWorkspace(workspaceId);
+    this.activeImports.set(workspaceId, pending);
+    const clear = () => {
+      if (this.activeImports.get(workspaceId) === pending) {
+        this.activeImports.delete(workspaceId);
+      }
+    };
+    void pending.then(clear, clear);
+    return pending;
+  }
+
+  private async performImportWorkspace(workspaceId: string): Promise<OpenVikingImportJob> {
     const workspace = await this.requireWorkspace(workspaceId);
     const existingJob = await this.options.store.getOpenVikingImportJob(workspaceId);
     if (existingJob?.state === "paused") return existingJob;
@@ -210,7 +224,17 @@ export class OpenVikingMemoryService {
       prioritizePinned: false,
     });
     const candidates = await this.collectCandidates(sessions);
-    let importedTurns = Math.min(existingJob?.importedTurns ?? 0, candidates.length);
+    const importedCandidates = new Set<ImportCandidate>();
+    for (const candidate of candidates) {
+      if (await this.options.store.hasOpenVikingImportedTurn(
+        workspaceId,
+        candidate.sourceTurnId,
+        candidate.fingerprint,
+      )) {
+        importedCandidates.add(candidate);
+      }
+    }
+    let importedTurns = importedCandidates.size;
     let currentSession = existingJob?.cursorSessionKey ?? null;
     await this.options.store.updateOpenVikingImportJob(workspaceId, {
       state: "running",
@@ -227,11 +251,7 @@ export class OpenVikingMemoryService {
         for (const candidate of sessionCandidates) {
           const currentJob = await this.options.store.getOpenVikingImportJob(workspaceId);
           if (currentJob?.state === "paused") return currentJob;
-          if (await this.options.store.hasOpenVikingImportedTurn(
-            workspaceId,
-            candidate.sourceTurnId,
-            candidate.fingerprint,
-          )) {
+          if (importedCandidates.has(candidate)) {
             continue;
           }
           await this.options.client.appendMessages(
@@ -255,6 +275,7 @@ export class OpenVikingMemoryService {
             candidate.sourceTurnId,
             candidate.fingerprint,
           );
+          importedCandidates.add(candidate);
           appended = true;
           importedTurns += 1;
           await this.options.store.updateOpenVikingImportJob(workspaceId, {
@@ -270,7 +291,9 @@ export class OpenVikingMemoryService {
             auth,
             deterministicImportSessionId(workspaceId, session.sessionKey),
           );
-          await this.waitForTask(auth, task.taskId);
+          if (!await this.waitForTask(workspaceId, auth, task.taskId)) {
+            return this.requireImportJob(workspaceId);
+          }
         }
       }
       return this.options.store.updateOpenVikingImportJob(workspaceId, {
@@ -406,18 +429,24 @@ export class OpenVikingMemoryService {
     return candidates;
   }
 
-  private async waitForTask(auth: OpenVikingWorkspaceAuth, taskId: string): Promise<void> {
-    for (let attempt = 0; attempt < MAX_TASK_POLLS; attempt += 1) {
+  private async waitForTask(
+    workspaceId: string,
+    auth: OpenVikingWorkspaceAuth,
+    taskId: string,
+  ): Promise<boolean> {
+    for (;;) {
+      if ((await this.options.store.getOpenVikingImportJob(workspaceId))?.state === "paused") {
+        return false;
+      }
       const task = await this.options.client.getTask(auth, taskId);
       const status = typeof task?.status === "string" ? task.status.toLowerCase() : "";
-      if (["completed", "succeeded", "success", "done"].includes(status)) return;
+      if (["completed", "succeeded", "success", "done"].includes(status)) return true;
       if (["failed", "error", "cancelled", "canceled"].includes(status)) {
         const message = typeof task?.error === "string" ? task.error : `OpenViking task ${taskId} ${status}.`;
         throw new Error(message);
       }
       await this.sleep(500);
     }
-    throw new Error(`OpenViking task ${taskId} did not finish in time.`);
   }
 
   private async requireWorkspace(workspaceId: string): Promise<OpenVikingWorkspace> {

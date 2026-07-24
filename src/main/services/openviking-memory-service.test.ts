@@ -139,6 +139,7 @@ function harness(options: {
   sessions?: SessionSearchResult[];
   turns?: Record<string, SessionTurnSummary[]>;
   details?: Record<string, SessionTurnDetail>;
+  sleep?: (durationMs: number) => Promise<void>;
 } = {}) {
   const workspaces = [...(options.initialWorkspaces ?? [])];
   const jobs = new Map<string, {
@@ -247,7 +248,7 @@ function harness(options: {
     inspectDirectory: async (rootPath) => path.resolve(rootPath),
     resolveIdentity: async () => "repo:github.com/acme/app",
     createId: () => "workspace-1",
-    sleep: async () => undefined,
+    sleep: options.sleep ?? (async () => undefined),
   });
   return { service, store, client, credentials, workspaces, jobs, imported, events };
 }
@@ -370,6 +371,62 @@ describe("OpenVikingMemoryService", () => {
     expect(client.appendMessages).toHaveBeenCalledTimes(2);
   });
 
+  it("repairs displayed progress from persisted turn checkpoints", async () => {
+    const summary = turn("turn-1", 0);
+    const h = harness({
+      initialWorkspaces: [workspace()],
+      sessions: [session("codex:1")],
+      turns: { "codex:1": [summary] },
+      details: { "turn-1": detail(summary, "question", "answer") },
+    });
+
+    await h.service.importWorkspace("workspace-1");
+    h.jobs.set("workspace-1", {
+      state: "failed",
+      importedTurns: 0,
+      totalTurns: 1,
+      cursorSessionKey: "codex:1",
+      lastError: "stale import failed",
+    });
+
+    await expect(h.service.importWorkspace("workspace-1")).resolves.toMatchObject({
+      state: "completed",
+      importedTurns: 1,
+      totalTurns: 1,
+    });
+    expect(h.client.appendMessages).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces concurrent imports for the same workspace", async () => {
+    const summary = turn("turn-1", 0);
+    const h = harness({
+      initialWorkspaces: [workspace()],
+      sessions: [session("codex:1")],
+      turns: { "codex:1": [summary] },
+      details: { "turn-1": detail(summary, "question", "answer") },
+    });
+    let finishTask!: () => void;
+    const taskFinished = new Promise<void>((resolve) => {
+      finishTask = resolve;
+    });
+    vi.mocked(h.client.getTask).mockImplementation(async () => {
+      await taskFinished;
+      return { id: "task-1", status: "completed" };
+    });
+
+    const first = h.service.importWorkspace("workspace-1");
+    await vi.waitFor(() => expect(h.client.commitSession).toHaveBeenCalledOnce());
+    const second = h.service.importWorkspace("workspace-1");
+    const coalesced = first === second;
+    finishTask();
+    await Promise.all([first, second]);
+
+    expect(coalesced).toBe(true);
+    expect(h.store.searchSessions).toHaveBeenCalledOnce();
+    expect(h.client.appendMessages).toHaveBeenCalledOnce();
+    expect(h.client.commitSession).toHaveBeenCalledOnce();
+  });
+
   it("pauses safely and resumes from persisted import checkpoints", async () => {
     const summary = turn("turn-1", 0);
     const h = harness({
@@ -399,7 +456,43 @@ describe("OpenVikingMemoryService", () => {
     }));
   });
 
-  it("allows slow OpenViking commit tasks to finish after the first minute", async () => {
+  it("stops waiting for a queued OpenViking task when the import is paused", async () => {
+    const summary = turn("turn-1", 0);
+    let reportSleeping!: () => void;
+    let resumeSleeping!: () => void;
+    const sleeping = new Promise<void>((resolve) => {
+      reportSleeping = resolve;
+    });
+    const sleepBarrier = new Promise<void>((resolve) => {
+      resumeSleeping = resolve;
+    });
+    const h = harness({
+      initialWorkspaces: [workspace()],
+      sessions: [session("codex:1")],
+      turns: { "codex:1": [summary] },
+      details: { "turn-1": detail(summary, "question", "answer") },
+      sleep: async () => {
+        reportSleeping();
+        await sleepBarrier;
+      },
+    });
+    vi.mocked(h.client.getTask)
+      .mockResolvedValueOnce({ id: "task-1", status: "pending" })
+      .mockResolvedValue({ id: "task-1", status: "completed" });
+
+    const importing = h.service.importWorkspace("workspace-1");
+    await sleeping;
+    await h.service.pauseImport("workspace-1");
+    resumeSleeping();
+
+    await expect(importing).resolves.toMatchObject({
+      state: "paused",
+      importedTurns: 1,
+    });
+    expect(h.client.getTask).toHaveBeenCalledOnce();
+  });
+
+  it("keeps waiting while OpenViking reports a queued commit task", async () => {
     const summary = turn("turn-1", 0);
     const h = harness({
       initialWorkspaces: [workspace()],
@@ -410,14 +503,14 @@ describe("OpenVikingMemoryService", () => {
     let polls = 0;
     vi.mocked(h.client.getTask).mockImplementation(async () => ({
       id: "task-1",
-      status: ++polls > 120 ? "completed" : "running",
+      status: ++polls > 1_200 ? "completed" : "pending",
     }));
 
     await expect(h.service.importWorkspace("workspace-1")).resolves.toMatchObject({
       state: "completed",
       importedTurns: 1,
     });
-    expect(h.client.getTask).toHaveBeenCalledTimes(121);
+    expect(h.client.getTask).toHaveBeenCalledTimes(1_201);
   });
 
   it("stops management without deleting data, but purges remote data before local mapping", async () => {
