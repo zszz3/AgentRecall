@@ -1,5 +1,6 @@
 import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement } from "react";
+import { createPortal } from "react-dom";
 import {
   AppWindow,
   Archive,
@@ -71,6 +72,7 @@ import type {
   SessionStats,
   SessionStatsPeriod,
   SessionStatsTrend,
+  SessionStatsTrendBucket,
   SessionTraceEvent,
   UsageQuotaCard,
   UsageQuotaSnapshot,
@@ -341,6 +343,7 @@ export function App(): ReactElement {
   const [environments, setEnvironments] = useState<SessionEnvironment[]>([]);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
   const [statsTrend, setStatsTrend] = useState<SessionStatsTrend>(EMPTY_STATS_TREND);
+  const [statsTrendLoadedFor, setStatsTrendLoadedFor] = useState<SessionStatsPeriod | null>(null);
   const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
   const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [statsTrendLoading, setStatsTrendLoading] = useState(false);
@@ -485,28 +488,47 @@ export function App(): ReactElement {
 
   const loadStats = useCallback(async () => {
     const requestId = ++statsLoadSeqRef.current;
-    const trendRequestId = ++statsTrendLoadSeqRef.current;
-    setStatsTrendLoading(statsPeriod !== "allTime");
+    const nextStats = await window.sessionSearch.getStats({ period: statsPeriod });
+    if (requestId !== statsLoadSeqRef.current) return;
+    setStats(nextStats);
+  }, [statsPeriod]);
+
+  const fetchStatsTrend = useCallback(async () => {
+    if (statsPeriod === "allTime") return;
+    const requestId = ++statsTrendLoadSeqRef.current;
+    setStatsTrendLoading(true);
     try {
-      const [nextStats, nextTrend] = await Promise.all([
-        window.sessionSearch.getStats({ period: statsPeriod }),
-        statsPeriod === "allTime"
-          ? Promise.resolve<SessionStatsTrend>({ period: statsPeriod, granularity: null, buckets: [] })
-          : window.sessionSearch.getStatsTrend({ period: statsPeriod }).catch(() => ({ period: statsPeriod, granularity: null, buckets: [] })),
-      ]);
-      if (requestId !== statsLoadSeqRef.current) return;
-      setStats(nextStats);
-      if (trendRequestId === statsTrendLoadSeqRef.current) setStatsTrend(nextTrend);
+      const nextTrend = await window.sessionSearch
+        .getStatsTrend({ period: statsPeriod })
+        .catch(() => ({ period: statsPeriod, granularity: null, buckets: [] }) as SessionStatsTrend);
+      if (requestId !== statsTrendLoadSeqRef.current) return;
+      setStatsTrend(nextTrend);
+      setStatsTrendLoadedFor(statsPeriod);
     } finally {
-      if (trendRequestId === statsTrendLoadSeqRef.current) setStatsTrendLoading(false);
+      if (requestId === statsTrendLoadSeqRef.current) setStatsTrendLoading(false);
     }
+  }, [statsPeriod]);
+
+  const ensureStatsTrend = useCallback(() => {
+    if (statsPeriod === "allTime") return;
+    if (statsTrendLoadedFor === statsPeriod) return;
+    void fetchStatsTrend();
+  }, [statsPeriod, statsTrendLoadedFor, fetchStatsTrend]);
+
+  useEffect(() => {
+    setStatsTrend(EMPTY_STATS_TREND);
+    setStatsTrendLoadedFor(null);
+    ++statsTrendLoadSeqRef.current;
   }, [statsPeriod]);
 
   const refreshStats = useCallback(async () => {
     setStatsRefreshing(true);
     setStatsFeedback({ kind: "running", message: t("Refreshing usage...", "正在刷新用量...") });
     try {
-      await loadStats();
+      await Promise.all([
+        loadStats(),
+        statsPeriod === "allTime" ? Promise.resolve() : fetchStatsTrend(),
+      ]);
       const successMessage = t("Usage refreshed.", "用量已刷新。");
       setStatsFeedback({ kind: "success", message: successMessage });
       window.setTimeout(() => {
@@ -517,7 +539,7 @@ export function App(): ReactElement {
     } finally {
       setStatsRefreshing(false);
     }
-  }, [loadStats, t]);
+  }, [fetchStatsTrend, loadStats, statsPeriod, t]);
 
   const loadQuotas = useCallback(async (mode: "initial" | "manual" | "background" = "initial") => {
     const background = mode === "background";
@@ -1917,14 +1939,16 @@ export function App(): ReactElement {
               {t("Messages", "消息")}
             </span>
             {hasTokenUsage(stats.total) ? (
-              <span className={statsPeriod === "allTime" ? "" : "stats-token-metric"} tabIndex={statsPeriod === "allTime" ? undefined : 0}>
-                <span className="stats-metric-value">
-                  <strong>{formatTokenCount(stats.total.totalTokens)}</strong>
-                  <UsageDeltaBadge delta={usageDelta(stats.total.totalTokens, stats.previousTotal?.totalTokens ?? null)} />
-                </span>
-                {t("Tokens", "Token")}
-                <UsageTokenTrendPopover trend={statsTrend} loading={statsTrendLoading} period={statsPeriod} language={language} />
-              </span>
+              <UsageTokenMetric
+                totalTokens={stats.total.totalTokens}
+                previousTotalTokens={stats.previousTotal?.totalTokens ?? null}
+                period={statsPeriod}
+                language={language}
+                trend={statsTrend}
+                trendLoading={statsTrendLoading}
+                onEnsureTrend={ensureStatsTrend}
+                tokensLabel={t("Tokens", "Token")}
+              />
             ) : null}
           </div>
           <div className="stats-breakdown">
@@ -2716,18 +2740,123 @@ export function App(): ReactElement {
   );
 }
 
+function UsageTokenMetric({
+  totalTokens,
+  previousTotalTokens,
+  period,
+  language,
+  trend,
+  trendLoading,
+  onEnsureTrend,
+  tokensLabel,
+}: {
+  totalTokens: number;
+  previousTotalTokens: number | null;
+  period: SessionStatsPeriod;
+  language: LanguageMode;
+  trend: SessionStatsTrend;
+  trendLoading: boolean;
+  onEnsureTrend: () => void;
+  tokensLabel: string;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number; arrowLeft: number } | null>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const interactive = period !== "allTime";
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+  }, [cancelClose]);
+
+  const openPopover = useCallback(() => {
+    if (!interactive) return;
+    cancelClose();
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (rect) {
+      const popoverWidth = 280;
+      const anchorCenter = rect.left + rect.width / 2;
+      const desiredLeft = anchorCenter - (popoverWidth - 40);
+      const left = Math.max(8, Math.min(window.innerWidth - popoverWidth - 8, desiredLeft));
+      const top = rect.bottom + 8;
+      const arrowLeft = Math.max(14, Math.min(popoverWidth - 14, anchorCenter - left));
+      setPosition({ top, left, arrowLeft });
+    }
+    onEnsureTrend();
+    setOpen(true);
+  }, [interactive, cancelClose, onEnsureTrend]);
+
+  useEffect(() => () => cancelClose(), [cancelClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (): void => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={anchorRef}
+      className={interactive ? "stats-token-metric stats-token-metric--interactive" : "stats-token-metric"}
+      tabIndex={interactive ? 0 : undefined}
+      onMouseEnter={openPopover}
+      onMouseLeave={scheduleClose}
+      onFocus={openPopover}
+      onBlur={() => setOpen(false)}
+    >
+      <span className="stats-metric-value">
+        <strong>{formatTokenCount(totalTokens)}</strong>
+        <UsageDeltaBadge delta={usageDelta(totalTokens, previousTotalTokens)} />
+      </span>
+      {tokensLabel}
+      {interactive && open && position
+        ? createPortal(
+            <UsageTokenTrendPopover
+              trend={trend}
+              loading={trendLoading}
+              period={period}
+              language={language}
+              position={position}
+              onMouseEnter={cancelClose}
+              onMouseLeave={() => setOpen(false)}
+            />,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
 function UsageTokenTrendPopover({
   trend,
   loading,
   period,
   language,
+  position,
+  onMouseEnter,
+  onMouseLeave,
 }: {
   trend: SessionStatsTrend;
   loading: boolean;
   period: SessionStatsPeriod;
   language: LanguageMode;
-}): ReactElement | null {
-  if (period === "allTime") return null;
+  position: { top: number; left: number; arrowLeft: number };
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}): ReactElement {
   const title =
     period === "today"
       ? localize(language, "Last 30 days", "近 30 天")
@@ -2735,9 +2864,9 @@ function UsageTokenTrendPopover({
         ? localize(language, "Last 30 weeks", "近 30 周")
         : localize(language, "Last 30 months", "近 30 个月");
   const buckets = trend.buckets;
-  const width = 220;
-  const height = 96;
-  const chartLeft = 36;
+  const width = 280;
+  const height = 118;
+  const chartLeft = 34;
   const chartRight = 8;
   const chartTop = 8;
   const chartBottom = 22;
@@ -2745,40 +2874,136 @@ function UsageTokenTrendPopover({
   const plotHeight = height - chartTop - chartBottom;
   const maxTokens = Math.max(...buckets.map((bucket) => bucket.totalTokens), 0);
   const yMax = Math.max(maxTokens, 1);
+  const yMid = chartTop + plotHeight / 2;
   const points = buckets.map((bucket, index) => {
     const x = buckets.length <= 1 ? chartLeft + plotWidth / 2 : chartLeft + (index * plotWidth) / (buckets.length - 1);
     const y = chartTop + (1 - bucket.totalTokens / yMax) * plotHeight;
-    return { x, y, bucket };
+    return { x, y, bucket, index };
   });
   const pathData = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
-  const latest = buckets.at(-1);
+  const totalTokens = buckets.reduce((sum, bucket) => sum + bucket.totalTokens, 0);
+  const nonZeroBuckets = buckets.filter((bucket) => bucket.totalTokens > 0);
+  const peakBucket = nonZeroBuckets.reduce<SessionStatsTrendBucket | undefined>(
+    (best, bucket) => (!best || bucket.totalTokens > best.totalTokens ? bucket : best),
+    undefined,
+  );
+  const avgTokens = nonZeroBuckets.length > 0 ? Math.round(totalTokens / nonZeroBuckets.length) : 0;
+  let lastNonZeroIndex = -1;
+  for (let i = buckets.length - 1; i >= 0; i -= 1) {
+    if (buckets[i].totalTokens > 0) {
+      lastNonZeroIndex = i;
+      break;
+    }
+  }
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const focusIndex = hoveredIndex ?? lastNonZeroIndex;
+  const focusPoint = focusIndex >= 0 && focusIndex < points.length ? points[focusIndex] : null;
+  const focusBucket = focusPoint?.bucket ?? null;
+  const midLabelIndex = Math.floor(buckets.length / 2);
+  const handleChartMove = useCallback(
+    (event: ReactMouseEvent<SVGSVGElement>) => {
+      const svg = svgRef.current;
+      if (!svg || points.length === 0) return;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const relativeX = ((event.clientX - rect.left) / rect.width) * width;
+      let nearest = points[0];
+      let nearestDistance = Math.abs(nearest.x - relativeX);
+      for (let i = 1; i < points.length; i += 1) {
+        const distance = Math.abs(points[i].x - relativeX);
+        if (distance < nearestDistance) {
+          nearest = points[i];
+          nearestDistance = distance;
+        }
+      }
+      setHoveredIndex(nearest.index);
+    },
+    [points, width],
+  );
+  const clearHover = useCallback(() => setHoveredIndex(null), []);
 
   return (
-    <div className="stats-token-popover" role="tooltip">
+    <div
+      className="stats-token-popover"
+      role="tooltip"
+      style={{
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        ["--stats-popover-arrow-left" as string]: `${position.arrowLeft}px`,
+      } as CSSProperties}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       <div className="stats-token-popover-header">
         <span>{title}</span>
-        {latest ? <em>{formatTokenCount(latest.totalTokens)}</em> : null}
+        <em>
+          {localize(language, "Total", "合计")} {formatTokenCount(totalTokens)}
+        </em>
       </div>
+      {peakBucket ? (
+        <div className="stats-token-popover-summary">
+          <span>
+            {localize(language, "Peak", "峰值")} <em>{formatTokenCount(peakBucket.totalTokens)}</em>
+            <i>{peakBucket.label}</i>
+          </span>
+          <span>
+            {localize(language, "Avg", "平均")} <em>{formatTokenCount(avgTokens)}</em>
+          </span>
+        </div>
+      ) : null}
       {loading ? (
         <div className="stats-token-popover-empty">{localize(language, "Loading trend...", "正在加载趋势...")}</div>
       ) : buckets.length === 0 ? (
         <div className="stats-token-popover-empty">{localize(language, "No token usage yet", "暂无 Token 用量")}</div>
       ) : (
-        <>
-          <svg className="stats-token-chart" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-            <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${chartTop + plotHeight / 2}H${width - chartRight}`} />
-            <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
-            <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
-            <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
-            <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
-            <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{latest?.label}</text>
-            <path className="stats-token-chart-line" d={pathData} />
-            {points.map((point) => (
-              <circle key={point.bucket.start} className="stats-token-chart-point" cx={point.x} cy={point.y} r="2" />
-            ))}
-          </svg>
-        </>
+        <svg
+          ref={svgRef}
+          className="stats-token-chart"
+          viewBox={`0 0 ${width} ${height}`}
+          onMouseMove={handleChartMove}
+          onMouseLeave={clearHover}
+        >
+          <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${yMid}H${width - chartRight}`} />
+          <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
+          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
+          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={yMid + 3} textAnchor="end">{formatCompactNumber(Math.round(yMax / 2))}</text>
+          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
+          <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
+          {buckets.length > 2 ? (
+            <text className="stats-token-chart-x-label" x={chartLeft + plotWidth / 2} y={height - 5} textAnchor="middle">
+              {buckets[midLabelIndex]?.label}
+            </text>
+          ) : null}
+          <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{buckets.at(-1)?.label}</text>
+          <path className="stats-token-chart-line" d={pathData} />
+          {focusPoint ? (
+            <path
+              className="stats-token-chart-focus-line"
+              d={`M${focusPoint.x.toFixed(1)} ${chartTop}V${height - chartBottom}`}
+            />
+          ) : null}
+          {points.map((point) => (
+            <circle
+              key={point.bucket.start}
+              className={
+                point.index === focusIndex
+                  ? "stats-token-chart-point stats-token-chart-point--focus"
+                  : "stats-token-chart-point"
+              }
+              cx={point.x}
+              cy={point.y}
+              r={point.index === focusIndex ? 2.8 : 1.6}
+            />
+          ))}
+        </svg>
       )}
+      {focusBucket ? (
+        <div className="stats-token-popover-focus">
+          <span>{focusBucket.label}</span>
+          <em>{formatTokenCount(focusBucket.totalTokens)}</em>
+        </div>
+      ) : null}
     </div>
   );
 }
