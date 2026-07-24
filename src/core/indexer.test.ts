@@ -50,6 +50,34 @@ describe("indexer", () => {
     expect(store.searchSessions({ query: "Question", limit: 10 })).toHaveLength(3);
   });
 
+  it("yields when the time budget is exhausted before the batch limit", async () => {
+    const store = createInMemoryStore();
+    const progress: number[] = [];
+    let yields = 0;
+    let clock = 0;
+    const loaded = (function* () {
+      clock = 4;
+      yield session(1);
+      clock = 9;
+      yield session(2);
+      clock = 10;
+      yield session(3);
+    })();
+
+    await syncLoadedSessionsInBatches(store, loaded, {
+      batchSize: 100,
+      timeBudgetMs: 8,
+      now: () => clock,
+      onProgress: (nextStatus) => progress.push(nextStatus.indexed),
+      yieldToEventLoop: async () => {
+        yields++;
+      },
+    });
+
+    expect(progress).toEqual([2, 3]);
+    expect(yields).toBe(2);
+  });
+
   it("skips rebuilding unchanged sessions", async () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(session(1).session, [

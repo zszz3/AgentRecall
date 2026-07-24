@@ -68,6 +68,7 @@ import {
   type SidebarSectionsState,
 } from "./sidebar-sections";
 import { LANGUAGE_STORAGE_KEY, localize, readInitialLanguage, type LanguageMode } from "./language";
+import { coalesceIndexStatusForRender } from "./index-status";
 import { readInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from "./theme";
 import { loadSkillsPanelData } from "./skills-load";
 import {
@@ -968,7 +969,7 @@ export function App(): ReactElement {
 
   useEffect(() => {
     const offIndex = window.sessionSearch.onIndexStatus((nextStatus) => {
-      setIndexStatus(nextStatus);
+      setIndexStatus((current) => coalesceIndexStatusForRender(current, nextStatus));
       if (!nextStatus.running) {
         void load();
         void loadSidebarMetadata();

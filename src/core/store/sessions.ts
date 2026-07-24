@@ -336,7 +336,7 @@ export class SessionsStore {
         );
       }
 
-      this.refreshFtsForSession(session.sessionKey);
+      this.refreshFtsForSession(session.sessionKey, messages);
       this.replaceBranchTag(session.sessionKey, session.gitBranch);
     });
   }
@@ -1270,14 +1270,15 @@ export class SessionsStore {
     });
   }
 
-  private refreshFtsForSession(sessionKey: string): void {
+  private refreshFtsForSession(sessionKey: string, indexedMessages?: SessionMessage[]): void {
     const row = this.db.prepare("SELECT * FROM sessions WHERE session_key = ?").get(sessionKey) as SessionRow | undefined;
     if (!row) return;
-    const contentText = (this.db.prepare("SELECT content FROM messages WHERE session_key = ? ORDER BY message_index").all(
-      sessionKey,
-    ) as Array<{ content: string }>)
-      .map((message) => message.content)
-      .join("\n\n");
+    const messages =
+      indexedMessages ??
+      (this.db
+        .prepare("SELECT content FROM messages WHERE session_key = ? ORDER BY message_index")
+        .all(sessionKey) as Array<{ content: string }>);
+    const contentText = messages.map((message) => message.content).join("\n\n");
     const title = row.custom_title || row.original_title || row.first_question || "Untitled Session";
     // Prepend the AI summary so its normalized wording is searchable alongside the raw transcript.
     const summary = row.ai_summary?.trim();

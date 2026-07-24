@@ -29,4 +29,10 @@ describe("SessionStore search performance", () => {
     expect(searchFtsBlock).toContain("SELECT session_key");
     expect(searchFtsBlock).not.toContain("snippet(session_fts");
   });
+
+  it("builds FTS from the messages already loaded for indexing", () => {
+    const upsertBlock = sourceBlock("  upsertIndexedSession(", "  isIndexedSessionFresh(");
+
+    expect(upsertBlock).toContain("this.refreshFtsForSession(session.sessionKey, messages)");
+  });
 });
