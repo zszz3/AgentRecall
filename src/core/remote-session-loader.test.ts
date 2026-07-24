@@ -170,7 +170,6 @@ describe("remote session loader", () => {
       customTitle: null,
       displayTitle: "Remote summary title",
       favorited: false,
-      pinned: false,
       hidden: false,
       tags: [],
       matchSnippet: null,

@@ -9,8 +9,6 @@ import {
   Download,
   Eye,
   FolderOpen,
-  Pin,
-  PinOff,
   Play,
   Search,
   Settings,
@@ -149,7 +147,7 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeCodexInternal: false,
 } satisfies MigrationTargetSettings;
 
-type ViewMode = "default" | "favorites" | "pinned" | "hidden";
+type ViewMode = "default" | "favorites" | "hidden";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -2116,9 +2114,6 @@ export function App(): ReactElement {
               contextMenu.session.favorited ? t("Removed from favorites.", "已取消收藏。") : t("Added to favorites.", "已加入收藏。"),
             )
           }
-          onPin={() =>
-            void runAction(t("Updating pin", "正在更新置顶"), () => window.sessionSearch.setPinned(contextMenu.session.sessionKey, !contextMenu.session.pinned), t("Pin updated.", "置顶已更新。"))
-          }
           onHide={() =>
             void runAction(
               t("Updating visibility", "正在更新可见性"),
@@ -2397,7 +2392,6 @@ function ContextMenu({
   onRename,
   onAddTag,
   onFavorite,
-  onPin,
   onHide,
   onResume,
   onResumeIterm,
@@ -2419,7 +2413,6 @@ function ContextMenu({
   onRename: () => void;
   onAddTag: () => void;
   onFavorite: () => void;
-  onPin: () => void;
   onHide: () => void;
   onResume: () => void;
   onResumeIterm: () => void;
@@ -2454,7 +2447,6 @@ function ContextMenu({
         <Star size={14} fill={state.session.favorited ? "currentColor" : "none"} />{" "}
         {state.session.favorited ? l("Unfavorite", "取消收藏") : l("Favorite", "收藏")}
       </button>
-      <button onClick={onPin}>{state.session.pinned ? <PinOff size={14} /> : <Pin size={14} />} {state.session.pinned ? l("Unpin", "取消置顶") : l("Pin", "置顶")}</button>
       <button onClick={onHide}>
         {state.session.hidden ? <Eye size={14} /> : <Archive size={14} />} {state.session.hidden ? l("Unhide", "取消隐藏") : l("Hide", "隐藏")}
       </button>

@@ -57,7 +57,6 @@ function localSession(overrides: Partial<SessionSearchResult> = {}): SessionSear
     customTitle: null,
     displayTitle: "Session 1",
     favorited: false,
-    pinned: false,
     hidden: false,
     tags: [],
     matchSnippet: null,

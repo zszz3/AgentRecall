@@ -332,7 +332,6 @@ describe("remote sync", () => {
     }, []);
     store.setCustomTitle(legacyKey, "Legacy custom title");
     store.setFavorited(legacyKey, true);
-    store.setPinned(legacyKey, true);
     store.setHidden(legacyKey, true);
     store.setAiSummary(legacyKey, "Legacy AI summary", "legacy-model");
     store.addTag(legacyKey, "legacy-tag");
@@ -363,7 +362,6 @@ describe("remote sync", () => {
     expect(store.getSession(`ssh:ssh-devbox:${source}:${rawId}`)).toMatchObject({
       customTitle: "Legacy custom title",
       favorited: true,
-      pinned: true,
       hidden: true,
       aiSummary: "Legacy AI summary",
       lastOpenedAt: new Date("2026-07-15T10:00:00Z").getTime(),
@@ -403,14 +401,12 @@ describe("remote sync", () => {
     seed(legacyKey, "Legacy");
     store.setCustomTitle(legacyKey, "Legacy custom");
     store.setFavorited(legacyKey, legacyState);
-    store.setPinned(legacyKey, legacyState);
     store.setHidden(legacyKey, legacyState);
     store.setAiSummary(legacyKey, "Legacy summary", "legacy-model");
     store.addTag(legacyKey, "legacy-tag");
     seed(targetKey, "Target");
     store.setCustomTitle(targetKey, "Target custom");
     store.setFavorited(targetKey, targetState);
-    store.setPinned(targetKey, targetState);
     store.setHidden(targetKey, targetState);
     store.setAiSummary(targetKey, "Target summary", "target-model");
     store.addTag(targetKey, "target-tag");
@@ -434,7 +430,6 @@ describe("remote sync", () => {
     expect(store.getSession(targetKey)).toMatchObject({
       customTitle: "Target custom",
       favorited: true,
-      pinned: true,
       hidden: true,
       aiSummary: "Target summary",
       tags: ["legacy-tag", "target-tag"],
@@ -1076,7 +1071,6 @@ db.close()
       customTitle: null,
       displayTitle: "Remote Summary",
       favorited: false,
-      pinned: false,
       hidden: false,
       tags: [],
       matchSnippet: null,

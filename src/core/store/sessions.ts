@@ -526,10 +526,6 @@ export class SessionsStore {
     this.refreshFtsForSession(sessionKey);
   }
 
-  setPinned(sessionKey: string, pinned: boolean): void {
-    this.db.prepare("UPDATE sessions SET pinned = ? WHERE session_key = ?").run(pinned ? 1 : 0, sessionKey);
-  }
-
   setFavorited(sessionKey: string, favorited: boolean): void {
     this.db.prepare("UPDATE sessions SET favorited = ? WHERE session_key = ?").run(favorited ? 1 : 0, sessionKey);
   }
@@ -584,7 +580,7 @@ export class SessionsStore {
     this.transaction(() => {
       const legacy = this.db
         .prepare(
-          `SELECT custom_title, favorited, pinned, hidden, last_opened_at, last_resumed_at,
+          `SELECT custom_title, favorited, hidden, last_opened_at, last_resumed_at,
              ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
            FROM sessions WHERE session_key = ?`,
         )
@@ -593,7 +589,6 @@ export class SessionsStore {
           SessionRow,
           | "custom_title"
           | "favorited"
-          | "pinned"
           | "hidden"
           | "last_opened_at"
           | "last_resumed_at"
@@ -623,7 +618,6 @@ export class SessionsStore {
             `UPDATE sessions SET
                custom_title = COALESCE(custom_title, ?),
                favorited = CASE WHEN favorited = 1 OR ? = 1 THEN 1 ELSE 0 END,
-               pinned = CASE WHEN pinned = 1 OR ? = 1 THEN 1 ELSE 0 END,
                hidden = CASE WHEN hidden = 1 OR ? = 1 THEN 1 ELSE 0 END,
                last_opened_at = CASE
                  WHEN ? IS NULL THEN last_opened_at
@@ -644,7 +638,6 @@ export class SessionsStore {
           .run(
             legacy.custom_title,
             legacy.favorited,
-            legacy.pinned,
             legacy.hidden,
             legacy.last_opened_at,
             legacy.last_opened_at,
@@ -1591,7 +1584,7 @@ export class SessionsStore {
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
-          ORDER BY pinned DESC, ${sessionSortSql(options.sortBy)} DESC
+          ORDER BY favorited DESC, ${sessionSortSql(options.sortBy)} DESC
           LIMIT ?
         `,
         )
@@ -1615,7 +1608,6 @@ export class SessionsStore {
 
     if (options.visibility === "hidden") where.push("hidden = 1");
     else if (options.visibility === "favorites") where.push("hidden = 0 AND favorited = 1");
-    else if (options.visibility === "pinned") where.push("hidden = 0 AND pinned = 1");
     else where.push("hidden = 0");
 
     if (options.excludeSubagents) where.push("is_subagent = 0");
@@ -1881,7 +1873,6 @@ export class SessionsStore {
       customTitle: row.custom_title,
       displayTitle,
       favorited: row.favorited === 1,
-      pinned: row.pinned === 1,
       hidden: row.hidden === 1,
       tags,
       matchSnippet: snippet,
@@ -1900,7 +1891,7 @@ export class SessionsStore {
   }
 
   private score(result: SessionSearchResult, query: string): number {
-    if (!query) return result.pinned ? 1_000_000_000_000 : 0;
+    if (!query) return result.favorited ? 1_000_000_000_000 : 0;
     const q = query.toLowerCase();
     const title = result.displayTitle.toLowerCase();
     let score = 0;
@@ -1910,7 +1901,7 @@ export class SessionsStore {
     if (result.firstQuestion.toLowerCase().includes(q)) score += 300;
     if (result.matchSnippet) score += 120;
     if (result.projectPath.toLowerCase().includes(q) || result.rawId.toLowerCase().includes(q)) score += 50;
-    if (result.pinned) score += 25;
+    if (result.favorited) score += 25;
     return score;
   }
 
@@ -1927,8 +1918,8 @@ export class SessionsStore {
     const activityMs = result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
     const ageDays = Math.max(0, (Date.now() - activityMs) / (24 * 60 * 60 * 1000));
     const decay = Math.pow(0.5, ageDays / 30);
-    const pinnedBoost = result.pinned ? 1.2 : 1.0;
-    return relevance * (0.08 + 0.92 * decay) * pinnedBoost;
+    const favoriteBoost = result.favorited ? 1.2 : 1.0;
+    return relevance * (0.08 + 0.92 * decay) * favoriteBoost;
   }
 
   private sortValue(result: SessionSearchResult, sortBy: SessionSortBy = "activity"): number {

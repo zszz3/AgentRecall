@@ -1,7 +1,7 @@
 import type { SearchOptions } from "../../../../core/types";
 import { resolveDateRange, type DateRangeFilter } from "../../date-range";
 
-export type QueryBuilderVisibility = "default" | "favorites" | "pinned" | "hidden";
+export type QueryBuilderVisibility = "default" | "favorites" | "hidden";
 
 export interface QueryBuilderState {
   source: SearchOptions["source"];

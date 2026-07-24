@@ -23,7 +23,7 @@ const listProjects = mcp.listProjects as (db: Db) => Array<{ project: string; se
 const listTags = mcp.listTags as (db: Db) => string[];
 type LatestResult = { sessionKey: string; title: string; source: string; project: string; timestamp: string; summary: string | null };
 const getLatestSessions = mcp.getLatestSessions as (db: Db, args?: Record<string, unknown>) => LatestResult[];
-type WriteResult = { ok: boolean; error?: string; tags?: string[]; favorited?: boolean; pinned?: boolean; hidden?: boolean };
+type WriteResult = { ok: boolean; error?: string; tags?: string[]; favorited?: boolean; hidden?: boolean };
 const tagSession = mcp.tagSession as (db: Db, args: Record<string, unknown>) => WriteResult;
 const toggleFavorite = mcp.toggleFavorite as (db: Db, args: Record<string, unknown>) => WriteResult;
 const setVisibility = mcp.setVisibility as (db: Db, args: Record<string, unknown>) => WriteResult;
@@ -315,37 +315,49 @@ describe("MCP write functions", () => {
     expect(toggleFavorite(db, { sessionKey: "missing", favorited: true }).ok).toBe(false);
   });
 
-  it("sets each visibility dimension", () => {
+  it("sets each supported visibility dimension without changing legacy pinned data", () => {
     const { db } = seedStore();
 
+    db.prepare("UPDATE sessions SET pinned = 1 WHERE session_key = ?").run("codex:abc");
     setVisibility(db, { sessionKey: "codex:abc", visibility: "hidden" });
     expect(flags(db, "codex:abc").hidden).toBe(1);
 
-    // "default" un-hides and un-pins.
-    setVisibility(db, { sessionKey: "codex:abc", visibility: "pinned" });
-    expect(flags(db, "codex:abc").pinned).toBe(1);
     const back = setVisibility(db, { sessionKey: "codex:abc", visibility: "default" });
-    expect(back.pinned).toBe(false);
     expect(back.hidden).toBe(false);
+    expect(back).not.toHaveProperty("pinned");
+    expect(flags(db, "codex:abc").pinned).toBe(1);
 
     const fav = setVisibility(db, { sessionKey: "codex:abc", visibility: "favorites" });
     expect(fav.favorited).toBe(true);
     expect(fav.hidden).toBe(false);
   });
 
-  it("leaves unrelated flags alone (favoriting does not unpin)", () => {
+  it("leaves favorites unchanged when restoring default visibility", () => {
     const { db } = seedStore();
-    setVisibility(db, { sessionKey: "codex:abc", visibility: "pinned" });
     setVisibility(db, { sessionKey: "codex:abc", visibility: "favorites" });
+    setVisibility(db, { sessionKey: "codex:abc", visibility: "hidden" });
+    setVisibility(db, { sessionKey: "codex:abc", visibility: "default" });
     const f = flags(db, "codex:abc");
-    expect(f.pinned).toBe(1);
     expect(f.favorited).toBe(1);
+    expect(f.hidden).toBe(0);
   });
 
   it("rejects an invalid visibility and a missing session", () => {
     const { db } = seedStore();
+    expect(setVisibility(db, { sessionKey: "codex:abc", visibility: "pinned" }).ok).toBe(false);
     expect(setVisibility(db, { sessionKey: "codex:abc", visibility: "bogus" }).ok).toBe(false);
     expect(setVisibility(db, { sessionKey: "missing", visibility: "hidden" }).ok).toBe(false);
+  });
+
+  it("does not expose pin through MCP or Electron IPC", () => {
+    const mcpSource = fs.readFileSync(path.resolve("bin", "agent-recall-mcp.mjs"), "utf8");
+    const preloadSource = fs.readFileSync(path.resolve("src", "preload", "index.ts"), "utf8");
+    const mainSource = fs.readFileSync(path.resolve("src", "main", "index.ts"), "utf8");
+
+    expect(mcpSource).not.toContain('case "pinned"');
+    expect(mcpSource).not.toContain('["default", "favorites", "hidden", "pinned"]');
+    expect(preloadSource).not.toContain("setPinned:");
+    expect(mainSource).not.toContain('"pin:set"');
   });
 });
 

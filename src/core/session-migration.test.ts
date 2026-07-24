@@ -47,7 +47,6 @@ function session(
     },
     customTitle: null,
     favorited: false,
-    pinned: false,
     hidden: false,
     tags: [],
     matchSnippet: null,

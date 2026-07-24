@@ -46,7 +46,7 @@ describe("query-builder-types", () => {
   it("counts active filters", () => {
     expect(countActiveFilters(DEFAULT_QUERY_BUILDER_STATE)).toBe(0);
     expect(
-      countActiveFilters({ source: "codex-cli", tag: "x", visibility: "pinned", dateRange: "90d" }),
+      countActiveFilters({ source: "codex-cli", tag: "x", visibility: "hidden", dateRange: "90d" }),
     ).toBe(4);
     expect(countActiveFilters({ ...DEFAULT_QUERY_BUILDER_STATE, tag: "only" })).toBe(1);
   });

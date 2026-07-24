@@ -15,7 +15,6 @@ import {
 const VISIBILITY_OPTIONS: Array<{ value: QueryBuilderVisibility; en: string; zh: string }> = [
   { value: "default", en: "All", zh: "全部" },
   { value: "favorites", en: "Favorites", zh: "收藏" },
-  { value: "pinned", en: "Pinned", zh: "置顶" },
   { value: "hidden", en: "Hidden", zh: "隐藏" },
 ];
 

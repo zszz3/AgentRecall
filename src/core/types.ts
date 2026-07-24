@@ -222,7 +222,7 @@ export interface SearchOptions {
   source?: SessionSourceFilter;
   liveStatus?: "open" | "closed";
   liveSessionKeys?: string[];
-  visibility?: "default" | "favorites" | "hidden" | "pinned";
+  visibility?: "default" | "favorites" | "hidden";
   sortBy?: SessionSortBy;
   dateFrom?: number;
   dateTo?: number;
@@ -270,7 +270,6 @@ export interface SessionSearchResult extends IndexedSession {
   customTitle: string | null;
   displayTitle: string;
   favorited: boolean;
-  pinned: boolean;
   hidden: boolean;
   tags: string[];
   matchSnippet: string | null;

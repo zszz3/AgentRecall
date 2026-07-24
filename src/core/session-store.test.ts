@@ -249,7 +249,6 @@ describe("SessionStore", () => {
     );
     const db = (store as unknown as { db: InstanceType<typeof DatabaseSync> }).db;
     db.prepare("UPDATE sessions SET custom_title = ?, favorited = 1 WHERE session_key = ?").run("legacy title", legacyKey);
-    db.prepare("UPDATE sessions SET pinned = 1 WHERE session_key = ?").run(targetKey);
     store.addTag(legacyKey, "legacy-tag");
     store.addTag(targetKey, "target-tag");
     const legacyMigration = migrationRecord({ id: "legacy-history", sourceSessionKey: legacyKey, createdAt: 100 });
@@ -288,7 +287,6 @@ describe("SessionStore", () => {
     expect(store.getSession(targetKey)).toMatchObject({
       customTitle: "legacy title",
       favorited: true,
-      pinned: true,
       messageCount: 3,
       tokenUsage: expect.objectContaining({ inputTokens: 150, totalTokens: 150 }),
       tags: ["legacy-tag", "target-tag"],
@@ -303,6 +301,146 @@ describe("SessionStore", () => {
       totalTokens: 150,
     });
     store.close();
+  });
+
+  it("ignores legacy pinned values when ordering sessions", () => {
+    const db = new DatabaseSync(":memory:");
+    const store = new SessionStore(db);
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:older",
+          rawId: "older",
+          timestamp: 100,
+          fileMtimeMs: 100,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:newer",
+          rawId: "newer",
+          timestamp: 200,
+          fileMtimeMs: 200,
+        }),
+        [],
+      );
+      db.prepare("UPDATE sessions SET pinned = 1 WHERE session_key = ?").run("codex:older");
+
+      expect(store.searchSessions({ query: "" }).map((session) => session.sessionKey)).toEqual([
+        "codex:newer",
+        "codex:older",
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("prioritizes favorite sessions when browsing without a query", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:older-favorite",
+          rawId: "older-favorite",
+          timestamp: 100,
+          fileMtimeMs: 100,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:newer-plain",
+          rawId: "newer-plain",
+          timestamp: 200,
+          fileMtimeMs: 200,
+        }),
+        [],
+      );
+      store.setFavorited("codex:older-favorite", true);
+
+      expect(store.searchSessions({ query: "" }).map((session) => session.sessionKey)).toEqual([
+        "codex:older-favorite",
+        "codex:newer-plain",
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("prioritizes favorite sessions in relevance sorting", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:older-match",
+          rawId: "older-match",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: 100,
+          fileMtimeMs: 100,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:newer-match",
+          rawId: "newer-match",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: 200,
+          fileMtimeMs: 200,
+        }),
+        [],
+      );
+      store.setFavorited("codex:older-match", true);
+
+      expect(
+        store.searchSessions({ query: "deploy", sortBy: "activity" }).map((session) => session.sessionKey),
+      ).toEqual(["codex:older-match", "codex:newer-match"]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("applies the favorite boost in smart sorting", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-24T00:00:00Z"));
+    const store = createInMemoryStore();
+    try {
+      const now = Date.now();
+      const fiveDays = 5 * 24 * 60 * 60 * 1000;
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:favorite-smart",
+          rawId: "favorite-smart",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: now - fiveDays,
+          fileMtimeMs: now - fiveDays,
+        }),
+        [],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:recent-smart",
+          rawId: "recent-smart",
+          originalTitle: "deploy",
+          firstQuestion: "deploy",
+          timestamp: now,
+          fileMtimeMs: now,
+        }),
+        [],
+      );
+      store.setFavorited("codex:favorite-smart", true);
+
+      expect(
+        store.searchSessions({ query: "deploy", sortBy: "smart" }).map((session) => session.sessionKey),
+      ).toEqual(["codex:favorite-smart", "codex:recent-smart"]);
+    } finally {
+      store.close();
+      vi.useRealTimers();
+    }
   });
 
   it("returns structured message hits and metadata-only match reasons", () => {
@@ -1216,13 +1354,12 @@ describe("SessionStore", () => {
     ]);
   });
 
-  it("keeps custom title, tags, favorite, pinned, and hidden state separate from reindexing", () => {
+  it("keeps custom title, tags, favorite, and hidden state separate from reindexing", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession(), messages);
     store.setCustomTitle("codex:abc", "Auth bug");
     store.addTag("codex:abc", "backend");
     store.setFavorited("codex:abc", true);
-    store.setPinned("codex:abc", true);
     store.setHidden("codex:abc", true);
 
     store.upsertIndexedSession(sampleSession({ originalTitle: "New extracted title" }), messages);
@@ -1232,7 +1369,6 @@ describe("SessionStore", () => {
       customTitle: "Auth bug",
       displayTitle: "Auth bug",
       favorited: true,
-      pinned: true,
       hidden: true,
       tags: ["backend"],
     });

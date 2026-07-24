@@ -46,7 +46,6 @@ const SESSION: SessionSearchResult = {
   customTitle: null,
   displayTitle: "Fix login bug",
   favorited: false,
-  pinned: false,
   hidden: false,
   tags: ["auth", "react"],
   matchSnippet: null,

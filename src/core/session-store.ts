@@ -134,10 +134,6 @@ export class SessionStore {
     this.sessions.setCustomTitle(sessionKey, title);
   }
 
-  setPinned(sessionKey: string, pinned: boolean): void {
-    this.sessions.setPinned(sessionKey, pinned);
-  }
-
   setFavorited(sessionKey: string, favorited: boolean): void {
     this.sessions.setFavorited(sessionKey, favorited);
   }

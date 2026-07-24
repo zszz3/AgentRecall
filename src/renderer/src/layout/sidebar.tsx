@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, Container, EyeOff, Folder, GitBranch, Laptop, Pin, RefreshCw, Search, Server, Star, Tag, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Container, EyeOff, Folder, GitBranch, Laptop, RefreshCw, Search, Server, Star, Tag, Trash2 } from "lucide-react";
 import { formatRelativeTime } from "../../../core/format-session";
 import type { IndexStatus } from "../../../core/indexer";
 import type {
@@ -43,7 +43,7 @@ export type SidebarTreeGroup = {
   projects: Array<ProjectSummary & { tags: string[] }>;
 };
 
-export type ViewMode = "default" | "favorites" | "pinned" | "hidden";
+export type ViewMode = "default" | "favorites" | "hidden";
 
 export type SidebarProps = {
   language: LanguageMode;
@@ -335,10 +335,6 @@ export function Sidebar(props: SidebarProps): ReactElement {
           <button className={visibility === "favorites" ? "active" : ""} onClick={() => onSelectVisibility("favorites")}>
             <Star size={14} />
             {t("Favorites", "收藏")}
-          </button>
-          <button className={visibility === "pinned" ? "active" : ""} onClick={() => onSelectVisibility("pinned")}>
-            <Pin size={14} />
-            {t("Pinned", "置顶")}
           </button>
           <button className={visibility === "hidden" ? "active" : ""} onClick={() => onSelectVisibility("hidden")}>
             <EyeOff size={14} />

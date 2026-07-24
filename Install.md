@@ -304,7 +304,7 @@ The app creates a local SQLite database at Electron's `userData` path:
 <Electron userData>/session-search.sqlite
 ```
 
-This database contains the search index and app-only metadata such as custom titles, tags, pinned state, and hidden state. It is runtime state, not source code.
+This database contains the search index and app-only metadata such as custom titles, tags, favorites, and hidden state. It is runtime state, not source code.
 
 SSH remote sessions are read-only inputs. The app stores remote summaries and on-demand details in the local SQLite index, but it does not install a remote daemon or create a remote database.
 

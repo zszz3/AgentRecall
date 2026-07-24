@@ -40,14 +40,12 @@ describe("SessionsStore", () => {
         { role: "assistant", content: "Rotate the token and retry", timestamp: "2026-07-16T00:01:00.000Z", index: 1 },
       ]);
       store.setCustomTitle(session.sessionKey, "Token repair");
-      store.setPinned(session.sessionKey, true);
       store.addTag(session.sessionKey, "authentication");
 
       expect(store.searchSessions({ query: "refresh token" })).toEqual([
         expect.objectContaining({
           sessionKey: session.sessionKey,
           displayTitle: "Token repair",
-          pinned: true,
           tags: ["authentication"],
           messageCount: 2,
         }),

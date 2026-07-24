@@ -9,7 +9,6 @@ import {
   Edit3,
   EyeOff,
   Laptop,
-  Pin,
   Server,
   Star,
   Terminal as TerminalIcon,
@@ -91,7 +90,6 @@ export const SessionRow = memo(function SessionRow({
           >
             <Star size={14} fill={session.favorited ? "currentColor" : "none"} />
           </button>
-          {session.pinned ? <Pin size={14} /> : null}
           {session.hidden ? <EyeOff size={14} /> : null}
           <span className="session-name">{session.displayTitle}</span>
           <button
@@ -170,5 +168,4 @@ export const SessionRow = memo(function SessionRow({
     </article>
   );
 });
-
 

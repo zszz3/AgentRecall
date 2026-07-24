@@ -88,7 +88,6 @@ const api = {
   removeTag: (sessionKey: string, tagName: string): Promise<void> => ipcRenderer.invoke("tag:remove", sessionKey, tagName),
   deleteTag: (tagName: string): Promise<void> => ipcRenderer.invoke("tag:delete", tagName),
   setFavorited: (sessionKey: string, favorited: boolean): Promise<void> => ipcRenderer.invoke("favorite:set", sessionKey, favorited),
-  setPinned: (sessionKey: string, pinned: boolean): Promise<void> => ipcRenderer.invoke("pin:set", sessionKey, pinned),
   setHidden: (sessionKey: string, hidden: boolean): Promise<void> => ipcRenderer.invoke("hide:set", sessionKey, hidden),
   deleteSession: (sessionKey: string): Promise<boolean> => ipcRenderer.invoke("session:delete", sessionKey),
   refreshIndex: (): Promise<IndexStatus> => ipcRenderer.invoke("index:refresh"),
