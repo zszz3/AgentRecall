@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { McpServerDefinition } from "../../shared/mcp/types";
 import type {
   AgentChannel,
@@ -1237,7 +1238,43 @@ export class AgentHub {
     for (const def of defs) {
       if (!def.workflowId) continue;
       const existing = this.workflowStore.workflows.get(def.workflowId);
-      if (existing) { if (existing.sourceType !== "official" || !existing.topologyLocked) { this.workflowStore.workflows.set(existing.workflowId, this.cloneWorkflowDraft({ ...existing, sourceType: "official", topologyLocked: true })); changed = true; } continue; }
+      const bundledDefinition = normalizeWorkflowV2TerminalNode(def.definition).definition;
+      if (existing) {
+        if (existing.sourceType === "official") {
+          const bundledContentChanged = existing.title !== def.title
+            || existing.objective !== def.objective
+            || !isDeepStrictEqual(existing.definition, bundledDefinition);
+          if (bundledContentChanged || !existing.topologyLocked) {
+            const refreshed = bundledContentChanged
+              ? updateWorkflowDraftStateValue({
+                  current: existing,
+                  request: {
+                    workflowId: existing.workflowId,
+                    title: def.title,
+                    objective: def.objective,
+                    definition: bundledDefinition,
+                  },
+                  definition: bundledDefinition,
+                  configuredAgentId: existing.configuredAgentId,
+                  modelId: existing.modelId,
+                  reviewerConfiguredAgentId: existing.reviewerConfiguredAgentId,
+                  reviewerModelId: existing.reviewerModelId,
+                  cloneDraft: (draft) => this.cloneWorkflowDraft(draft),
+                })
+              : existing;
+            this.workflowStore.workflows.set(existing.workflowId, this.cloneWorkflowDraft({
+              ...refreshed,
+              sourceType: "official",
+              topologyLocked: true,
+            }));
+            changed = true;
+          }
+        } else if (!existing.topologyLocked) {
+          this.workflowStore.workflows.set(existing.workflowId, this.cloneWorkflowDraft({ ...existing, sourceType: "official", topologyLocked: true }));
+          changed = true;
+        }
+        continue;
+      }
       const now = Date.now();
       const workflow = this.cloneWorkflowDraft({
         workflowId: def.workflowId, sourceType: "official", topologyLocked: true,
@@ -1249,7 +1286,7 @@ export class AgentHub {
         reviewerConfiguredAgentId: "",
         reviewerModelId: "",
         objective: def.objective,
-        definition: normalizeWorkflowV2TerminalNode(def.definition).definition,
+        definition: bundledDefinition,
         messages: [],
         reply: "",
         error: undefined,
