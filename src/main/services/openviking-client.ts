@@ -160,12 +160,27 @@ export class OpenVikingGateway implements OpenVikingClientPort {
     return this.normalize(async () => {
       const client = this.workspaceClient(auth);
       if (!query.trim()) {
-        return (await client.list("viking://user/memories", {
-          recursive: true,
-          nodeLimit: 1_000,
-        }))
+        const [listed, globbed] = await Promise.all([
+          client.list("viking://user/memories", {
+            recursive: true,
+            nodeLimit: 1_000,
+          }),
+          client.glob("**/*.md", "viking://user/memories", 1_000),
+        ]);
+        const memories = listed
           .map(normalizeMemory)
-          .filter((memory): memory is OpenVikingMemoryItem => memory !== null)
+          .filter((memory): memory is OpenVikingMemoryItem => memory !== null);
+        const listedIds = new Set(memories.map((memory) => memory.id));
+        const matches = Array.isArray(globbed.matches) ? globbed.matches : [];
+        for (const uri of matches) {
+          if (typeof uri !== "string" || listedIds.has(uri)) continue;
+          const memory = normalizeMemory({
+            uri,
+            rel_path: uri.replace(/^viking:\/\/user\/memories\//u, ""),
+          });
+          if (memory) memories.push(memory);
+        }
+        return memories
           .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""))
           .slice(0, limit);
       }

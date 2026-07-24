@@ -174,7 +174,7 @@ describe("OpenVikingGateway", () => {
     await gateway.deleteMemory(auth, saved.id);
   });
 
-  it("lists the most recently updated memories when the query is empty", async () => {
+  it("lists nested event memories when the query is empty", async () => {
     const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
     const auth: OpenVikingWorkspaceAuth = {
       accountId: "agent-recall",
@@ -182,7 +182,7 @@ describe("OpenVikingGateway", () => {
       apiKey: "workspace-key",
     };
 
-    await expect(gateway.searchMemories(auth, "", 2)).resolves.toEqual([
+    await expect(gateway.searchMemories(auth, "", 3)).resolves.toEqual([
       {
         id: "viking://user/memories/experiences/newest.md",
         workspaceId: "",
@@ -199,8 +199,18 @@ describe("OpenVikingGateway", () => {
         source: "cases",
         updatedAt: "2026-07-23T12:00:00Z",
       },
+      {
+        id: "viking://user/memories/events/2026/07/24/import_completed.md",
+        workspaceId: "",
+        title: "import_completed",
+        content: "",
+        source: "events",
+      },
     ]);
-    expect(requests.at(-1)?.path).toContain("/api/v1/fs/ls?");
+    expect(requests.slice(-2).map((request) => request.path)).toEqual([
+      expect.stringContaining("/api/v1/fs/ls?"),
+      "/api/v1/search/glob",
+    ]);
   });
 
   it("turns SDK failures into stable retryable gateway errors", async () => {
@@ -342,6 +352,19 @@ describe("OpenVikingGateway", () => {
             modTime: "2026-07-24T12:00:00Z",
           },
         ],
+      });
+    }
+    if (url.pathname === "/api/v1/search/glob") {
+      return sendJson(response, 200, {
+        status: "ok",
+        result: {
+          matches: [
+            "viking://user/memories/cases/older.md",
+            "viking://user/memories/events/2026/07/24/import_completed.md",
+            "viking://user/memories/experiences/newest.md",
+          ],
+          count: 3,
+        },
       });
     }
     if (url.pathname === "/api/v1/content/read") {
