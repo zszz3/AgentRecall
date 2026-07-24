@@ -8,6 +8,7 @@ import {
 } from "../agent-executor-conversation";
 import {
   developerInstructionsForWorkflowRequest,
+  emitWorkflowAgentApprovalEvent,
   modelFromRuntimeConfig,
   type RuntimeWorkflowExecutionOptions,
 } from "../workflow/agent-executor-workflow-shared";
@@ -50,9 +51,11 @@ export async function runClaudeWorkflow(
       ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       abortController,
       approvalOwnerId: `workflow-draft:${input.planningWorkflowId ?? input.requestId}`,
+      ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
       ...(workflowMcpScopeForContext(input) ? { workflowMcpScope: workflowMcpScopeForContext(input) } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
       onEvent: (event) => {
+        if (emitWorkflowAgentApprovalEvent(input, event)) return;
         if (event.type === "delta") {
           content += event.content;
           input.onEvent?.({ requestId: input.requestId, type: "delta", content: event.content });

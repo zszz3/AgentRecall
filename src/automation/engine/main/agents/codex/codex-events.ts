@@ -91,7 +91,10 @@ function normalizeToolItem(item: Record<string, unknown> | undefined, state: Cod
     const callId = asString(item.call_id) || asString(item.callId) || asString(item.id);
     if (callId) state.toolNames.set(callId, name);
 
-    const args = truncate(formatArguments(item.arguments), 600);
+    const formattedArguments = formatArguments(item.arguments);
+    const args = name.toLowerCase().includes("workflow_node_complete")
+      ? formattedArguments
+      : truncate(formattedArguments, 600);
     return [{ type: "tool_call", name, content: args }];
   }
 
@@ -119,10 +122,13 @@ function normalizeMcpToolItem(
   const serverName = asString(item.server) || asString(item.serverName);
   if (id) state.toolNames.set(id, name);
   if (method === "item/started") {
+    const formattedArguments = formatValue(item.arguments ?? item.input);
     return [{
       type: "tool_call",
       name,
-      content: truncate(formatValue(item.arguments ?? item.input), 600),
+      content: name.toLowerCase().includes("workflow_node_complete")
+        ? formattedArguments
+        : truncate(formattedArguments, 600),
       metadata: {
         ...(id ? { id } : {}),
         ...(serverName ? { serverName } : {}),

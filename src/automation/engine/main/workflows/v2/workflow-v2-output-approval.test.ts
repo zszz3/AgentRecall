@@ -1,6 +1,6 @@
 import path from "node:path";
 import os from "node:os";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, stat } from "node:fs/promises";
 import { describe, expect, test, vi } from "vitest";
 import { runWorkflowV2TaskWithOutputPolicy } from "./workflow-v2-output-approval";
 
@@ -24,6 +24,7 @@ describe("runWorkflowV2TaskWithOutputPolicy", () => {
     expect(runTask).toHaveBeenCalledWith(request, {
       allowedFileWriteRoot: path.resolve(workDir, "outputs/wf-1/run-1"),
     });
+    await expect(stat(path.resolve(workDir, "outputs/wf-1/run-1"))).resolves.toMatchObject({});
   });
 
   test("does not grant output writes to reviewer or supervisor tasks", async () => {

@@ -14,6 +14,7 @@ export interface WorkflowMcpBinding {
   workflowId?: string;
   runId?: string;
   nodeId?: string;
+  executionId?: string;
   managedToken?: string;
   scope?: WorkflowMcpScope;
 }
@@ -48,6 +49,7 @@ export function workflowMcpLaunchConfig(
         AGENT_RECALL_WORKFLOW_MCP_SCOPE: scope,
         ...(binding.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: binding.runId } : {}),
         ...(binding.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: binding.nodeId } : {}),
+        ...(binding.executionId ? { AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: binding.executionId } : {}),
         ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
         ELECTRON_RUN_AS_NODE: "1",
       },
@@ -70,6 +72,7 @@ export function workflowMcpLaunchConfig(
       AGENT_RECALL_WORKFLOW_MCP_SCOPE: scope,
       ...(binding.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: binding.runId } : {}),
       ...(binding.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: binding.nodeId } : {}),
+      ...(binding.executionId ? { AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: binding.executionId } : {}),
       ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
       ELECTRON_RUN_AS_NODE: "1",
     },

@@ -94,7 +94,7 @@ describe("runtime MCP configuration", () => {
     const previousServer = process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER;
     process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER = serverScriptPath;
     const [server] = acpWorkflowMcpServers({
-      discoveryPath: "C:/app/mcp-bridge.json", workflowId: "wf-1", runId: "run-1", nodeId: "node-1", managedToken: "managed-token",
+      discoveryPath: "C:/app/mcp-bridge.json", workflowId: "wf-1", runId: "run-1", nodeId: "node-1", executionId: "execution-1", managedToken: "managed-token",
     });
     if (previousServer === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER;
     else process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER = previousServer;
@@ -105,6 +105,7 @@ describe("runtime MCP configuration", () => {
         { name: "AGENT_RECALL_WORKFLOW_ID", value: "wf-1" },
         { name: "AGENT_RECALL_WORKFLOW_RUN_ID", value: "run-1" },
         { name: "AGENT_RECALL_WORKFLOW_NODE_ID", value: "node-1" },
+        { name: "AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID", value: "execution-1" },
         { name: "AGENT_RECALL_WORKFLOW_MCP_TOKEN", value: "managed-token" },
       ]),
     });

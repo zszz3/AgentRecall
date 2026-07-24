@@ -1,7 +1,8 @@
-import type { AgentChannel, AgentId, RuntimeRequest } from "../../../../../shared/types";
+import type { AgentChannel, AgentEvent, AgentId, RuntimeRequest, WorkflowAgentEvent } from "../../../../../shared/types";
 import type { RuntimeWorkflowRequestContext } from "../../../../agents/runtime/runtime-driver";
 import { WORKFLOW_EXECUTION_MODE_POLICY } from "../../../../../shared/workflow-agent";
 import type { BoundMcpServer } from "../runtime-mcp";
+import type { RuntimeApprovalRequester } from "../../../../approvals/runtime-approval-broker";
 import { combineDeveloperInstructions } from "../runtime-instructions";
 
 export const WORKFLOW_AGENT_IDLE_TIMEOUT_MS = 10 * 60_000;
@@ -30,6 +31,35 @@ export interface RuntimeWorkflowExecutionOptions {
   workflowMcpDiscoveryPath?: () => string | undefined;
   workflowMcpManagedToken?: () => string | undefined;
   mcpServersForAgent?: (configuredAgentId: string) => BoundMcpServer[];
+  requestApproval?: RuntimeApprovalRequester;
+}
+
+export function emitWorkflowAgentApprovalEvent(
+  input: Pick<RuntimeWorkflowRequestContext, "requestId" | "onEvent">,
+  event: AgentEvent,
+): boolean {
+  if (event.type === "approval_request") {
+    input.onEvent?.({
+      requestId: input.requestId,
+      type: "approval_request",
+      approvalRequestId: event.requestId,
+      content: event.content,
+      ...(event.metadata ? { metadata: event.metadata } : {}),
+    });
+    return true;
+  }
+  if (event.type === "approval_response") {
+    input.onEvent?.({
+      requestId: input.requestId,
+      type: "approval_response",
+      approvalRequestId: event.requestId,
+      decision: event.decision,
+      ...(event.content ? { content: event.content } : {}),
+      ...(event.metadata ? { metadata: event.metadata } : {}),
+    });
+    return true;
+  }
+  return false;
 }
 
 export function modelFromRuntimeConfig(runtimeConfig: RuntimeRequest["runtimeConfig"]): string {

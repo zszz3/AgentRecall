@@ -101,6 +101,13 @@ describe("MCP bridge", () => {
       stopWorkflowRun: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
       resolveWorkflowV2Intervention: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
       submitWorkflowScriptInput: vi.fn(async () => ({ ok: true, workflowId: "wf-1", runId: "run-1" })),
+      submitWorkflowNodeCompletion: vi.fn(async (input: any) => ({
+        submissionId: "submission-1",
+        digest: "digest-1",
+        status: "submitted",
+        output: input.output,
+        submittedAt: 11,
+      })),
       listWorkflowOutputs: vi.fn(async () => [
         { name: "report.md", path: outputPath },
         { name: "secrets.txt", path: secretOutputPath },
@@ -170,7 +177,7 @@ describe("MCP bridge", () => {
     });
 
     const wrongNode = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
-      workflowId: "wf-1", runId: "run-1", nodeId: "missing", summary: "Done", outputs: {}, proposals: [],
+      workflowId: "wf-1", runId: "run-1", nodeId: "missing", executionId: "execution-1", summary: "Done", outputs: {}, proposals: [],
     });
     expect(await wrongNode.json()).toEqual({
       ok: false,
@@ -178,21 +185,21 @@ describe("MCP bridge", () => {
     });
 
     const completion = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
-      workflowId: "wf-1", runId: "run-1", nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [],
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", executionId: "execution-1", summary: "Done", outputs: { answer: "yes" }, proposals: [],
     });
     expect(await completion.json()).toEqual({
       ok: true,
-      data: { output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
+      data: { submissionId: "submission-1", digest: "digest-1", status: "submitted", output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
     });
     expect(await (await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
-      workflowId: "wf-1", runId: "run-1", nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [],
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", executionId: "execution-1", summary: "Done", outputs: { answer: "yes" }, proposals: [],
     })).json()).toEqual({
       ok: true,
-      data: { output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
+      data: { submissionId: "submission-1", digest: "digest-1", status: "submitted", output: { nodeId: "approve", summary: "Done", outputs: { answer: "yes" }, proposals: [] } },
     });
 
     const malformedCompletion = await bridgeRequest("/mcp/workflow/node/complete", bridge.token, {
-      workflowId: "wf-1", runId: "run-1", nodeId: "approve", summary: "Done", outputs: {}, proposals: [{ kind: "unknown" }],
+      workflowId: "wf-1", runId: "run-1", nodeId: "approve", executionId: "execution-1", summary: "Done", outputs: {}, proposals: [{ kind: "unknown" }],
     });
     expect(await malformedCompletion.json()).toEqual({
       ok: false,

@@ -58,6 +58,7 @@ export function respondToCodexRuntimeServerRequest(
     emit: (event: AgentEvent) => void;
     request: RuntimeApprovalRequester;
     cwd: string;
+    signal?: AbortSignal;
   },
   workflowMcpScope?: WorkflowMcpScope,
 ): void {
@@ -111,6 +112,7 @@ export function respondToCodexRuntimeServerRequest(
         : "Codex requests permission to call an MCP tool.",
     metadata: { method, nativeRequestId: id, request: params },
     emit: approval.emit,
+    ...(approval.signal ? { signal: approval.signal } : {}),
     ...(permissionsApproval && fileWriteOperationFromCodexPermissions(params, approval.cwd)
       ? { operation: fileWriteOperationFromCodexPermissions(params, approval.cwd)! }
       : {}),

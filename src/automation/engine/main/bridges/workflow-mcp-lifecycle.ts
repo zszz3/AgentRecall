@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AgentHub } from "../hub/agent-hub";
 import type { WorkflowOperationResult, WorkflowRunState, WorkflowStatus } from "../../shared/types";
 import type { WorkflowV2InterventionAction } from "../../shared/workflow-v2/review";
+import type { WorkflowV2WorkerOutput } from "../../shared/workflow-v2/packets";
 
 type McpLifecycleErrorCode =
   | "INVALID_ARGUMENT"
@@ -202,6 +203,7 @@ async function routeWorkflowMcpLifecycleInternal(
   const workflowId = stringField(record, "workflowId");
   const runId = stringField(record, "runId");
   const nodeId = stringField(record, "nodeId");
+  const executionId = stringField(record, "executionId");
 
   if (route === "/mcp/workflow/run/list") {
     const status = stringField(record, "status");
@@ -288,7 +290,7 @@ async function routeWorkflowMcpLifecycleInternal(
   }
 
   if (route === "/mcp/workflow/node/complete") {
-    if (!workflowId || !runId || !nodeId) return fail("INVALID_ARGUMENT", "workflow_node_complete requires workflowId, runId, and nodeId.");
+    if (!workflowId || !runId || !nodeId || !executionId) return fail("INVALID_ARGUMENT", "workflow_node_complete requires workflowId, runId, nodeId, and executionId.");
     const resolved = workflowAndRun(hub, workflowId, runId);
     if (!("run" in resolved)) return resolved;
     if (!resolved.run.progress.some((node) => node.nodeId === nodeId)) return fail("NODE_NOT_FOUND", `Workflow node ${nodeId} was not found in run ${runId}.`);
@@ -300,20 +302,21 @@ async function routeWorkflowMcpLifecycleInternal(
       || !record.proposals.every(validProposal)) {
       return fail("INVALID_ARGUMENT", "workflow_node_complete output is invalid.");
     }
-    return {
-      ok: true,
-      data: {
-        output: {
-          nodeId,
-          summary,
-          outputs: record.outputs,
-          ...(Array.isArray(record.evidence) ? { evidence: record.evidence } : {}),
-          ...(Array.isArray(record.risks) ? { risks: record.risks } : {}),
-          ...(Array.isArray(record.nextStepSuggestions) ? { nextStepSuggestions: record.nextStepSuggestions } : {}),
-          proposals: record.proposals,
-        },
-      },
+    const output: WorkflowV2WorkerOutput = {
+      nodeId,
+      summary,
+      outputs: record.outputs as Record<string, unknown>,
+      ...(Array.isArray(record.evidence) ? { evidence: record.evidence } : {}),
+      ...(Array.isArray(record.risks) ? { risks: record.risks } : {}),
+      ...(Array.isArray(record.nextStepSuggestions) ? { nextStepSuggestions: record.nextStepSuggestions } : {}),
+      proposals: record.proposals,
     };
+    try {
+      const submission = await hub.submitWorkflowNodeCompletion({ workflowId, runId, nodeId, executionId, output });
+      return { ok: true, data: { submissionId: submission.submissionId, digest: submission.digest, status: submission.status, output: submission.output } };
+    } catch (error) {
+      return fail("INVALID_STATE", error instanceof Error ? error.message : String(error));
+    }
   }
 
   return undefined;

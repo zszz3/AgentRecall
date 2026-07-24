@@ -129,3 +129,70 @@ Chat 兼容路由现在从三个来源合并工具定义：
 5. 调用是否被审批、执行并形成结果。
 
 仅检查 MCP 配置或状态接口不足以证明模型实际获得了工具。最终请求体和工具调用事件才是暴露链路的权威证据。
+
+## 后续问题：工具已暴露但被立即拒绝
+
+### 现象与定位
+
+完成 Responses Lite 工具承载兼容后，Codex 已能发现并发起 `workflow_create`，但调用会在进入 `in_progress` 后立即失败：
+
+```text
+user rejected MCP tool call
+```
+
+对应 rollout 中，从工具调用记录到失败结果不足 100ms，期间没有用户审批事件，也没有 MCP 服务端调用结果。这证明失败发生在 Codex 的工具审批层，而不是 Workflow Bridge、MCP Handler 或前端交互层。
+
+### 根因
+
+Codex 0.145 支持 MCP Server 和单个 MCP Tool 的原生审批模式。未显式配置时，默认 `auto` 会根据工具语义决定是否提示；`workflow_create` 的描述包含“写入草稿”，因此被判定为需要审批。
+
+Workflow Agent 使用非终端 App Server 会话。该会话不能像 Codex CLI 终端一样直接承接 MCP 原生审批提示，于是提示没有到达 AgentRecall 的 Runtime Approval Broker，Codex 随即把调用作为用户拒绝处理。旧的 `item/mcpToolCall/requestApproval` 兼容处理无法覆盖 Codex 0.145 的这一原生 MCP 审批路径。
+
+### 修改
+
+Codex Workflow MCP 启动配置现在由共享 Workflow MCP 权限策略同时生成三层约束：
+
+- `enabled_tools` 仅包含当前 planning 或 node execution scope 可见的工具；
+- Server 默认审批模式保持 `prompt`，未知或生命周期变更操作不会静默执行；
+- 仅将共享策略判定为 `allow` 的工具逐项配置为 `approval_mode="approve"`。
+
+因此 `workflow_create`、`workflow_get`、`workflow_node_complete` 等当前 scope 内的安全操作可以正常执行；`workflow_confirm`、`workflow_run`、`workflow_stop` 等需要批准的生命周期操作仍不会被自动放行。旧版 Codex 的 App Server 审批响应逻辑继续保留，作为协议兼容路径。
+
+### 诊断结论更新
+
+工具生命周期需要区分六个阶段：
+
+```text
+配置 -> 启动 -> 暴露 -> 模型选择 -> 审批 -> MCP 执行
+```
+
+“工具不存在”对应暴露或模型请求问题；`user rejected MCP tool call` 且没有用户操作，对应审批配置问题；只有出现 MCP 服务端结果后，才进入 Bridge、鉴权和业务 Handler 的排查范围。
+
+## 后续完善：可交互审批与长结构化结果
+
+### Workflow 草稿审批为什么仍需补前端链路
+
+自动允许仅适用于共享策略明确判定安全的当前 scope 工具。其他需要确认的 MCP 调用仍会产生 Runtime Approval Broker 请求。此前普通聊天和节点交互会话能够显示这类事件，但 Workflow 草稿会话只转发 `tool_call` 与 `tool_result`，导致真实审批请求没有进入草稿时间线。
+
+现已统一转发 `approval_request` 与 `approval_response`，并复用现有审批卡片和 Broker resolve 接口。审批 owner 固定为 `workflow-draft:<workflowId>`；停止回复、重置、会话重绑、超时和删除时都会取消该 owner 的请求。应用重启后没有对应内存 waiter 的历史请求恢复为过期状态，避免点击一个已经无法完成的审批。
+
+### `Bad control character` 并非工具生成了非法 JSON
+
+失败 Run 的持久化事件证明 `workflow_node_complete` 已返回 `ok: true`，完整结构化结果也存在。真正的问题发生在 Codex 事件归一化：工具参数为了时间线展示被截断为 600 字符并追加 `...`，而节点完成提取逻辑优先读取该 `tool_call` 内容，最终把展示摘要当成权威 JSON 解析。
+
+修复后，`workflow_node_complete` 参数作为协议数据完整保留；其他工具仍使用摘要。界面是否折叠属于渲染决策，不能再修改状态机消费的数据。回归测试覆盖超过摘要上限、包含换行和 Markdown 的完成包，确认归一化后仍可直接 `JSON.parse`。
+
+### 后续架构重构：历史事件退出权威数据链路
+
+进一步审计发现，即使不再截断，执行器从 `task.messages[].events` 或 Conversation 消息中反查最后一次完成工具调用，仍然把展示与审计数据当成领域结果。这会继续受到事件丢失、恢复顺序、重复调用和 Renderer 摘要策略影响。
+
+现已引入独立的节点 completion submission ledger：
+
+- 节点执行开始前创建 workflow/run/node/execution/attempt 绑定；
+- MCP Server 从宿主环境注入 executionId，模型不能覆盖；
+- Bridge 原子持久化完整 output，并返回 submissionId、digest 和状态；
+- 重复 output 按规范化 digest 幂等，不同的新提交 supersede 旧候选；
+- one-shot 从 ledger 消费，interactive 以 submission 生成待用户确认 proposal；
+- 只有通过 Review、Hook 或用户确认的 output 才进入 Run checkpoint 的 `workerOutputs`。
+
+会话工具事件继续保留完整审计记录，但删除了所有从 `workflow_node_complete` 历史事件提取权威结果的执行路径。回归测试会故意提供截断的历史工具 JSON，同时从 ledger 提供合法 submission，确认 Run 使用持久化结果完成。

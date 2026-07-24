@@ -4,6 +4,7 @@ import type {
   WorkflowAgentResponse,
   WorkflowDraftState,
 } from "../../../shared/types";
+import type { WorkflowGrillEvent } from "../../../shared/workflow/draft";
 import { replaceWorkflowDraftMessage } from "./agent-hub-workflow-draft";
 import { runWorkflowDraftReply } from "./agent-hub-workflow-agent";
 import {
@@ -111,23 +112,55 @@ export function reduceWorkflowDraftReplyEvent(input: {
     };
   }
 
-  if (input.event.type === "tool_call" || input.event.type === "tool_result") {
+  if (
+    input.event.type === "tool_call"
+    || input.event.type === "tool_result"
+    || input.event.type === "approval_request"
+    || input.event.type === "approval_response"
+  ) {
     if (!input.workflow) return { type: "ignored" };
-    const toolEvent = input.event;
+    const runtimeEvent = input.event;
     const timestamp = input.now ?? Date.now();
+    const event: WorkflowGrillEvent = runtimeEvent.type === "approval_request"
+      ? {
+          id: `workflow-approval-${runtimeEvent.approvalRequestId}-${timestamp}`,
+          type: "approval_request",
+          content: runtimeEvent.content,
+          timestamp,
+          requestId: runtimeEvent.approvalRequestId,
+          requestState: "live",
+          ...(runtimeEvent.metadata ? { metadata: structuredClone(runtimeEvent.metadata) } : {}),
+        }
+      : runtimeEvent.type === "approval_response"
+        ? {
+            id: `workflow-approval-response-${runtimeEvent.approvalRequestId}-${timestamp}`,
+            type: "approval_response",
+            content: runtimeEvent.content ?? "",
+            timestamp,
+            requestId: runtimeEvent.approvalRequestId,
+            decision: runtimeEvent.decision,
+            ...(runtimeEvent.metadata ? { metadata: structuredClone(runtimeEvent.metadata) } : {}),
+          }
+        : {
+            id: `workflow-tool-${runtimeEvent.requestId}-${runtimeEvent.type}-${timestamp}`,
+            type: runtimeEvent.type,
+            content: safeWorkflowToolEventContent(runtimeEvent.content),
+            timestamp,
+            ...(runtimeEvent.name ? { name: runtimeEvent.name } : {}),
+            ...(runtimeEvent.metadata ? { metadata: structuredClone(runtimeEvent.metadata) } : {}),
+          };
     const messages = input.workflow.messages.map((message) => message.id === input.activeRequest!.assistantMessageId
       ? {
           ...message,
           events: [
-            ...(message.events ?? []),
-            {
-              id: `workflow-tool-${toolEvent.requestId}-${timestamp}-${message.events?.length ?? 0}`,
-              type: toolEvent.type,
-              content: safeWorkflowToolEventContent(toolEvent.content),
-              timestamp,
-              ...(toolEvent.name ? { name: toolEvent.name } : {}),
-              ...(toolEvent.metadata ? { metadata: structuredClone(toolEvent.metadata) } : {}),
-            },
+            ...(message.events ?? []).map((existing) =>
+              runtimeEvent.type === "approval_response"
+              && existing.type === "approval_request"
+              && existing.requestId === runtimeEvent.approvalRequestId
+              && existing.requestState === "live"
+                ? { ...existing, requestState: "resolved" as const }
+                : existing),
+            event,
           ],
         }
       : message);

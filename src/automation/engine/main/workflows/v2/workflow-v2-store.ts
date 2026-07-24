@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -9,6 +9,14 @@ import {
   type WorkflowV2PersistedRunState,
   type WorkflowV2StorageLayout,
 } from "../../../shared/workflow-v2/storage";
+import {
+  isWorkflowV2NodeCompletionLedger,
+  WORKFLOW_V2_COMPLETION_LEDGER_SCHEMA_VERSION,
+  type WorkflowV2NodeCompletionLedger,
+  type WorkflowV2NodeCompletionSubmission,
+  type WorkflowV2NodeCompletionSubmissionStatus,
+} from "../../../shared/workflow-v2/completion";
+import type { WorkflowV2WorkerOutput } from "../../../shared/workflow-v2/packets";
 
 export class WorkflowV2FileStore {
   private writeChain: Promise<void> = Promise.resolve();
@@ -107,11 +115,147 @@ export class WorkflowV2FileStore {
     return structuredClone(parsed);
   }
 
+  beginNodeCompletionExecution(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    attempt: number;
+    startedAt: number;
+  }): Promise<WorkflowV2NodeCompletionLedger> {
+    return this.enqueueValue(async () => {
+      const existing = await this.readNodeCompletionLedgerFile(input);
+      if (existing) {
+        if (existing.attempt !== input.attempt) throw new Error("Workflow node completion execution attempt does not match its durable ledger.");
+        return structuredClone(existing);
+      }
+      const ledger: WorkflowV2NodeCompletionLedger = {
+        schemaVersion: WORKFLOW_V2_COMPLETION_LEDGER_SCHEMA_VERSION,
+        ...input,
+        updatedAt: input.startedAt,
+        submissions: [],
+      };
+      await atomicWriteJson(this.nodeCompletionLedgerPath(input), ledger);
+      return structuredClone(ledger);
+    });
+  }
+
+  submitNodeCompletion(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    output: WorkflowV2WorkerOutput;
+    submittedAt: number;
+  }): Promise<WorkflowV2NodeCompletionSubmission> {
+    return this.enqueueValue(async () => {
+      const ledger = await this.readNodeCompletionLedgerFile(input);
+      if (!ledger) throw new Error("Workflow node completion execution is not active.");
+      if (input.output.nodeId !== input.nodeId) throw new Error("Workflow node completion output identity does not match the active node.");
+      const digest = completionDigest(input.output);
+      const duplicate = [...ledger.submissions].reverse().find((submission) => submission.digest === digest && submission.status !== "rejected" && submission.status !== "superseded");
+      if (duplicate) return structuredClone(duplicate);
+      for (const submission of ledger.submissions) {
+        if (submission.status === "submitted") {
+          submission.status = "superseded";
+          submission.resolvedAt = input.submittedAt;
+        }
+      }
+      const submission: WorkflowV2NodeCompletionSubmission = {
+        submissionId: randomUUID(),
+        digest,
+        status: "submitted",
+        output: structuredClone(input.output),
+        submittedAt: input.submittedAt,
+      };
+      ledger.submissions.push(submission);
+      ledger.updatedAt = input.submittedAt;
+      await atomicWriteJson(this.nodeCompletionLedgerPath(input), ledger);
+      return structuredClone(submission);
+    });
+  }
+
+  async readLatestNodeCompletionSubmission(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+  }): Promise<WorkflowV2NodeCompletionSubmission | undefined> {
+    await this.writeChain;
+    const ledger = await this.readNodeCompletionLedgerFile(input);
+    const submission = [...(ledger?.submissions ?? [])].reverse().find((candidate) => candidate.status === "submitted");
+    return submission ? structuredClone(submission) : undefined;
+  }
+
+  resolveNodeCompletionSubmission(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    submissionId: string;
+    status: Extract<WorkflowV2NodeCompletionSubmissionStatus, "consumed" | "accepted" | "rejected">;
+    resolvedAt: number;
+    reason?: string;
+  }): Promise<WorkflowV2NodeCompletionSubmission> {
+    return this.enqueueValue(async () => {
+      const ledger = await this.readNodeCompletionLedgerFile(input);
+      if (!ledger) throw new Error("Workflow node completion execution was not found.");
+      const submission = ledger.submissions.find((candidate) => candidate.submissionId === input.submissionId);
+      if (!submission) throw new Error("Workflow node completion submission was not found.");
+      if (submission.status === input.status) return structuredClone(submission);
+      if (submission.status !== "submitted" && !(submission.status === "consumed" && input.status === "accepted")) {
+        throw new Error(`Workflow node completion submission cannot transition from ${submission.status} to ${input.status}.`);
+      }
+      submission.status = input.status;
+      submission.resolvedAt = input.resolvedAt;
+      if (input.reason) submission.reason = input.reason;
+      ledger.updatedAt = input.resolvedAt;
+      await atomicWriteJson(this.nodeCompletionLedgerPath(input), ledger);
+      return structuredClone(submission);
+    });
+  }
+
+  private nodeCompletionLedgerPath(input: { workflowId: string; runId: string; nodeId: string; executionId: string }): string {
+    const layout = this.layout(input.workflowId, input.runId);
+    const nodeKey = createHash("sha256").update(input.nodeId).digest("hex");
+    const executionKey = createHash("sha256").update(input.executionId).digest("hex");
+    return path.join(layout.runDir, "completion-submissions", nodeKey, `${executionKey}.json`);
+  }
+
+  private async readNodeCompletionLedgerFile(input: { workflowId: string; runId: string; nodeId: string; executionId: string }): Promise<WorkflowV2NodeCompletionLedger | undefined> {
+    const content = await readOptionalFile(this.nodeCompletionLedgerPath(input));
+    if (content === undefined) return undefined;
+    const parsed = parseJson(content, `Workflow V2 node completion ledger ${input.nodeId}`);
+    if (!isWorkflowV2NodeCompletionLedger(parsed)) throw new Error(`Workflow V2 node completion ledger ${input.nodeId} is malformed.`);
+    if (parsed.workflowId !== input.workflowId || parsed.runId !== input.runId || parsed.nodeId !== input.nodeId || parsed.executionId !== input.executionId) {
+      throw new Error("Workflow V2 node completion ledger identity does not match its storage location.");
+    }
+    return structuredClone(parsed);
+  }
+
   private enqueue(operation: () => Promise<void>): Promise<void> {
+    return this.enqueueValue(operation);
+  }
+
+  private enqueueValue<T>(operation: () => Promise<T>): Promise<T> {
     const pending = this.writeChain.then(operation);
-    this.writeChain = pending.catch(() => undefined);
+    this.writeChain = pending.then(() => undefined, () => undefined);
     return pending;
   }
+}
+
+function completionDigest(output: WorkflowV2WorkerOutput): string {
+  return createHash("sha256").update(canonicalJson(output)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error("Workflow node completion output is not JSON serializable.");
+  return serialized;
 }
 
 async function atomicWriteJson(filePath: string, value: unknown): Promise<void> {

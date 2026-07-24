@@ -13,11 +13,16 @@ import type { RuntimeConversation } from "../../shared/runtime/conversation";
 import type { WorkflowDraftState } from "../../shared/workflow/draft";
 import { isWorkflowRunTerminalStatus, type WorkflowRunState } from "../../shared/workflow/run";
 import type { WorkflowV2WorkerOutput } from "../../shared/workflow-v2/packets";
+import type {
+  WorkflowV2NodeCompletionLedger,
+  WorkflowV2NodeCompletionSubmission,
+} from "../../shared/workflow-v2/completion";
 import type { WorkflowV2Plan } from "../../shared/workflow-v2/planning";
 import path from "node:path";
 import { workflowStoragePlanDocument, workflowStoragePlanFor } from "../../shared/workflow-v2/runtime-utils";
 import { WorkflowRunRegistry, type ActiveWorkflowRun } from "./workflow-run-registry";
 import { WorkflowV2RunExecutor } from "./v2/workflow-v2-run-executor";
+import { materializeWorkflowV2OutputArtifacts } from "./v2/workflow-v2-output-artifacts";
 import type { WorkflowV2RecoveryOverride } from "./v2/workflow-v2-execution-contract";
 import type {
   ExecuteWorkflowV2ScriptRequest,
@@ -65,9 +70,66 @@ export class WorkflowRuntime {
   private readonly runRegistry = new WorkflowRunRegistry();
   private readonly runExecutor: WorkflowV2RunExecutor;
   private readonly scriptApprovalCoordinator = new WorkflowV2ScriptApprovalCoordinator();
+  private readonly completionStore: WorkflowV2StorePort | undefined;
 
   constructor(private readonly deps: WorkflowRuntimeDependencies) {
+    this.completionStore = deps.createWorkflowV2Store?.();
     this.runExecutor = new WorkflowV2RunExecutor(deps, this.runRegistry);
+  }
+
+  async beginNodeCompletionExecution(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    attempt: number;
+    startedAt?: number;
+  }): Promise<WorkflowV2NodeCompletionLedger | undefined> {
+    const store = this.completionStore;
+    if (!store?.beginNodeCompletionExecution) return undefined;
+    return store.beginNodeCompletionExecution({ ...input, startedAt: input.startedAt ?? Date.now() });
+  }
+
+  async submitNodeCompletion(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    output: WorkflowV2WorkerOutput;
+  }): Promise<WorkflowV2NodeCompletionSubmission> {
+    const snapshot = this.deps.snapshot();
+    const run = snapshot.workflowStore.runs.find((item) => item.workflowId === input.workflowId && item.runId === input.runId);
+    const node = run?.progress.find((item) => item.nodeId === input.nodeId);
+    if (!run || !node) throw new Error("Workflow node completion target was not found.");
+    if (node.status !== "running" && node.status !== "paused" && node.status !== "awaiting_input") {
+      throw new Error(`Workflow node ${input.nodeId} is not accepting completion submissions.`);
+    }
+    const store = this.completionStore;
+    if (!store?.submitNodeCompletion) throw new Error("Workflow node completion storage is unavailable.");
+    return store.submitNodeCompletion({ ...input, submittedAt: Date.now() });
+  }
+
+  async readLatestNodeCompletionSubmission(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+  }): Promise<WorkflowV2NodeCompletionSubmission | undefined> {
+    return this.completionStore?.readLatestNodeCompletionSubmission?.(input);
+  }
+
+  async resolveNodeCompletionSubmission(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    submissionId: string;
+    status: "consumed" | "accepted" | "rejected";
+    reason?: string;
+  }): Promise<WorkflowV2NodeCompletionSubmission | undefined> {
+    const store = this.completionStore;
+    if (!store?.resolveNodeCompletionSubmission) return undefined;
+    return store.resolveNodeCompletionSubmission({ ...input, resolvedAt: Date.now() });
   }
 
   runWorkflow(input: RunWorkflowRequest): WorkflowOperationResult {
@@ -297,6 +359,8 @@ export class WorkflowRuntime {
     runId: string;
     nodeId: string;
     output: WorkflowV2WorkerOutput;
+    executionId: string;
+    submissionId?: string;
   }): Promise<WorkflowOperationResult> {
     const snapshot = this.deps.snapshot();
     const workflow = snapshot.workflowStore.workflows.find((item) => item.workflowId === input.workflowId);
@@ -311,10 +375,31 @@ export class WorkflowRuntime {
     if (nodeState?.status !== "paused") {
       return { ok: false, workflowId: input.workflowId, runId: input.runId, error: `Workflow V2 node ${input.nodeId} is not awaiting interactive confirmation.` };
     }
+    const node = workflow.workflowV2Plan.definition.nodes.find((item) => item.id === input.nodeId);
+    if (!node) {
+      return { ok: false, workflowId: input.workflowId, runId: input.runId, error: `Workflow V2 node ${input.nodeId} is unavailable.` };
+    }
+    await materializeWorkflowV2OutputArtifacts({
+      workflowId: input.workflowId,
+      runId: input.runId,
+      workDir: workflow.workDir || snapshot.workDir,
+      node,
+      output: input.output,
+    });
     const runState = transitionWorkflowV2NodeState(persisted.runState, { nodeId: input.nodeId, status: "completed", now: Date.now() });
     const workerOutputs = [...persisted.workerOutputs.filter((output) => output.nodeId !== input.nodeId), structuredClone(input.output)];
     const checkpoint = { runState, workerOutputs };
     await store.persistRunState({ ...persisted, runState, workerOutputs });
+    if (input.submissionId) {
+      await this.resolveNodeCompletionSubmission({
+        workflowId: input.workflowId,
+        runId: input.runId,
+        nodeId: input.nodeId,
+        executionId: input.executionId,
+        submissionId: input.submissionId,
+        status: "accepted",
+      });
+    }
     this.runRegistry.register({
       workflowId: input.workflowId,
       runId: input.runId,

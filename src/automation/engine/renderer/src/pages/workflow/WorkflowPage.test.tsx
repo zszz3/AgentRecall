@@ -163,6 +163,30 @@ describe("WorkflowPage input ownership", () => {
     expect(html).toContain("Permission rejected by runtime host.");
   });
 
+  test("renders live Workflow Agent approvals with resolve actions", () => {
+    const value = controller(false);
+    value.onResolveRuntimeApproval = () => undefined;
+    value.messages = [{
+      id: "assistant-approval",
+      role: "assistant",
+      content: "Waiting for approval.",
+      events: [{
+        id: "approval-1",
+        type: "approval_request",
+        content: "Allow workflow_run?",
+        timestamp: 1,
+        requestId: "runtime-approval:1",
+        requestState: "live",
+      }],
+    }];
+
+    const html = renderToStaticMarkup(<WorkflowPage controller={value} />);
+    expect(html).toContain("runtime-approval-card");
+    expect(html).toContain("Allow workflow_run?");
+    expect(html).toContain("Approve once");
+    expect(html).toContain("Reject");
+  });
+
   test("offers run history from a separate floating action", () => {
     const value = controller(true);
     value.runs = [{

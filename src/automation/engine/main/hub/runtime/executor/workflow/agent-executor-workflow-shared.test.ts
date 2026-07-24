@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   developerInstructionsForWorkflowRequest,
+  emitWorkflowAgentApprovalEvent,
   WORKFLOW_DEVELOPER_INSTRUCTIONS,
 } from "./agent-executor-workflow-shared";
 
@@ -23,5 +24,22 @@ describe("workflow manager execution-mode policy", () => {
       instructionScope: "agent",
       developerInstructions: "Configured policy",
     })).toBe("Configured policy");
+  });
+
+  test("maps runtime approval identity without replacing the workflow request identity", () => {
+    const onEvent = vi.fn();
+    expect(emitWorkflowAgentApprovalEvent({ requestId: "workflow-request", onEvent }, {
+      type: "approval_request",
+      requestId: "runtime-approval:1",
+      content: "Allow MCP tool?",
+      metadata: { provider: "codex" },
+    })).toBe(true);
+    expect(onEvent).toHaveBeenCalledWith({
+      requestId: "workflow-request",
+      type: "approval_request",
+      approvalRequestId: "runtime-approval:1",
+      content: "Allow MCP tool?",
+      metadata: { provider: "codex" },
+    });
   });
 });

@@ -8,8 +8,10 @@ import { callMcpTool, mcpToolDefinitions, resolveBridgeDiscoveryPath } from "./s
 
 const originalEnv = process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE;
 const originalManagedToken = process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
+const originalWorkflowId = process.env.AGENT_RECALL_WORKFLOW_ID;
 const originalRunId = process.env.AGENT_RECALL_WORKFLOW_RUN_ID;
 const originalNodeId = process.env.AGENT_RECALL_WORKFLOW_NODE_ID;
+const originalExecutionId = process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID;
 const originalScope = process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE;
 describe("MCP server tools", () => {
   afterEach(() => {
@@ -17,10 +19,14 @@ describe("MCP server tools", () => {
     else process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE = originalEnv;
     if (originalManagedToken === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
     else process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = originalManagedToken;
+    if (originalWorkflowId === undefined) delete process.env.AGENT_RECALL_WORKFLOW_ID;
+    else process.env.AGENT_RECALL_WORKFLOW_ID = originalWorkflowId;
     if (originalRunId === undefined) delete process.env.AGENT_RECALL_WORKFLOW_RUN_ID;
     else process.env.AGENT_RECALL_WORKFLOW_RUN_ID = originalRunId;
     if (originalNodeId === undefined) delete process.env.AGENT_RECALL_WORKFLOW_NODE_ID;
     else process.env.AGENT_RECALL_WORKFLOW_NODE_ID = originalNodeId;
+    if (originalExecutionId === undefined) delete process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID;
+    else process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID = originalExecutionId;
     if (originalScope === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE;
     else process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE = originalScope;
     vi.restoreAllMocks();
@@ -62,6 +68,7 @@ describe("MCP server tools", () => {
     process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE = "node_execution";
     process.env.AGENT_RECALL_WORKFLOW_RUN_ID = "run-1";
     process.env.AGENT_RECALL_WORKFLOW_NODE_ID = "node-1";
+    process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID = "execution-1";
 
     const names = mcpToolDefinitions().map((tool) => tool.name);
     expect(names).toContain("workflow_node_complete");
@@ -75,6 +82,7 @@ describe("MCP server tools", () => {
     process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE = "node_execution";
     process.env.AGENT_RECALL_WORKFLOW_RUN_ID = "run-1";
     process.env.AGENT_RECALL_WORKFLOW_NODE_ID = "node-1";
+    process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID = "execution-1";
     const tools = mcpToolDefinitions();
     const runList = tools.find((tool) => tool.name === "workflow_run_list")!;
     const runProperties = runList.inputSchema.properties as Record<string, any>;
@@ -187,6 +195,31 @@ describe("MCP server tools", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({ workflowId: "wf-explicit" });
     expect(String(request.body)).not.toContain("__workflowContextId");
+  });
+
+  test("injects the bound execution identity into node completion requests", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-mcp-completion-id-"));
+    const discoveryPath = path.join(dir, "bridge.json");
+    process.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE = discoveryPath;
+    process.env.AGENT_RECALL_WORKFLOW_ID = "wf-1";
+    process.env.AGENT_RECALL_WORKFLOW_RUN_ID = "run-1";
+    process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID = "execution-1";
+    await writeFile(discoveryPath, JSON.stringify({ host: "127.0.0.1", port: 48125, token: "secret" }), "utf8");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+
+    await callMcpTool("workflow_node_complete", { nodeId: "node-1", summary: "Done", outputs: {}, proposals: [] });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      workflowId: "wf-1",
+      runId: "run-1",
+      nodeId: "node-1",
+      executionId: "execution-1",
+    });
   });
 
 });

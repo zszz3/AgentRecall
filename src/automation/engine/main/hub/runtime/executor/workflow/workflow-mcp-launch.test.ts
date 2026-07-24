@@ -46,6 +46,7 @@ describe("workflowMcpLaunchConfig", () => {
       workflowId: "wf-1",
       runId: "run-1",
       nodeId: "node-1",
+      executionId: "execution-1",
       managedToken: "managed-token",
     }, {
       cwd: process.cwd(),
@@ -56,6 +57,7 @@ describe("workflowMcpLaunchConfig", () => {
     expect(config?.env).toMatchObject({
       AGENT_RECALL_WORKFLOW_RUN_ID: "run-1",
       AGENT_RECALL_WORKFLOW_NODE_ID: "node-1",
+      AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: "execution-1",
       AGENT_RECALL_WORKFLOW_MCP_TOKEN: "managed-token",
       AGENT_RECALL_WORKFLOW_MCP_SCOPE: "node_execution",
     });

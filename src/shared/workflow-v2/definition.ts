@@ -55,12 +55,19 @@ export type WorkflowV2ExhaustedPolicy = "fail" | "skip" | "ask_human";
 export type WorkflowV2PassThreshold = "must" | "should" | "nice_to_have";
 export type WorkflowV2ValidationOutcome = "pass" | "retry" | "fail" | "ask_human";
 export type WorkflowV2TemplateParamValue = string | number | boolean | string[] | number[] | boolean[];
+export type WorkflowV2OutputArtifactFormat = "markdown" | "text" | "json" | "html" | "csv";
+
+export interface WorkflowV2OutputArtifactDef {
+  format: WorkflowV2OutputArtifactFormat;
+  fileName?: string;
+}
 
 export interface WorkflowV2OutputFieldDef {
   key: string;
   required?: boolean;
   description?: string;
   valueType?: WorkflowV2ScriptParameterValueType;
+  artifact?: WorkflowV2OutputArtifactDef;
 }
 
 export interface WorkflowV2ConstraintDef {

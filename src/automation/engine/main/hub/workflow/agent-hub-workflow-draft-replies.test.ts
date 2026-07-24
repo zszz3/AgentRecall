@@ -61,4 +61,54 @@ describe("dispatchWorkflowDraftReply", () => {
       }),
     ]);
   });
+
+  it("persists and resolves runtime approval requests on the active assistant message", () => {
+    const started = beginWorkflowDraftReply({ workflow, reply: "Run it", thinkingMessage: "thinking", cloneDraft: structuredClone, now: 2 });
+    const request = reduceWorkflowDraftReplyEvent({
+      workflow: started.next,
+      activeRequest: started.request,
+      event: {
+        requestId: started.request.requestId,
+        type: "approval_request",
+        approvalRequestId: "runtime-approval:1",
+        content: "Allow workflow_run?",
+        metadata: { provider: "codex" },
+      },
+      thinkingMessage: "thinking",
+      cloneDraft: structuredClone,
+      replaceMessage: (messages) => messages,
+      now: 3,
+    });
+    expect(request.type).toBe("event");
+    if (request.type !== "event") throw new Error("Expected approval request event");
+    expect(request.workflow.messages.at(-1)?.events).toEqual([
+      expect.objectContaining({
+        type: "approval_request",
+        requestId: "runtime-approval:1",
+        requestState: "live",
+      }),
+    ]);
+
+    const response = reduceWorkflowDraftReplyEvent({
+      workflow: request.workflow,
+      activeRequest: started.request,
+      event: {
+        requestId: started.request.requestId,
+        type: "approval_response",
+        approvalRequestId: "runtime-approval:1",
+        decision: "approved",
+        content: "Approved once by user.",
+      },
+      thinkingMessage: "thinking",
+      cloneDraft: structuredClone,
+      replaceMessage: (messages) => messages,
+      now: 4,
+    });
+    expect(response.type).toBe("event");
+    if (response.type !== "event") throw new Error("Expected approval response event");
+    expect(response.workflow.messages.at(-1)?.events).toEqual([
+      expect.objectContaining({ type: "approval_request", requestState: "resolved" }),
+      expect.objectContaining({ type: "approval_response", decision: "approved" }),
+    ]);
+  });
 });

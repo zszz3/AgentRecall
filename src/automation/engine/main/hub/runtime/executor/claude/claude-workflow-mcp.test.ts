@@ -17,6 +17,7 @@ describe("claudeWorkflowMcpServers", () => {
       workflowId: "wf-1",
       runId: "run-1",
       nodeId: "node-1",
+      executionId: "execution-1",
       managedToken: "managed-token",
     });
     if (previousServer === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER;
@@ -29,6 +30,7 @@ describe("claudeWorkflowMcpServers", () => {
           AGENT_RECALL_WORKFLOW_ID: "wf-1",
           AGENT_RECALL_WORKFLOW_RUN_ID: "run-1",
           AGENT_RECALL_WORKFLOW_NODE_ID: "node-1",
+          AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: "execution-1",
           AGENT_RECALL_WORKFLOW_MCP_TOKEN: "managed-token",
         },
       },

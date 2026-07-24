@@ -46,6 +46,7 @@ export function createCodexDriver(options: RuntimeAgentExecutorFactoryOptions): 
             workflowId: sessionContext.planningWorkflowId,
             runId: sessionContext.workflowRunId,
             nodeId: sessionContext.workflowNodeId,
+            executionId: sessionContext.workflowNodeExecutionId,
             managedToken: options.workflowMcpManagedToken?.(),
           });
           let client: CodexRpcClient;

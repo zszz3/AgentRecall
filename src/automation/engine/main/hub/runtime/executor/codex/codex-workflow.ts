@@ -12,6 +12,7 @@ import {
 import {
   createWorkflowAgentTimeout,
   developerInstructionsForWorkflowRequest,
+  emitWorkflowAgentApprovalEvent,
   modelFromRuntimeConfig,
   type RuntimeWorkflowExecutionOptions,
   WORKFLOW_AGENT_IDLE_TIMEOUT_MS,
@@ -103,7 +104,16 @@ export async function runCodexWorkflow(
       },
       onRequest: (id, method, params) => {
         if (client) {
-          respondToCodexRuntimeServerRequest(client, id, method, params, undefined, workflowMcpScopeForContext(input));
+          respondToCodexRuntimeServerRequest(client, id, method, params, options.requestApproval ? {
+            ownerId: `workflow-draft:${input.planningWorkflowId ?? input.requestId}`,
+            emit: (event) => {
+              timeout?.refresh();
+              emitWorkflowAgentApprovalEvent(input, event);
+            },
+            request: options.requestApproval,
+            cwd: input.workDir,
+            ...(input.signal ? { signal: input.signal } : {}),
+          } : undefined, workflowMcpScopeForContext(input));
         }
       },
       onExit: (_code, _signal, stderr) => {

@@ -29,6 +29,7 @@ import { shouldSendComposerKey } from "../../app/composer";
 import type { Language } from "../../app/language";
 import { Markdown } from "../../Markdown";
 import { ChatControls } from "../chat/ChatControls";
+import { ChatEventMessage } from "../chat/chat-event-display";
 import { TaskStatusChip } from "../tasks/task-status";
 import { WorkflowCanvasBoard } from "./WorkflowCanvasBoard";
 import { WorkflowDraftEditorDialog } from "./WorkflowDraftEditorDialog";
@@ -431,6 +432,16 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
                   <Markdown text={workflowAssistantDisplayContent(message.content)} />
                   {running && message.content === WORKFLOW_THINKING_MESSAGE ? <span className="stream-cursor" aria-hidden="true" /> : null}
                   {message.events?.map((event) => {
+                    if (event.type === "approval_request" || event.type === "approval_response") {
+                      return workflowId ? (
+                        <ChatEventMessage
+                          key={event.id}
+                          event={event}
+                          ownerId={`workflow-draft:${workflowId}`}
+                          onResolveApproval={source.onResolveRuntimeApproval}
+                        />
+                      ) : null;
+                    }
                     const status = typeof event.metadata?.status === "string" ? event.metadata.status : event.type === "tool_call" ? "in_progress" : "completed";
                     return (
                       <details key={event.id} className={`workflow-tool-event ${status}`} open={status === "failed"}>

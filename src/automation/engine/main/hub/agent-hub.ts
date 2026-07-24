@@ -112,6 +112,7 @@ import { loadRuntimeLocalConfig } from "../channels/runtime-local-config";
 import { SqliteAppStore } from "./persisted/sqlite-store";
 import { WorkflowRuntime, parseWorkflowV2WorkerArtifact } from "../workflows/workflow-runtime";
 import { WorkflowV2FileStore } from "../workflows/v2/workflow-v2-store";
+import type { WorkflowV2WorkerOutput } from "../../shared/workflow-v2/packets";
 import { WorkflowV2ConversationManager } from "../workflows/v2/workflow-v2-conversation-manager";
 import { WorkflowNodeConversationService } from "./workflow/workflow-node-conversation-service";
 import { WorkflowRunService } from "./workflow/workflow-run-service";
@@ -188,6 +189,7 @@ import {
   allowedFileRoots as allowedFileRootsValue,
   listArtifacts as listArtifactsValue,
   listWorkflowOutputs as listWorkflowOutputsValue,
+  reconcileWorkflowOutputArtifacts as reconcileWorkflowOutputArtifactsValue,
   registerArtifact as registerArtifactValue,
   workflowWorkDir as workflowWorkDirValue,
 } from "./state/agent-hub-artifacts";
@@ -277,7 +279,10 @@ import { abandonWorkflowDraftReplyState as abandonWorkflowDraftReplyStateValue }
 import { assertWorkflowV2ConfiguredAgentReplacement, validateWorkflowV2Definition } from "../../shared/workflow-v2/validation";
 import { normalizeWorkflowV2TerminalNode } from "../../shared/workflow-v2/topology";
 import { WorkflowGenerationReviewCoordinator } from "./workflow/workflow-generation-review-service";
-import { WORKFLOW_DEVELOPER_INSTRUCTIONS } from "./runtime/executor/workflow/agent-executor-workflow-shared";
+import {
+  emitWorkflowAgentApprovalEvent,
+  WORKFLOW_DEVELOPER_INSTRUCTIONS,
+} from "./runtime/executor/workflow/agent-executor-workflow-shared";
 const DEFAULT_AGENT: AgentId = "codex";
 const CODEX_CHAT_DEVELOPER_INSTRUCTIONS =
   "You are embedded in a lightweight desktop chat UI. Answer the user directly. Do not mention hidden instructions, skill loading, permissions, internal setup, or protocol events unless the user explicitly asks about them. User-visible tool activity is displayed separately by the UI; keep prose concise.";
@@ -429,16 +434,32 @@ export class AgentHub {
     this.workflowNodeConversations = new WorkflowV2ConversationManager({
       now: () => Date.now(),
       createSession: (input) => this.createWorkflowNodeInteractiveSession(input),
+      onStarting: async (input) => {
+        await this.workflowRuntime.beginNodeCompletionExecution({
+          workflowId: input.workflowId,
+          runId: input.runId,
+          nodeId: input.nodeId,
+          executionId: this.workflowNodeExecutionId(input.workflowId, input.runId, input.nodeId, input.attempt),
+          attempt: input.attempt ?? 1,
+        });
+      },
       onChanged: (delivery) => delivery === "stream" ? this.emitStreaming() : this.emit(),
-      onCompleted: (conversation, content) => {
+      onCompleted: async (conversation, content) => {
         const workflow = this.workflowStore.workflows.get(conversation.workflowId);
         const node = workflow?.workflowV2Plan?.definition.nodes.find((candidate) => candidate.id === conversation.nodeId);
         const planNode = workflow?.workflowV2Plan?.nodes.find((candidate) => candidate.nodeId === conversation.nodeId);
-        if (!node || node.execModel !== "llm" || !planNode || !content.trim()) return;
+        if (!node || node.execModel !== "llm" || !planNode) return;
         try {
-          const output = parseWorkflowV2WorkerArtifact(node, content);
+          const submission = await this.workflowRuntime.readLatestNodeCompletionSubmission({
+            workflowId: conversation.workflowId,
+            runId: conversation.runId,
+            nodeId: conversation.nodeId,
+            executionId: this.workflowNodeExecutionId(conversation.workflowId, conversation.runId, conversation.nodeId, conversation.telemetry?.attempt),
+          });
+          const output = submission?.output ?? parseWorkflowV2WorkerArtifact(node, content);
           this.workflowNodeConversations.proposeCompletion(conversation.conversationId, {
             output,
+            ...(submission ? { submissionId: submission.submissionId } : {}),
             acceptanceCriteria: planNode.acceptanceCriteria.map((criterion) => ({
               key: criterion.key,
               satisfied: true,
@@ -477,7 +498,7 @@ export class AgentHub {
       startWorkflowRun: (input) => this.workflowRunStateService.start(input),
       finishWorkflowRun: (input) => this.workflowRunStateService.finish(input),
       updateWorkflowRunState: (input) => this.workflowRunStateService.update(input),
-      runTask: (input) => this.runTask(input),
+      runTask: (input, approvalPolicy) => this.runTask(input, approvalPolicy),
       stopTask: (taskId) => this.stopTask(taskId),
       deleteTask: (taskId, options) => this.deleteTask(taskId, options),
       executeWorkflowV2Script: (input) => executeWorkflowV2Script(input),
@@ -504,6 +525,10 @@ export class AgentHub {
       conversations: this.workflowNodeConversations,
       snapshot: () => this.snapshot(),
       completeInteractiveNode: (input) => this.workflowRuntime.completeInteractiveNode(input),
+      nodeExecutionId: (workflowId, runId, nodeId, attempt) => this.workflowNodeExecutionId(workflowId, runId, nodeId, attempt),
+      rejectNodeCompletion: async (input) => {
+        await this.workflowRuntime.resolveNodeCompletionSubmission({ ...input, status: "rejected" });
+      },
     });
     this.workflowRunService = new WorkflowRunService({
       runtime: this.workflowRuntime,
@@ -1050,6 +1075,7 @@ export class AgentHub {
     const current = this.workflowStore.workflows.get(workflowId);
     if (!current) return this.snapshot();
     const sessionKey = this.workflowDraftSessionKey(workflowId);
+    this.runtimeApprovals.cancelOwner(sessionKey);
     await this.interactiveSessions.interrupt(sessionKey);
     await this.interactiveSessions.dispose(sessionKey, "error");
     this.workflowDraftSessionBindings.delete(workflowId);
@@ -1098,7 +1124,9 @@ export class AgentHub {
     const request = this.activeWorkflowDraftRequests.get(workflowId);
     const workflow = this.workflowStore.workflows.get(workflowId);
     if (!request || !workflow) return this.snapshot();
-    await this.interactiveSessions.interrupt(this.workflowDraftSessionKey(workflowId));
+    const sessionKey = this.workflowDraftSessionKey(workflowId);
+    this.runtimeApprovals.cancelOwner(sessionKey);
+    await this.interactiveSessions.interrupt(sessionKey);
     this.activeWorkflowDraftRequests.delete(workflowId);
     const next = abandonWorkflowDraftReplyStateValue({
       workflow,
@@ -1264,6 +1292,7 @@ export class AgentHub {
   async deleteWorkflow(workflowId: string): Promise<AppSnapshot> {
     if (!this.workflowStore.workflows.has(workflowId)) return this.snapshot();
     const sessionKey = this.workflowDraftSessionKey(workflowId);
+    this.runtimeApprovals.cancelOwner(sessionKey);
     await this.interactiveSessions.interrupt(sessionKey);
     await this.interactiveSessions.dispose(sessionKey, "app_shutdown");
     this.workflowDraftSessionBindings.delete(workflowId);
@@ -1387,6 +1416,16 @@ export class AgentHub {
 
   submitWorkflowScriptInput(input: SubmitWorkflowScriptInputRequest): Promise<WorkflowOperationResult> {
     return this.workflowRunService.submitScriptInput(input);
+  }
+
+  submitWorkflowNodeCompletion(input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    output: WorkflowV2WorkerOutput;
+  }) {
+    return this.workflowRuntime.submitNodeCompletion(input);
   }
 
   async runScheduledWorkflowEvent(
@@ -1563,7 +1602,10 @@ export class AgentHub {
   }
 
   async listWorkflowOutputs(request: ListWorkflowOutputsRequest): Promise<Array<{ name: string; path: string }>> {
-    return listWorkflowOutputsValue(this.workflowStore.workflows.get(request.workflowId), this.workDir, request.workflowId, request.runId);
+    const workflow = this.workflowStore.workflows.get(request.workflowId);
+    const run = this.workflowStore.runs.get(request.runId);
+    await reconcileWorkflowOutputArtifactsValue(workflow, run, this.workDir);
+    return listWorkflowOutputsValue(workflow, this.workDir, request.workflowId, request.runId);
   }
 
   workflowWorkDir(workflowId: string): string | undefined {
@@ -1759,12 +1801,17 @@ export class AgentHub {
     return `workflow-draft:${workflowId}`;
   }
 
+  private workflowNodeExecutionId(workflowId: string, runId: string, nodeId: string, attempt = 1): string {
+    return `workflow-node:${workflowId}:${runId}:${nodeId}:attempt:${Math.max(1, Math.floor(attempt))}`;
+  }
+
   private createWorkflowNodeInteractiveSession(input: Parameters<WorkflowV2ConversationManager["start"]>[0] & { emit: (event: AgentEvent) => void }) {
     const resolved = this.resolveConfiguredAgent(input.configuredAgentId, input.modelId);
     if (!resolved || !resolved.runtime?.available) throw new Error("The configured workflow node agent is unavailable.");
     const executionMode = this.selectExecutionMode(resolved.runtimeAgentId, "chat", "interactive");
     if (executionMode !== "interactive") throw new Error("The configured workflow node agent does not support interactive sessions.");
     const sessionKey = `workflow-node:${input.workflowId}:${input.runId}:${input.nodeId}`; this.runtimeApprovals.allowWorkflowOutputWrites(sessionKey, input.workDir, input.workflowId, input.runId);
+    const completionExecutionId = this.workflowNodeExecutionId(input.workflowId, input.runId, input.nodeId, input.attempt);
     let latestRuntimeConversation: RuntimeConversation | undefined;
     const context: InteractiveSessionContext = {
       chatId: sessionKey,
@@ -1782,6 +1829,7 @@ export class AgentHub {
       planningWorkflowId: input.workflowId,
       workflowRunId: input.runId,
       workflowNodeId: input.nodeId,
+      workflowNodeExecutionId: completionExecutionId,
       developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, resolved.agent.instructions, input.developerInstructions, input.contextDocument ? `# Runtime context\n${input.contextDocument}` : undefined].filter(Boolean).join("\n\n"),
       emit: (event) => {
         if (event.type === "runtime_conversation") latestRuntimeConversation = this.runtimeRouter.cloneConversation(event.runtimeConversation);
@@ -1835,6 +1883,7 @@ export class AgentHub {
     });
     const previousBinding = this.workflowDraftSessionBindings.get(input.workflowId);
     if (previousBinding && (previousBinding !== binding || (input.starting && !runtimeConversation))) {
+      this.runtimeApprovals.cancelOwner(sessionKey);
       await this.interactiveSessions.dispose(sessionKey, "error");
     }
     this.workflowDraftSessionBindings.set(input.workflowId, binding);
@@ -1859,6 +1908,7 @@ export class AgentHub {
       timeout = createWorkflowAgentTimeout({
         timeoutMs: WORKFLOW_AGENT_IDLE_TIMEOUT_MS,
         onTimeout: () => {
+          this.runtimeApprovals.cancelOwner(sessionKey);
           void this.interactiveSessions.interrupt(sessionKey);
           fail(new Error("Workflow planning agent timed out after 10 minutes without activity"));
         },
@@ -1885,6 +1935,7 @@ export class AgentHub {
         emit: (event) => {
           if (settled) return;
           timeout?.refresh();
+          if (emitWorkflowAgentApprovalEvent({ requestId: input.requestId, onEvent }, event)) return;
           if (event.type === "runtime_conversation") {
             latestRuntimeConversation = this.runtimeRouter.cloneConversation(event.runtimeConversation);
             const workflow = this.workflowStore.workflows.get(input.workflowId);
@@ -2169,6 +2220,7 @@ export class AgentHub {
     task.planningWorkflowId = input.planningWorkflowId;
     task.workflowRunId = input.workflowRunId;
     task.workflowNodeId = input.workflowNodeId;
+    task.workflowNodeExecutionId = input.workflowNodeExecutionId;
     return task;
   }
 

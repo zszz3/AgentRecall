@@ -116,7 +116,22 @@ describe("Workflow V2 AgentHub durable restore", () => {
       modelId: "default",
       objective: "Plan a workflow",
       definition: { workflowId, graphVersion: 1, objective: "", nodes: [], edges: [] },
-      messages: [{ id: "message-1", role: "user", content: "Plan a workflow" }],
+      messages: [
+        { id: "message-1", role: "user", content: "Plan a workflow" },
+        {
+          id: "message-2",
+          role: "assistant",
+          content: "Waiting for approval",
+          events: [{
+            id: "approval-1",
+            type: "approval_request",
+            content: "Allow workflow_create?",
+            timestamp: 1,
+            requestId: "runtime-approval:1",
+            requestState: "live",
+          }],
+        },
+      ],
       reply: "",
       runProgress: [],
       runContextDocument: "",
@@ -136,7 +151,14 @@ describe("Workflow V2 AgentHub durable restore", () => {
       status: "draft",
       objective: "Plan a workflow",
     });
-    expect(restored?.messages).toHaveLength(1);
+    expect(restored?.messages).toHaveLength(2);
+    expect(restored?.messages[1]?.events).toEqual([
+      expect.objectContaining({
+        type: "approval_request",
+        requestId: "runtime-approval:1",
+        requestState: "expired",
+      }),
+    ]);
   });
 
   test("skips one invalid workflow without clearing valid workflow history", () => {

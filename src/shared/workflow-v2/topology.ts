@@ -58,6 +58,8 @@ function createSummaryNode(nodeId: string, upstreamNodeCount: number): WorkflowV
     outputFields: [{
       key: "answer_markdown",
       required: true,
+      valueType: "string",
+      artifact: { format: "markdown", fileName: "report.md" },
       description: "Complete user-facing Markdown answer synthesized from every terminal result packet.",
     }],
     contextBudget: {

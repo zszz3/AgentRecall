@@ -127,6 +127,8 @@ export function workflowV2LlmNodePrompt(input: {
     input.storagePlanDocument,
     "",
     "Populate outputs using the exact keys and value types declared in taskPacket.outputFields.",
+    "For an output field with artifact metadata, return the complete document content in that field; the runtime writes it to the current Run output directory.",
+    "For an output field with valueType=file, create the file inside the current Run output directory before completion and return its exact relative path.",
     "When taskPacket.downstreamRequirements is present, satisfy every listed downstream script parameter contract. These bindings read only outputs[upstreamOutputKey], never summary.",
     "Completion protocol: when workflow_node_complete (or its namespaced MCP equivalent) is available, you MUST call that tool exactly once when the node can complete. Do not print the worker-output JSON in assistant content; use the tool arguments as the structured result and keep any explanation as ordinary text.",
     "Only if the completion tool is genuinely unavailable, fall back to returning one structured JSON worker-output packet when the node can complete:",

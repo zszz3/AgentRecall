@@ -360,7 +360,7 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
     },
   ];
   const managed = Boolean(process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN);
-  if (managed && process.env.AGENT_RECALL_WORKFLOW_RUN_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_ID) {
+  if (managed && process.env.AGENT_RECALL_WORKFLOW_RUN_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID) {
     tools.push({
       name: "workflow_node_complete",
       description: "Submit the current workflow node's validated structured result. Call this exactly once when the node is complete; ordinary text remains conversation history.",
@@ -421,6 +421,7 @@ export async function callMcpTool(name: string, args: unknown): Promise<unknown>
       ...(name === "workflow_node_complete" ? {
         workflowId: process.env.AGENT_RECALL_WORKFLOW_ID,
         runId: process.env.AGENT_RECALL_WORKFLOW_RUN_ID,
+        executionId: process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID,
       } : {}),
     }),
   });

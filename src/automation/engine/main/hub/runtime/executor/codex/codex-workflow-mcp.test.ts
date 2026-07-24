@@ -6,6 +6,10 @@ describe("codexWorkflowMcpArgs", () => {
     const config = codexWorkflowMcpConfig({ discoveryPath: "C:/app/mcp-bridge.json", workflowId: "wf-1" });
     expect(config.args.join("\n")).toContain("mcp_servers.agent_recall.command");
     expect(config.args.join("\n")).toContain("AGENT_RECALL_WORKFLOW_MCP_BRIDGE");
+    expect(config.args.join("\n")).toContain('mcp_servers.agent_recall.default_tools_approval_mode="prompt"');
+    expect(config.args.join("\n")).toContain('mcp_servers.agent_recall.tools.workflow_create.approval_mode="approve"');
+    expect(config.args.join("\n")).toContain('mcp_servers.agent_recall.tools.workflow_get.approval_mode="approve"');
+    expect(config.args.join("\n")).not.toContain("mcp_servers.agent_recall.tools.workflow_run.approval_mode");
     expect(config.env.AGENT_RECALL_WORKFLOW_ID).toBe("wf-1");
     expect(config.requiredMcpTools).toEqual({ agent_recall: ["workflow_create"] });
   });
@@ -20,18 +24,24 @@ describe("codexWorkflowMcpArgs", () => {
       workflowId: "wf-1",
       runId: "run-1",
       nodeId: "node-1",
+      executionId: "execution-1",
       managedToken: "managed-token",
     });
     const args = config.args.join("\n");
 
     expect(args).toContain("AGENT_RECALL_WORKFLOW_RUN_ID");
     expect(args).toContain("AGENT_RECALL_WORKFLOW_NODE_ID");
+    expect(args).toContain("AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID");
     expect(args).toContain("AGENT_RECALL_WORKFLOW_MCP_TOKEN");
+    expect(args).toContain('mcp_servers.agent_recall.tools.workflow_node_complete.approval_mode="approve"');
+    expect(args).not.toContain("mcp_servers.agent_recall.tools.workflow_create.approval_mode");
+    expect(args).not.toContain("mcp_servers.agent_recall.tools.workflow_run.approval_mode");
     expect(args).not.toContain("managed-token");
     expect(config.env).toMatchObject({
       AGENT_RECALL_WORKFLOW_ID: "wf-1",
       AGENT_RECALL_WORKFLOW_RUN_ID: "run-1",
       AGENT_RECALL_WORKFLOW_NODE_ID: "node-1",
+      AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: "execution-1",
       AGENT_RECALL_WORKFLOW_MCP_TOKEN: "managed-token",
     });
     expect(config.requiredMcpTools).toEqual({ agent_recall: ["workflow_node_complete"] });

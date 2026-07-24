@@ -36,6 +36,7 @@ export class CodexAgentExecutor implements AgentExecutor {
       workflowId: this.context.planningWorkflowId,
       runId: this.context.workflowRunId,
       nodeId: this.context.workflowNodeId,
+      executionId: this.context.workflowNodeExecutionId,
       managedToken: this.options.workflowMcpManagedToken?.(),
     });
     let client: CodexRpcClient;

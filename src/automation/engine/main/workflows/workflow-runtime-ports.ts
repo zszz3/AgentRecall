@@ -7,6 +7,11 @@ import type { WorkflowEvent, WorkflowRunProgressItem } from "../../shared/workfl
 import type { WorkflowNodeConversation } from "../../shared/workflow-v2/conversation";
 import type { WorkflowV2ScriptAuthorization, WorkflowV2ScriptNode } from "../../shared/workflow-v2/definition";
 import type { WorkflowV2WorkerOutput } from "../../shared/workflow-v2/packets";
+import type {
+  WorkflowV2NodeCompletionLedger,
+  WorkflowV2NodeCompletionSubmission,
+  WorkflowV2NodeCompletionSubmissionStatus,
+} from "../../shared/workflow-v2/completion";
 import type { WorkflowV2ResultPacket } from "../../shared/workflow-v2/planning";
 import type {
   WorkflowV2CacheEntryMetadata,
@@ -49,6 +54,38 @@ export interface WorkflowV2StorePort {
     graphVersion: number,
     nodeId: string,
   ) => Promise<WorkflowV2CacheEntryMetadata | undefined>;
+  beginNodeCompletionExecution?: (input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    attempt: number;
+    startedAt: number;
+  }) => Promise<WorkflowV2NodeCompletionLedger>;
+  submitNodeCompletion?: (input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    output: WorkflowV2WorkerOutput;
+    submittedAt: number;
+  }) => Promise<WorkflowV2NodeCompletionSubmission>;
+  readLatestNodeCompletionSubmission?: (input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+  }) => Promise<WorkflowV2NodeCompletionSubmission | undefined>;
+  resolveNodeCompletionSubmission?: (input: {
+    workflowId: string;
+    runId: string;
+    nodeId: string;
+    executionId: string;
+    submissionId: string;
+    status: Extract<WorkflowV2NodeCompletionSubmissionStatus, "consumed" | "accepted" | "rejected">;
+    resolvedAt: number;
+    reason?: string;
+  }) => Promise<WorkflowV2NodeCompletionSubmission>;
 }
 
 export interface WorkflowRuntimeDependencies {
@@ -70,6 +107,7 @@ export interface WorkflowRuntimeDependencies {
     initialPrompt: string;
     developerInstructions?: string;
     contextDocument?: string;
+    attempt?: number;
   }) => Promise<WorkflowNodeConversation>;
   markWorkflowNodeConversationWaiting: (conversationId: string, question: string) => WorkflowNodeConversation;
   stopWorkflowNodeConversations: (workflowId: string, runId: string) => Promise<void>;

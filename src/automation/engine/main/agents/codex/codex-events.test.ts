@@ -85,6 +85,33 @@ describe("normalizeCodexNotification", () => {
     }]);
   });
 
+  test("preserves the complete structured workflow node output", () => {
+    const state = createCodexStreamState();
+    const output = {
+      nodeId: "report",
+      summary: "Done",
+      outputs: { answer_markdown: `# Report\n\n${"long content\n".repeat(100)}` },
+      proposals: [],
+    };
+
+    const [event] = normalizeCodexNotification("item/started", {
+      item: {
+        id: "mcp-complete",
+        type: "mcpToolCall",
+        server: "agent_recall",
+        tool: "workflow_node_complete",
+        arguments: output,
+        status: "inProgress",
+      },
+    }, state);
+
+    expect(event).toMatchObject({ type: "tool_call", name: "workflow_node_complete" });
+    const content = event && "content" in event ? event.content : undefined;
+    expect(typeof content).toBe("string");
+    expect(JSON.parse(content ?? "")).toEqual(output);
+    expect(content).not.toContain("\n...");
+  });
+
   test("maps turn completion to completed event", () => {
     const state = createCodexStreamState();
 

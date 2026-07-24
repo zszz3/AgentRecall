@@ -50,6 +50,7 @@ export class TaskState {
   planningWorkflowId: string | undefined = undefined;
   workflowRunId: string | undefined = undefined;
   workflowNodeId: string | undefined = undefined;
+  workflowNodeExecutionId: string | undefined = undefined;
   developerInstructions: string | undefined = undefined;
   contextDocument: string | undefined = undefined;
   continuationPolicy: RuntimeContinuationPolicy = "fresh";

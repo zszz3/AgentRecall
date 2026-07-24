@@ -89,6 +89,7 @@ export async function runAgentExecution(input: {
     ...(input.run.kind === "task" && input.run.planningWorkflowId ? { planningWorkflowId: input.run.planningWorkflowId } : {}),
     ...(input.run.kind === "task" && input.run.workflowRunId ? { workflowRunId: input.run.workflowRunId } : {}),
     ...(input.run.kind === "task" && input.run.workflowNodeId ? { workflowNodeId: input.run.workflowNodeId } : {}),
+    ...(input.run.kind === "task" && input.run.workflowNodeExecutionId ? { workflowNodeExecutionId: input.run.workflowNodeExecutionId } : {}),
     runtime,
     channelId: input.resolved.channel.id,
     prompt: input.prompt,

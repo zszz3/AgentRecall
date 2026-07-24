@@ -29,6 +29,7 @@ export interface CreateWorkflowNodeConversationInput {
   provider?: string;
   runtimeId?: string;
   channelId?: string;
+  attempt?: number;
 }
 
 export class WorkflowV2ConversationManager {
@@ -40,8 +41,9 @@ export class WorkflowV2ConversationManager {
   constructor(private readonly deps: {
     now: () => number;
     createSession: (input: CreateWorkflowNodeConversationInput & { emit: (event: AgentEvent) => void }) => WorkflowNodeInteractiveSession;
+    onStarting?: (input: CreateWorkflowNodeConversationInput) => Promise<void>;
     onChanged?: (delivery: "stream" | "immediate") => void;
-    onCompleted?: (conversation: WorkflowNodeConversation, content: string) => void;
+    onCompleted?: (conversation: WorkflowNodeConversation, content: string) => void | Promise<void>;
   }) {}
 
   async start(input: CreateWorkflowNodeConversationInput): Promise<WorkflowNodeConversation> {
@@ -67,10 +69,11 @@ export class WorkflowV2ConversationManager {
         ...(input.runtimeId ? { runtimeId: input.runtimeId } : {}),
         ...(input.channelId ? { channelId: input.channelId } : {}),
         modelId: input.modelId,
-        attempt: 1,
+        attempt: input.attempt ?? 1,
         startedAt: now,
       },
     };
+    await this.deps.onStarting?.(structuredClone(input));
     const session = this.deps.createSession({ ...input, emit: (event) => this.recordEvent(conversationId, event) });
     this.conversations.set(conversationId, conversation);
     this.sessions.set(conversationId, session);
@@ -224,6 +227,7 @@ export class WorkflowV2ConversationManager {
         workflowId: restored.workflowId, runId: restored.runId, nodeId: restored.nodeId,
         configuredAgentId: restored.configuredAgentId, modelId: restored.modelId, workDir: restored.workDir,
         initialPrompt: restored.messages.find((message) => message.role === "system")?.content ?? "Continue this workflow node.",
+        ...(restored.telemetry?.attempt ? { attempt: restored.telemetry.attempt } : {}),
       });
     }
   }
@@ -257,9 +261,9 @@ export class WorkflowV2ConversationManager {
     }
     if (event.type === "completed") {
       if (conversation.telemetry) conversation.telemetry.finishedAt = this.deps.now();
-      const completionTool = [...conversation.messages].reverse().find((message) => message.eventType === "tool_call" && message.name?.toLowerCase().includes("workflow_node_complete"));
-      const finalContent = (completionTool?.content || event.content || (conversation.messages.at(-1)?.eventType === "delta" ? conversation.messages.at(-1)?.content : "") || "").trim();
-      this.deps.onCompleted?.(structuredClone(conversation), finalContent);
+      const finalContent = (event.content || (conversation.messages.at(-1)?.eventType === "delta" ? conversation.messages.at(-1)?.content : "") || "").trim();
+      const completion = this.deps.onCompleted?.(structuredClone(conversation), finalContent);
+      if (completion) void Promise.resolve(completion).catch(() => undefined);
     }
     if (event.type === "error") {
       conversation.status = "failed";
@@ -370,6 +374,7 @@ function restoredCompletionProposal(value: unknown): WorkflowNodeCompletionPropo
   });
   if (acceptanceCriteria.length !== record.acceptanceCriteria.length) return undefined;
   return {
+    ...(typeof record.submissionId === "string" && record.submissionId.trim() ? { submissionId: record.submissionId } : {}),
     output: structuredClone(record.output),
     acceptanceCriteria,
     unresolvedRisks: [...record.unresolvedRisks] as string[],

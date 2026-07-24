@@ -32,7 +32,7 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
             ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
             ...acpWorkflowMcpServers({
               discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
-              runId: context.workflowRunId, nodeId: context.workflowNodeId, managedToken: options.workflowMcpManagedToken?.(),
+              runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
             }),
           ],
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
@@ -49,7 +49,7 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
             modelId: interactiveContext.runtimeConfig.model,
             mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers({
               discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
-              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, managedToken: options.workflowMcpManagedToken?.(),
+              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
             })],
             onEvent,
             onExit,
