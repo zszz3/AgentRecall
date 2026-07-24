@@ -44,7 +44,12 @@ export function OpenVikingMemorySettings({
   }, [refresh]);
 
   useEffect(() => {
-    if (action !== "runtime" && snapshot?.runtime.state !== "installing") return;
+    if (
+      action !== "runtime"
+      && action !== "start"
+      && snapshot?.runtime.state !== "installing"
+      && snapshot?.runtime.state !== "starting"
+    ) return;
     const timer = window.setInterval(() => {
       void refresh().catch((cause) => setError(errorMessage(cause)));
     }, 500);

@@ -52,6 +52,7 @@ describe("OpenViking directory memory UI", () => {
     expect(source).toContain("bytesPerSecond");
     expect(source).toContain("/s");
     expect(source).toContain("window.setInterval");
+    expect(source).toContain('&& action !== "start"');
   });
 
   it("wires directory management, import control and memory CRUD through the new preload API", async () => {
