@@ -390,9 +390,34 @@ describe("OpenVikingMemoryService", () => {
     expect(h.client.appendMessages).not.toHaveBeenCalled();
 
     await expect(h.service.resumeImport("workspace-1")).resolves.toMatchObject({
+      state: "queued",
+      importedTurns: 0,
+    });
+    await vi.waitFor(() => expect(h.jobs.get("workspace-1")).toMatchObject({
+      state: "completed",
+      importedTurns: 1,
+    }));
+  });
+
+  it("allows slow OpenViking commit tasks to finish after the first minute", async () => {
+    const summary = turn("turn-1", 0);
+    const h = harness({
+      initialWorkspaces: [workspace()],
+      sessions: [session("codex:1")],
+      turns: { "codex:1": [summary] },
+      details: { "turn-1": detail(summary, "question", "answer") },
+    });
+    let polls = 0;
+    vi.mocked(h.client.getTask).mockImplementation(async () => ({
+      id: "task-1",
+      status: ++polls > 120 ? "completed" : "running",
+    }));
+
+    await expect(h.service.importWorkspace("workspace-1")).resolves.toMatchObject({
       state: "completed",
       importedTurns: 1,
     });
+    expect(h.client.getTask).toHaveBeenCalledTimes(121);
   });
 
   it("stops management without deleting data, but purges remote data before local mapping", async () => {

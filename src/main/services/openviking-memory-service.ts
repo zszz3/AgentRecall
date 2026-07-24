@@ -39,7 +39,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const MAX_TURN_CONTENT = 12_000;
-const MAX_TASK_POLLS = 120;
+const MAX_TASK_POLLS = 1_200;
 
 export interface OpenVikingDirectoryPreview {
   rootPath: string;
@@ -305,14 +305,17 @@ export class OpenVikingMemoryService {
 
   async resumeImport(workspaceId: string): Promise<OpenVikingImportJob> {
     const current = await this.requireImportJob(workspaceId);
-    await this.options.store.updateOpenVikingImportJob(workspaceId, {
+    const queued = await this.options.store.updateOpenVikingImportJob(workspaceId, {
       state: "queued",
       importedTurns: current.importedTurns,
       totalTurns: current.totalTurns,
       cursorSessionKey: current.cursorSessionKey,
       lastError: null,
     });
-    return this.importWorkspace(workspaceId);
+    void this.importWorkspace(workspaceId).catch(() => {
+      // The import loop persists its failure for the renderer to surface.
+    });
+    return queued;
   }
 
   retryImport(workspaceId: string): Promise<OpenVikingImportJob> {

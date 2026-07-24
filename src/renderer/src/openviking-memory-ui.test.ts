@@ -83,5 +83,8 @@ describe("OpenViking directory memory UI", () => {
     ]) {
       expect(source).toContain(operation);
     }
+    expect(source).toContain('action === "import"');
+    expect(source).toContain("正在导入并提取记忆");
+    expect(source).toContain("已导入 ${workspace.importedTurns} / ${workspace.totalTurns}");
   });
 });

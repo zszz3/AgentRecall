@@ -77,7 +77,8 @@ export function OpenVikingMemoryPage({
   }, [enabled, refresh]);
 
   const transient = Boolean(
-    snapshot?.runtime.state === "installing"
+    action === "import"
+    || snapshot?.runtime.state === "installing"
     || snapshot?.runtime.state === "starting"
     || snapshot?.workspaces.some((workspace) =>
       ["idle", "queued", "running"].includes(workspace.importState)),
@@ -358,8 +359,14 @@ export function OpenVikingMemoryPage({
 
                 <div className="openviking-import-status">
                   <span>{importLabel(workspace, language)}</span>
-                  <div><i style={{ width: importProgress(workspace) }} /></div>
-                  <em>{workspace.importedTurns}/{workspace.totalTurns}</em>
+                  <div><i
+                    className={workspace.importState === "running" ? "active" : ""}
+                    style={{ width: importProgress(workspace) }}
+                  /></div>
+                  <em>{l(
+                    `Imported ${workspace.importedTurns} / ${workspace.totalTurns} · ${importProgress(workspace)}`,
+                    `已导入 ${workspace.importedTurns} / ${workspace.totalTurns} · ${importProgress(workspace)}`,
+                  )}</em>
                 </div>
 
                 <form className="openviking-search" onSubmit={(event) => { event.preventDefault(); search(); }}>
@@ -488,7 +495,7 @@ function importProgress(workspace: OpenVikingWorkspace): string {
 function importLabel(workspace: OpenVikingWorkspace, language: LanguageMode): string {
   const l = (en: string, zh: string) => localize(language, en, zh);
   switch (workspace.importState) {
-    case "running": return l("Importing", "导入中");
+    case "running": return l("Importing and extracting memory", "正在导入并提取记忆");
     case "queued": return l("Queued", "等待导入");
     case "paused": return l("Paused", "已暂停");
     case "failed": return l("Import failed", "导入失败");

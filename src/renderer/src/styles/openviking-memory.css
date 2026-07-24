@@ -390,6 +390,18 @@
   transition: width 0.2s ease;
 }
 
+.openviking-import-status i.active {
+  background: linear-gradient(90deg, var(--accent), var(--accent-bright), var(--accent));
+  background-size: 200% 100%;
+  animation: openviking-import-active 1.2s linear infinite;
+}
+
+@keyframes openviking-import-active {
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .openviking-import-status em {
   color: var(--text-faint);
   font-style: normal;
