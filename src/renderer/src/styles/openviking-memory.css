@@ -468,45 +468,93 @@
   border-right: 1px solid var(--border);
 }
 
-.openviking-result-list > button {
+.openviking-result-group {
+  border-bottom: 1px solid var(--border);
+}
+
+.openviking-result-group-head {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.openviking-result-group-head:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.openviking-result-group-head > span {
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+}
+
+.openviking-result-group-head > strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-result-group-head > em {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--panel-bg);
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.openviking-result-group-body > button {
   position: relative;
   display: grid;
   width: 100%;
   min-width: 0;
   gap: 4px;
-  padding: 11px 13px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 11px 13px 11px 22px;
+  border-top: 1px solid var(--border-subtle);
   color: var(--text-muted);
   text-align: left;
 }
 
-.openviking-result-list > button:hover,
-.openviking-result-list > button.active {
+.openviking-result-group-body > button:hover,
+.openviking-result-group-body > button.active {
   background: var(--panel-hover);
 }
 
-.openviking-result-list > button.active {
+.openviking-result-group-body > button.active {
   box-shadow: inset 3px 0 var(--accent);
 }
 
-.openviking-result-list strong,
-.openviking-result-list span {
+.openviking-result-group-body strong,
+.openviking-result-group-body span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.openviking-result-list strong {
+.openviking-result-group-body strong {
   color: var(--text);
   font-size: 12.5px;
 }
 
-.openviking-result-list span {
+.openviking-result-group-body span {
   color: var(--text-muted);
   font-size: 11px;
 }
 
-.openviking-result-list em {
+.openviking-result-group-body em {
   position: absolute;
   top: 10px;
   right: 10px;

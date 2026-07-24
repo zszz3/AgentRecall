@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import {
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   FolderOpen,
   Pause,
   Play,
@@ -21,6 +23,10 @@ import type {
 } from "../../../../core/openviking-memory";
 import type { OpenVikingDirectoryPreview } from "../../../../main/services/openviking-memory-service";
 import { localize, type LanguageMode } from "../../language";
+import {
+  groupOpenVikingMemories,
+  type OpenVikingMemoryCategory,
+} from "./openviking-memory-groups";
 
 type PageAction =
   | "choose"
@@ -56,6 +62,9 @@ export function OpenVikingMemoryPage({
   const [action, setAction] = useState<PageAction>(null);
   const [error, setError] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [collapsedCategories, setCollapsedCategories] = useState<
+    Set<OpenVikingMemoryCategory>
+  >(() => new Set());
 
   const refresh = useCallback(async () => {
     const next = await window.sessionSearch.getOpenVikingMemorySnapshot();
@@ -97,6 +106,11 @@ export function OpenVikingMemoryPage({
     () => snapshot?.workspaces.find((item) => item.id === workspaceId) ?? null,
     [snapshot, workspaceId],
   );
+  const memoryGroups = useMemo(() => groupOpenVikingMemories(results), [results]);
+
+  useEffect(() => {
+    setCollapsedCategories(new Set());
+  }, [results, workspaceId]);
 
   useEffect(() => {
     if (!enabled || !workspace || query.trim()) {
@@ -123,6 +137,15 @@ export function OpenVikingMemoryPage({
   const ready = snapshot?.runtime.state !== "not-installed" && snapshot?.model.installed;
   const manualMemoryId = selected ? manualIdFromUri(selected.id) : null;
   const canEditSelected = Boolean(selected && (!selected.id || manualMemoryId));
+
+  const toggleCategory = (category: OpenVikingMemoryCategory) => {
+    setCollapsedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
 
   const run = async (nextAction: Exclude<PageAction, null>, operation: () => Promise<void>) => {
     setAction(nextAction);
@@ -426,18 +449,45 @@ export function OpenVikingMemoryPage({
                             ? "还没有生成记忆。"
                             : "生成的记忆会显示在这里。",
                       )}</div>
-                    ) : results.map((memory) => (
-                      <button
-                        type="button"
-                        key={memory.id}
-                        className={selected?.id === memory.id ? "active" : ""}
-                        onClick={() => void openMemory(memory)}
-                      >
-                        <strong>{memory.title}</strong>
-                        <span>{memory.content || memory.source || memory.id}</span>
-                        {memory.score !== undefined ? <em>{memory.score.toFixed(2)}</em> : null}
-                      </button>
-                    ))}
+                    ) : memoryGroups.map((group) => {
+                      const isCollapsed = collapsedCategories.has(group.key);
+                      return (
+                        <section className="openviking-result-group" key={group.key}>
+                          <button
+                            type="button"
+                            className="openviking-result-group-head"
+                            aria-expanded={!isCollapsed}
+                            onClick={() => toggleCategory(group.key)}
+                          >
+                            <span aria-hidden="true">
+                              {isCollapsed
+                                ? <ChevronRight size={13} />
+                                : <ChevronDown size={13} />}
+                            </span>
+                            <strong>{l(group.label.en, group.label.zh)}</strong>
+                            <em>{group.memories.length}</em>
+                          </button>
+                          {!isCollapsed ? (
+                            <div className="openviking-result-group-body">
+                              {group.memories.map((memory) => (
+                                <button
+                                  type="button"
+                                  key={memory.id}
+                                  className={selected?.id === memory.id ? "active" : ""}
+                                  onClick={() => void openMemory(memory)}
+                                >
+                                  <strong>{memory.title}</strong>
+                                  <span>{memory.content || memory.source || memory.id}</span>
+                                  {memory.score !== undefined
+                                    ? <em>{memory.score.toFixed(2)}</em>
+                                    : null}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </section>
+                      );
+                    })}
                   </div>
 
                   <div className="openviking-memory-detail">

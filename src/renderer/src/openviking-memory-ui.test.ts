@@ -112,4 +112,24 @@ describe("OpenViking directory memory UI", () => {
     expect(css).toMatch(/\.openviking-memory-content\s*\{[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/su);
     expect(css).toMatch(/\.openviking-result-list\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/su);
   });
+
+  it("renders accessible collapsible memory category groups", async () => {
+    const source = await readFile(
+      path.join(process.cwd(), "src/renderer/src/features/openviking-memory/openviking-memory-page.tsx"),
+      "utf8",
+    );
+    const css = await readFile(
+      path.join(process.cwd(), "src/renderer/src/styles/openviking-memory.css"),
+      "utf8",
+    );
+
+    expect(source).toContain("groupOpenVikingMemories");
+    expect(source).toContain("collapsedCategories");
+    expect(source).toContain('aria-expanded={!isCollapsed}');
+    expect(source).toContain('className="openviking-result-group-head"');
+    expect(source).toContain("group.memories.length");
+    expect(source).toContain('aria-hidden="true"');
+    expect(css).toContain(".openviking-result-group-head");
+    expect(css).toContain(".openviking-result-group-body");
+  });
 });
