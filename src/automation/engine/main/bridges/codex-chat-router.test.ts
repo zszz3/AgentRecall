@@ -201,6 +201,89 @@ describe("Codex chat router", () => {
     }]);
   });
 
+  test("reads eager Workflow MCP tools from Responses Lite additional_tools input", async () => {
+    let capturedBody: unknown;
+    const upstream = await startJsonUpstream(async (body) => {
+      capturedBody = body;
+      return {
+        id: "chatcmpl_lite_workflow_create",
+        model: "deepseek-v4-flash",
+        choices: [{
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call_lite_create",
+              type: "function",
+              function: {
+                name: "mcp__agent_recall__workflow_create",
+                arguments: "{\"workflowId\":\"wf_lite\"}",
+              },
+            }],
+          },
+          finish_reason: "tool_calls",
+        }],
+      };
+    });
+    const router = await startRouter(upstream.baseUrl);
+
+    const response = await fetch(`${router.baseUrl}/codex-test/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "deepseek-v4-flash",
+        tools: [],
+        input: [
+          {
+            type: "additional_tools",
+            role: "developer",
+            tools: [{
+              type: "namespace",
+              name: "mcp__agent_recall",
+              tools: [{
+                type: "function",
+                name: "workflow_create",
+                description: "Create or update a workflow draft.",
+                parameters: { type: "object", properties: { workflowId: { type: "string" } } },
+              }],
+            }],
+          },
+          {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "Use workflow_create to update the current draft." }],
+          },
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Create the workflow now." }],
+          },
+        ],
+      }),
+    });
+    const payload = await response.json();
+
+    expect(capturedBody).toMatchObject({
+      messages: [
+        { role: "system", content: "Use workflow_create to update the current draft." },
+        { role: "user", content: "Create the workflow now." },
+      ],
+      tools: [{
+        type: "function",
+        function: expect.objectContaining({ name: "mcp__agent_recall__workflow_create" }),
+      }],
+    });
+    expect(payload.output).toEqual([{
+      id: "fc_call_lite_create",
+      type: "function_call",
+      status: "completed",
+      call_id: "call_lite_create",
+      namespace: "mcp__agent_recall",
+      name: "workflow_create",
+      arguments: "{\"workflowId\":\"wf_lite\"}",
+    }]);
+  });
+
   test("converts deferred MCP tool search and discovered namespace tools", async () => {
     const capturedBodies: unknown[] = [];
     let requestIndex = 0;

@@ -10,4 +10,4 @@
 ## Bug 修复
 
 - 修复 Workflow Agent 在工具尚未完成启动时创建会话，导致后续始终无法调用工作流工具的问题；Codex 失败时也会显示具体原因，不再只显示笼统错误。
-- 修复使用第三方模型渠道的新版 Codex 无法发现 Workflow MCP 工具、因而错误提示 `workflow_create` 未提供的问题。
+- 修复使用第三方模型渠道的新版 Codex 在 Responses Lite 模式下丢失 Workflow MCP 工具、因而错误提示 `workflow_create` 未提供的问题。

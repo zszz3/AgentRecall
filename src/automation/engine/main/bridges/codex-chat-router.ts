@@ -301,6 +301,7 @@ function appendInput(messages: ChatMessage[], input: unknown, toolContext: ToolC
       messages.push({ role: "tool", tool_call_id: callId, content: outputToText(record.output ?? record) });
       continue;
     }
+    if (type === "additional_tools") continue;
     if (type === "reasoning") continue;
 
     flushPendingToolCalls();
@@ -342,7 +343,7 @@ function buildToolContext(body: ResponsesRequestBody): ToolContext {
   };
   const tools = Array.isArray(body.tools) ? body.tools : [];
   for (const tool of tools) addResponseTool(context, tool);
-  collectToolSearchOutputTools(context, body.input);
+  collectInputTools(context, body.input);
   return context;
 }
 
@@ -436,16 +437,17 @@ function addChatTool(context: ToolContext, chatName: string, spec: ToolSpec, cha
   context.chatTools.push(chatTool);
 }
 
-function collectToolSearchOutputTools(context: ToolContext, value: unknown): void {
+function collectInputTools(context: ToolContext, value: unknown): void {
   if (Array.isArray(value)) {
-    for (const item of value) collectToolSearchOutputTools(context, item);
+    for (const item of value) collectInputTools(context, item);
     return;
   }
   if (!isRecord(value)) return;
-  if (stringField(value.type) === "tool_search_output" && Array.isArray(value.tools)) {
+  const type = stringField(value.type);
+  if ((type === "additional_tools" || type === "tool_search_output") && Array.isArray(value.tools)) {
     for (const tool of value.tools) addResponseTool(context, tool);
   }
-  for (const child of Object.values(value)) collectToolSearchOutputTools(context, child);
+  for (const child of Object.values(value)) collectInputTools(context, child);
 }
 
 function responseFunctionCallToChatToolCall(item: JsonRecord, toolContext: ToolContext): unknown {
