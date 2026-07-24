@@ -470,6 +470,7 @@ select:focus-visible {
 .stats-period-toggle {
   display: inline-flex;
   min-width: 0;
+  gap: 1px;
   padding: 1px;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
@@ -477,7 +478,8 @@ select:focus-visible {
 }
 
 .stats-period-toggle button {
-  min-width: 34px;
+  min-width: 0;
+  flex: 1 1 0;
   height: 22px;
   padding: 0 6px;
   border: 0;
@@ -1656,6 +1658,7 @@ select:focus-visible {
   --toolbar-filter-gap: 8px;
   --live-filter-width: 166px;
   --date-filter-width: 214px;
+  --sort-filter-width: 214px;
   display: flex;
   width: fit-content;
   min-width: 0;
@@ -1872,6 +1875,7 @@ select:focus-visible {
 .live-filter {
   display: inline-flex;
   align-items: center;
+  gap: 2px;
   height: 38px;
   width: var(--live-filter-width);
   flex: 0 0 var(--live-filter-width);
@@ -1883,11 +1887,12 @@ select:focus-visible {
 
 .live-filter button {
   display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  min-width: 50px;
   height: 30px;
-  padding: 0 9px;
+  padding: 0 6px;
   border-radius: 7px;
   color: var(--text-muted);
   font-size: 12px;
@@ -1910,9 +1915,8 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   height: 38px;
-  width: fit-content;
-  max-width: var(--date-filter-width);
-  flex: 0 0 auto;
+  width: var(--date-filter-width);
+  flex: 0 0 var(--date-filter-width);
   gap: 2px;
   padding: 2px 4px;
   border: 1px solid var(--border);
@@ -1928,11 +1932,12 @@ select:focus-visible {
 
 .date-filter button {
   display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
   height: 30px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 7px;
   color: var(--text-muted);
   font-size: 12px;
@@ -1955,8 +1960,8 @@ select:focus-visible {
   display: inline-flex;
   align-items: center;
   height: 38px;
-  width: fit-content;
-  flex: 0 0 auto;
+  width: var(--sort-filter-width);
+  flex: 0 0 var(--sort-filter-width);
   gap: 2px;
   padding: 2px 4px;
   border: 1px solid var(--border);
@@ -1972,11 +1977,12 @@ select:focus-visible {
 
 .sort-filter button {
   display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
   height: 30px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 7px;
   color: var(--text-muted);
   font-size: 12px;
@@ -5290,6 +5296,7 @@ select:focus-visible {
 .theme-setting-toggle,
 .language-setting-toggle {
   display: inline-flex;
+  width: 176px;
   flex: 0 0 auto;
   gap: 2px;
   padding: 2px;
@@ -5301,12 +5308,13 @@ select:focus-visible {
 .theme-setting-toggle button,
 .language-setting-toggle button {
   display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 74px;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-radius: 6px;
   color: var(--text-muted);
