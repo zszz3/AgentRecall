@@ -182,6 +182,7 @@ describe("stylesheet theme contract", () => {
     expect(toolbar).toMatch(/grid-template-columns:\s*minmax\(180px,\s*1fr\)\s+minmax\(0,\s*max-content\)\s+auto/);
     expect(toolbarFilters).toMatch(/--live-filter-width:\s*166px/);
     expect(toolbarFilters).toMatch(/--date-filter-width:\s*214px/);
+    expect(toolbarFilters).toMatch(/--sort-filter-width:\s*214px/);
     expect(toolbarFilters).toMatch(/width:\s*fit-content/);
     expect(toolbarFilters).toMatch(/max-width:\s*min\(636px,\s*48vw\)/);
     expect(toolbarFilters).toMatch(/justify-self:\s*end/);
@@ -189,10 +190,10 @@ describe("stylesheet theme contract", () => {
     expect(toolbarFilters).toMatch(/justify-content:\s*flex-start/);
     expect(toolbarFilters).toMatch(/overflow:\s*visible/);
     expect(dateFilter).toMatch(/height:\s*38px/);
-    expect(dateFilter).toMatch(/width:\s*fit-content/);
-    expect(dateFilter).toMatch(/max-width:\s*var\(--date-filter-width\)/);
-    expect(dateFilter).toMatch(/flex:\s*0\s+0\s+auto/);
-    expect(dateFilterButton).toMatch(/min-width:\s*36px/);
+    expect(dateFilter).toMatch(/width:\s*var\(--date-filter-width\)/);
+    expect(dateFilter).toMatch(/flex:\s*0\s+0\s+var\(--date-filter-width\)/);
+    expect(dateFilterButton).toMatch(/min-width:\s*0/);
+    expect(dateFilterButton).toMatch(/flex:\s*1\s+1\s+0/);
     expect(dateFilterButton).toMatch(/height:\s*30px/);
     expect(dateFilterButton).toMatch(/white-space:\s*nowrap/);
     const liveFilter = stylesheet.match(/\.live-filter\s*\{[^}]*\}/)?.[0] ?? "";
