@@ -48,6 +48,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openviking/sdk": "^0.1.0",
     "@xyflow/react": "^12.11.2",
     "electron": "42.3.0",
     "electron-store": "^10.0.1",
