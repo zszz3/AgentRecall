@@ -41,7 +41,7 @@ export class CodexRpcClient {
   async start(): Promise<void> {
     if (this.proc) throw new Error("Codex client already started");
 
-    const args = ["--yolo", ...(this.options.extraArgs ?? []), "app-server", "--listen", "stdio://"];
+    const args = [...(this.options.extraArgs ?? []), "app-server", "--listen", "stdio://"];
     const proc = spawnCli({
       executable: this.options.executable,
       args,

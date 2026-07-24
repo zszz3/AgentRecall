@@ -296,6 +296,21 @@ export class WorkflowV2RunExecutor {
             .find((event) => event.type === "user_input_request" && event.requestState !== "resolved");
           if (requestEvent?.content.trim()) throw new WorkflowV2OneShotInputRequestSignal(task, requestEvent.content.trim());
         }
+        const approvalRequest = task.messages
+          .flatMap((message) => message.events ?? [])
+          .find((event) => event.type === "approval_request" && event.requestState === "live");
+        if (approvalRequest) {
+          const prompt = approvalRequest.content.trim() || "This workflow node is waiting for command approval.";
+          updateNode(nodeId, {
+            status: "awaiting_input",
+            detail: prompt,
+            taskId,
+            inputRequest: { kind: "agent_message", prompt },
+            messages: workflowNodeHistoryMessages(task),
+          });
+          await delay(Math.min(WORKFLOW_TASK_POLL_MS, remainingTaskMs, remainingWallClockMs()));
+          continue;
+        }
         if (task.status === "completed") return task;
         if (task.status === "failed" || task.status === "stopped") {
           throw new Error(task.lastError || `Workflow V2 task ${task.title} ${task.status}.`);
