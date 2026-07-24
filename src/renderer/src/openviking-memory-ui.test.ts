@@ -87,4 +87,16 @@ describe("OpenViking directory memory UI", () => {
     expect(source).toContain("正在导入并提取记忆");
     expect(source).toContain("已导入 ${workspace.importedTurns} / ${workspace.totalTurns}");
   });
+
+  it("loads existing memories without requiring a search query", async () => {
+    const source = await readFile(
+      path.join(process.cwd(), "src/renderer/src/features/openviking-memory/openviking-memory-page.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain('searchOpenVikingMemories(workspace.id, "", 200)');
+    expect(source).toContain("browseLoading");
+    expect(source).toContain("正在加载已有记忆");
+    expect(source).toContain("还没有生成记忆");
+  });
 });

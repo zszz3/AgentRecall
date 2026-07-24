@@ -104,7 +104,7 @@ describe("OpenViking memory IPC", () => {
     await handlers.get(OPENVIKING_MEMORY_IPC.importWorkspace.channel)?.(event, "workspace-1");
     await handlers.get(OPENVIKING_MEMORY_IPC.pauseImport.channel)?.(event, "workspace-1");
     await handlers.get(OPENVIKING_MEMORY_IPC.resumeImport.channel)?.(event, "workspace-1");
-    await handlers.get(OPENVIKING_MEMORY_IPC.search.channel)?.(event, "workspace-1", " migration ", 10);
+    await handlers.get(OPENVIKING_MEMORY_IPC.search.channel)?.(event, "workspace-1", "", 200);
     await handlers.get(OPENVIKING_MEMORY_IPC.read.channel)?.(
       event,
       "workspace-1",
@@ -131,7 +131,7 @@ describe("OpenViking memory IPC", () => {
     );
 
     expect(target.previewDirectory).toHaveBeenCalledWith("/repo");
-    expect(target.search).toHaveBeenCalledWith("workspace-1", "migration", 10);
+    expect(target.search).toHaveBeenCalledWith("workspace-1", "", 200);
     expect(target.save).toHaveBeenCalledWith("workspace-1", {
       id: "manual-1",
       title: "Note",

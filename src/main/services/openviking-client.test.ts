@@ -174,6 +174,35 @@ describe("OpenVikingGateway", () => {
     await gateway.deleteMemory(auth, saved.id);
   });
 
+  it("lists the most recently updated memories when the query is empty", async () => {
+    const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
+    const auth: OpenVikingWorkspaceAuth = {
+      accountId: "agent-recall",
+      userId: "workspace_abcd",
+      apiKey: "workspace-key",
+    };
+
+    await expect(gateway.searchMemories(auth, "", 2)).resolves.toEqual([
+      {
+        id: "viking://user/memories/experiences/newest.md",
+        workspaceId: "",
+        title: "newest",
+        content: "",
+        source: "experiences",
+        updatedAt: "2026-07-24T12:00:00Z",
+      },
+      {
+        id: "viking://user/memories/cases/older.md",
+        workspaceId: "",
+        title: "older",
+        content: "",
+        source: "cases",
+        updatedAt: "2026-07-23T12:00:00Z",
+      },
+    ]);
+    expect(requests.at(-1)?.path).toContain("/api/v1/fs/ls?");
+  });
+
   it("turns SDK failures into stable retryable gateway errors", async () => {
     failure = {
       path: "/api/v1/search/find",
@@ -285,6 +314,34 @@ describe("OpenVikingGateway", () => {
             score: 0.91,
           }],
         },
+      });
+    }
+    if (url.pathname === "/api/v1/fs/ls") {
+      return sendJson(response, 200, {
+        status: "ok",
+        result: [
+          {
+            name: "cases",
+            isDir: true,
+            rel_path: "cases",
+            uri: "viking://user/memories/cases",
+            modTime: "2026-07-24T13:00:00Z",
+          },
+          {
+            name: "older.md",
+            isDir: false,
+            rel_path: "cases/older.md",
+            uri: "viking://user/memories/cases/older.md",
+            modTime: "2026-07-23T12:00:00Z",
+          },
+          {
+            name: "newest.md",
+            isDir: false,
+            rel_path: "experiences/newest.md",
+            uri: "viking://user/memories/experiences/newest.md",
+            modTime: "2026-07-24T12:00:00Z",
+          },
+        ],
       });
     }
     if (url.pathname === "/api/v1/content/read") {

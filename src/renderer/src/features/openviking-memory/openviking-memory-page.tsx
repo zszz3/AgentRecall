@@ -55,6 +55,7 @@ export function OpenVikingMemoryPage({
   const [draftContent, setDraftContent] = useState("");
   const [action, setAction] = useState<PageAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const [browseLoading, setBrowseLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     const next = await window.sessionSearch.getOpenVikingMemorySnapshot();
@@ -96,6 +97,29 @@ export function OpenVikingMemoryPage({
     () => snapshot?.workspaces.find((item) => item.id === workspaceId) ?? null,
     [snapshot, workspaceId],
   );
+
+  useEffect(() => {
+    if (!enabled || !workspace || query.trim()) {
+      setBrowseLoading(false);
+      return;
+    }
+    let current = true;
+    setBrowseLoading(true);
+    void window.sessionSearch.searchOpenVikingMemories(workspace.id, "", 200)
+      .then((memories) => {
+        if (current) setResults(memories);
+      })
+      .catch((cause) => {
+        if (current) setError(errorMessage(cause));
+      })
+      .finally(() => {
+        if (current) setBrowseLoading(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [enabled, workspace?.id, workspace?.importState, query]);
+
   const ready = snapshot?.runtime.state !== "not-installed" && snapshot?.model.installed;
   const manualMemoryId = selected ? manualIdFromUri(selected.id) : null;
   const canEditSelected = Boolean(selected && (!selected.id || manualMemoryId));
@@ -384,10 +408,23 @@ export function OpenVikingMemoryPage({
 
                 <div className="openviking-memory-content">
                   <div className="openviking-result-list">
-                    {results.length === 0 ? (
+                    {browseLoading ? (
                       <div className="openviking-result-empty">{l(
-                        "Search memory or create a manual note.",
-                        "搜索记忆，或新建一条手动记忆。",
+                        "Loading existing memories…",
+                        "正在加载已有记忆…",
+                      )}</div>
+                    ) : results.length === 0 ? (
+                      <div className="openviking-result-empty">{l(
+                        query.trim()
+                          ? "No matching memories."
+                          : workspace.importState === "completed"
+                            ? "No memories have been generated yet."
+                            : "Generated memories will appear here.",
+                        query.trim()
+                          ? "没有匹配的记忆。"
+                          : workspace.importState === "completed"
+                            ? "还没有生成记忆。"
+                            : "生成的记忆会显示在这里。",
                       )}</div>
                     ) : results.map((memory) => (
                       <button

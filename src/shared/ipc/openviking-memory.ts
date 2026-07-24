@@ -7,7 +7,7 @@ const pathInput = z.string().trim().min(1).max(32_768)
   .refine((value) => !value.includes("\0"), "Path must not contain NUL.");
 const workspaceIdInput = z.string().trim().min(1).max(128)
   .regex(/^[A-Za-z0-9_-]+$/u, "Workspace ID is invalid.");
-const queryInput = z.string().trim().min(1).max(2_000);
+const queryInput = z.string().trim().max(2_000);
 const memoryUriInput = z.string().trim().min(1).max(8_192)
   .startsWith("viking://user/memories", "Memory URI must stay under the user memory scope.")
   .refine((value) => !value.includes("\0"), "Memory URI must not contain NUL.");
@@ -27,7 +27,7 @@ export const OPENVIKING_MEMORY_IPC = {
   resumeImport: defineIpcRequest("openviking-memory:resume-import", z.tuple([workspaceIdInput])),
   search: defineIpcRequest(
     "openviking-memory:search",
-    z.tuple([workspaceIdInput, queryInput, z.number().int().min(1).max(100).optional()]),
+    z.tuple([workspaceIdInput, queryInput, z.number().int().min(1).max(200).optional()]),
   ),
   read: defineIpcRequest("openviking-memory:read", z.tuple([workspaceIdInput, memoryUriInput])),
   save: defineIpcRequest("openviking-memory:save", z.tuple([workspaceIdInput, memoryInput])),

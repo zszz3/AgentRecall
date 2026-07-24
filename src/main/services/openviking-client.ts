@@ -158,7 +158,18 @@ export class OpenVikingGateway implements OpenVikingClientPort {
     limit = 20,
   ): Promise<OpenVikingMemoryItem[]> {
     return this.normalize(async () => {
-      const result = await this.workspaceClient(auth).find(query, {
+      const client = this.workspaceClient(auth);
+      if (!query.trim()) {
+        return (await client.list("viking://user/memories", {
+          recursive: true,
+          nodeLimit: 1_000,
+        }))
+          .map(normalizeMemory)
+          .filter((memory): memory is OpenVikingMemoryItem => memory !== null)
+          .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""))
+          .slice(0, limit);
+      }
+      const result = await client.find(query, {
         targetUri: "viking://user/memories",
         limit,
       });
@@ -271,15 +282,26 @@ function requiredString(record: JsonObject, keys: string[], label: string): stri
 function normalizeMemory(value: unknown): OpenVikingMemoryItem | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
+  if (record.isDir === true || record.is_dir === true) return null;
   const id = stringValue(record.uri) || stringValue(record.id);
   if (!id) return null;
+  const name = stringValue(record.title)
+    || stringValue(record.name)
+    || id.split("/").at(-1)
+    || id;
+  const relativePath = stringValue(record.rel_path) || stringValue(record.relPath);
+  const source = stringValue(record.source) || relativePath.split("/")[0] || "";
+  const updatedAt = stringValue(record.modTime)
+    || stringValue(record.mod_time)
+    || stringValue(record.updatedAt);
   return {
     id,
     workspaceId: "",
-    title: stringValue(record.title) || stringValue(record.name) || id.split("/").at(-1) || id,
+    title: name.replace(/\.md$/iu, ""),
     content: stringValue(record.content) || stringValue(record.abstract) || stringValue(record.overview),
-    ...(stringValue(record.source) ? { source: stringValue(record.source) } : {}),
+    ...(source ? { source } : {}),
     ...(typeof record.score === "number" ? { score: record.score } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
   };
 }
 
