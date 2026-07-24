@@ -78,6 +78,61 @@ describe("AgentHub workflow materialization", () => {
     expect(hub.snapshot().workflowStore.workflows).toHaveLength(1);
   });
 
+  test("refreshes an existing official workflow from the bundled definition", () => {
+    const hub = new AgentHub();
+    hub.ensureBundledWorkflows([{
+      workflowId: "bundled-test",
+      title: "Old title",
+      objective: "Old objective",
+      definition: {
+        workflowId: "bundled-test",
+        graphVersion: 1,
+        objective: "Old objective",
+        nodes: [{ id: "old", kind: "answer", title: "Old", execModel: "llm", executionMode: "one-shot", prompt: "Old prompt.", outputFields: [{ key: "answer", required: true }] }],
+        edges: [],
+      },
+    }]);
+    const before = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    hub.patchWorkflowDraft({
+      workflowId: before.workflowId,
+      status: "failed",
+      runProgress: [{ nodeId: "old", title: "Old", status: "failed" }],
+      runContextDocument: "Old run context",
+    });
+
+    hub.ensureBundledWorkflows([{
+      workflowId: "bundled-test",
+      title: "New title",
+      objective: "New objective",
+      definition: {
+        workflowId: "bundled-test",
+        graphVersion: 1,
+        objective: "New objective",
+        nodes: [
+          { id: "collect", kind: "analysis", title: "Collect", execModel: "llm", executionMode: "one-shot", prompt: "Collect.", outputFields: [{ key: "scope", required: true }] },
+          { id: "report", kind: "answer", title: "Report", execModel: "llm", executionMode: "one-shot", prompt: "Report.", outputFields: [{ key: "answer", required: true }] },
+        ],
+        edges: [{ fromNodeId: "collect", toNodeId: "report" }],
+      },
+    }]);
+
+    const refreshed = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    expect(refreshed).toMatchObject({
+      sourceType: "official",
+      topologyLocked: true,
+      title: "New title",
+      objective: "New objective",
+      status: "draft",
+      revision: before.revision + 1,
+      runProgress: [],
+      runContextDocument: "",
+      definition: {
+        objective: "New objective",
+        nodes: [{ id: "collect" }, { id: "report" }],
+      },
+    });
+  });
+
   test("reports definition validation errors when confirming a planning draft without a plan", () => {
     const hub = new AgentHub();
     const workflow = hub.createWorkflowDraft().workflowDraft!;

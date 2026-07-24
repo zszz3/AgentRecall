@@ -1,0 +1,232 @@
+{
+  "id": "bundled-code-change-review",
+  "title": "代码变更审查",
+  "objective": "对当前 Git 工作区中的代码变更进行并行、只读、证据驱动的审查，识别正确性、安全性、测试与跨平台兼容风险，并生成按严重程度排序的中文 Markdown 报告。",
+  "assets": {
+    "__REVIEW_GUIDELINES__": "review-guidelines.md"
+  },
+  "definition": {
+    "workflowId": "bundled-code-change-review",
+    "graphVersion": 1,
+    "objective": "对当前 Git 工作区中的代码变更进行并行、只读、证据驱动的审查，识别正确性、安全性、测试与跨平台兼容风险，并生成按严重程度排序的中文 Markdown 报告。",
+    "nodes": [
+      {
+        "id": "collect_changes",
+        "kind": "script",
+        "title": "收集 Git 变更范围",
+        "execModel": "script",
+        "role": "orchestrator",
+        "executionMode": "script",
+        "executionModeRationale": "A deterministic script should validate the selected absolute path and collect the exact Git change set before LLM review.",
+        "executionModeConfidence": 1,
+        "script": {
+          "executable": {
+            "kind": "inline",
+            "language": "typescript",
+            "code": "return (async () => {\n  const reviewDirectory = inputs.review_directory;\n  if (typeof reviewDirectory !== 'string' || !reviewDirectory.trim()) throw new Error('review_directory must be a non-empty absolute path.');\n  if (typeof process.getBuiltinModule !== 'function') throw new Error('This script requires a Node.js runtime with process.getBuiltinModule.');\n  const { realpath, stat } = process.getBuiltinModule('node:fs/promises');\n  const path = process.getBuiltinModule('node:path');\n  const { spawn } = process.getBuiltinModule('node:child_process');\n  if (!path.isAbsolute(reviewDirectory)) throw new Error('review_directory must be an absolute path.');\n  const resolvedDirectory = await realpath(reviewDirectory);\n  if (!(await stat(resolvedDirectory)).isDirectory()) throw new Error('review_directory must reference a directory.');\n  const runGit = (args) => new Promise((resolve, reject) => {\n    const child = spawn('git', args, { shell: false, windowsHide: true });\n    let stdout = '';\n    let stderr = '';\n    let size = 0;\n    const timer = setTimeout(() => { child.kill(); reject(new Error('Git scope collection timed out.')); }, 15000);\n    child.stdout.on('data', (chunk) => { size += chunk.length; if (size > 4 * 1024 * 1024) { child.kill(); reject(new Error('Git scope output exceeded 4 MiB.')); return; } stdout += String(chunk); });\n    child.stderr.on('data', (chunk) => { stderr += String(chunk); });\n    child.on('error', (error) => { clearTimeout(timer); reject(error); });\n    child.on('close', (code) => { clearTimeout(timer); if (code === 0) resolve(stdout); else reject(new Error(stderr.trim() || `Git exited with code ${code}.`)); });\n  });\n  const repositoryRoot = (await runGit(['-C', resolvedDirectory, 'rev-parse', '--show-toplevel'])).trim();\n  const relativeScope = path.relative(repositoryRoot, resolvedDirectory);\n  if (relativeScope.startsWith('..') || path.isAbsolute(relativeScope)) throw new Error('review_directory must stay inside its Git repository.');\n  const pathspec = relativeScope ? relativeScope.split(path.sep).join('/') : '.';\n  const readPaths = async (args) => (await runGit(['-C', repositoryRoot, ...args, '--', pathspec])).split('\\0').filter(Boolean);\n  const [stagedFiles, unstagedFiles, untrackedFiles] = await Promise.all([\n    readPaths(['diff', '--cached', '--name-only', '-z']),\n    readPaths(['diff', '--name-only', '-z']),\n    readPaths(['ls-files', '--others', '--exclude-standard', '-z']),\n  ]);\n  const changedFiles = [...new Set([...stagedFiles, ...unstagedFiles, ...untrackedFiles])].sort();\n  return { review_directory: resolvedDirectory, repository_root: repositoryRoot, staged_files: stagedFiles.sort(), unstaged_files: unstagedFiles.sort(), untracked_files: untrackedFiles.sort(), changed_files: changedFiles };\n})();"
+          },
+          "parameters": [
+            {
+              "key": "review_directory",
+              "label": "审查目录（完整绝对路径）",
+              "location": "argument",
+              "valueType": "directory",
+              "source": "user",
+              "required": true,
+              "description": "需要审查的 Git 仓库根目录或仓库内子目录，必须填写完整绝对路径。"
+            }
+          ],
+          "capabilities": [
+            "workspace_read",
+            "process_spawn",
+            "shell_execute"
+          ],
+          "managerRisk": {
+            "level": "dangerous",
+            "rationale": "Reads the selected directory and starts Git with a fixed executable and shell disabled to collect change paths without modifying files."
+          },
+          "timeoutMs": 30000,
+          "outputSchema": {
+            "type": "object",
+            "required": [
+              "review_directory",
+              "repository_root",
+              "staged_files",
+              "unstaged_files",
+              "untracked_files",
+              "changed_files"
+            ]
+          }
+        },
+        "outputFields": [
+          { "key": "review_directory", "required": true, "valueType": "directory" },
+          { "key": "repository_root", "required": true, "valueType": "directory" },
+          { "key": "staged_files", "required": true, "valueType": "json" },
+          { "key": "unstaged_files", "required": true, "valueType": "json" },
+          { "key": "untracked_files", "required": true, "valueType": "json" },
+          { "key": "changed_files", "required": true, "valueType": "json" }
+        ]
+      },
+      {
+        "id": "impact_scope",
+        "kind": "agent",
+        "title": "确定真实影响范围",
+        "execModel": "llm",
+        "role": "orchestrator",
+        "executionMode": "one-shot",
+        "executionModeRationale": "The collected Git manifest must be expanded through actual callers, consumers, contracts, and tests before specialist review.",
+        "executionModeConfidence": 1,
+        "modelProfile": "expert",
+        "prompt": "读取上游脚本输出的 review_directory、repository_root 以及 staged、unstaged、untracked 文件清单。若 changed_files 为空，明确说明没有可审查变更并停止扩大范围。否则以 repository_root 为根目录读取实际 diff 和变更文件，再沿真实符号引用、调用方、消费者、公开合同、配置、持久化格式和相关测试追踪本次变更真正可能影响的范围。\n\n区分“直接修改文件”“为理解行为必须读取的依赖文件”和“可能受影响但尚无证据的区域”。不要进行无边界全仓扫描，不要修改文件，也不要运行安装、构建、测试、格式化或迁移命令。\n\n输出结构化交接内容：绝对审查目录、仓库根目录、三类 Git 变更清单、每项变更目的、关键调用链、真实受影响组件与用户行为、相关测试位置、无法验证的边界，以及四个专家节点应重点核验的问题。不要提前给出最终审查结论。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true,
+            "valueType": "string"
+          }
+        ]
+      },
+      {
+        "id": "correctness",
+        "kind": "agent",
+        "title": "正确性与回归审查",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "A bounded diff and its owning call sites can be reviewed independently for correctness.",
+        "executionModeConfidence": 1,
+        "modelProfile": "expert",
+        "prompt": "根据上游确定的变更范围，独立审查功能正确性和回归风险。沿真实调用链检查状态转换、错误处理、边界条件、并发、资源生命周期、持久化与恢复语义。重点寻找由本次变更新引入、具有明确触发路径且开发者会愿意修复的问题。\n\n只读取证据，不修改文件，不运行测试。每条候选发现必须给出严重程度、文件位置、触发条件、因果链、实际影响和最小修复方向。排除纯风格偏好、既有问题、没有证据的猜测和与变更无关的建议。没有确定性问题时明确返回没有发现，并列出已检查的关键路径。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true,
+            "valueType": "string"
+          }
+        ]
+      },
+      {
+        "id": "security",
+        "kind": "agent",
+        "title": "安全与数据风险审查",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "Security and data-safety risks can be assessed independently from the same bounded diff.",
+        "executionModeConfidence": 1,
+        "modelProfile": "expert",
+        "prompt": "根据上游确定的变更范围，独立审查安全、隐私和数据完整性风险。检查权限边界、输入校验、命令与路径处理、凭证和敏感信息、网络访问、反序列化、删除或覆盖行为，以及跨信任边界的数据流。Windows 与 macOS/Linux 的路径和进程差异只有在与实际变更相关时才纳入。\n\n只读取证据，不修改文件，不执行可能改变状态的命令。每条候选发现必须有可复现的触发路径，并给出严重程度、文件位置、因果链、影响和最小修复方向。不要把理论上的最佳实践缺失当作漏洞。没有确定性问题时明确返回没有发现。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true,
+            "valueType": "string"
+          }
+        ]
+      },
+      {
+        "id": "tests",
+        "kind": "agent",
+        "title": "测试与验证审查",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "Test coverage and verification gaps can be reviewed independently without executing the suite.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "根据上游确定的变更范围，检查现有测试是否覆盖新的可观察行为、失败路径和平台分支。读取仓库提供的测试与构建命令，但不要实际运行。只有当缺失测试会让一个具体高风险行为无法被发现，或者现有测试断言与实现合同明显矛盾时，才记录为发现。\n\n输出每个确定性测试问题的严重程度、关联实现与测试位置、漏掉的触发场景、可能放过的回归，以及最小验证建议。另列出建议后续执行的最小命令，并明确这些命令尚未执行。不要仅以覆盖率不足或没有新增测试作为问题。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true,
+            "valueType": "string"
+          }
+        ]
+      },
+      {
+        "id": "compatibility",
+        "kind": "agent",
+        "title": "兼容性与产品行为审查",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "User-visible and compatibility impacts can be reviewed independently from implementation correctness.",
+        "executionModeConfidence": 1,
+        "modelProfile": "balanced",
+        "prompt": "根据上游确定的变更范围，独立检查用户可见行为、向后兼容、配置和数据格式兼容、跨平台路径、可访问性以及文档与真实行为是否一致。追踪公开 API、CLI、配置、持久化格式和 UI 交互的消费者，判断本次变更是否会让既有使用方式失效或产生误导。\n\n只报告具有明确证据和用户影响的问题，给出严重程度、文件位置、触发条件、影响范围和最小修复方向。不要记录纯文案偏好、内部重构建议或与变更无关的旧问题。没有确定性问题时明确返回没有发现。",
+        "outputFields": [
+          {
+            "key": "result",
+            "required": true,
+            "valueType": "string"
+          }
+        ]
+      },
+      {
+        "id": "report",
+        "kind": "agent",
+        "title": "汇总审查报告",
+        "execModel": "llm",
+        "role": "reviewer",
+        "executionMode": "one-shot",
+        "executionModeRationale": "The final reviewer can reconcile all independent findings from the frozen review scope.",
+        "executionModeConfidence": 1,
+        "modelProfile": "expert",
+        "prompt": "汇总上游四路审查结果，并回到实际 diff 和相邻代码核验每条候选发现。删除无法由代码支持、与本次变更无关、重复或仅属于风格偏好的内容；同一根因只保留影响最直接的一条。严重程度必须与真实影响匹配。不要修改文件，也不要声称运行过任何测试或构建。\n\n严格按照以下规范生成最终中文 Markdown 报告：\n\n__REVIEW_GUIDELINES__\n\n最终结构化输出只包含完整报告正文。报告必须能独立阅读，不能引用“上游节点说了什么”。",
+        "outputFields": [
+          {
+            "key": "answer_markdown",
+            "required": true,
+            "valueType": "string",
+            "artifact": {
+              "format": "markdown",
+              "fileName": "code-review-report.md"
+            }
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "fromNodeId": "collect_changes",
+        "toNodeId": "impact_scope"
+      },
+      {
+        "fromNodeId": "impact_scope",
+        "toNodeId": "correctness"
+      },
+      {
+        "fromNodeId": "impact_scope",
+        "toNodeId": "security"
+      },
+      {
+        "fromNodeId": "impact_scope",
+        "toNodeId": "tests"
+      },
+      {
+        "fromNodeId": "impact_scope",
+        "toNodeId": "compatibility"
+      },
+      {
+        "fromNodeId": "impact_scope",
+        "toNodeId": "report"
+      },
+      {
+        "fromNodeId": "correctness",
+        "toNodeId": "report"
+      },
+      {
+        "fromNodeId": "security",
+        "toNodeId": "report"
+      },
+      {
+        "fromNodeId": "tests",
+        "toNodeId": "report"
+      },
+      {
+        "fromNodeId": "compatibility",
+        "toNodeId": "report"
+      }
+    ]
+  }
+}
