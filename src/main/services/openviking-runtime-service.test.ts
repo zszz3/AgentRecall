@@ -177,6 +177,64 @@ describe("OpenVikingRuntimeService", () => {
     await expect(service.getStatus()).resolves.toMatchObject({ state: "stopped" });
   });
 
+  it("allows a slow first boot to become healthy after the old ten-second deadline", async () => {
+    const root = await temporaryRoot();
+    const child = new FakeChild();
+    const service = new OpenVikingRuntimeService({
+      rootDir: root,
+      platform: "darwin",
+      arch: "arm64",
+      download: async (_url, destination) => {
+        await writeFile(destination, "runtime archive");
+      },
+      extractArchive: async ({ destination }) => {
+        const launcher = path.join(destination, "bin", "openviking-server");
+        const python = path.join(destination, "bin", "python3");
+        await mkdir(path.dirname(launcher), { recursive: true });
+        await writeFile(launcher, "");
+        await writeFile(python, "");
+        await chmod(launcher, 0o755);
+        await chmod(python, 0o755);
+      },
+      allocatePort: async () => 21933,
+      spawnProcess: () => child,
+      isProcessAlive: () => false,
+    });
+    await service.install(manifest());
+
+    vi.useFakeTimers();
+    let healthy = false;
+    let markFirstProbe: () => void = () => undefined;
+    const firstProbe = new Promise<void>((resolve) => {
+      markFirstProbe = resolve;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      markFirstProbe();
+      if (!healthy) throw new Error("server is still starting");
+      return new Response(null, { status: 200 });
+    });
+    try {
+      const starting = service.start({
+        embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+        vlm: { provider: "openai-codex", model: "gpt-5.4" },
+      }).then(
+        (status) => ({ status }),
+        (error: unknown) => ({ error }),
+      );
+      await firstProbe;
+      await vi.advanceTimersByTimeAsync(10_500);
+      healthy = true;
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(starting).resolves.toMatchObject({
+        status: { state: "running", port: 21933 },
+      });
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects checksum mismatches before extracting anything", async () => {
     const root = await temporaryRoot();
     const extractArchive = vi.fn(async () => undefined);

@@ -51,6 +51,7 @@ interface OpenVikingControlServiceOptions {
 export class OpenVikingControlService implements OpenVikingMemoryIpcService {
   private runtimeInstallStatus: OpenVikingRuntimeStatus | null = null;
   private runtimeInstallation: Promise<OpenVikingRuntimeStatus> | null = null;
+  private runtimeStart: Promise<OpenVikingRuntimeStatus> | null = null;
 
   constructor(private readonly options: OpenVikingControlServiceOptions) {}
 
@@ -172,8 +173,20 @@ export class OpenVikingControlService implements OpenVikingMemoryIpcService {
     }
   }
 
-  async startRuntime(): Promise<OpenVikingRuntimeStatus> {
+  startRuntime(): Promise<OpenVikingRuntimeStatus> {
     this.requireEnabled();
+    if (this.runtimeStart) return this.runtimeStart;
+    const starting = this.performRuntimeStart()
+      .finally(() => {
+        if (this.runtimeStart === starting) {
+          this.runtimeStart = null;
+        }
+      });
+    this.runtimeStart = starting;
+    return starting;
+  }
+
+  private async performRuntimeStart(): Promise<OpenVikingRuntimeStatus> {
     const model = await this.options.model.getStatus();
     if (!model.installed) throw new Error("Download the local embedding model before starting OpenViking.");
     const status = await this.options.runtime.start(await this.options.serverConfig());

@@ -230,6 +230,25 @@ describe("OpenVikingControlService", () => {
     expect(runtime.install).toHaveBeenCalledOnce();
   });
 
+  it("coalesces concurrent runtime start requests into one operation", async () => {
+    let finishStart: () => void = () => undefined;
+    const startGate = new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+    const { service, runtime } = harness();
+    vi.mocked(runtime.start).mockImplementation(async () => {
+      await startGate;
+      return { state: "running", version: "0.4.11", port: 21933 };
+    });
+
+    const first = service.startRuntime();
+    const second = service.startRuntime();
+    finishStart();
+    await Promise.all([first, second]);
+
+    expect(runtime.start).toHaveBeenCalledOnce();
+  });
+
   it("refreshes external hook state after workspace and runtime lifecycle changes", async () => {
     const { service, memory, onStateChanged } = harness();
     vi.mocked(memory.stopManaging).mockResolvedValue({ id: "workspace-1" } as never);

@@ -502,7 +502,7 @@ async function allocateLoopbackPort(): Promise<number> {
 }
 
 async function waitForHealthyServer(baseUrl: string, rootApiKey: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 90_000;
   let lastError: unknown;
   while (Date.now() < deadline) {
     try {
