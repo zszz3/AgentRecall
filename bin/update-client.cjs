@@ -493,6 +493,31 @@ async function downloadUpdatePackage(manifest, archivePath, options = {}) {
   return { downloadedBytes, totalBytes };
 }
 
+async function prepareStagedPackageDependencies(options = {}) {
+  if (!options.stageRoot) throw new Error("Staged dependency preparation requires a stage root.");
+  const stageRoot = path.resolve(options.stageRoot);
+  const nodeModulesRoot = path.join(stageRoot, "node_modules");
+  const expectedPackagePath = path.join(nodeModulesRoot, "agent-recall");
+  const packagePath = path.resolve(options.packagePath || expectedPackagePath);
+  if (packagePath !== expectedPackagePath) {
+    throw new Error("Staged AgentRecall package path does not match the stage root.");
+  }
+
+  const entries = (await fsp.readdir(nodeModulesRoot))
+    .filter((name) => name !== "agent-recall" && !name.startsWith("."))
+    .sort();
+  const destinationRoot = path.join(packagePath, "node_modules");
+  await fsp.mkdir(destinationRoot, { recursive: true });
+  for (const name of entries) {
+    await fsp.cp(
+      path.join(nodeModulesRoot, name),
+      path.join(destinationRoot, name),
+      { recursive: true, force: true },
+    );
+  }
+  return { copied: entries };
+}
+
 async function stageUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
@@ -545,6 +570,7 @@ async function stageUpdate(manifest, options = {}) {
     } catch (error) {
       throw new Error(`npm 安装失败：${formatUpdateError(error)}`);
     }
+    await prepareStagedPackageDependencies({ stageRoot, packagePath: stagedPackagePath });
     options.onProgress?.(updateProgress(parsed.version, "validating", {
       message: "正在检查应用和 Electron 运行时…",
     }));
@@ -1073,6 +1099,7 @@ module.exports = {
   launchInstalledApp,
   manualInstallCommand,
   parseUpdateManifest,
+  prepareStagedPackageDependencies,
   readUpdatePreference,
   readInstallStatus,
   skipUpdateVersion,

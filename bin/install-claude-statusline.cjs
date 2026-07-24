@@ -112,6 +112,7 @@ function uninstallClaudeStatuslineBridge(options) {
 
 function runCli() {
   // Never fail the install: postinstall must always exit 0.
+  if (process.env.AGENT_RECALL_STAGING_INSTALL === "1") return;
   if (process.env.AGENT_RECALL_SKIP_STATUSLINE_INSTALL) return;
   if (process.env.CI) return;
 

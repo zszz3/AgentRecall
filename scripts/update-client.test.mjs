@@ -48,6 +48,7 @@ const {
   launchInstalledApp,
   manualInstallCommand,
   parseUpdateManifest,
+  prepareStagedPackageDependencies,
   showNativeUpdateFailure,
   skipUpdateVersion,
   snoozeUpdatePrompt,
@@ -56,6 +57,37 @@ const {
   waitForUpdateCompletion,
   updateLockPath,
 } = require("../bin/update-client.cjs");
+
+test("copies hoisted staged dependencies into the package before the atomic swap", async () => {
+  const stageRoot = await temporaryDirectory("agent-recall-staged-dependencies-");
+  const nodeModulesRoot = path.join(stageRoot, "node_modules");
+  const packagePath = path.join(nodeModulesRoot, "agent-recall");
+  await mkdir(path.join(packagePath, "bin"), { recursive: true });
+  await mkdir(path.join(nodeModulesRoot, "electron"), { recursive: true });
+  await mkdir(path.join(nodeModulesRoot, "@electron", "get"), { recursive: true });
+  await mkdir(path.join(nodeModulesRoot, ".bin"), { recursive: true });
+  await writeFile(path.join(nodeModulesRoot, "electron", "package.json"), JSON.stringify({ version: "42.3.0" }), "utf8");
+  await writeFile(path.join(nodeModulesRoot, "@electron", "get", "package.json"), JSON.stringify({ version: "4.0.0" }), "utf8");
+  await writeFile(path.join(nodeModulesRoot, ".bin", "electron"), "temporary shim", "utf8");
+  await writeFile(path.join(nodeModulesRoot, ".package-lock.json"), "temporary metadata", "utf8");
+
+  const result = await prepareStagedPackageDependencies({ stageRoot, packagePath });
+
+  assert.deepEqual(result.copied, ["@electron", "electron"]);
+  assert.equal(
+    JSON.parse(await readFile(path.join(packagePath, "node_modules", "electron", "package.json"), "utf8")).version,
+    "42.3.0",
+  );
+  assert.equal(
+    JSON.parse(await readFile(path.join(packagePath, "node_modules", "@electron", "get", "package.json"), "utf8")).version,
+    "4.0.0",
+  );
+  await assert.rejects(readFile(path.join(packagePath, "node_modules", ".bin", "electron"), "utf8"), /ENOENT/);
+  assert.equal(
+    JSON.parse(await readFile(path.join(nodeModulesRoot, "electron", "package.json"), "utf8")).version,
+    "42.3.0",
+  );
+});
 
 test("streams package bytes and reports monotonic download progress while staging", async () => {
   const bytes = Buffer.from("0123456789");
@@ -85,12 +117,23 @@ test("streams package bytes and reports monotonic download progress while stagin
       const installed = path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "agent-recall");
       await mkdir(path.join(installed, "out", "main"), { recursive: true });
       await mkdir(path.join(installed, "bin"), { recursive: true });
+      await mkdir(path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "electron"), { recursive: true });
       await writeFile(path.join(installed, "package.json"), JSON.stringify({ name: "agent-recall", version: value.version }), "utf8");
       await writeFile(path.join(installed, "out", "main", "index.js"), "", "utf8");
       await writeFile(path.join(installed, "bin", "agent-recall.cjs"), "", "utf8");
+      await writeFile(
+        path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "electron", "package.json"),
+        JSON.stringify({ version: "42.3.0" }),
+        "utf8",
+      );
       return { stdout: "", stderr: "" };
     },
-    ensureElectronImpl: async () => undefined,
+    ensureElectronImpl: async ({ packagePath: installed }) => {
+      assert.equal(
+        JSON.parse(await readFile(path.join(installed, "node_modules", "electron", "package.json"), "utf8")).version,
+        "42.3.0",
+      );
+    },
     onProgress: (event) => progress.push(event),
   });
 

@@ -27,6 +27,9 @@
     "bin",
     "assets"
   ],
+  "bundleDependencies": [
+    "electron"
+  ],
   "scripts": {
     "dev": "electron-vite dev",
     "build": "npm run typecheck && npm run build:mcp && electron-vite build",
