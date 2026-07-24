@@ -136,6 +136,46 @@ describe("deriveSessionTimeline", () => {
     });
   });
 
+  it("collapses identical repeated tool calls into one span while preserving raw events", () => {
+    const repeatedTraceEvents: SessionTraceEvent[] = [
+      {
+        ...traceEvents[0],
+        index: 0,
+        timestamp: "2026-07-23T10:00:02.000Z",
+      },
+      {
+        ...traceEvents[0],
+        index: 1,
+        timestamp: "2026-07-23T10:00:02.001Z",
+      },
+      {
+        ...traceEvents[1],
+        index: 2,
+        timestamp: "2026-07-23T10:00:05.000Z",
+      },
+      {
+        ...traceEvents[1],
+        index: 3,
+        timestamp: "2026-07-23T10:00:05.002Z",
+      },
+    ];
+
+    const timeline = deriveSessionTimeline({
+      sessionKey: "claude-internal:repeated-tool-event",
+      messages: messages.slice(0, 2),
+      traceEvents: repeatedTraceEvents,
+    });
+
+    expect(timeline.rawEvents).toHaveLength(6);
+    expect(timeline.turns[0].spans).toHaveLength(1);
+    expect(timeline.turns[0].spans[0]).toMatchObject({
+      callId: "call-1",
+      input: { text: "{\"command\":\"npm test\"}" },
+      output: { text: "1 test failed" },
+      status: "failed",
+    });
+  });
+
   it("keeps preamble events in a synthetic Turn instead of attributing them to the first request", () => {
     const timeline = deriveSessionTimeline({
       sessionKey: "codex:preamble",

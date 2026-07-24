@@ -221,9 +221,22 @@ function completedSpanStatus(status: SessionTraceEvent["status"]): DerivedTraceS
 function buildSpans(turnId: string, traceEvents: readonly SessionTraceEvent[]): DerivedTraceSpan[] {
   const spans: DerivedTraceSpan[] = [];
   const calls = new Map<string, DerivedTraceSpan>();
+  const callSignatures = new Set<string>();
 
   for (const event of [...traceEvents].sort(compareTimestamped)) {
     const callId = event.callId || null;
+    if (callId && event.kind === "tool_call") {
+      const signature = JSON.stringify([
+        callId,
+        event.source,
+        event.title,
+        event.detail,
+        event.eventType ?? null,
+        event.status ?? null,
+      ]);
+      if (callSignatures.has(signature)) continue;
+      callSignatures.add(signature);
+    }
     const paired = callId && event.kind !== "tool_call" ? calls.get(callId) : undefined;
     if (paired) {
       paired.endedAt = timestampString(event.timestamp) ?? paired.startedAt;
