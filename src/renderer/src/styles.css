@@ -7936,7 +7936,7 @@ body.overlay-open .sidebar {
 /* Query Builder */
 
 .query-builder {
-  margin: 0 18px 12px;
+  margin: 8px 0;
   padding: 14px 16px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
@@ -8069,7 +8069,7 @@ body.overlay-open .sidebar {
 /* Saved Searches Panel */
 
 .saved-searches-panel {
-  margin: 0 18px 12px;
+  margin: 8px 0;
   padding: 14px 16px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
