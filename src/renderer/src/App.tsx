@@ -103,8 +103,10 @@ const RuntimeFeaturePage = lazy(() =>
   import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
 const McpFeaturePage = lazy(() =>
   import("./features/automation/mcp-feature-page").then((module) => ({ default: module.McpFeaturePage })));
-const AgentMemoryPage = lazy(() =>
-  import("./features/agent-memory/agent-memory-page").then((module) => ({ default: module.AgentMemoryPage })));
+const OpenVikingMemoryPage = lazy(() =>
+  import("./features/openviking-memory/openviking-memory-page").then((module) => ({
+    default: module.OpenVikingMemoryPage,
+  })));
 const ProviderPage = lazy(() =>
   import("./features/providers/provider-page").then((module) => ({ default: module.ProviderPage })));
 
@@ -1319,7 +1321,16 @@ export function App(): ReactElement {
 
             {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
 
-            {activePage === "memories" ? <AgentMemoryPage language={language} /> : null}
+            {activePage === "memories" ? (
+              <OpenVikingMemoryPage
+                language={language}
+                enabled={Boolean(appSettings?.openVikingMemoryEnabled)}
+                onOpenSettings={() => {
+                  setSettingsInitialSection("memory");
+                  setSettingsOpen(true);
+                }}
+              />
+            ) : null}
 
             {activePage === "providers" ? (
               <ProviderPage

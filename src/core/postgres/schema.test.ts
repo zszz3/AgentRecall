@@ -40,8 +40,11 @@ describe("AgentRecall PostgreSQL schema", () => {
       "evaluation_results",
       "chat_rooms",
       "chat_messages",
+      "openviking_workspaces",
+      "openviking_import_jobs",
+      "openviking_imported_turns",
     ]));
-    expect(names).toHaveLength(50);
+    expect(names).toHaveLength(53);
     await database.close();
   });
 

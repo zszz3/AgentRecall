@@ -8,6 +8,12 @@ import type {
 import { PostgresDatabase } from "./postgres/database";
 import { PostgresEnvironmentRepository } from "./postgres/environment-repository";
 import {
+  PostgresOpenVikingMemoryRepository,
+  type AddOpenVikingWorkspaceInput,
+  type OpenVikingImportJob,
+  type UpdateOpenVikingImportJobInput,
+} from "./postgres/openviking-memory-repository";
+import {
   PostgresMetadataRepository,
   type ApiProviderKeyTarget,
   type SessionSyncBinding,
@@ -50,6 +56,7 @@ import type {
   TagListOptions,
   TokenUsageEvent,
 } from "./types";
+import type { OpenVikingWorkspace } from "./openviking-memory";
 
 export type {
   ApiProviderKeyTarget,
@@ -72,6 +79,7 @@ export class SessionStore {
   private readonly turns: PostgresSessionTurnRepository;
   private readonly environments: PostgresEnvironmentRepository;
   private readonly metadata: PostgresMetadataRepository;
+  private readonly openVikingMemory: PostgresOpenVikingMemoryRepository;
   private readonly skills: PostgresSkillRepository;
   private readonly savedSearches: SavedSearchStore;
   private readonly historyStore: SearchHistoryStore;
@@ -86,6 +94,7 @@ export class SessionStore {
     this.turns = new PostgresSessionTurnRepository(database);
     this.environments = new PostgresEnvironmentRepository(database);
     this.metadata = new PostgresMetadataRepository(database);
+    this.openVikingMemory = new PostgresOpenVikingMemoryRepository(database);
     this.skills = new PostgresSkillRepository(database);
     this.savedSearches = new SavedSearchStore(database);
     this.historyStore = new SearchHistoryStore(database);
@@ -267,6 +276,84 @@ export class SessionStore {
   async listProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
     await this.ready;
     return this.sessions.listProjects(options);
+  }
+
+  async addOpenVikingWorkspace(input: AddOpenVikingWorkspaceInput): Promise<OpenVikingWorkspace> {
+    await this.ready;
+    return this.openVikingMemory.addWorkspace(input);
+  }
+
+  async listOpenVikingWorkspaces(): Promise<OpenVikingWorkspace[]> {
+    await this.ready;
+    return this.openVikingMemory.listWorkspaces();
+  }
+
+  async getOpenVikingWorkspace(id: string): Promise<OpenVikingWorkspace | null> {
+    await this.ready;
+    return this.openVikingMemory.getWorkspace(id);
+  }
+
+  async findOpenVikingWorkspaceByRootPath(rootPath: string): Promise<OpenVikingWorkspace | null> {
+    await this.ready;
+    return this.openVikingMemory.findWorkspaceByRootPath(rootPath);
+  }
+
+  async findOpenVikingWorkspaceByIdentity(identity: string): Promise<OpenVikingWorkspace | null> {
+    await this.ready;
+    return this.openVikingMemory.findWorkspaceByIdentity(identity);
+  }
+
+  async relinkOpenVikingWorkspace(
+    id: string,
+    rootPath: string,
+    displayName: string,
+  ): Promise<OpenVikingWorkspace> {
+    await this.ready;
+    return this.openVikingMemory.relinkWorkspace(id, rootPath, displayName);
+  }
+
+  async setOpenVikingWorkspaceManaged(
+    id: string,
+    managed: boolean,
+  ): Promise<OpenVikingWorkspace> {
+    await this.ready;
+    return this.openVikingMemory.setWorkspaceManaged(id, managed);
+  }
+
+  async deleteOpenVikingWorkspace(id: string): Promise<boolean> {
+    await this.ready;
+    return this.openVikingMemory.deleteWorkspace(id);
+  }
+
+  async updateOpenVikingImportJob(
+    workspaceId: string,
+    input: UpdateOpenVikingImportJobInput,
+  ): Promise<OpenVikingImportJob> {
+    await this.ready;
+    return this.openVikingMemory.updateImportJob(workspaceId, input);
+  }
+
+  async getOpenVikingImportJob(workspaceId: string): Promise<OpenVikingImportJob | null> {
+    await this.ready;
+    return this.openVikingMemory.getImportJob(workspaceId);
+  }
+
+  async hasOpenVikingImportedTurn(
+    workspaceId: string,
+    sourceTurnId: string,
+    fingerprint: string,
+  ): Promise<boolean> {
+    await this.ready;
+    return this.openVikingMemory.hasImportedTurn(workspaceId, sourceTurnId, fingerprint);
+  }
+
+  async recordOpenVikingImportedTurn(
+    workspaceId: string,
+    sourceTurnId: string,
+    fingerprint: string,
+  ): Promise<void> {
+    await this.ready;
+    await this.openVikingMemory.recordImportedTurn(workspaceId, sourceTurnId, fingerprint);
   }
 
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {

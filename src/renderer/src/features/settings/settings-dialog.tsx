@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Activity,
+  BrainCircuit,
   CheckCircle2,
   ChevronRight,
   Cloud,
@@ -42,6 +43,7 @@ import {
   environmentStatusLabel,
   environmentTarget,
 } from "../environments/environment-display";
+import { OpenVikingMemorySettings } from "./openviking-memory-settings";
 
 export type SettingsSection =
   | "terminal"
@@ -50,6 +52,7 @@ export type SettingsSection =
   | "sources"
   | "usage"
   | "ai"
+  | "memory"
   | "remote"
   | "skills"
   | "appearance"
@@ -304,6 +307,10 @@ export function SettingsDialog({
             <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
               <Sparkles size={15} />
               <span>{l("AI", "AI")}</span>
+            </button>
+            <button className={activeSection === "memory" ? "active" : ""} onClick={() => setActiveSection("memory")}>
+              <BrainCircuit size={15} />
+              <span>{l("Memory", "记忆")}</span>
             </button>
             <button className={activeSection === "remote" ? "active" : ""} onClick={() => setActiveSection("remote")}>
               <Cloud size={15} />
@@ -821,6 +828,14 @@ export function SettingsDialog({
                 </label>
               </section>
             ) : null}
+            {activeSection === "memory" ? (
+              <OpenVikingMemorySettings
+                language={language}
+                settings={settings}
+                saving={saving}
+                onSettingsChange={onSettingsChange}
+              />
+            ) : null}
             {activeSection === "remote" ? (
               <section className="settings-pane">
                 <header className="settings-pane-head settings-pane-head-row">
@@ -1224,4 +1239,3 @@ export function SettingsDialog({
     </div>
   );
 }
-

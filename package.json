@@ -15,6 +15,8 @@
     "agent-recall-setup-skill-usage-hook": "bin/setup-skill-usage-hook.cjs",
     "agent-recall-session-sync": "bin/session-sync-record.cjs",
     "agent-recall-setup-session-sync-hook": "bin/setup-session-sync-hook.cjs",
+    "agent-recall-openviking-memory-hook": "bin/openviking-memory-hook.cjs",
+    "agent-recall-setup-openviking-memory-hooks": "bin/setup-openviking-memory-hooks.cjs",
     "agent-recall-mcp": "bin/agent-recall-mcp.mjs",
     "agent-recall-workflow-mcp": "bin/agent-recall-workflow-mcp.mjs",
     "agent-recall-setup-mcp": "bin/setup-mcp.cjs"
@@ -25,7 +27,8 @@
   "files": [
     "out",
     "bin",
-    "assets"
+    "assets",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "dev": "npm run build:mcp && electron-vite dev",
@@ -38,7 +41,8 @@
     "release-note:check": "node scripts/release-notes.mjs check-range",
     "postinstall": "node bin/install-claude-statusline.cjs",
     "prepare": "npm run build:mcp && electron-vite build",
-    "build:mcp": "node scripts/build-mcp-bundle.mjs"
+    "build:mcp": "node scripts/build-mcp-bundle.mjs",
+    "build:openviking-runtime": "node scripts/build-openviking-runtime.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
@@ -47,6 +51,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@openviking/sdk": "^0.1.0",
     "@xyflow/react": "^12.11.2",
     "electron": "42.3.0",
     "electron-store": "^10.0.1",
@@ -57,11 +62,12 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "tar": "^7.5.21",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
     "@electric-sql/pglite": "^0.5.4",
+    "@types/node": "^22.10.2",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

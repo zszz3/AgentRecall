@@ -792,4 +792,47 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS events jsonb;
     `,
   ],
+}, {
+  version: 5,
+  name: "add directory-scoped OpenViking memory state",
+  statements: [
+    `
+      CREATE TABLE agent_recall.openviking_workspaces (
+        id text PRIMARY KEY,
+        user_id text NOT NULL UNIQUE,
+        root_path text NOT NULL UNIQUE,
+        identity text NOT NULL UNIQUE,
+        display_name text NOT NULL,
+        managed boolean NOT NULL DEFAULT true,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+
+      CREATE TABLE agent_recall.openviking_import_jobs (
+        workspace_id text PRIMARY KEY
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        state text NOT NULL DEFAULT 'idle'
+          CHECK (state IN ('idle', 'queued', 'running', 'paused', 'failed', 'completed')),
+        imported_turns integer NOT NULL DEFAULT 0 CHECK (imported_turns >= 0),
+        total_turns integer NOT NULL DEFAULT 0 CHECK (total_turns >= 0),
+        cursor_session_key text,
+        last_error text,
+        updated_at timestamptz NOT NULL
+      );
+
+      CREATE TABLE agent_recall.openviking_imported_turns (
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        source_turn_id text NOT NULL,
+        fingerprint text NOT NULL,
+        imported_at timestamptz NOT NULL,
+        PRIMARY KEY (workspace_id, source_turn_id, fingerprint)
+      );
+
+      CREATE INDEX openviking_workspaces_managed_idx
+        ON agent_recall.openviking_workspaces (managed, updated_at DESC);
+      CREATE INDEX openviking_imported_turns_workspace_idx
+        ON agent_recall.openviking_imported_turns (workspace_id, imported_at);
+    `,
+  ],
 }];

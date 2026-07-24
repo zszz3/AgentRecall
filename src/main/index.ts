@@ -17,7 +17,7 @@ import Store from "electron-store";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -76,7 +76,8 @@ import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts"
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
-import { registerAgentMemoryIpc } from "./ipc/agent-memory";
+import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
+import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -93,7 +94,26 @@ import {
   launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
 } from "./services/app-update-service";
-import { AgentMemoryService } from "./services/agent-memory-service";
+import { AutoStartingOpenVikingClient } from "./services/openviking-auto-client";
+import {
+  OPENVIKING_RUNTIME_VERSION,
+  resolveOpenVikingRuntimeManifest,
+} from "./services/openviking-artifact-resolver";
+import { OpenVikingGateway } from "./services/openviking-client";
+import { OpenVikingControlService } from "./services/openviking-control-service";
+import { OpenVikingHookManifestService } from "./services/openviking-hook-manifest";
+import {
+  OpenVikingMemoryService,
+  OpenVikingWorkspaceCredentialStore,
+} from "./services/openviking-memory-service";
+import {
+  BUILTIN_OPENVIKING_MODEL_MANIFEST,
+  OpenVikingLocalModelManager,
+} from "./services/openviking-model-manager";
+import {
+  OpenVikingRuntimeService,
+  type OpenVikingRuntimeManifest,
+} from "./services/openviking-runtime-service";
 import { NativeAutomationService } from "./services/automation-service";
 import { createLocalTextFilePreviewUnderRoots } from "../automation/engine/main/platform/local-file-preview";
 import { ProviderService } from "./services/provider-service";
@@ -148,6 +168,52 @@ function loadSessionSyncHookSetup(): SessionSyncHookSetup {
   return requireCjs(SESSION_SYNC_HOOK_SETUP_PATH) as SessionSyncHookSetup;
 }
 
+interface OpenVikingMemoryHookSetup {
+  reconcileOpenVikingMemoryHooks(options: {
+    homeDir: string;
+    hookScriptPath: string;
+    openCodePluginPath: string;
+    manifestPath: string;
+    nodePath: string;
+    integrations: { claude: boolean; codex: boolean; opencode: boolean };
+  }): { status: "configured" | "error"; detail?: string };
+}
+
+const OPENVIKING_MEMORY_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-openviking-memory-hooks.cjs");
+const OPENVIKING_MEMORY_HOOK_SCRIPT_PATH = path.join(__dirname, "../../bin/openviking-memory-hook.cjs");
+const OPENVIKING_OPENCODE_PLUGIN_PATH = path.join(__dirname, "../../bin/openviking-opencode-plugin.mjs");
+const OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH = path.join(__dirname, "../../scripts/build-openviking-runtime.mjs");
+
+const DEVELOPMENT_PYTHON_RUNTIMES: Readonly<Record<string, { url: string; sha256: string }>> = {
+  "darwin-arm64": {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    sha256: "55bc1a5edbc8ac4da0081f4f5731ed2d1ed10c57cb37a820b2a0dbc7cad742e9",
+  },
+  "darwin-x64": {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-apple-darwin-install_only_stripped.tar.gz",
+    sha256: "6bab7fa97d4f2ddba86da0e05acff66c53b5edaca1df8edcf00ddca785a9c59b",
+  },
+  "win32-x64": {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    sha256: "24168aff2e7d93784c6a436124c4ebb79b076a4e289bde4902c08333507b71d0",
+  },
+};
+
+interface DevelopmentRuntimeArtifactRecord {
+  version?: unknown;
+  platform?: unknown;
+  arch?: unknown;
+  sha256?: unknown;
+  archiveType?: unknown;
+  executablePath?: unknown;
+  file?: unknown;
+}
+
+let developmentOpenVikingRuntimeBuild: Promise<OpenVikingRuntimeManifest | null> | null = null;
+function loadOpenVikingMemoryHookSetup(): OpenVikingMemoryHookSetup {
+  return requireCjs(OPENVIKING_MEMORY_HOOK_SETUP_PATH) as OpenVikingMemoryHookSetup;
+}
+
 const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
 interface McpSetup {
   run(remove: boolean): string[];
@@ -186,6 +252,10 @@ let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
 let disposeTeamChatIpc: (() => void) | null = null;
+let disposeOpenVikingMemoryIpc: (() => void) | null = null;
+let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
+let openVikingControlService: OpenVikingControlService | null = null;
+let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
 let automationQuitReady = false;
 let postgresRuntime: PostgresRuntime | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
@@ -302,10 +372,6 @@ const skillService = new SkillService({
   revealPath: (targetPath) => revealInFileManager(targetPath),
   now: () => Date.now(),
   logError: (message) => console.error(message),
-});
-
-const agentMemoryService = new AgentMemoryService({
-  chooseDirectory: chooseAgentMemoryDirectory,
 });
 
 const remoteSessionAccess = new RemoteSessionAccess({
@@ -541,14 +607,276 @@ async function chooseLocalProjectDirectory(): Promise<string | null> {
   return result.filePaths[0] ?? null;
 }
 
-async function chooseAgentMemoryDirectory(): Promise<string | null> {
+async function chooseOpenVikingMemoryDirectory(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
-    title: "Choose a directory for Agent memory",
+    title: "Choose a directory for managed memory",
     properties: ["openDirectory"],
   };
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
   if (result.canceled) return null;
   return result.filePaths[0] ?? null;
+}
+
+function buildDevelopmentOpenVikingRuntime(
+  rootDir: string,
+  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
+): Promise<OpenVikingRuntimeManifest | null> {
+  if (!developmentOpenVikingRuntimeBuild) {
+    developmentOpenVikingRuntimeBuild = buildDevelopmentOpenVikingRuntimeArtifact(rootDir, onProgress)
+      .catch((error) => {
+        developmentOpenVikingRuntimeBuild = null;
+        throw error;
+      });
+  }
+  return developmentOpenVikingRuntimeBuild;
+}
+
+async function buildDevelopmentOpenVikingRuntimeArtifact(
+  rootDir: string,
+  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
+): Promise<OpenVikingRuntimeManifest | null> {
+  const pythonRuntime = DEVELOPMENT_PYTHON_RUNTIMES[`${process.platform}-${process.arch}`];
+  if (!pythonRuntime) return null;
+
+  const buildRoot = path.join(rootDir, "development-runtime-build");
+  const buildHome = path.join(buildRoot, "home");
+  const outputDir = path.join(buildRoot, "artifacts");
+  const artifactName = `openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-${process.platform}-${process.arch}.tar.gz`;
+  const archivePath = path.join(outputDir, artifactName);
+  const manifestPath = `${archivePath}.json`;
+  await fs.mkdir(buildHome, { recursive: true, mode: 0o700 });
+  await fs.mkdir(outputDir, { recursive: true });
+
+  try {
+    await Promise.all([fs.access(archivePath), fs.access(manifestPath)]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile(process.execPath, [
+        OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH,
+        "--version",
+        OPENVIKING_RUNTIME_VERSION,
+        "--platform",
+        process.platform,
+        "--arch",
+        process.arch,
+        "--build-home",
+        buildHome,
+        "--output-dir",
+        outputDir,
+        "--python-url",
+        pythonRuntime.url,
+        "--python-sha256",
+        pythonRuntime.sha256,
+      ], {
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
+      }, (buildError, _stdout, stderr) => {
+        if (!buildError) {
+          resolve();
+          return;
+        }
+        const detail = stderr.trim();
+        reject(new Error(
+          detail
+            ? `Could not build the OpenViking development runtime: ${detail}`
+            : "Could not build the OpenViking development runtime.",
+          { cause: buildError },
+        ));
+      });
+      let bufferedOutput = "";
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        bufferedOutput += chunk;
+        const lines = bufferedOutput.split(/\r?\n/u);
+        bufferedOutput = lines.pop() ?? "";
+        for (const line of lines) reportDevelopmentRuntimeBuildProgress(line, onProgress);
+      });
+    });
+  }
+
+  onProgress({ phase: "verifying-runtime" });
+  const record = JSON.parse(
+    await fs.readFile(manifestPath, "utf8"),
+  ) as DevelopmentRuntimeArtifactRecord;
+  if (
+    record.version !== OPENVIKING_RUNTIME_VERSION
+    || record.platform !== process.platform
+    || record.arch !== process.arch
+    || record.file !== artifactName
+    || record.archiveType !== "tar.gz"
+    || typeof record.sha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(record.sha256)
+    || typeof record.executablePath !== "string"
+  ) {
+    throw new Error("The locally built OpenViking runtime manifest is invalid.");
+  }
+  return {
+    version: OPENVIKING_RUNTIME_VERSION,
+    platform: process.platform,
+    arch: process.arch,
+    url: pathToFileURL(archivePath).href,
+    sha256: record.sha256,
+    executablePath: record.executablePath,
+    archiveType: "tar.gz",
+  };
+}
+
+function reportDevelopmentRuntimeBuildProgress(
+  line: string,
+  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
+): void {
+  try {
+    const message = JSON.parse(line) as {
+      type?: unknown;
+      progress?: {
+        phase?: unknown;
+        downloadedBytes?: unknown;
+        totalBytes?: unknown;
+        bytesPerSecond?: unknown;
+      };
+    };
+    const progress = message.progress;
+    if (
+      message.type !== "progress"
+      || !progress
+      || ![
+        "downloading-python",
+        "building-runtime",
+        "packaging-runtime",
+      ].includes(String(progress.phase))
+    ) {
+      return;
+    }
+    onProgress({
+      phase: progress.phase as OpenVikingRuntimeInstallProgress["phase"],
+      ...(typeof progress.downloadedBytes === "number"
+        ? { downloadedBytes: progress.downloadedBytes }
+        : {}),
+      ...(typeof progress.totalBytes === "number"
+        ? { totalBytes: progress.totalBytes }
+        : {}),
+      ...(typeof progress.bytesPerSecond === "number"
+        ? { bytesPerSecond: progress.bytesPerSecond }
+        : {}),
+    });
+  } catch {
+    // pip and Python write ordinary log lines beside the structured progress records.
+  }
+}
+
+function initializeOpenVikingMemory(): void {
+  const rootDir = path.join(app.getPath("userData"), "openviking");
+  const runtime = new OpenVikingRuntimeService({
+    rootDir,
+    allowLocalRuntime: !releaseUpdateRuntime,
+  });
+  const model = new OpenVikingLocalModelManager({
+    rootDir,
+    resolveManifest: async () => BUILTIN_OPENVIKING_MODEL_MANIFEST,
+  });
+  let control: OpenVikingControlService;
+  const client = new AutoStartingOpenVikingClient({
+    ensureRunning: async () => {
+      await control.startRuntime();
+    },
+    getConnection: () => runtime.getConnection(),
+    createClient: (connection) => new OpenVikingGateway(connection),
+  });
+  const credentials = new OpenVikingWorkspaceCredentialStore(rootDir);
+  const memory = new OpenVikingMemoryService({
+    store,
+    client,
+    credentials,
+  });
+  const hookManifest = new OpenVikingHookManifestService({
+    rootDir,
+    credentials,
+    realpath: fs.realpath,
+  });
+  openVikingRuntimeService = runtime;
+  openVikingHookManifestService = hookManifest;
+  control = new OpenVikingControlService({
+    runtime,
+    model,
+    memory,
+    getSettings,
+    chooseDirectory: chooseOpenVikingMemoryDirectory,
+    resolveRuntimeManifest: (onProgress) => resolveOpenVikingRuntimeManifest({
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      releaseBaseUrl: process.env.AGENT_RECALL_OPENVIKING_RELEASE_BASE_URL,
+      developmentFallback: releaseUpdateRuntime
+        ? undefined
+        : () => buildDevelopmentOpenVikingRuntime(rootDir, onProgress),
+    }),
+    serverConfig: async () => ({
+      embedding: {
+        dense: {
+          provider: "local",
+          model: "bge-small-zh-v1.5-f16",
+          dimension: 512,
+          model_path: await model.getModelPath(),
+        },
+      },
+      vlm: {
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        api_base: "https://chatgpt.com/backend-api/codex",
+      },
+    }),
+    onStateChanged: refreshOpenVikingHookManifest,
+  });
+  openVikingControlService = control;
+  console.info(`OpenViking ${OPENVIKING_RUNTIME_VERSION} control plane is ready.`);
+}
+
+function openVikingIntegrations(settings: AppSettings): { claude: boolean; codex: boolean; opencode: boolean } {
+  return {
+    claude: settings.openVikingMemoryEnabled && settings.openVikingClaudeEnabled,
+    codex: settings.openVikingMemoryEnabled && settings.openVikingCodexEnabled,
+    opencode: settings.openVikingMemoryEnabled && settings.openVikingOpenCodeEnabled,
+  };
+}
+
+async function refreshOpenVikingHookManifest(): Promise<void> {
+  if (!openVikingHookManifestService || !openVikingRuntimeService) return;
+  const runtimeStatus = await openVikingRuntimeService.getStatus();
+  let baseUrl: string | null = null;
+  if (runtimeStatus.state === "running") {
+    baseUrl = (await openVikingRuntimeService.getConnection()).baseUrl;
+  }
+  await openVikingHookManifestService.write({
+    baseUrl,
+    integrations: openVikingIntegrations(getSettings()),
+    workspaces: await store.listOpenVikingWorkspaces(),
+  });
+}
+
+function reconcileOpenVikingMemoryHooks(settings: AppSettings): void {
+  if (!openVikingHookManifestService) return;
+  const result = loadOpenVikingMemoryHookSetup().reconcileOpenVikingMemoryHooks({
+    homeDir: app.getPath("home"),
+    hookScriptPath: OPENVIKING_MEMORY_HOOK_SCRIPT_PATH,
+    openCodePluginPath: OPENVIKING_OPENCODE_PLUGIN_PATH,
+    manifestPath: openVikingHookManifestService.manifestPath(),
+    nodePath: process.env.npm_node_execpath || "node",
+    integrations: openVikingIntegrations(settings),
+  });
+  if (result.status === "error") throw new Error(result.detail || "Could not configure OpenViking memory hooks.");
+}
+
+async function startConfiguredOpenVikingRuntime(settings: AppSettings): Promise<void> {
+  if (!openVikingControlService || !Object.values(openVikingIntegrations(settings)).some(Boolean)) return;
+  const snapshot = await openVikingControlService.snapshot();
+  if (snapshot.runtime.state === "stopped" && snapshot.model.installed) {
+    await openVikingControlService.startRuntime();
+  }
 }
 
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -1242,6 +1570,9 @@ function stopAutoIndexRefresh(): void {
 
 function registerIpc(): void {
   if (!automationService) throw new Error("Automation service must be created before IPC registration.");
+  if (!openVikingControlService) {
+    throw new Error("OpenViking memory must be initialized before IPC registration.");
+  }
   disposeAutomationIpc = registerAutomationIpc({
     ipc: ipcMain,
     service: automationService,
@@ -1482,12 +1813,18 @@ function registerIpc(): void {
     return diagnoseRemoteEnvironment(await remoteSessionAccess.requireSshEnvironment(environmentId));
   });
   registerAppUpdateIpc(ipcMain, appUpdateService);
-  registerAgentMemoryIpc(ipcMain, agentMemoryService);
+  disposeOpenVikingMemoryIpc = registerOpenVikingMemoryIpc(ipcMain, openVikingControlService);
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
   registerProvidersIpc(ipcMain, providerService);
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
     const previous = getSettings();
     const next = mergeAppSettings(previous, settings);
+    const openVikingSettingsChanged = [
+      "openVikingMemoryEnabled",
+      "openVikingClaudeEnabled",
+      "openVikingCodexEnabled",
+      "openVikingOpenCodeEnabled",
+    ].some((key) => key in settings);
     if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
       throw new Error(
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -1498,6 +1835,16 @@ function registerIpc(): void {
     }
     await providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
+    if (openVikingSettingsChanged) {
+      reconcileOpenVikingMemoryHooks(next);
+      if (!next.openVikingMemoryEnabled) await openVikingControlService?.stopRuntime().catch((error) => {
+        console.error(
+          `Failed to stop OpenViking after Memory was disabled: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+      await refreshOpenVikingHookManifest();
+      await startConfiguredOpenVikingRuntime(next);
+    }
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
     await pruneDisabledOptionalSources(next);
     return providerService.addStoredKeys(next);
@@ -1564,6 +1911,14 @@ app.whenReady().then(async () => {
   });
   await postgresDatabase.initialize();
   store = new SessionStore(postgresDatabase);
+  initializeOpenVikingMemory();
+  try {
+    await refreshOpenVikingHookManifest();
+    reconcileOpenVikingMemoryHooks(getSettings());
+    await startConfiguredOpenVikingRuntime(getSettings());
+  } catch (error) {
+    console.error(`Failed to configure OpenViking memory hooks: ${error instanceof Error ? error.message : String(error)}`);
+  }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {
     writeDatabaseUrlPointer(postgresRuntime.connectionUrl);
@@ -1622,11 +1977,14 @@ app.on("before-quit", (event) => {
   disposeAutomationIpc = null;
   disposeTeamChatIpc?.();
   disposeTeamChatIpc = null;
+  disposeOpenVikingMemoryIpc?.();
+  disposeOpenVikingMemoryIpc = null;
   globalShortcut.unregisterAll();
   void Promise.allSettled([
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
     providerService.stopCodexChatProxy(),
+    openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {
     await postgresDatabase?.close().catch((error) => {
       console.error(`Failed to close AgentRecall data store: ${error instanceof Error ? error.message : String(error)}`);

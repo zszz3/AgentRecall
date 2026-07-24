@@ -83,6 +83,38 @@ function decodeEncodedCmdPowerShell(command: string): string {
 }
 
 describe("platform application resolution", () => {
+  it("keeps OpenViking memory opt-in and preserves explicit integration settings", () => {
+    expect(defaultSettings.openVikingMemoryEnabled).toBe(false);
+    expect(defaultSettings.openVikingClaudeEnabled).toBe(false);
+    expect(defaultSettings.openVikingCodexEnabled).toBe(false);
+    expect(defaultSettings.openVikingOpenCodeEnabled).toBe(false);
+    expect(defaultSettings.openVikingEmbeddingMode).toBe("local");
+    expect(defaultSettings.openVikingLocalEmbeddingModel).toBe("BAAI/bge-small-zh-v1.5");
+
+    expect(mergeAppSettings(defaultSettings, {
+      openVikingMemoryEnabled: true,
+      openVikingClaudeEnabled: true,
+      openVikingOpenCodeEnabled: true,
+      openVikingEmbeddingMode: "remote",
+    })).toMatchObject({
+      openVikingMemoryEnabled: true,
+      openVikingClaudeEnabled: true,
+      openVikingCodexEnabled: false,
+      openVikingOpenCodeEnabled: true,
+      openVikingEmbeddingMode: "remote",
+    });
+  });
+
+  it("normalizes invalid persisted OpenViking settings", () => {
+    expect(mergeAppSettings(defaultSettings, {
+      openVikingMemoryEnabled: 1 as unknown as boolean,
+      openVikingEmbeddingMode: "unsupported" as "local",
+    })).toMatchObject({
+      openVikingMemoryEnabled: true,
+      openVikingEmbeddingMode: "local",
+    });
+  });
+
   it("hides subagent sessions by default and preserves the default for older saved settings", () => {
     expect(defaultSettings.hideSubagentSessions).toBe(true);
     expect(defaultSettings.autoCheckUpdates).toBe(true);

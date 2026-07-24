@@ -90,6 +90,12 @@ export interface AppSettings {
   includeQoder: boolean;
   rulesSyncEnabled: boolean;
   memoriesSyncEnabled: boolean;
+  openVikingMemoryEnabled: boolean;
+  openVikingClaudeEnabled: boolean;
+  openVikingCodexEnabled: boolean;
+  openVikingOpenCodeEnabled: boolean;
+  openVikingEmbeddingMode: "local" | "remote";
+  openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5";
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   hideSubagentSessions: boolean;
@@ -150,6 +156,12 @@ export const defaultSettings: AppSettings = {
   includeQoder: false,
   rulesSyncEnabled: false,
   memoriesSyncEnabled: false,
+  openVikingMemoryEnabled: false,
+  openVikingClaudeEnabled: false,
+  openVikingCodexEnabled: false,
+  openVikingOpenCodeEnabled: false,
+  openVikingEmbeddingMode: "local",
+  openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5",
   hideCodexQuota: false,
   hideClaudeQuota: false,
   hideSubagentSessions: true,
@@ -179,6 +191,12 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     summaryMaxAgeDays: normalizeSummaryMaxAgeDays(merged.summaryMaxAgeDays),
     compressionConcurrency: normalizeCompressionConcurrency(merged.compressionConcurrency),
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
+    openVikingMemoryEnabled: Boolean(merged.openVikingMemoryEnabled),
+    openVikingClaudeEnabled: Boolean(merged.openVikingClaudeEnabled),
+    openVikingCodexEnabled: Boolean(merged.openVikingCodexEnabled),
+    openVikingOpenCodeEnabled: Boolean(merged.openVikingOpenCodeEnabled),
+    openVikingEmbeddingMode: merged.openVikingEmbeddingMode === "remote" ? "remote" : "local",
+    openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5",
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),

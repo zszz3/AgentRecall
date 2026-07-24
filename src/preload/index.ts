@@ -30,11 +30,11 @@ import type {
   UsageQuotaSnapshot,
 } from "../core/types";
 import { createAppUpdateApi } from "./app-update";
-import { createAgentMemoryApi } from "./agent-memory";
 import { createAutomationApi } from "./automation";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createMemoriesApi } from "./memories";
+import { createOpenVikingMemoryApi } from "./openviking-memory";
 import { createDiscoveryApi } from "./discovery";
 import { createRulesApi } from "./rules";
 import { createSkillsApi } from "./skills";
@@ -98,7 +98,7 @@ const api = {
   refreshIndex: (): Promise<IndexStatus> => ipcRenderer.invoke("index:refresh"),
   getIndexStatus: (): Promise<IndexStatus> => ipcRenderer.invoke("index:status"),
   ...createAppUpdateApi(ipcRenderer),
-  ...createAgentMemoryApi(ipcRenderer),
+  ...createOpenVikingMemoryApi(ipcRenderer),
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (settings: AppSettingsUpdate): Promise<AppSettings> => ipcRenderer.invoke("settings:set", settings),
   ...createProvidersApi(ipcRenderer),
