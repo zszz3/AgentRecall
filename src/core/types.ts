@@ -377,7 +377,20 @@ export interface UsageQuotaSnapshot {
   error?: string;
 }
 
-export type LiveSessionFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "trae" | "qoder";
+export type LiveSessionFamily =
+  | "claude"
+  | "codex"
+  | "tclaude"
+  | "tcodex"
+  | "codebuddy"
+  | "codewiz"
+  | "openclaw"
+  | "hermes"
+  | "opencode"
+  | "zcode"
+  | "cursor"
+  | "trae"
+  | "qoder";
 
 export interface LiveSession {
   family: LiveSessionFamily;

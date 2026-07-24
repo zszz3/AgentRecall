@@ -1451,7 +1451,19 @@ function registerIpc(): void {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getTraceEvents(sessionKey, options);
   });
-  ipcMain.handle("sessions:live", () => loadCachedLiveSessionSnapshot({ includeTrae: getSettings().includeTrae, includeQoder: getSettings().includeQoder }));
+  ipcMain.handle("sessions:live", () =>
+    loadCachedLiveSessionSnapshot({
+      includeTrae: getSettings().includeTrae,
+      includeQoder: getSettings().includeQoder,
+      includeOpenClaw: getSettings().includeOpenClaw,
+      includeHermes: getSettings().includeHermes,
+      includeOpenCode: getSettings().includeOpenCode,
+      includeZcode: getSettings().includeZcode,
+      includeCursor: getSettings().includeCursorAgent,
+      includeCodeBuddy: getSettings().includeCodeBuddyCli,
+      includeCodeWiz: getSettings().includeCodeWizCli,
+    }),
+  );
   ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     const endpoint = await resolveSummaryEndpointFromSettings();
@@ -1637,7 +1649,18 @@ function registerIpc(): void {
     setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
       getSession: (key) => store.getSession(key),
       setCustomTitle: (key, customTitle) => store.setCustomTitle(key, customTitle),
-      loadLiveSessions: () => loadCachedLiveSessionSnapshot({ includeTrae: getSettings().includeTrae, includeQoder: getSettings().includeQoder }),
+      loadLiveSessions: () =>
+        loadCachedLiveSessionSnapshot({
+          includeTrae: getSettings().includeTrae,
+          includeQoder: getSettings().includeQoder,
+          includeOpenClaw: getSettings().includeOpenClaw,
+          includeHermes: getSettings().includeHermes,
+          includeOpenCode: getSettings().includeOpenCode,
+          includeZcode: getSettings().includeZcode,
+          includeCursor: getSettings().includeCursorAgent,
+          includeCodeBuddy: getSettings().includeCodeBuddyCli,
+          includeCodeWiz: getSettings().includeCodeWizCli,
+        }),
       setLiveTerminalTitle: (pid, displayTitle) => setLiveSessionTerminalTitle(pid, displayTitle),
       onSyncError: (error) => console.warn("[terminal-title] Could not synchronize live terminal title.", error),
     }),
@@ -1718,7 +1741,17 @@ function registerIpc(): void {
       store.markResumed(sessionKey);
       return { route: "resume" as const };
     }
-    const snapshot = await loadCachedLiveSessionSnapshot({ includeTrae: getSettings().includeTrae, includeQoder: getSettings().includeQoder });
+    const snapshot = await loadCachedLiveSessionSnapshot({
+      includeTrae: getSettings().includeTrae,
+      includeQoder: getSettings().includeQoder,
+      includeOpenClaw: getSettings().includeOpenClaw,
+      includeHermes: getSettings().includeHermes,
+      includeOpenCode: getSettings().includeOpenCode,
+      includeZcode: getSettings().includeZcode,
+      includeCursor: getSettings().includeCursorAgent,
+      includeCodeBuddy: getSettings().includeCodeBuddyCli,
+      includeCodeWiz: getSettings().includeCodeWizCli,
+    });
     const route = routeResumeSession(session, snapshot.error ? [] : snapshot.sessions);
     if (route.route === "app") {
       await openNativeApp(session, { openExternal: (url) => shell.openExternal(url) });

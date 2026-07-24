@@ -44,6 +44,11 @@ const LIVE_SESSION_KEY_SQL = `
     WHEN source = 'tcodex-cli' THEN 'tcodex:' || raw_id
     WHEN source = 'codebuddy-cli' THEN 'codebuddy:' || raw_id
     WHEN source = 'codewiz-cli' THEN 'codewiz:' || raw_id
+    WHEN source = 'openclaw' THEN 'openclaw:' || raw_id
+    WHEN source = 'hermes' THEN 'hermes:' || raw_id
+    WHEN source = 'opencode-cli' THEN 'opencode:' || raw_id
+    WHEN source = 'zcode-cli' THEN 'zcode:' || raw_id
+    WHEN source = 'cursor-agent' THEN 'cursor:' || raw_id
     WHEN source = 'trae' THEN 'trae:' || raw_id
     WHEN source = 'qoder' THEN 'qoder:' || raw_id
     ELSE NULL

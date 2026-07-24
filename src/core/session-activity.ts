@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { LIVE_SESSION_SNAPSHOT_CACHE_TTL_MS } from "./refresh-policy";
+import { encodeCursorWorkspaceSlug } from "./session-loader";
 import type { LiveSession, LiveSessionFamily, LiveSessionSnapshot } from "./types";
 
 const require = createRequire(import.meta.url);
@@ -37,6 +38,13 @@ export interface LoadLiveSessionOptions {
   now?: Date;
   includeTrae?: boolean;
   includeQoder?: boolean;
+  includeOpenClaw?: boolean;
+  includeHermes?: boolean;
+  includeOpenCode?: boolean;
+  includeZcode?: boolean;
+  includeCursor?: boolean;
+  includeCodeBuddy?: boolean;
+  includeCodeWiz?: boolean;
   homeDir?: string;
 }
 
@@ -73,6 +81,10 @@ export function detectLiveSessionsFromProcessLines(
   claudeSessionFilesByPid: Map<number, string> = new Map(),
   traeSessionIdsByPid: Map<number, string> = new Map(),
   qoderSessionIdsByPid: Map<number, string> = new Map(),
+  openclawSessionFilesByPid: Map<number, string> = new Map(),
+  cursorSessionFilesByPid: Map<number, string> = new Map(),
+  codebuddySessionFilesByPid: Map<number, string> = new Map(),
+  dbSessionIdsByPid: Map<number, string> = new Map(),
 ): LiveSession[] {
   const sessions: LiveSession[] = [];
   const seen = new Set<string>();
@@ -86,6 +98,10 @@ export function detectLiveSessionsFromProcessLines(
       detectResumeCommand(tokens) ??
       detectPlainCodexCommand(tokens, codexSessionFilesByPid.get(entry.pid)) ??
       detectPlainClaudeCommand(tokens, claudeSessionFilesByPid.get(entry.pid)) ??
+      detectPlainOpenClawCommand(tokens, openclawSessionFilesByPid.get(entry.pid)) ??
+      detectPlainCursorCommand(tokens, cursorSessionFilesByPid.get(entry.pid)) ??
+      detectPlainCodeBuddyCommand(tokens, codebuddySessionFilesByPid.get(entry.pid)) ??
+      detectDbBackedCommand(tokens, dbSessionIdsByPid.get(entry.pid)) ??
       detectTraeAppSession(entry.command, traeSessionIdsByPid.get(entry.pid)) ??
       detectQoderAppSession(entry.command, qoderSessionIdsByPid.get(entry.pid));
     if (!command) continue;
@@ -104,6 +120,13 @@ function liveSessionSnapshotCacheKey(options: LoadLiveSessionOptions): string {
     platform: options.platform ?? process.platform,
     includeTrae: options.includeTrae !== false,
     includeQoder: options.includeQoder !== false,
+    includeOpenClaw: options.includeOpenClaw !== false,
+    includeHermes: options.includeHermes !== false,
+    includeOpenCode: options.includeOpenCode !== false,
+    includeZcode: options.includeZcode !== false,
+    includeCursor: options.includeCursor !== false,
+    includeCodeBuddy: options.includeCodeBuddy !== false,
+    includeCodeWiz: options.includeCodeWiz !== false,
     homeDir: options.homeDir ?? os.homedir(),
   });
 }
@@ -126,15 +149,51 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
     const [codexSessionFilesByPid, claudeSessionFilesByPid] =
       platform === "win32"
         ? [new Map<number, string>(), new Map<number, string>()]
-        : await Promise.all([loadPlainCodexSessionFiles(lines, runner), loadPlainClaudeSessionFiles(lines, runner, options.homeDir ?? os.homedir())]);
+        : await Promise.all([
+            loadPlainCodexSessionFiles(lines, runner, options.homeDir ?? os.homedir()),
+            loadPlainClaudeSessionFiles(lines, runner, options.homeDir ?? os.homedir()),
+          ]);
     const traeSessionIdsByPid =
       platform === "win32" || options.includeTrae === false ? new Map<number, string>() : await loadTraeSessionIds(lines, runner);
     const qoderSessionIdsByPid =
       platform === "win32" || options.includeQoder === false ? new Map<number, string>() : await loadQoderSessionIds(lines, runner);
+    const openclawSessionFilesByPid =
+      platform === "win32" || options.includeOpenClaw === false ? new Map<number, string>() : await loadOpenClawSessionFiles(lines, runner);
+    const cursorSessionFilesByPid =
+      platform === "win32" || options.includeCursor === false
+        ? new Map<number, string>()
+        : await loadCursorSessionFiles(lines, runner, options.homeDir ?? os.homedir());
+    const codebuddySessionFilesByPid =
+      platform === "win32" || options.includeCodeBuddy === false
+        ? new Map<number, string>()
+        : await loadCodeBuddySessionFiles(lines, runner, options.homeDir ?? os.homedir());
+    const dbSessionIdsByPid =
+      platform === "win32" ||
+      (options.includeHermes === false &&
+        options.includeOpenCode === false &&
+        options.includeZcode === false &&
+        options.includeCodeWiz === false)
+        ? new Map<number, string>()
+        : await loadDbSessionIds(lines, runner, {
+            includeHermes: options.includeHermes !== false,
+            includeOpenCode: options.includeOpenCode !== false,
+            includeZcode: options.includeZcode !== false,
+            includeCodeWiz: options.includeCodeWiz !== false,
+          });
 
     return {
       generatedAt,
-      sessions: detectLiveSessionsFromProcessLines(lines, codexSessionFilesByPid, claudeSessionFilesByPid, traeSessionIdsByPid, qoderSessionIdsByPid),
+      sessions: detectLiveSessionsFromProcessLines(
+        lines,
+        codexSessionFilesByPid,
+        claudeSessionFilesByPid,
+        traeSessionIdsByPid,
+        qoderSessionIdsByPid,
+        openclawSessionFilesByPid,
+        cursorSessionFilesByPid,
+        codebuddySessionFilesByPid,
+        dbSessionIdsByPid,
+      ),
     };
   } catch (error) {
     return {
@@ -145,8 +204,66 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
   }
 }
 
-async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRunner): Promise<Map<number, string>> {
-  return loadPlainSessionFiles(lines, runner, isPlainCodexCommand, extractCodexSessionFile);
+async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRunner, homeDir = os.homedir()): Promise<Map<number, string>> {
+  return loadPlainSessionFilesWithCwdFallback(
+    lines,
+    runner,
+    isPlainCodexCommand,
+    extractCodexSessionFile,
+    homeDir,
+    (home, cwd) => findMostRecentCodexSessionByCwd(home, cwd),
+  );
+}
+
+/**
+ * Codex sessions live under ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl
+ * and the first line of each file is session_meta with a `cwd` field. Walk recent
+ * session files and return the most recently modified one whose cwd matches.
+ */
+function findMostRecentCodexSessionByCwd(homeDir: string, cwd: string): string | null {
+  const sessionsRoot = path.join(homeDir, ".codex", "sessions");
+  let best: { filePath: string; mtimeMs: number } | null = null;
+  const consider = (filePath: string, mtimeMs: number): void => {
+    if (best !== null && mtimeMs <= (best as { mtimeMs: number }).mtimeMs) return;
+    try {
+      const fd = fs.openSync(filePath, "r");
+      try {
+        const buf = Buffer.alloc(4096);
+        const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+        const firstLine = buf.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+        if (!firstLine) return;
+        const meta = JSON.parse(firstLine) as { payload?: { cwd?: string } };
+        if (meta?.payload?.cwd !== cwd) return;
+        best = { filePath, mtimeMs };
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      // Not a parseable session file; skip.
+    }
+  };
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 4) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const stat = fs.statSync(full, { throwIfNoEntry: false });
+      if (!stat) continue;
+      consider(full, stat.mtimeMs);
+    }
+  };
+  walk(sessionsRoot, 0);
+  return best === null ? null : (best as { filePath: string }).filePath;
 }
 
 async function loadPlainClaudeSessionFiles(lines: string[], runner: ProcessListRunner, homeDir = os.homedir()): Promise<Map<number, string>> {
@@ -348,6 +465,34 @@ function detectPlainClaudeCommand(tokens: string[], sessionFile: string | undefi
   return rawId ? { family: "claude", rawId } : null;
 }
 
+function detectPlainOpenClawCommand(tokens: string[], sessionFile: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!sessionFile || !isPlainOpenClawCommand(tokens)) return null;
+  const rawId = extractOpenClawSessionId(sessionFile);
+  return rawId ? { family: "openclaw", rawId } : null;
+}
+
+function detectPlainCursorCommand(tokens: string[], sessionFile: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!sessionFile || !isPlainCursorCommand(tokens)) return null;
+  const rawId = extractCursorSessionId(sessionFile);
+  return rawId ? { family: "cursor", rawId } : null;
+}
+
+function detectPlainCodeBuddyCommand(tokens: string[], sessionFile: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!sessionFile || !isPlainCodeBuddyCommand(tokens)) return null;
+  const rawId = extractCodeBuddySessionId(sessionFile);
+  return rawId ? { family: "codebuddy", rawId } : null;
+}
+
+function detectDbBackedCommand(tokens: string[], rawId: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
+  if (!rawId) return null;
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family === "hermes" || family === "opencode" || family === "zcode") return { family, rawId };
+  }
+  return null;
+}
+
 function detectTraeAppSession(command: string, rawId: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
   if (!rawId || !isTraeAppCommand(command)) return null;
   return { family: "trae", rawId };
@@ -379,6 +524,59 @@ function isPlainClaudeCommand(tokens: string[]): boolean {
     const args = tokens.slice(index + 1);
     if (flagResumeId(args)) return false;
     return true;
+  }
+
+  return false;
+}
+
+function isPlainOpenClawCommand(tokens: string[]): boolean {
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family !== "openclaw") continue;
+    const args = tokens.slice(index + 1);
+    if (flagResumeId(args)) return false;
+    return true;
+  }
+
+  return false;
+}
+
+function isPlainCursorCommand(tokens: string[]): boolean {
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family !== "cursor") continue;
+    const args = tokens.slice(index + 1);
+    if (flagResumeId(args)) return false;
+    return true;
+  }
+
+  return false;
+}
+
+function isPlainCodeBuddyCommand(tokens: string[]): boolean {
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family !== "codebuddy") continue;
+    const args = tokens.slice(index + 1);
+    if (flagResumeId(args)) return false;
+    return true;
+  }
+
+  return false;
+}
+
+function isDbBackedCommand(tokens: string[]): boolean {
+  const commandStartIndexes = isNodeExecutable(tokens[0]) ? [1] : [0];
+
+  for (const index of commandStartIndexes) {
+    const family = executableFamily(tokens[index]);
+    if (family === "hermes" || family === "opencode" || family === "zcode" || family === "codewiz") return true;
   }
 
   return false;
@@ -422,11 +620,21 @@ function executableFamily(token: string | undefined): LiveSessionFamily | null {
   if (normalized === "claude" || normalized === "claude-code") return "claude";
   if (normalized === "tclaude") return "tclaude";
   if (normalized === "codebuddy" || normalized === "cbc") return "codebuddy";
+  if (normalized === "openclaw") return "openclaw";
+  if (normalized === "hermes") return "hermes";
+  if (normalized === "opencode") return "opencode";
+  if (normalized === "zcode") return "zcode";
+  if (normalized === "cursor-agent") return "cursor";
 
   const lower = token.toLowerCase();
   if (lower.includes("@openai/codex")) return "codex";
   if (lower.includes("@anthropic-ai/claude") || lower.includes("claude-code")) return "claude";
   if (lower.includes("codebuddy")) return "codebuddy";
+  if (lower.includes("openclaw")) return "openclaw";
+  if (lower.includes("hermes")) return "hermes";
+  if (lower.includes("opencode")) return "opencode";
+  if (lower.includes("zcode")) return "zcode";
+  if (lower.includes("cursor-agent")) return "cursor";
   return null;
 }
 
@@ -469,6 +677,77 @@ function extractClaudeSessionId(sessionFile: string): string | null {
 function extractClaudeSessionFile(lsofOutput: string): string | null {
   for (const line of lsofOutput.split(/\r?\n/)) {
     const match = line.match(/(\S*\.claude\/projects\/\S+?\.jsonl)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractOpenClawSessionFile(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.(?:openclaw|clawdbot)\/agents\/\S+?\/sessions\/\S+?\.jsonl)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractOpenClawSessionId(sessionFile: string): string | null {
+  const rawId = sessionFile.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "").trim();
+  return rawId || null;
+}
+
+function extractCursorSessionFile(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.cursor\/projects\/\S+?\/agent-transcripts\/\S+?\.jsonl)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractCursorSessionId(sessionFile: string): string | null {
+  const rawId = sessionFile.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "").trim();
+  return rawId || null;
+}
+
+function extractCodeBuddySessionFile(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.codebuddy\/projects\/\S+?\/tool-results\/\S+?\.txt)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractCodeBuddySessionId(sessionFile: string): string | null {
+  const match = sessionFile.match(/\.codebuddy\/projects\/[^/]+\/([^/]+)\/tool-results\//);
+  return match?.[1] ?? null;
+}
+
+function extractHermesDbPath(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.hermes\/state\.db)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractOpenCodeDbPath(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.local\/share\/opencode\/opencode\.db)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractZcodeDbPath(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.zcode\/cli\/db\/db\.sqlite)\b/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function extractCodeWizDbPath(lsofOutput: string): string | null {
+  for (const line of lsofOutput.split(/\r?\n/)) {
+    const match = line.match(/(\S*\.local\/share\/codewiz\/opencode\.db)\b/);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -537,6 +816,233 @@ function isQoderAppCommand(command: string): boolean {
 function detectQoderAppSession(command: string, rawId: string | undefined): { family: LiveSessionFamily; rawId: string } | null {
   if (!rawId || !isQoderAppCommand(command)) return null;
   return { family: "qoder", rawId };
+}
+
+async function loadOpenClawSessionFiles(lines: string[], runner: ProcessListRunner): Promise<Map<number, string>> {
+  return loadPlainSessionFiles(lines, runner, isPlainOpenClawCommand, extractOpenClawSessionFile);
+}
+
+async function loadCursorSessionFiles(lines: string[], runner: ProcessListRunner, homeDir = os.homedir()): Promise<Map<number, string>> {
+  return loadPlainSessionFilesWithCwdFallback(
+    lines,
+    runner,
+    isPlainCursorCommand,
+    extractCursorSessionFile,
+    homeDir,
+    (home, cwd) => {
+      // cursor: ~/.cursor/projects/<slug>/agent-transcripts/<sessionId>/<sessionId>.jsonl
+      const slug = encodeCursorWorkspaceSlug(cwd);
+      const transcriptsDir = path.join(home, ".cursor", "projects", slug, "agent-transcripts");
+      const sessionId = findMostRecentSessionDirWithJsonl(transcriptsDir);
+      if (!sessionId) return null;
+      return path.join(transcriptsDir, sessionId, `${sessionId}.jsonl`);
+    },
+  );
+}
+
+async function loadCodeBuddySessionFiles(lines: string[], runner: ProcessListRunner, homeDir = os.homedir()): Promise<Map<number, string>> {
+  return loadPlainSessionFilesWithCwdFallback(
+    lines,
+    runner,
+    isPlainCodeBuddyCommand,
+    extractCodeBuddySessionFile,
+    homeDir,
+    (home, cwd) => {
+      const sessionId = findMostRecentCodeBuddySessionId(home, cwd);
+      if (!sessionId) return null;
+      return path.join(home, ".codebuddy", "projects", encodeProjectDirSlug(cwd), sessionId, "tool-results", "fallback.txt");
+    },
+  );
+}
+
+/**
+ * Generic loader: try lsof to find an open session file; if lsof cannot see other
+ * processes' regular files (e.g. restricted environments like Electron main), fall
+ * back to using the process cwd and inferring the session from the project dir.
+ */
+async function loadPlainSessionFilesWithCwdFallback(
+  lines: string[],
+  runner: ProcessListRunner,
+  isPlainCommand: (tokens: string[]) => boolean,
+  extractSessionFile: (lsofOutput: string) => string | null,
+  homeDir: string,
+  buildFallbackPath: (homeDir: string, cwd: string) => string | null,
+): Promise<Map<number, string>> {
+  const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
+  const plainPids = entries.filter((entry) => isPlainCommand(splitCommandLine(entry.command))).map((entry) => entry.pid);
+  const sessionFiles = new Map<number, string>();
+  const pendingCwds: Array<{ pid: number; cwd: string }> = [];
+
+  await Promise.all(
+    plainPids.map(async (pid) => {
+      try {
+        const lsofOutput = await runner("lsof", ["-p", String(pid)]);
+        const sessionFile = extractSessionFile(lsofOutput);
+        if (sessionFile) {
+          sessionFiles.set(pid, sessionFile);
+          return;
+        }
+        const cwd = extractProcessCwd(lsofOutput);
+        if (cwd) pendingCwds.push({ pid, cwd });
+      } catch {
+        // Process may exit between ps and lsof; ignore.
+      }
+    }),
+  );
+
+  for (const { pid, cwd } of pendingCwds) {
+    const fallback = buildFallbackPath(homeDir, cwd);
+    if (fallback) sessionFiles.set(pid, fallback);
+  }
+
+  return sessionFiles;
+}
+
+function encodeProjectDirSlug(cwd: string): string {
+  return cwd.replace(/^\/+/, "").replace(/\//g, "-");
+}
+
+function findMostRecentCodeBuddySessionId(homeDir: string, cwd: string): string | null {
+  const projectDir = path.join(homeDir, ".codebuddy", "projects", encodeProjectDirSlug(cwd));
+  try {
+    let best: { sessionId: string; mtimeMs: number } | null = null;
+    for (const entry of fs.readdirSync(projectDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.name)) continue;
+      const toolResultsDir = path.join(projectDir, entry.name, "tool-results");
+      const stat = fs.statSync(toolResultsDir, { throwIfNoEntry: false });
+      if (!stat) continue;
+      if (!best || stat.mtimeMs > best.mtimeMs) best = { sessionId: entry.name, mtimeMs: stat.mtimeMs };
+    }
+    return best?.sessionId ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the name of the most recently modified subdirectory under `dir` that
+ * itself contains a `<dirname>.jsonl` file (e.g. cursor's agent-transcripts layout).
+ */
+function findMostRecentSessionDirWithJsonl(dir: string): string | null {
+  try {
+    let best: { name: string; mtimeMs: number } | null = null;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const jsonlPath = path.join(dir, entry.name, `${entry.name}.jsonl`);
+      const stat = fs.statSync(jsonlPath, { throwIfNoEntry: false });
+      if (!stat) continue;
+      if (!best || stat.mtimeMs > best.mtimeMs) best = { name: entry.name, mtimeMs: stat.mtimeMs };
+    }
+    return best?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadDbSessionIds(
+  lines: string[],
+  runner: ProcessListRunner,
+  options: { includeHermes: boolean; includeOpenCode: boolean; includeZcode: boolean; includeCodeWiz: boolean },
+): Promise<Map<number, string>> {
+  const sessionIds = new Map<number, string>();
+  const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
+
+  const pidsByDbPath = new Map<string, number[]>();
+  for (const entry of entries) {
+    if (!isDbBackedCommand(splitCommandLine(entry.command))) continue;
+    const dbPath = await findDbPathForProcess(entry.pid, entry.command, runner, options);
+    if (!dbPath) continue;
+    const list = pidsByDbPath.get(dbPath) ?? [];
+    list.push(entry.pid);
+    pidsByDbPath.set(dbPath, list);
+  }
+
+  for (const [dbPath, pids] of pidsByDbPath) {
+    try {
+      const db = new DatabaseSync(dbPath, { readOnly: true });
+      try {
+        for (const pid of pids) {
+          const rawId = readActiveSessionRawIdFromDb(db, dbPath);
+          if (rawId) sessionIds.set(pid, rawId);
+        }
+      } finally {
+        db.close();
+      }
+    } catch {
+      // Ignore databases that are locked or malformed.
+    }
+  }
+
+  return sessionIds;
+}
+
+async function findDbPathForProcess(
+  pid: number,
+  command: string,
+  runner: ProcessListRunner,
+  options: { includeHermes: boolean; includeOpenCode: boolean; includeZcode: boolean; includeCodeWiz: boolean },
+): Promise<string | null> {
+  const tokens = splitCommandLine(command);
+  const family = executableFamily(tokens[isNodeExecutable(tokens[0]) ? 1 : 0]);
+  if (!family) return null;
+
+  try {
+    const output = await runner("lsof", ["-p", String(pid)]);
+    if (family === "hermes" && options.includeHermes) return extractHermesDbPath(output);
+    if (family === "opencode" && options.includeOpenCode) return extractOpenCodeDbPath(output);
+    if (family === "zcode" && options.includeZcode) return extractZcodeDbPath(output);
+    if (family === "codewiz" && options.includeCodeWiz) return extractCodeWizDbPath(output);
+  } catch {
+    // Process may exit between ps and lsof.
+  }
+
+  return null;
+}
+
+function readActiveSessionRawIdFromDb(db: import("node:sqlite").DatabaseSync, dbPath: string): string | null {
+  try {
+    if (dbPath.endsWith("state.db") && sqliteTableExists(db, "sessions")) {
+      const row = db.prepare("SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1").get() as { id?: unknown } | undefined;
+      return typeof row?.id === "string" ? row.id : null;
+    }
+
+    if (dbPath.endsWith("opencode.db") && sqliteTableExists(db, "session")) {
+      const row = db
+        .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC LIMIT 1")
+        .get() as { id?: unknown } | undefined;
+      return typeof row?.id === "string" ? row.id : null;
+    }
+
+    if (dbPath.endsWith("db.sqlite") && sqliteTableExists(db, "session")) {
+      const row = db
+        .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC, id DESC LIMIT 1")
+        .get() as { id?: unknown } | undefined;
+      return typeof row?.id === "string" ? row.id : null;
+    }
+
+    if (dbPath.endsWith("opencode.db") && dbPath.includes("codewiz") && sqliteTableExists(db, "session")) {
+      const row = db
+        .prepare("SELECT id FROM session ORDER BY time_updated DESC, time_created DESC LIMIT 1")
+        .get() as { id?: unknown } | undefined;
+      return typeof row?.id === "string" ? row.id : null;
+    }
+  } catch {
+    // Ignore transient read errors.
+  }
+
+  return null;
+}
+
+function sqliteTableExists(db: import("node:sqlite").DatabaseSync, tableName: string): boolean {
+  try {
+    const row = db.prepare("SELECT 1 FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1").get("table", tableName) as
+      | { 1?: number }
+      | undefined;
+    return row?.[1] === 1;
+  } catch {
+    return false;
+  }
 }
 
 async function loadQoderSessionIds(lines: string[], runner: ProcessListRunner): Promise<Map<number, string>> {

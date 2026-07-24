@@ -69,7 +69,8 @@ describe("session source capability registry", () => {
       format: "zcode",
       uiFamily: "zcode",
       optionalSetting: "includeZcode",
-      capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+      liveFamily: "zcode",
+      capabilities: { live: true, resume: false, migrate: false, sessionSync: false, openApp: false },
     });
     expect(OPTIONAL_SESSION_SOURCE_DESCRIPTORS.filter(({ remoteCollectorOptional }) => remoteCollectorOptional).map(({ id }) => id)).toEqual([
       "tclaude-cli",
