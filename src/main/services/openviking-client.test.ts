@@ -93,6 +93,25 @@ describe("OpenVikingGateway", () => {
     });
   });
 
+  it("regenerates credentials when a previous add already created the workspace user", async () => {
+    const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
+
+    await expect(gateway.ensureWorkspaceUser({
+      accountId: "agent-recall-existing",
+      userId: "workspace_existing",
+    })).resolves.toEqual({
+      accountId: "agent-recall-existing",
+      userId: "workspace_existing",
+      apiKey: "regenerated-workspace-key",
+    });
+
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ["GET", "/api/v1/admin/accounts"],
+      ["GET", "/api/v1/admin/accounts/agent-recall-existing/users"],
+      ["POST", "/api/v1/admin/accounts/agent-recall-existing/users/workspace_existing/key"],
+    ]);
+  });
+
   it("appends and commits sessions using only the workspace user's credentials", async () => {
     const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
     const auth: OpenVikingWorkspaceAuth = {
@@ -212,16 +231,28 @@ describe("OpenVikingGateway", () => {
       }
       return sendJson(response, 200, {
         status: "ok",
-        result: { api_key: "workspace-key" },
+        result: { user_key: "workspace-key" },
       });
     }
     if (url.pathname === "/api/v1/admin/accounts/agent-recall-existing/users" && request.method === "GET") {
-      return sendJson(response, 200, { status: "ok", result: [] });
+      return sendJson(response, 200, {
+        status: "ok",
+        result: [{ user_id: "workspace_existing" }],
+      });
     }
     if (url.pathname === "/api/v1/admin/accounts/agent-recall-existing/users" && request.method === "POST") {
       return sendJson(response, 200, {
         status: "ok",
-        result: { api_key: "workspace-key" },
+        result: { user_key: "workspace-key" },
+      });
+    }
+    if (
+      url.pathname === "/api/v1/admin/accounts/agent-recall-existing/users/workspace_existing/key"
+      && request.method === "POST"
+    ) {
+      return sendJson(response, 200, {
+        status: "ok",
+        result: { user_key: "regenerated-workspace-key" },
       });
     }
     if (url.pathname === "/api/v1/admin/accounts/agent-recall/users/workspace_abcd" && request.method === "DELETE") {

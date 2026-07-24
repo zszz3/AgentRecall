@@ -246,9 +246,13 @@ function extractApiKey(result: JsonObject): string {
     ? result.user as Record<string, unknown>
     : undefined;
   const value = [
+    result.user_key,
+    result.userKey,
     result.api_key,
     result.apiKey,
     result.key,
+    nested?.user_key,
+    nested?.userKey,
     nested?.api_key,
     nested?.apiKey,
   ].find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0);
