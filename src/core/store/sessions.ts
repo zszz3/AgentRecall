@@ -555,6 +555,7 @@ export class SessionsStore {
     this.transaction(() => {
       if (row.source === "hermes") throw new Error("Cannot delete shared Hermes source database.");
       if (row.source === "opencode-cli") throw new Error("Cannot delete shared OpenCode source database.");
+      if (row.source === "codewiz-cli") throw new Error("Cannot delete shared CodeWiz source database.");
       this.deleteSessionSourceFile(row.file_path);
       this.db.prepare("DELETE FROM session_fts WHERE session_key = ?").run(sessionKey);
       this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(sessionKey);

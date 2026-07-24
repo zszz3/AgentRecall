@@ -1649,6 +1649,9 @@ function registerIpc(): void {
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
   ipcMain.handle("session:delete", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
+    if (session?.environmentKind === "ssh") {
+      throw new Error("Cannot delete sessions stored on SSH remote environments.");
+    }
     if (!session || session.environmentKind !== "wsl") return store.deleteSession(sessionKey);
     await deleteWslSessionFile(requireWslEnvironment(session), session.filePath);
     return store.deleteSessionRecord(sessionKey);

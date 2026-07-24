@@ -214,6 +214,7 @@ export function DetailPanel({
     && roleFilter !== "all"
     && !messages.some((message) => message.role === roleFilter);
   const localOnlyDisabled = isRemoteSession(session);
+  const canDelete = session.environmentKind !== "ssh";
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
 
   const toggleTools = () => {
@@ -477,11 +478,13 @@ export function DetailPanel({
             </button>
             <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
           </div>
-          <div className="detail-action-group">
-            <button className="danger" onClick={onDelete} disabled={actionRunning}>
-              <Trash2 size={15} /> {l("Delete", "删除")}
-            </button>
-          </div>
+          {canDelete ? (
+            <div className="detail-action-group">
+              <button className="danger" onClick={onDelete} disabled={actionRunning}>
+                <Trash2 size={15} /> {l("Delete", "删除")}
+              </button>
+            </div>
+          ) : null}
         </div> : null}
         {session.aiSummary ? (
           <div className="detail-summary">
