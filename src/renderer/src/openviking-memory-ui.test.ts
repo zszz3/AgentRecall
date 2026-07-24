@@ -53,8 +53,12 @@ describe("OpenViking directory memory UI", () => {
     expect(source).toContain("installedBytes");
     expect(source).toContain("runtimeInstalledSize");
     expect(source).toContain("${runtimeInstalledSize} / ${runtimeInstalledSize} MB");
+    expect(source).not.toContain("Managed runtime");
+    expect(source).not.toContain("托管运行时");
     expect(source).not.toContain("system Python");
     expect(source).not.toContain("系统 Python");
+    expect(source).toContain("服务运行中");
+    expect(source).toContain("服务已停止");
     expect(source).toContain("/s");
     expect(source).toContain("window.setInterval");
     expect(source).toContain('&& action !== "start"');

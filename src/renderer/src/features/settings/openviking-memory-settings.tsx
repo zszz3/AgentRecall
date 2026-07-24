@@ -123,13 +123,10 @@ export function OpenVikingMemorySettings({
           <div>
             <strong>OpenViking {snapshot?.runtime.version ?? "0.4.11"}</strong>
             <span>{runtimeInstalledSize
-              ? l(
-                `Managed runtime · ${runtimeInstalledSize} / ${runtimeInstalledSize} MB`,
-                `托管运行时 · ${runtimeInstalledSize} / ${runtimeInstalledSize} MB`,
-              )
+              ? `${runtimeInstalledSize} / ${runtimeInstalledSize} MB`
               : l(
-                "Managed runtime · about 260–320 MB download",
-                "托管运行时 · 下载约 260–320 MB",
+                "About 260–320 MB download",
+                "下载约 260–320 MB",
               )}</span>
             {runtimeState === "installing" ? (
               <div className="openviking-runtime-progress">
@@ -293,10 +290,10 @@ function runtimeLabel(
     case "installing-runtime": return l("Installing runtime", "安装运行时");
   }
   switch (state) {
-    case "running": return l("Running", "运行中");
-    case "stopped": return l("Stopped", "已停止");
+    case "running": return l("Service running", "服务运行中");
+    case "stopped": return l("Service stopped", "服务已停止");
     case "installing": return l("Downloading", "下载中");
-    case "starting": return l("Starting", "启动中");
+    case "starting": return l("Starting service", "正在启动服务");
     case "error": return l("Error", "异常");
     default: return l("Not downloaded", "未下载");
   }
