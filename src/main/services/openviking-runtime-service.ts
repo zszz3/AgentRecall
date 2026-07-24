@@ -5,6 +5,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   chmod,
+  copyFile,
   mkdir,
   readFile,
   rename,
@@ -16,6 +17,7 @@ import {
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { fileURLToPath } from "node:url";
 import * as tar from "tar";
 
 import type { OpenVikingRuntimeStatus } from "../../core/openviking-memory";
@@ -66,6 +68,7 @@ interface RuntimeServiceOptions {
   rootDir: string;
   platform?: NodeJS.Platform;
   arch?: string;
+  allowLocalRuntime?: boolean;
   download?: (url: string, destination: string) => Promise<void>;
   extractArchive?: (input: ExtractArchiveInput) => Promise<void>;
   allocatePort?: () => Promise<number>;
@@ -88,6 +91,7 @@ export class OpenVikingRuntimeService {
   private readonly rootDir: string;
   private readonly platform: NodeJS.Platform;
   private readonly arch: string;
+  private readonly allowLocalRuntime: boolean;
   private readonly download: NonNullable<RuntimeServiceOptions["download"]>;
   private readonly extractArchive: NonNullable<RuntimeServiceOptions["extractArchive"]>;
   private readonly allocatePort: NonNullable<RuntimeServiceOptions["allocatePort"]>;
@@ -102,6 +106,7 @@ export class OpenVikingRuntimeService {
     this.rootDir = path.resolve(options.rootDir);
     this.platform = options.platform ?? process.platform;
     this.arch = options.arch ?? process.arch;
+    this.allowLocalRuntime = options.allowLocalRuntime === true;
     this.download = options.download ?? downloadFile;
     this.extractArchive = options.extractArchive ?? extractTarGz;
     this.allocatePort = options.allocatePort ?? allocateLoopbackPort;
@@ -277,7 +282,16 @@ export class OpenVikingRuntimeService {
     if (!/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(manifest.version)) {
       throw new Error("OpenViking runtime version is invalid.");
     }
-    if (!/^https:\/\//u.test(manifest.url)) throw new Error("OpenViking runtime URL must use HTTPS.");
+    const runtimeUrl = new URL(manifest.url);
+    if (runtimeUrl.protocol === "file:" && this.allowLocalRuntime) {
+      const localPath = path.resolve(fileURLToPath(runtimeUrl));
+      const relative = path.relative(this.rootDir, localPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("OpenViking development runtime escaped the application-owned directory.");
+      }
+    } else if (runtimeUrl.protocol !== "https:") {
+      throw new Error("OpenViking runtime URL must use HTTPS.");
+    }
     if (!/^[a-f0-9]{64}$/u.test(manifest.sha256.toLowerCase())) {
       throw new Error("OpenViking runtime checksum is invalid.");
     }
@@ -362,6 +376,11 @@ function resolveArchivePath(root: string, archivePath: string): string {
 }
 
 async function downloadFile(url: string, destination: string): Promise<void> {
+  const source = new URL(url);
+  if (source.protocol === "file:") {
+    await copyFile(fileURLToPath(source), destination);
+    return;
+  }
   const response = await fetch(url, { redirect: "follow" });
   if (!response.ok || !response.body) {
     throw new Error(`OpenViking runtime download failed with HTTP ${response.status}.`);

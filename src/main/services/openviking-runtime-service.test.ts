@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -181,6 +182,47 @@ describe("OpenVikingRuntimeService", () => {
     await expect(mismatched.install(manifest())).rejects.toThrow("checksum");
     expect(extractArchive).not.toHaveBeenCalled();
     await expect(service.getStatus()).resolves.toMatchObject({ state: "not-installed" });
+  });
+
+  it("installs a checksummed local archive only when development mode enables it", async () => {
+    const root = await temporaryRoot();
+    const archivePath = path.join(root, "development-runtime.tar.gz");
+    await writeFile(archivePath, "runtime archive");
+    const extractArchive = vi.fn(async ({ destination }: { destination: string }) => {
+      const executable = path.join(destination, "bin", "openviking-server");
+      await mkdir(path.dirname(executable), { recursive: true });
+      await writeFile(executable, "#!/bin/sh\n");
+    });
+    const service = new OpenVikingRuntimeService({
+      rootDir: root,
+      platform: "darwin",
+      arch: "arm64",
+      allowLocalRuntime: true,
+      extractArchive,
+    });
+
+    await expect(service.install(manifest({
+      url: pathToFileURL(archivePath).href,
+    }))).resolves.toMatchObject({
+      state: "stopped",
+      version: "0.4.11",
+    });
+    expect(extractArchive).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a local runtime archive outside development mode", async () => {
+    const root = await temporaryRoot();
+    const archivePath = path.join(root, "development-runtime.tar.gz");
+    await writeFile(archivePath, "runtime archive");
+    const service = new OpenVikingRuntimeService({
+      rootDir: root,
+      platform: "darwin",
+      arch: "arm64",
+    });
+
+    await expect(service.install(manifest({
+      url: pathToFileURL(archivePath).href,
+    }))).rejects.toThrow("must use HTTPS");
   });
 
   it.each(["../escape", "/absolute", "folder/../../escape", "C:\\absolute"] as const)(

@@ -18,6 +18,7 @@ interface ResolveRuntimeManifestOptions {
   arch?: string;
   releaseBaseUrl?: string;
   fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
+  developmentFallback?: () => Promise<OpenVikingRuntimeManifest | null>;
 }
 
 export async function resolveOpenVikingRuntimeManifest(
@@ -37,7 +38,9 @@ export async function resolveOpenVikingRuntimeManifest(
   const response = await (options.fetchImpl ?? fetch)(`${releaseBase}/${artifactName}.json`, {
     redirect: "follow",
   });
-  if (response.status === 404) return null;
+  if (response.status === 404) {
+    return options.developmentFallback?.() ?? null;
+  }
   if (!response.ok) {
     throw new Error(`OpenViking runtime manifest download failed with HTTP ${response.status}.`);
   }

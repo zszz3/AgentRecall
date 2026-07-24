@@ -17,7 +17,7 @@ import Store from "electron-store";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -109,7 +109,10 @@ import {
   BUILTIN_OPENVIKING_MODEL_MANIFEST,
   OpenVikingLocalModelManager,
 } from "./services/openviking-model-manager";
-import { OpenVikingRuntimeService } from "./services/openviking-runtime-service";
+import {
+  OpenVikingRuntimeService,
+  type OpenVikingRuntimeManifest,
+} from "./services/openviking-runtime-service";
 import { NativeAutomationService } from "./services/automation-service";
 import { createLocalTextFilePreviewUnderRoots } from "../automation/engine/main/platform/local-file-preview";
 import { ProviderService } from "./services/provider-service";
@@ -178,6 +181,34 @@ interface OpenVikingMemoryHookSetup {
 const OPENVIKING_MEMORY_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-openviking-memory-hooks.cjs");
 const OPENVIKING_MEMORY_HOOK_SCRIPT_PATH = path.join(__dirname, "../../bin/openviking-memory-hook.cjs");
 const OPENVIKING_OPENCODE_PLUGIN_PATH = path.join(__dirname, "../../bin/openviking-opencode-plugin.mjs");
+const OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH = path.join(__dirname, "../../scripts/build-openviking-runtime.mjs");
+
+const DEVELOPMENT_PYTHON_RUNTIMES: Readonly<Record<string, { url: string; sha256: string }>> = {
+  "darwin-arm64": {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    sha256: "55bc1a5edbc8ac4da0081f4f5731ed2d1ed10c57cb37a820b2a0dbc7cad742e9",
+  },
+  "darwin-x64": {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-apple-darwin-install_only_stripped.tar.gz",
+    sha256: "6bab7fa97d4f2ddba86da0e05acff66c53b5edaca1df8edcf00ddca785a9c59b",
+  },
+  "win32-x64": {
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+    sha256: "24168aff2e7d93784c6a436124c4ebb79b076a4e289bde4902c08333507b71d0",
+  },
+};
+
+interface DevelopmentRuntimeArtifactRecord {
+  version?: unknown;
+  platform?: unknown;
+  arch?: unknown;
+  sha256?: unknown;
+  archiveType?: unknown;
+  executablePath?: unknown;
+  file?: unknown;
+}
+
+let developmentOpenVikingRuntimeBuild: Promise<OpenVikingRuntimeManifest | null> | null = null;
 function loadOpenVikingMemoryHookSetup(): OpenVikingMemoryHookSetup {
   return requireCjs(OPENVIKING_MEMORY_HOOK_SETUP_PATH) as OpenVikingMemoryHookSetup;
 }
@@ -585,9 +616,110 @@ async function chooseOpenVikingMemoryDirectory(): Promise<string | null> {
   return result.filePaths[0] ?? null;
 }
 
+function buildDevelopmentOpenVikingRuntime(
+  rootDir: string,
+): Promise<OpenVikingRuntimeManifest | null> {
+  if (!developmentOpenVikingRuntimeBuild) {
+    developmentOpenVikingRuntimeBuild = buildDevelopmentOpenVikingRuntimeArtifact(rootDir)
+      .catch((error) => {
+        developmentOpenVikingRuntimeBuild = null;
+        throw error;
+      });
+  }
+  return developmentOpenVikingRuntimeBuild;
+}
+
+async function buildDevelopmentOpenVikingRuntimeArtifact(
+  rootDir: string,
+): Promise<OpenVikingRuntimeManifest | null> {
+  const pythonRuntime = DEVELOPMENT_PYTHON_RUNTIMES[`${process.platform}-${process.arch}`];
+  if (!pythonRuntime) return null;
+
+  const buildRoot = path.join(rootDir, "development-runtime-build");
+  const buildHome = path.join(buildRoot, "home");
+  const outputDir = path.join(buildRoot, "artifacts");
+  const artifactName = `openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-${process.platform}-${process.arch}.tar.gz`;
+  const archivePath = path.join(outputDir, artifactName);
+  const manifestPath = `${archivePath}.json`;
+  await fs.mkdir(buildHome, { recursive: true, mode: 0o700 });
+  await fs.mkdir(outputDir, { recursive: true });
+
+  try {
+    await Promise.all([fs.access(archivePath), fs.access(manifestPath)]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    await new Promise<void>((resolve, reject) => {
+      execFile(process.execPath, [
+        OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH,
+        "--version",
+        OPENVIKING_RUNTIME_VERSION,
+        "--platform",
+        process.platform,
+        "--arch",
+        process.arch,
+        "--build-home",
+        buildHome,
+        "--output-dir",
+        outputDir,
+        "--python-url",
+        pythonRuntime.url,
+        "--python-sha256",
+        pythonRuntime.sha256,
+      ], {
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
+      }, (buildError, _stdout, stderr) => {
+        if (!buildError) {
+          resolve();
+          return;
+        }
+        const detail = stderr.trim();
+        reject(new Error(
+          detail
+            ? `Could not build the OpenViking development runtime: ${detail}`
+            : "Could not build the OpenViking development runtime.",
+          { cause: buildError },
+        ));
+      });
+    });
+  }
+
+  const record = JSON.parse(
+    await fs.readFile(manifestPath, "utf8"),
+  ) as DevelopmentRuntimeArtifactRecord;
+  if (
+    record.version !== OPENVIKING_RUNTIME_VERSION
+    || record.platform !== process.platform
+    || record.arch !== process.arch
+    || record.file !== artifactName
+    || record.archiveType !== "tar.gz"
+    || typeof record.sha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(record.sha256)
+    || typeof record.executablePath !== "string"
+  ) {
+    throw new Error("The locally built OpenViking runtime manifest is invalid.");
+  }
+  return {
+    version: OPENVIKING_RUNTIME_VERSION,
+    platform: process.platform,
+    arch: process.arch,
+    url: pathToFileURL(archivePath).href,
+    sha256: record.sha256,
+    executablePath: record.executablePath,
+    archiveType: "tar.gz",
+  };
+}
+
 function initializeOpenVikingMemory(): void {
   const rootDir = path.join(app.getPath("userData"), "openviking");
-  const runtime = new OpenVikingRuntimeService({ rootDir });
+  const runtime = new OpenVikingRuntimeService({
+    rootDir,
+    allowLocalRuntime: !releaseUpdateRuntime,
+  });
   const model = new OpenVikingLocalModelManager({
     rootDir,
     resolveManifest: async () => BUILTIN_OPENVIKING_MODEL_MANIFEST,
@@ -624,6 +756,9 @@ function initializeOpenVikingMemory(): void {
       platform: process.platform,
       arch: process.arch,
       releaseBaseUrl: process.env.AGENT_RECALL_OPENVIKING_RELEASE_BASE_URL,
+      developmentFallback: releaseUpdateRuntime
+        ? undefined
+        : () => buildDevelopmentOpenVikingRuntime(rootDir),
     }),
     serverConfig: async () => ({
       embedding: {

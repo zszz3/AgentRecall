@@ -46,6 +46,30 @@ describe("OpenViking artifact resolver", () => {
     })).resolves.toBeNull();
   });
 
+  it("builds a development runtime when the current release has no artifact", async () => {
+    const developmentFallback = vi.fn(async () => ({
+      version: OPENVIKING_RUNTIME_VERSION,
+      platform: "darwin" as const,
+      arch: "arm64",
+      sha256: "b".repeat(64),
+      archiveType: "tar.gz" as const,
+      executablePath: "bin/openviking-server",
+      url: "file:///tmp/openviking-runtime.tar.gz",
+    }));
+
+    await expect(resolveOpenVikingRuntimeManifest({
+      appVersion: "0.1.0",
+      platform: "darwin",
+      arch: "arm64",
+      fetchImpl: async () => new Response("not found", { status: 404 }),
+      developmentFallback,
+    })).resolves.toMatchObject({
+      version: OPENVIKING_RUNTIME_VERSION,
+      url: "file:///tmp/openviking-runtime.tar.gz",
+    });
+    expect(developmentFallback).toHaveBeenCalledOnce();
+  });
+
   it("rejects a mismatched or unsafe release manifest", async () => {
     await expect(resolveOpenVikingRuntimeManifest({
       appVersion: "0.8.0",
