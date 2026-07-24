@@ -99,4 +99,17 @@ describe("OpenViking directory memory UI", () => {
     expect(source).toContain("正在加载已有记忆");
     expect(source).toContain("还没有生成记忆");
   });
+
+  it("bounds the memory browser to the page so long result lists can scroll", async () => {
+    const css = await readFile(
+      path.join(process.cwd(), "src/renderer/src/styles/openviking-memory.css"),
+      "utf8",
+    );
+
+    expect(css).toMatch(/\.openviking-memory-page\s*\{[^}]*height:\s*100%;[^}]*overflow:\s*hidden;/su);
+    expect(css).toMatch(/\.openviking-memory-layout\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;/su);
+    expect(css).toMatch(/\.openviking-memory-browser\s*\{[^}]*grid-template-rows:[^;]*minmax\(0,\s*1fr\);[^}]*min-height:\s*0;/su);
+    expect(css).toMatch(/\.openviking-memory-content\s*\{[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/su);
+    expect(css).toMatch(/\.openviking-result-list\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/su);
+  });
 });

@@ -1,7 +1,12 @@
 .openviking-memory-page {
-  display: grid;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
   min-height: 0;
+  flex-direction: column;
   gap: 16px;
+  overflow: hidden;
   padding: 24px 28px 28px;
 }
 
@@ -191,6 +196,7 @@
 .openviking-memory-layout {
   display: grid;
   grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -199,7 +205,10 @@
 }
 
 .openviking-workspaces {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--panel-subtle);
 }
@@ -224,7 +233,10 @@
 
 .openviking-workspaces > div {
   display: grid;
+  align-content: start;
   gap: 3px;
+  min-height: 0;
+  overflow-y: auto;
   padding: 8px;
 }
 
@@ -305,7 +317,10 @@
 }
 
 .openviking-memory-browser {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
 }
 
 .openviking-workspace-head {
@@ -442,11 +457,13 @@
 .openviking-memory-content {
   display: grid;
   grid-template-columns: minmax(210px, 0.42fr) minmax(300px, 0.58fr);
-  min-height: 410px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .openviking-result-list {
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   border-right: 1px solid var(--border);
 }
@@ -515,6 +532,7 @@
   display: grid;
   grid-template-rows: auto auto minmax(240px, 1fr) auto;
   min-width: 0;
+  min-height: 0;
 }
 
 .openviking-memory-detail > header {
