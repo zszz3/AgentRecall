@@ -102,7 +102,14 @@ test("runtime build reports exact standalone Python download bytes", async () =>
   const originalFetch = globalThis.fetch;
   const body = Buffer.from("not-a-python-archive");
   const progress = [];
-  globalThis.fetch = async () => new Response(body, {
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      setTimeout(() => {
+        controller.enqueue(body);
+        controller.close();
+      }, 300);
+    },
+  }), {
     headers: { "content-length": String(body.byteLength) },
   });
   try {
@@ -116,18 +123,15 @@ test("runtime build reports exact standalone Python download bytes", async () =>
       pythonSha256: createHash("sha256").update(body).digest("hex"),
       onProgress: (event) => progress.push(event),
     }));
-    assert.deepEqual(progress.slice(0, 2), [
-      {
-        phase: "downloading-python",
-        downloadedBytes: 0,
-        totalBytes: body.byteLength,
-      },
-      {
-        phase: "downloading-python",
-        downloadedBytes: body.byteLength,
-        totalBytes: body.byteLength,
-      },
-    ]);
+    assert.deepEqual(progress[0], {
+      phase: "downloading-python",
+      downloadedBytes: 0,
+      totalBytes: body.byteLength,
+    });
+    const completedDownload = progress.findLast((event) =>
+      event.phase === "downloading-python" && event.downloadedBytes === body.byteLength);
+    assert.equal(completedDownload.totalBytes, body.byteLength);
+    assert.ok(completedDownload.bytesPerSecond > 0);
   } finally {
     globalThis.fetch = originalFetch;
     await rm(root, { recursive: true, force: true });

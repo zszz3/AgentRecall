@@ -76,6 +76,9 @@ export function OpenVikingMemorySettings({
       ? `${(runtimeProgress.downloadedBytes / 1_000_000).toFixed(1)} / ${(runtimeProgress.totalBytes / 1_000_000).toFixed(1)} MB`
       : `${(runtimeProgress.downloadedBytes / 1_000_000).toFixed(1)} MB`
     : null;
+  const runtimeDownloadSpeed = runtimeProgress?.bytesPerSecond
+    ? `${(runtimeProgress.bytesPerSecond / 1_000_000).toFixed(1)} MB/s`
+    : null;
   const modelInstalled = Boolean(snapshot?.model.installed);
   const controlsDisabled = !enabled || saving || action !== null;
 
@@ -122,6 +125,7 @@ export function OpenVikingMemorySettings({
                   <span>
                     {runtimeProgressSize}
                     {runtimePercent === null ? null : ` · ${runtimePercent}%`}
+                    {runtimeDownloadSpeed ? ` · ${runtimeDownloadSpeed}` : null}
                   </span>
                 </div>
                 <div className="openviking-runtime-progress-track" aria-hidden="true">

@@ -737,6 +737,7 @@ function reportDevelopmentRuntimeBuildProgress(
         phase?: unknown;
         downloadedBytes?: unknown;
         totalBytes?: unknown;
+        bytesPerSecond?: unknown;
       };
     };
     const progress = message.progress;
@@ -758,6 +759,9 @@ function reportDevelopmentRuntimeBuildProgress(
         : {}),
       ...(typeof progress.totalBytes === "number"
         ? { totalBytes: progress.totalBytes }
+        : {}),
+      ...(typeof progress.bytesPerSecond === "number"
+        ? { bytesPerSecond: progress.bytesPerSecond }
         : {}),
     });
   } catch {

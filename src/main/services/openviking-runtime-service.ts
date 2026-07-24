@@ -79,7 +79,11 @@ interface RuntimeServiceOptions {
   download?: (
     url: string,
     destination: string,
-    onProgress?: (downloadedBytes: number, totalBytes?: number) => void,
+    onProgress?: (
+      downloadedBytes: number,
+      totalBytes?: number,
+      bytesPerSecond?: number,
+    ) => void,
   ) => Promise<void>;
   extractArchive?: (input: ExtractArchiveInput) => Promise<void>;
   allocatePort?: () => Promise<number>;
@@ -174,11 +178,12 @@ export class OpenVikingRuntimeService {
       await mkdir(downloadsDir, { recursive: true });
       await mkdir(runtimeDir, { recursive: true });
       await rm(partialPath, { force: true });
-      await this.download(manifest.url, partialPath, (downloadedBytes, totalBytes) => {
+      await this.download(manifest.url, partialPath, (downloadedBytes, totalBytes, bytesPerSecond) => {
         reportProgress({
           phase: "downloading-runtime",
           downloadedBytes,
           ...(totalBytes === undefined ? {} : { totalBytes }),
+          ...(bytesPerSecond === undefined ? {} : { bytesPerSecond }),
         });
       });
       reportProgress({ phase: "verifying-runtime" });
@@ -415,7 +420,11 @@ function resolveArchivePath(root: string, archivePath: string): string {
 async function downloadFile(
   url: string,
   destination: string,
-  onProgress?: (downloadedBytes: number, totalBytes?: number) => void,
+  onProgress?: (
+    downloadedBytes: number,
+    totalBytes?: number,
+    bytesPerSecond?: number,
+  ) => void,
 ): Promise<void> {
   const source = new URL(url);
   if (source.protocol === "file:") {
@@ -446,14 +455,23 @@ async function downloadFile(
 
 function createDownloadProgressTransform(
   totalBytes: number | undefined,
-  onProgress?: (downloadedBytes: number, totalBytes?: number) => void,
+  onProgress?: (
+    downloadedBytes: number,
+    totalBytes?: number,
+    bytesPerSecond?: number,
+  ) => void,
 ): Transform {
   let downloadedBytes = 0;
+  const startedAt = Date.now();
   onProgress?.(downloadedBytes, totalBytes);
   return new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       downloadedBytes += chunk.byteLength;
-      onProgress?.(downloadedBytes, totalBytes);
+      const elapsedMs = Date.now() - startedAt;
+      const bytesPerSecond = elapsedMs >= 250
+        ? Math.round(downloadedBytes / (elapsedMs / 1_000))
+        : undefined;
+      onProgress?.(downloadedBytes, totalBytes, bytesPerSecond);
       callback(null, chunk);
     },
   });

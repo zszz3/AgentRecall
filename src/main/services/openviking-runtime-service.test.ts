@@ -263,8 +263,12 @@ describe("OpenVikingRuntimeService", () => {
       platform: "darwin",
       arch: "arm64",
       download: async (_url, destination, ...args: unknown[]) => {
-        const report = args[0] as undefined | ((downloadedBytes: number, totalBytes?: number) => void);
-        report?.(64, 128);
+        const report = args[0] as undefined | ((
+          downloadedBytes: number,
+          totalBytes?: number,
+          bytesPerSecond?: number,
+        ) => void);
+        report?.(64, 128, 256);
         await downloadGate;
         await writeFile(destination, "runtime archive");
       },
@@ -284,6 +288,7 @@ describe("OpenVikingRuntimeService", () => {
             phase: "downloading-runtime",
             downloadedBytes: 64,
             totalBytes: 128,
+            bytesPerSecond: 256,
           },
         });
       });

@@ -27,6 +27,7 @@ export interface OpenVikingRuntimeInstallProgress {
   phase: OpenVikingRuntimeInstallPhase;
   downloadedBytes?: number;
   totalBytes?: number;
+  bytesPerSecond?: number;
 }
 
 export interface OpenVikingWorkspace {

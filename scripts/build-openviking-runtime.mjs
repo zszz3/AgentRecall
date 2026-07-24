@@ -159,6 +159,7 @@ export async function buildRuntimeArtifactFromUrl(input) {
       ? contentLength
       : undefined;
     let downloadedBytes = 0;
+    const downloadStartedAt = Date.now();
     reportProgress(input, {
       phase: "downloading-python",
       downloadedBytes,
@@ -169,10 +170,15 @@ export async function buildRuntimeArtifactFromUrl(input) {
       new Transform({
         transform(chunk, _encoding, callback) {
           downloadedBytes += chunk.byteLength;
+          const elapsedMs = Date.now() - downloadStartedAt;
+          const bytesPerSecond = elapsedMs >= 250
+            ? Math.round(downloadedBytes / (elapsedMs / 1_000))
+            : undefined;
           reportProgress(input, {
             phase: "downloading-python",
             downloadedBytes,
             ...(totalBytes === undefined ? {} : { totalBytes }),
+            ...(bytesPerSecond === undefined ? {} : { bytesPerSecond }),
           });
           callback(null, chunk);
         },
