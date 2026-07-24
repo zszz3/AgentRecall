@@ -58,7 +58,7 @@ agent-recall --update
 
 ## 核心能力
 
-- **统一搜索会话**：索引 Claude Code、Codex 以及可选的 CodeBuddy、CodeWiz、Cursor Agent、Qoder、Trae、WSL、SSH 等来源，支持关键词、标签、收藏、置顶、隐藏、时间范围和来源筛选。
+- **统一搜索会话**：索引 Claude Code、Codex 以及可选的 CodeBuddy、CodeWiz、Cursor Agent、Qoder、Trae、WSL、SSH 等来源，支持关键词、标签、收藏、置顶、隐藏，以及最近 7 天、30 天或 90 天等时间范围筛选。
 - **查看完整上下文**：在详情页查看消息、工具调用、Markdown、代码块、附件和 AI 摘要，并可导出 Markdown 或常见模型请求 JSON。
 - **继续和迁移会话**：从搜索结果快速启动原 Agent，也可在支持的本地 Agent 之间迁移会话。
 - **跨设备恢复**：可使用自己的 Supabase 项目同步会话快照，在另一台设备搜索、查看并恢复会话。
