@@ -72,11 +72,11 @@ export function EvaluationOverview({
           },
           {
             label: zh ? "平均得分" : "Average score",
-            value: completed.length ? average.toFixed(2) : "-",
+            value: completed.length ? average.toFixed(2) : "—",
           },
           {
             label: zh ? "通过率" : "Pass rate",
-            value: completed.length ? `${Math.round(passRate * 100)}%` : "-",
+            value: completed.length ? `${Math.round(passRate * 100)}%` : "—",
             ...(completed.length && passRate >= 0.8
               ? { tone: "success" as const }
               : {}),

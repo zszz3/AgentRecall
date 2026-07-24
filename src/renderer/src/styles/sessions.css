@@ -58,16 +58,16 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 11px;
-  height: 38px;
+  gap: 8px;
+  height: 40px;
   min-width: 0;
   width: 100%;
   flex: none;
-  padding: 0 11px;
+  padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--panel-bg);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .searchbox:focus-within {
@@ -111,7 +111,7 @@
   color: var(--text-muted);
   font-family: var(--mono);
   font-size: 11px;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
 }
 
 .searchbox:focus-within .kbd-hint {
@@ -224,7 +224,7 @@
 .live-filter {
   display: inline-flex;
   align-items: center;
-  height: 38px;
+  height: 40px;
   width: var(--live-filter-width);
   flex: 0 0 var(--live-filter-width);
   padding: 2px;
@@ -238,14 +238,14 @@
   align-items: center;
   justify-content: center;
   min-width: 50px;
-  height: 30px;
+  height: 32px;
   padding: 0 9px;
   border-radius: 7px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .live-filter button:hover {
@@ -261,7 +261,7 @@
 .date-filter {
   display: inline-flex;
   align-items: center;
-  height: 38px;
+  height: 40px;
   width: fit-content;
   max-width: var(--date-filter-width);
   flex: 0 0 auto;
@@ -283,14 +283,14 @@
   align-items: center;
   justify-content: center;
   min-width: 36px;
-  height: 30px;
+  height: 32px;
   padding: 0 8px;
   border-radius: 7px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .date-filter button:hover {
@@ -366,7 +366,7 @@
   font-family: var(--mono);
   font-size: 11.5px;
   font-weight: 650;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .scope-filter-chip:hover {
@@ -451,7 +451,7 @@
   color: var(--tag-text);
   font-family: var(--mono);
   font-size: 11.5px;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .chip:hover {
@@ -519,9 +519,9 @@
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--row-bg);
+  box-shadow: var(--shadow-sm);
 }
 
 .load-more-sessions {
@@ -553,14 +553,14 @@
   align-items: start;
   gap: 10px;
   flex: 0 0 auto;
-  padding: 9px 12px;
+  padding: 10px 14px;
   overflow: hidden;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--row-bg);
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  transition: background 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .session-row:last-child {
@@ -599,7 +599,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--text);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -624,7 +624,7 @@
   border-radius: 7px;
   color: var(--text-faint);
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition: opacity var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
 }
 
 .session-row:hover .title-edit-button,

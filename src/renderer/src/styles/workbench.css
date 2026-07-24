@@ -34,15 +34,23 @@
 .workbench-quota-card,
 .workbench-token-trend {
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--panel-bg);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
+}
+
+.workbench-usage:hover,
+.workbench-quota-card:hover,
+.workbench-token-trend:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .workbench-usage {
   position: relative;
   display: flex;
-  padding: 13px 15px 11px;
+  padding: 14px 16px 12px;
   flex-direction: column;
 }
 
@@ -56,8 +64,8 @@
 }
 
 .workbench-usage-head > strong {
-  color: var(--text);
-  font-size: 11px;
+  color: var(--text-dim);
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -154,7 +162,7 @@
   stroke: var(--accent);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.6;
+  stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
 
@@ -349,7 +357,7 @@
   animation: spin 0.9s linear infinite;
 }
 
-.workbench-metrics {
+.usage-metrics {
   display: grid;
   min-width: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -358,7 +366,7 @@
   margin-top: 5px;
 }
 
-.workbench-metrics > div {
+.usage-metrics > div {
   position: relative;
   display: grid;
   min-width: 0;
@@ -367,22 +375,22 @@
   gap: 0;
 }
 
-.workbench-metrics > div:nth-child(2),
-.workbench-metrics > div:nth-child(3) {
+.usage-metrics > div:nth-child(2),
+.usage-metrics > div:nth-child(3) {
   text-align: center;
 }
 
-.workbench-metrics > div:last-child {
+.usage-metrics > div:last-child {
   text-align: right;
 }
 
-.workbench-metrics strong {
+.usage-metrics strong {
   display: block;
   width: 100%;
   overflow: hidden;
   color: var(--text);
   font-family: var(--mono);
-  font-size: clamp(17px, 1.8vw, 23px);
+  font-size: clamp(20px, 2vw, 26px);
   font-weight: 640;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
@@ -391,12 +399,13 @@
   white-space: nowrap;
 }
 
-.workbench-metrics span {
+.usage-metrics span {
   display: block;
   width: 100%;
   color: var(--text-muted);
-  font-size: 10.5px;
-  line-height: 14px;
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 2px;
 }
 
 .workbench-usage-detail {
@@ -587,8 +596,8 @@
 
 .quota-identity > i {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   border-radius: 8px;
   background: var(--panel-subtle);
@@ -605,7 +614,7 @@
 .quota-identity strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -641,7 +650,7 @@
 }
 
 .workbench-quota-track {
-  height: 3px;
+  height: 4px;
   overflow: hidden;
   border-radius: 99px;
   background: var(--panel-subtle);
@@ -728,9 +737,14 @@
 
 .workbench-primary-grid > .workbench-panel {
   min-height: 0;
-  padding: 15px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
+}
+
+.workbench-primary-grid > .workbench-panel:hover {
+  box-shadow: var(--shadow-md);
 }
 
 .workbench-panel-head h2 {
@@ -779,14 +793,15 @@
 .workbench-workflow-row {
   display: grid;
   min-width: 0;
-  min-height: 46px;
+  min-height: 50px;
   grid-template-columns: 82px minmax(0, 1fr) auto 14px;
   align-items: center;
   gap: 8px;
-  padding: 5px 7px;
+  padding: 7px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   text-align: left;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
 }
 
 .workbench-workflow-row:hover {
@@ -804,7 +819,7 @@
 
 .workbench-workflow-row > strong {
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 660;
 }
 
@@ -911,9 +926,9 @@
   display: grid;
   grid-template-columns: 3px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  min-height: 46px;
-  padding: 4px 0;
+  gap: 10px;
+  min-height: 50px;
+  padding: 5px 0;
   cursor: pointer;
 }
 
@@ -955,7 +970,7 @@
 
 .workbench-session-copy > strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 640;
   text-overflow: ellipsis;
   white-space: nowrap;

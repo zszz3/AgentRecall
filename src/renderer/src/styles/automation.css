@@ -549,7 +549,7 @@
   content: "›";
   font-size: 18px;
   line-height: 1;
-  transition: transform 140ms var(--ease);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .automation-runtime-content .runtime-config-disclosure[open] > summary::after {

@@ -34,14 +34,14 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 34px;
+  min-height: 38px;
   padding: 0 10px;
   border-radius: 8px;
   color: var(--text-dim);
   font-size: 13px;
   font-weight: 600;
   text-align: left;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .settings-sidebar button svg {
@@ -927,7 +927,7 @@
   background: var(--panel-bg);
   color: var(--text);
   font-size: 13px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .settings-field input.settings-number:focus {
@@ -938,7 +938,7 @@
 .settings-field select,
 .settings-field input[type="text"],
 .settings-field input[type="password"] {
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .settings-field select:focus,
@@ -1045,7 +1045,7 @@
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
-  transition: background 0.18s ease;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .settings-dialog .switch::before {
@@ -1058,7 +1058,7 @@
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.3, 1);
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .settings-dialog .switch:checked {
@@ -1394,7 +1394,7 @@
   color: var(--codex-badge-text);
   font-family: var(--mono);
   font-size: 12px;
-  transition: background 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .tag-suggestions button:hover {
@@ -1484,7 +1484,7 @@
   background: var(--panel-bg);
   color: var(--text-dim);
   font-weight: 500;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .dialog-actions button:hover {
