@@ -1433,6 +1433,7 @@ describe("SessionStore", () => {
     const sources = [
       { sessionKey: "hermes:abc", source: "hermes", fileName: "hermes.db", message: "Cannot delete shared Hermes source database." },
       { sessionKey: "opencode:abc", source: "opencode-cli", fileName: "opencode.db", message: "Cannot delete shared OpenCode source database." },
+      { sessionKey: "codewiz:abc", source: "codewiz-cli", fileName: "codewiz-opencode.db", message: "Cannot delete shared CodeWiz source database." },
       { sessionKey: "cursor:abc", source: "cursor-agent", fileName: "state.vscdb", message: "Cannot delete shared Cursor source database." },
     ] as const;
     for (const item of sources) {
