@@ -3,6 +3,7 @@ import type {
   OpenVikingMemoryItem,
   OpenVikingMemorySnapshot,
   OpenVikingModelStatus,
+  OpenVikingRuntimeInstallProgress,
   OpenVikingRuntimeStatus,
   OpenVikingWorkspace,
 } from "../../core/openviking-memory";
@@ -21,7 +22,10 @@ import type {
 
 interface RuntimePort {
   getStatus(): Promise<OpenVikingRuntimeStatus>;
-  install(manifest: OpenVikingRuntimeManifest): Promise<OpenVikingRuntimeStatus>;
+  install(
+    manifest: OpenVikingRuntimeManifest,
+    onProgress?: (progress: OpenVikingRuntimeInstallProgress) => void,
+  ): Promise<OpenVikingRuntimeStatus>;
   start(config: OpenVikingServerConfig): Promise<OpenVikingRuntimeStatus>;
   stop(): Promise<OpenVikingRuntimeStatus>;
 }
@@ -37,17 +41,24 @@ interface OpenVikingControlServiceOptions {
   memory: OpenVikingMemoryService;
   getSettings(): AppSettings;
   chooseDirectory(): Promise<string | null>;
-  resolveRuntimeManifest(): Promise<OpenVikingRuntimeManifest | null>;
+  resolveRuntimeManifest(
+    onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
+  ): Promise<OpenVikingRuntimeManifest | null>;
   serverConfig(): OpenVikingServerConfig | Promise<OpenVikingServerConfig>;
   onStateChanged?(): void | Promise<void>;
 }
 
 export class OpenVikingControlService implements OpenVikingMemoryIpcService {
+  private runtimeInstallStatus: OpenVikingRuntimeStatus | null = null;
+  private runtimeInstallation: Promise<OpenVikingRuntimeStatus> | null = null;
+
   constructor(private readonly options: OpenVikingControlServiceOptions) {}
 
   async snapshot(): Promise<OpenVikingMemorySnapshot> {
     const [runtime, model, workspaces] = await Promise.all([
-      this.options.runtime.getStatus(),
+      this.runtimeInstallStatus
+        ? Promise.resolve(this.runtimeInstallStatus)
+        : this.options.runtime.getStatus(),
       this.options.model.getStatus(),
       this.options.memory.listWorkspaces(),
     ]);
@@ -123,13 +134,42 @@ export class OpenVikingControlService implements OpenVikingMemoryIpcService {
     await this.notifyStateChanged();
   }
 
-  async installRuntime(): Promise<OpenVikingRuntimeStatus> {
+  installRuntime(): Promise<OpenVikingRuntimeStatus> {
     this.requireEnabled();
-    const manifest = await this.options.resolveRuntimeManifest();
-    if (!manifest) {
-      throw new Error("OpenViking runtime is not available for this build and platform.");
+    if (this.runtimeInstallation) return this.runtimeInstallation;
+    const installation = this.performRuntimeInstall()
+      .finally(() => {
+        if (this.runtimeInstallation === installation) {
+          this.runtimeInstallation = null;
+        }
+      });
+    this.runtimeInstallation = installation;
+    return installation;
+  }
+
+  private async performRuntimeInstall(): Promise<OpenVikingRuntimeStatus> {
+    const reportProgress = (progress: OpenVikingRuntimeInstallProgress) => {
+      this.runtimeInstallStatus = {
+        state: "installing",
+        version: this.runtimeInstallStatus?.version,
+        progress,
+      };
+    };
+    reportProgress({ phase: "resolving-runtime" });
+    try {
+      const manifest = await this.options.resolveRuntimeManifest(reportProgress);
+      if (!manifest) {
+        throw new Error("OpenViking runtime is not available for this build and platform.");
+      }
+      this.runtimeInstallStatus = {
+        state: "installing",
+        version: manifest.version,
+        progress: { phase: "downloading-runtime" },
+      };
+      return await this.options.runtime.install(manifest, reportProgress);
+    } finally {
+      this.runtimeInstallStatus = null;
     }
-    return this.options.runtime.install(manifest);
   }
 
   async startRuntime(): Promise<OpenVikingRuntimeStatus> {

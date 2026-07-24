@@ -78,9 +78,17 @@ function runtimeHarness(root: string, options: {
       const executablePath = options.executablePath ?? "bin/openviking-server";
       validateEntry(executablePath);
       const executable = path.join(destination, ...executablePath.split("/"));
+      const python = options.platform === "win32"
+        ? path.join(destination, "python.exe")
+        : path.join(destination, "bin", "python3");
       await mkdir(path.dirname(executable), { recursive: true });
       await writeFile(executable, "#!/bin/sh\n");
-      if (options.platform !== "win32") await chmod(executable, 0o755);
+      await mkdir(path.dirname(python), { recursive: true });
+      await writeFile(python, "");
+      if (options.platform !== "win32") {
+        await chmod(executable, 0o755);
+        await chmod(python, 0o755);
+      }
     },
     allocatePort: async () => 21933,
     spawnProcess: (command, args, spawnOptions) => {
@@ -123,8 +131,10 @@ describe("OpenVikingRuntimeService", () => {
       port: 21933,
     });
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].command).toBe(path.join(root, "runtime", "0.4.11", "bin", "openviking-server"));
+    expect(spawnCalls[0].command).toBe(path.join(root, "runtime", "0.4.11", "bin", "python3"));
     expect(spawnCalls[0].args).toEqual(expect.arrayContaining([
+      "-c",
+      expect.stringContaining("openviking_cli.server_bootstrap"),
       "--host",
       "127.0.0.1",
       "--port",
@@ -182,6 +192,47 @@ describe("OpenVikingRuntimeService", () => {
     await expect(mismatched.install(manifest())).rejects.toThrow("checksum");
     expect(extractArchive).not.toHaveBeenCalled();
     await expect(service.getStatus()).resolves.toMatchObject({ state: "not-installed" });
+  });
+
+  it("reports real download bytes while installing the runtime", async () => {
+    const root = await temporaryRoot();
+    let finishDownload: () => void = () => undefined;
+    const downloadGate = new Promise<void>((resolve) => {
+      finishDownload = resolve;
+    });
+    const service = new OpenVikingRuntimeService({
+      rootDir: root,
+      platform: "darwin",
+      arch: "arm64",
+      download: async (_url, destination, ...args: unknown[]) => {
+        const report = args[0] as undefined | ((downloadedBytes: number, totalBytes?: number) => void);
+        report?.(64, 128);
+        await downloadGate;
+        await writeFile(destination, "runtime archive");
+      },
+      extractArchive: async ({ destination }) => {
+        const executable = path.join(destination, "bin", "openviking-server");
+        await mkdir(path.dirname(executable), { recursive: true });
+        await writeFile(executable, "#!/bin/sh\n");
+      },
+    });
+    const installation = service.install(manifest());
+
+    try {
+      await vi.waitFor(async () => {
+        await expect(service.getStatus()).resolves.toMatchObject({
+          state: "installing",
+          progress: {
+            phase: "downloading-runtime",
+            downloadedBytes: 64,
+            totalBytes: 128,
+          },
+        });
+      });
+    } finally {
+      finishDownload();
+      await installation;
+    }
   });
 
   it("installs a checksummed local archive only when development mode enables it", async () => {
@@ -248,7 +299,7 @@ describe("OpenVikingRuntimeService", () => {
     await expect(readFile(path.join(root, "runtime-state.json"), "utf8")).rejects.toThrow();
   });
 
-  it("uses the manifest's Windows executable path", async () => {
+  it("uses the packaged Windows Python instead of the non-relocatable pip launcher", async () => {
     const root = await temporaryRoot();
     const executablePath = "Scripts/openviking-server.exe";
     const { service, spawnCalls } = runtimeHarness(root, {
@@ -267,7 +318,11 @@ describe("OpenVikingRuntimeService", () => {
     });
 
     expect(spawnCalls[0].command).toBe(
-      path.join(root, "runtime", "0.4.11", "Scripts", "openviking-server.exe"),
+      path.join(root, "runtime", "0.4.11", "python.exe"),
     );
+    expect(spawnCalls[0].args).toEqual(expect.arrayContaining([
+      "-c",
+      expect.stringContaining("openviking_cli.server_bootstrap"),
+    ]));
   });
 });

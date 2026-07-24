@@ -40,6 +40,18 @@ describe("OpenViking directory memory UI", () => {
     expect(html).toContain("OpenCode");
   });
 
+  it("renders live runtime download stages, byte counts and a progress bar", async () => {
+    const source = await readFile(
+      path.join(process.cwd(), "src/renderer/src/features/settings/openviking-memory-settings.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain("openviking-runtime-progress");
+    expect(source).toContain("downloadedBytes");
+    expect(source).toContain("totalBytes");
+    expect(source).toContain("window.setInterval");
+  });
+
   it("wires directory management, import control and memory CRUD through the new preload API", async () => {
     const source = await readFile(
       path.join(process.cwd(), "src/renderer/src/features/openviking-memory/openviking-memory-page.tsx"),

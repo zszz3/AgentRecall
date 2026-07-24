@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
@@ -74,6 +74,7 @@ export function buildRuntimePlan(input) {
 
 export async function buildRuntimeArtifact(input) {
   const plan = buildRuntimePlan(input);
+  reportProgress(input, { phase: "building-runtime" });
   await access(plan.pythonArchive);
   const pythonArchiveSha256 = await sha256File(plan.pythonArchive);
   if (pythonArchiveSha256 !== plan.pythonSha256.toLowerCase()) {
@@ -98,6 +99,7 @@ export async function buildRuntimeArtifact(input) {
       cwd: stagingRoot,
       env: plan.env,
     });
+    reportProgress(input, { phase: "packaging-runtime" });
     const archiveRoot = runtimeArchiveRoot(python, plan.platform);
     await writeFile(path.join(archiveRoot, "OPENVIKING-SOURCE.txt"), [
       "OpenViking server 0.4.11",
@@ -152,11 +154,39 @@ export async function buildRuntimeArtifactFromUrl(input) {
   try {
     const response = await fetch(url, { redirect: "follow" });
     if (!response.ok || !response.body) throw new Error(`Could not download standalone Python (${response.status}).`);
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(pythonArchive, { mode: 0o600 }));
+    const contentLength = Number(response.headers.get("content-length"));
+    const totalBytes = Number.isSafeInteger(contentLength) && contentLength > 0
+      ? contentLength
+      : undefined;
+    let downloadedBytes = 0;
+    reportProgress(input, {
+      phase: "downloading-python",
+      downloadedBytes,
+      ...(totalBytes === undefined ? {} : { totalBytes }),
+    });
+    await pipeline(
+      Readable.fromWeb(response.body),
+      new Transform({
+        transform(chunk, _encoding, callback) {
+          downloadedBytes += chunk.byteLength;
+          reportProgress(input, {
+            phase: "downloading-python",
+            downloadedBytes,
+            ...(totalBytes === undefined ? {} : { totalBytes }),
+          });
+          callback(null, chunk);
+        },
+      }),
+      createWriteStream(pythonArchive, { mode: 0o600 }),
+    );
     return await buildRuntimeArtifact({ ...input, pythonArchive });
   } finally {
     await rm(downloadRoot, { recursive: true, force: true });
   }
+}
+
+function reportProgress(input, progress) {
+  input.onProgress?.(progress);
 }
 
 export function runtimeArchiveRoot(pythonPath, platform, pathApi = path) {
@@ -238,9 +268,12 @@ function parseArguments(argv) {
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
   const input = parseArguments(process.argv.slice(2));
+  input.onProgress = (progress) => {
+    process.stdout.write(`${JSON.stringify({ type: "progress", progress })}\n`);
+  };
   const build = input.pythonUrl ? buildRuntimeArtifactFromUrl(input) : buildRuntimeArtifact(input);
   build
-    .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
+    .then((result) => process.stdout.write(`${JSON.stringify({ type: "result", result })}\n`))
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;

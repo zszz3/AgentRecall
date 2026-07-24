@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import test from "node:test";
 import {
   assertSafeBuildDirectory,
   assertTrustedPythonArchiveUrl,
+  buildRuntimeArtifactFromUrl,
   buildRuntimePlan,
   runtimeArchiveRoot,
   runtimeArtifactName,
@@ -93,4 +95,41 @@ test("runtime build downloads standalone Python only from the pinned upstream re
     () => assertTrustedPythonArchiveUrl("https://downloads.example/cpython.tar.gz"),
     /trusted python-build-standalone release/,
   );
+});
+
+test("runtime build reports exact standalone Python download bytes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-recall-runtime-progress-"));
+  const originalFetch = globalThis.fetch;
+  const body = Buffer.from("not-a-python-archive");
+  const progress = [];
+  globalThis.fetch = async () => new Response(body, {
+    headers: { "content-length": String(body.byteLength) },
+  });
+  try {
+    await assert.rejects(buildRuntimeArtifactFromUrl({
+      version: "0.4.11",
+      platform: "darwin",
+      arch: "arm64",
+      buildHome: path.join(root, "home"),
+      outputDir: path.join(root, "output"),
+      pythonUrl: "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython.tar.gz",
+      pythonSha256: createHash("sha256").update(body).digest("hex"),
+      onProgress: (event) => progress.push(event),
+    }));
+    assert.deepEqual(progress.slice(0, 2), [
+      {
+        phase: "downloading-python",
+        downloadedBytes: 0,
+        totalBytes: body.byteLength,
+      },
+      {
+        phase: "downloading-python",
+        downloadedBytes: body.byteLength,
+        totalBytes: body.byteLength,
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
 });

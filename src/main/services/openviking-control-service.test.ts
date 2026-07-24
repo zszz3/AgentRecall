@@ -15,7 +15,11 @@ const runtimeManifest: OpenVikingRuntimeManifest = {
   archiveType: "tar.gz",
 };
 
-function harness(enabled = true, manifest: OpenVikingRuntimeManifest | null = runtimeManifest) {
+function harness(
+  enabled = true,
+  manifest: OpenVikingRuntimeManifest | null = runtimeManifest,
+  resolveRuntimeManifest: (...args: unknown[]) => Promise<OpenVikingRuntimeManifest | null> = async () => manifest,
+) {
   const onStateChanged = vi.fn(async () => undefined);
   const workspaces = [{
     id: "workspace-1",
@@ -84,7 +88,7 @@ function harness(enabled = true, manifest: OpenVikingRuntimeManifest | null = ru
       openVikingMemoryEnabled: enabled,
     }),
     chooseDirectory: async () => "/repo",
-    resolveRuntimeManifest: async () => manifest,
+    resolveRuntimeManifest,
     serverConfig: async () => ({
       embedding: {
         dense: {
@@ -126,7 +130,7 @@ describe("OpenVikingControlService", () => {
     await service.installModel("BAAI/bge-small-zh-v1.5");
     await service.startRuntime();
 
-    expect(runtime.install).toHaveBeenCalledWith(runtimeManifest);
+    expect(runtime.install).toHaveBeenCalledWith(runtimeManifest, expect.any(Function));
     expect(model.install).toHaveBeenCalledWith("BAAI/bge-small-zh-v1.5");
     expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
       embedding: {
@@ -165,6 +169,65 @@ describe("OpenVikingControlService", () => {
     const { service: unavailable } = harness(true, null);
 
     await expect(unavailable.installRuntime()).rejects.toThrow("not available for this build");
+  });
+
+  it("exposes runtime preparation progress through snapshots while installation is pending", async () => {
+    let finishResolution: () => void = () => undefined;
+    const resolutionGate = new Promise<void>((resolve) => {
+      finishResolution = resolve;
+    });
+    const resolveRuntimeManifest = vi.fn(async (...args: unknown[]) => {
+      const report = args[0] as undefined | ((progress: {
+        phase: string;
+        downloadedBytes?: number;
+        totalBytes?: number;
+      }) => void);
+      report?.({
+        phase: "downloading-python",
+        downloadedBytes: 50,
+        totalBytes: 100,
+      });
+      await resolutionGate;
+      return runtimeManifest;
+    });
+    const { service } = harness(true, runtimeManifest, resolveRuntimeManifest);
+    const installation = service.installRuntime();
+
+    try {
+      await expect(service.snapshot()).resolves.toMatchObject({
+        runtime: {
+          state: "installing",
+          progress: {
+            phase: "downloading-python",
+            downloadedBytes: 50,
+            totalBytes: 100,
+          },
+        },
+      });
+    } finally {
+      finishResolution();
+      await installation;
+    }
+  });
+
+  it("coalesces concurrent runtime install requests into one operation", async () => {
+    let finishResolution: () => void = () => undefined;
+    const resolutionGate = new Promise<void>((resolve) => {
+      finishResolution = resolve;
+    });
+    const resolveRuntimeManifest = vi.fn(async () => {
+      await resolutionGate;
+      return runtimeManifest;
+    });
+    const { service, runtime } = harness(true, runtimeManifest, resolveRuntimeManifest);
+    const first = service.installRuntime();
+    const second = service.installRuntime();
+
+    finishResolution();
+    await Promise.all([first, second]);
+
+    expect(resolveRuntimeManifest).toHaveBeenCalledOnce();
+    expect(runtime.install).toHaveBeenCalledOnce();
   });
 
   it("refreshes external hook state after workspace and runtime lifecycle changes", async () => {

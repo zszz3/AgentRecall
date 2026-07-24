@@ -704,6 +704,57 @@
   line-height: 1.4;
 }
 
+.openviking-runtime-progress {
+  display: grid;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.openviking-runtime-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.openviking-runtime-progress-meta span:last-child {
+  flex: 0 0 auto;
+}
+
+.openviking-runtime-progress-track {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-bg);
+}
+
+.openviking-runtime-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-bright);
+  transition: width 180ms ease;
+}
+
+.openviking-runtime-progress-fill.indeterminate {
+  width: 34%;
+  animation: openviking-runtime-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes openviking-runtime-progress {
+  from {
+    transform: translateX(-120%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
 .openviking-status {
   padding: 3px 7px;
   border-radius: 999px;

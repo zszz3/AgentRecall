@@ -10,7 +10,10 @@ import {
 } from "lucide-react";
 
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
-import type { OpenVikingMemorySnapshot } from "../../../../core/openviking-memory";
+import type {
+  OpenVikingMemorySnapshot,
+  OpenVikingRuntimeInstallPhase,
+} from "../../../../core/openviking-memory";
 import { localize, type LanguageMode } from "../../language";
 
 type ComponentAction = "runtime" | "model" | "start" | "stop" | null;
@@ -40,6 +43,14 @@ export function OpenVikingMemorySettings({
     void refresh().catch((cause) => setError(errorMessage(cause)));
   }, [refresh]);
 
+  useEffect(() => {
+    if (action !== "runtime" && snapshot?.runtime.state !== "installing") return;
+    const timer = window.setInterval(() => {
+      void refresh().catch((cause) => setError(errorMessage(cause)));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [action, refresh, snapshot?.runtime.state]);
+
   const run = async (nextAction: Exclude<ComponentAction, null>, operation: () => Promise<unknown>) => {
     setAction(nextAction);
     setError(null);
@@ -54,6 +65,17 @@ export function OpenVikingMemorySettings({
   };
 
   const runtimeState = snapshot?.runtime.state ?? "not-installed";
+  const runtimeProgress = snapshot?.runtime.progress;
+  const runtimePercent = runtimeProgress?.totalBytes
+    ? Math.min(100, Math.round(
+      ((runtimeProgress.downloadedBytes ?? 0) / runtimeProgress.totalBytes) * 100,
+    ))
+    : null;
+  const runtimeProgressSize = runtimeProgress?.downloadedBytes !== undefined
+    ? runtimeProgress.totalBytes
+      ? `${(runtimeProgress.downloadedBytes / 1_000_000).toFixed(1)} / ${(runtimeProgress.totalBytes / 1_000_000).toFixed(1)} MB`
+      : `${(runtimeProgress.downloadedBytes / 1_000_000).toFixed(1)} MB`
+    : null;
   const modelInstalled = Boolean(snapshot?.model.installed);
   const controlsDisabled = !enabled || saving || action !== null;
 
@@ -93,8 +115,29 @@ export function OpenVikingMemorySettings({
               "Managed runtime · about 260–320 MB download · no system Python required",
               "托管运行时 · 下载约 260–320 MB · 不依赖系统 Python",
             )}</span>
+            {runtimeState === "installing" ? (
+              <div className="openviking-runtime-progress">
+                <div className="openviking-runtime-progress-meta">
+                  <span>{runtimeLabel(runtimeState, language, runtimeProgress?.phase)}</span>
+                  <span>
+                    {runtimeProgressSize}
+                    {runtimePercent === null ? null : ` · ${runtimePercent}%`}
+                  </span>
+                </div>
+                <div className="openviking-runtime-progress-track" aria-hidden="true">
+                  <span
+                    className={runtimePercent === null
+                      ? "openviking-runtime-progress-fill indeterminate"
+                      : "openviking-runtime-progress-fill"}
+                    style={runtimePercent === null ? undefined : { width: `${runtimePercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
-          <span className={`openviking-status ${runtimeState}`}>{runtimeLabel(runtimeState, language)}</span>
+          <span className={`openviking-status ${runtimeState}`}>
+            {runtimeLabel(runtimeState, language, runtimeProgress?.phase)}
+          </span>
           {runtimeState === "not-installed" ? (
             <button
               type="button"
@@ -220,8 +263,18 @@ function IntegrationToggle({
 function runtimeLabel(
   state: OpenVikingMemorySnapshot["runtime"]["state"],
   language: LanguageMode,
+  phase?: OpenVikingRuntimeInstallPhase,
 ): string {
   const l = (en: string, zh: string) => localize(language, en, zh);
+  switch (phase) {
+    case "resolving-runtime": return l("Checking download", "检查下载");
+    case "downloading-python": return l("Downloading runtime base", "下载运行环境");
+    case "building-runtime": return l("Installing OpenViking", "安装 OpenViking");
+    case "packaging-runtime": return l("Packaging runtime", "打包运行时");
+    case "downloading-runtime": return l("Downloading runtime", "下载运行时");
+    case "verifying-runtime": return l("Verifying download", "校验下载");
+    case "installing-runtime": return l("Installing runtime", "安装运行时");
+  }
   switch (state) {
     case "running": return l("Running", "运行中");
     case "stopped": return l("Stopped", "已停止");

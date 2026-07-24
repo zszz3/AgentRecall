@@ -76,6 +76,7 @@ import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts"
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
+import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
 import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerTeamChatIpc } from "./ipc/team-chat";
@@ -618,9 +619,10 @@ async function chooseOpenVikingMemoryDirectory(): Promise<string | null> {
 
 function buildDevelopmentOpenVikingRuntime(
   rootDir: string,
+  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
 ): Promise<OpenVikingRuntimeManifest | null> {
   if (!developmentOpenVikingRuntimeBuild) {
-    developmentOpenVikingRuntimeBuild = buildDevelopmentOpenVikingRuntimeArtifact(rootDir)
+    developmentOpenVikingRuntimeBuild = buildDevelopmentOpenVikingRuntimeArtifact(rootDir, onProgress)
       .catch((error) => {
         developmentOpenVikingRuntimeBuild = null;
         throw error;
@@ -631,6 +633,7 @@ function buildDevelopmentOpenVikingRuntime(
 
 async function buildDevelopmentOpenVikingRuntimeArtifact(
   rootDir: string,
+  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
 ): Promise<OpenVikingRuntimeManifest | null> {
   const pythonRuntime = DEVELOPMENT_PYTHON_RUNTIMES[`${process.platform}-${process.arch}`];
   if (!pythonRuntime) return null;
@@ -649,7 +652,7 @@ async function buildDevelopmentOpenVikingRuntimeArtifact(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     await new Promise<void>((resolve, reject) => {
-      execFile(process.execPath, [
+      const child = execFile(process.execPath, [
         OPENVIKING_RUNTIME_BUILD_SCRIPT_PATH,
         "--version",
         OPENVIKING_RUNTIME_VERSION,
@@ -685,9 +688,18 @@ async function buildDevelopmentOpenVikingRuntimeArtifact(
           { cause: buildError },
         ));
       });
+      let bufferedOutput = "";
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        bufferedOutput += chunk;
+        const lines = bufferedOutput.split(/\r?\n/u);
+        bufferedOutput = lines.pop() ?? "";
+        for (const line of lines) reportDevelopmentRuntimeBuildProgress(line, onProgress);
+      });
     });
   }
 
+  onProgress({ phase: "verifying-runtime" });
   const record = JSON.parse(
     await fs.readFile(manifestPath, "utf8"),
   ) as DevelopmentRuntimeArtifactRecord;
@@ -712,6 +724,45 @@ async function buildDevelopmentOpenVikingRuntimeArtifact(
     executablePath: record.executablePath,
     archiveType: "tar.gz",
   };
+}
+
+function reportDevelopmentRuntimeBuildProgress(
+  line: string,
+  onProgress: (progress: OpenVikingRuntimeInstallProgress) => void,
+): void {
+  try {
+    const message = JSON.parse(line) as {
+      type?: unknown;
+      progress?: {
+        phase?: unknown;
+        downloadedBytes?: unknown;
+        totalBytes?: unknown;
+      };
+    };
+    const progress = message.progress;
+    if (
+      message.type !== "progress"
+      || !progress
+      || ![
+        "downloading-python",
+        "building-runtime",
+        "packaging-runtime",
+      ].includes(String(progress.phase))
+    ) {
+      return;
+    }
+    onProgress({
+      phase: progress.phase as OpenVikingRuntimeInstallProgress["phase"],
+      ...(typeof progress.downloadedBytes === "number"
+        ? { downloadedBytes: progress.downloadedBytes }
+        : {}),
+      ...(typeof progress.totalBytes === "number"
+        ? { totalBytes: progress.totalBytes }
+        : {}),
+    });
+  } catch {
+    // pip and Python write ordinary log lines beside the structured progress records.
+  }
 }
 
 function initializeOpenVikingMemory(): void {
@@ -751,14 +802,14 @@ function initializeOpenVikingMemory(): void {
     memory,
     getSettings,
     chooseDirectory: chooseOpenVikingMemoryDirectory,
-    resolveRuntimeManifest: () => resolveOpenVikingRuntimeManifest({
+    resolveRuntimeManifest: (onProgress) => resolveOpenVikingRuntimeManifest({
       appVersion: app.getVersion(),
       platform: process.platform,
       arch: process.arch,
       releaseBaseUrl: process.env.AGENT_RECALL_OPENVIKING_RELEASE_BASE_URL,
       developmentFallback: releaseUpdateRuntime
         ? undefined
-        : () => buildDevelopmentOpenVikingRuntime(rootDir),
+        : () => buildDevelopmentOpenVikingRuntime(rootDir, onProgress),
     }),
     serverConfig: async () => ({
       embedding: {

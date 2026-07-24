@@ -5,7 +5,6 @@ import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   chmod,
-  copyFile,
   mkdir,
   readFile,
   rename,
@@ -15,12 +14,20 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
 
-import type { OpenVikingRuntimeStatus } from "../../core/openviking-memory";
+import type {
+  OpenVikingRuntimeInstallProgress,
+  OpenVikingRuntimeStatus,
+} from "../../core/openviking-memory";
+
+const OPENVIKING_SERVER_BOOTSTRAP = [
+  "from openviking_cli.server_bootstrap import main",
+  "raise SystemExit(main())",
+].join("; ");
 
 export interface OpenVikingRuntimeManifest {
   version: string;
@@ -69,7 +76,11 @@ interface RuntimeServiceOptions {
   platform?: NodeJS.Platform;
   arch?: string;
   allowLocalRuntime?: boolean;
-  download?: (url: string, destination: string) => Promise<void>;
+  download?: (
+    url: string,
+    destination: string,
+    onProgress?: (downloadedBytes: number, totalBytes?: number) => void,
+  ) => Promise<void>;
   extractArchive?: (input: ExtractArchiveInput) => Promise<void>;
   allocatePort?: () => Promise<number>;
   spawnProcess?: (
@@ -139,9 +150,20 @@ export class OpenVikingRuntimeService {
     return { state: "stopped", version: manifest.version };
   }
 
-  async install(manifest: OpenVikingRuntimeManifest): Promise<OpenVikingRuntimeStatus> {
+  async install(
+    manifest: OpenVikingRuntimeManifest,
+    onProgress?: (progress: OpenVikingRuntimeInstallProgress) => void,
+  ): Promise<OpenVikingRuntimeStatus> {
     this.validateManifest(manifest);
-    this.transientStatus = { state: "installing", version: manifest.version };
+    const reportProgress = (progress: OpenVikingRuntimeInstallProgress) => {
+      this.transientStatus = {
+        state: "installing",
+        version: manifest.version,
+        progress,
+      };
+      onProgress?.(progress);
+    };
+    reportProgress({ phase: "downloading-runtime" });
     const downloadsDir = this.resolveOwnedPath("downloads");
     const runtimeDir = this.resolveOwnedPath("runtime");
     const archivePath = path.join(downloadsDir, `openviking-${manifest.version}-${manifest.platform}-${manifest.arch}.tar.gz`);
@@ -152,12 +174,20 @@ export class OpenVikingRuntimeService {
       await mkdir(downloadsDir, { recursive: true });
       await mkdir(runtimeDir, { recursive: true });
       await rm(partialPath, { force: true });
-      await this.download(manifest.url, partialPath);
+      await this.download(manifest.url, partialPath, (downloadedBytes, totalBytes) => {
+        reportProgress({
+          phase: "downloading-runtime",
+          downloadedBytes,
+          ...(totalBytes === undefined ? {} : { totalBytes }),
+        });
+      });
+      reportProgress({ phase: "verifying-runtime" });
       const actualSha = await sha256File(partialPath);
       if (actualSha !== manifest.sha256.toLowerCase()) {
         throw new Error(`OpenViking runtime checksum mismatch: expected ${manifest.sha256}, received ${actualSha}.`);
       }
       await rename(partialPath, archivePath);
+      reportProgress({ phase: "installing-runtime" });
       await mkdir(stagingPath, { recursive: true });
       await this.extractArchive({
         archivePath,
@@ -191,6 +221,11 @@ export class OpenVikingRuntimeService {
     const runtimePath = this.resolveOwnedPath("runtime", manifest.version);
     const executable = resolveArchivePath(runtimePath, manifest.executablePath);
     await access(executable);
+    const python = resolveArchivePath(
+      runtimePath,
+      this.platform === "win32" ? "python.exe" : "bin/python3",
+    );
+    await access(python);
     const port = await this.allocatePort();
     const rootApiKey = await this.loadOrCreateRootApiKey();
     await mkdir(this.resolveOwnedPath("data"), { recursive: true });
@@ -211,6 +246,8 @@ export class OpenVikingRuntimeService {
       },
     });
     const args = [
+      "-c",
+      OPENVIKING_SERVER_BOOTSTRAP,
       "--config",
       configPath,
       "--host",
@@ -218,7 +255,7 @@ export class OpenVikingRuntimeService {
       "--port",
       String(port),
     ];
-    const child = this.spawnProcess(executable, args, {
+    const child = this.spawnProcess(python, args, {
       cwd: this.resolveOwnedPath("data"),
       env: {
         ...process.env,
@@ -375,18 +412,51 @@ function resolveArchivePath(root: string, archivePath: string): string {
   return resolved;
 }
 
-async function downloadFile(url: string, destination: string): Promise<void> {
+async function downloadFile(
+  url: string,
+  destination: string,
+  onProgress?: (downloadedBytes: number, totalBytes?: number) => void,
+): Promise<void> {
   const source = new URL(url);
   if (source.protocol === "file:") {
-    await copyFile(fileURLToPath(source), destination);
+    const sourcePath = fileURLToPath(source);
+    const totalBytes = (await stat(sourcePath)).size;
+    await pipeline(
+      createReadStream(sourcePath),
+      createDownloadProgressTransform(totalBytes, onProgress),
+      createWriteStream(destination, { mode: 0o600 }),
+    );
     return;
   }
   const response = await fetch(url, { redirect: "follow" });
   if (!response.ok || !response.body) {
     throw new Error(`OpenViking runtime download failed with HTTP ${response.status}.`);
   }
+  const contentLength = Number(response.headers.get("content-length"));
+  const totalBytes = Number.isSafeInteger(contentLength) && contentLength > 0
+    ? contentLength
+    : undefined;
   const body = Readable.fromWeb(response.body as never);
-  await pipeline(body, createWriteStream(destination, { mode: 0o600 }));
+  await pipeline(
+    body,
+    createDownloadProgressTransform(totalBytes, onProgress),
+    createWriteStream(destination, { mode: 0o600 }),
+  );
+}
+
+function createDownloadProgressTransform(
+  totalBytes: number | undefined,
+  onProgress?: (downloadedBytes: number, totalBytes?: number) => void,
+): Transform {
+  let downloadedBytes = 0;
+  onProgress?.(downloadedBytes, totalBytes);
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      downloadedBytes += chunk.byteLength;
+      onProgress?.(downloadedBytes, totalBytes);
+      callback(null, chunk);
+    },
+  });
 }
 
 async function extractTarGz(input: ExtractArchiveInput): Promise<void> {

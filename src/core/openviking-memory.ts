@@ -14,6 +14,20 @@ export type OpenVikingRuntimeState =
   | "running"
   | "error";
 export type OpenVikingImportState = "idle" | "queued" | "running" | "paused" | "failed" | "completed";
+export type OpenVikingRuntimeInstallPhase =
+  | "resolving-runtime"
+  | "downloading-python"
+  | "building-runtime"
+  | "packaging-runtime"
+  | "downloading-runtime"
+  | "verifying-runtime"
+  | "installing-runtime";
+
+export interface OpenVikingRuntimeInstallProgress {
+  phase: OpenVikingRuntimeInstallPhase;
+  downloadedBytes?: number;
+  totalBytes?: number;
+}
 
 export interface OpenVikingWorkspace {
   id: string;
@@ -45,6 +59,7 @@ export interface OpenVikingRuntimeStatus {
   state: OpenVikingRuntimeState;
   version?: string;
   port?: number;
+  progress?: OpenVikingRuntimeInstallProgress;
   error?: string;
 }
 
