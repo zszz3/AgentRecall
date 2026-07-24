@@ -21,7 +21,7 @@
   color: var(--text-dim);
   font-size: 12.5px;
   text-align: left;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .context-menu button:hover:not(:disabled) {
@@ -88,7 +88,7 @@
   text-align: left;
   font-size: 15px;
   font-weight: 700;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .migration-targets button:hover:not(:disabled) {
@@ -126,7 +126,7 @@
   height: 100%;
   border-radius: 999px;
   background: var(--accent);
-  transition: width 0.2s ease;
+  transition: width var(--duration-fast) var(--ease-out);
 }
 
 .migration-progress-meta {
@@ -173,7 +173,7 @@
   background: var(--panel-bg);
   color: var(--text);
   font-size: 13.5px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .command-dialog input::placeholder {
@@ -282,7 +282,7 @@
   border-radius: 8px;
   background: var(--panel-bg);
   color: var(--text-muted);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .skills-search:focus-within {

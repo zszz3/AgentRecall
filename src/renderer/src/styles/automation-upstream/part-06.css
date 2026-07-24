@@ -181,7 +181,7 @@
 .workbench-metrics span,
 .workbench-metrics small { display: block; color: var(--muted); font-size: 9px; }
 
-.workbench-metrics strong { display: block; margin: 3px 0 1px; font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: 18px; font-weight: 620; }
+.workbench-metrics strong { display: block; margin: 3px 0 1px; font-size: 18px; font-weight: 620; }
 
 .workbench-metrics strong.is-success { color: var(--ok); }
 

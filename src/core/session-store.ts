@@ -112,7 +112,16 @@ export class SessionStore {
     traceEvents: readonly SessionTraceEvent[] = [],
   ): Promise<void> {
     await this.ready;
-    await this.sessions.upsertIndexedSession(session, messages, tokenEvents, traceEvents);
+    const sanitizedMessages = messages.map((message) => {
+      const content = message.content.replaceAll("\u0000", "");
+      return content === message.content ? message : { ...message, content };
+    });
+    const sanitizedTraceEvents = traceEvents.map((event) => {
+      const title = event.title.replaceAll("\u0000", "");
+      const detail = event.detail.replaceAll("\u0000", "");
+      return title === event.title && detail === event.detail ? event : { ...event, title, detail };
+    });
+    await this.sessions.upsertIndexedSession(session, sanitizedMessages, tokenEvents, sanitizedTraceEvents);
   }
 
   async isIndexedSessionFresh(session: IndexedSession): Promise<boolean> {

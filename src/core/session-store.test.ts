@@ -48,6 +48,44 @@ const messages: SessionMessage[] = [
 ];
 
 describe("SessionStore PostgreSQL facade", () => {
+  it("removes NUL characters from message and trace text before indexing", async () => {
+    const store = createStore();
+
+    await store.upsertIndexedSession(
+      indexedSession(),
+      [
+        {
+          role: "user",
+          content: "before\u0000after",
+          timestamp: "2026-07-20T08:00:00.000Z",
+          index: 0,
+        },
+      ],
+      [],
+      [
+        {
+          index: 0,
+          kind: "tool_call",
+          source: "codex",
+          title: "shell\u0000command",
+          detail: "stdout:\u0000pass",
+          timestamp: "2026-07-20T08:00:01.000Z",
+          callId: "call-1",
+        },
+      ],
+    );
+
+    await expect(store.getMessages("codex:session-a")).resolves.toEqual([
+      expect.objectContaining({ content: "beforeafter" }),
+    ]);
+    await expect(store.getTraceEvents("codex:session-a")).resolves.toEqual([
+      expect.objectContaining({
+        title: "shellcommand",
+        detail: "stdout:pass",
+      }),
+    ]);
+  });
+
   it("indexes a Session and exposes Turn-backed search through the stable facade", async () => {
     const store = createStore();
     await store.upsertIndexedSession(indexedSession(), messages);

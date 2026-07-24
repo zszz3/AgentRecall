@@ -11,6 +11,7 @@ interface RegisterTeamChatIpcOptions {
   ipc: TeamChatIpcMainLike;
   service: TeamChatService;
   send: (channel: string, payload: unknown) => void;
+  ensureReady?: () => Promise<void>;
 }
 
 const idSchema = z.string().trim().min(1).max(200);
@@ -44,17 +45,24 @@ const agentSessionResetSchema = z.object({
   agentId: idSchema,
 }).strict();
 
-export function registerTeamChatIpc({ ipc, service, send }: RegisterTeamChatIpcOptions): () => void {
+export function registerTeamChatIpc({ ipc, service, send, ensureReady }: RegisterTeamChatIpcOptions): () => void {
   const channels: string[] = [];
-  const handle = (channel: string, handler: (value: unknown) => unknown): void => {
+  const handle = (
+    channel: string,
+    handler: (value: unknown) => unknown,
+    options: { requiresReady?: boolean } = {},
+  ): void => {
     channels.push(channel);
-    ipc.handle(channel, async (_event, value) => handler(value));
+    ipc.handle(channel, async (_event, value) => {
+      if (options.requiresReady !== false) await ensureReady?.();
+      return handler(value);
+    });
   };
 
-  handle(TEAM_CHAT_CHANNELS.connectionStatus, () => service.getConnectionStatus());
+  handle(TEAM_CHAT_CHANNELS.connectionStatus, () => service.getConnectionStatus(), { requiresReady: false });
   handle(TEAM_CHAT_CHANNELS.connectionConnect, () => service.connect());
   handle(TEAM_CHAT_CHANNELS.connectionUseLocal, () => service.useLocalDatabase());
-  handle(TEAM_CHAT_CHANNELS.connectionDisconnect, () => service.disconnect());
+  handle(TEAM_CHAT_CHANNELS.connectionDisconnect, () => service.disconnect(), { requiresReady: false });
   handle(TEAM_CHAT_CHANNELS.roomsList, () => service.listRooms());
   handle(TEAM_CHAT_CHANNELS.roomsGet, (value) => service.getRoom(idSchema.parse(value)));
   handle(TEAM_CHAT_CHANNELS.roomsCreate, (value) => service.createRoom(roomCreateSchema.parse(value)));

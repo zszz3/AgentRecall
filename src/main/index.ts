@@ -1394,7 +1394,7 @@ function registerIpc(): void {
       const resolvedPath = path.resolve(filePath);
       await createLocalTextFilePreviewUnderRoots(
         resolvedPath,
-        automationService?.hub().allowedFileRoots() ?? [],
+        automationService?.workflows.allowedFileRoots() ?? [],
         app.getPath("home"),
       );
       shell.showItemInFolder(resolvedPath);
@@ -1403,8 +1403,9 @@ function registerIpc(): void {
   });
   disposeTeamChatIpc = registerTeamChatIpc({
     ipc: ipcMain,
-    service: automationService.teamChat(),
+    service: automationService.teamChat,
     send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
+    ensureReady: () => automationService!.requireReady(),
   });
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
@@ -1745,7 +1746,6 @@ app.whenReady().then(async () => {
   registerIpc();
   createApplicationMenu();
   createWindow();
-  void automationService.initialize();
   createTray();
   void appUpdateService.showPreviousUpdateResult();
   const shortcut = getSettings().globalShortcut;

@@ -2004,8 +2004,8 @@
   border-radius: 8px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-family: "Geist Mono Variable", ui-monospace, monospace;
   font-size: 9px;
+  font-weight: 650;
 }
 
 .evaluation-workbench-body,

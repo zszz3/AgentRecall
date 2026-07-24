@@ -1,11 +1,11 @@
 export function formatScore(value: number | undefined): string {
-  return value === undefined ? "-" : value.toFixed(2);
+  return value === undefined ? "—" : value.toFixed(2);
 }
 export function formatPassRate(value: number | undefined): string {
-  return value === undefined ? "-" : `${Math.round(value * 100)}%`;
+  return value === undefined ? "—" : `${Math.round(value * 100)}%`;
 }
 export function formatDuration(value: number | undefined): string {
-  if (value === undefined) return "-";
+  if (value === undefined) return "—";
   if (value < 1_000) return `${value} ms`;
   return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)} s`;
 }

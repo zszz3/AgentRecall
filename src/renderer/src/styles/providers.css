@@ -86,7 +86,7 @@
   background: var(--panel-subtle);
   color: var(--text-dim);
   text-align: left;
-  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .api-provider-switch button:hover:not(:disabled) {
@@ -260,7 +260,7 @@
   font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
-  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 
 .codex-model-detect-button:hover:not(:disabled) {

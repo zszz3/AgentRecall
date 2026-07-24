@@ -141,7 +141,7 @@ export function WorkbenchPage({
               </button>
             </div>
           </div>
-          <div className="workbench-metrics">
+          <div className="usage-metrics">
             <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
             <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
             <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AUTOMATION_CHANNELS } from "../shared/ipc/automation";
 import type { NativeAutomationService } from "./services/automation-service";
+import { McpAutomationModule } from "./services/mcp-automation-module";
 import { registerAutomationIpc } from "./ipc/automation";
 
 function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefined>) {
@@ -40,15 +41,30 @@ function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefi
     deleteRun: vi.fn(async () => true),
     runExperiment: vi.fn(async (experimentId) => ({ experimentId })),
   };
+  const mcpAgents = {
+    status: vi.fn(async () => ({})),
+    listInstalled: vi.fn(async () => []),
+    listForAgent: vi.fn(async () => []),
+    install: vi.fn(async () => ({})),
+    uninstall: vi.fn(async () => ({})),
+  };
+  const mcp = new McpAutomationModule({
+    registry: registry as never,
+    agents: mcpAgents as never,
+    runtime: hub as never,
+    discoverTools: vi.fn(async () => []),
+  });
   const service = {
+    requirePrepared: vi.fn(async () => undefined),
     requireReady: vi.fn(async () => undefined),
     health: vi.fn(() => ({ state: "ready" })),
     snapshot: vi.fn(() => ({ workDir: "/repo" })),
     subscribe: vi.fn(() => () => undefined),
-    hub: vi.fn(() => hub),
-    mcpRegistry: vi.fn(() => registry),
-    mcpAgents: vi.fn(() => ({})),
-    evaluations: vi.fn(() => evaluations),
+    runtime: hub,
+    workflows: hub,
+    mcp,
+    evaluations,
+    resolveRuntimeApproval: vi.fn(),
   } as unknown as NativeAutomationService;
   registerAutomationIpc({ ipc: ipc as never, service, send: vi.fn(), pickDirectory });
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args);
@@ -60,6 +76,15 @@ describe("registerAutomationIpc", () => {
     const { handlers } = setup();
     expect([...handlers.keys()].length).toBeGreaterThan(30);
     expect([...handlers.keys()].every((channel) => channel.startsWith("automation:"))).toBe(true);
+  });
+
+  it("loads the overview snapshot without starting the execution engine", async () => {
+    const { invoke, service } = setup();
+
+    await expect(invoke(AUTOMATION_CHANNELS.snapshot)).resolves.toEqual({ workDir: "/repo" });
+
+    expect(service.requirePrepared).toHaveBeenCalledOnce();
+    expect(service.requireReady).not.toHaveBeenCalled();
   });
 
   it("opens the directory picker without a default when Chat passes an empty work directory", async () => {
