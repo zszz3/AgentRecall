@@ -15,6 +15,8 @@
     "agent-recall-setup-skill-usage-hook": "bin/setup-skill-usage-hook.cjs",
     "agent-recall-session-sync": "bin/session-sync-record.cjs",
     "agent-recall-setup-session-sync-hook": "bin/setup-session-sync-hook.cjs",
+    "agent-recall-openviking-memory-hook": "bin/openviking-memory-hook.cjs",
+    "agent-recall-setup-openviking-memory-hooks": "bin/setup-openviking-memory-hooks.cjs",
     "agent-recall-mcp": "bin/agent-recall-mcp.mjs",
     "agent-recall-workflow-mcp": "bin/agent-recall-workflow-mcp.mjs",
     "agent-recall-setup-mcp": "bin/setup-mcp.cjs"
@@ -25,7 +27,8 @@
   "files": [
     "out",
     "bin",
-    "assets"
+    "assets",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "dev": "npm run build:mcp && electron-vite dev",

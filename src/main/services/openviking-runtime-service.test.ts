@@ -108,8 +108,9 @@ describe("OpenVikingRuntimeService", () => {
       embedding: {
         dense: {
           provider: "local",
-          model: "BAAI/bge-small-zh-v1.5",
+          model: "bge-small-zh-v1.5-f16",
           dimension: 512,
+          model_path: "/models/bge-small-zh-v1.5-f16.gguf",
         },
       },
       vlm: { provider: "openai-codex", model: "gpt-5.4" },
@@ -134,6 +135,14 @@ describe("OpenVikingRuntimeService", () => {
 
     const config = JSON.parse(await readFile(path.join(root, "ov.conf"), "utf8"));
     expect(config).toMatchObject({
+      embedding: {
+        dense: {
+          provider: "local",
+          model: "bge-small-zh-v1.5-f16",
+          dimension: 512,
+          model_path: "/models/bge-small-zh-v1.5-f16.gguf",
+        },
+      },
       storage: {
         workspace: path.join(root, "data"),
         agfs: { backend: "local" },
@@ -147,6 +156,10 @@ describe("OpenVikingRuntimeService", () => {
       },
     });
     expect(config.server.root_api_key).toMatch(/^[a-f0-9]{64}$/);
+    await expect(service.getConnection()).resolves.toEqual({
+      baseUrl: "http://127.0.0.1:21933",
+      rootApiKey: config.server.root_api_key,
+    });
 
     await service.stop();
     expect(child.killed).toBe(true);

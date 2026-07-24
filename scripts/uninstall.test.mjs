@@ -29,7 +29,11 @@ test("uninstall removes only AgentRecall integrations and caches", async () => {
       ],
       Stop: [
         { hooks: [{ type: "command", command: 'node "/global/bin/session-sync-record.cjs" --agent claude' }] },
+        { hooks: [{ type: "command", command: 'node "/global/bin/openviking-memory-hook.cjs" --agent claude --event Stop' }] },
         { hooks: [{ type: "command", command: "keep-claude-stop" }] },
+      ],
+      UserPromptSubmit: [
+        { hooks: [{ type: "command", command: 'node "/global/bin/openviking-memory-hook.cjs" --agent claude --event UserPromptSubmit' }] },
       ],
     },
   }));
@@ -38,8 +42,14 @@ test("uninstall removes only AgentRecall integrations and caches", async () => {
   fs.writeFileSync(path.join(homeDir, ".codex", "config.toml"), '[model]\nname="keep"\n\n[mcp_servers.agent_recall]\ncommand="node"\nargs=["old"]\n');
   fs.writeFileSync(path.join(homeDir, ".codex", "hooks.json"), JSON.stringify({ hooks: { Stop: [
     { hooks: [{ type: "command", command: 'node "/global/bin/session-sync-record.cjs" --agent codex' }] },
+    { hooks: [{ type: "command", command: 'node "/global/bin/openviking-memory-hook.cjs" --agent codex --event Stop' }] },
     { hooks: [{ type: "command", command: "keep-codex-stop" }] },
+  ], UserPromptSubmit: [
+    { hooks: [{ type: "command", command: 'node "/global/bin/openviking-memory-hook.cjs" --agent codex --event UserPromptSubmit' }] },
   ] } }));
+  const openCodeWrapper = path.join(homeDir, ".config", "opencode", "plugins", "agent-recall-openviking.js");
+  fs.mkdirSync(path.dirname(openCodeWrapper), { recursive: true });
+  fs.writeFileSync(openCodeWrapper, "export default function agentRecallOpenViking() {}\n");
   fs.mkdirSync(path.join(homeDir, ".agent-recall"), { recursive: true });
   fs.writeFileSync(path.join(homeDir, ".agent-recall", "update-check.json"), "{}");
   fs.writeFileSync(path.join(homeDir, ".agent-recall", "update-preferences.json"), '{"enabled":false}');
@@ -56,6 +66,7 @@ test("uninstall removes only AgentRecall integrations and caches", async () => {
   assert.equal(nextSettings.hooks.PostToolUse.length, 1);
   assert.equal(nextSettings.hooks.Stop.length, 1);
   assert.equal(nextSettings.hooks.Stop[0].hooks[0].command, "keep-claude-stop");
+  assert.equal(nextSettings.hooks.UserPromptSubmit, undefined);
   const claudeConfig = JSON.parse(fs.readFileSync(path.join(homeDir, ".claude.json"), "utf8"));
   assert.equal(claudeConfig.custom, true);
   assert.equal(claudeConfig.mcpServers["agent-recall"], undefined);
@@ -65,6 +76,8 @@ test("uninstall removes only AgentRecall integrations and caches", async () => {
   const codexHooks = JSON.parse(fs.readFileSync(path.join(homeDir, ".codex", "hooks.json"), "utf8"));
   assert.equal(codexHooks.hooks.Stop.length, 1);
   assert.equal(codexHooks.hooks.Stop[0].hooks[0].command, "keep-codex-stop");
+  assert.equal(codexHooks.hooks.UserPromptSubmit, undefined);
+  assert.equal(fs.existsSync(openCodeWrapper), false);
   assert.equal(fs.existsSync(path.join(homeDir, ".agent-recall", "update-check.json")), false);
   assert.equal(fs.existsSync(path.join(homeDir, ".agent-recall", "session-sync-queue")), false);
   assert.equal(fs.existsSync(path.join(homeDir, ".agent-recall", "update-preferences.json")), true);

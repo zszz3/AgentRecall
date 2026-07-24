@@ -298,6 +298,38 @@ describe("OpenVikingMemoryService", () => {
     expect(client.ensureWorkspaceUser).not.toHaveBeenCalled();
   });
 
+  it("resumes a retained workspace when its exact directory is selected again", async () => {
+    const retained = workspace({ managed: false });
+    const { service, client, store } = harness({ initialWorkspaces: [retained] });
+
+    await expect(service.addWorkspace(retained.rootPath)).resolves.toMatchObject({
+      id: retained.id,
+      managed: true,
+    });
+    expect(store.setOpenVikingWorkspaceManaged).toHaveBeenCalledWith(retained.id, true);
+    expect(store.addOpenVikingWorkspace).not.toHaveBeenCalled();
+    expect(client.ensureWorkspaceUser).not.toHaveBeenCalled();
+  });
+
+  it("repairs missing workspace credentials before resuming retained memory", async () => {
+    const retained = workspace({ managed: false });
+    const { service, client, credentials } = harness({ initialWorkspaces: [retained] });
+    await credentials.delete(retained.id);
+
+    await expect(service.addWorkspace(retained.rootPath)).resolves.toMatchObject({
+      id: retained.id,
+      managed: true,
+    });
+
+    expect(client.ensureWorkspaceUser).toHaveBeenCalledWith({
+      accountId: OPENVIKING_ACCOUNT_ID,
+      userId: retained.userId,
+    });
+    expect(credentials.set).toHaveBeenCalledWith(retained.id, expect.objectContaining({
+      userId: retained.userId,
+    }));
+  });
+
   it("imports useful turns with deterministic sessions, truncation and persisted dedupe", async () => {
     const first = turn("turn-1", 0);
     const empty = turn("turn-2", 1);

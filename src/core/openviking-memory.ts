@@ -48,6 +48,21 @@ export interface OpenVikingRuntimeStatus {
   error?: string;
 }
 
+export interface OpenVikingModelStatus {
+  model: typeof OPENVIKING_LOCAL_EMBEDDING_MODEL;
+  installed: boolean;
+  downloading?: boolean;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  error?: string;
+}
+
+export interface OpenVikingMemorySnapshot {
+  runtime: OpenVikingRuntimeStatus;
+  model: OpenVikingModelStatus;
+  workspaces: OpenVikingWorkspace[];
+}
+
 export interface ImportTurnFingerprintInput {
   source: string;
   sessionId: string;

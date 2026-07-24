@@ -80,7 +80,7 @@ import {
 } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WorkbenchPage } from "./features/workbench/workbench-page";
-import { AgentMemoryPage } from "./features/agent-memory/agent-memory-page";
+import { OpenVikingMemoryPage } from "./features/openviking-memory/openviking-memory-page";
 import { useAutomation } from "./features/automation/automation-provider";
 import { McpFeaturePage } from "./features/automation/mcp-feature-page";
 import { RuntimeFeaturePage } from "./features/automation/runtime-feature-page";
@@ -1649,7 +1649,16 @@ export function App(): ReactElement {
 
           {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
 
-          {activePage === "memories" ? <AgentMemoryPage language={language} /> : null}
+          {activePage === "memories" ? (
+            <OpenVikingMemoryPage
+              language={language}
+              enabled={Boolean(appSettings?.openVikingMemoryEnabled)}
+              onOpenSettings={() => {
+                setSettingsInitialSection("memory");
+                setSettingsOpen(true);
+              }}
+            />
+          ) : null}
 
           {activePage === "providers" ? (
             <ProviderPage

@@ -29,6 +29,8 @@
   The detail view shows complete messages, tool calls, Markdown / code blocks, and supports AI summaries plus Markdown export.
 - **AI / Agent-assisted session retrieval**:
   Use AI summaries to improve history search, ask for sessions in natural language, and expose MCP capabilities so Claude Code / Codex / CodeBuddy can search, read, tag, favorite, and set the visibility of session history directly in chat.
+- **Directory-scoped long-term memory**:
+  The Memory page can enable isolated OpenViking memory for directories you explicitly select, import their existing sessions, and search, create, or delete memories. It is off by default; the managed OpenViking component and local embedding model are downloaded only when requested, run on CPU, and require no system Python. Automatic recall and capture can be enabled separately for Claude Code, Codex, and OpenCode, while conversations outside managed directories are never read.
 - **Cross-agent session migration**:
   Migrate local sessions between Claude Code, Codex, CodeBuddy, and enabled optional CLIs; remote restore remains available for Claude Code, Codex, and CodeBuddy.
 - **Remote session storage and cross-device restore**:
@@ -227,6 +229,8 @@ npm run release-note:check
 ## License
 
 This project is licensed under the [MIT License](../LICENSE). You may use, modify, and distribute it, provided that the original copyright and license notices are retained.
+
+The optional standalone OpenViking runtime and local embedding model retain their upstream licenses; see [Third-party notices](../THIRD_PARTY_NOTICES.md).
 
 ## Star History
 

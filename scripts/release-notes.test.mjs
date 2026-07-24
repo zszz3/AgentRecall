@@ -69,10 +69,15 @@ test("workflows require branch notes and publish only main commits associated wi
   assert.match(releaseWorkflow, /gh release view "\$TAG" --json isDraft --jq '\.isDraft'/);
   assert.match(releaseWorkflow, /already exists and is published; refusing to overwrite it/);
   assert.match(releaseWorkflow, /node scripts\/compute-release-version\.mjs/);
+  assert.match(releaseWorkflow, /macos-15-intel/);
+  assert.match(releaseWorkflow, /macos-15/);
+  assert.match(releaseWorkflow, /windows-2025/);
+  assert.match(releaseWorkflow, /scripts\/build-openviking-runtime\.mjs/);
+  assert.match(releaseWorkflow, /openviking-runtime-\*/);
   const releaseRequiredGuards = releaseWorkflow.match(
     /if: steps\.merged\.outputs\.publish == 'true' && steps\.version\.outputs\.release_required == 'true'/g,
   );
-  assert.equal(releaseRequiredGuards?.length, 4, "all post-version release work must skip an already published commit");
+  assert.equal(releaseRequiredGuards?.length, 9, "all post-version release work must skip an already published commit");
   assert.match(releaseWorkflow, /gh release edit "\$TAG" --draft=false/);
   const tagIdentityName = releaseWorkflow.indexOf('git config user.name "github-actions[bot]"');
   const tagIdentityEmail = releaseWorkflow.indexOf('git config user.email "41898282+github-actions[bot]@users.noreply.github.com"');

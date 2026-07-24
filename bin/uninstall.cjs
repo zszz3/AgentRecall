@@ -7,6 +7,7 @@ const path = require("node:path");
 const { uninstallClaudeStatuslineBridge } = require("./install-claude-statusline.cjs");
 const { uninstallSkillUsageHook } = require("./setup-skill-usage-hook.cjs");
 const { uninstallSessionSyncHooks } = require("./setup-session-sync-hook.cjs");
+const { reconcileOpenVikingMemoryHooks } = require("./setup-openviking-memory-hooks.cjs");
 const { acquireUpdateLock, stopRunningApp, waitForUpdateCompletion } = require("./update-client.cjs");
 const mcp = require("./setup-mcp.cjs");
 
@@ -32,6 +33,13 @@ async function uninstall(options = {}) {
     const sessionHooks = uninstallSessionSyncHooks({ homeDir });
     if (sessionHooks.status === "error") errors.push(`Session sync hooks: ${sessionHooks.detail}`);
     else messages.push(sessionHooks.status === "removed" ? "Removed the AgentRecall session sync hooks." : "Session sync hooks did not need changes.");
+
+    const openVikingHooks = reconcileOpenVikingMemoryHooks({
+      homeDir,
+      integrations: { claude: false, codex: false, opencode: false },
+    });
+    if (openVikingHooks.status === "error") errors.push(`OpenViking memory hooks: ${openVikingHooks.detail}`);
+    else messages.push("Removed the AgentRecall OpenViking memory hooks.");
 
     try {
       messages.push(...mcp.run(true, { homeDir }));

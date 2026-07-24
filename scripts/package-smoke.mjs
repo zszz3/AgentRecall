@@ -121,6 +121,10 @@ try {
   await access(path.join(installedRoot, "out", "main", "index.js"));
   await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
+  await access(path.join(installedRoot, "bin", "openviking-memory-hook.cjs"));
+  await access(path.join(installedRoot, "bin", "openviking-opencode-plugin.mjs"));
+  await access(path.join(installedRoot, "bin", "setup-openviking-memory-hooks.cjs"));
+  await access(path.join(installedRoot, "THIRD_PARTY_NOTICES.md"));
   const installedRequire = createRequire(path.join(installedRoot, "package.json"));
   const embeddedPostgresEntry = installedRequire.resolve("embedded-postgres");
   const { default: EmbeddedPostgres } = await import(pathToFileURL(embeddedPostgresEntry).href);

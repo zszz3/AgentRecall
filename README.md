@@ -78,6 +78,8 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/download/v0.2.0/age
   详情页展示完整消息、tool call 与 Markdown / code block，并支持查看 AI 摘要、导出 Markdown，以及导出 OpenAI Chat、OpenAI Responses 或 Anthropic 请求体 JSON。Codex 会话会从 rollout 重建模型、指令、工具调用、推理参数、流式开关和请求 metadata；如果启动 Codex 与 AgentRecall 时均设置了 `CODEX_ROLLOUT_TRACE_ROOT`，OpenAI Responses 导出还会优先使用 Codex trace 中捕获的原始请求体。trace 可能包含完整提示词、工具参数与响应，请只保存到受信任的本地目录并妥善清理。
 - **AI / Agent 辅助检索历史会话**：
   可以使用 AI 摘要增强历史会话检索，也支持自然语言找会话；同时开放 MCP 能力,让 Claude Code / Codex / CodeBuddy 可以在对话里直接搜索、读取历史会话,并对会话打标签、收藏、设置可见性。
+- **目录级长期记忆**：
+  Memory 页面可为用户主动选择的目录启用基于 OpenViking 的隔离记忆，导入该目录的已有会话，并检索、创建或删除记忆。功能默认关闭；OpenViking 托管组件与本地向量模型均由用户按需下载，CPU 即可运行，不依赖系统 Python。可分别为 Claude Code、Codex 和 OpenCode 开启自动召回与记忆，未受管理目录的对话不会被读取。
 - **跨 Agent 迁移会话**：
   支持在 Claude Code、Codex、CodeBuddy、CodeWiz 及已启用的扩展 CLI 间迁移本地会话；远程恢复支持 Claude Code、Codex、CodeBuddy 和 CodeWiz。
 - **远程保存和跨设备恢复会话**：
@@ -261,6 +263,8 @@ npm run package:smoke
 ## 开源协议
 
 本项目基于 [MIT License](./LICENSE) 开源。你可以自由使用、修改和分发本项目，但需要保留原始版权声明和许可声明。
+
+目录记忆按需下载的 OpenViking 独立运行时及本地向量模型保留各自的上游许可，详情见 [第三方许可说明](./THIRD_PARTY_NOTICES.md)。
 
 ## 贡献者
 

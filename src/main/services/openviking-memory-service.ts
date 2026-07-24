@@ -155,7 +155,13 @@ export class OpenVikingMemoryService {
   async addWorkspace(inputPath: string): Promise<OpenVikingWorkspace> {
     const preview = await this.previewDirectory(inputPath);
     if (preview.existingWorkspaceId) {
-      throw new Error(`Directory is already managed by workspace ${preview.existingWorkspaceId}.`);
+      const existing = await this.options.store.getOpenVikingWorkspace(preview.existingWorkspaceId);
+      if (!existing) throw new Error("Retained OpenViking workspace was not found.");
+      if (existing.managed) {
+        throw new Error(`Directory is already managed by workspace ${preview.existingWorkspaceId}.`);
+      }
+      await this.requireAuth(existing);
+      return this.options.store.setOpenVikingWorkspaceManaged(existing.id, true);
     }
     if (preview.relinkWorkspaceId) {
       const relinked = await this.options.store.relinkOpenVikingWorkspace(
@@ -163,6 +169,7 @@ export class OpenVikingMemoryService {
         preview.rootPath,
         preview.displayName,
       );
+      await this.requireAuth(relinked);
       return relinked.managed
         ? relinked
         : this.options.store.setOpenVikingWorkspaceManaged(relinked.id, true);

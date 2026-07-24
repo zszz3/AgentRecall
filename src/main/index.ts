@@ -76,7 +76,7 @@ import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts"
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
-import { registerAgentMemoryIpc } from "./ipc/agent-memory";
+import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
@@ -93,7 +93,23 @@ import {
   launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
 } from "./services/app-update-service";
-import { AgentMemoryService } from "./services/agent-memory-service";
+import { AutoStartingOpenVikingClient } from "./services/openviking-auto-client";
+import {
+  OPENVIKING_RUNTIME_VERSION,
+  resolveOpenVikingRuntimeManifest,
+} from "./services/openviking-artifact-resolver";
+import { OpenVikingGateway } from "./services/openviking-client";
+import { OpenVikingControlService } from "./services/openviking-control-service";
+import { OpenVikingHookManifestService } from "./services/openviking-hook-manifest";
+import {
+  OpenVikingMemoryService,
+  OpenVikingWorkspaceCredentialStore,
+} from "./services/openviking-memory-service";
+import {
+  BUILTIN_OPENVIKING_MODEL_MANIFEST,
+  OpenVikingLocalModelManager,
+} from "./services/openviking-model-manager";
+import { OpenVikingRuntimeService } from "./services/openviking-runtime-service";
 import { NativeAutomationService } from "./services/automation-service";
 import { createLocalTextFilePreviewUnderRoots } from "../automation/engine/main/platform/local-file-preview";
 import { ProviderService } from "./services/provider-service";
@@ -148,6 +164,24 @@ function loadSessionSyncHookSetup(): SessionSyncHookSetup {
   return requireCjs(SESSION_SYNC_HOOK_SETUP_PATH) as SessionSyncHookSetup;
 }
 
+interface OpenVikingMemoryHookSetup {
+  reconcileOpenVikingMemoryHooks(options: {
+    homeDir: string;
+    hookScriptPath: string;
+    openCodePluginPath: string;
+    manifestPath: string;
+    nodePath: string;
+    integrations: { claude: boolean; codex: boolean; opencode: boolean };
+  }): { status: "configured" | "error"; detail?: string };
+}
+
+const OPENVIKING_MEMORY_HOOK_SETUP_PATH = path.join(__dirname, "../../bin/setup-openviking-memory-hooks.cjs");
+const OPENVIKING_MEMORY_HOOK_SCRIPT_PATH = path.join(__dirname, "../../bin/openviking-memory-hook.cjs");
+const OPENVIKING_OPENCODE_PLUGIN_PATH = path.join(__dirname, "../../bin/openviking-opencode-plugin.mjs");
+function loadOpenVikingMemoryHookSetup(): OpenVikingMemoryHookSetup {
+  return requireCjs(OPENVIKING_MEMORY_HOOK_SETUP_PATH) as OpenVikingMemoryHookSetup;
+}
+
 const MCP_SETUP_PATH = path.join(__dirname, "../../bin/setup-mcp.cjs");
 interface McpSetup {
   run(remove: boolean): string[];
@@ -186,6 +220,10 @@ let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
 let disposeTeamChatIpc: (() => void) | null = null;
+let disposeOpenVikingMemoryIpc: (() => void) | null = null;
+let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
+let openVikingControlService: OpenVikingControlService | null = null;
+let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
 let automationQuitReady = false;
 let postgresRuntime: PostgresRuntime | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
@@ -302,10 +340,6 @@ const skillService = new SkillService({
   revealPath: (targetPath) => revealInFileManager(targetPath),
   now: () => Date.now(),
   logError: (message) => console.error(message),
-});
-
-const agentMemoryService = new AgentMemoryService({
-  chooseDirectory: chooseAgentMemoryDirectory,
 });
 
 const remoteSessionAccess = new RemoteSessionAccess({
@@ -541,14 +575,118 @@ async function chooseLocalProjectDirectory(): Promise<string | null> {
   return result.filePaths[0] ?? null;
 }
 
-async function chooseAgentMemoryDirectory(): Promise<string | null> {
+async function chooseOpenVikingMemoryDirectory(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
-    title: "Choose a directory for Agent memory",
+    title: "Choose a directory for managed memory",
     properties: ["openDirectory"],
   };
   const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
   if (result.canceled) return null;
   return result.filePaths[0] ?? null;
+}
+
+function initializeOpenVikingMemory(): void {
+  const rootDir = path.join(app.getPath("userData"), "openviking");
+  const runtime = new OpenVikingRuntimeService({ rootDir });
+  const model = new OpenVikingLocalModelManager({
+    rootDir,
+    resolveManifest: async () => BUILTIN_OPENVIKING_MODEL_MANIFEST,
+  });
+  let control: OpenVikingControlService;
+  const client = new AutoStartingOpenVikingClient({
+    ensureRunning: async () => {
+      await control.startRuntime();
+    },
+    getConnection: () => runtime.getConnection(),
+    createClient: (connection) => new OpenVikingGateway(connection),
+  });
+  const credentials = new OpenVikingWorkspaceCredentialStore(rootDir);
+  const memory = new OpenVikingMemoryService({
+    store,
+    client,
+    credentials,
+  });
+  const hookManifest = new OpenVikingHookManifestService({
+    rootDir,
+    credentials,
+    realpath: fs.realpath,
+  });
+  openVikingRuntimeService = runtime;
+  openVikingHookManifestService = hookManifest;
+  control = new OpenVikingControlService({
+    runtime,
+    model,
+    memory,
+    getSettings,
+    chooseDirectory: chooseOpenVikingMemoryDirectory,
+    resolveRuntimeManifest: () => resolveOpenVikingRuntimeManifest({
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      releaseBaseUrl: process.env.AGENT_RECALL_OPENVIKING_RELEASE_BASE_URL,
+    }),
+    serverConfig: async () => ({
+      embedding: {
+        dense: {
+          provider: "local",
+          model: "bge-small-zh-v1.5-f16",
+          dimension: 512,
+          model_path: await model.getModelPath(),
+        },
+      },
+      vlm: {
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        api_base: "https://chatgpt.com/backend-api/codex",
+      },
+    }),
+    onStateChanged: refreshOpenVikingHookManifest,
+  });
+  openVikingControlService = control;
+  console.info(`OpenViking ${OPENVIKING_RUNTIME_VERSION} control plane is ready.`);
+}
+
+function openVikingIntegrations(settings: AppSettings): { claude: boolean; codex: boolean; opencode: boolean } {
+  return {
+    claude: settings.openVikingMemoryEnabled && settings.openVikingClaudeEnabled,
+    codex: settings.openVikingMemoryEnabled && settings.openVikingCodexEnabled,
+    opencode: settings.openVikingMemoryEnabled && settings.openVikingOpenCodeEnabled,
+  };
+}
+
+async function refreshOpenVikingHookManifest(): Promise<void> {
+  if (!openVikingHookManifestService || !openVikingRuntimeService) return;
+  const runtimeStatus = await openVikingRuntimeService.getStatus();
+  let baseUrl: string | null = null;
+  if (runtimeStatus.state === "running") {
+    baseUrl = (await openVikingRuntimeService.getConnection()).baseUrl;
+  }
+  await openVikingHookManifestService.write({
+    baseUrl,
+    integrations: openVikingIntegrations(getSettings()),
+    workspaces: await store.listOpenVikingWorkspaces(),
+  });
+}
+
+function reconcileOpenVikingMemoryHooks(settings: AppSettings): void {
+  if (!openVikingHookManifestService) return;
+  const result = loadOpenVikingMemoryHookSetup().reconcileOpenVikingMemoryHooks({
+    homeDir: app.getPath("home"),
+    hookScriptPath: OPENVIKING_MEMORY_HOOK_SCRIPT_PATH,
+    openCodePluginPath: OPENVIKING_OPENCODE_PLUGIN_PATH,
+    manifestPath: openVikingHookManifestService.manifestPath(),
+    nodePath: process.env.npm_node_execpath || "node",
+    integrations: openVikingIntegrations(settings),
+  });
+  if (result.status === "error") throw new Error(result.detail || "Could not configure OpenViking memory hooks.");
+}
+
+async function startConfiguredOpenVikingRuntime(settings: AppSettings): Promise<void> {
+  if (!openVikingControlService || !Object.values(openVikingIntegrations(settings)).some(Boolean)) return;
+  const snapshot = await openVikingControlService.snapshot();
+  if (snapshot.runtime.state === "stopped" && snapshot.model.installed) {
+    await openVikingControlService.startRuntime();
+  }
 }
 
 const DEFAULT_WINDOW_WIDTH = 1280;
@@ -1242,6 +1380,9 @@ function stopAutoIndexRefresh(): void {
 
 function registerIpc(): void {
   if (!automationService) throw new Error("Automation service must be created before IPC registration.");
+  if (!openVikingControlService) {
+    throw new Error("OpenViking memory must be initialized before IPC registration.");
+  }
   disposeAutomationIpc = registerAutomationIpc({
     ipc: ipcMain,
     service: automationService,
@@ -1481,12 +1622,18 @@ function registerIpc(): void {
     return diagnoseRemoteEnvironment(await remoteSessionAccess.requireSshEnvironment(environmentId));
   });
   registerAppUpdateIpc(ipcMain, appUpdateService);
-  registerAgentMemoryIpc(ipcMain, agentMemoryService);
+  disposeOpenVikingMemoryIpc = registerOpenVikingMemoryIpc(ipcMain, openVikingControlService);
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
   registerProvidersIpc(ipcMain, providerService);
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
     const previous = getSettings();
     const next = mergeAppSettings(previous, settings);
+    const openVikingSettingsChanged = [
+      "openVikingMemoryEnabled",
+      "openVikingClaudeEnabled",
+      "openVikingCodexEnabled",
+      "openVikingOpenCodeEnabled",
+    ].some((key) => key in settings);
     if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
       throw new Error(
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -1497,6 +1644,16 @@ function registerIpc(): void {
     }
     await providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
+    if (openVikingSettingsChanged) {
+      reconcileOpenVikingMemoryHooks(next);
+      if (!next.openVikingMemoryEnabled) await openVikingControlService?.stopRuntime().catch((error) => {
+        console.error(
+          `Failed to stop OpenViking after Memory was disabled: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+      await refreshOpenVikingHookManifest();
+      await startConfiguredOpenVikingRuntime(next);
+    }
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
     await pruneDisabledOptionalSources(next);
     return providerService.addStoredKeys(next);
@@ -1563,6 +1720,14 @@ app.whenReady().then(async () => {
   });
   await postgresDatabase.initialize();
   store = new SessionStore(postgresDatabase);
+  initializeOpenVikingMemory();
+  try {
+    await refreshOpenVikingHookManifest();
+    reconcileOpenVikingMemoryHooks(getSettings());
+    await startConfiguredOpenVikingRuntime(getSettings());
+  } catch (error) {
+    console.error(`Failed to configure OpenViking memory hooks: ${error instanceof Error ? error.message : String(error)}`);
+  }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {
     writeDatabaseUrlPointer(postgresRuntime.connectionUrl);
@@ -1622,11 +1787,14 @@ app.on("before-quit", (event) => {
   disposeAutomationIpc = null;
   disposeTeamChatIpc?.();
   disposeTeamChatIpc = null;
+  disposeOpenVikingMemoryIpc?.();
+  disposeOpenVikingMemoryIpc = null;
   globalShortcut.unregisterAll();
   void Promise.allSettled([
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
     providerService.stopCodexChatProxy(),
+    openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {
     await postgresDatabase?.close().catch((error) => {
       console.error(`Failed to close AgentRecall data store: ${error instanceof Error ? error.message : String(error)}`);

@@ -38,6 +38,7 @@ export interface OpenVikingServerConfig {
       dimension: number;
       api_base?: string;
       api_key?: string;
+      model_path?: string;
     };
   };
   vlm: {
@@ -256,6 +257,17 @@ export class OpenVikingRuntimeService {
     await rm(this.runtimeStatePath(), { force: true });
     this.transientStatus = null;
     return this.getStatus();
+  }
+
+  async getConnection(): Promise<{ baseUrl: string; rootApiKey: string }> {
+    const status = await this.getStatus();
+    if (status.state !== "running" || !status.port) {
+      throw new Error("OpenViking runtime is not running.");
+    }
+    return {
+      baseUrl: `http://127.0.0.1:${status.port}`,
+      rootApiKey: await this.loadOrCreateRootApiKey(),
+    };
   }
 
   private validateManifest(manifest: OpenVikingRuntimeManifest): void {

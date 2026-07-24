@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   mkdir,
@@ -12,6 +12,8 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
 
@@ -43,6 +45,9 @@ export function buildRuntimePlan(input) {
   if (!path.isAbsolute(input.pythonArchive)) {
     throw new Error("OpenViking runtime build requires an absolute CPython archive path.");
   }
+  if (!/^[a-f0-9]{64}$/i.test(String(input.pythonSha256 ?? ""))) {
+    throw new Error("OpenViking runtime CPython archive checksum is invalid.");
+  }
   return {
     ...input,
     buildHome,
@@ -70,6 +75,10 @@ export function buildRuntimePlan(input) {
 export async function buildRuntimeArtifact(input) {
   const plan = buildRuntimePlan(input);
   await access(plan.pythonArchive);
+  const pythonArchiveSha256 = await sha256File(plan.pythonArchive);
+  if (pythonArchiveSha256 !== plan.pythonSha256.toLowerCase()) {
+    throw new Error("OpenViking runtime CPython archive checksum did not match the pinned value.");
+  }
   await mkdir(plan.buildHome, { recursive: true, mode: 0o700 });
   await mkdir(plan.outputDir, { recursive: true });
   const stagingRoot = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-build-"));
@@ -89,7 +98,14 @@ export async function buildRuntimeArtifact(input) {
       cwd: stagingRoot,
       env: plan.env,
     });
-    const archiveRoot = path.dirname(path.dirname(python));
+    const archiveRoot = runtimeArchiveRoot(python, plan.platform);
+    await writeFile(path.join(archiveRoot, "OPENVIKING-SOURCE.txt"), [
+      "OpenViking server 0.4.11",
+      "License: GNU Affero General Public License v3.0",
+      "Corresponding source: https://github.com/volcengine/OpenViking/tree/v0.4.11",
+      "License text: https://github.com/volcengine/OpenViking/blob/v0.4.11/LICENSE",
+      "",
+    ].join("\n"), "utf8");
     await tar.c({
       cwd: archiveRoot,
       file: plan.outputPath,
@@ -115,6 +131,38 @@ export async function buildRuntimeArtifact(input) {
   } finally {
     await rm(stagingRoot, { recursive: true, force: true });
   }
+}
+
+export function assertTrustedPythonArchiveUrl(value) {
+  const url = new URL(String(value ?? ""));
+  if (
+    url.protocol !== "https:"
+    || url.hostname !== "github.com"
+    || !url.pathname.startsWith("/astral-sh/python-build-standalone/releases/download/20260510/")
+  ) {
+    throw new Error("OpenViking runtime builds require a trusted python-build-standalone release URL.");
+  }
+  return url;
+}
+
+export async function buildRuntimeArtifactFromUrl(input) {
+  const url = assertTrustedPythonArchiveUrl(input.pythonUrl);
+  const downloadRoot = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-python-"));
+  const pythonArchive = path.join(downloadRoot, "cpython.tar.gz");
+  try {
+    const response = await fetch(url, { redirect: "follow" });
+    if (!response.ok || !response.body) throw new Error(`Could not download standalone Python (${response.status}).`);
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(pythonArchive, { mode: 0o600 }));
+    return await buildRuntimeArtifact({ ...input, pythonArchive });
+  } finally {
+    await rm(downloadRoot, { recursive: true, force: true });
+  }
+}
+
+export function runtimeArchiveRoot(pythonPath, platform, pathApi = path) {
+  return platform === "win32"
+    ? pathApi.dirname(pythonPath)
+    : pathApi.dirname(pathApi.dirname(pythonPath));
 }
 
 async function locatePython(stagingRoot, platform) {
@@ -182,12 +230,16 @@ function parseArguments(argv) {
     buildHome: values["build-home"],
     outputDir: values["output-dir"],
     pythonArchive: values["python-archive"],
+    pythonUrl: values["python-url"],
+    pythonSha256: values["python-sha256"],
   };
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  buildRuntimeArtifact(parseArguments(process.argv.slice(2)))
+  const input = parseArguments(process.argv.slice(2));
+  const build = input.pythonUrl ? buildRuntimeArtifactFromUrl(input) : buildRuntimeArtifact(input);
+  build
     .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
