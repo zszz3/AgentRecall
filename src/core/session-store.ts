@@ -8,6 +8,12 @@ import type {
 import { PostgresDatabase } from "./postgres/database";
 import { PostgresEnvironmentRepository } from "./postgres/environment-repository";
 import {
+  PostgresOpenVikingMemoryRepository,
+  type AddOpenVikingWorkspaceInput,
+  type OpenVikingImportJob,
+  type UpdateOpenVikingImportJobInput,
+} from "./postgres/openviking-memory-repository";
+import {
   PostgresMetadataRepository,
   type ApiProviderKeyTarget,
   type SessionSyncBinding,
@@ -50,6 +56,7 @@ import type {
   TagListOptions,
   TokenUsageEvent,
 } from "./types";
+import type { OpenVikingWorkspace } from "./openviking-memory";
 
 export type {
   ApiProviderKeyTarget,
@@ -72,6 +79,7 @@ export class SessionStore {
   private readonly turns: PostgresSessionTurnRepository;
   private readonly environments: PostgresEnvironmentRepository;
   private readonly metadata: PostgresMetadataRepository;
+  private readonly openVikingMemory: PostgresOpenVikingMemoryRepository;
   private readonly skills: PostgresSkillRepository;
   private readonly savedSearches: SavedSearchStore;
   private readonly historyStore: SearchHistoryStore;
@@ -86,6 +94,7 @@ export class SessionStore {
     this.turns = new PostgresSessionTurnRepository(database);
     this.environments = new PostgresEnvironmentRepository(database);
     this.metadata = new PostgresMetadataRepository(database);
+    this.openVikingMemory = new PostgresOpenVikingMemoryRepository(database);
     this.skills = new PostgresSkillRepository(database);
     this.savedSearches = new SavedSearchStore(database);
     this.historyStore = new SearchHistoryStore(database);
@@ -258,6 +267,29 @@ export class SessionStore {
   async listProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
     await this.ready;
     return this.sessions.listProjects(options);
+  }
+
+  async addOpenVikingWorkspace(input: AddOpenVikingWorkspaceInput): Promise<OpenVikingWorkspace> {
+    await this.ready;
+    return this.openVikingMemory.addWorkspace(input);
+  }
+
+  async listOpenVikingWorkspaces(): Promise<OpenVikingWorkspace[]> {
+    await this.ready;
+    return this.openVikingMemory.listWorkspaces();
+  }
+
+  async getOpenVikingWorkspace(id: string): Promise<OpenVikingWorkspace | null> {
+    await this.ready;
+    return this.openVikingMemory.getWorkspace(id);
+  }
+
+  async updateOpenVikingImportJob(
+    workspaceId: string,
+    input: UpdateOpenVikingImportJobInput,
+  ): Promise<OpenVikingImportJob> {
+    await this.ready;
+    return this.openVikingMemory.updateImportJob(workspaceId, input);
   }
 
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
