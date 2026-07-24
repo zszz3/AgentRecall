@@ -107,7 +107,7 @@
 .managed-skills-toolbar-actions button {
   border-radius: 7px;
   white-space: nowrap;
-  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .managed-skills-toolbar-actions button,
@@ -838,7 +838,7 @@
 }
 
 .managed-skill-sync-summary svg {
-  transition: transform 0.16s ease;
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 
 .managed-skill-sync.expanded .managed-skill-sync-summary svg {

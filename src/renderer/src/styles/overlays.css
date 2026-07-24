@@ -360,7 +360,7 @@
   cursor: pointer;
   user-select: text;
   -webkit-user-select: text;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .ai-session-card:hover {
@@ -452,7 +452,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 14px;
   background: var(--panel-bg);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .ai-assistant-input:focus-within {
@@ -490,7 +490,7 @@
   background: var(--accent);
   color: var(--accent-contrast);
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition: background var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
 }
 
 .ai-assistant-send:hover:not(:disabled) {
@@ -553,7 +553,7 @@
   border-radius: 9px;
   background: var(--panel-bg);
   color: var(--text-muted);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .remote-search:focus-within {
@@ -638,7 +638,7 @@
   cursor: pointer;
   flex: 0 0 auto;
   white-space: nowrap;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .remote-toolbar-icon {
@@ -730,7 +730,7 @@
   border: 1px solid transparent;
   border-radius: 10px;
   background: var(--panel-bg);
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .remote-session-row:hover {
@@ -906,7 +906,7 @@
   justify-content: flex-end;
   gap: 6px;
   opacity: 0.88;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 .remote-session-actions.cloud-empty {
@@ -979,7 +979,7 @@
   font-size: 12px;
   font-weight: 610;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .remote-session-action.subtle {
@@ -1134,7 +1134,7 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .remote-restore-targets button:hover:not(:disabled) {
@@ -1182,7 +1182,7 @@
   font-weight: 550;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .remote-project-picker:hover:not(:disabled) {
@@ -1340,7 +1340,7 @@
   color: var(--text);
   font-size: 12px;
   outline: none;
-  transition: border-color 0.12s ease;
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .panel-search-input:focus {
@@ -1373,7 +1373,7 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .panel-search-nav:hover:not(:disabled),
