@@ -1658,14 +1658,29 @@ select:focus-visible {
 .toolbar {
   position: relative;
   z-index: 5;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(2, 38px);
   gap: 8px;
 }
 
-.toolbar > .searchbox {
+.toolbar-primary,
+.toolbar-secondary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.toolbar-primary > .searchbox {
   flex: 1 1 180px;
   width: auto;
+}
+
+.toolbar-secondary {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .toolbar-discovery {
@@ -2078,11 +2093,7 @@ select:focus-visible {
 }
 
 @media (max-width: 1040px) {
-  .toolbar {
-    flex-wrap: wrap;
-  }
-
-  .toolbar > .searchbox {
+  .toolbar-primary > .searchbox {
     flex-basis: 240px;
   }
 
@@ -6220,7 +6231,7 @@ select:focus-visible {
     padding-left: 12px;
   }
 
-  .toolbar > .searchbox {
+  .toolbar-primary > .searchbox {
     flex-basis: 160px;
   }
 

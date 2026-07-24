@@ -20,19 +20,21 @@
 - Remove internal-only changes entirely. If a useful outcome contains private or sensitive context, rewrite it at the product-behavior level and omit identifiers, hosts, paths, table names, credentials, and organizational details.
 - Do not use vague text such as “优化代码”, “修复一些问题”, or “新增若干功能”. A reader should understand what became possible or what stopped going wrong.
 - A small number of appropriate emoji is allowed when it improves scanning, but clarity comes first.
-- The release-note text is published verbatim in GitHub Release notes and is shown in the terminal and the App update UI. Treat it as final product copy.
+- User-facing release-note bullets are aggregated verbatim in GitHub Release notes and are shown in the terminal and the App update UI. Treat them as final product copy.
 - Run `npm run release-note:check` before opening an MR. Do not open or merge an MR while this check fails.
 
 ## Merge and release
 
 - MRs target `main`. Direct feature pushes to `main` are not part of the development workflow.
-- Every MR merged into `main` automatically publishes a GitHub Release after all release checks pass.
+- MRs merged into `main` accumulate release notes; they do not publish immediately.
+- The release workflow publishes accumulated notes every day at 10:00 Beijing time (02:00 UTC), and can be triggered manually for an urgent release.
+- A scheduled or manual run with no added release notes since the latest stable tag exits without publishing a release.
 - Follow semantic versioning as `x.y.z`, and be conservative about version bumps.
 - Prefer bumping `z` for routine releases, including Bug fixes and small user-facing functionality additions, removals, or changes.
 - Bump `y` only when the release contains a reasonable new capability increase or a concentrated batch of major Bug fixes.
 - Bump `x` only for very large releases or very large changes. Any change that increases `x` must be confirmed with the user before proceeding.
-- In the current release-note workflow, `新增功能` entries bump `y`, while releases containing only `Bug 修复` entries bump `z`; reserve `新增功能` for changes that intentionally warrant a `y` bump.
-- Do not manually create an application tag or GitHub Release unless recovering a failed automated release.
+- In the current release-note workflow, any accumulated `新增功能` entry bumps `y`, while an accumulated release containing only `Bug 修复` entries bumps `z`; reserve `新增功能` for changes that intentionally warrant a `y` bump.
+- Trigger the release workflow manually for urgent releases. Do not create an application tag or GitHub Release directly unless recovering a failed automated release.
 
 ## Safe test and packaging workflow
 

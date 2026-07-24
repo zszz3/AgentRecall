@@ -74,6 +74,14 @@ export function renderReleaseNotes(note) {
   return `${sections.join("\n\n")}\n`;
 }
 
+export function combineReleaseNotes(notes, title = "AgentRecall 更新") {
+  return {
+    title,
+    features: [...new Set(notes.flatMap((note) => note.features))],
+    fixes: [...new Set(notes.flatMap((note) => note.fixes))],
+  };
+}
+
 export function findAddedReleaseNoteFiles(baseRef = "origin/main", headRef = "HEAD", runGit = defaultRunGit) {
   const committedOutput = runGit([
     "diff",
@@ -108,7 +116,8 @@ function printUsage() {
       "  node scripts/release-notes.mjs check-file <file>\n" +
       "  node scripts/release-notes.mjs check-range [base-ref] [head-ref]\n" +
       "  node scripts/release-notes.mjs next-version <current-version> <file>\n" +
-      "  node scripts/release-notes.mjs render <file>\n",
+      "  node scripts/release-notes.mjs render <file>\n" +
+      "  node scripts/release-notes.mjs combine <file> [file...]\n",
   );
 }
 
@@ -130,6 +139,10 @@ export function runCli(argv) {
   }
   if (command === "render" && args[0]) {
     process.stdout.write(renderReleaseNotes(readReleaseNote(args[0])));
+    return;
+  }
+  if (command === "combine" && args.length > 0) {
+    process.stdout.write(renderReleaseNotes(combineReleaseNotes(args.map(readReleaseNote))));
     return;
   }
   printUsage();
