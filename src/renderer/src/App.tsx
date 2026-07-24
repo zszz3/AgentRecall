@@ -1,50 +1,27 @@
-import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, RefObject } from "react";
-import { createPortal } from "react-dom";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactElement, RefObject } from "react";
 import {
   AppWindow,
   Archive,
   ArrowRightLeft,
-  Bookmark,
-  CalendarDays,
-  ChevronDown,
-  ChevronRight,
   Clipboard,
-  Cloud,
-  Code2,
-  Container,
   Copy,
   Download,
-  Edit3,
   Eye,
-  EyeOff,
-  Folder,
   FolderOpen,
-  GitBranch,
-  KeyRound,
-  Laptop,
-  Layers,
-  PackageSearch,
   Pin,
-  Database,
   PinOff,
   Play,
-  RefreshCw,
   Search,
-  Server,
   Settings,
-  SlidersHorizontal,
-  Sparkles,
   Star,
   Tag,
   Terminal as TerminalIcon,
   Trash2,
-  X,
 } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
 import type { AppUpdateProgress, AppUpdateStatus } from "../../core/app-update-types";
-import { formatRelativeTime } from "../../core/format-session";
 import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
@@ -117,9 +94,6 @@ import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./co
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { SkillsDialog } from "./features/skills/skills-dialog";
 import { DigitalAssetsDialog } from "./features/digital-assets/digital-assets-dialog";
-import { QueryBuilder } from "./features/search/query-builder";
-import { SavedSearchesPanel } from "./features/search/saved-searches-panel";
-import { GroupedResults } from "./features/search/grouped-results";
 import { RelatedSessions } from "./features/session-detail/related-sessions";
 import { DEFAULT_QUERY_BUILDER_STATE, countActiveFilters, toSearchOptionsPatch, type QueryBuilderState } from "./features/search/query-builder-types";
 import type { GroupMode } from "./features/search/group-logic";
@@ -131,10 +105,10 @@ import { AiAssistantDialog } from "./components/ai-assistant-dialog";
 import { RemoteSessionsDialog } from "./features/remote-sessions/remote-sessions-dialog";
 import { SupabaseSetupGuide } from "./components/supabase-setup-guide";
 import { useClampedContextMenuStyle } from "./context-menu-position";
-import { environmentTarget } from "./features/environments/environment-display";
-import { SearchBox } from "./features/search/search-box";
+import { Sidebar } from "./layout/sidebar";
+import { ContentArea } from "./layout/content-area";
+import { ActionToast } from "./layout/action-toast";
 import { resolveSearchScope } from "./features/search/search-scope";
-import { SessionRow } from "./features/search/session-row";
 import {
   SettingsDialog,
   type SettingsSection,
@@ -149,47 +123,24 @@ import {
   isBranchTag,
   displayTagName,
   isRemoteSession,
-  liveStatusFilterLabel,
-  localizedLiveStateLabel,
   projectDisplayLabel,
-  projectSortTimestamp,
   remoteOpenAppTitle,
   remoteMigrationTitle,
   remoteRevealTitle,
   resumeActionLabel,
   resumeRouteMessage,
-  sessionSortTimestamp,
-  sourceFilterLabel,
   sourceFilters,
-  sourceUiFamily,
   supportsMigrationSource,
-  statsPeriodLabel,
   supportsResumeSource,
   unsupportedMigrationTitle,
-  usageStatsDisplayRows,
-  usageDelta,
-  formatUsageDelta,
   migrationAgentLabel,
   migrationTargetsForSession,
 } from "./session-ui";
 import type { UsageDelta } from "./session-ui";
 
-const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> = [
-  { label: "Today", value: "today" },
-  { label: "7D", value: "sevenDay" },
-  { label: "30D", value: "thirtyDay" },
-  { label: "All", value: "allTime" },
-];
-
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
-
-const LIVE_STATUS_FILTERS: Array<{ label: string; value: LiveStatusFilter }> = [
-  { label: "All", value: "all" },
-  { label: "Open", value: "open" },
-  { label: "Closed", value: "closed" },
-];
 
 const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeTclaude: false,
@@ -1875,472 +1826,168 @@ export function App(): ReactElement {
   return (
     <main className="app" data-theme={theme} data-platform={RUNTIME_PLATFORM} onClick={() => setContextMenu(null)}>
       <div className="titlebar-drag" />
-      <section className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <Search size={17} />
-          </div>
-          <div>
-            <h1>AgentRecall</h1>
-            <p>{t("Codex and Claude Code", "Codex 和 Claude Code")}</p>
-          </div>
-        </div>
+      <Sidebar
+        language={language}
+        sidebarSections={sidebarSections}
+        onToggleSection={toggleSidebarSectionById}
+        indexStatus={indexStatus}
+        refreshFeedback={refreshFeedback}
+        onRefreshNow={() => void refreshNow()}
+        stats={stats}
+        statsPeriod={statsPeriod}
+        onStatsPeriodChange={setStatsPeriod}
+        statsFeedback={statsFeedback}
+        statsTrend={statsTrend}
+        statsTrendLoading={statsTrendLoading}
+        onEnsureStatsTrend={ensureStatsTrend}
+        quotas={quotas}
+        quotaLoading={quotaLoading}
+        quotaFeedback={quotaFeedback}
+        onRefreshQuotas={() => void loadQuotas("manual")}
+        sidebarTree={sidebarTree}
+        collapsedProjectGroups={collapsedProjectGroups}
+        collapsedTreeProjects={collapsedTreeProjects}
+        onToggleProjectGroup={toggleProjectGroup}
+        onToggleTreeProject={toggleTreeProject}
+        environmentId={environmentId}
+        projectPath={projectPath}
+        projectEnvironmentId={projectEnvironmentId}
+        tag={tag}
+        onSelectAllSessions={() => { selectEnvironment("all"); clearProjectFilter(); setTag(undefined); }}
+        onSelectEnvironment={(groupId) => { selectEnvironment(groupId); clearProjectFilter(); setTag(undefined); }}
+        onSelectProject={(project) => {
+          setProjectPath(project.path);
+          setProjectEnvironmentId(project.environmentId);
+          projectPathRef.current = project.path;
+          projectEnvironmentIdRef.current = project.environmentId;
+          setTag(undefined);
+        }}
+        onSelectTag={(tagName, project) => {
+          if (tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId) {
+            setTag(undefined);
+          } else {
+            setTag(tagName);
+            setProjectPath(project.path);
+            setProjectEnvironmentId(project.environmentId);
+            projectPathRef.current = project.path;
+            projectEnvironmentIdRef.current = project.environmentId;
+          }
+        }}
+        onDeleteTag={setDeleteTagName}
+        sourceFilters={visibleSourceFilters}
+        source={source}
+        onSelectSource={setSource}
+        visibility={visibility}
+        onSelectVisibility={setVisibility}
+      />
 
-        <div className="refresh-control">
-          <button className={`primary ${indexStatus?.running ? "is-running" : ""}`} onClick={() => void refreshNow()} disabled={indexStatus?.running}>
-            <RefreshCw size={16} />
-            {indexStatus?.running ? t("Refreshing Index...", "正在更新索引...") : t("Refresh Index", "更新索引")}
-          </button>
-          {refreshFeedback ? <div className={`refresh-feedback ${refreshFeedback.kind}`}>{refreshFeedback.message}</div> : null}
-        </div>
-
-        <div className="stats-panel">
-          <div className="stats-header">
-            <span>{t("Usage", "用量")}</span>
-            <div className="stats-controls">
-              <div className="stats-period-toggle" role="group" aria-label={t("Usage period", "用量周期")}>
-                {STATS_PERIOD_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={statsPeriod === option.value ? "active" : ""}
-                    onClick={() => setStatsPeriod(option.value)}
-                  >
-                    {statsPeriodLabel(option.value, language)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          {statsFeedback ? <div className={`stats-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</div> : null}
-          <div className="stats-metrics">
+      <ContentArea
+        language={language}
+        toolbar={{
+          language,
+          platform: RUNTIME_PLATFORM,
+          searchRef,
+          searchPlaceholder,
+          onSearch: setQuery,
+          activeFilterCount: countActiveFilters({ source: source === "all" ? undefined : source, tag, visibility, dateRange }),
+          queryBuilderOpen,
+          onToggleQueryBuilder: () => {
+            setSavedSearchesOpen(false);
+            setQueryBuilderOpen((value) => !value);
+          },
+          savedSearchesOpen,
+          onToggleSavedSearches: () => {
+            setQueryBuilderOpen(false);
+            setSavedSearchesOpen((value) => !value);
+          },
+          groupMode,
+          onCycleGroupMode: () => setGroupMode((current) => (current === "flat" ? "project" : current === "project" ? "source" : current === "source" ? "time" : "flat")),
+          liveStatus,
+          onSelectLiveStatus: setLiveStatus,
+          dateRange,
+          onSelectDateRange: setDateRange,
+          sortBy,
+          onSelectSortBy: setSortBy,
+          aiAssistantOpen,
+          onOpenAiAssistant: () => {
+            setSettingsOpen(false);
+            setApiConfigOpen(false);
+            setSkillsOpen(false);
+            setRemoteSessionsOpen(false);
+            setAiAssistantOpen(true);
+          },
+          skillsOpen,
+          onOpenSkills: () => {
+            setSettingsOpen(false);
+            setApiConfigOpen(false);
+            setRemoteSessionsOpen(false);
+            setSkillsOpen(true);
+          },
+          assetsOpen,
+          onOpenAssets: () => {
+            setSettingsOpen(false);
+            setApiConfigOpen(false);
+            setRemoteSessionsOpen(false);
+            setSkillsOpen(false);
+            setAssetsOpen(true);
+          },
+          remoteSessionsOpen,
+          onOpenRemoteSessions: () => {
+            setSettingsOpen(false);
+            setApiConfigOpen(false);
+            setSkillsOpen(false);
+            setRemoteSessionsOpen(true);
+          },
+          apiConfigOpen,
+          onOpenApiConfig: () => {
+            setSkillsOpen(false);
+            setSettingsOpen(false);
+            setRemoteSessionsOpen(false);
+            setApiConfigOpen(true);
+          },
+          shouldSignalAppUpdate,
+          onOpenSettings: () => {
+            setSkillsOpen(false);
+            setApiConfigOpen(false);
+            setRemoteSessionsOpen(false);
+            setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
+            setSettingsOpen(true);
+          },
+        }}
+        queryBuilderOpen={queryBuilderOpen}
+        queryBuilderInitial={{ source: source === "all" ? undefined : source, tag, visibility, dateRange }}
+        sourceOptions={visibleSourceFilters}
+        tagOptions={tags}
+        onApplyQueryBuilder={applyQueryBuilder}
+        onCloseQueryBuilder={() => setQueryBuilderOpen(false)}
+        onSaveSearch={saveCurrentSearch}
+        savedSearchesOpen={savedSearchesOpen}
+        savedSearches={savedSearches}
+        onApplySavedSearch={applySavedSearch}
+        onDeleteSavedSearch={deleteSavedSearchById}
+        onCloseSavedSearches={() => setSavedSearchesOpen(false)}
+        resultsHeader={
+          <div className="result-count">
             <span>
-              <span className="stats-metric-value">
-                <strong>{formatCompactNumber(stats.total.messageCount)}</strong>
-                <UsageDeltaBadge delta={usageDelta(stats.total.messageCount, stats.previousTotal?.messageCount ?? null)} />
-              </span>
-              {t("Messages", "消息")}
+              {t(`${sessionTotalCount} sessions`, `${sessionTotalCount} 个会话`)}
             </span>
-            {hasTokenUsage(stats.total) ? (
-              <UsageTokenMetric
-                totalTokens={stats.total.totalTokens}
-                previousTotalTokens={stats.previousTotal?.totalTokens ?? null}
-                period={statsPeriod}
-                language={language}
-                trend={statsTrend}
-                trendLoading={statsTrendLoading}
-                onEnsureTrend={ensureStatsTrend}
-                tokensLabel={t("Tokens", "Token")}
-              />
-            ) : null}
+            {selected ? <span className="selected-path">{selected.projectPath || selected.rawId}</span> : null}
           </div>
-          <div className="stats-breakdown">
-            {usageStatsDisplayRows(stats.bySource).map((item) => (
-              <div key={item.key}>
-                <span>{item.label}</span>
-                <em>
-                  {formatCompactNumber(item.messageCount)} {t("msg", "条")}
-                  {hasTokenUsage(item) ? ` · ${formatTokenCount(item.totalTokens)}` : ""}
-                </em>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <QuotaPanel
-          snapshot={quotas}
-          loading={quotaLoading}
-          feedback={quotaFeedback}
-          expanded={sidebarSections.remaining}
-          onToggle={() => toggleSidebarSectionById("remaining")}
-          onRefresh={() => void loadQuotas("manual")}
-          language={language}
-        />
-
-        <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
-        {sidebarSections.environments ? (
-          <nav className="sidebar-tree">
-            <button
-              className={`tree-row tree-root ${environmentId === "all" && !projectPath && !tag ? "active" : ""}`}
-              onClick={() => { selectEnvironment("all"); clearProjectFilter(); setTag(undefined); }}
-            >
-              <span>{t("All Sessions", "全部会话")}</span>
-            </button>
-            {sidebarTree.map((group) => {
-              const groupId = group.projects[0]?.environmentId ?? "unknown";
-              const envCollapsed = collapsedProjectGroups.has(groupId);
-              const envActive = environmentId === groupId && !projectPath && !tag;
-              return (
-                <div key={groupId} className="tree-group">
-                  <div className="tree-row tree-env-row">
-                    <button
-                      className="tree-chevron"
-                      onClick={() => toggleProjectGroup(groupId)}
-                      aria-expanded={!envCollapsed}
-                      aria-label={envCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
-                    >
-                      {envCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                    </button>
-                    <button
-                      className={`tree-label ${envActive ? "active" : ""}`}
-                      onClick={() => { selectEnvironment(groupId); clearProjectFilter(); setTag(undefined); }}
-                      title={group.environment ? environmentTarget(group.environment, language) : t("Unknown", "未知")}
-                    >
-                      {group.environment?.kind === "local" ? <Laptop size={13} /> : group.environment?.kind === "wsl" ? <Container size={13} /> : <Server size={13} />}
-                      <span>{group.environment?.label ?? t("Unknown", "未知")}</span>
-                      <em className="tree-count">{group.projects.length}</em>
-                    </button>
-                  </div>
-                  {!envCollapsed && group.projects.map((project) => {
-                    const projectKey = `${project.environmentId}:${project.path}`;
-                    const projExpanded = collapsedTreeProjects.has(projectKey);
-                    const projCollapsed = !projExpanded;
-                    const projActive = projectPath === project.path && projectEnvironmentId === project.environmentId && !tag;
-                    return (
-                      <div key={projectKey} className="tree-group">
-                        <div className="tree-row tree-proj-row">
-                          {project.tags.length > 0 ? (
-                            <button
-                              className="tree-chevron"
-                              onClick={() => toggleTreeProject(projectKey)}
-                              aria-expanded={projExpanded}
-                              aria-label={projCollapsed ? t("Expand", "展开") : t("Collapse", "折叠")}
-                            >
-                              {projCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                            </button>
-                          ) : (
-                            <span className="tree-chevron-spacer" />
-                          )}
-                          <button
-                            className={`tree-label ${projActive ? "active" : ""}`}
-                            onClick={() => {
-                              setProjectPath(project.path);
-                              setProjectEnvironmentId(project.environmentId);
-                              projectPathRef.current = project.path;
-                              projectEnvironmentIdRef.current = project.environmentId;
-                              setTag(undefined);
-                            }}
-                            title={project.path}
-                          >
-                            <Folder size={13} />
-                            <span>{projectDisplayLabel(project, language)}</span>
-                            <em>{formatRelativeTime(projectSortTimestamp(project))}</em>
-                          </button>
-                        </div>
-                        {!projCollapsed && project.tags.map((tagName) => (
-                          <div
-                            key={tagName}
-                            className={`tree-row tree-tag-row ${tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId ? "active" : ""} ${isBranchTag(tagName) ? "branch-tag" : ""}`}
-                          >
-                            <button
-                              className="tree-label"
-                              onClick={() => {
-                                if (tag === tagName && projectPath === project.path && projectEnvironmentId === project.environmentId) {
-                                  setTag(undefined);
-                                } else {
-                                  setTag(tagName);
-                                  setProjectPath(project.path);
-                                  setProjectEnvironmentId(project.environmentId);
-                                  projectPathRef.current = project.path;
-                                  projectEnvironmentIdRef.current = project.environmentId;
-                                }
-                              }}
-                              title={t(`Filter by ${displayTagName(tagName)}`, `按 ${displayTagName(tagName)} 过滤`)}
-                            >
-                              {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
-                              <span>{displayTagName(tagName)}</span>
-                            </button>
-                            <button
-                              className="tag-delete"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setDeleteTagName(tagName);
-                              }}
-                              title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                              aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </nav>
-        ) : null}
-
-        <SidebarSectionHeader title={t("Sources", "来源")} expanded={sidebarSections.sources} onToggle={() => toggleSidebarSectionById("sources")} />
-        {sidebarSections.sources ? (
-          <nav className="nav-group">
-            {visibleSourceFilters.map((item) => (
-              <button key={item.label} className={source === item.value ? "active" : ""} onClick={() => setSource(item.value)}>
-                {sourceFilterLabel(item, language)}
-              </button>
-            ))}
-          </nav>
-        ) : null}
-
-        <SidebarSectionHeader title={t("Views", "视图")} expanded={sidebarSections.views} onToggle={() => toggleSidebarSectionById("views")} />
-        {sidebarSections.views ? (
-          <nav className="nav-group">
-            <button className={visibility === "default" ? "active" : ""} onClick={() => setVisibility("default")}>
-              {t("All", "全部")}
-            </button>
-            <button className={visibility === "favorites" ? "active" : ""} onClick={() => setVisibility("favorites")}>
-              <Star size={14} />
-              {t("Favorites", "收藏")}
-            </button>
-            <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
-              <Pin size={14} />
-              {t("Pinned", "置顶")}
-            </button>
-            <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
-              <EyeOff size={14} />
-              {t("Hidden", "隐藏")}
-            </button>
-          </nav>
-        ) : null}
-      </section>
-
-      <section className="content">
-        <header className="toolbar">
-          <SearchBox
-            platform={RUNTIME_PLATFORM}
-            ref={searchRef}
-            placeholder={searchPlaceholder}
-            recentLabel={t("Recent searches", "最近搜索")}
-            clearRecentLabel={t("Clear", "清空")}
-            deleteRecentLabel={t("Delete recent search", "删除最近搜索")}
-            onSearch={setQuery}
-          />
-          <div className="toolbar-discovery" role="group" aria-label={t("Search tools", "搜索工具")}>
-            <button
-              className={`icon-button toolbar-icon-button ${queryBuilderOpen ? "active" : ""}`}
-              onClick={() => {
-                setSavedSearchesOpen(false);
-                setQueryBuilderOpen((value) => !value);
-              }}
-              title={t("Advanced search", "高级搜索")}
-              aria-label={t("Advanced search", "高级搜索")}
-            >
-              <SlidersHorizontal size={15} />
-              {countActiveFilters({ source: source === "all" ? undefined : source, tag, visibility, dateRange }) > 0 ? (
-                <span className="toolbar-badge">
-                  {countActiveFilters({ source: source === "all" ? undefined : source, tag, visibility, dateRange })}
-                </span>
-              ) : null}
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${savedSearchesOpen ? "active" : ""}`}
-              onClick={() => {
-                setQueryBuilderOpen(false);
-                setSavedSearchesOpen((value) => !value);
-              }}
-              title={t("Saved searches", "保存的搜索")}
-              aria-label={t("Saved searches", "保存的搜索")}
-            >
-              <Bookmark size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${groupMode !== "flat" ? "active" : ""}`}
-              onClick={() => setGroupMode((current) => (current === "flat" ? "project" : "flat"))}
-              title={t("Group results", "分组展示")}
-              aria-label={t("Group results", "分组展示")}
-            >
-              <Layers size={15} />
-            </button>
-          </div>
-          <div className="toolbar-filters">
-            <div className="live-filter" role="group" aria-label="Live session status">
-              {LIVE_STATUS_FILTERS.map((option) => (
-                <button
-                  key={option.value}
-                  className={liveStatus === option.value ? "active" : ""}
-                  onClick={() => setLiveStatus(option.value)}
-                >
-                  {liveStatusFilterLabel(option.value, language)}
-                </button>
-              ))}
-            </div>
-            <div className="date-filter" role="group" aria-label={t("Session time range", "会话时间范围")}>
-              <CalendarDays size={14} aria-hidden="true" />
-              {DATE_RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={dateRange === option.value ? "active" : ""}
-                  onClick={() => setDateRange(option.value)}
-                  title={dateRangeLabel(option.value, language)}
-                  aria-label={dateRangeLabel(option.value, language)}
-                >
-                  {dateRangeShortLabel(option.value, language)}
-                </button>
-              ))}
-            </div>
-            <div className="sort-filter" role="group" aria-label={t("Sort order", "排序方式")}>
-              <ArrowRightLeft size={14} aria-hidden="true" />
-              <button
-                className={sortBy === "smart" ? "active" : ""}
-                onClick={() => setSortBy("smart")}
-                title={t("Smart: relevance + recency", "智能：相关性 + 时间")}
-              >
-                {t("Smart", "智能")}
-              </button>
-              <button
-                className={sortBy === "activity" ? "active" : ""}
-                onClick={() => setSortBy("activity")}
-                title={t("Most recent first", "最近活跃优先")}
-              >
-                {t("Recent", "最新")}
-              </button>
-              <button
-                className={sortBy === "created" ? "active" : ""}
-                onClick={() => setSortBy("created")}
-                title={t("Oldest first", "最早创建优先")}
-              >
-                {t("Oldest", "最早")}
-              </button>
-            </div>
-          </div>
-          <div className="top-actions">
-            <button
-              className={`icon-button toolbar-icon-button ${aiAssistantOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setSkillsOpen(false);
-                setRemoteSessionsOpen(false);
-                setAiAssistantOpen(true);
-              }}
-              title={t("AI session finder", "AI 找会话")}
-              aria-label={t("AI session finder", "AI 找会话")}
-            >
-              <Sparkles size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setRemoteSessionsOpen(false);
-                setSkillsOpen(true);
-              }}
-              title={t("Skills", "Skills 管理")}
-              aria-label={t("Skills", "Skills 管理")}
-            >
-              <PackageSearch size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${assetsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setRemoteSessionsOpen(false);
-                setSkillsOpen(false);
-                setAssetsOpen(true);
-              }}
-              title={t("Digital Assets", "数字资产")}
-              aria-label={t("Digital Assets", "数字资产")}
-            >
-              <Database size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${remoteSessionsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setSkillsOpen(false);
-                setRemoteSessionsOpen(true);
-              }}
-              title={t("Remote sessions", "远程会话")}
-              aria-label={t("Remote sessions", "远程会话")}
-            >
-              <Cloud size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
-              onClick={() => {
-                setSkillsOpen(false);
-                setSettingsOpen(false);
-                setRemoteSessionsOpen(false);
-                setApiConfigOpen(true);
-              }}
-              title={t("API configuration", "API 配置")}
-              aria-label={t("API configuration", "API 配置")}
-            >
-              <KeyRound size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${shouldSignalAppUpdate ? "update-available" : ""}`}
-              onClick={() => {
-                setSkillsOpen(false);
-                setApiConfigOpen(false);
-                setRemoteSessionsOpen(false);
-                setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
-                setSettingsOpen(true);
-              }}
-              title={shouldSignalAppUpdate ? t("Update available", "有新版本可用") : t("Settings", "设置")}
-              aria-label={shouldSignalAppUpdate ? t("Update available", "有新版本可用") : t("Settings", "设置")}
-            >
-              <Settings size={15} />
-              {shouldSignalAppUpdate ? <span className="update-indicator" aria-hidden="true" /> : null}
-            </button>
-          </div>
-        </header>
-
-        {queryBuilderOpen ? (
-          <QueryBuilder
-            initial={{ source: source === "all" ? undefined : source, tag, visibility, dateRange }}
-            sourceOptions={visibleSourceFilters}
-            tagOptions={tags}
-            language={language}
-            onApply={applyQueryBuilder}
-            onClose={() => setQueryBuilderOpen(false)}
-            onSaveSearch={saveCurrentSearch}
-          />
-        ) : null}
-
-        {savedSearchesOpen ? (
-          <SavedSearchesPanel
-            savedSearches={savedSearches}
-            language={language}
-            onApply={applySavedSearch}
-            onDelete={deleteSavedSearchById}
-            onClose={() => setSavedSearchesOpen(false)}
-          />
-        ) : null}
-
-        <div className="result-count">
-          <span>
-            {t(`${sessionTotalCount} sessions`, `${sessionTotalCount} 个会话`)}
-          </span>
-          {selected ? <span className="selected-path">{selected.projectPath || selected.rawId}</span> : null}
-        </div>
-
-        <div className="results">
-          <GroupedResults
-            sessions={displayedResults}
-            groupMode={groupMode}
-            selectedKey={selected?.sessionKey ?? null}
-            liveStateFor={(session) => getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
-            language={language}
-            onOpenMatch={handleRowOpenMatch}
-            onSelect={handleRowSelect}
-            onOpen={handleRowOpen}
-            onRename={handleRowRename}
-            onFavorite={handleRowFavorite}
-            onContextMenu={handleRowContextMenu}
-          />
-          {displayedResults.length === 0 && !hasMoreSessions ? <div className="empty">{t("No sessions found.", "没有找到会话。")}</div> : null}
-          {hasMoreSessions ? (
-            <button className="load-more-sessions" onClick={() => setSessionLimit((current) => current + SESSION_PAGE_SIZE)}>
-              <ChevronDown size={14} />
-              {t(`Load ${SESSION_PAGE_SIZE} more`, `再加载 ${SESSION_PAGE_SIZE} 个`)}
-            </button>
-          ) : null}
-        </div>
-      </section>
+        }
+        sessions={displayedResults}
+        groupMode={groupMode}
+        selectedKey={selected?.sessionKey ?? null}
+        liveStateFor={(session) => getLiveSessionState(session, liveSessionKeys, liveDetectionFailed)}
+        onOpenMatch={handleRowOpenMatch}
+        onSelect={handleRowSelect}
+        onOpen={handleRowOpen}
+        onRename={handleRowRename}
+        onFavorite={handleRowFavorite}
+        onContextMenu={handleRowContextMenu}
+        hasMoreSessions={hasMoreSessions}
+        onLoadMore={() => setSessionLimit((current) => current + SESSION_PAGE_SIZE)}
+        loadMoreCount={SESSION_PAGE_SIZE}
+      />
 
       {detail ? (
         <DetailPanel
@@ -2720,467 +2367,6 @@ export function App(): ReactElement {
       ) : null}
     </main>
   );
-}
-
-function UsageTokenMetric({
-  totalTokens,
-  previousTotalTokens,
-  period,
-  language,
-  trend,
-  trendLoading,
-  onEnsureTrend,
-  tokensLabel,
-}: {
-  totalTokens: number;
-  previousTotalTokens: number | null;
-  period: SessionStatsPeriod;
-  language: LanguageMode;
-  trend: SessionStatsTrend;
-  trendLoading: boolean;
-  onEnsureTrend: () => void;
-  tokensLabel: string;
-}): ReactElement {
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState<{ top: number; left: number; arrowLeft: number } | null>(null);
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const closeTimerRef = useRef<number | null>(null);
-  const interactive = period !== "allTime";
-
-  const closePopover = useCallback(() => {
-    setOpen(false);
-  }, []);
-
-  const cancelClose = useCallback(() => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleClose = useCallback(() => {
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(closePopover, 120);
-  }, [cancelClose, closePopover]);
-
-  const openPopover = useCallback(() => {
-    if (!interactive) return;
-    cancelClose();
-    const rect = anchorRef.current?.getBoundingClientRect();
-    if (rect) {
-      const popoverWidth = 280;
-      const anchorCenter = rect.left + rect.width / 2;
-      const desiredLeft = anchorCenter - (popoverWidth - 40);
-      const left = Math.max(8, Math.min(window.innerWidth - popoverWidth - 8, desiredLeft));
-      const top = rect.bottom + 8;
-      const arrowLeft = Math.max(14, Math.min(popoverWidth - 14, anchorCenter - left));
-      setPosition({ top, left, arrowLeft });
-    }
-    onEnsureTrend();
-    setOpen(true);
-  }, [interactive, cancelClose, onEnsureTrend]);
-
-  useEffect(() => () => cancelClose(), [cancelClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (): void => closePopover();
-    const closeIfPointerLeaves = (event: PointerEvent): void => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (anchorRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      closePopover();
-    };
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") closePopover();
-    };
-    window.addEventListener("pointermove", closeIfPointerLeaves, true);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    window.addEventListener("blur", close);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointermove", closeIfPointerLeaves, true);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("blur", close);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [closePopover, open]);
-
-  return (
-    <div
-      ref={anchorRef}
-      className={interactive ? "stats-token-metric stats-token-metric--interactive" : "stats-token-metric"}
-      tabIndex={interactive ? 0 : undefined}
-      onMouseEnter={openPopover}
-      onMouseLeave={scheduleClose}
-      onFocus={openPopover}
-      onBlur={closePopover}
-    >
-      <span className="stats-metric-value">
-        <strong>{formatTokenCount(totalTokens)}</strong>
-        <UsageDeltaBadge delta={usageDelta(totalTokens, previousTotalTokens)} />
-      </span>
-      {tokensLabel}
-      {interactive && open && position
-        ? createPortal(
-            <UsageTokenTrendPopover
-              popoverRef={popoverRef}
-              trend={trend}
-              loading={trendLoading}
-              period={period}
-              language={language}
-              position={position}
-              onMouseEnter={cancelClose}
-              onMouseLeave={closePopover}
-            />,
-            document.body,
-          )
-        : null}
-    </div>
-  );
-}
-
-function UsageTokenTrendPopover({
-  popoverRef,
-  trend,
-  loading,
-  period,
-  language,
-  position,
-  onMouseEnter,
-  onMouseLeave,
-}: {
-  popoverRef: RefObject<HTMLDivElement | null>;
-  trend: SessionStatsTrend;
-  loading: boolean;
-  period: SessionStatsPeriod;
-  language: LanguageMode;
-  position: { top: number; left: number; arrowLeft: number };
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
-}): ReactElement {
-  const title =
-    period === "today"
-      ? localize(language, "Last 30 days", "近 30 天")
-      : period === "sevenDay"
-        ? localize(language, "Last 30 weeks", "近 30 周")
-        : localize(language, "Last 30 months", "近 30 个月");
-  const buckets = trend.buckets;
-  const width = 280;
-  const height = 118;
-  const chartLeft = 34;
-  const chartRight = 8;
-  const chartTop = 8;
-  const chartBottom = 22;
-  const plotWidth = width - chartLeft - chartRight;
-  const plotHeight = height - chartTop - chartBottom;
-  const maxTokens = Math.max(...buckets.map((bucket) => bucket.totalTokens), 0);
-  const yMax = Math.max(maxTokens, 1);
-  const yMid = chartTop + plotHeight / 2;
-  const points = buckets.map((bucket, index) => {
-    const x = buckets.length <= 1 ? chartLeft + plotWidth / 2 : chartLeft + (index * plotWidth) / (buckets.length - 1);
-    const y = chartTop + (1 - bucket.totalTokens / yMax) * plotHeight;
-    return { x, y, bucket, index };
-  });
-  const pathData = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
-  const totalTokens = buckets.reduce((sum, bucket) => sum + bucket.totalTokens, 0);
-  const nonZeroBuckets = buckets.filter((bucket) => bucket.totalTokens > 0);
-  const peakBucket = nonZeroBuckets.reduce<SessionStatsTrendBucket | undefined>(
-    (best, bucket) => (!best || bucket.totalTokens > best.totalTokens ? bucket : best),
-    undefined,
-  );
-  const avgTokens = nonZeroBuckets.length > 0 ? Math.round(totalTokens / nonZeroBuckets.length) : 0;
-  let lastNonZeroIndex = -1;
-  for (let i = buckets.length - 1; i >= 0; i -= 1) {
-    if (buckets[i].totalTokens > 0) {
-      lastNonZeroIndex = i;
-      break;
-    }
-  }
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const focusIndex = hoveredIndex ?? lastNonZeroIndex;
-  const focusPoint = focusIndex >= 0 && focusIndex < points.length ? points[focusIndex] : null;
-  const focusBucket = focusPoint?.bucket ?? null;
-  const midLabelIndex = Math.floor(buckets.length / 2);
-  const handleChartMove = useCallback(
-    (event: ReactMouseEvent<SVGSVGElement>) => {
-      const svg = svgRef.current;
-      if (!svg || points.length === 0) return;
-      const rect = svg.getBoundingClientRect();
-      if (rect.width === 0) return;
-      const relativeX = ((event.clientX - rect.left) / rect.width) * width;
-      let nearest = points[0];
-      let nearestDistance = Math.abs(nearest.x - relativeX);
-      for (let i = 1; i < points.length; i += 1) {
-        const distance = Math.abs(points[i].x - relativeX);
-        if (distance < nearestDistance) {
-          nearest = points[i];
-          nearestDistance = distance;
-        }
-      }
-      setHoveredIndex(nearest.index);
-    },
-    [points, width],
-  );
-  const clearHover = useCallback(() => setHoveredIndex(null), []);
-
-  useEffect(() => clearHover, [clearHover]);
-
-  return (
-    <div
-      ref={popoverRef}
-      className="stats-token-popover"
-      role="tooltip"
-      style={{
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-        ["--stats-popover-arrow-left" as string]: `${position.arrowLeft}px`,
-      } as CSSProperties}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <div className="stats-token-popover-header">
-        <span>{title}</span>
-        <em>
-          {localize(language, "Total", "合计")} {formatTokenCount(totalTokens)}
-        </em>
-      </div>
-      {peakBucket ? (
-        <div className="stats-token-popover-summary">
-          <span>
-            {localize(language, "Peak", "峰值")} <em>{formatTokenCount(peakBucket.totalTokens)}</em>
-            <i>{peakBucket.label}</i>
-          </span>
-          <span>
-            {localize(language, "Avg", "平均")} <em>{formatTokenCount(avgTokens)}</em>
-          </span>
-        </div>
-      ) : null}
-      {loading ? (
-        <div className="stats-token-popover-empty">{localize(language, "Loading trend...", "正在加载趋势...")}</div>
-      ) : buckets.length === 0 ? (
-        <div className="stats-token-popover-empty">{localize(language, "No token usage yet", "暂无 Token 用量")}</div>
-      ) : (
-        <svg
-          ref={svgRef}
-          className="stats-token-chart"
-          viewBox={`0 0 ${width} ${height}`}
-          onMouseMove={handleChartMove}
-          onMouseLeave={clearHover}
-        >
-          <path className="stats-token-chart-grid" d={`M${chartLeft} ${chartTop}H${width - chartRight}M${chartLeft} ${yMid}H${width - chartRight}`} />
-          <path className="stats-token-chart-axis" d={`M${chartLeft} ${chartTop}V${height - chartBottom}H${width - chartRight}`} />
-          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={chartTop + 3} textAnchor="end">{formatCompactNumber(yMax)}</text>
-          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={yMid + 3} textAnchor="end">{formatCompactNumber(Math.round(yMax / 2))}</text>
-          <text className="stats-token-chart-y-label" x={chartLeft - 6} y={height - chartBottom + 3} textAnchor="end">0</text>
-          <text className="stats-token-chart-x-label" x={chartLeft} y={height - 5} textAnchor="start">{buckets[0]?.label}</text>
-          {buckets.length > 2 ? (
-            <text className="stats-token-chart-x-label" x={chartLeft + plotWidth / 2} y={height - 5} textAnchor="middle">
-              {buckets[midLabelIndex]?.label}
-            </text>
-          ) : null}
-          <text className="stats-token-chart-x-label" x={width - chartRight} y={height - 5} textAnchor="end">{buckets.at(-1)?.label}</text>
-          <path className="stats-token-chart-line" d={pathData} />
-          {focusPoint ? (
-            <path
-              className="stats-token-chart-focus-line"
-              d={`M${focusPoint.x.toFixed(1)} ${chartTop}V${height - chartBottom}`}
-            />
-          ) : null}
-          {points.map((point) => (
-            <circle
-              key={point.bucket.start}
-              className={
-                point.index === focusIndex
-                  ? "stats-token-chart-point stats-token-chart-point--focus"
-                  : "stats-token-chart-point"
-              }
-              cx={point.x}
-              cy={point.y}
-              r={point.index === focusIndex ? 2.8 : 1.6}
-            />
-          ))}
-        </svg>
-      )}
-      {focusBucket ? (
-        <div className="stats-token-popover-focus">
-          <span>{focusBucket.label}</span>
-          <em>{formatTokenCount(focusBucket.totalTokens)}</em>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function UsageDeltaBadge({ delta }: { delta: UsageDelta | null }): ReactElement | null {
-  if (!delta || delta.kind === "flat") return null;
-  return <span className={`stats-delta stats-delta-${delta.kind}`}>{formatUsageDelta(delta)}</span>;
-}
-
-function QuotaPanel({
-  snapshot,
-  loading,
-  feedback,
-  expanded,
-  onToggle,
-  onRefresh,
-  language,
-}: {
-  snapshot: UsageQuotaSnapshot;
-  loading: boolean;
-  feedback: QuotaFeedback;
-  expanded: boolean;
-  onToggle: () => void;
-  onRefresh: () => void;
-  language: LanguageMode;
-}): ReactElement {
-  const updatedAt = snapshot.generatedAt ? formatRelativeTime(Date.parse(snapshot.generatedAt)) : "";
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className="quota-panel">
-      <div className="quota-header">
-        <button className="quota-section-toggle" onClick={onToggle} aria-expanded={expanded}>
-          <span>{l("Remaining", "剩余额度")}</span>
-          {updatedAt ? <em>{updatedAt}</em> : null}
-          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </button>
-        <button
-          className="quota-refresh"
-          onClick={onRefresh}
-          disabled={loading}
-          title={l("Refresh usage limits", "刷新额度")}
-          aria-label={l("Refresh usage limits", "刷新额度")}
-        >
-          <RefreshCw size={13} />
-        </button>
-      </div>
-      {expanded ? (
-        <>
-          <div className="quota-list">
-            {snapshot.providers.map((card) => (
-              <QuotaProviderCard key={card.provider} card={card} language={language} />
-            ))}
-            {snapshot.providers.length === 0 ? (
-              <div className="quota-empty">
-                {loading
-                  ? l("Checking usage limits...", "正在检查额度...")
-                  : (snapshot.hiddenProviders?.length ?? 0) > 0
-                    ? l("Usage limits are hidden. Enable them in settings.", "额度已在设置中隐藏。")
-                    : l("Usage limits unavailable.", "额度不可用。")}
-              </div>
-            ) : null}
-          </div>
-          {snapshot.freshness === "stale" ? (
-            <div className="quota-stale-notice">
-              {l(
-                `Showing data from ${formatRelativeTime(Date.parse(snapshot.lastSuccessfulAt ?? ""))}. Refresh failed.`,
-                `正在显示 ${formatRelativeTime(Date.parse(snapshot.lastSuccessfulAt ?? ""))} 的数据，刷新失败。`,
-              )}
-            </div>
-          ) : null}
-          {snapshot.freshness === "auth-required" ? (
-            <div className="quota-stale-notice error">
-              {l("Codex login expired. Sign in again to refresh usage limits.", "Codex 登录已失效，请重新登录后刷新额度。")}
-            </div>
-          ) : null}
-          {feedback ? <div className={`quota-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function QuotaProviderCard({ card, language }: { card: UsageQuotaCard; language: LanguageMode }): ReactElement {
-  const supported = card.status === "supported" && card.quotas.length > 0;
-  const meta = card.plan;
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  return (
-    <div className={`quota-card ${card.provider}`}>
-      <div className="quota-provider-head">
-        <span className="quota-provider-name">{card.displayName}</span>
-        <span className={`quota-status ${card.status}`}>{quotaStatusLabel(card.status, language)}</span>
-      </div>
-      {meta ? <div className="quota-meta">{meta}</div> : null}
-      {supported ? (
-        <div className="quota-windows">
-          {card.quotas.map((quota) => (
-            <div className="quota-window" key={quota.key}>
-              <div className="quota-window-top">
-                <span>{quota.label}</span>
-                <strong>{l(`${quota.remainingDisplay} left`, `剩余 ${quota.remainingDisplay}`)}</strong>
-              </div>
-              <div className="quota-track" aria-hidden="true">
-                <div className="quota-fill" style={{ width: `${quota.remainingPercent}%` } as CSSProperties} />
-              </div>
-              <div className="quota-reset">{quota.stale ? l("stale", "已过期") : formatQuotaReset(quota.resetsAt, language)}</div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="quota-detail">{card.detail || l("Quota data unavailable.", "额度数据不可用。")}</p>
-      )}
-    </div>
-  );
-}
-
-function SidebarSectionHeader({
-  title,
-  expanded,
-  onToggle,
-}: {
-  title: string;
-  expanded: boolean;
-  onToggle: () => void;
-}): ReactElement {
-  return (
-    <button className="section-header" onClick={onToggle} aria-expanded={expanded}>
-      <span>{title}</span>
-      {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-    </button>
-  );
-}
-
-function ActionToast({ status, onClose }: { status: ActionStatus; onClose: () => void }): ReactElement {
-  return (
-    <div className={`action-toast ${status.kind}`} role="status" aria-live="polite">
-      <span>{status.message}</span>
-      {status.kind === "error" ? (
-        <button type="button" className="action-toast-close" onClick={onClose} aria-label="Close">
-          <X size={14} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function quotaStatusLabel(status: UsageQuotaCard["status"], language: LanguageMode): string {
-  if (status === "supported") return localize(language, "Live", "可用");
-  if (status === "unsupported_api_key") return localize(language, "Unsupported", "不支持");
-  if (status === "error") return localize(language, "Error", "错误");
-  return localize(language, "Setup", "设置");
-}
-
-function formatQuotaReset(resetsAt: string | undefined, language: LanguageMode): string {
-  if (!resetsAt) return "";
-  const timestamp = Date.parse(resetsAt);
-  if (!Number.isFinite(timestamp)) return "";
-  const diff = timestamp - Date.now();
-  if (diff <= 0) return localize(language, "reset due", "应重置");
-  const minutes = Math.ceil(diff / 60_000);
-  if (minutes < 60) return localize(language, `resets in ${minutes}m`, `${minutes} 分钟后重置`);
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    const remainingMinutes = minutes - hours * 60;
-    return remainingMinutes > 0
-      ? localize(language, `resets in ${hours}h ${remainingMinutes}m`, `${hours} 小时 ${remainingMinutes} 分钟后重置`)
-      : localize(language, `resets in ${hours}h`, `${hours} 小时后重置`);
-  }
-  const days = Math.ceil(hours / 24);
-  return localize(language, `resets in ${days}d`, `${days} 天后重置`);
 }
 
 function migrationStrategyLabel(strategy: SessionMigrationResult["strategy"], language: LanguageMode): string {

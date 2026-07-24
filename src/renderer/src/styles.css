@@ -81,6 +81,14 @@
   --radius: 10px;
   --radius-sm: 7px;
 
+  /* Shell layout tokens: one source of truth for the sidebar column so the
+     grid, titlebar overlays, detail drawer and narrow breakpoints stay in
+     sync when the sidebar is resized or made collapsible. */
+  --sidebar-width: 256px;
+  --sidebar-compact-width: 220px;
+  --shell-titlebar-height: 40px;
+  --detail-gap: 20px;
+
   font-family: "Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
@@ -228,7 +236,7 @@ select:focus-visible {
 .app {
   position: relative;
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   background: var(--app-bg);
@@ -240,8 +248,8 @@ select:focus-visible {
   top: 0;
   left: 0;
   z-index: 7;
-  width: 256px;
-  height: 40px;
+  width: var(--sidebar-width);
+  height: var(--shell-titlebar-height);
   pointer-events: none;
   background: var(--sidebar-bg);
 }
@@ -251,7 +259,7 @@ select:focus-visible {
   position: fixed;
   top: 0;
   bottom: 0;
-  left: 256px;
+  left: var(--sidebar-width);
   z-index: 7;
   width: 1px;
   pointer-events: none;
@@ -264,7 +272,7 @@ select:focus-visible {
   right: 0;
   left: 0;
   z-index: 8;
-  height: 40px;
+  height: var(--shell-titlebar-height);
   -webkit-app-region: drag;
 }
 
@@ -292,11 +300,11 @@ select:focus-visible {
   position: relative;
   display: flex;
   min-width: 0;
-  height: calc(100vh - 40px);
-  min-height: calc(100vh - 40px);
+  height: calc(100vh - var(--shell-titlebar-height));
+  min-height: calc(100vh - var(--shell-titlebar-height));
   flex-direction: column;
   gap: 1px;
-  margin-top: 40px;
+  margin-top: var(--shell-titlebar-height);
   padding: 0 10px 10px;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -1643,17 +1651,25 @@ select:focus-visible {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  padding: 40px 18px 14px;
+  padding: var(--shell-titlebar-height) 18px 14px;
   background: var(--app-bg);
 }
 
 .toolbar {
   position: relative;
   z-index: 5;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(0, max-content) auto;
+  display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.toolbar > .searchbox {
+  flex: 1 1 180px;
+  width: auto;
+}
+
+.toolbar-discovery {
+  flex: 0 0 auto;
 }
 
 .toolbar-filters {
@@ -1662,11 +1678,9 @@ select:focus-visible {
   --date-filter-width: 214px;
   --sort-filter-width: 214px;
   display: flex;
-  width: fit-content;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: min(636px, 48vw);
   flex-wrap: nowrap;
-  justify-self: end;
   justify-content: flex-start;
   align-items: center;
   gap: var(--toolbar-filter-gap);
@@ -1676,6 +1690,7 @@ select:focus-visible {
 .top-actions {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 6px;
@@ -2064,7 +2079,11 @@ select:focus-visible {
 
 @media (max-width: 1040px) {
   .toolbar {
-    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .toolbar > .searchbox {
+    flex-basis: 240px;
   }
 
   .toolbar-filters {
@@ -2454,7 +2473,7 @@ select:focus-visible {
 
 .detail {
   display: flex;
-  width: min(720px, calc(100vw - 276px));
+  width: min(720px, calc(100vw - var(--sidebar-width) - var(--detail-gap)));
   min-width: 520px;
   height: 100%;
   min-height: 0;
@@ -6185,15 +6204,15 @@ select:focus-visible {
 
 @media (max-width: 860px) {
   .app {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-compact-width) minmax(0, 1fr);
   }
 
   .app::before {
-    width: 220px;
+    width: var(--sidebar-compact-width);
   }
 
   .app::after {
-    left: 220px;
+    left: var(--sidebar-compact-width);
   }
 
   .content {
@@ -6201,9 +6220,8 @@ select:focus-visible {
     padding-left: 12px;
   }
 
-  .toolbar {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-    align-items: center;
+  .toolbar > .searchbox {
+    flex-basis: 160px;
   }
 
   .toolbar-filters {
@@ -6211,7 +6229,7 @@ select:focus-visible {
   }
 
   .detail {
-    width: calc(100vw - 20px);
+    width: calc(100vw - var(--detail-gap));
     min-width: 0;
   }
 
