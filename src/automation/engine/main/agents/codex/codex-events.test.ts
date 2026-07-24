@@ -135,23 +135,6 @@ describe("normalizeCodexNotification", () => {
     }]);
   });
 
-  test("keeps retryable Codex errors non-terminal while the app-server reconnects", () => {
-    const state = createCodexStreamState();
-
-    expect(normalizeCodexNotification("error", {
-      message: "Reconnecting... 2/5",
-      willRetry: true,
-    }, state)).toEqual([{
-      type: "system",
-      content: "Reconnecting... 2/5",
-      metadata: { transient: true, willRetry: true },
-    }]);
-    expect(state.lastError).toBe("");
-    expect(normalizeCodexNotification("turn/completed", {
-      turn: { status: "completed" },
-    }, state)).toEqual([{ type: "completed" }]);
-  });
-
   test("emits OpenAI usage from turn completion", () => {
     const state = createCodexStreamState();
 

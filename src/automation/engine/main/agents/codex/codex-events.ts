@@ -260,13 +260,6 @@ export function normalizeCodexNotification(
 
   if (method === "error") {
     const message = asString(params.message) || errorMessage(params.error) || "Codex error";
-    if (params.willRetry === true) {
-      return [{
-        type: "system",
-        content: message,
-        metadata: { transient: true, willRetry: true },
-      }];
-    }
     state.lastError = message;
     return [{ type: "error", error: message }];
   }

@@ -275,36 +275,6 @@ describe("model channel config", () => {
     expect(codexAppServerConfigArgs(channel, "gpt-5.5").join("\n")).not.toContain("model_providers.openai");
   });
 
-  test("lets the default Codex model inherit the local provider and base URL", () => {
-    const channel: AgentChannel = {
-      id: "codex-openai",
-      agentId: "codex",
-      label: "Codex OpenAI",
-      modelProvider: "openai",
-      providerName: "OpenAI",
-      models: [{ id: "default", label: "Default" }],
-    };
-
-    expect(codexAppServerConfigArgs(channel, "default")).toEqual([]);
-  });
-
-  test("keeps an explicitly configured official Codex channel on OpenAI", () => {
-    const channel: AgentChannel = {
-      id: "codex-openai",
-      agentId: "codex",
-      label: "Codex OpenAI",
-      modelProvider: "openai",
-      providerName: "OpenAI",
-      httpHeaders: { Authorization: "Bearer explicit-key" },
-      models: [{ id: "default", label: "Default" }],
-    };
-
-    expect(codexAppServerConfigArgs(channel, "default")).toEqual([
-      "-c",
-      'model_provider="openai"',
-    ]);
-  });
-
   test("uses an agent reasoning effort override for Codex app-server", () => {
     const channel: AgentChannel = {
       id: "codex-openai",

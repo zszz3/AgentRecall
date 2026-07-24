@@ -491,12 +491,7 @@ export function codexAppServerConfigArgs(channel: AgentChannel | undefined, mode
   if (!channel || channel.agentId !== "codex") return [];
 
   const args: string[] = [];
-  const inheritLocalDefaults = modelId === DEFAULT_MODEL_ID
-    && channel.modelProvider === "openai"
-    && !channel.profileName
-    && !channel.baseUrl
-    && !channel.httpHeaders?.Authorization;
-  if (channel.modelProvider && !inheritLocalDefaults) pushConfigOverride(args, "model_provider", channel.modelProvider);
+  if (channel.modelProvider) pushConfigOverride(args, "model_provider", channel.modelProvider);
 
   const model = runtimeModelId(modelId);
   if (model) pushConfigOverride(args, "model", model);
@@ -508,7 +503,7 @@ export function codexAppServerConfigArgs(channel: AgentChannel | undefined, mode
     pushBooleanConfigOverride(args, pluginConfigKey(plugin.id), plugin.enabled);
   }
 
-  if (!inheritLocalDefaults && channel.modelProvider && !BUILT_IN_CODEX_PROVIDER_IDS.has(channel.modelProvider)) {
+  if (channel.modelProvider && !BUILT_IN_CODEX_PROVIDER_IDS.has(channel.modelProvider)) {
     const prefix = `model_providers.${channel.modelProvider}`;
     const routedBaseUrl = codexChatRouterUrlForChannel(channel);
     const baseUrl = routedBaseUrl ?? channel.baseUrl;
