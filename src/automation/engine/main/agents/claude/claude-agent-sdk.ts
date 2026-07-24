@@ -10,6 +10,11 @@ import {
 import type { AgentEvent } from "../../../shared/types";
 import type { RuntimeApprovalOperation, RuntimeApprovalRequester } from "../../approvals/runtime-approval-broker";
 import { createClaudeStreamState, normalizeClaudeStreamEvent } from "./claude-stream";
+import {
+  workflowMcpToolDecision,
+  workflowMcpToolNameFromIdentifier,
+  type WorkflowMcpScope,
+} from "../../../shared/workflow-mcp-policy";
 
 export interface ClaudeAgentSdkRunInput {
   prompt: string;
@@ -23,6 +28,7 @@ export interface ClaudeAgentSdkRunInput {
   env?: NodeJS.ProcessEnv;
   approvalOwnerId?: string;
   requestApproval?: RuntimeApprovalRequester;
+  workflowMcpScope?: WorkflowMcpScope;
 }
 
 export class ClaudeAgentSdkAdapter {
@@ -58,6 +64,7 @@ export function createClaudeSdkQueryOptions(input: {
   env?: NodeJS.ProcessEnv;
   approvalOwnerId?: string;
   requestApproval?: RuntimeApprovalRequester;
+  workflowMcpScope?: WorkflowMcpScope;
 }): Options {
   const systemPrompt =
     input.developerInstructions?.trim()
@@ -78,7 +85,7 @@ export function createClaudeSdkQueryOptions(input: {
     ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     systemPrompt,
     permissionMode: "default",
-    canUseTool: createClaudeSdkPermissionHandler(input.onEvent, input.approvalOwnerId, input.requestApproval, input.abortController?.signal, input.cwd),
+    canUseTool: createClaudeSdkPermissionHandler(input.onEvent, input.approvalOwnerId, input.requestApproval, input.abortController?.signal, input.cwd, input.workflowMcpScope),
     onElicitation: createClaudeSdkElicitationHandler(input.onEvent),
     ...(input.abortController ? { abortController: input.abortController } : {}),
     ...(input.env ? { env: input.env } : {}),
@@ -91,14 +98,20 @@ export function createClaudeSdkPermissionHandler(
   requestApproval?: RuntimeApprovalRequester,
   signal?: AbortSignal,
   cwd?: string,
+  workflowMcpScope?: WorkflowMcpScope,
 ): CanUseTool {
   return async (toolName, toolInput, options) => {
-    const trustedWorkflowAuthoringTool = approvalOwnerId?.startsWith("workflow-draft:")
-      && ["workflow_create", "workflow_validate", "workflow_context_append"].some((name) => toolName.toLowerCase().includes(name));
-    if (trustedWorkflowAuthoringTool) {
-      return { behavior: "allow", toolUseID: options.toolUseID };
+    const workflowToolName = workflowMcpScope && toolName.toLowerCase().startsWith("mcp__")
+      ? workflowMcpToolNameFromIdentifier(toolName)
+      : undefined;
+    if (workflowToolName) {
+      const decision = workflowMcpToolDecision(workflowMcpScope!, workflowToolName);
+      if (decision === "allow") return { behavior: "allow", toolUseID: options.toolUseID };
+      if (decision === "deny") {
+        return { behavior: "deny", message: "This Workflow MCP tool is unavailable on the current surface.", toolUseID: options.toolUseID };
+      }
     }
-    if (approvalOwnerId?.startsWith("workflow-")) {
+    if (approvalOwnerId?.startsWith("workflow-") && !workflowToolName) {
       return { behavior: "deny", message: "Runtime tool permissions are unavailable on this workflow surface.", toolUseID: options.toolUseID };
     }
     const decision = approvalOwnerId && requestApproval

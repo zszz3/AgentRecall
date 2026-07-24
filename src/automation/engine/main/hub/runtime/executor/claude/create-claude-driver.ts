@@ -46,7 +46,10 @@ export function createClaudeDriver(
         options.requestApproval,
         {
           ...claudeMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
-          ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), context.planningWorkflowId, context.workflowRunId, context.workflowNodeId),
+          ...claudeWorkflowMcpServers({
+            discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
+            runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
+          }),
         },
       ),
     createInteractiveSession: (context) =>
@@ -61,7 +64,10 @@ export function createClaudeDriver(
             ) ?? modelFromRuntimeConfig(interactiveContext.runtimeConfig),
           resolveMcpServers: (interactiveContext) => ({
             ...claudeMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []),
-            ...claudeWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId, interactiveContext.workflowRunId, interactiveContext.workflowNodeId),
+            ...claudeWorkflowMcpServers({
+              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
+              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
+            }),
           }),
           sdkInteractive: new ClaudeAgentSdkInteractive(),
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),

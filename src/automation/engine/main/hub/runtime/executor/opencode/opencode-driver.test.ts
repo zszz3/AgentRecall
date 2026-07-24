@@ -6,6 +6,7 @@ import type { AgentEvent, RuntimeConversation } from "../../../../../shared/type
 import { openCodeRuntimeStateCodec } from "../../../../agents/opencode/opencode-runtime-state-codec";
 import { writeNodeCliLauncher } from "../../../../platform/test-cli-fixtures";
 import { createOpenCodeDriver } from "./create-opencode-driver";
+import { AcpWorkflowOneShotExecutor } from "../acp-workflow-one-shot-executor";
 
 async function createOpenCodeAcpFake(dir: string): Promise<{ executable: string; callsPath: string }> {
   const callsPath = path.join(dir, "calls.jsonl");
@@ -36,6 +37,25 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 }
 
 describe("createOpenCodeDriver interactive integration", () => {
+  test("uses ACP for one-shot workflow nodes so scoped MCP tools are available", () => {
+    const driver = createOpenCodeDriver({
+      executables: { codex: "codex", claude: "claude", api: "api", hermes: "hermes", opencode: "opencode", openclaw: "openclaw" },
+      channelById: () => undefined,
+      workflowMcpDiscoveryPath: () => "C:/app/mcp-bridge.json",
+      workflowMcpManagedToken: () => "managed-token",
+    });
+    const executor = driver.createOneShotExecutor?.({
+      runId: "task-1", runKind: "task", configuredAgentId: "agent-1", planningWorkflowId: "wf-1",
+      workflowRunId: "run-1", workflowNodeId: "node-1", runtimeId: "opencode", executionMode: "oneshot",
+      continuationPolicy: "fresh", runtimeConfig: { model: "default" },
+      runtime: { id: "opencode", label: "OpenCode", command: "opencode", version: "test", available: true },
+      channelId: "opencode-default", prompt: "Complete", workDir: process.cwd(), developerInstructions: "Complete structurally",
+      emit: vi.fn(), onExit: vi.fn(),
+    });
+
+    expect(executor).toBeInstanceOf(AcpWorkflowOneShotExecutor);
+  });
+
   test("starts OpenCode ACP, selects a model, and resumes persisted sessions", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-opencode-driver-"));
     const fake = await createOpenCodeAcpFake(dir);

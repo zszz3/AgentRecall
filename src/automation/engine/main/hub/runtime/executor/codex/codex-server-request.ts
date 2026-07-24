@@ -1,10 +1,28 @@
 import type { CodexRpcClient } from "../../../../agents/codex/codex-rpc";
 import type { AgentEvent } from "../../../../../shared/types";
 import type { RuntimeApprovalOperation, RuntimeApprovalRequester } from "../../../../approvals/runtime-approval-broker";
+import {
+  isWorkflowMcpServerName,
+  workflowMcpToolDecision,
+  workflowMcpToolNameFromIdentifier,
+  type WorkflowMcpScope,
+} from "../../../../../shared/workflow-mcp-policy";
 
-function isWorkflowMcpRequest(params: Record<string, unknown>): boolean {
-  const serialized = JSON.stringify(params).toLowerCase();
-  return ["workflow_create", "workflow_validate", "workflow_context_append"].some((name) => serialized.includes(name));
+function workflowMcpToolFromCodexRequest(params: Record<string, unknown>): string | undefined {
+  const records = [params, params.request, params.toolCall]
+    .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)));
+  const server = records
+    .flatMap((record) => [record.serverName, record.server_name, record.server, record.mcpServerName, record.mcp_server_name, record.mcpServer])
+    .find((value): value is string => typeof value === "string");
+  for (const record of records) {
+    const toolIdentifier = [record.toolName, record.tool_name, record.tool, record.name]
+      .find((value): value is string => typeof value === "string");
+    if (!toolIdentifier) continue;
+    const qualified = workflowMcpToolNameFromIdentifier(toolIdentifier);
+    if (!qualified) continue;
+    if (server ? isWorkflowMcpServerName(server) : toolIdentifier.toLowerCase().includes("agent_recall")) return qualified;
+  }
+  return undefined;
 }
 
 export function fileWriteOperationFromCodexPermissions(
@@ -40,14 +58,17 @@ export function respondToCodexRuntimeServerRequest(
     emit: (event: AgentEvent) => void;
     request: RuntimeApprovalRequester;
     cwd: string;
+    signal?: AbortSignal;
   },
+  workflowMcpScope?: WorkflowMcpScope,
 ): void {
   if (method === "item/tool/requestUserInput") {
     client.respond(id, { answers: {} });
     return;
   }
   if (method === "mcpServer/elicitation/request") {
-    client.respond(id, isWorkflowMcpRequest(params)
+    const toolName = workflowMcpScope ? workflowMcpToolFromCodexRequest(params) : undefined;
+    client.respond(id, toolName && workflowMcpToolDecision(workflowMcpScope!, toolName) === "allow"
       ? { action: "accept", content: {}, _meta: null }
       : { action: "decline", content: null, _meta: null });
     return;
@@ -69,7 +90,10 @@ export function respondToCodexRuntimeServerRequest(
     client.respond(id, {});
     return;
   }
-  if (mcpApproval && isWorkflowMcpRequest(params)) {
+  const workflowToolName = mcpApproval && workflowMcpScope
+    ? workflowMcpToolFromCodexRequest(params)
+    : undefined;
+  if (workflowToolName && workflowMcpToolDecision(workflowMcpScope!, workflowToolName) === "allow") {
     client.respond(id, { decision: "accept" });
     return;
   }
@@ -88,6 +112,7 @@ export function respondToCodexRuntimeServerRequest(
         : "Codex requests permission to call an MCP tool.",
     metadata: { method, nativeRequestId: id, request: params },
     emit: approval.emit,
+    ...(approval.signal ? { signal: approval.signal } : {}),
     ...(permissionsApproval && fileWriteOperationFromCodexPermissions(params, approval.cwd)
       ? { operation: fileWriteOperationFromCodexPermissions(params, approval.cwd)! }
       : {}),

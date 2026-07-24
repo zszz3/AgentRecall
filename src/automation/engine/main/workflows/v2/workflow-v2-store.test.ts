@@ -88,6 +88,39 @@ describe("workflow-v2 file store", () => {
     ]);
   });
 
+  test("persists idempotent node completion submissions outside message history", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "workflow-v2-completion-"));
+    temporaryDirectories.push(root);
+    const store = new WorkflowV2FileStore(root);
+    const identity = { workflowId: "workflow-1", runId: "run-1", nodeId: "node-1", executionId: "execution-1" };
+    await store.beginNodeCompletionExecution({ ...identity, attempt: 2, startedAt: 10 });
+
+    const first = await store.submitNodeCompletion({
+      ...identity,
+      output: { nodeId: "node-1", summary: "Done", outputs: { b: 2, a: 1 }, proposals: [] },
+      submittedAt: 20,
+    });
+    const duplicate = await store.submitNodeCompletion({
+      ...identity,
+      output: { nodeId: "node-1", summary: "Done", outputs: { a: 1, b: 2 }, proposals: [] },
+      submittedAt: 21,
+    });
+
+    expect(duplicate.submissionId).toBe(first.submissionId);
+    expect(await store.readLatestNodeCompletionSubmission(identity)).toMatchObject({ submissionId: first.submissionId, status: "submitted" });
+    await store.resolveNodeCompletionSubmission({ ...identity, submissionId: first.submissionId, status: "consumed", resolvedAt: 30 });
+    await store.resolveNodeCompletionSubmission({ ...identity, submissionId: first.submissionId, status: "accepted", resolvedAt: 31 });
+    expect(await store.readLatestNodeCompletionSubmission(identity)).toBeUndefined();
+    await expect(store.submitNodeCompletion({
+      workflowId: "workflow-1",
+      runId: "run-1",
+      nodeId: "node-1",
+      executionId: "stale-execution",
+      output: { nodeId: "node-1", summary: "Late", outputs: { value: true }, proposals: [] },
+      submittedAt: 40,
+    })).rejects.toThrow("not active");
+  });
+
   test("rejects traversal identifiers before touching the filesystem", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "workflow-v2-safe-path-"));
     temporaryDirectories.push(root);

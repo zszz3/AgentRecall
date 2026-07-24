@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { RUNTIME_IDS } from "../shared/runtime-catalog";
+import { workflowMcpScopeFromEnvironment, workflowMcpToolsForScope } from "../shared/workflow-mcp-policy";
 
 interface McpToolDefinition {
   name: string;
@@ -32,6 +32,14 @@ const TOOL_ROUTES: Record<string, string> = {
   workflow_get: "/mcp/workflow/get",
   workflow_update: "/mcp/workflow/update",
   workflow_validate: "/mcp/workflow/validate",
+  workflow_confirm: "/mcp/workflow/confirm",
+  workflow_run: "/mcp/workflow/run",
+  workflow_run_list: "/mcp/workflow/run/list",
+  workflow_run_get: "/mcp/workflow/run/get",
+  workflow_stop: "/mcp/workflow/run/stop",
+  workflow_intervention_resolve: "/mcp/workflow/intervention/resolve",
+  workflow_script_input_submit: "/mcp/workflow/script-input/submit",
+  workflow_outputs_list: "/mcp/workflow/outputs/list",
   workflow_context_append: "/mcp/workflow/context/append",
   workflow_run_context_append: "/mcp/workflow/run-context/append",
   workflow_node_complete: "/mcp/workflow/node/complete",
@@ -91,6 +99,43 @@ const artifactsSchema = {
     additionalProperties: false,
   },
 };
+
+const workflowProposalSchema = {
+  oneOf: [
+    objectSchema({
+      kind: { type: "string", const: "continue" },
+      reason: { type: "string", minLength: 1 },
+      targetNodeIds: { type: "array", items: { type: "string", minLength: 1 } },
+    }, ["kind", "reason"]),
+    objectSchema({
+      kind: { type: "string", const: "retry" },
+      reason: { type: "string", minLength: 1 },
+      targetNodeId: { type: "string", minLength: 1 },
+    }, ["kind", "reason"]),
+    objectSchema({
+      kind: { type: "string", const: "escalate" },
+      reason: { type: "string", minLength: 1 },
+    }, ["kind", "reason"]),
+    objectSchema({
+      kind: { type: "string", const: "graph-revision" },
+      reason: { type: "string", minLength: 1 },
+    }, ["kind", "reason"]),
+  ],
+};
+
+const READ_ONLY_TOOL_NAMES = new Set([
+  "agent_templates_list",
+  "skill_templates_list",
+  "agents_list",
+  "channels_list",
+  "models_list",
+  "workflow_list",
+  "workflow_get",
+  "workflow_validate",
+  "workflow_run_list",
+  "workflow_run_get",
+  "workflow_outputs_list",
+]);
 
 export function mcpToolDefinitions(): McpToolDefinition[] {
   const tools: McpToolDefinition[] = [
@@ -241,8 +286,81 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
         ["workflowId", "runId", "report", "handoff"],
       ),
     },
+    {
+      name: "workflow_confirm",
+      description: "Confirm one exact workflow revision after validation.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        expectedRevision: { type: "integer", minimum: 1 },
+      }, ["workflowId", "expectedRevision"]),
+    },
+    {
+      name: "workflow_run",
+      description: "Start a confirmed workflow revision and return its runId.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        expectedRevision: { type: "integer", minimum: 1 },
+        contextDocument: { type: "string" },
+      }, ["workflowId", "expectedRevision"]),
+    },
+    {
+      name: "workflow_run_list",
+      description: "List workflow runs with optional workflow and status filters.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        status: { type: "string", enum: ["draft", "running", "waiting_for_user", "completed", "failed", "stopped"] },
+        startedAfter: { type: "number", minimum: 0 },
+        startedBefore: { type: "number", minimum: 0 },
+      }),
+    },
+    {
+      name: "workflow_run_get",
+      description: "Get one workflow run, node states, pending actions, and output summary.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        runId: { type: "string" },
+      }, ["workflowId", "runId"]),
+    },
+    {
+      name: "workflow_stop",
+      description: "Stop one exact workflow run without affecting other runs.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        runId: { type: "string" },
+      }, ["workflowId", "runId"]),
+    },
+    {
+      name: "workflow_intervention_resolve",
+      description: "Resolve the current intervention for one workflow node. Script approvals remain enforced.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        runId: { type: "string" },
+        nodeId: { type: "string" },
+        action: { type: "string", enum: ["continue", "skip", "escalate", "replan", "increase_review_strength", "approve_once", "reject"] },
+        reason: { type: "string" },
+      }, ["workflowId", "runId", "nodeId", "action"]),
+    },
+    {
+      name: "workflow_script_input_submit",
+      description: "Submit structured values requested by one script node.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        runId: { type: "string" },
+        nodeId: { type: "string" },
+        values: { type: "object", additionalProperties: true },
+      }, ["workflowId", "runId", "nodeId", "values"]),
+    },
+    {
+      name: "workflow_outputs_list",
+      description: "List safe output metadata for one workflow run without exposing local absolute paths.",
+      inputSchema: objectSchema({
+        workflowId: { type: "string" },
+        runId: { type: "string" },
+      }, ["workflowId", "runId"]),
+    },
   ];
-  if (process.env.AGENT_RECALL_WORKFLOW_RUN_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_ID) {
+  const managed = Boolean(process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN);
+  if (managed && process.env.AGENT_RECALL_WORKFLOW_RUN_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID) {
     tools.push({
       name: "workflow_node_complete",
       description: "Submit the current workflow node's validated structured result. Call this exactly once when the node is complete; ordinary text remains conversation history.",
@@ -253,11 +371,13 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
         evidence: { type: "array", items: { type: "string" } },
         risks: { type: "array", items: { type: "string" } },
         nextStepSuggestions: { type: "array", items: { type: "string" } },
-        proposals: { type: "array" },
+        proposals: { type: "array", items: workflowProposalSchema },
       }, ["nodeId", "summary", "outputs", "proposals"]),
     });
   }
-  return tools;
+  if (!managed) return tools.filter((tool) => READ_ONLY_TOOL_NAMES.has(tool.name));
+  const allowed = new Set(workflowMcpToolsForScope(workflowMcpScopeFromEnvironment(process.env)));
+  return tools.filter((tool) => allowed.has(tool.name));
 }
 
 export function resolveBridgeDiscoveryPath(): string {
@@ -279,7 +399,11 @@ async function readBridgeDiscovery(): Promise<{ host: string; port: number; toke
   if (typeof record.host !== "string" || typeof record.port !== "number" || typeof record.token !== "string") {
     throw new Error("AgentRecall MCP bridge discovery file is invalid.");
   }
-  return { host: record.host, port: record.port, token: record.token };
+  return {
+    host: record.host,
+    port: record.port,
+    token: process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN || record.token,
+  };
 }
 
 export async function callMcpTool(name: string, args: unknown): Promise<unknown> {
@@ -297,6 +421,7 @@ export async function callMcpTool(name: string, args: unknown): Promise<unknown>
       ...(name === "workflow_node_complete" ? {
         workflowId: process.env.AGENT_RECALL_WORKFLOW_ID,
         runId: process.env.AGENT_RECALL_WORKFLOW_RUN_ID,
+        executionId: process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID,
       } : {}),
     }),
   });
@@ -371,8 +496,4 @@ export function startStdioMcpServer(): void {
       void handleJsonRpc(JSON.parse(line) as JsonRpcRequest);
     }
   });
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  startStdioMcpServer();
 }

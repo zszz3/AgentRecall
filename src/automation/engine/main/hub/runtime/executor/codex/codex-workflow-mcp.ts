@@ -1,13 +1,45 @@
-import { workflowMcpLaunchConfig } from "../workflow/workflow-mcp-launch";
+import { workflowMcpLaunchConfig, type WorkflowMcpBinding } from "../workflow/workflow-mcp-launch";
+import {
+  workflowMcpToolDecision,
+  workflowMcpToolsForScope,
+  type WorkflowMcpScope,
+} from "../../../../../shared/workflow-mcp-policy";
 
-export function codexWorkflowMcpArgs(discoveryPath: string | undefined, workflowId: string | undefined, runId?: string, nodeId?: string): string[] {
-  const config = workflowMcpLaunchConfig(discoveryPath, workflowId, { runId, nodeId });
-  if (!config) return [];
-  return [
-    "-c", `mcp_servers.agent_recall.command=${JSON.stringify(config.command)}`,
-    "-c", `mcp_servers.agent_recall.args=[${config.args.map((arg) => JSON.stringify(arg)).join(", ")}]`,
-    "-c", `mcp_servers.agent_recall.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE=${JSON.stringify(config.env.AGENT_RECALL_WORKFLOW_MCP_BRIDGE)}`,
-    "-c", `mcp_servers.agent_recall.env.AGENT_RECALL_WORKFLOW_ID=${JSON.stringify(config.env.AGENT_RECALL_WORKFLOW_ID)}`,
-    "-c", `mcp_servers.agent_recall.env.ELECTRON_RUN_AS_NODE=${JSON.stringify(config.env.ELECTRON_RUN_AS_NODE)}`,
-  ];
+export interface CodexWorkflowMcpConfig {
+  args: string[];
+  env: Record<string, string>;
+  requiredMcpTools?: Record<string, string[]>;
+}
+
+export function codexWorkflowMcpConfig(binding: WorkflowMcpBinding): CodexWorkflowMcpConfig {
+  const config = workflowMcpLaunchConfig(binding);
+  if (!config) return { args: [], env: {} };
+  const envNames = Object.keys(config.env);
+  const scope: WorkflowMcpScope = binding.scope
+    ?? (binding.runId && binding.nodeId ? "node_execution" : "planning");
+  const completionEnabled = Boolean(binding.runId && binding.nodeId && binding.executionId);
+  const exposedTools = workflowMcpToolsForScope(scope)
+    .filter((toolName) => toolName !== "workflow_node_complete" || completionEnabled);
+  const approvedTools = exposedTools.filter((toolName) => workflowMcpToolDecision(scope, toolName) === "allow");
+  return {
+    args: [
+      "-c", `mcp_servers.agent_recall.command=${JSON.stringify(config.command)}`,
+      "-c", `mcp_servers.agent_recall.args=[${config.args.map((arg) => JSON.stringify(arg)).join(", ")}]`,
+      "-c", `mcp_servers.agent_recall.env_vars=[${envNames.map((name) => JSON.stringify(name)).join(", ")}]`,
+      "-c", `mcp_servers.agent_recall.enabled_tools=[${exposedTools.map((name) => JSON.stringify(name)).join(", ")}]`,
+      "-c", `mcp_servers.agent_recall.default_tools_approval_mode=${JSON.stringify("prompt")}`,
+      ...approvedTools.flatMap((toolName) => [
+        "-c",
+        `mcp_servers.agent_recall.tools.${toolName}.approval_mode=${JSON.stringify("approve")}`,
+      ]),
+    ],
+    env: config.env,
+    ...((completionEnabled || scope === "planning") ? {
+      requiredMcpTools: { agent_recall: [completionEnabled ? "workflow_node_complete" : "workflow_create"] },
+    } : {}),
+  };
+}
+
+export function codexWorkflowMcpArgs(binding: WorkflowMcpBinding): string[] {
+  return codexWorkflowMcpConfig(binding).args;
 }

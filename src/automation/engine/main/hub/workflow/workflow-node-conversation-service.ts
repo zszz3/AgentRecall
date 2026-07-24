@@ -11,7 +11,18 @@ export class WorkflowNodeConversationService {
       runId: string;
       nodeId: string;
       output: Parameters<WorkflowV2ConversationManager["proposeCompletion"]>[1]["output"];
+      executionId: string;
+      submissionId?: string;
     }) => Promise<WorkflowOperationResult>;
+    nodeExecutionId: (workflowId: string, runId: string, nodeId: string, attempt?: number) => string;
+    rejectNodeCompletion: (input: {
+      workflowId: string;
+      runId: string;
+      nodeId: string;
+      executionId: string;
+      submissionId: string;
+      reason?: string;
+    }) => Promise<void>;
   }) {}
 
   async sendMessage(conversationId: string, message: string): Promise<AppSnapshot> {
@@ -43,6 +54,8 @@ export class WorkflowNodeConversationService {
         runId: conversation.runId,
         nodeId: conversation.nodeId,
         output: proposal.output,
+        executionId: this.deps.nodeExecutionId(conversation.workflowId, conversation.runId, conversation.nodeId, conversation.telemetry?.attempt),
+        ...(proposal.submissionId ? { submissionId: proposal.submissionId } : {}),
       });
       if (result.ok) await this.deps.conversations.closeCompleted(conversationId);
       else this.deps.conversations.releaseCompletion(conversationId);
@@ -59,6 +72,18 @@ export class WorkflowNodeConversationService {
   }
 
   async rejectCompletion(conversationId: string, instruction: string): Promise<AppSnapshot> {
+    const conversation = this.deps.conversations.get(conversationId);
+    const submissionId = conversation?.completionProposal?.submissionId;
+    if (conversation && submissionId) {
+      await this.deps.rejectNodeCompletion({
+        workflowId: conversation.workflowId,
+        runId: conversation.runId,
+        nodeId: conversation.nodeId,
+        executionId: this.deps.nodeExecutionId(conversation.workflowId, conversation.runId, conversation.nodeId, conversation.telemetry?.attempt),
+        submissionId,
+        ...(instruction.trim() ? { reason: instruction.trim() } : {}),
+      });
+    }
     await this.deps.conversations.rejectCompletion(conversationId, instruction);
     return this.deps.snapshot();
   }

@@ -172,6 +172,19 @@ describe("normalizeClaudeStreamEvent", () => {
       { type: "tool_result", name: "mcp__multi_agent_chat__workflow_create", content: "Workflow created", metadata: { id: "toolu_2" } },
     ]);
 
+    expect(normalizeClaudeStreamEvent({
+      type: "message",
+      message: {
+        role: "user",
+        content: [{ type: "mcp_tool_result", tool_use_id: "toolu_2", content: "Permission rejected", is_error: true }],
+      },
+    }, state)).toEqual([{
+      type: "tool_result",
+      name: "mcp__multi_agent_chat__workflow_create",
+      content: "Permission rejected",
+      metadata: { id: "toolu_2", status: "failed" },
+    }]);
+
     expect(
       normalizeClaudeStreamEvent(
         {

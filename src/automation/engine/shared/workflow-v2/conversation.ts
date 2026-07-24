@@ -21,6 +21,7 @@ export interface WorkflowNodeMessage {
 }
 
 export interface WorkflowNodeCompletionProposal {
+  submissionId?: string;
   output: WorkflowV2WorkerOutput;
   acceptanceCriteria: Array<{ key: string; satisfied: boolean; evidence?: string }>;
   unresolvedRisks: string[];

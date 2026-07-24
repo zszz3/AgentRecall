@@ -427,6 +427,33 @@ describe("workflow-v2 validation", () => {
     expect(validateWorkflowV2Definition(definition).valid).toBe(true);
   });
 
+  test("accepts document artifact metadata on string outputs", () => {
+    const definition = validDefinition();
+    definition.nodes[0]!.outputFields[0] = {
+      key: "answer_markdown",
+      required: true,
+      valueType: "string",
+      artifact: { format: "markdown", fileName: "report.md" },
+    };
+
+    expect(validateWorkflowV2Definition(definition)).toMatchObject({ valid: true, errors: [] });
+  });
+
+  test("rejects unsafe artifact names and incompatible content types", () => {
+    const definition = validDefinition();
+    definition.nodes[0]!.outputFields[0] = {
+      key: "answer_markdown",
+      required: true,
+      valueType: "boolean",
+      artifact: { format: "markdown", fileName: "../report.md" },
+    };
+
+    const result = validateWorkflowV2Definition(definition);
+
+    expect(result.errors).toContain("Workflow V2 node plan output field answer_markdown artifact fileName must be a safe file name.");
+    expect(result.errors).toContain("Workflow V2 node plan output field answer_markdown artifact content must have valueType string or json.");
+  });
+
   test("rejects an execution lease whose soft deadline is not below its hard deadline", () => {
     const invalid = validDefinition();
     invalid.nodes[0]!.executionLease = {

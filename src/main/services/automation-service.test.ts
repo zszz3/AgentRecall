@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import path from "node:path";
 import type { AppSnapshot } from "../../automation/contracts";
 import type { AgentHub } from "../../automation/engine/main/hub/agent-hub";
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
@@ -12,7 +13,7 @@ function snapshot(workDir = "/repo"): AppSnapshot {
   return { workDir } as AppSnapshot;
 }
 
-function fixture() {
+function fixture(injectAgents = true) {
   const calls: string[] = [];
   let current = snapshot();
   let listener: ((value: AppSnapshot) => void) | undefined;
@@ -22,6 +23,7 @@ function fixture() {
     ensureBundledWorkflows: vi.fn(() => { calls.push("bundled"); }),
     setMcpServers: vi.fn(() => { calls.push("mcp"); }),
     setWorkflowMcpDiscoveryPath: vi.fn(() => { calls.push("discovery"); }),
+    setWorkflowMcpManagedToken: vi.fn(() => { calls.push("managed-token"); }),
     initialize: vi.fn(async () => { calls.push("runtime"); }),
     refreshDiscoverableModelCatalogs: vi.fn(async () => undefined),
     snapshot: vi.fn(() => current),
@@ -60,7 +62,7 @@ function fixture() {
       registry,
       evaluations,
       teamChats,
-      agents,
+      ...(injectAgents ? { agents } : {}),
       loadBundledWorkflows: vi.fn(async () => [{ workflowId: "wf", title: "One", objective: "One", definition: {} as never }]),
       startRouter: vi.fn(async () => {
         calls.push("router");
@@ -73,6 +75,7 @@ function fixture() {
           host: "127.0.0.1",
           port: 2,
           token: "test-token",
+          readToken: "read-token",
           discoveryPath: "/user-data/automation-mcp-bridge.json",
           stop: async () => { calls.push("bridge-stop"); },
         };
@@ -93,15 +96,39 @@ describe("NativeAutomationService", () => {
     expect(service.health()).toEqual({ state: "idle" });
   });
 
+  it("reports planning write tools without reading child-only environment variables", async () => {
+    const previous = process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
+    delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
+    try {
+      const { service } = fixture(false);
+      await service.initialize();
+      expect(service.mcp.setupStatus()).toMatchObject({
+        bridgeRunning: true,
+        workflowCreateAvailable: true,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
+      else process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = previous;
+    }
+  });
+  it("keeps the managed MCP write token inside the native runtime", async () => {
+    const { service, hub } = fixture();
+
+    await service.initialize();
+
+    expect(hub.setWorkflowMcpManagedToken).toHaveBeenCalledWith("test-token");
+  });
+
   it("initializes the native engine once in dependency order", async () => {
     const { service, calls, hub, teamChats } = fixture();
 
     await Promise.all([service.initialize(), service.initialize()]);
 
-    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "router", "bridge", "discovery", "runtime", "team-chat-start"]);
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "router", "bridge", "discovery", "managed-token", "runtime", "team-chat-start"]);
     expect(teamChats.connect).toHaveBeenCalledTimes(1);
-    expect(hub.loadModelChannels).toHaveBeenCalledWith("/user-data/runtime-channels.json");
+    expect(hub.loadModelChannels).toHaveBeenCalledWith(path.join("/user-data", "runtime-channels.json"));
     expect(hub.loadPersistedState).toHaveBeenCalledWith(expect.any(Object));
+    expect(hub.setWorkflowMcpManagedToken).toHaveBeenCalledWith("test-token");
     expect(service.health()).toEqual({ state: "ready" });
   });
 

@@ -67,7 +67,19 @@ describe("PostgreSQL AgentHub persistence", () => {
           configuredAgentId: "codex",
           modelId: "gpt",
           objective: "Review the change",
-          messages: [],
+          messages: [{
+            id: "workflow-message-1",
+            role: "assistant",
+            content: "Approval denied",
+            events: [{
+              id: "workflow-tool-1",
+              type: "tool_result",
+              name: "workflow_update",
+              content: "denied",
+              timestamp: 1_650,
+              metadata: { status: "failed" },
+            }],
+          }],
           reply: "",
           runProgress: [{
             nodeId: "review",
@@ -162,7 +174,18 @@ describe("PostgreSQL AgentHub persistence", () => {
       }],
       workflowStore: {
         activeWorkflowId: "workflow-1",
-        workflows: [{ workflowId: "workflow-1", runIds: ["run-1"] }],
+        workflows: [{
+          workflowId: "workflow-1",
+          runIds: ["run-1"],
+          messages: [{
+            id: "workflow-message-1",
+            events: [{
+              id: "workflow-tool-1",
+              type: "tool_result",
+              metadata: { status: "failed" },
+            }],
+          }],
+        }],
         runs: [{
           runId: "run-1",
           triggerSource: "scheduled",

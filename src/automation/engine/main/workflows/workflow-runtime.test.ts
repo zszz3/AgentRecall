@@ -2119,6 +2119,61 @@ describe("WorkflowRuntime Workflow V2 bridge", () => {
     ]);
   });
 
+  test("consumes one-shot node output from the durable completion ledger instead of tool-call history", async () => {
+    const persistedStates: WorkflowV2PersistedRunState[] = [];
+    let executionIdentity: { workflowId: string; runId: string; nodeId: string; executionId: string } | undefined;
+    let resolvedStatus: string | undefined;
+    const submittedOutput: WorkflowV2WorkerOutput = {
+      nodeId: "draft",
+      summary: "Durable result",
+      outputs: { draft: "persisted completion" },
+      proposals: [],
+    };
+    const store: WorkflowV2StorePort = {
+      persistRunState: async (state) => { persistedStates.push(structuredClone(state)); },
+      appendEvents: async () => undefined,
+      beginNodeCompletionExecution: async (input) => {
+        executionIdentity = { workflowId: input.workflowId, runId: input.runId, nodeId: input.nodeId, executionId: input.executionId };
+        return { schemaVersion: 1, ...input, updatedAt: input.startedAt, submissions: [] };
+      },
+      readLatestNodeCompletionSubmission: async (input) => {
+        expect(input).toEqual(executionIdentity);
+        return { submissionId: "submission-1", digest: "digest-1", status: "submitted", output: submittedOutput, submittedAt: 2 };
+      },
+      resolveNodeCompletionSubmission: async (input) => {
+        resolvedStatus = input.status;
+        return { submissionId: input.submissionId, digest: "digest-1", status: input.status, output: submittedOutput, submittedAt: 2, resolvedAt: input.resolvedAt };
+      },
+    };
+    const fixture = await workflowV2RuntimeFixture({
+      store,
+      taskFactory: (request, index) => ({
+        id: `task-${index}`,
+        title: "Workflow V2 LLM node",
+        status: "completed",
+        prompt: request.prompt,
+        configuredAgentId: request.configuredAgentId,
+        messages: [{
+          id: "message-1",
+          role: "assistant",
+          content: "This text is not the structured result.",
+          events: [{ id: "tool-1", type: "tool_call", name: "workflow_node_complete", content: "{truncated...", timestamp: 1 }],
+        }],
+        createdAt: 1,
+        updatedAt: 1,
+      } as TaskRun),
+      executeScript: async ({ node }) => ({ nodeId: node.id, summary: "Verified", outputs: { verified: true }, proposals: [] }),
+    });
+
+    fixture.runtime.runWorkflow({ workflowId: fixture.workflow.workflowId });
+    const finished = await fixture.finished;
+
+    expect(finished.status).toBe("completed");
+    expect(executionIdentity).toMatchObject({ workflowId: fixture.workflow.workflowId, runId: "run-v2-runtime", nodeId: "draft" });
+    expect(resolvedStatus).toBe("consumed");
+    expect(persistedStates.at(-1)?.workerOutputs.find((output) => output.nodeId === "draft")).toEqual(submittedOutput);
+  });
+
   test("keeps one-shot message history when structured output parsing fails", async () => {
     const fixture = await workflowV2RuntimeFixture({
       taskFactory: (request) => ({

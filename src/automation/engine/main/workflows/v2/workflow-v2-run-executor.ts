@@ -1,4 +1,5 @@
 import type { RunTaskRequest, TaskRun } from "../../../shared/types";
+import { randomUUID } from "node:crypto";
 import type { RuntimeConversation } from "../../../shared/runtime/conversation";
 import { mergeRuntimeUsage } from "../../../../../shared/runtime/usage";
 import type { WorkflowEvent, WorkflowRunNodeTelemetry, WorkflowRunProgressItem } from "../../../shared/workflow/run";
@@ -15,6 +16,7 @@ import path from "node:path";
 import {
   WORKFLOW_TASK_POLL_MS,
   WORKFLOW_TASK_TIMEOUT_MS,
+  taskAssistantArtifact,
   taskArtifact,
   truncateWorkflowContext,
   workflowProgressAfterFailure,
@@ -71,6 +73,7 @@ import {
   parseWorkflowV2HookLlmValue,
   parseWorkflowV2WorkerArtifact,
 } from "./workflow-v2-output-parser";
+import { materializeWorkflowV2OutputArtifacts } from "./workflow-v2-output-artifacts";
 import {
   parseWorkflowV2ReviewerResponse,
   workflowV2ReviewerPrompt,
@@ -360,6 +363,7 @@ export class WorkflowV2RunExecutor {
       workDir: string;
       taskIds: string[];
       supervisorTaskIds: string[];
+      completionExecutionId?: string;
     }): Promise<TaskRun> => {
       const policy = input.node.executionLease;
       if (!policy) {
@@ -628,6 +632,7 @@ export class WorkflowV2RunExecutor {
           workDir: input.workDir,
           continuationPolicy: "resume-required",
           runtimeConversation: completedProgressTask.runtimeConversation,
+          ...(input.completionExecutionId ? { workflowNodeExecutionId: input.completionExecutionId } : {}),
         }, true);
         input.taskIds.push(currentTask.id);
       }
@@ -672,6 +677,8 @@ export class WorkflowV2RunExecutor {
         ...(recoveryOverride?.forceIndependentReview ? ["This attempt requires independent semantic review."] : []),
       ].join("\n\n");
       const effectiveContextDocument = [messages.contextDocument, recoveryCheckpoint ? `# Recovery checkpoint\n${recoveryCheckpoint}` : ""].filter(Boolean).join("\n\n");
+      const attempt = (runtimeAttemptByNodeId.get(request.node.id) ?? 0) + 1;
+      runtimeAttemptByNodeId.set(request.node.id, attempt);
       if (request.planNode.executionMode === "interactive") {
         const conversation = await this.deps.startWorkflowNodeConversation({
           workflowId: workflow.workflowId,
@@ -688,6 +695,7 @@ export class WorkflowV2RunExecutor {
             "When complete, call workflow_node_complete (or its namespaced MCP equivalent) exactly once with the structured worker output for explicit user confirmation. Do not print the worker-output JSON as ordinary assistant content.",
           ].join("\n\n"),
           contextDocument: effectiveContextDocument,
+          attempt,
         });
         throw new WorkflowV2SupervisionSignal({
           resolution: {
@@ -697,7 +705,7 @@ export class WorkflowV2RunExecutor {
           },
           report: {
             nodeId: request.node.id,
-            attempt: 1,
+            attempt,
             phase: "interactive",
             completedItems: [],
             remainingItems: ["User confirmation"],
@@ -709,8 +717,15 @@ export class WorkflowV2RunExecutor {
           },
         });
       }
-      const attempt = (runtimeAttemptByNodeId.get(request.node.id) ?? 0) + 1;
-      runtimeAttemptByNodeId.set(request.node.id, attempt);
+      const completionExecutionId = randomUUID();
+      await durableStore?.beginNodeCompletionExecution?.({
+        workflowId: workflow.workflowId,
+        runId,
+        nodeId: request.node.id,
+        executionId: completionExecutionId,
+        attempt,
+        startedAt: Date.now(),
+      });
       const configuredAgent = latestSnapshot.configuredAgents.find((item) => item.id === agentRoute.configuredAgentId);
       const channel = configuredAgent?.channelId
         ? latestSnapshot.channels.find((item) => item.id === configuredAgent.channelId)
@@ -734,6 +749,7 @@ export class WorkflowV2RunExecutor {
         prompt: effectivePrompt,
         developerInstructions: effectiveDeveloperInstructions,
         contextDocument: effectiveContextDocument,
+        workflowNodeExecutionId: completionExecutionId,
         configuredAgentId: agentRoute.configuredAgentId,
         modelId: agentRoute.modelId,
         workDir: workflowWorkDir,
@@ -757,6 +773,7 @@ export class WorkflowV2RunExecutor {
           workDir: workflowWorkDir,
           taskIds,
           supervisorTaskIds,
+          completionExecutionId,
         });
         archiveTaskId = completedTask.id;
         // Message history is an execution artifact, independent from whether the
@@ -771,13 +788,37 @@ export class WorkflowV2RunExecutor {
           telemetry: completedTelemetry,
           ...(historyMessages.length > 0 ? { messages: historyMessages } : {}),
         });
-        const artifact = taskArtifact(completedTask);
+        const submission = await durableStore?.readLatestNodeCompletionSubmission?.({
+          workflowId: workflow.workflowId,
+          runId,
+          nodeId: request.node.id,
+          executionId: completionExecutionId,
+        });
+        const artifact = submission ? JSON.stringify(submission.output) : taskAssistantArtifact(completedTask);
         const output = parseWorkflowV2WorkerArtifact(request.node, artifact);
+        await materializeWorkflowV2OutputArtifacts({
+          workflowId: workflow.workflowId,
+          runId,
+          workDir: workflowWorkDir,
+          node: request.node,
+          output,
+        });
+        if (submission) {
+          await durableStore?.resolveNodeCompletionSubmission?.({
+            workflowId: workflow.workflowId,
+            runId,
+            nodeId: request.node.id,
+            executionId: completionExecutionId,
+            submissionId: submission.submissionId,
+            status: "consumed",
+            resolvedAt: Date.now(),
+          });
+        }
         updateNode(request.node.id, { status: "running", detail: output.summary, taskId: task.id, telemetry: completedTelemetry }, {
           type: "node_output",
           nodeId: request.node.id,
           taskId: task.id,
-          attempt: 1,
+          attempt,
           summary: output.summary,
         });
         return output;
@@ -879,6 +920,13 @@ export class WorkflowV2RunExecutor {
             operationDigest,
             ...(approvalGrant ? { approvalRequestId: approvalGrant.requestId } : {}),
           },
+        });
+        await materializeWorkflowV2OutputArtifacts({
+          workflowId: workflow.workflowId,
+          runId,
+          workDir: workflowWorkDir,
+          node: request.node,
+          output,
         });
       } catch (error) {
         await throwIfWorkflowV2ManuallyPaused(request.node.id);

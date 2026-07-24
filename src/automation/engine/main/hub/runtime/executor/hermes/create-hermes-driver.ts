@@ -13,6 +13,8 @@ import { HermesAgentExecutor } from "./hermes-executor";
 import { HermesInteractiveSession } from "./hermes-session";
 import { runHermesChannelTest, runHermesWorkflow } from "./hermes-workflow";
 import { acpMcpServers, acpWorkflowMcpServers } from "../runtime-mcp";
+import { AcpWorkflowOneShotExecutor } from "../acp-workflow-one-shot-executor";
+import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
 
 export function createHermesDriver(options: RuntimeAgentExecutorFactoryOptions): RuntimeDriver {
   const deleteSessionArtifactsByRuntime = options.deleteSessionArtifactsByRuntime ?? {};
@@ -21,7 +23,21 @@ export function createHermesDriver(options: RuntimeAgentExecutorFactoryOptions):
     surfaceSupport: [...hermesSurfaceSupport],
     getCapabilities: getHermesCapabilities,
     runtimeStateCodec: hermesRuntimeStateCodec,
-    createOneShotExecutor: (context) => new HermesAgentExecutor(context, options),
+    createOneShotExecutor: (context) => context.planningWorkflowId && context.workflowRunId && context.workflowNodeId
+      ? new AcpWorkflowOneShotExecutor(context, {
+          executable: context.runtime.command || options.executables.hermes,
+          args: ["acp"],
+          modelId: context.runtimeConfig.model,
+          mcpServers: [
+            ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
+            ...acpWorkflowMcpServers({
+              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
+              runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
+            }),
+          ],
+          ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
+        })
+      : new HermesAgentExecutor(context, options),
     createInteractiveSession: (context) =>
       new HermesInteractiveSession(context, {
         capabilities: hermesInteractiveSessionCapabilities,
@@ -31,10 +47,14 @@ export function createHermesDriver(options: RuntimeAgentExecutorFactoryOptions):
             args: ["acp"],
             cwd: interactiveContext.workDir,
             modelId: interactiveContext.runtimeConfig.model,
-            mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers(options.workflowMcpDiscoveryPath?.(), interactiveContext.planningWorkflowId, interactiveContext.workflowRunId, interactiveContext.workflowNodeId)],
+            mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers({
+              discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
+              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
+            })],
             onEvent,
             onExit,
             approvalOwnerId: interactiveContext.chatId,
+            ...(workflowMcpScopeForContext(interactiveContext) ? { workflowMcpScope: workflowMcpScopeForContext(interactiveContext) } : {}),
             ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
           }),
       }),

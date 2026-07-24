@@ -372,6 +372,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         workflow_id text NOT NULL REFERENCES agent_recall.workflows(id) ON DELETE CASCADE,
         role text NOT NULL,
         content text NOT NULL,
+        events jsonb,
         sequence integer NOT NULL
       );
 
@@ -780,6 +781,15 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           nullif(assistant_text, '')
         )
         OR derivation_version < 2;
+    `,
+  ],
+}, {
+  version: 4,
+  name: "persist Workflow draft message events",
+  statements: [
+    `
+      ALTER TABLE agent_recall.workflow_draft_messages
+        ADD COLUMN IF NOT EXISTS events jsonb;
     `,
   ],
 }];

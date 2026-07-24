@@ -91,7 +91,8 @@ export function workflowStoragePlanDocument(plan: WorkflowStoragePlan): string {
     `- Output document directory: ${plan.outputDir}`,
     "",
     "All agent nodes should treat the Workflow Context in the app as the source of shared memory.",
-    "If an agent creates user-facing documents, write every file directly under the output document directory and report the exact relative file path.",
+    "Output fields with artifact metadata are materialized by the runtime under the output document directory.",
+    "If an agent creates any other user-facing file, write it directly under the output document directory and report the exact relative file path.",
     "Do not create per-node output directories or write into another workflow run directory.",
   ].join("\n");
 }
@@ -105,11 +106,10 @@ export function workflowProgressAfterFailure(progress: WorkflowRunProgressItem[]
 }
 
 export function taskArtifact(task: TaskRun): string {
-  const completionTool = [...task.messages]
-    .reverse()
-    .flatMap((message) => [...(message.events ?? [])].reverse())
-    .find((event) => event.type === "tool_call" && event.name?.toLowerCase().includes("workflow_node_complete"));
-  if (completionTool?.content?.trim()) return completionTool.content.trim();
+  return taskAssistantArtifact(task);
+}
+
+export function taskAssistantArtifact(task: TaskRun): string {
   const assistantMessage = [...task.messages].reverse().find((message) => message.role === "assistant" && message.content.trim());
   if (assistantMessage) return assistantMessage.content.trim();
   const errorMessage = [...task.messages].reverse().find((message) => message.role === "error" && message.content.trim());

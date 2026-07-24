@@ -75,11 +75,15 @@ export class PostgresWorkflowRepository {
         configuredAgentId: row.configured_agent_id,
         modelId: row.model_id,
         objective: row.objective,
-        messages: (messagesByWorkflow.get(workflowId) ?? []).map((message) => ({
-          id: message.id,
-          role: message.role,
-          content: message.content,
-        })),
+        messages: (messagesByWorkflow.get(workflowId) ?? []).map((message) => {
+          const draftMessage: RecordValue = {
+            id: message.id,
+            role: message.role,
+            content: message.content,
+          };
+          optional(draftMessage, "events", postgresJson(message.events));
+          return draftMessage;
+        }),
         reply: row.reply,
         runProgress: mapProgress(progressByWorkflow.get(workflowId) ?? []),
         runContextDocument: row.run_context_document,
@@ -178,13 +182,14 @@ export class PostgresWorkflowRepository {
       for (const [sequence, message] of asArray(workflow.messages).entries()) {
         await database.query(
           `insert into agent_recall.workflow_draft_messages (
-            id, workflow_id, role, content, sequence
-          ) values ($1, $2, $3, $4, $5)`,
+            id, workflow_id, role, content, events, sequence
+          ) values ($1, $2, $3, $4, $5::jsonb, $6)`,
           [
             asString(message.id),
             workflowId,
             asString(message.role),
             asString(message.content),
+            jsonParameter(message.events),
             sequence,
           ],
         );

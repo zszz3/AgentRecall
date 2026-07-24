@@ -9,6 +9,19 @@ export interface WorkflowGrillMessage {
   id: string;
   role: "assistant" | "user";
   content: string;
+  events?: WorkflowGrillEvent[];
+}
+
+export interface WorkflowGrillEvent {
+  id: string;
+  type: "tool_call" | "tool_result" | "approval_request" | "approval_response";
+  content: string;
+  timestamp: number;
+  name?: string;
+  requestId?: string;
+  requestState?: "live" | "resolved" | "expired";
+  decision?: "approved" | "rejected";
+  metadata?: Record<string, unknown>;
 }
 
 export interface WorkflowDraftState {

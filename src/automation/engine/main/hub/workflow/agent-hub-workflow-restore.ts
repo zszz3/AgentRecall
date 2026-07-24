@@ -8,7 +8,7 @@ import type {
   WorkflowV2Plan,
 } from "../../../shared/types";
 import type { RuntimeConversation } from "../../../shared/runtime/conversation";
-import type { WorkflowDraftState, WorkflowStoreState } from "../../../shared/workflow/draft";
+import type { WorkflowDraftState, WorkflowGrillEvent, WorkflowStoreState } from "../../../shared/workflow/draft";
 import type {
   WorkflowEvent,
   WorkflowRunProgressItem,
@@ -51,6 +51,34 @@ function restoreWorkflowV2Plan(raw: unknown): WorkflowV2Plan | undefined {
   } catch {
     return undefined;
   }
+}
+
+function restoreWorkflowGrillEvent(raw: unknown): WorkflowGrillEvent | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  const type = record.type;
+  if (type !== "tool_call" && type !== "tool_result" && type !== "approval_request" && type !== "approval_response") return undefined;
+  const event: WorkflowGrillEvent = {
+    id: asOptionalString(record.id) ?? randomUUID(),
+    type,
+    content: asOptionalString(record.content) ?? "",
+    timestamp: asNumber(record.timestamp, Date.now()),
+  };
+  const name = asOptionalString(record.name);
+  if (name) event.name = name;
+  const requestId = asOptionalString(record.requestId);
+  if (requestId) event.requestId = requestId;
+  if (type === "approval_request") {
+    event.requestState = record.requestState === "resolved" || record.requestState === "expired"
+      ? record.requestState
+      : "expired";
+  }
+  if (type === "approval_response" && (record.decision === "approved" || record.decision === "rejected")) {
+    event.decision = record.decision;
+  }
+  const metadata = asRecord(record.metadata);
+  if (metadata) event.metadata = structuredClone(metadata);
+  return event;
 }
 
 export function restoreScheduledWorkflowRunnerConfig(
@@ -184,10 +212,14 @@ export function restoreWorkflowDraft(
       .map((message) => {
         const messageRecord = asRecord(message);
         if (!messageRecord || !isWorkflowDraftMessageRole(messageRecord.role)) return undefined;
+        const events = asArray(messageRecord.events)
+          .map((event) => restoreWorkflowGrillEvent(event))
+          .filter((event): event is WorkflowGrillEvent => Boolean(event));
         return {
           id: asOptionalString(messageRecord.id) ?? randomUUID(),
           role: messageRecord.role,
           content: asOptionalString(messageRecord.content) ?? "",
+          ...(events.length > 0 ? { events } : {}),
         };
       })
       .filter((message): message is WorkflowDraftState["messages"][number] => Boolean(message)),

@@ -51,7 +51,7 @@ describe("workflow-v2 terminal normalization", () => {
       execModel: "llm",
       executionMode: "one-shot",
       role: "orchestrator",
-      outputFields: [{ key: "answer_markdown", required: true }],
+      outputFields: [{ key: "answer_markdown", required: true, valueType: "string", artifact: { format: "markdown", fileName: "report.md" } }],
       contextBudget: { maxUpstreamNodes: 2 },
     });
     if (!summaryNode || summaryNode.execModel !== "llm") throw new Error("expected summary LLM node");

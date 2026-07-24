@@ -19,6 +19,13 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function errorMessage(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  return asString(record.message) || asString(record.error) || asString(record.detail);
+}
+
 function truncate(value: string, maxLength = 1600): string {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength).trimEnd()}\n...`;
@@ -44,6 +51,16 @@ function formatArguments(value: unknown): string {
   }
 
   return raw;
+}
+
+function formatValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function extractToolOutput(item: Record<string, unknown>): string {
@@ -74,7 +91,10 @@ function normalizeToolItem(item: Record<string, unknown> | undefined, state: Cod
     const callId = asString(item.call_id) || asString(item.callId) || asString(item.id);
     if (callId) state.toolNames.set(callId, name);
 
-    const args = truncate(formatArguments(item.arguments), 600);
+    const formattedArguments = formatArguments(item.arguments);
+    const args = name.toLowerCase().includes("workflow_node_complete")
+      ? formattedArguments
+      : truncate(formattedArguments, 600);
     return [{ type: "tool_call", name, content: args }];
   }
 
@@ -86,6 +106,53 @@ function normalizeToolItem(item: Record<string, unknown> | undefined, state: Cod
   }
 
   return [];
+}
+
+function normalizeMcpToolItem(
+  method: string,
+  item: Record<string, unknown> | undefined,
+  state: CodexStreamState,
+): AgentEvent[] {
+  if (!item) return [];
+  const itemType = asString(item.type).replaceAll("_", "").toLowerCase();
+  if (itemType !== "mcptoolcall") return [];
+  const id = asString(item.id) || asString(item.callId) || asString(item.call_id);
+  const name = asString(item.tool) || asString(item.toolName) || asString(item.name)
+    || (id && state.toolNames.get(id)) || "MCP tool";
+  const serverName = asString(item.server) || asString(item.serverName);
+  if (id) state.toolNames.set(id, name);
+  if (method === "item/started") {
+    const formattedArguments = formatValue(item.arguments ?? item.input);
+    return [{
+      type: "tool_call",
+      name,
+      content: name.toLowerCase().includes("workflow_node_complete")
+        ? formattedArguments
+        : truncate(formattedArguments, 600),
+      metadata: {
+        ...(id ? { id } : {}),
+        ...(serverName ? { serverName } : {}),
+        status: "in_progress",
+      },
+    }];
+  }
+  const error = item.error && typeof item.error === "object"
+    ? asString((item.error as Record<string, unknown>).message)
+    : asString(item.error);
+  const result = item.result && typeof item.result === "object"
+    ? extractToolOutput(item.result as Record<string, unknown>) || formatValue(item.result)
+    : formatValue(item.result ?? item.output);
+  const status = asString(item.status).toLowerCase() === "failed" || error ? "failed" : "completed";
+  return [{
+    type: "tool_result",
+    name,
+    content: truncate(error || result),
+    metadata: {
+      ...(id ? { id } : {}),
+      ...(serverName ? { serverName } : {}),
+      status,
+    },
+  }];
 }
 
 function extractItemText(item: Record<string, unknown> | undefined): string {
@@ -133,6 +200,10 @@ export function normalizeCodexNotification(
   params: Record<string, unknown>,
   state: CodexStreamState,
 ): AgentEvent[] {
+  if (method === "item/started" || method === "item/completed") {
+    const mcpEvents = normalizeMcpToolItem(method, params.item as Record<string, unknown> | undefined, state);
+    if (mcpEvents.length > 0) return mcpEvents;
+  }
   if (method === "item/agentMessage/delta") {
     const delta = asString(params.delta);
     if (!delta) return [];
@@ -170,7 +241,7 @@ export function normalizeCodexNotification(
     const usageEvents: AgentEvent[] = usage ? [{ type: "usage", usage }] : [];
     const status = asString(turn?.status) || "completed";
     if (status === "failed") {
-      const error = asString(turn?.error) || "Codex turn failed";
+      const error = errorMessage(turn?.error) || "Codex turn failed";
       state.lastError = error;
       return [...usageEvents, { type: "error", error }];
     }
@@ -188,7 +259,7 @@ export function normalizeCodexNotification(
   }
 
   if (method === "error") {
-    const message = asString(params.message) || "Codex error";
+    const message = asString(params.message) || errorMessage(params.error) || "Codex error";
     state.lastError = message;
     return [{ type: "error", error: message }];
   }

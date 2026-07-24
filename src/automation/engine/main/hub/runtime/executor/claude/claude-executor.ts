@@ -3,6 +3,7 @@ import { claudeSessionIdFromConversation } from "../agent-executor-conversation"
 import type { AgentExecutionContext, AgentExecutor } from "../agent-executor-types";
 import type { RuntimeApprovalRequester } from "../../../../approvals/runtime-approval-broker";
 import type { ClaudeAgentSdkRunInput } from "../../../../agents/claude/claude-agent-sdk";
+import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
 
 export class ClaudeAgentExecutor implements AgentExecutor {
   private abortController: AbortController | undefined;
@@ -28,6 +29,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
         onEvent: this.context.emit,
         abortController,
         approvalOwnerId: this.context.runId,
+        ...(workflowMcpScopeForContext(this.context) ? { workflowMcpScope: workflowMcpScopeForContext(this.context) } : {}),
         ...(this.requestApproval ? { requestApproval: this.requestApproval } : {}),
         ...(this.resolvedModelId ? { modelId: this.resolvedModelId } : {}),
         ...(resumeSessionId ? { resumeSessionId } : {}),

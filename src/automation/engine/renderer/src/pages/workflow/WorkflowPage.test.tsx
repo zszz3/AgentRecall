@@ -141,6 +141,51 @@ describe("WorkflowPage input ownership", () => {
     expect(html).toContain("Edit workflow definition");
     expect(html).toContain("workflow-composer");
   });
+  test("renders MCP failures independently from assistant Markdown", () => {
+    const value = controller(false);
+    value.messages = [{
+      id: "assistant-1",
+      role: "assistant",
+      content: "I could not update the workflow.",
+      events: [{
+        id: "tool-1",
+        type: "tool_result",
+        name: "workflow_update",
+        content: "Permission rejected by runtime host.",
+        timestamp: 1,
+        metadata: { status: "failed" },
+      }],
+    }];
+    const html = renderToStaticMarkup(<WorkflowPage controller={value} />);
+    expect(html).toContain("workflow-tool-event");
+    expect(html).toContain("workflow_update");
+    expect(html).toContain("failed");
+    expect(html).toContain("Permission rejected by runtime host.");
+  });
+
+  test("renders live Workflow Agent approvals with resolve actions", () => {
+    const value = controller(false);
+    value.onResolveRuntimeApproval = () => undefined;
+    value.messages = [{
+      id: "assistant-approval",
+      role: "assistant",
+      content: "Waiting for approval.",
+      events: [{
+        id: "approval-1",
+        type: "approval_request",
+        content: "Allow workflow_run?",
+        timestamp: 1,
+        requestId: "runtime-approval:1",
+        requestState: "live",
+      }],
+    }];
+
+    const html = renderToStaticMarkup(<WorkflowPage controller={value} />);
+    expect(html).toContain("runtime-approval-card");
+    expect(html).toContain("Allow workflow_run?");
+    expect(html).toContain("Approve once");
+    expect(html).toContain("Reject");
+  });
 
   test("offers run history from a separate floating action", () => {
     const value = controller(true);

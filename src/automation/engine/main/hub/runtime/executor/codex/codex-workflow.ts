@@ -12,14 +12,16 @@ import {
 import {
   createWorkflowAgentTimeout,
   developerInstructionsForWorkflowRequest,
+  emitWorkflowAgentApprovalEvent,
   modelFromRuntimeConfig,
   type RuntimeWorkflowExecutionOptions,
   WORKFLOW_AGENT_IDLE_TIMEOUT_MS,
 } from "../workflow/agent-executor-workflow-shared";
 import { reasoningEffortFromRuntimeConfig } from "../agent-executor-types";
 import { respondToCodexRuntimeServerRequest } from "./codex-server-request";
-import { codexWorkflowMcpArgs } from "./codex-workflow-mcp";
+import { codexWorkflowMcpConfig } from "./codex-workflow-mcp";
 import { codexMcpLaunchConfig } from "../runtime-mcp";
+import { workflowMcpScopeForContext } from "../../../../../shared/workflow-mcp-policy";
 
 export async function runCodexWorkflow(
   input: RuntimeWorkflowRequestContext,
@@ -36,6 +38,11 @@ export async function runCodexWorkflow(
   const mcp = codexMcpLaunchConfig(input.configuredAgentId
     ? options.mcpServersForAgent?.(input.configuredAgentId) ?? []
     : []);
+  const workflowMcp = codexWorkflowMcpConfig({
+    discoveryPath: options.workflowMcpDiscoveryPath?.(),
+    workflowId: input.planningWorkflowId,
+    managedToken: options.workflowMcpManagedToken?.(),
+  });
   const developerInstructions = developerInstructionsForWorkflowRequest(input);
 
   return new Promise<WorkflowAgentResponse>((resolve, reject) => {
@@ -67,10 +74,11 @@ export async function runCodexWorkflow(
           modelFromRuntimeConfig(input.runtimeConfig),
           reasoningEffortFromRuntimeConfig(input.runtimeConfig),
         ),
-        ...codexWorkflowMcpArgs(options.workflowMcpDiscoveryPath?.(), input.planningWorkflowId),
+        ...workflowMcp.args,
         ...mcp.args,
       ],
-      env: { ...codexEnvironmentForChannel(channel), ...mcp.env },
+      env: { ...codexEnvironmentForChannel(channel), ...mcp.env, ...workflowMcp.env },
+      requiredMcpTools: workflowMcp.requiredMcpTools,
       onEvent: (event) => {
         timeout?.refresh();
         if (event.type === "delta") {
@@ -96,7 +104,16 @@ export async function runCodexWorkflow(
       },
       onRequest: (id, method, params) => {
         if (client) {
-          respondToCodexRuntimeServerRequest(client, id, method, params);
+          respondToCodexRuntimeServerRequest(client, id, method, params, options.requestApproval ? {
+            ownerId: `workflow-draft:${input.planningWorkflowId ?? input.requestId}`,
+            emit: (event) => {
+              timeout?.refresh();
+              emitWorkflowAgentApprovalEvent(input, event);
+            },
+            request: options.requestApproval,
+            cwd: input.workDir,
+            ...(input.signal ? { signal: input.signal } : {}),
+          } : undefined, workflowMcpScopeForContext(input));
         }
       },
       onExit: (_code, _signal, stderr) => {

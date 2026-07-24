@@ -62,7 +62,7 @@ describe("WorkflowNodeAgentWindow", () => {
     expect(taskHtml).toContain("Approve once");
   });
 
-  test("visually labels system instructions, tool calls, and tool results", () => {
+  test("shows tool calls and results in the conversation timeline while keeping system instructions in runtime details", () => {
     const html = renderToStaticMarkup(<WorkflowNodeAgentWindow nodeTitle="Research" onClose={() => undefined} conversation={{
       conversationId: "workflow::run::research", workflowId: "workflow", runId: "run", nodeId: "research", configuredAgentId: "agent", modelId: "model", workDir: "C:/workspace", status: "active",
       messages: [
@@ -79,6 +79,22 @@ describe("WorkflowNodeAgentWindow", () => {
     expect(html).toContain("is-tool-result");
     expect(html).toContain("<details");
     expect(html).toContain("Runtime details");
+    const runtimeDetailsAt = html.indexOf('<details class="workflow-node-agent-runtime-details"');
+    expect(html.indexOf("Tool call")).toBeLessThan(runtimeDetailsAt);
+    expect(html.slice(runtimeDetailsAt)).not.toContain("web_search");
+  });
+
+  test("labels workflow node completion as a structured result submission", () => {
+    const html = renderToStaticMarkup(<WorkflowNodeAgentWindow nodeTitle="Research" onClose={() => undefined} conversation={{
+      conversationId: "workflow::run::research", workflowId: "workflow", runId: "run", nodeId: "research", configuredAgentId: "agent", modelId: "model", workDir: "C:/workspace", status: "active",
+      messages: [
+        { id: "m1", role: "tool", content: '{"summary":"Done"}', at: 1, eventType: "tool_call", name: "workflow_node_complete" },
+        { id: "m2", role: "system", content: "Runtime instruction", at: 2 },
+      ], createdAt: 1, updatedAt: 1, lastActivityAt: 1,
+    }} />);
+
+    expect(html).toContain("Structured result submitted");
+    expect(html.indexOf("Structured result submitted")).toBeLessThan(html.indexOf('<details class="workflow-node-agent-runtime-details"'));
   });
 
   test("renders a worker-output packet as its user-facing Markdown output", () => {

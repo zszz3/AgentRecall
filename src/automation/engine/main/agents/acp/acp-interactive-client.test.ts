@@ -4,10 +4,10 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import type { AgentEvent } from "../../../shared/types";
 import { writeNodeCliLauncher } from "../../platform/test-cli-fixtures";
-import { AcpInteractiveClient, agentEventsFromAcpUpdate, fileWriteOperationFromAcpUpdate } from "./acp-interactive-client";
+import { AcpInteractiveClient, agentEventsFromAcpUpdate, fileWriteOperationFromAcpUpdate, workflowMcpDecisionFromAcpToolCall } from "./acp-interactive-client";
 import { RuntimeApprovalBroker } from "../../approvals/runtime-approval-broker";
 
-async function createFakeAcpRuntime(dir: string): Promise<{ executable: string; callsPath: string }> {
+async function createFakeAcpRuntime(dir: string, toolTitle = "Read file"): Promise<{ executable: string; callsPath: string }> {
   const callsPath = path.join(dir, "calls.jsonl");
   const executable = await writeNodeCliLauncher(
     dir,
@@ -15,6 +15,7 @@ async function createFakeAcpRuntime(dir: string): Promise<{ executable: string; 
     `const fs = require("node:fs");
 const readline = require("node:readline");
 const callsPath = ${JSON.stringify(callsPath)};
+const toolTitle = ${JSON.stringify(toolTitle)};
 let promptRequestId;
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 const rl = readline.createInterface({ input: process.stdin });
@@ -30,8 +31,8 @@ rl.on("line", (line) => {
   } else if (message.method === "session/prompt") {
     promptRequestId = message.id;
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } } } });
-    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Read file", kind: "read", status: "in_progress", rawInput: { path: "README.md" } } } });
-    send({ jsonrpc: "2.0", id: 900, method: "session/request_permission", params: { sessionId: message.params.sessionId, toolCall: { toolCallId: "tool-1", title: "Read file" }, options: [{ optionId: "allow-once", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" }] } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: message.params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: toolTitle, kind: "read", status: "in_progress", rawInput: { path: "README.md" } } } });
+    send({ jsonrpc: "2.0", id: 900, method: "session/request_permission", params: { sessionId: message.params.sessionId, toolCall: { toolCallId: "tool-1", title: toolTitle }, options: [{ optionId: "allow-once", name: "Allow once", kind: "allow_once" }, { optionId: "reject", name: "Reject", kind: "reject_once" }] } });
   } else if (message.id === 900 && message.result) {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "acp-session-1", update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", title: "Read file", status: "completed", rawOutput: "contents" } } });
     send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn" } });
@@ -117,9 +118,37 @@ describe("AcpInteractiveClient", () => {
     expect(calls.some((call) => call.method === "session/resume" && call.params.sessionId === "existing-session")).toBe(true);
     expect(calls.some((call) => call.method === "session/new")).toBe(false);
   }, 15_000);
+
+  test("auto-allows planning MCP tools without cancelling workflow sessions", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-acp-workflow-"));
+    const fake = await createFakeAcpRuntime(dir, "workflow_update");
+    const client = new AcpInteractiveClient({
+      executable: fake.executable,
+      args: ["acp"],
+      cwd: dir,
+      onEvent: vi.fn(),
+      approvalOwnerId: "workflow-draft:wf-1",
+      workflowMcpScope: "planning",
+    });
+
+    await client.attach();
+    await client.prompt("update it");
+    await client.detach();
+
+    const calls = (await readFile(fake.callsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, any>);
+    expect(calls.find((call) => call.id === 900)?.result).toEqual({
+      outcome: { outcome: "selected", optionId: "allow-once" },
+    });
+  }, 15_000);
 });
 
 describe("agentEventsFromAcpUpdate", () => {
+  test("uses the shared workflow policy for ACP runtimes", () => {
+    expect(workflowMcpDecisionFromAcpToolCall("workflow_update", "planning")).toBe("allow");
+    expect(workflowMcpDecisionFromAcpToolCall("workflow_run", "planning")).toBe("approval_required");
+    expect(workflowMcpDecisionFromAcpToolCall("workflow_node_complete", "node_execution")).toBe("allow");
+    expect(workflowMcpDecisionFromAcpToolCall("Read file", "planning")).toBe("deny");
+  });
   test("maps ACP thought and plan updates into visible metadata", () => {
     expect(agentEventsFromAcpUpdate({
       sessionUpdate: "agent_thought_chunk",

@@ -79,11 +79,12 @@ function normalizeClaudeToolEvents(message: unknown, state?: ClaudeStreamState):
     } else if (blockType === "tool_result" || blockType === "mcp_tool_result" || blockType === "custom_tool_result") {
       const id = asString(block.tool_use_id) || asString(block.toolUseId) || asString(block.id);
       const name = (id && state?.toolNames.get(id)) || asString(block.name) || asString(block.tool_name) || "tool";
+      const failed = block.is_error === true || block.isError === true;
       events.push({
         type: "tool_result",
         name,
         content: truncate(extractToolResultContent(block.content)),
-        ...(id ? { metadata: { id } } : {}),
+        ...(id || failed ? { metadata: { ...(id ? { id } : {}), ...(failed ? { status: "failed" } : {}) } } : {}),
       });
     }
   }

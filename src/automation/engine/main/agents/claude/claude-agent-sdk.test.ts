@@ -111,12 +111,21 @@ describe("createClaudeSdkPermissionHandler", () => {
 
   test("allows only trusted workflow authoring tools on non-interactive workflow surfaces", async () => {
     const requestApproval = vi.fn(async () => "approved" as const);
-    const handler = createClaudeSdkPermissionHandler(vi.fn(), "workflow-draft:wf-1", requestApproval);
-    await expect(handler("mcp__app__workflow_validate", {}, { toolUseID: "tool-3" } as never))
+    const handler = createClaudeSdkPermissionHandler(vi.fn(), "workflow-draft:wf-1", requestApproval, undefined, undefined, "planning");
+    await expect(handler("mcp__agent_recall__workflow_update", {}, { toolUseID: "tool-3" } as never))
       .resolves.toMatchObject({ behavior: "allow" });
     await expect(handler("Bash", {}, { toolUseID: "tool-4" } as never))
       .resolves.toMatchObject({ behavior: "deny" });
     expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  test("allows node completion only on node execution surfaces", async () => {
+    const planning = createClaudeSdkPermissionHandler(vi.fn(), "workflow-draft:wf-1", undefined, undefined, undefined, "planning");
+    const node = createClaudeSdkPermissionHandler(vi.fn(), "workflow-run:run-1", undefined, undefined, undefined, "node_execution");
+    await expect(planning("mcp__agent_recall__workflow_node_complete", {}, { toolUseID: "tool-6" } as never))
+      .resolves.toMatchObject({ behavior: "deny" });
+    await expect(node("mcp__agent_recall_workflow__workflow_node_complete", {}, { toolUseID: "tool-7" } as never))
+      .resolves.toMatchObject({ behavior: "allow" });
   });
 
   test("describes Claude Write as a normalized file-write operation", async () => {

@@ -7,6 +7,7 @@ import type { AgentEvent } from "../../../shared/types";
 import type { RuntimeApprovalRequester } from "../../approvals/runtime-approval-broker";
 import { createClaudeSdkQueryOptions } from "./claude-agent-sdk";
 import { createClaudeStreamState, normalizeClaudeStreamEvent } from "./claude-stream";
+import type { WorkflowMcpScope } from "../../../shared/workflow-mcp-policy";
 
 interface ClaudeAgentSdkInteractiveAttachInput {
   cwd: string;
@@ -18,6 +19,7 @@ interface ClaudeAgentSdkInteractiveAttachInput {
   env?: NodeJS.ProcessEnv;
   approvalOwnerId?: string;
   requestApproval?: RuntimeApprovalRequester;
+  workflowMcpScope?: WorkflowMcpScope;
 }
 
 export class ClaudeAgentSdkInteractive {
@@ -54,6 +56,7 @@ export class ClaudeAgentSdkInteractive {
         ...(input.env ? { env: input.env } : {}),
         ...(input.approvalOwnerId ? { approvalOwnerId: input.approvalOwnerId } : {}),
         ...(input.requestApproval ? { requestApproval: input.requestApproval } : {}),
+        ...(input.workflowMcpScope ? { workflowMcpScope: input.workflowMcpScope } : {}),
       }),
     });
 

@@ -5,6 +5,7 @@ import { ProcessLease } from "../shared/process-lease";
 import { claudeRuntimeStateCodec } from "./claude-runtime-state-codec";
 import { planSessionReconfigure } from "../runtime/session-reconfigure";
 import type { RuntimeApprovalRequester } from "../../approvals/runtime-approval-broker";
+import { workflowMcpScopeForContext } from "../../../shared/workflow-mcp-policy";
 
 type ClaudeInteractiveSdkBinding = Pick<
   ClaudeAgentSdkInteractive,
@@ -105,6 +106,7 @@ export class ClaudeInteractiveSession implements InteractiveSession {
       ...(mcpServers ? { mcpServers } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
       approvalOwnerId: this.context.chatId,
+      ...(workflowMcpScopeForContext(this.context) ? { workflowMcpScope: workflowMcpScopeForContext(this.context) } : {}),
       ...(this.options.requestApproval ? { requestApproval: this.options.requestApproval } : {}),
       onEvent: (event) => {
         if (!this.lease.matchesAttachment(generation)) return;

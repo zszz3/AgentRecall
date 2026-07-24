@@ -65,12 +65,74 @@ describe("normalizeCodexNotification", () => {
     ).toEqual([{ type: "tool_result", name: "shell_command", content: "Exit code: 0\nOutput:\nApp.tsx" }]);
   });
 
+  test("emits failed MCP calls from current app-server item notifications", () => {
+    const state = createCodexStreamState();
+    expect(normalizeCodexNotification("item/started", {
+      item: { id: "mcp-1", type: "mcpToolCall", server: "agent_recall", tool: "workflow_update", arguments: { workflowId: "wf-1" }, status: "inProgress" },
+    }, state)).toEqual([{
+      type: "tool_call",
+      name: "workflow_update",
+      content: JSON.stringify({ workflowId: "wf-1" }, null, 2),
+      metadata: { id: "mcp-1", serverName: "agent_recall", status: "in_progress" },
+    }]);
+    expect(normalizeCodexNotification("item/completed", {
+      item: { id: "mcp-1", type: "mcpToolCall", server: "agent_recall", tool: "workflow_update", status: "failed", error: { message: "user cancelled MCP tool call" } },
+    }, state)).toEqual([{
+      type: "tool_result",
+      name: "workflow_update",
+      content: "user cancelled MCP tool call",
+      metadata: { id: "mcp-1", serverName: "agent_recall", status: "failed" },
+    }]);
+  });
+
+  test("preserves the complete structured workflow node output", () => {
+    const state = createCodexStreamState();
+    const output = {
+      nodeId: "report",
+      summary: "Done",
+      outputs: { answer_markdown: `# Report\n\n${"long content\n".repeat(100)}` },
+      proposals: [],
+    };
+
+    const [event] = normalizeCodexNotification("item/started", {
+      item: {
+        id: "mcp-complete",
+        type: "mcpToolCall",
+        server: "agent_recall",
+        tool: "workflow_node_complete",
+        arguments: output,
+        status: "inProgress",
+      },
+    }, state);
+
+    expect(event).toMatchObject({ type: "tool_call", name: "workflow_node_complete" });
+    const content = event && "content" in event ? event.content : undefined;
+    expect(typeof content).toBe("string");
+    expect(JSON.parse(content ?? "")).toEqual(output);
+    expect(content).not.toContain("\n...");
+  });
+
   test("maps turn completion to completed event", () => {
     const state = createCodexStreamState();
 
     expect(normalizeCodexNotification("turn/completed", { turn: { status: "completed" } }, state)).toEqual([
       { type: "completed" },
     ]);
+  });
+
+  test("preserves nested Codex error details", () => {
+    const state = createCodexStreamState();
+
+    expect(normalizeCodexNotification("error", {
+      error: {
+        message: "We're currently experiencing high demand, which may cause temporary errors.",
+        codexErrorInfo: "internalServerError",
+      },
+      willRetry: false,
+    }, state)).toEqual([{
+      type: "error",
+      error: "We're currently experiencing high demand, which may cause temporary errors.",
+    }]);
   });
 
   test("emits OpenAI usage from turn completion", () => {

@@ -32,6 +32,8 @@ describe("workflow V2 manager prompt", () => {
     expect(prompt).toContain("upstreamOutputKey to an exact key declared by the predecessor's outputFields");
     expect(prompt).toContain("Downstream bindings read outputs[upstreamOutputKey], never the LLM summary");
     expect(prompt).toContain("declare the output field valueType");
+    expect(prompt).toContain('"artifact":{"format":"markdown","fileName":"report.md"}');
+    expect(prompt).toContain("Use valueType=file only when the node itself creates a file");
     expect(prompt).toContain('"upstreamNodeId":"research"');
     expect(prompt).toContain('"valueType":"string"');
     expect(prompt).toContain("Read values through inputs.<key>");

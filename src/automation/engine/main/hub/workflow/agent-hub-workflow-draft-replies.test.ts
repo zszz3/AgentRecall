@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dispatchWorkflowDraftReply } from "./agent-hub-workflow-draft-replies";
+import { dispatchWorkflowDraftReply, reduceWorkflowDraftReplyEvent } from "./agent-hub-workflow-draft-replies";
 import type { WorkflowDraftState } from "../../../shared/types";
 import { beginWorkflowDraftReply, createWorkflowDraftInteractiveRequest } from "./agent-hub-workflow-draft-reply-state";
 
@@ -30,5 +30,85 @@ describe("dispatchWorkflowDraftReply", () => {
     expect(request.prompt).toContain("workflow_create");
     expect(request.prompt).toContain('"graphVersion": 2');
     expect(request.prompt).toContain("Make it concise");
+  });
+
+  it("attaches failed MCP tool results to the active assistant message", () => {
+    const started = beginWorkflowDraftReply({ workflow, reply: "Update it", thinkingMessage: "thinking", cloneDraft: structuredClone, now: 2 });
+    const reduced = reduceWorkflowDraftReplyEvent({
+      workflow: started.next,
+      activeRequest: started.request,
+      event: {
+        requestId: started.request.requestId,
+        type: "tool_result",
+        name: "workflow_update",
+        content: "Permission rejected by runtime host.",
+        metadata: { status: "failed", serverName: "agent_recall" },
+      },
+      thinkingMessage: "thinking",
+      cloneDraft: structuredClone,
+      replaceMessage: (messages) => messages,
+      now: 3,
+    });
+
+    expect(reduced.type).toBe("event");
+    if (reduced.type !== "event") throw new Error("Expected event reduction");
+    expect(reduced.workflow.messages.at(-1)?.events).toEqual([
+      expect.objectContaining({
+        type: "tool_result",
+        name: "workflow_update",
+        content: "Permission rejected by runtime host.",
+        metadata: { status: "failed", serverName: "agent_recall" },
+      }),
+    ]);
+  });
+
+  it("persists and resolves runtime approval requests on the active assistant message", () => {
+    const started = beginWorkflowDraftReply({ workflow, reply: "Run it", thinkingMessage: "thinking", cloneDraft: structuredClone, now: 2 });
+    const request = reduceWorkflowDraftReplyEvent({
+      workflow: started.next,
+      activeRequest: started.request,
+      event: {
+        requestId: started.request.requestId,
+        type: "approval_request",
+        approvalRequestId: "runtime-approval:1",
+        content: "Allow workflow_run?",
+        metadata: { provider: "codex" },
+      },
+      thinkingMessage: "thinking",
+      cloneDraft: structuredClone,
+      replaceMessage: (messages) => messages,
+      now: 3,
+    });
+    expect(request.type).toBe("event");
+    if (request.type !== "event") throw new Error("Expected approval request event");
+    expect(request.workflow.messages.at(-1)?.events).toEqual([
+      expect.objectContaining({
+        type: "approval_request",
+        requestId: "runtime-approval:1",
+        requestState: "live",
+      }),
+    ]);
+
+    const response = reduceWorkflowDraftReplyEvent({
+      workflow: request.workflow,
+      activeRequest: started.request,
+      event: {
+        requestId: started.request.requestId,
+        type: "approval_response",
+        approvalRequestId: "runtime-approval:1",
+        decision: "approved",
+        content: "Approved once by user.",
+      },
+      thinkingMessage: "thinking",
+      cloneDraft: structuredClone,
+      replaceMessage: (messages) => messages,
+      now: 4,
+    });
+    expect(response.type).toBe("event");
+    if (response.type !== "event") throw new Error("Expected approval response event");
+    expect(response.workflow.messages.at(-1)?.events).toEqual([
+      expect.objectContaining({ type: "approval_request", requestState: "resolved" }),
+      expect.objectContaining({ type: "approval_response", decision: "approved" }),
+    ]);
   });
 });

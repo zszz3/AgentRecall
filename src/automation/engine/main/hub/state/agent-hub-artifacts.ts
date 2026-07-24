@@ -4,7 +4,10 @@ import { readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { RegisterArtifactRequest, RegisteredArtifact } from "../../../shared/types";
+import type { WorkflowDraftState } from "../../../shared/workflow/draft";
+import type { WorkflowRunState } from "../../../shared/workflow/run";
 import { resolveWorkDirFile } from "../../platform/local-file-preview";
+import { materializeWorkflowV2OutputArtifacts } from "../../workflows/v2/workflow-v2-output-artifacts";
 
 type WorkflowFileRoot = { workDir?: string };
 
@@ -67,6 +70,35 @@ export async function listWorkflowOutputs(workflow: WorkflowFileRoot | undefined
     .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
     .map((entry) => ({ name: entry.name, path: path.join(outputsDir, entry.name) }))
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export async function reconcileWorkflowOutputArtifacts(
+  workflow: WorkflowDraftState | undefined,
+  run: WorkflowRunState | undefined,
+  defaultWorkDir: string,
+): Promise<void> {
+  if (!workflow?.workflowV2Plan || !run || run.workflowId !== workflow.workflowId) return;
+  const workDir = workflow.workDir || defaultWorkDir;
+  for (const progress of run.progress) {
+    if (!progress.outputs) continue;
+    const node = workflow.workflowV2Plan.definition.nodes.find((item) => item.id === progress.nodeId);
+    if (!node) continue;
+    await materializeWorkflowV2OutputArtifacts({
+      workflowId: workflow.workflowId,
+      runId: run.runId,
+      workDir,
+      node,
+      output: {
+        nodeId: progress.nodeId,
+        summary: progress.detail || node.title,
+        outputs: structuredClone(progress.outputs),
+        proposals: [],
+      },
+      validateFileOutputs: false,
+    }).catch((error) => {
+      console.warn(`Failed to reconcile Workflow output artifacts for ${workflow.workflowId}/${run.runId}/${progress.nodeId}:`, error);
+    });
+  }
 }
 
 export function workflowWorkDir(workflow: WorkflowFileRoot | undefined, defaultWorkDir: string): string | undefined {

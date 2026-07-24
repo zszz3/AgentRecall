@@ -66,6 +66,24 @@ describe("WorkflowV2ConversationManager", () => {
     ]);
   });
 
+  test("keeps completion tool history for audit but does not pass it as authoritative output", async () => {
+    let emit!: (event: AgentEvent) => void;
+    const onCompleted = vi.fn();
+    const manager = new WorkflowV2ConversationManager({
+      now: () => 9,
+      createSession: (input) => {
+        emit = input.emit;
+        return { sendPrompt: async () => undefined, interrupt: async () => undefined, close: async () => undefined, runtimeConversation: () => undefined };
+      },
+      onCompleted,
+    });
+    await manager.start({ workflowId: "w", runId: "r", nodeId: "n", configuredAgentId: "a", modelId: "m", workDir: "C:/workspace", initialPrompt: "Complete" });
+    emit({ type: "tool_call", name: "workflow_node_complete", content: "{truncated..." });
+    emit({ type: "completed", content: "assistant fallback" });
+
+    expect(onCompleted).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "n" }), "assistant fallback");
+  });
+
   test("aggregates interactive usage and preserves it when the conversation is restored", async () => {
     let emit!: (event: AgentEvent) => void;
     const manager = new WorkflowV2ConversationManager({

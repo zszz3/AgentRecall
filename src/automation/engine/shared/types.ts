@@ -321,6 +321,7 @@ export interface RuntimeRequest {
   planningWorkflowId?: string;
   workflowRunId?: string;
   workflowNodeId?: string;
+  workflowNodeExecutionId?: string;
 }
 
 export interface RuntimeResumeCapabilities {
@@ -455,6 +456,7 @@ export interface RunTaskRequest {
   planningWorkflowId?: string;
   workflowRunId?: string;
   workflowNodeId?: string;
+  workflowNodeExecutionId?: string;
 }
 
 export interface WorkflowAgentRequest extends RuntimeRequest {
@@ -472,6 +474,9 @@ export interface WorkflowAgentResponse {
 
 export type WorkflowAgentEvent =
   | { requestId: string; type: "delta"; content: string }
+  | { requestId: string; type: "tool_call" | "tool_result"; content: string; name?: string; metadata?: Record<string, unknown> }
+  | { requestId: string; type: "approval_request"; approvalRequestId: string; content: string; metadata?: Record<string, unknown> }
+  | { requestId: string; type: "approval_response"; approvalRequestId: string; decision: ApprovalDecision; content?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "completed"; content: string; runtimeConversation?: RuntimeConversation }
   | { requestId: string; type: "error"; error: string };
 

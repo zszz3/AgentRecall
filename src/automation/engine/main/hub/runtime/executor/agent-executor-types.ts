@@ -40,6 +40,7 @@ export interface RuntimeAgentExecutorFactoryOptions {
   executables: Record<AgentId, string>;
   channelById: (channelId: string) => AgentChannel | undefined;
   workflowMcpDiscoveryPath?: () => string | undefined;
+  workflowMcpManagedToken?: () => string | undefined;
   mcpServersForAgent?: (configuredAgentId: string) => BoundMcpServer[];
   requestApproval?: RuntimeApprovalRequester;
   askWorkflowByRuntime?: Partial<Record<AgentId, (input: RuntimeWorkflowRequestContext) => Promise<WorkflowAgentResponse>>>;

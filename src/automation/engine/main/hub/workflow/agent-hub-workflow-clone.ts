@@ -140,6 +140,7 @@ export function cloneWorkflowDraft(input: {
       id: message.id,
       role: message.role,
       content: message.content,
+      ...(message.events ? { events: structuredClone(message.events) } : {}),
     })),
     reply: draft.reply,
     error: draft.error,

@@ -33,6 +33,7 @@ const VALID_WORKFLOW_VALUE_TYPES = new Set([
   "file",
   "directory",
 ]);
+const VALID_OUTPUT_ARTIFACT_FORMATS = new Set(["markdown", "text", "json", "html", "csv"]);
 
 export function isSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value);
@@ -191,6 +192,19 @@ function appendNodeValidationErrors(node: WorkflowV2Node, errors: string[]): voi
             outputField.valueType,
           )}.`,
         );
+      }
+      if (outputField.artifact !== undefined) {
+        const artifact = outputField.artifact as unknown as Record<string, unknown>;
+        if (!artifact || typeof artifact !== "object" || Array.isArray(artifact) || !VALID_OUTPUT_ARTIFACT_FORMATS.has(String(artifact.format))) {
+          errors.push(`Workflow V2 node ${node.id} output field ${outputField.key} has an invalid artifact format.`);
+        } else {
+          if (artifact.fileName !== undefined && (typeof artifact.fileName !== "string" || !artifact.fileName.trim() || /[\\/]/.test(artifact.fileName) || artifact.fileName === "." || artifact.fileName === "..")) {
+            errors.push(`Workflow V2 node ${node.id} output field ${outputField.key} artifact fileName must be a safe file name.`);
+          }
+          if (outputField.valueType !== undefined && outputField.valueType !== "string" && outputField.valueType !== "json") {
+            errors.push(`Workflow V2 node ${node.id} output field ${outputField.key} artifact content must have valueType string or json.`);
+          }
+        }
       }
     }
   }

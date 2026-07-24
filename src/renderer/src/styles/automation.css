@@ -1032,6 +1032,44 @@
   padding: 18px 20px;
 }
 
+.workflow-tool-event {
+  margin-top: 8px;
+  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.24));
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.workflow-tool-event.failed {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.14);
+}
+
+.workflow-tool-event summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.workflow-tool-event summary span {
+  color: var(--text-muted, #94a3b8);
+  text-transform: lowercase;
+}
+
+.workflow-tool-event pre {
+  margin: 0;
+  padding: 9px 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .automation-workflow-detail > .workflow-page {
   width: 100%;
   min-width: 0;

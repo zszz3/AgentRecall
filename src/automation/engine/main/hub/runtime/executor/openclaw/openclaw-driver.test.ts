@@ -6,6 +6,7 @@ import type { AgentEvent, RuntimeConversation } from "../../../../../shared/type
 import { openClawRuntimeStateCodec } from "../../../../agents/openclaw/openclaw-runtime-state-codec";
 import { writeNodeCliLauncher } from "../../../../platform/test-cli-fixtures";
 import { createOpenClawDriver } from "./create-openclaw-driver";
+import { AcpWorkflowOneShotExecutor } from "../acp-workflow-one-shot-executor";
 
 async function createOpenClawAcpFake(dir: string): Promise<{ executable: string; callsPath: string }> {
   const callsPath = path.join(dir, "calls.jsonl");
@@ -36,6 +37,25 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 }
 
 describe("createOpenClawDriver interactive integration", () => {
+  test("uses ACP for one-shot workflow nodes so scoped MCP tools are available", () => {
+    const driver = createOpenClawDriver({
+      executables: { codex: "codex", claude: "claude", api: "api", hermes: "hermes", opencode: "opencode", openclaw: "openclaw" },
+      channelById: () => undefined,
+      workflowMcpDiscoveryPath: () => "C:/app/mcp-bridge.json",
+      workflowMcpManagedToken: () => "managed-token",
+    });
+    const executor = driver.createOneShotExecutor?.({
+      runId: "task-1", runKind: "task", configuredAgentId: "agent-1", planningWorkflowId: "wf-1",
+      workflowRunId: "run-1", workflowNodeId: "node-1", runtimeId: "openclaw", executionMode: "oneshot",
+      continuationPolicy: "fresh", runtimeConfig: { model: "default" },
+      runtime: { id: "openclaw", label: "OpenClaw", command: "openclaw", version: "test", available: true },
+      channelId: "openclaw-default", prompt: "Complete", workDir: process.cwd(), developerInstructions: "Complete structurally",
+      emit: vi.fn(), onExit: vi.fn(),
+    });
+
+    expect(executor).toBeInstanceOf(AcpWorkflowOneShotExecutor);
+  });
+
   test("starts the OpenClaw ACP bridge and resumes its Gateway session", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "agent-runtime-driver-"));
     const fake = await createOpenClawAcpFake(dir);
