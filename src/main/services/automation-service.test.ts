@@ -62,27 +62,43 @@ function fixture() {
       teamChats,
       agents,
       loadBundledWorkflows: vi.fn(async () => [{ workflowId: "wf", title: "One", objective: "One", definition: {} as never }]),
-      startRouter: vi.fn(async () => ({ host: "127.0.0.1", port: 1, baseUrl: "http://127.0.0.1:1", stop: async () => { calls.push("router-stop"); } })),
+      startRouter: vi.fn(async () => {
+        calls.push("router");
+        return { host: "127.0.0.1", port: 1, baseUrl: "http://127.0.0.1:1", stop: async () => { calls.push("router-stop"); } };
+      }),
       setRouterBaseUrl: vi.fn(),
-      startBridge: vi.fn(async () => ({
-        host: "127.0.0.1",
-        port: 2,
-        token: "test-token",
-        discoveryPath: "/user-data/automation-mcp-bridge.json",
-        stop: async () => { calls.push("bridge-stop"); },
-      })),
+      startBridge: vi.fn(async () => {
+        calls.push("bridge");
+        return {
+          host: "127.0.0.1",
+          port: 2,
+          token: "test-token",
+          discoveryPath: "/user-data/automation-mcp-bridge.json",
+          stop: async () => { calls.push("bridge-stop"); },
+        };
+      }),
     },
   );
   return { service, calls, hub, registry, evaluations, teamChats, emit: (value: AppSnapshot) => { current = value; listener?.(value); } };
 }
 
 describe("NativeAutomationService", () => {
+  it("prepares the persisted snapshot without starting execution infrastructure", async () => {
+    const { service, calls, teamChats } = fixture();
+
+    await Promise.all([service.requirePrepared(), service.requirePrepared()]);
+
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled"]);
+    expect(teamChats.connect).not.toHaveBeenCalled();
+    expect(service.health()).toEqual({ state: "idle" });
+  });
+
   it("initializes the native engine once in dependency order", async () => {
     const { service, calls, hub, teamChats } = fixture();
 
     await Promise.all([service.initialize(), service.initialize()]);
 
-    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "discovery", "runtime", "team-chat-start"]);
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "router", "bridge", "discovery", "runtime", "team-chat-start"]);
     expect(teamChats.connect).toHaveBeenCalledTimes(1);
     expect(hub.loadModelChannels).toHaveBeenCalledWith("/user-data/runtime-channels.json");
     expect(hub.loadPersistedState).toHaveBeenCalledWith(expect.any(Object));
@@ -109,7 +125,8 @@ describe("NativeAutomationService", () => {
     await service.shutdown();
 
     expect(calls.slice(-6)).toEqual(["team-chat-close", "hub-stop", "bridge-stop", "router-stop", "evaluations-close", "registry-close"]);
-    expect(service.evaluations()).toBe(evaluations);
-    expect(service.teamChat()).toBe(teamChats);
+    expect(service.evaluations).toBe(evaluations);
+    expect(service.teamChat).toBe(teamChats);
+    await expect(service.requireReady()).rejects.toThrow(/stopped/i);
   });
 });

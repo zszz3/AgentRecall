@@ -223,6 +223,15 @@
   overflow: hidden;
 }
 
+.app-page-loading {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .sessions-page {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);

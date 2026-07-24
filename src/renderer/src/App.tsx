@@ -1,39 +1,36 @@
-import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { GitBranch } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
 import type { AppUpdateStatus } from "../../core/app-update-types";
-import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { RemoteHealthReport } from "../../core/remote-health";
-import type { RemoteSessionDetailSnapshot } from "../../core/remote-session-sync";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
   EnvironmentUpsertInput,
-  LiveSessionSnapshot,
   ProjectSummary,
   ProjectTagEntry,
-  SearchOptions,
-  SessionDailyTokenUsage,
   SessionEnvironment,
   SessionMigrationProgress,
   SessionMigrationResult,
   SessionMatchHit,
   SessionSearchResult,
-  SessionSortBy,
-  SessionStats,
-  SessionStatsPeriod,
-  SessionTurnSummary,
-  UsageQuotaSnapshot,
 } from "../../core/types";
-import { resolveDateRange, type DateRangeFilter } from "./date-range";
 import {
-  filterSessionsByLiveStatus,
   getLiveSessionState,
-  type LiveStatusFilter,
 } from "./live-filter";
 import {
   readSidebarSections,
@@ -48,25 +45,20 @@ import type {
   ActionStatus,
   ContextMenuState,
   DialogState,
-  QuotaFeedback,
   RefreshFeedback,
   SettingsFeedback,
   SessionMigrationDialogState,
-  StatsFeedback,
 } from "./app-types";
-import { ProviderPage } from "./features/providers/provider-page";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { AppNavigation, type AppPage } from "./components/app-navigation";
 import { ActionToast } from "./components/action-toast";
-import { SkillsPage } from "./features/skills/skills-page";
 import { useSkillsController } from "./features/skills/use-skills-controller";
 import { AiAssistantDialog } from "./components/ai-assistant-dialog";
 import { RemoteSessionsDialog } from "./features/remote-sessions/remote-sessions-dialog";
 import { useRemoteSessionsCache } from "./features/remote-sessions/use-remote-sessions-cache";
 import { SupabaseSetupGuide } from "./components/supabase-setup-guide";
 import { environmentTarget } from "./features/environments/environment-display";
-import { resolveSearchScope } from "./features/search/search-scope";
 import { SessionsPage } from "./features/sessions/sessions-page";
 import { SessionContextMenu } from "./features/sessions/session-context-menu";
 import { SessionDetails } from "./features/sessions/session-details";
@@ -74,20 +66,14 @@ import {
   migrationProgressMessage,
   migrationStrategyLabel,
 } from "./features/sessions/session-migration-copy";
-import {
-  SettingsDialog,
-  type SettingsSection,
-} from "./features/settings/settings-dialog";
+import { SESSION_PAGE_SIZE, useSessionCatalog } from "./features/sessions/use-session-catalog";
+import { useSessionDetail } from "./features/sessions/use-session-detail";
+import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WorkbenchPage } from "./features/workbench/workbench-page";
-import { AgentMemoryPage } from "./features/agent-memory/agent-memory-page";
+import { useWorkbenchOverview } from "./features/workbench/use-workbench-overview";
 import { useAutomation } from "./features/automation/automation-provider";
-import { McpFeaturePage } from "./features/automation/mcp-feature-page";
-import { RuntimeFeaturePage } from "./features/automation/runtime-feature-page";
-import { WorkflowFeaturePage } from "./features/automation/workflow-feature-page";
-import { EvaluationFeaturePage } from "./features/automation/evaluation-feature-page";
 import { selectWorkbenchWorkflows } from "./features/automation/workbench-workflows";
-import { TeamChatPage } from "./features/team-chat/team-chat-page";
 import {
   isBranchTag,
   displayTagName,
@@ -97,7 +83,6 @@ import {
   sourceFilters,
   supportsMigrationSource,
   supportsResumeSource,
-  WORKBENCH_SESSION_LIMIT,
   migrationAgentLabel,
   migrationTargetsForSession,
 } from "./session-ui";
@@ -106,6 +91,23 @@ const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
 
+const SkillsPage = lazy(() =>
+  import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
+const WorkflowFeaturePage = lazy(() =>
+  import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
+const TeamChatPage = lazy(() =>
+  import("./features/team-chat/team-chat-page").then((module) => ({ default: module.TeamChatPage })));
+const EvaluationFeaturePage = lazy(() =>
+  import("./features/automation/evaluation-feature-page").then((module) => ({ default: module.EvaluationFeaturePage })));
+const RuntimeFeaturePage = lazy(() =>
+  import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
+const McpFeaturePage = lazy(() =>
+  import("./features/automation/mcp-feature-page").then((module) => ({ default: module.McpFeaturePage })));
+const AgentMemoryPage = lazy(() =>
+  import("./features/agent-memory/agent-memory-page").then((module) => ({ default: module.AgentMemoryPage })));
+const ProviderPage = lazy(() =>
+  import("./features/providers/provider-page").then((module) => ({ default: module.ProviderPage })));
+
 const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeTclaude: false,
   includeTcodex: false,
@@ -113,7 +115,6 @@ const DEFAULT_MIGRATION_TARGET_SETTINGS = {
   includeCodexInternal: false,
 } satisfies MigrationTargetSettings;
 
-type ViewMode = "default" | "favorites" | "pinned" | "hidden";
 type PendingSourceKey = (typeof OPTIONAL_SESSION_SOURCE_DESCRIPTORS)[number]["pendingKey"];
 
 const OPTIONAL_SOURCE_SETTINGS = OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map((descriptor) => ({
@@ -127,39 +128,6 @@ function emptyPendingPersonalSources(): Record<PendingSourceKey, boolean> {
     OPTIONAL_SESSION_SOURCE_DESCRIPTORS.map(({ pendingKey }) => [pendingKey, false]),
   ) as Record<PendingSourceKey, boolean>;
 }
-
-const INITIAL_SESSION_LIMIT = 30;
-const SESSION_PAGE_SIZE = 30;
-
-const EMPTY_STATS: SessionStats = {
-  total: {
-    sessionCount: 0,
-    messageCount: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedInputTokens: 0,
-    reasoningOutputTokens: 0,
-    totalTokens: 0,
-  },
-  bySource: [],
-  dailyTokenUsage: [],
-  previousTotal: null,
-  range: {
-    period: "today",
-    since: null,
-    until: 0,
-  },
-};
-
-const EMPTY_QUOTAS: UsageQuotaSnapshot = {
-  generatedAt: "",
-  providers: [],
-};
-
-const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
-  generatedAt: "",
-  sessions: [],
-};
 
 const SIDEBAR_SECTIONS_STORAGE_KEY = "agent-recall-sidebar-sections";
 const COLLAPSED_PROJECT_GROUPS_STORAGE_KEY = "agent-recall-collapsed-project-groups";
@@ -211,42 +179,73 @@ export function App(): ReactElement {
   const [sidebarSections, setSidebarSections] = useState<SidebarSectionsState>(() => loadInitialSidebarSections());
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => loadCollapsedProjectGroups());
   const [collapsedTreeProjects, setCollapsedTreeProjects] = useState<Set<string>>(new Set());
-  const [query, setQuery] = useState("");
-  const [workbenchQuery, setWorkbenchQuery] = useState("");
-  const [source, setSource] = useState<SearchOptions["source"]>("all");
-  const [environmentId, setEnvironmentId] = useState<string | "all">("all");
-  const [tag, setTag] = useState<string | undefined>();
-  const [projectPath, setProjectPath] = useState<string | undefined>();
-  const [projectEnvironmentId, setProjectEnvironmentId] = useState<string | undefined>();
-  const [visibility, setVisibility] = useState<ViewMode>("default");
-  const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
-  const [customDateRange, setCustomDateRange] = useState<Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive"> | null>(null);
-  const sortBy: SessionSortBy = "smart";
-  const [liveStatus, setLiveStatus] = useState<LiveStatusFilter>("all");
-  const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
-  const [sessionTotalCount, setSessionTotalCount] = useState(0);
-  const [hasMoreSessions, setHasMoreSessions] = useState(false);
-  const [results, setResults] = useState<SessionSearchResult[]>([]);
+  const {
+    query: workbenchQuery,
+    setQuery: setWorkbenchQuery,
+    sessions: workbenchSessions,
+    stats,
+    statsPeriod,
+    setStatsPeriod,
+    statsRefreshing,
+    statsFeedback,
+    quotas,
+    quotaLoading,
+    quotaFeedback,
+    liveSessions,
+    loadSessions: loadWorkbenchSessions,
+    loadStats,
+    refreshStats,
+    loadQuotas,
+    refreshLiveSessions,
+  } = useWorkbenchOverview(language);
   const [tags, setTags] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectTags, setProjectTags] = useState<ProjectTagEntry[]>([]);
   const [environments, setEnvironments] = useState<SessionEnvironment[]>([]);
-  const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
-  const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
-  const [statsRefreshing, setStatsRefreshing] = useState(false);
-  const [statsFeedback, setStatsFeedback] = useState<StatsFeedback>(null);
-  const [quotas, setQuotas] = useState<UsageQuotaSnapshot>(EMPTY_QUOTAS);
-  const [quotaLoading, setQuotaLoading] = useState(false);
-  const [quotaFeedback, setQuotaFeedback] = useState<QuotaFeedback>(null);
-  const [liveSessions, setLiveSessions] = useState<LiveSessionSnapshot>(EMPTY_LIVE_SESSIONS);
-  const [workbenchSessions, setWorkbenchSessions] = useState<SessionSearchResult[]>([]);
+  const {
+    query,
+    setQuery,
+    source,
+    setSource,
+    environmentId,
+    setEnvironmentId,
+    tag,
+    setTag,
+    projectPath,
+    projectEnvironmentId,
+    visibility,
+    setVisibility,
+    dateRange,
+    setDateRange,
+    customDateRange,
+    setCustomDateRange,
+    liveStatus,
+    setLiveStatus,
+    sessionTotalCount,
+    hasMoreSessions,
+    displayedResults,
+    selectedKey,
+    setSelectedKey,
+    selected,
+    searchRef,
+    liveSessionKeys,
+    liveDetectionFailed,
+    liveSearchKeys,
+    load,
+    loadMore,
+    clearProjectFilter,
+    clearProjectScopeFilter,
+    clearEnvironmentScopeFilter,
+    selectEnvironment,
+    selectProject,
+  } = useSessionCatalog({
+    active: activePage === "sessions",
+    liveSessions,
+    projects,
+    environments,
+    tags,
+  });
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [detail, setDetail] = useState<SessionSearchResult | null>(null);
-  const [remoteDetail, setRemoteDetail] = useState<{ snapshot: RemoteSessionDetailSnapshot; query: string } | null>(null);
-  const [detailTurns, setDetailTurns] = useState<SessionTurnSummary[]>([]);
-  const [matchedTurnId, setMatchedTurnId] = useState<string | null>(null);
-  const [turnsLoading, setTurnsLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [migrationDialog, setMigrationDialog] = useState<SessionMigrationDialogState>(null);
@@ -277,121 +276,24 @@ export function App(): ReactElement {
   const [pendingPersonalSources, setPendingPersonalSources] = useState<Record<PendingSourceKey, boolean>>(
     emptyPendingPersonalSources,
   );
-  const loadSeqRef = useRef(0);
   const metadataLoadSeqRef = useRef(0);
-  const statsLoadSeqRef = useRef(0);
-  const detailLoadSeqRef = useRef(0);
-  const workbenchSessionsLoadSeqRef = useRef(0);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const environmentIdRef = useRef(environmentId);
-  const projectPathRef = useRef(projectPath);
-  const projectEnvironmentIdRef = useRef(projectEnvironmentId);
-  environmentIdRef.current = environmentId;
-  projectPathRef.current = projectPath;
-  projectEnvironmentIdRef.current = projectEnvironmentId;
   const t = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
-  const searchScopeKey = useMemo(
-    () => JSON.stringify([
-      query,
-      source,
-      environmentId,
-      tag ?? "",
-      projectPath ?? "",
-      projectEnvironmentId ?? "",
-      visibility,
-      dateRange,
-      customDateRange?.dayStart ?? null,
-      customDateRange?.dayEndExclusive ?? null,
-      sortBy,
-      liveStatus,
-    ]),
-    [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, customDateRange, sortBy, liveStatus],
-  );
-  const liveSessionKeys = useMemo(
-    () => new Set(liveSessions.sessions.map((session) => `${session.family}:${session.rawId}`)),
-    [liveSessions],
-  );
-  const liveDetectionFailed = Boolean(liveSessions.error);
-  const liveSearchKeys = useMemo(() => [...liveSessionKeys], [liveSessionKeys]);
-
-  const load = useCallback(async () => {
-    const requestId = ++loadSeqRef.current;
-    const searchScope = resolveSearchScope(environmentId, projectPath, projectEnvironmentId);
-    const { dateFrom, dateTo } = customDateRange
-      ? { dateFrom: customDateRange.dayStart, dateTo: customDateRange.dayEndExclusive - 1 }
-      : resolveDateRange(dateRange);
-    const options: SearchOptions = {
-      query,
-      source,
-      tag,
-      projectPath: searchScope.projectPath,
-      environmentId: searchScope.environmentId,
-      visibility,
-      sortBy,
-      dateFrom,
-      dateTo,
-      limit: sessionLimit,
-      liveStatus: liveStatus === "all" ? undefined : liveStatus,
-      liveSessionKeys: liveStatus === "all" || liveDetectionFailed ? [] : liveSearchKeys,
-    };
-    const page = searchScope.projectEnvironmentConflict
-      ? { sessions: [], totalCount: 0, hasMore: false }
-      : await window.sessionSearch.searchSessionPage(options);
-    if (requestId !== loadSeqRef.current) return;
-    // Applying results re-renders the (unvirtualized) list, so mark it as a
-    // transition to keep it interruptible and avoid blocking active typing.
-    startTransition(() => {
-      setResults(page.sessions);
-      setSessionTotalCount(page.totalCount);
-      setHasMoreSessions(page.hasMore);
-      setSelectedKey((current) =>
-        current && !page.sessions.some((session) => session.sessionKey === current) ? null : current,
-      );
-    });
-  }, [query, source, environmentId, tag, projectPath, projectEnvironmentId, visibility, dateRange, customDateRange, sortBy, sessionLimit, liveStatus, liveDetectionFailed, liveSearchKeys]);
-
-  const loadWorkbenchSessions = useCallback(async () => {
-    const requestId = ++workbenchSessionsLoadSeqRef.current;
-    if (workbenchQuery.trim()) {
-      const page = await window.sessionSearch.searchSessionPage({
-        query: workbenchQuery,
-        source: "all",
-        visibility: "default",
-        sortBy: "smart",
-        prioritizePinned: false,
-        limit: WORKBENCH_SESSION_LIMIT,
-      });
-      if (requestId === workbenchSessionsLoadSeqRef.current) setWorkbenchSessions(page.sessions);
-      return;
-    }
-    const recentRequest = window.sessionSearch.searchSessionPage({
-      query: "",
-      source: "all",
-      visibility: "default",
-      sortBy: "activity",
-      prioritizePinned: false,
-      liveStatus: liveDetectionFailed ? undefined : "closed",
-      liveSessionKeys: liveDetectionFailed ? [] : liveSearchKeys,
-      limit: WORKBENCH_SESSION_LIMIT,
-    });
-    const activeRequest = !liveDetectionFailed && liveSearchKeys.length > 0
-      ? window.sessionSearch.searchSessionPage({
-          query: "",
-          source: "all",
-          visibility: "default",
-          sortBy: "activity",
-          prioritizePinned: false,
-          liveStatus: "open",
-          liveSessionKeys: liveSearchKeys,
-          limit: WORKBENCH_SESSION_LIMIT,
-        })
-      : Promise.resolve({ sessions: [], totalCount: 0, hasMore: false });
-    const [recentPage, activeSessionsPage] = await Promise.all([recentRequest, activeRequest]);
-    if (requestId !== workbenchSessionsLoadSeqRef.current) return;
-    const sessionsByKey = new Map<string, SessionSearchResult>();
-    for (const session of [...activeSessionsPage.sessions, ...recentPage.sessions]) sessionsByKey.set(session.sessionKey, session);
-    setWorkbenchSessions([...sessionsByKey.values()]);
-  }, [liveDetectionFailed, liveSearchKeys, workbenchQuery]);
+  const reportSessionDetailError = useCallback((error: unknown): void => {
+    setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+  }, []);
+  const {
+    detail,
+    remoteDetail,
+    turns: detailTurns,
+    turnsLoading,
+    matchedTurnId,
+    openLocal: openDetail,
+    closeLocal: closeDetail,
+    openRemote: openRemoteDetail,
+    closeRemote: closeRemoteDetail,
+    refreshLocal: refreshDetail,
+    applyUpdatedLocal: applyUpdatedDetail,
+  } = useSessionDetail(reportSessionDetailError);
 
   const loadSidebarMetadata = useCallback(async () => {
     const requestId = ++metadataLoadSeqRef.current;
@@ -408,101 +310,17 @@ export function App(): ReactElement {
     setProjectTags(nextProjectTags);
   }, []);
 
-  const loadStats = useCallback(async () => {
-    const requestId = ++statsLoadSeqRef.current;
-    const nextStats = await window.sessionSearch.getStats({ period: statsPeriod });
-    if (requestId !== statsLoadSeqRef.current) return;
-    setStats(nextStats);
-  }, [statsPeriod]);
-
-  const refreshStats = useCallback(async () => {
-    setStatsRefreshing(true);
-    setStatsFeedback({ kind: "running", message: t("Refreshing usage...", "正在刷新用量...") });
-    try {
-      await loadStats();
-      const successMessage = t("Usage refreshed.", "用量已刷新。");
-      setStatsFeedback({ kind: "success", message: successMessage });
-      window.setTimeout(() => {
-        setStatsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-      }, 1600);
-    } catch (error) {
-      setStatsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setStatsRefreshing(false);
-    }
-  }, [loadStats, t]);
-
-  const loadQuotas = useCallback(async (mode: "initial" | "manual" | "background" = "initial") => {
-    const background = mode === "background";
-    if (!background) setQuotaLoading(true);
-    if (mode === "manual") setQuotaFeedback({ kind: "running", message: t("Refreshing usage limits...", "正在刷新额度...") });
-    try {
-      const nextQuotas = await window.sessionSearch.getQuotas();
-      setQuotas(nextQuotas);
-      if (mode === "manual") {
-        const successMessage = t("Usage limits refreshed.", "额度已刷新。");
-        setQuotaFeedback({ kind: "success", message: successMessage });
-        window.setTimeout(() => {
-          setQuotaFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
-        }, 1800);
-      }
-    } catch (error) {
-      // Background polls fail silently so a transient read error does not clobber the last good value.
-      if (!background) setQuotaFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      if (!background) setQuotaLoading(false);
-    }
-  }, [t]);
-
-  const refreshLiveSessions = useCallback(async () => {
-    try {
-      setLiveSessions(await window.sessionSearch.getLiveSessions());
-    } catch (error) {
-      setLiveSessions({
-        generatedAt: new Date().toISOString(),
-        sessions: [],
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    setSessionLimit(INITIAL_SESSION_LIMIT);
-    setHasMoreSessions(false);
-  }, [searchScopeKey]);
-
-  useEffect(() => {
-    if (activePage !== "sessions") return;
-    // Typing is debounced inside SearchBox, so the search can run immediately
-    // here; filter and sort changes then respond without an extra delay.
-    void load();
-  }, [activePage, load]);
-
   useEffect(() => {
     void loadSidebarMetadata();
   }, [loadSidebarMetadata]);
 
   useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
-
-  useEffect(() => {
-    void loadQuotas();
-    const timer = window.setInterval(() => void loadQuotas("background"), QUOTA_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [loadQuotas]);
-
-  useEffect(() => {
-    void remoteSessions.load();
-  }, [remoteSessions.load]);
+    if (remoteSessionsOpen) void remoteSessions.load();
+  }, [remoteSessions.load, remoteSessionsOpen]);
 
   useEffect(() => {
     if (activePage === "skills") skills.ensureLoaded();
   }, [activePage, skills.ensureLoaded]);
-
-  useEffect(() => {
-    void loadWorkbenchSessions();
-  }, [loadWorkbenchSessions]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -552,12 +370,6 @@ export function App(): ReactElement {
   }, [t]);
 
   useEffect(() => {
-    void refreshLiveSessions();
-    const timer = window.setInterval(() => void refreshLiveSessions(), LIVE_SESSION_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [refreshLiveSessions]);
-
-  useEffect(() => {
     void window.sessionSearch.getSettings().then(setAppSettings);
   }, []);
 
@@ -565,38 +377,6 @@ export function App(): ReactElement {
     if (!appSettings) return;
     if (OPTIONAL_SOURCE_SETTINGS.some((item) => source === item.filter && !appSettings[item.key])) setSource("all");
   }, [source, appSettings]);
-
-  useEffect(() => {
-    if (environmentId !== "all" && environments.length > 0 && !environments.some((environment) => environment.id === environmentId)) {
-      setEnvironmentId("all");
-    }
-    if (projectEnvironmentId && environments.length > 0 && !environments.some((environment) => environment.id === projectEnvironmentId)) {
-      clearProjectFilter();
-    }
-  }, [environmentId, environments, projectEnvironmentId]);
-
-  useEffect(() => {
-    if (tag && tags.length > 0 && !tags.includes(tag)) {
-      setTag(undefined);
-    }
-  }, [tag, tags]);
-
-  useEffect(() => {
-    if (
-      projectPath &&
-      projects.length > 0 &&
-      !projects.some((project) =>
-        projectEnvironmentId
-          ? project.path === projectPath && project.environmentId === projectEnvironmentId
-          : project.path === projectPath,
-      )
-    ) {
-      setProjectPath(undefined);
-      setProjectEnvironmentId(undefined);
-      projectPathRef.current = undefined;
-      projectEnvironmentIdRef.current = undefined;
-    }
-  }, [projectPath, projectEnvironmentId, projects]);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -657,16 +437,6 @@ export function App(): ReactElement {
     const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
       setEnvironments(nextEnvironments);
-      setEnvironmentId((current) =>
-        current !== "all" && !nextEnvironments.some((environment) => environment.id === current) ? "all" : current,
-      );
-      setProjectEnvironmentId((current) => {
-        if (current && !nextEnvironments.some((environment) => environment.id === current)) {
-          setProjectPath(undefined);
-          return undefined;
-        }
-        return current;
-      });
       if (activePage === "sessions") void load();
     });
     return () => {
@@ -688,15 +458,6 @@ export function App(): ReactElement {
       setActionStatus({ kind: "running", message: migrationProgressMessage(progress, language) });
     });
   }, [language]);
-
-  const displayedResults = useMemo(
-    () => filterSessionsByLiveStatus(results, liveSessionKeys, liveStatus, liveDetectionFailed),
-    [results, liveSessionKeys, liveStatus, liveDetectionFailed],
-  );
-  const selected = useMemo(
-    () => displayedResults.find((session) => session.sessionKey === selectedKey) || null,
-    [displayedResults, selectedKey],
-  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -866,100 +627,8 @@ export function App(): ReactElement {
       ? t(`Search within ${displayTagName(tag)}`, `在 ${displayTagName(tag)} 中搜索`)
       : t("Search titles, first questions, full text, paths, or ids", "搜索标题、首个问题、全文、路径或 ID");
 
-  useEffect(() => {
-    setSelectedKey((current) =>
-      current && !displayedResults.some((session) => session.sessionKey === current) ? null : current,
-    );
-  }, [displayedResults]);
-
   function toggleSidebarSectionById(section: SidebarSectionId): void {
     setSidebarSections((current) => toggleSidebarSection(current, section));
-  }
-
-  function clearProjectFilter(): void {
-    setProjectPath(undefined);
-    setProjectEnvironmentId(undefined);
-    projectPathRef.current = undefined;
-    projectEnvironmentIdRef.current = undefined;
-  }
-
-  function clearProjectScopeFilter(): void {
-    clearProjectFilter();
-    setTag(undefined);
-  }
-
-  function clearEnvironmentScopeFilter(): void {
-    selectEnvironment("all");
-    clearProjectFilter();
-    setTag(undefined);
-  }
-
-  function selectEnvironment(nextEnvironmentId: string | "all"): void {
-    if (nextEnvironmentId === environmentId) return;
-    setEnvironmentId(nextEnvironmentId);
-    environmentIdRef.current = nextEnvironmentId;
-  }
-
-  function selectProject(project: ProjectSummary): void {
-    if (project.path === projectPath && project.environmentId === projectEnvironmentId) return;
-    setProjectPath(project.path);
-    setProjectEnvironmentId(project.environmentId);
-    projectPathRef.current = project.path;
-    projectEnvironmentIdRef.current = project.environmentId;
-  }
-
-  async function openDetail(session: SessionSearchResult, matchHit?: SessionMatchHit): Promise<void> {
-    const requestId = ++detailLoadSeqRef.current;
-    setContextMenu(null);
-    setRemoteDetail(null);
-    setDetail(session);
-    setDetailTurns([]);
-    setMatchedTurnId(matchHit?.turnId ?? session.bestTurn?.turnId ?? null);
-    setTurnsLoading(true);
-
-    const sessionKey = session.sessionKey;
-    try {
-      const fresh = await window.sessionSearch.getSession(sessionKey);
-      if (requestId !== detailLoadSeqRef.current) return;
-      if (!fresh) {
-        setTurnsLoading(false);
-        return;
-      }
-
-      const loadedTurns = await window.sessionSearch.listSessionTurns(sessionKey);
-      if (requestId !== detailLoadSeqRef.current) return;
-
-      setDetail(fresh);
-      setDetailTurns(loadedTurns);
-      setMatchedTurnId(matchHit?.turnId ?? fresh.bestTurn?.turnId ?? null);
-      setTurnsLoading(false);
-    } catch (error) {
-      if (requestId === detailLoadSeqRef.current) {
-        setTurnsLoading(false);
-        setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
-      }
-    }
-  }
-
-  function closeDetail(): void {
-    detailLoadSeqRef.current++;
-    setDetail(null);
-    setDetailTurns([]);
-    setMatchedTurnId(null);
-    setTurnsLoading(false);
-  }
-
-  function openRemoteDetail(snapshot: RemoteSessionDetailSnapshot, detailQuery: string): void {
-    detailLoadSeqRef.current++;
-    setDetail(null);
-    setDetailTurns([]);
-    setMatchedTurnId(null);
-    setTurnsLoading(false);
-    setRemoteDetail({ snapshot, query: detailQuery });
-  }
-
-  function closeRemoteDetail(): void {
-    setRemoteDetail(null);
   }
 
   async function refreshAfterAction(options: { metadata?: boolean; stats?: boolean } = {}): Promise<void> {
@@ -968,10 +637,7 @@ export function App(): ReactElement {
       options.metadata ? loadSidebarMetadata() : Promise.resolve(),
       options.stats ? loadStats() : Promise.resolve(),
     ]);
-    if (detail) {
-      const fresh = await window.sessionSearch.getSession(detail.sessionKey);
-      if (fresh) setDetail(fresh);
-    }
+    await refreshDetail();
   }
 
   function beginRename(session: SessionSearchResult): void {
@@ -1013,7 +679,7 @@ export function App(): ReactElement {
     setActionStatus({ kind: "running", message: t("Generating AI summary...", "正在生成 AI 摘要...") });
     try {
       const updated = await window.sessionSearch.summarizeSession(session.sessionKey);
-      if (updated) setDetail(updated);
+      if (updated) applyUpdatedDetail(updated);
       await refreshAfterAction();
       const message = t("AI summary generated.", "AI 摘要已生成。");
       setActionStatus({ kind: "success", message });
@@ -1031,10 +697,7 @@ export function App(): ReactElement {
     if (tag === tagName) setTag(undefined);
     else await load();
     await loadSidebarMetadata();
-    if (detail) {
-      const fresh = await window.sessionSearch.getSession(detail.sessionKey);
-      if (fresh) setDetail(fresh);
-    }
+    await refreshDetail();
   }
 
   function requestDeleteSession(session: SessionSearchResult): void {
@@ -1605,62 +1268,70 @@ export function App(): ReactElement {
                 renameSession: handleRowRename,
                 toggleFavorite: handleRowFavorite,
                 openContextMenu: handleRowContextMenu,
-                loadMore: () => setSessionLimit((current) => current + SESSION_PAGE_SIZE),
+                loadMore,
               }}
             />
           ) : null}
-          {activePage === "skills" ? (
-            <SkillsPage
-              snapshot={skills.snapshot}
-              syncSnapshot={skills.syncSnapshot}
-              loading={skills.loading}
-              feedback={skills.feedback}
-              language={language}
-              revealLabel={FILE_MANAGER_LABEL}
-              onRefresh={() => void skills.load({ refreshUsage: true })}
-              onUpload={(skill, force) => skills.upload(skill, force)}
-              onUploadSelected={(selectedSkills) => skills.uploadSelected(selectedSkills)}
-              onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
-              onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
-              onRefreshRemote={() => void skills.load({ silent: true })}
-              onCopySetupSql={() => void skills.copySetupSql()}
-              onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
-              onCopyPath={(skillPath) =>
-                void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
-              }
-              onReveal={(skillPath) =>
-                void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
-              }
-              onDelete={(skill) => skills.deleteSkill(skill)}
-            />
-          ) : null}
+          <Suspense
+            fallback={(
+              <div className="app-page-loading" role="status">
+                {t("Loading feature...", "正在加载功能...")}
+              </div>
+            )}
+          >
+            {activePage === "skills" ? (
+              <SkillsPage
+                snapshot={skills.snapshot}
+                syncSnapshot={skills.syncSnapshot}
+                loading={skills.loading}
+                feedback={skills.feedback}
+                language={language}
+                revealLabel={FILE_MANAGER_LABEL}
+                onRefresh={() => void skills.load({ refreshUsage: true })}
+                onUpload={(skill, force) => skills.upload(skill, force)}
+                onUploadSelected={(selectedSkills) => skills.uploadSelected(selectedSkills)}
+                onInstallRemote={(remoteSkillId) => skills.installRemote(remoteSkillId)}
+                onFetchVersion={(remoteSkillId) => skills.fetchVersion(remoteSkillId)}
+                onRefreshRemote={() => void skills.load({ silent: true })}
+                onCopySetupSql={() => void skills.copySetupSql()}
+                onOpenSqlEditor={() => window.sessionSearch.openSupabaseSqlEditor("skills")}
+                onCopyPath={(skillPath) =>
+                  void runUtilityAction(t("Copying skill path", "正在复制 Skill 路径"), () => window.sessionSearch.copySkillPath(skillPath), t("Skill path copied.", "Skill 路径已复制。"))
+                }
+                onReveal={(skillPath) =>
+                  void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
+                }
+                onDelete={(skill) => skills.deleteSkill(skill)}
+              />
+            ) : null}
 
-          {activePage === "workflows" ? <WorkflowFeaturePage language={language} /> : null}
+            {activePage === "workflows" ? <WorkflowFeaturePage language={language} /> : null}
 
-          {activePage === "team-chat" ? <TeamChatPage language={language} /> : null}
+            {activePage === "team-chat" ? <TeamChatPage language={language} /> : null}
 
-          {activePage === "evaluation" ? (
-            <EvaluationFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
-          ) : null}
+            {activePage === "evaluation" ? (
+              <EvaluationFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
+            ) : null}
 
-          {activePage === "runtimes" ? (
-            <RuntimeFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
-          ) : null}
+            {activePage === "runtimes" ? (
+              <RuntimeFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
+            ) : null}
 
-          {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
+            {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
 
-          {activePage === "memories" ? <AgentMemoryPage language={language} /> : null}
+            {activePage === "memories" ? <AgentMemoryPage language={language} /> : null}
 
-          {activePage === "providers" ? (
-            <ProviderPage
-              settings={appSettings}
-              language={language}
-              feedback={settingsFeedback}
-              onSettingsChange={(next) => void updateSettings(next)}
-              onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
-              onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
-            />
-          ) : null}
+            {activePage === "providers" ? (
+              <ProviderPage
+                settings={appSettings}
+                language={language}
+                feedback={settingsFeedback}
+                onSettingsChange={(next) => void updateSettings(next)}
+                onApplyToCodex={(apiConfig) => void applyApiConfigToCodex(apiConfig)}
+                onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
+              />
+            ) : null}
+          </Suspense>
         </div>
       </section>
 

@@ -31,9 +31,10 @@ function setup() {
     }),
   } as unknown as TeamChatService;
   const send = vi.fn();
-  const dispose = registerTeamChatIpc({ ipc, service, send });
+  const ensureReady = vi.fn(async () => undefined);
+  const dispose = registerTeamChatIpc({ ipc, service, send, ensureReady });
   const invoke = (channel: string, value?: unknown) => handlers.get(channel)?.({}, value);
-  return { handlers, invoke, ipc, service, send, dispose, emit: (event: TeamChatEvent) => eventListener?.(event) };
+  return { handlers, invoke, ipc, service, send, ensureReady, dispose, emit: (event: TeamChatEvent) => eventListener?.(event) };
 }
 
 describe("registerTeamChatIpc", () => {
@@ -57,12 +58,20 @@ describe("registerTeamChatIpc", () => {
   });
 
   it("uses the shared managed database and ignores Renderer connection payloads", async () => {
-    const { invoke, service } = setup();
+    const { invoke, service, ensureReady } = setup();
 
     await expect(invoke(TEAM_CHAT_CHANNELS.connectionConnect, {
       connectionUrl: "https://renderer-must-not-select-storage.example",
     })).resolves.toMatchObject({ state: "ready" });
+    expect(ensureReady).toHaveBeenCalledOnce();
     expect(service.connect).toHaveBeenCalledWith();
+  });
+
+  it("does not start Automation just to report the current Chat connection status", async () => {
+    const { invoke, ensureReady } = setup();
+
+    await expect(invoke(TEAM_CHAT_CHANNELS.connectionStatus)).resolves.toMatchObject({ state: "ready" });
+    expect(ensureReady).not.toHaveBeenCalled();
   });
 
   it("bounds room names and member selection before delegation", async () => {

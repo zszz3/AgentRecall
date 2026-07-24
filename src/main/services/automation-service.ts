@@ -25,6 +25,7 @@ import { EvaluationService } from "./evaluation-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { TeamChatService } from "../team-chat/team-chat-service";
 import { PostgresTeamChatStore } from "../team-chat/postgres-team-chat-store";
+import { McpAutomationModule } from "./mcp-automation-module";
 
 export interface AutomationServiceOptions {
   database: PostgresDatabase;
@@ -49,13 +50,61 @@ interface AutomationServiceDependencies {
 
 type SnapshotListener = (snapshot: AppSnapshot) => void;
 
+export type RuntimeAutomationModule = Pick<
+  AgentHub,
+  | "saveModelChannels"
+  | "updateConfiguredAgents"
+  | "testRuntimeChannel"
+  | "testConfiguredAgent"
+  | "queryRuntimeChannelBalance"
+  | "importRuntimeLocalConfig"
+  | "refreshModelCatalog"
+  | "listCodexPluginCatalog"
+  | "setWorkDir"
+  | "getWorkDir"
+  | "snapshot"
+>;
+
+export type WorkflowAutomationModule = Pick<
+  AgentHub,
+  | "createWorkflowDraft"
+  | "patchWorkflowDraft"
+  | "updateWorkflow"
+  | "resetWorkflowDraftSession"
+  | "sendWorkflowDraftReply"
+  | "abandonWorkflowDraftReply"
+  | "selectWorkflow"
+  | "renameWorkflow"
+  | "deleteWorkflow"
+  | "confirmWorkflow"
+  | "reviewWorkflow"
+  | "interruptWorkflowReview"
+  | "runWorkflow"
+  | "pauseWorkflowNode"
+  | "reviseWorkflowV2Run"
+  | "stopWorkflowRun"
+  | "resolveWorkflowV2Intervention"
+  | "sendWorkflowNodeMessage"
+  | "completeWorkflowNodeConversation"
+  | "rejectWorkflowNodeCompletion"
+  | "interruptWorkflowNodeConversation"
+  | "startWorkflowNode"
+  | "submitWorkflowScriptInput"
+  | "listWorkflowOutputs"
+  | "allowedFileRoots"
+  | "snapshot"
+>;
+
 export class NativeAutomationService {
   readonly paths: AutomationPaths;
+  readonly runtime: RuntimeAutomationModule;
+  readonly workflows: WorkflowAutomationModule;
+  readonly mcp: McpAutomationModule;
+  readonly evaluations: EvaluationService;
+  readonly teamChat: TeamChatService;
   private readonly hubInstance: AgentHub;
   private readonly registryInstance: McpRegistryStore;
   private readonly agentsInstance: McpAgentManagementService;
-  private readonly evaluationsInstance: EvaluationService;
-  private readonly teamChatsInstance: TeamChatService;
   private readonly loadWorkflows: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
   private readonly startBridgeService: typeof startMcpBridge;
   private readonly startRouterService: typeof startCodexChatRouter;
@@ -65,8 +114,10 @@ export class NativeAutomationService {
   private currentSnapshot: AppSnapshot;
   private bridge: McpBridgeServer | undefined;
   private router: CodexChatRouterServer | undefined;
+  private preparePromise: Promise<void> | undefined;
   private initializePromise: Promise<void> | undefined;
   private shutdownPromise: Promise<void> | undefined;
+  private shutdownRequested = false;
   private healthState: AutomationHealth = { state: "idle" };
 
   constructor(
@@ -86,13 +137,13 @@ export class NativeAutomationService {
       defaultWorkDir: () => this.hubInstance.getWorkDir(),
       execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
     });
-    this.evaluationsInstance = dependencies.evaluations ?? new EvaluationService({
+    this.evaluations = dependencies.evaluations ?? new EvaluationService({
       store: new EvaluationStore(options.database),
       agents: () => this.hubInstance.snapshot().configuredAgents,
       executeAgent: (configuredAgentId, prompt) =>
         configuredAgentExecutor.runOneShot({ configuredAgentId, prompt }),
     });
-    this.teamChatsInstance = dependencies.teamChats ?? new TeamChatService({
+    this.teamChat = dependencies.teamChats ?? new TeamChatService({
       storeFactory: () => new PostgresTeamChatStore(options.database),
       configuredAgents: () => this.hubInstance.snapshot().configuredAgents,
       executeAgent: (input, onEvent, signal) => configuredAgentExecutor.runConversation(input, onEvent, signal),
@@ -108,6 +159,13 @@ export class NativeAutomationService {
       runtimeForAgent: (agentId) => this.hubInstance.snapshot().configuredAgents
         .find((agent) => agent.id === agentId)?.runtimeAgentId,
     });
+    this.runtime = this.hubInstance;
+    this.workflows = this.hubInstance;
+    this.mcp = new McpAutomationModule({
+      registry: this.registryInstance,
+      agents: this.agentsInstance,
+      runtime: this.hubInstance,
+    });
     this.currentSnapshot = this.hubInstance.snapshot();
     this.unsubscribeHub = this.hubInstance.onChange((snapshot) => {
       this.currentSnapshot = snapshot;
@@ -116,28 +174,56 @@ export class NativeAutomationService {
   }
 
   initialize(): Promise<void> {
+    if (this.shutdownRequested) {
+      return Promise.reject(new Error("AgentRecall automation has stopped."));
+    }
     if (this.initializePromise) return this.initializePromise;
     this.healthState = { state: "initializing" };
     this.initializePromise = this.initializeInternal().then(
-      () => { this.healthState = { state: "ready" }; },
+      () => {
+        if (!this.shutdownRequested) this.healthState = { state: "ready" };
+      },
       (error) => {
-        this.healthState = {
-          state: "error",
-          error: error instanceof Error ? error.message : String(error),
-        };
+        if (!this.shutdownRequested) {
+          this.healthState = {
+            state: "error",
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+        throw error;
       },
     );
     return this.initializePromise;
   }
 
-  private async initializeInternal(): Promise<void> {
+  prepare(): Promise<void> {
+    if (this.shutdownRequested) {
+      return Promise.reject(new Error("AgentRecall automation has stopped."));
+    }
+    if (this.preparePromise) return this.preparePromise;
+    this.preparePromise = this.prepareInternal().catch((error) => {
+      if (!this.shutdownRequested) {
+        this.healthState = {
+          state: "error",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      throw error;
+    });
+    return this.preparePromise;
+  }
+
+  private async prepareInternal(): Promise<void> {
     await this.hubInstance.loadModelChannels(this.paths.channelsPath);
     await this.hubInstance.loadPersistedState(
       new PostgresAppStore(this.options.database, this.paths.fileStoragePath),
     );
     this.hubInstance.setMcpServers(await this.registryInstance.list());
     this.hubInstance.ensureBundledWorkflows(await this.loadWorkflows(this.options.bundledWorkflowsPath));
+  }
 
+  private async initializeInternal(): Promise<void> {
+    await this.prepare();
     this.router = await this.startRouterService({ channels: () => this.hubInstance.snapshot().channels });
     this.setRouterBaseUrl(this.router.baseUrl);
     this.bridge = await this.startBridgeService(this.hubInstance, {
@@ -146,18 +232,26 @@ export class NativeAutomationService {
     });
     this.hubInstance.setWorkflowMcpDiscoveryPath(this.bridge.discoveryPath);
     await this.hubInstance.initialize();
-    void this.teamChatsInstance.connect().catch(() => undefined);
+    void this.teamChat.connect().catch(() => undefined);
     void this.hubInstance.refreshDiscoverableModelCatalogs().catch((error) => {
       console.warn("Failed to refresh AgentRecall automation model catalogs:", error);
     });
   }
 
+  async requirePrepared(): Promise<void> {
+    await this.prepare();
+    if (this.shutdownRequested) throw new Error("AgentRecall automation has stopped.");
+    if (this.healthState.state === "error") {
+      throw new Error(this.healthState.error ?? "AgentRecall automation could not load its saved state.");
+    }
+  }
+
   async requireReady(): Promise<void> {
     await this.initialize();
+    if (this.shutdownRequested) throw new Error("AgentRecall automation has stopped.");
     if (this.healthState.state === "error") {
       throw new Error(this.healthState.error ?? "AgentRecall automation failed to initialize.");
     }
-    if (this.healthState.state === "stopped") throw new Error("AgentRecall automation has stopped.");
   }
 
   snapshot(): AppSnapshot {
@@ -174,38 +268,29 @@ export class NativeAutomationService {
     return { ...this.healthState };
   }
 
-  hub(): AgentHub {
-    return this.hubInstance;
-  }
-
-  mcpRegistry(): McpRegistryStore {
-    return this.registryInstance;
-  }
-
-  mcpAgents(): McpAgentManagementService {
-    return this.agentsInstance;
-  }
-
-  evaluations(): EvaluationService {
-    return this.evaluationsInstance;
-  }
-
-  teamChat(): TeamChatService {
-    return this.teamChatsInstance;
+  resolveRuntimeApproval(request: {
+    ownerId: string;
+    requestId: string;
+    decision: "approved" | "rejected";
+  }): AppSnapshot {
+    this.hubInstance.runtimeApprovals.resolveOrThrow(request);
+    return this.currentSnapshot;
   }
 
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
+    this.shutdownRequested = true;
     this.shutdownPromise = this.shutdownInternal();
     return this.shutdownPromise;
   }
 
   private async shutdownInternal(): Promise<void> {
-    await this.teamChatsInstance.close();
+    await (this.initializePromise ?? this.preparePromise)?.catch(() => undefined);
+    await this.teamChat.close();
     await this.hubInstance.shutdown();
     await this.bridge?.stop();
     await this.router?.stop();
-    this.evaluationsInstance.close();
+    this.evaluations.close();
     this.registryInstance.close();
     this.unsubscribeHub();
     this.listeners.clear();

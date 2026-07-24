@@ -30,7 +30,6 @@ import type {
 } from "../../automation/contracts";
 import type { McpInstallRequest } from "../../automation/engine/shared/mcp-config";
 import { loadClaudeDefaultConfig, loadCodexDefaultConfig } from "../../automation/engine/main/channels/model-config";
-import { discoverMcpTools } from "../../automation/engine/main/mcp-client";
 import { AUTOMATION_CHANNELS } from "../../shared/ipc/automation";
 import type { NativeAutomationService } from "../services/automation-service";
 
@@ -211,35 +210,44 @@ export function registerAutomationIpc({
       return handler(...args);
     });
   };
+  const prepared = <Args extends unknown[], Result>(
+    channel: string,
+    handler: (...args: Args) => Result | Promise<Result>,
+  ): void => {
+    ipc.handle(channel, async (_event, ...args: Args) => {
+      await service.requirePrepared();
+      return handler(...args);
+    });
+  };
 
   ipc.handle(AUTOMATION_CHANNELS.health, () => service.health());
-  ready(AUTOMATION_CHANNELS.snapshot, () => service.snapshot());
+  prepared(AUTOMATION_CHANNELS.snapshot, () => service.snapshot());
   ready(AUTOMATION_CHANNELS.runtimeSaveChannels, (value: unknown) =>
-    service.hub().saveModelChannels(z.array(channelSchema).max(500).parse(value) as AgentChannel[]));
+    service.runtime.saveModelChannels(z.array(channelSchema).max(500).parse(value) as AgentChannel[]));
   ready(AUTOMATION_CHANNELS.runtimeSaveAgents, (value: unknown) =>
-    service.hub().updateConfiguredAgents(z.array(agentSchema).max(500).parse(value) as ConfiguredAgent[]));
+    service.runtime.updateConfiguredAgents(z.array(agentSchema).max(500).parse(value) as ConfiguredAgent[]));
   ready(AUTOMATION_CHANNELS.runtimeTestChannel, (value: unknown) =>
-    service.hub().testRuntimeChannel(idSchema.parse(value), (event) => send(AUTOMATION_CHANNELS.runtimeTestEvent, event)));
+    service.runtime.testRuntimeChannel(idSchema.parse(value), (event) => send(AUTOMATION_CHANNELS.runtimeTestEvent, event)));
   ready(AUTOMATION_CHANNELS.runtimeTestAgent, (value: unknown) =>
-    service.hub().testConfiguredAgent(idSchema.parse(value), (event) => send(AUTOMATION_CHANNELS.runtimeTestEvent, event)));
-  ready(AUTOMATION_CHANNELS.runtimeBalance, (value: unknown) => service.hub().queryRuntimeChannelBalance(idSchema.parse(value)));
+    service.runtime.testConfiguredAgent(idSchema.parse(value), (event) => send(AUTOMATION_CHANNELS.runtimeTestEvent, event)));
+  ready(AUTOMATION_CHANNELS.runtimeBalance, (value: unknown) => service.runtime.queryRuntimeChannelBalance(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.runtimeLoadCodexDefault, () => loadCodexDefaultConfig());
   ready(AUTOMATION_CHANNELS.runtimeLoadClaudeDefault, () => loadClaudeDefaultConfig());
   ready(AUTOMATION_CHANNELS.runtimeImportLocal, (value: unknown) => {
     const request = z.object({ runtimeId: runtimeIdSchema, channelId: idSchema.optional() }).parse(value);
-    return service.hub().importRuntimeLocalConfig(request.runtimeId, request.channelId);
+    return service.runtime.importRuntimeLocalConfig(request.runtimeId, request.channelId);
   });
-  ready(AUTOMATION_CHANNELS.runtimeRefreshModels, (value: unknown) => service.hub().refreshModelCatalog(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.runtimeListCodexPlugins, () => service.hub().listCodexPluginCatalog());
+  ready(AUTOMATION_CHANNELS.runtimeRefreshModels, (value: unknown) => service.runtime.refreshModelCatalog(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.runtimeListCodexPlugins, () => service.runtime.listCodexPluginCatalog());
   ready(AUTOMATION_CHANNELS.workDirSet, (value: unknown) => {
-    service.hub().setWorkDir(pathSchema.parse(value));
-    return service.hub().snapshot();
+    service.runtime.setWorkDir(pathSchema.parse(value));
+    return service.runtime.snapshot();
   });
   ready(AUTOMATION_CHANNELS.workDirChoose, async () => {
     if (!pickDirectory) throw new Error("Directory picker is unavailable.");
-    const selected = await pickDirectory(service.hub().getWorkDir());
-    if (selected) service.hub().setWorkDir(pathSchema.parse(selected));
-    return service.hub().snapshot();
+    const selected = await pickDirectory(service.runtime.getWorkDir());
+    if (selected) service.runtime.setWorkDir(pathSchema.parse(selected));
+    return service.runtime.snapshot();
   });
   ready(AUTOMATION_CHANNELS.directoryPick, async (value: unknown) => {
     if (!pickDirectory) throw new Error("Directory picker is unavailable.");
@@ -247,114 +255,88 @@ export function registerAutomationIpc({
     return pickDirectory(defaultPath);
   });
 
-  ready(AUTOMATION_CHANNELS.mcpList, () => service.mcpRegistry().list());
-  ready(AUTOMATION_CHANNELS.mcpSave, async (value: unknown) => {
-    const saved = await service.mcpRegistry().upsert(mcpServerSchema.parse(value) as McpServerDefinition);
-    service.hub().setMcpServers(await service.mcpRegistry().list());
-    return saved;
-  });
-  ready(AUTOMATION_CHANNELS.mcpTest, async (value: unknown) => {
-    const server = mcpServerSchema.parse(value) as McpServerDefinition;
-    try {
-      const tested = await service.mcpRegistry().recordTest(server, await discoverMcpTools(server));
-      service.hub().setMcpServers(await service.mcpRegistry().list());
-      return tested;
-    } catch (error) {
-      const tested = service.mcpRegistry().recordTest(server, [], error instanceof Error ? error.message : String(error));
-      service.hub().setMcpServers(await service.mcpRegistry().list());
-      return tested;
-    }
-  });
-  ready(AUTOMATION_CHANNELS.mcpDelete, async (value: unknown) => {
-    const serverId = idSchema.parse(value);
-    const deleted = await service.mcpRegistry().delete(serverId);
-    if (deleted) {
-      service.hub().setMcpServers(await service.mcpRegistry().list());
-      const agents = service.hub().listConfiguredAgents().map((agent) => ({
-        ...agent,
-        ...(agent.mcpBindings ? {
-          mcpBindings: agent.mcpBindings.filter((binding) => binding.serverId !== serverId),
-        } : {}),
-      }));
-      service.hub().updateConfiguredAgents(agents);
-    }
-    return deleted;
-  });
-  ready(AUTOMATION_CHANNELS.mcpSetupStatus, () => service.mcpAgents().status());
-  ready(AUTOMATION_CHANNELS.mcpInstalledList, () => service.mcpAgents().listInstalled());
-  ready(AUTOMATION_CHANNELS.mcpAgentList, (value: unknown) => service.mcpAgents().listForAgent(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.mcpAgentInstall, (value: unknown) => service.mcpAgents().install(mcpInstallSchema.parse(value) as McpInstallRequest));
-  ready(AUTOMATION_CHANNELS.mcpAgentUninstall, (value: unknown) => service.mcpAgents().uninstall(mcpInstallSchema.parse(value) as McpInstallRequest));
+  ready(AUTOMATION_CHANNELS.mcpList, () => service.mcp.list());
+  ready(AUTOMATION_CHANNELS.mcpSave, (value: unknown) =>
+    service.mcp.save(mcpServerSchema.parse(value) as McpServerDefinition));
+  ready(AUTOMATION_CHANNELS.mcpTest, (value: unknown) =>
+    service.mcp.test(mcpServerSchema.parse(value) as McpServerDefinition));
+  ready(AUTOMATION_CHANNELS.mcpDelete, (value: unknown) =>
+    service.mcp.delete(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpSetupStatus, () => service.mcp.setupStatus());
+  ready(AUTOMATION_CHANNELS.mcpInstalledList, () => service.mcp.listInstalled());
+  ready(AUTOMATION_CHANNELS.mcpAgentList, (value: unknown) => service.mcp.listForAgent(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.mcpAgentInstall, (value: unknown) => service.mcp.install(mcpInstallSchema.parse(value) as McpInstallRequest));
+  ready(AUTOMATION_CHANNELS.mcpAgentUninstall, (value: unknown) => service.mcp.uninstall(mcpInstallSchema.parse(value) as McpInstallRequest));
 
-  ready(AUTOMATION_CHANNELS.evaluationDatasetList, () => service.evaluations().listDatasets());
+  ready(AUTOMATION_CHANNELS.evaluationDatasetList, () => service.evaluations.listDatasets());
   ready(AUTOMATION_CHANNELS.evaluationDatasetSave, (value: unknown) =>
-    service.evaluations().saveDataset(evaluationDatasetSchema.parse(value) as EvaluationDataset));
+    service.evaluations.saveDataset(evaluationDatasetSchema.parse(value) as EvaluationDataset));
   ready(AUTOMATION_CHANNELS.evaluationDatasetDelete, (value: unknown) =>
-    service.evaluations().deleteDataset(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.evaluationEvaluatorList, () => service.evaluations().listEvaluators());
+    service.evaluations.deleteDataset(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationEvaluatorList, () => service.evaluations.listEvaluators());
   ready(AUTOMATION_CHANNELS.evaluationEvaluatorSave, (value: unknown) =>
-    service.evaluations().saveEvaluator(evaluationEvaluatorSchema.parse(value) as EvaluationEvaluator));
+    service.evaluations.saveEvaluator(evaluationEvaluatorSchema.parse(value) as EvaluationEvaluator));
   ready(AUTOMATION_CHANNELS.evaluationEvaluatorDelete, (value: unknown) =>
-    service.evaluations().deleteEvaluator(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.evaluationExperimentList, () => service.evaluations().listExperiments());
+    service.evaluations.deleteEvaluator(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.evaluationExperimentList, () => service.evaluations.listExperiments());
   ready(AUTOMATION_CHANNELS.evaluationExperimentSave, (value: unknown) =>
-    service.evaluations().saveExperiment(evaluationExperimentSchema.parse(value) as EvaluationExperiment));
+    service.evaluations.saveExperiment(evaluationExperimentSchema.parse(value) as EvaluationExperiment));
   ready(AUTOMATION_CHANNELS.evaluationExperimentDelete, (value: unknown) =>
-    service.evaluations().deleteExperiment(idSchema.parse(value)));
+    service.evaluations.deleteExperiment(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.evaluationExperimentRun, (value: unknown) => {
     const request = z.object({ experimentId: idSchema }).strict().parse(value);
-    return service.evaluations().runExperiment(request.experimentId);
+    return service.evaluations.runExperiment(request.experimentId);
   });
   ready(AUTOMATION_CHANNELS.evaluationRunList, (value: unknown) =>
-    service.evaluations().listRuns(value === undefined ? undefined : evaluationRunListSchema.parse(value)));
+    service.evaluations.listRuns(value === undefined ? undefined : evaluationRunListSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.evaluationRunGet, (value: unknown) =>
-    service.evaluations().getRun(idSchema.parse(value)));
+    service.evaluations.getRun(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.evaluationRunDelete, (value: unknown) =>
-    service.evaluations().deleteRun(idSchema.parse(value)));
+    service.evaluations.deleteRun(idSchema.parse(value)));
 
   ready(AUTOMATION_CHANNELS.workflowDraftCreate, (value: unknown) =>
-    service.hub().createWorkflowDraft((value === undefined ? {} : z.object({
+    service.workflows.createWorkflowDraft((value === undefined ? {} : z.object({
       title: z.string().trim().min(1).max(200).optional(),
       configuredAgentId: idSchema.optional(),
       modelId: idSchema.optional(),
       reviewerConfiguredAgentId: idSchema.optional(),
       reviewerModelId: idSchema.optional(),
     }).passthrough().parse(value)) as CreateWorkflowDraftRequest));
-  ready(AUTOMATION_CHANNELS.workflowDraftPatch, (value: unknown) => service.hub().patchWorkflowDraft(workflowRequestSchema.parse(value) as PatchWorkflowDraftRequest));
-  ready(AUTOMATION_CHANNELS.workflowUpdate, (value: unknown) => service.hub().updateWorkflow(workflowRequestSchema.parse(value) as UpdateWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowDraftReset, (value: unknown) => service.hub().resetWorkflowDraftSession(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowDraftSend, (value: unknown) => service.hub().sendWorkflowDraftReply(workflowDraftReplySchema.parse(value) as SendWorkflowDraftReplyRequest));
-  ready(AUTOMATION_CHANNELS.workflowDraftAbandon, (value: unknown) => service.hub().abandonWorkflowDraftReply(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowSelect, (value: unknown) => service.hub().selectWorkflow(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.workflowDraftPatch, (value: unknown) => service.workflows.patchWorkflowDraft(workflowRequestSchema.parse(value) as PatchWorkflowDraftRequest));
+  ready(AUTOMATION_CHANNELS.workflowUpdate, (value: unknown) => service.workflows.updateWorkflow(workflowRequestSchema.parse(value) as UpdateWorkflowRequest));
+  ready(AUTOMATION_CHANNELS.workflowDraftReset, (value: unknown) => service.workflows.resetWorkflowDraftSession(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.workflowDraftSend, (value: unknown) => service.workflows.sendWorkflowDraftReply(workflowDraftReplySchema.parse(value) as SendWorkflowDraftReplyRequest));
+  ready(AUTOMATION_CHANNELS.workflowDraftAbandon, (value: unknown) => service.workflows.abandonWorkflowDraftReply(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.workflowSelect, (value: unknown) => service.workflows.selectWorkflow(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.workflowRename, (value: unknown) => {
     const request = z.object({ workflowId: idSchema, title: z.string().trim().min(1).max(200) }).parse(value);
-    return service.hub().renameWorkflow(request.workflowId, request.title);
+    return service.workflows.renameWorkflow(request.workflowId, request.title);
   });
-  ready(AUTOMATION_CHANNELS.workflowDelete, (value: unknown) => service.hub().deleteWorkflow(idSchema.parse(value)));
-  ready(AUTOMATION_CHANNELS.workflowConfirm, (value: unknown) => service.hub().confirmWorkflow(workflowRequestSchema.parse(value) as ConfirmWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowReview, (value: unknown) => service.hub().reviewWorkflow(workflowReviewSchema.parse(value) as ReviewWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowReviewInterrupt, (value: unknown) => service.hub().interruptWorkflowReview(workflowRequestSchema.parse(value) as InterruptWorkflowReviewRequest));
-  ready(AUTOMATION_CHANNELS.workflowRun, (value: unknown) => service.hub().runWorkflow(workflowRequestSchema.parse(value) as RunWorkflowRequest));
-  ready(AUTOMATION_CHANNELS.workflowPauseNode, (value: unknown) => service.hub().pauseWorkflowNode(workflowNodeSchema.parse(value) as PauseWorkflowNodeRequest));
-  ready(AUTOMATION_CHANNELS.workflowReviseRun, (value: unknown) => service.hub().reviseWorkflowV2Run(workflowReviseSchema.parse(value) as unknown as ReviseWorkflowV2RunRequest));
-  ready(AUTOMATION_CHANNELS.workflowStopRun, (value: unknown) => service.hub().stopWorkflowRun(workflowStopSchema.parse(value) as StopWorkflowRunRequest));
-  ready(AUTOMATION_CHANNELS.workflowResolveIntervention, (value: unknown) => service.hub().resolveWorkflowV2Intervention(workflowInterventionSchema.parse(value) as ResolveWorkflowV2InterventionRequest));
+  ready(AUTOMATION_CHANNELS.workflowDelete, (value: unknown) => service.workflows.deleteWorkflow(idSchema.parse(value)));
+  ready(AUTOMATION_CHANNELS.workflowConfirm, (value: unknown) => service.workflows.confirmWorkflow(workflowRequestSchema.parse(value) as ConfirmWorkflowRequest));
+  ready(AUTOMATION_CHANNELS.workflowReview, (value: unknown) => service.workflows.reviewWorkflow(workflowReviewSchema.parse(value) as ReviewWorkflowRequest));
+  ready(AUTOMATION_CHANNELS.workflowReviewInterrupt, (value: unknown) => service.workflows.interruptWorkflowReview(workflowRequestSchema.parse(value) as InterruptWorkflowReviewRequest));
+  ready(AUTOMATION_CHANNELS.workflowRun, (value: unknown) => service.workflows.runWorkflow(workflowRequestSchema.parse(value) as RunWorkflowRequest));
+  ready(AUTOMATION_CHANNELS.workflowPauseNode, (value: unknown) => service.workflows.pauseWorkflowNode(workflowNodeSchema.parse(value) as PauseWorkflowNodeRequest));
+  ready(AUTOMATION_CHANNELS.workflowReviseRun, (value: unknown) => service.workflows.reviseWorkflowV2Run(workflowReviseSchema.parse(value) as unknown as ReviseWorkflowV2RunRequest));
+  ready(AUTOMATION_CHANNELS.workflowStopRun, (value: unknown) => service.workflows.stopWorkflowRun(workflowStopSchema.parse(value) as StopWorkflowRunRequest));
+  ready(AUTOMATION_CHANNELS.workflowResolveIntervention, (value: unknown) => service.workflows.resolveWorkflowV2Intervention(workflowInterventionSchema.parse(value) as ResolveWorkflowV2InterventionRequest));
   ready(AUTOMATION_CHANNELS.workflowSendNodeMessage, (value: unknown) => {
     const request = z.object({ conversationId: idSchema, message: z.string().trim().min(1).max(200_000) }).parse(value);
-    return service.hub().sendWorkflowNodeMessage(request as SendWorkflowNodeMessageRequest);
+    return service.workflows.sendWorkflowNodeMessage(request as SendWorkflowNodeMessageRequest);
   });
-  ready(AUTOMATION_CHANNELS.workflowCompleteNodeConversation, (value: unknown) => service.hub().completeWorkflowNodeConversation(z.object({ conversationId: idSchema }).parse(value)));
+  ready(AUTOMATION_CHANNELS.workflowCompleteNodeConversation, (value: unknown) => service.workflows.completeWorkflowNodeConversation(z.object({ conversationId: idSchema }).parse(value)));
   ready(AUTOMATION_CHANNELS.workflowRejectNodeCompletion, (value: unknown) => {
     const request = z.object({ conversationId: idSchema, instruction: z.string().trim().min(1).max(200_000) }).parse(value);
-    return service.hub().rejectWorkflowNodeCompletion(request as RejectWorkflowNodeCompletionRequest);
+    return service.workflows.rejectWorkflowNodeCompletion(request as RejectWorkflowNodeCompletionRequest);
   });
-  ready(AUTOMATION_CHANNELS.workflowInterruptNodeConversation, (value: unknown) => service.hub().interruptWorkflowNodeConversation(z.object({ conversationId: idSchema }).parse(value) as InterruptWorkflowNodeConversationRequest));
-  ready(AUTOMATION_CHANNELS.workflowStartNode, (value: unknown) => service.hub().startWorkflowNode(workflowNodeSchema.parse(value) as StartWorkflowNodeRequest));
-  ready(AUTOMATION_CHANNELS.workflowSubmitScriptInput, (value: unknown) => service.hub().submitWorkflowScriptInput(workflowScriptInputSchema.parse(value) as SubmitWorkflowScriptInputRequest));
-  ready(AUTOMATION_CHANNELS.workflowOutputsList, (value: unknown) => service.hub().listWorkflowOutputs(workflowStopSchema.parse(value) as ListWorkflowOutputsRequest));
+  ready(AUTOMATION_CHANNELS.workflowInterruptNodeConversation, (value: unknown) => service.workflows.interruptWorkflowNodeConversation(z.object({ conversationId: idSchema }).parse(value) as InterruptWorkflowNodeConversationRequest));
+  ready(AUTOMATION_CHANNELS.workflowStartNode, (value: unknown) => service.workflows.startWorkflowNode(workflowNodeSchema.parse(value) as StartWorkflowNodeRequest));
+  ready(AUTOMATION_CHANNELS.workflowSubmitScriptInput, (value: unknown) => service.workflows.submitWorkflowScriptInput(workflowScriptInputSchema.parse(value) as SubmitWorkflowScriptInputRequest));
+  ready(AUTOMATION_CHANNELS.workflowOutputsList, (value: unknown) => service.workflows.listWorkflowOutputs(workflowStopSchema.parse(value) as ListWorkflowOutputsRequest));
   ready(AUTOMATION_CHANNELS.workflowOutputRead, async (value: unknown) => {
     if (!readLocalFile) throw new Error("Workflow output preview is unavailable.");
-    return readLocalFile(pathSchema.parse(value), service.hub().allowedFileRoots());
+    return readLocalFile(pathSchema.parse(value), service.workflows.allowedFileRoots());
   });
   ready(AUTOMATION_CHANNELS.workflowOutputReveal, async (value: unknown) => {
     if (!revealPath) throw new Error("Workflow output reveal is unavailable.");
@@ -366,8 +348,7 @@ export function registerAutomationIpc({
       requestId: idSchema,
       decision: z.enum(["approved", "rejected"]),
     }).parse(value) as ResolveRuntimeApprovalRequest;
-    service.hub().runtimeApprovals.resolveOrThrow(request);
-    return service.hub().snapshot();
+    return service.resolveRuntimeApproval(request);
   });
 
   return service.subscribe((snapshot) => send(AUTOMATION_CHANNELS.snapshotChanged, snapshot));
