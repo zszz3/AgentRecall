@@ -16,6 +16,14 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve("src/preload/index.ts"),
+          "update-progress": resolve("src/preload/update-progress.ts"),
+        },
+      },
+    },
   },
   renderer: {
     plugins: [react()],
@@ -24,6 +32,7 @@ export default defineConfig({
         input: {
           index: resolve("src/renderer/index.html"),
           "quick-search": resolve("src/renderer/quick-search.html"),
+          "update-progress": resolve("src/renderer/update-progress.html"),
         },
       },
     },

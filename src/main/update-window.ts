@@ -108,20 +108,49 @@ async function main(): Promise<void> {
   };
   publishProgress({ phase: "downloading", version: manifest.version, percent: 0 });
 
-  await runDetachedUpdate({
-    manifest,
-    manifestPath,
-    mainProcessId,
-    updaterProcessId: process.pid,
-    stableNodePath,
-    applyUpdatePath,
-    waitForProcessExit: client.waitForProcessExit,
-    stageUpdate: client.stageUpdate,
-    publishProgress,
-    formatUpdateError: client.formatUpdateError,
-    showNativeUpdateFailure: client.showNativeUpdateFailure,
-    launchInstalledApp: client.launchInstalledApp,
-  });
+  try {
+    await runDetachedUpdate({
+      manifest,
+      manifestPath,
+      mainProcessId,
+      updaterProcessId: process.pid,
+      stableNodePath,
+      applyUpdatePath,
+      waitForProcessExit: client.waitForProcessExit,
+      stageUpdate: client.stageUpdate,
+      publishProgress,
+      formatUpdateError: client.formatUpdateError,
+      showNativeUpdateFailure: client.showNativeUpdateFailure,
+      launchInstalledApp: client.launchInstalledApp,
+    });
+  } catch {
+    process.exitCode = 1;
+  }
+}
+
+async function handleBootstrapFailure(error: unknown): Promise<void> {
+  console.error("AgentRecall updater failed to start:", error);
+  const manifestPath = argumentValue("--manifest");
+  try {
+    const client = loadUpdateClient();
+    const mainProcessId = Number(argumentValue("--wait-pid"));
+    if (Number.isInteger(mainProcessId) && mainProcessId > 0) {
+      await client.waitForProcessExit(mainProcessId, 30_000).catch(() => undefined);
+    }
+    const message = client.formatUpdateError(error);
+    client.showNativeUpdateFailure(message);
+    try {
+      client.launchInstalledApp();
+    } catch {
+      // The user can still launch the unchanged installation manually.
+    }
+  } catch (fallbackError) {
+    console.error("AgentRecall updater fallback failed:", fallbackError);
+  }
+  if (manifestPath) {
+    await fs.rm(path.dirname(manifestPath), { recursive: true, force: true }).catch(() => undefined);
+  }
+  process.exitCode = 1;
 }
 
 app.setName("AgentRecall Updater");
@@ -130,8 +159,7 @@ void app.whenReady().then(async () => {
     await main();
     app.quit();
   } catch (error) {
-    console.error("AgentRecall update failed:", error);
-    process.exitCode = 1;
+    await handleBootstrapFailure(error);
     app.quit();
   }
 });
