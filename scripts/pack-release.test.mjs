@@ -159,7 +159,9 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
   assert.equal((await readFile(path.join(packedElectronRoot, "dist", "version"), "utf8")).trim(), "24.15.0");
   assert.equal(await readFile(path.join(packedElectronRoot, "path.txt"), "utf8"), "Electron.app/Contents/MacOS/Electron");
   assert.equal(await readFile(stagingDefaultApp, "utf8"), "agent-recall-staging-runtime\n");
-  assert.equal((await stat(stagingExecutable)).mode & 0o111, 0o111);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(stagingExecutable)).mode & 0o111, 0o111);
+  }
 
   if (process.platform === "darwin") {
     const resolved = await execFile(process.execPath, [
