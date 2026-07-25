@@ -644,6 +644,9 @@ async function installUpdate(manifest, options = {}) {
     const registry = options.registry || process.env.AGENT_RECALL_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
     const installEnvironment = { ...process.env };
     delete installEnvironment.ELECTRON_RUN_AS_NODE;
+    options.onProgress?.(updateProgress(parsed.version, "staging", {
+      message: "正在通过 npm 安装…",
+    }));
     try {
       installationStarted = true;
       await (options.execFileImpl || execFileAsync)(npmCommand, [
@@ -668,6 +671,9 @@ async function installUpdate(manifest, options = {}) {
       const detail = formatUpdateError(error);
       throw new Error(`npm 安装失败：${detail}`);
     }
+    options.onProgress?.(updateProgress(parsed.version, "validating", {
+      message: "正在检查应用和 Electron 运行时…",
+    }));
     await (options.ensureElectronImpl || ensureInstalledElectron)({
       npmCommand,
       nodePath: options.nodePath,

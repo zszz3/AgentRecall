@@ -13,6 +13,7 @@ const {
   stopRunningApp,
   waitForProcessExit,
 } = require("./update-client.cjs");
+const { createTerminalUpdateProgress } = require("./update-progress.cjs");
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -80,6 +81,22 @@ async function applyStagedUpdate(staged) {
   }
 }
 
+async function installManifestUpdate(manifest, options = {}) {
+  const progress = (options.createProgressImpl || createTerminalUpdateProgress)({
+    stream: options.stream || process.stdout,
+  });
+  try {
+    await (options.installUpdateImpl || installUpdate)(manifest, {
+      nodePath: options.nodePath || process.env.AGENT_RECALL_NODE_PATH,
+      onProgress: progress.report,
+    });
+    await (options.clearInstallStatusImpl || clearInstallStatus)().catch(() => undefined);
+    progress.complete(manifest.version);
+  } finally {
+    progress.dispose();
+  }
+}
+
 async function main() {
   const manifestPath = argumentValue("--manifest");
   const stagedPath = argumentValue("--staged");
@@ -99,11 +116,9 @@ async function main() {
     } else {
       const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
       version = manifest.version;
-      process.stdout.write(`正在安装 AgentRecall v${version}...\n`);
-      await installUpdate(manifest, {
+      await installManifestUpdate(manifest, {
         nodePath: process.env.AGENT_RECALL_NODE_PATH,
       });
-      await clearInstallStatus().catch(() => undefined);
     }
     process.stdout.write(`AgentRecall v${version} 安装完成，正在重新启动。\n`);
     await relaunchInstalledApp();
@@ -128,4 +143,4 @@ if (require.main === module) main().catch(async (error) => {
   process.exitCode = 1;
 });
 
-module.exports = { applyStagedUpdate, relaunchInstalledApp };
+module.exports = { applyStagedUpdate, installManifestUpdate, relaunchInstalledApp };

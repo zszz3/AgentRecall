@@ -6,7 +6,33 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { applyStagedUpdate, relaunchInstalledApp } = require("../bin/apply-update.cjs");
+const { applyStagedUpdate, installManifestUpdate, relaunchInstalledApp } = require("../bin/apply-update.cjs");
+
+test("forwards manifest update progress to the terminal renderer", async () => {
+  const calls = [];
+  const terminalProgress = {
+    report: (event) => calls.push(`progress:${event.phase}`),
+    complete: (version) => calls.push(`complete:${version}`),
+    dispose: () => calls.push("dispose"),
+  };
+
+  await installManifestUpdate({ version: "0.32.0" }, {
+    nodePath: "/stable/node",
+    createProgressImpl: () => terminalProgress,
+    installUpdateImpl: async (_manifest, options) => {
+      assert.equal(options.nodePath, "/stable/node");
+      options.onProgress({ phase: "staging", version: "0.32.0" });
+    },
+    clearInstallStatusImpl: async () => calls.push("clear-status"),
+  });
+
+  assert.deepEqual(calls, [
+    "progress:staging",
+    "clear-status",
+    "complete:0.32.0",
+    "dispose",
+  ]);
+});
 
 test("swaps a validated staged package into place and removes the backup", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-apply-stage-"));
