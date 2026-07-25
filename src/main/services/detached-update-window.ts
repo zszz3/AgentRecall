@@ -103,6 +103,7 @@ export interface DetachedUpdateLifecycleOptions {
   formatUpdateError(error: unknown): string;
   showNativeUpdateFailure(errorMessage: string): unknown;
   launchInstalledApp(): unknown;
+  acquireUpdateLock?(): Promise<{ release(): Promise<void> }>;
   writeStagedDescriptor?(staged: StagedAppUpdate): Promise<string>;
   launchApply?(stagedPath: string, waitPid: number): Promise<void>;
   cleanupControlDirectory?(): Promise<void>;
@@ -137,7 +138,9 @@ async function recordInstallFailure(staged: StagedAppUpdate | undefined, error: 
 
 export async function runDetachedUpdate(options: DetachedUpdateLifecycleOptions): Promise<void> {
   let staged: StagedAppUpdate | undefined;
+  let lock: { release(): Promise<void> } | undefined;
   try {
+    lock = await options.acquireUpdateLock?.();
     await options.waitForProcessExit(options.mainProcessId, 30_000);
     staged = await options.stageUpdate(options.manifest, {
       nodePath: options.stableNodePath,
@@ -173,6 +176,8 @@ export async function runDetachedUpdate(options: DetachedUpdateLifecycleOptions)
         options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions)),
       );
     }
+    // Keep the lock owned by this live updater until it exits. The Node apply
+    // process waits for that exit, then safely removes the now-stale lock.
   } catch (error) {
     const formatted = options.formatUpdateError(error);
     options.publishProgress({
@@ -181,6 +186,7 @@ export async function runDetachedUpdate(options: DetachedUpdateLifecycleOptions)
       error: formatted,
     });
     await recordInstallFailure(staged, formatted).catch(() => undefined);
+    await lock?.release().catch(() => undefined);
     options.showNativeUpdateFailure(formatted);
     try {
       options.launchInstalledApp();

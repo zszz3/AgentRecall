@@ -10,6 +10,7 @@ import {
 } from "./services/detached-update-window";
 
 interface UpdateClient {
+  acquireUpdateLock(): Promise<{ release(): Promise<void> }>;
   formatUpdateError(error: unknown): string;
   launchInstalledApp(): unknown;
   parseUpdateManifest(value: unknown): AppUpdateManifest;
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
       formatUpdateError: client.formatUpdateError,
       showNativeUpdateFailure: client.showNativeUpdateFailure,
       launchInstalledApp: client.launchInstalledApp,
+      acquireUpdateLock: client.acquireUpdateLock,
     });
   } catch {
     process.exitCode = 1;

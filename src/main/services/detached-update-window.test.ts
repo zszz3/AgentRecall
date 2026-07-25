@@ -186,6 +186,7 @@ describe("detached update lifecycle", () => {
     const showNativeUpdateFailure = vi.fn();
     const launchInstalledApp = vi.fn();
     const launchApply = vi.fn();
+    const releaseLock = vi.fn(async () => undefined);
     const progress: AppUpdateProgress[] = [];
 
     await expect(runDetachedUpdate({
@@ -205,10 +206,12 @@ describe("detached update lifecycle", () => {
       formatUpdateError: (error) => error instanceof Error ? error.message : String(error),
       showNativeUpdateFailure,
       launchInstalledApp,
+      acquireUpdateLock: vi.fn(async () => ({ release: releaseLock })),
       cleanupControlDirectory: vi.fn(async () => undefined),
     })).rejects.toThrow("npm staging failed");
 
     expect(launchApply).not.toHaveBeenCalled();
+    expect(releaseLock).toHaveBeenCalledOnce();
     expect(showNativeUpdateFailure).toHaveBeenCalledWith("npm staging failed");
     expect(launchInstalledApp).toHaveBeenCalledOnce();
     expect(progress.at(-1)).toEqual({
@@ -227,6 +230,7 @@ describe("detached update lifecycle", () => {
       queueMicrotask(() => child.emit("spawn"));
       return child;
     });
+    const releaseLock = vi.fn(async () => undefined);
 
     await runDetachedUpdate({
       manifest: manifest(),
@@ -242,6 +246,7 @@ describe("detached update lifecycle", () => {
       formatUpdateError: (error) => String(error),
       showNativeUpdateFailure: vi.fn(),
       launchInstalledApp: vi.fn(),
+      acquireUpdateLock: vi.fn(async () => ({ release: releaseLock })),
       environment: {
         EXISTING_VALUE: "kept",
         ELECTRON_RUN_AS_NODE: "1",
@@ -265,5 +270,6 @@ describe("detached update lifecycle", () => {
       },
     });
     expect(child.unref).toHaveBeenCalledOnce();
+    expect(releaseLock).not.toHaveBeenCalled();
   });
 });
