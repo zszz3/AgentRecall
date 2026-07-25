@@ -1,0 +1,61 @@
+appId: dev.zszz3.agent-recall
+productName: AgentRecall
+copyright: Copyright © 2026 AgentRecall contributors
+asar: true
+
+directories:
+  app: dist/native-app
+  output: dist/native
+  buildResources: build
+
+files:
+  - out/**/*
+  - assets/**/*
+  - package.json
+
+publish:
+  provider: github
+  owner: zszz3
+  repo: AgentRecall
+  releaseType: release
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+afterSign: build/notarize.cjs
+
+dmg:
+  sign: false
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-Setup-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  include: build/installer.nsh
+  artifactName: ${productName}-Setup-${version}-win-${arch}.${ext}
+
+generateUpdatesFilesForAllChannels: false

@@ -1,0 +1,88 @@
+name: Native Distribution (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Require signing and macOS notarization credentials
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal artifacts
+            os: macos-latest
+            command: package:native:mac
+          - name: Windows x64 NSIS
+            os: windows-latest
+            command: package:native:win
+    runs-on: ${{ matrix.os }}
+    env:
+      AGENT_RECALL_NOTARIZE: ${{ inputs.signed && runner.os == 'macOS' && 'true' || 'false' }}
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ inputs.signed && 'true' || 'false' }}
+      CSC_LINK: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_LINK || secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || secrets.WINDOWS_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies without external configuration hooks
+        run: npm ci --ignore-scripts
+
+      - name: Validate requested signing credentials
+        if: ${{ inputs.signed }}
+        shell: bash
+        run: |
+          if [ -z "$CSC_LINK" ] || [ -z "$CSC_KEY_PASSWORD" ]; then
+            echo "Signed packaging requires platform CSC link and password secrets." >&2
+            exit 1
+          fi
+          if [ "$RUNNER_OS" = "macOS" ] && { [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; }; then
+            echo "Signed macOS packaging also requires APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID." >&2
+            exit 1
+          fi
+
+      - name: Remove credentials from unsigned validation
+        if: ${{ !inputs.signed }}
+        shell: bash
+        run: |
+          echo "CSC_LINK=" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=" >> "$GITHUB_ENV"
+          echo "APPLE_ID=" >> "$GITHUB_ENV"
+          echo "APPLE_APP_SPECIFIC_PASSWORD=" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=" >> "$GITHUB_ENV"
+
+      - name: Build MCP bundle without lifecycle scripts
+        run: npm run build:mcp
+
+      - name: Test
+        run: npm test
+
+      - name: Package native artifacts without publishing
+        run: npm run ${{ matrix.command }}
+
+      - name: Upload workflow artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-recall-${{ runner.os }}-${{ runner.arch }}-${{ inputs.signed && 'signed' || 'unsigned' }}
+          path: dist/native/**
+          if-no-files-found: error
+          retention-days: 14
