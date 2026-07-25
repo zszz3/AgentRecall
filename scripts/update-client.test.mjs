@@ -29,6 +29,7 @@ async function electronFixtureExec(command, args, options) {
 }
 
 const require = createRequire(import.meta.url);
+const mutableFsPromises = require("node:fs/promises");
 const updateClientSource = await readFile(new URL("../bin/update-client.cjs", import.meta.url), "utf8");
 const {
   DEFAULT_NPM_REGISTRY,
@@ -990,6 +991,78 @@ test("repairs a missing path.txt after install.js populates a complete runtime",
 
   await ensureInstalledElectron({ packagePath, timeoutMs: 5_000, execFileImpl: electronFixtureExec });
   assert.equal(await readFile(path.join(electronPath, "path.txt"), "utf8"), relativeExecutable);
+  assert.equal(isElectronRuntimeReady(packagePath), true);
+});
+
+test("retries transient ENOTEMPTY failures while removing the previous Electron runtime", async () => {
+  const packagePath = await temporaryDirectory("agent-session-electron-backup-cleanup-");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeExecutable)), { recursive: true });
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeDefaultApp)), { recursive: true });
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(path.join(electronPath, "package.json"), JSON.stringify({ version: "42.3.0" }), "utf8");
+  await writeFile(path.join(electronPath, "path.txt"), relativeExecutable, "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeExecutable), "corrupt-runtime", "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeDefaultApp), "old-default", "utf8");
+  await writeFile(path.join(electronPath, "dist", "version"), "42.3.0", "utf8");
+  await writeFile(
+    path.join(electronPath, "install.js"),
+    [
+      'const fs = require("node:fs"); const path = require("node:path");',
+      `const executable = path.join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});`,
+      `const defaultApp = path.join(__dirname, "dist", ${JSON.stringify(relativeDefaultApp)});`,
+      'fs.mkdirSync(path.dirname(executable), { recursive: true }); fs.writeFileSync(executable, "#!/bin/sh\\necho v42.3.0\\n"); fs.chmodSync(executable, 0o755);',
+      'fs.mkdirSync(path.dirname(defaultApp), { recursive: true }); fs.writeFileSync(defaultApp, "ok");',
+      'fs.writeFileSync(path.join(__dirname, "dist", "version"), "42.3.0");',
+      `fs.writeFileSync(path.join(__dirname, "path.txt"), ${JSON.stringify(relativeExecutable)});`,
+    ].join(" "),
+    "utf8",
+  );
+
+  const originalRm = mutableFsPromises.rm;
+  let backupRemovalAttempts = 0;
+  let installRuns = 0;
+  mutableFsPromises.rm = async (target, options) => {
+    if (String(target).includes(".agent-recall-dist-") && String(target).endsWith(".backup")) {
+      backupRemovalAttempts += 1;
+      if (backupRemovalAttempts <= 2) {
+        const error = new Error("directory not empty");
+        error.code = "ENOTEMPTY";
+        throw error;
+      }
+    }
+    return originalRm(target, options);
+  };
+  try {
+    await ensureInstalledElectron({
+      packagePath,
+      timeoutMs: 5_000,
+      findCachedArchiveImpl: async () => null,
+      execFileImpl: async (command, args, options) => {
+        if (command === process.execPath && args[0] === path.join(electronPath, "install.js")) {
+          installRuns += 1;
+        }
+        return electronFixtureExec(command, args, options);
+      },
+    });
+  } finally {
+    mutableFsPromises.rm = originalRm;
+  }
+
+  assert.equal(backupRemovalAttempts, 3);
+  assert.equal(installRuns, 1);
   assert.equal(isElectronRuntimeReady(packagePath), true);
 });
 

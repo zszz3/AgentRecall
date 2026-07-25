@@ -21,6 +21,7 @@ const LATEST_UPDATE_MANIFEST_URL = `https://github.com/${GITHUB_REPOSITORY}/rele
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
+const TRANSIENT_REMOVE_ERROR_CODES = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 
 function packageRoot() {
   return path.resolve(__dirname, "..");
@@ -773,6 +774,20 @@ async function findFileRecursive(rootPath, fileName) {
   return null;
 }
 
+async function removeRuntimeDirectory(directoryPath, options = {}) {
+  const maxRetries = options.maxRetries ?? 5;
+  const retryDelayMs = options.retryDelayMs ?? 50;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fsp.rm(directoryPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!TRANSIENT_REMOVE_ERROR_CODES.has(error?.code) || attempt >= maxRetries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  }
+}
+
 async function ensureInstalledElectron(options = {}) {
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
   const electronModulePath = path.join(packagePath, "node_modules", "electron");
@@ -872,7 +887,7 @@ async function ensureInstalledElectron(options = {}) {
     if (!isElectronRuntimeReady(packagePath)) throw new Error("Electron runtime files are incomplete.");
   };
   const cleanupBackups = async (distBackup, pathBackup) => {
-    await fsp.rm(distBackup, { recursive: true, force: true });
+    await removeRuntimeDirectory(distBackup);
     await fsp.rm(pathBackup, { force: true });
   };
   const repairViaInstallScript = async (forceNoCache = false) => {
@@ -900,7 +915,7 @@ async function ensureInstalledElectron(options = {}) {
         `electron-v${expectedVersion}-${options.platform || process.platform}-${options.arch || process.arch}.zip`,
       );
     if (!archivePath) return false;
-    await fsp.rm(distPath, { recursive: true, force: true }).catch(() => undefined);
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
     await fsp.mkdir(distPath, { recursive: true });
     if (options.extractArchiveImpl) {
@@ -942,13 +957,13 @@ async function ensureInstalledElectron(options = {}) {
     if (await attemptRepair(() => repairViaInstallScript(false))) return;
     if (await attemptRepair(repairMissingPathFile)) return;
     if (await attemptRepair(repairFromCachedArchive)) return;
-    await fsp.rm(distPath, { recursive: true, force: true }).catch(() => undefined);
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
     if (await attemptRepair(() => repairViaInstallScript(true))) return;
     if (await attemptRepair(repairMissingPathFile)) return;
     throw repairError || new Error("Electron runtime files are incomplete.");
   } catch (error) {
-    await fsp.rm(distPath, { recursive: true, force: true }).catch(() => undefined);
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
     if (fs.existsSync(distBackup)) await fsp.rename(distBackup, distPath).catch(() => undefined);
     if (fs.existsSync(pathBackup)) await fsp.rename(pathBackup, pathFile).catch(() => undefined);
