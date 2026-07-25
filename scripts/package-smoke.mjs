@@ -85,8 +85,8 @@ try {
     throw new Error("Staged package unexpectedly bundles Electron.");
   }
   await Promise.all([
-    access(path.join(stagedRoot, "node_modules", "agent-recall", "node_modules", "electron", "package.json")),
-    access(path.join(stagedRoot, "node_modules", "agent-recall", "node_modules", "electron-store", "package.json")),
+    access(path.join(stagedRoot, "node_modules", "electron", "package.json")),
+    access(path.join(stagedRoot, "node_modules", "electron-store", "package.json")),
   ]);
   try {
     await access(path.join(home, ".claude", "settings.json"));
