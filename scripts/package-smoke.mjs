@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { access, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +7,6 @@ import { promisify } from "node:util";
 import { packReleaseArchive } from "./pack-release.mjs";
 
 const execFileAsync = promisify(execFile);
-const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agent-recall-package-smoke-"));
 const packDir = path.join(tempRoot, "pack");
@@ -24,23 +22,19 @@ const environment = {
   AGENT_RECALL_SKIP_STATUSLINE_INSTALL: "1",
   AGENT_RECALL_NO_UPDATE_CHECK: "1",
   electron_config_cache: path.join(tempRoot, "electron-cache"),
-  npm_config_cache: path.join(tempRoot, "npm-cache"),
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1",
+  npm_config_cache: process.env.AGENT_RECALL_TEST_NPM_CACHE || path.join(tempRoot, "npm-cache"),
   npm_config_prefix: prefix,
 };
-
-async function relativeFiles(rootDirectory, currentDirectory = rootDirectory) {
-  const files = [];
-  for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
-    const entryPath = path.join(currentDirectory, entry.name);
-    if (entry.isDirectory()) files.push(...await relativeFiles(rootDirectory, entryPath));
-    else files.push(path.relative(rootDirectory, entryPath));
-  }
-  return files.sort();
-}
+delete environment.npm_config_allow_scripts;
 
 try {
   await Promise.all([packDir, prefix, stageRoot, home].map((directory) => mkdir(directory, { recursive: true })));
   const archive = await packReleaseArchive({ root, destination: packDir, environment });
+  const archiveSize = (await stat(archive)).size;
+  if (archiveSize >= 3 * 1024 * 1024) {
+    throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 3MB.`);
+  }
   await execFileAsync(npm, ["install", "--global", archive, "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund"], {
     cwd: root,
     env: environment,
@@ -61,6 +55,9 @@ try {
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
+  if (JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).bundleDependencies?.includes("electron")) {
+    throw new Error("Release package must not bundle Electron.");
+  }
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
 
   await execFileAsync(npm, ["install", "--prefix", stageRoot, archive, "--ignore-scripts", "--no-audit", "--no-fund"], {
@@ -75,69 +72,28 @@ try {
     maxBuffer: 16 * 1024 * 1024,
   });
   const stagedRoot = path.join(stageRoot, "node_modules", "agent-recall");
-  const stagedElectronRoot = path.join(stagedRoot, "node_modules", "electron");
+  await execFileAsync(process.execPath, [path.join(stagedRoot, "bin", "install-claude-statusline.cjs")], {
+    cwd: stagedRoot,
+    env: {
+      ...environment,
+      AGENT_RECALL_STAGING_INSTALL: "1",
+      AGENT_RECALL_STAGE_ROOT: stageRoot,
+    },
+  });
   const stagedPackage = JSON.parse(await readFile(path.join(stagedRoot, "package.json"), "utf8"));
-  const stagedElectron = JSON.parse(await readFile(path.join(stagedElectronRoot, "package.json"), "utf8"));
-  const stagedBridge = JSON.parse(await readFile(
-    path.join(stagedElectronRoot, ".agent-recall-staging-bridge.json"),
-    "utf8",
-  ));
-  if (stagedBridge.electronVersion !== "42.3.0" || stagedElectron.version !== stagedBridge.bridgedVersion) {
-    throw new Error("Staged package did not contain the verified Electron bridge metadata.");
+  if (stagedPackage.bundleDependencies?.includes("electron")) {
+    throw new Error("Staged package unexpectedly bundles Electron.");
   }
-  if (stagedPackage.dependencies?.electron !== stagedBridge.bridgedVersion) {
-    throw new Error("Staged package dependency metadata did not match its Electron bridge.");
+  await Promise.all([
+    access(path.join(stagedRoot, "node_modules", "agent-recall", "node_modules", "electron", "package.json")),
+    access(path.join(stagedRoot, "node_modules", "agent-recall", "node_modules", "electron-store", "package.json")),
+  ]);
+  try {
+    await access(path.join(home, ".claude", "settings.json"));
+    throw new Error("Staging postinstall must not write Claude settings.");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
   }
-  const stagedElectronInstall = await readFile(path.join(stagedElectronRoot, "install.js"), "utf8");
-  if (!stagedElectronInstall.includes("applyAgentRecallStagingBridge")) {
-    throw new Error("Release package did not contain the legacy Electron update bridge.");
-  }
-  if (
-    stagedBridge.stagingRuntimePlatforms?.length !== 1
-    || stagedBridge.stagingRuntimePlatforms[0] !== "darwin"
-  ) {
-    throw new Error("Release package did not identify the macOS-only staging runtime.");
-  }
-  const stagingExecutable = path.join(
-    stagedElectronRoot,
-    "dist",
-    "Electron.app",
-    "Contents",
-    "MacOS",
-    "Electron",
-  );
-  const stagingDefaultApp = path.join(
-    stagedElectronRoot,
-    "dist",
-    "Electron.app",
-    "Contents",
-    "Resources",
-    "default_app.asar",
-  );
-  const stagedRuntimeFiles = await relativeFiles(path.join(stagedElectronRoot, "dist"));
-  if (JSON.stringify(stagedRuntimeFiles) !== JSON.stringify([
-    path.join("Electron.app", "Contents", "MacOS", "Electron"),
-    path.join("Electron.app", "Contents", "Resources", "default_app.asar"),
-    "version",
-  ].sort())) {
-    throw new Error("Release package contained files outside the minimal staging runtime.");
-  }
-  if (
-    await readFile(path.join(stagedElectronRoot, "path.txt"), "utf8") !== "Electron.app/Contents/MacOS/Electron"
-    || (await readFile(path.join(stagedElectronRoot, "dist", "version"), "utf8")).trim() !== stagedBridge.bridgedVersion
-    || await readFile(stagingDefaultApp, "utf8") !== "agent-recall-staging-runtime\n"
-    || await readFile(stagingExecutable, "utf8") !== `#!/bin/sh\nprintf 'v${stagedBridge.bridgedVersion}\\n'\n`
-  ) {
-    throw new Error("Release package staging runtime did not match its verified sentinel.");
-  }
-  if (process.platform !== "win32" && ((await stat(stagingExecutable)).mode & 0o111) !== 0o111) {
-    throw new Error("Release package staging runtime was not executable.");
-  }
-  const stagedElectronIndex = await readFile(path.join(stagedElectronRoot, "index.js"), "utf8");
-  if (!stagedElectronIndex.includes("getAgentRecallStagingBridgePath")) {
-    throw new Error("Release package did not contain the staging runtime resolver.");
-  }
-  require.resolve("@electron/get", { paths: [stagedElectronRoot] });
 
   process.stdout.write(`Package smoke test passed for v${packageVersion} (${process.platform}).\n`);
 } finally {

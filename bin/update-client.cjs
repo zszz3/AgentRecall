@@ -9,6 +9,7 @@ const { createRequire } = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 const { promisify } = require("node:util");
+const { materializeStagedPackageDependencies } = require("./staged-package-dependencies.cjs");
 
 const execFileAsync = promisify(execFile);
 const GITHUB_REPOSITORY = "zszz3/AgentRecall";
@@ -495,28 +496,7 @@ async function downloadUpdatePackage(manifest, archivePath, options = {}) {
 }
 
 async function prepareStagedPackageDependencies(options = {}) {
-  if (!options.stageRoot) throw new Error("Staged dependency preparation requires a stage root.");
-  const stageRoot = path.resolve(options.stageRoot);
-  const nodeModulesRoot = path.join(stageRoot, "node_modules");
-  const expectedPackagePath = path.join(nodeModulesRoot, "agent-recall");
-  const packagePath = path.resolve(options.packagePath || expectedPackagePath);
-  if (packagePath !== expectedPackagePath) {
-    throw new Error("Staged AgentRecall package path does not match the stage root.");
-  }
-
-  const entries = (await fsp.readdir(nodeModulesRoot))
-    .filter((name) => name !== "agent-recall" && !name.startsWith("."))
-    .sort();
-  const destinationRoot = path.join(packagePath, "node_modules");
-  await fsp.mkdir(destinationRoot, { recursive: true });
-  for (const name of entries) {
-    await fsp.cp(
-      path.join(nodeModulesRoot, name),
-      path.join(destinationRoot, name),
-      { recursive: true, force: true },
-    );
-  }
-  return { copied: entries };
+  return materializeStagedPackageDependencies(options);
 }
 
 async function stageUpdate(manifest, options = {}) {

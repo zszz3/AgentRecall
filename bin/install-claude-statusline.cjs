@@ -9,6 +9,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { materializeStagedPackageDependencies } = require("./staged-package-dependencies.cjs");
 
 const BRIDGE_SCRIPT_BASENAME = "claude-statusline-snapshot.cjs";
 const BRIDGE_BIN_NAME = "agent-recall-claude-statusline";
@@ -110,9 +111,17 @@ function uninstallClaudeStatuslineBridge(options) {
   return { status: "removed", settingsPath };
 }
 
-function runCli() {
-  // Never fail the install: postinstall must always exit 0.
-  if (process.env.AGENT_RECALL_STAGING_INSTALL === "1") return;
+async function runCli() {
+  if (process.env.AGENT_RECALL_STAGING_INSTALL === "1") {
+    const stageRoot = process.env.AGENT_RECALL_STAGE_ROOT;
+    if (!stageRoot) throw new Error("AgentRecall staging install is missing its stage root.");
+    await materializeStagedPackageDependencies({
+      stageRoot,
+      packagePath: path.resolve(__dirname, ".."),
+    });
+    return;
+  }
+  // Normal postinstall configuration is best effort and must never fail npm install.
   if (process.env.AGENT_RECALL_SKIP_STATUSLINE_INSTALL) return;
   if (process.env.CI) return;
 
@@ -154,5 +163,8 @@ module.exports = {
 };
 
 if (require.main === module) {
-  runCli();
+  runCli().catch((error) => {
+    process.stderr.write(`AgentRecall staging install failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
 }
