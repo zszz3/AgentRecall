@@ -984,7 +984,15 @@ export function App(): ReactElement {
       setSettingsOpen(true);
     });
     const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
-    const offAppUpdateProgress = window.sessionSearch.onAppUpdateProgress(setAppUpdateProgress);
+    const offAppUpdateProgress = window.sessionSearch.onAppUpdateProgress((progress) => {
+      setAppUpdateProgress(progress);
+      if (progress.phase === "error") {
+        setAppUpdateError(progress.error || progress.message || "更新失败。");
+        setAppUpdateBusy(false);
+      } else if (progress.phase === "completed") {
+        setAppUpdateBusy(false);
+      }
+    });
     const offOpenSession = window.sessionSearch.onOpenSession((sessionKey) => setSelectedKey(sessionKey));
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
       setEnvironments(nextEnvironments);

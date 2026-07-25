@@ -720,6 +720,12 @@ function nodeSubprocessEnvironment(baseEnvironment = {}) {
   return environment;
 }
 
+function electronSubprocessEnvironment(baseEnvironment = {}) {
+  const environment = { ...process.env, ...baseEnvironment };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  return environment;
+}
+
 function nodeSubprocessPath(options = {}) {
   if (!process.versions.electron) return process.execPath;
   const candidate = options.nodePath || process.env.NODE || "node";
@@ -771,12 +777,68 @@ async function ensureInstalledElectron(options = {}) {
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
   const electronModulePath = path.join(packagePath, "node_modules", "electron");
   const installScript = path.join(electronModulePath, "install.js");
-  const environment = nodeSubprocessEnvironment(options.env);
+  const nodeEnvironment = nodeSubprocessEnvironment(options.env);
+  nodeEnvironment.AGENT_RECALL_SKIP_LEGACY_ELECTRON_BRIDGE = "1";
+  const electronEnvironment = electronSubprocessEnvironment(options.env);
   const run = options.execFileImpl || execFileAsync;
   const nodePath = nodeSubprocessPath(options);
   const timeout = options.timeoutMs ?? 5 * 60_000;
   const homeDir = options.homeDir || os.homedir();
   const { relativeExecutable, relativeDefaultApp } = electronRuntimePaths(options.platform);
+  const bridgeMarkerPath = path.join(electronModulePath, ".agent-recall-staging-bridge.json");
+  let bridgeMarker = null;
+  if (fs.existsSync(bridgeMarkerPath)) {
+    try {
+      bridgeMarker = JSON.parse(await fsp.readFile(bridgeMarkerPath, "utf8"));
+    } catch {
+      throw new Error("Electron staging bridge metadata is invalid.");
+    }
+    if (!bridgeMarker || typeof bridgeMarker !== "object" || Array.isArray(bridgeMarker)) {
+      throw new Error("Electron staging bridge metadata is invalid.");
+    }
+  }
+  if (bridgeMarker) {
+    const electronVersion = String(bridgeMarker.electronVersion || "").trim();
+    const bridgedVersion = String(bridgeMarker.bridgedVersion || "").trim();
+    if (
+      bridgeMarker.schemaVersion !== 1
+      || !/^\d+\.\d+\.\d+$/.test(electronVersion)
+      || !/^\d+\.\d+\.\d+$/.test(bridgedVersion)
+    ) {
+      throw new Error("Electron staging bridge metadata is invalid.");
+    }
+    const agentRecallPackagePath = path.join(packagePath, "package.json");
+    const packageJsonPath = path.join(electronModulePath, "package.json");
+    const distVersionPath = path.join(electronModulePath, "dist", "version");
+    const agentRecallPackage = JSON.parse(await fsp.readFile(agentRecallPackagePath, "utf8"));
+    const electronPackage = JSON.parse(await fsp.readFile(packageJsonPath, "utf8"));
+    let installedVersion = "";
+    try {
+      installedVersion = (await fsp.readFile(distVersionPath, "utf8")).trim().replace(/^v/, "");
+    } catch {
+      // Install scripts may be blocked; normal runtime repair will populate dist after metadata restoration.
+    }
+    const dependencyVersion = String(agentRecallPackage.dependencies?.electron || "").trim();
+    const expectedMetadataVersions = new Set([electronVersion, bridgedVersion]);
+    if (
+      !expectedMetadataVersions.has(electronPackage.version)
+      || !expectedMetadataVersions.has(dependencyVersion)
+      || (installedVersion !== "" && !expectedMetadataVersions.has(installedVersion))
+    ) {
+      throw new Error("Electron staging bridge metadata does not match the installed runtime.");
+    }
+    agentRecallPackage.dependencies.electron = electronVersion;
+    electronPackage.version = electronVersion;
+    if (Array.isArray(electronPackage.files)) {
+      electronPackage.files = electronPackage.files.filter((entry) => entry !== ".agent-recall-staging-bridge.json");
+    }
+    await writeJsonAtomic(agentRecallPackagePath, agentRecallPackage);
+    await writeJsonAtomic(packageJsonPath, electronPackage);
+    if (installedVersion && installedVersion !== electronVersion) {
+      await fsp.writeFile(distVersionPath, electronVersion, "utf8");
+    }
+    await fsp.rm(bridgeMarkerPath, { force: true });
+  }
   let expectedVersion = "";
   try {
     expectedVersion = String(JSON.parse(await fsp.readFile(path.join(electronModulePath, "package.json"), "utf8")).version || "").trim();
@@ -789,14 +851,14 @@ async function ensureInstalledElectron(options = {}) {
   const pathFile = path.join(electronModulePath, "path.txt");
   const validate = async () => {
     const resolved = await run(nodePath, ["-e", validationScript], {
-      env: environment,
+      env: nodeEnvironment,
       timeout,
       maxBuffer: 4 * 1024 * 1024,
     });
     const executable = String(resolved?.stdout || "").trim();
     if (!executable || !fs.existsSync(executable)) throw new Error(`Electron executable is missing: ${executable || "unknown"}`);
     const loaded = await run(executable, ["--version"], {
-      env: environment,
+      env: electronEnvironment,
       timeout,
       maxBuffer: 4 * 1024 * 1024,
       windowsHide: true,
@@ -816,7 +878,7 @@ async function ensureInstalledElectron(options = {}) {
   const repairViaInstallScript = async (forceNoCache = false) => {
     await run(nodePath, [installScript], {
       cwd: electronModulePath,
-      env: forceNoCache ? { ...environment, force_no_cache: "true" } : environment,
+      env: forceNoCache ? { ...nodeEnvironment, force_no_cache: "true" } : nodeEnvironment,
       timeout,
       maxBuffer: 16 * 1024 * 1024,
     });
@@ -832,9 +894,9 @@ async function ensureInstalledElectron(options = {}) {
   };
   const repairFromCachedArchive = async () => {
     const archivePath = options.findCachedArchiveImpl
-      ? await options.findCachedArchiveImpl({ expectedVersion, environment, homeDir, platform: options.platform || process.platform, arch: options.arch || process.arch })
+      ? await options.findCachedArchiveImpl({ expectedVersion, environment: nodeEnvironment, homeDir, platform: options.platform || process.platform, arch: options.arch || process.arch })
       : await findFileRecursive(
-        electronCacheRoot(environment, homeDir, options.platform || process.platform),
+        electronCacheRoot(nodeEnvironment, homeDir, options.platform || process.platform),
         `electron-v${expectedVersion}-${options.platform || process.platform}-${options.arch || process.arch}.zip`,
       );
     if (!archivePath) return false;

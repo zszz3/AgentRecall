@@ -37,7 +37,7 @@
     "test": "vitest run && npm run test:scripts",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:watch": "vitest",
-    "package:smoke": "node scripts/package-smoke.mjs",
+    "package:smoke": "npm run build && node scripts/package-smoke.mjs",
     "release-note:check": "node scripts/release-notes.mjs check-range",
     "postinstall": "node bin/install-claude-statusline.cjs",
     "prepare": "npm run build:mcp && electron-vite build",

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { packReleaseArchive } from "./pack-release.mjs";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -23,23 +24,13 @@ const environment = {
   AGENT_RECALL_SKIP_STATUSLINE_INSTALL: "1",
   AGENT_RECALL_NO_UPDATE_CHECK: "1",
   electron_config_cache: path.join(tempRoot, "electron-cache"),
+  npm_config_cache: path.join(tempRoot, "npm-cache"),
+  npm_config_prefix: prefix,
 };
 
 try {
   await Promise.all([packDir, prefix, stageRoot, home].map((directory) => mkdir(directory, { recursive: true })));
-  const { stdout } = await execFileAsync(npm, ["pack", "--json", "--pack-destination", packDir], {
-    cwd: root,
-    env: environment,
-    shell: process.platform === "win32",
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  const jsonStart = stdout.split("\n").findIndex((line) => line === "[" || line === "{");
-  if (jsonStart === -1) throw new Error("npm pack did not emit a JSON result.");
-  const result = JSON.parse(stdout.split("\n").slice(jsonStart).join("\n"));
-  const packed = Array.isArray(result) ? result[0] : Object.values(result)[0];
-  if (!packed?.filename) throw new Error("npm pack did not return an archive name.");
-  if (!packed.bundled?.includes("electron")) throw new Error("Release package did not bundle the Electron bootstrap package.");
-  const archive = path.join(packDir, packed.filename);
+  const archive = await packReleaseArchive({ root, destination: packDir, environment });
   await execFileAsync(npm, ["install", "--global", archive, "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund"], {
     cwd: root,
     env: environment,
@@ -75,9 +66,21 @@ try {
   });
   const stagedRoot = path.join(stageRoot, "node_modules", "agent-recall");
   const stagedElectronRoot = path.join(stagedRoot, "node_modules", "electron");
+  const stagedPackage = JSON.parse(await readFile(path.join(stagedRoot, "package.json"), "utf8"));
   const stagedElectron = JSON.parse(await readFile(path.join(stagedElectronRoot, "package.json"), "utf8"));
-  if (stagedElectron.version !== "42.3.0") {
-    throw new Error(`Staged package bundled Electron ${stagedElectron.version || "without a version"} instead of 42.3.0.`);
+  const stagedBridge = JSON.parse(await readFile(
+    path.join(stagedElectronRoot, ".agent-recall-staging-bridge.json"),
+    "utf8",
+  ));
+  if (stagedBridge.electronVersion !== "42.3.0" || stagedElectron.version !== stagedBridge.bridgedVersion) {
+    throw new Error("Staged package did not contain the verified Electron bridge metadata.");
+  }
+  if (stagedPackage.dependencies?.electron !== stagedBridge.bridgedVersion) {
+    throw new Error("Staged package dependency metadata did not match its Electron bridge.");
+  }
+  const stagedElectronInstall = await readFile(path.join(stagedElectronRoot, "install.js"), "utf8");
+  if (!stagedElectronInstall.includes("applyAgentRecallStagingBridge")) {
+    throw new Error("Release package did not contain the legacy Electron update bridge.");
   }
   try {
     await access(path.join(stagedElectronRoot, "path.txt"));

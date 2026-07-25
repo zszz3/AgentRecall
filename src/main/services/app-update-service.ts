@@ -67,6 +67,7 @@ export interface AppUpdateServiceDependencies {
 export class AppUpdateService {
   private status: AppUpdateStatus | null = null;
   private activeCheck: Promise<AppUpdateStatus> | null = null;
+  private activeInstall: { version: string; task: Promise<void> } | null = null;
   private previousResultShown = false;
 
   constructor(private readonly dependencies: AppUpdateServiceDependencies) {}
@@ -83,27 +84,68 @@ export class AppUpdateService {
     if (!this.dependencies.releaseRuntime) {
       throw new Error("Application updates are unavailable in development builds.");
     }
+    if (this.activeInstall) {
+      return { started: true, version: this.activeInstall.version };
+    }
     const manifest = this.dependencies.getClient().parseUpdateManifest(this.status?.manifest);
+    const task = this.runInstall(manifest);
+    this.activeInstall = { version: manifest.version, task };
+    void task.then(
+      () => this.clearActiveInstall(task),
+      (error) => {
+        this.reportInstallFailure(manifest.version, error);
+        this.clearActiveInstall(task);
+      },
+    );
+    return { started: true, version: manifest.version };
+  }
+
+  private async runInstall(manifest: AppUpdateManifest): Promise<void> {
+    const staged = await this.dependencies.stageInstaller(
+      manifest,
+      (progress) => this.dependencies.publishProgress(progress),
+    );
+    this.dependencies.publishProgress({
+      phase: "restarting",
+      version: manifest.version,
+      message: "更新准备完成，正在重新启动…",
+    });
+    await this.dependencies.launchInstaller(staged);
+    this.dependencies.schedule(() => this.dependencies.requestQuit(), 300);
+  }
+
+  private clearActiveInstall(task: Promise<void>): void {
+    if (this.activeInstall?.task === task) this.activeInstall = null;
+  }
+
+  private reportInstallFailure(version: string, error: unknown): void {
+    let formatted = "Unknown update error";
     try {
-      const staged = await this.dependencies.stageInstaller(
-        manifest,
-        (progress) => this.dependencies.publishProgress(progress),
-      );
-      this.dependencies.publishProgress({
-        phase: "restarting",
-        version: manifest.version,
-        message: "更新准备完成，正在重新启动…",
-      });
-      await this.dependencies.launchInstaller(staged);
-      this.dependencies.schedule(() => this.dependencies.requestQuit(), 300);
-      return { started: true, version: manifest.version };
-    } catch (error) {
+      formatted = this.dependencies.getClient().formatUpdateError(error);
+    } catch {
+      try {
+        formatted = error instanceof Error ? error.message : String(error);
+      } catch {
+        // Keep the generic fallback when even converting an unusual thrown value fails.
+      }
+    }
+    try {
       this.dependencies.publishProgress({
         phase: "error",
-        version: manifest.version,
-        error: this.dependencies.getClient().formatUpdateError(error),
+        version,
+        error: formatted,
       });
-      throw error;
+    } catch (publishError) {
+      try {
+        this.dependencies.logError(`Failed to publish app update error: ${String(publishError)}`);
+      } catch {
+        // Background failure reporting must never reject the detached install task.
+      }
+    }
+    try {
+      this.dependencies.logError(`App update installation failed: ${formatted}`);
+    } catch {
+      // Background failure reporting must never reject the detached install task.
     }
   }
 

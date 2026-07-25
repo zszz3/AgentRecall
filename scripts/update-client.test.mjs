@@ -601,7 +601,7 @@ test("repairs an incomplete Electron runtime before reporting update success", a
   assert.equal(isElectronRuntimeReady(packagePath), true);
 });
 
-test("validates Electron runtime with Node semantics when launched by Electron", async () => {
+test("uses Node mode only for Node probes when launched by Electron", async () => {
   const directory = await temporaryDirectory("agent-session-electron-node-mode-");
   const packagePath = path.join(directory, "agent-recall");
   const electronPath = path.join(packagePath, "node_modules", "electron");
@@ -636,11 +636,13 @@ test("validates Electron runtime with Node semantics when launched by Electron",
       env: { ELECTRON_RUN_AS_NODE: "1" },
       execFileImpl: async (command, args, options) => {
         invocation = { command, args, options };
-        assert.equal(options.env.ELECTRON_RUN_AS_NODE, "1");
         if (command === process.execPath) {
+          assert.equal(options.env.ELECTRON_RUN_AS_NODE, "1");
+          assert.equal(options.env.AGENT_RECALL_SKIP_LEGACY_ELECTRON_BRIDGE, "1");
           assert.equal(args[0], "-e");
           return { stdout: path.join(electronPath, "dist", relativeExecutable), stderr: "" };
         }
+        assert.equal("ELECTRON_RUN_AS_NODE" in options.env, false);
         return { stdout: "v42.3.0\n", stderr: "" };
       },
     });
@@ -649,6 +651,211 @@ test("validates Electron runtime with Node semantics when launched by Electron",
   }
 
   assert.ok(invocation);
+});
+
+test("restores real Electron metadata left by the legacy staging bridge", async () => {
+  const directory = await temporaryDirectory("agent-session-electron-staging-bridge-");
+  const packagePath = path.join(directory, "agent-recall");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  const markerPath = path.join(electronPath, ".agent-recall-staging-bridge.json");
+  const bridgedVersion = process.versions.node;
+  await mkdir(packagePath, { recursive: true });
+  await writeFile(path.join(packagePath, "package.json"), JSON.stringify({
+    name: "agent-recall",
+    dependencies: { electron: bridgedVersion },
+  }), "utf8");
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeExecutable)), { recursive: true });
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeDefaultApp)), { recursive: true });
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(path.join(electronPath, "package.json"), JSON.stringify({ name: "electron", version: bridgedVersion }), "utf8");
+  await writeFile(path.join(electronPath, "install.js"), "throw new Error('install script should not run');\n", "utf8");
+  await writeFile(path.join(electronPath, "path.txt"), relativeExecutable, "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeExecutable), "ok", "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeDefaultApp), "ok", "utf8");
+  await writeFile(path.join(electronPath, "dist", "version"), bridgedVersion, "utf8");
+  await writeFile(markerPath, JSON.stringify({
+    schemaVersion: 1,
+    electronVersion: "42.3.0",
+    bridgedVersion,
+  }), "utf8");
+
+  await ensureInstalledElectron({
+    packagePath,
+    timeoutMs: 5_000,
+    execFileImpl: async (command, args) => {
+      if (command === process.execPath) {
+        assert.equal(args[0], "-e");
+        return { stdout: path.join(electronPath, "dist", relativeExecutable), stderr: "" };
+      }
+      return { stdout: "v42.3.0\n", stderr: "" };
+    },
+  });
+
+  const restoredPackage = JSON.parse(await readFile(path.join(electronPath, "package.json"), "utf8"));
+  const restoredAgentRecallPackage = JSON.parse(await readFile(path.join(packagePath, "package.json"), "utf8"));
+  assert.equal(restoredPackage.version, "42.3.0");
+  assert.equal(restoredAgentRecallPackage.dependencies.electron, "42.3.0");
+  assert.equal(await readFile(path.join(electronPath, "dist", "version"), "utf8"), "42.3.0");
+  await assert.rejects(readFile(markerPath, "utf8"), { code: "ENOENT" });
+});
+
+test("resumes a partially restored legacy Electron staging bridge", async () => {
+  const directory = await temporaryDirectory("agent-session-electron-partial-staging-bridge-");
+  const packagePath = path.join(directory, "agent-recall");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  const markerPath = path.join(electronPath, ".agent-recall-staging-bridge.json");
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeExecutable)), { recursive: true });
+  await mkdir(path.join(electronPath, "dist", path.dirname(relativeDefaultApp)), { recursive: true });
+  await writeFile(path.join(packagePath, "package.json"), JSON.stringify({
+    name: "agent-recall",
+    dependencies: { electron: "42.3.0" },
+  }), "utf8");
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(path.join(electronPath, "package.json"), JSON.stringify({
+    name: "electron",
+    version: "24.15.0",
+    files: [".agent-recall-staging-bridge.json"],
+  }), "utf8");
+  await writeFile(path.join(electronPath, "install.js"), "throw new Error('install script should not run');\n", "utf8");
+  await writeFile(path.join(electronPath, "path.txt"), relativeExecutable, "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeExecutable), "ok", "utf8");
+  await writeFile(path.join(electronPath, "dist", relativeDefaultApp), "ok", "utf8");
+  await writeFile(path.join(electronPath, "dist", "version"), "42.3.0", "utf8");
+  await writeFile(markerPath, JSON.stringify({
+    schemaVersion: 1,
+    electronVersion: "42.3.0",
+    bridgedVersion: "24.15.0",
+  }), "utf8");
+
+  await ensureInstalledElectron({
+    packagePath,
+    timeoutMs: 5_000,
+    execFileImpl: async (command, args) => {
+      if (command === process.execPath) {
+        assert.equal(args[0], "-e");
+        return { stdout: path.join(electronPath, "dist", relativeExecutable), stderr: "" };
+      }
+      return { stdout: "v42.3.0\n", stderr: "" };
+    },
+  });
+
+  assert.equal(JSON.parse(await readFile(path.join(packagePath, "package.json"), "utf8")).dependencies.electron, "42.3.0");
+  assert.deepEqual(JSON.parse(await readFile(path.join(electronPath, "package.json"), "utf8")), {
+    name: "electron",
+    version: "42.3.0",
+    files: [],
+  });
+  assert.equal(await readFile(path.join(electronPath, "dist", "version"), "utf8"), "42.3.0");
+  await assert.rejects(readFile(markerPath, "utf8"), { code: "ENOENT" });
+});
+
+test("rejects a non-object legacy Electron staging bridge marker", async () => {
+  const directory = await temporaryDirectory("agent-session-electron-invalid-staging-bridge-");
+  const packagePath = path.join(directory, "agent-recall");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  await mkdir(electronPath, { recursive: true });
+  await writeFile(path.join(electronPath, ".agent-recall-staging-bridge.json"), "null\n", "utf8");
+
+  await assert.rejects(
+    ensureInstalledElectron({ packagePath, timeoutMs: 5_000 }),
+    /Electron staging bridge metadata is invalid/,
+  );
+});
+
+test("repairs a blocked Electron install after restoring packaged bridge metadata", async () => {
+  const directory = await temporaryDirectory("agent-session-electron-blocked-staging-install-");
+  const packagePath = path.join(directory, "agent-recall");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const relativeExecutable = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : process.platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  const executablePath = path.join(electronPath, "dist", relativeExecutable);
+  const installScript = path.join(electronPath, "install.js");
+  const markerPath = path.join(electronPath, ".agent-recall-staging-bridge.json");
+  await mkdir(electronPath, { recursive: true });
+  await writeFile(path.join(packagePath, "package.json"), JSON.stringify({
+    name: "agent-recall",
+    dependencies: { electron: "24.15.0" },
+  }), "utf8");
+  await writeFile(path.join(electronPath, "package.json"), JSON.stringify({
+    name: "electron",
+    version: "24.15.0",
+    files: [".agent-recall-staging-bridge.json"],
+  }), "utf8");
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(installScript, "throw new Error('test executor handles this script');\n", "utf8");
+  await writeFile(markerPath, JSON.stringify({
+    schemaVersion: 1,
+    electronVersion: "42.3.0",
+    bridgedVersion: "24.15.0",
+  }), "utf8");
+
+  let installRuns = 0;
+  await ensureInstalledElectron({
+    packagePath,
+    env: { AGENT_RECALL_STAGING_INSTALL: "1" },
+    timeoutMs: 5_000,
+    execFileImpl: async (command, args, options) => {
+      if (command === process.execPath && args[0] === installScript) {
+        installRuns += 1;
+        assert.equal(options.env.AGENT_RECALL_SKIP_LEGACY_ELECTRON_BRIDGE, "1");
+        await mkdir(path.dirname(executablePath), { recursive: true });
+        await mkdir(path.join(electronPath, "dist", path.dirname(relativeDefaultApp)), { recursive: true });
+        await writeFile(executablePath, "ok", "utf8");
+        await writeFile(path.join(electronPath, "dist", relativeDefaultApp), "ok", "utf8");
+        await writeFile(path.join(electronPath, "dist", "version"), "42.3.0", "utf8");
+        await writeFile(path.join(electronPath, "path.txt"), relativeExecutable, "utf8");
+        return { stdout: "", stderr: "" };
+      }
+      if (command === process.execPath && args[0] === "-e") {
+        if (!await readFile(executablePath, "utf8").catch(() => null)) throw new Error("runtime is missing");
+        return { stdout: executablePath, stderr: "" };
+      }
+      if (command === executablePath) {
+        assert.equal("ELECTRON_RUN_AS_NODE" in options.env, false);
+        return { stdout: "v42.3.0\n", stderr: "" };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+
+  assert.equal(installRuns, 1);
+  assert.equal(JSON.parse(await readFile(path.join(packagePath, "package.json"), "utf8")).dependencies.electron, "42.3.0");
+  assert.equal(JSON.parse(await readFile(path.join(electronPath, "package.json"), "utf8")).version, "42.3.0");
+  await assert.rejects(readFile(markerPath, "utf8"), { code: "ENOENT" });
 });
 
 test("uses a stable Node executable for Electron runtime checks after npm replaces Electron", async () => {
@@ -703,6 +910,7 @@ test("uses a stable Node executable for Electron runtime checks after npm replac
     path.join(electronPath, "dist", relativeExecutable),
   ]);
   assert.equal(commands[0].options.env.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal("ELECTRON_RUN_AS_NODE" in commands[1].options.env, false);
 });
 
 test("accepts a ready Electron runtime when the version probe has no output", async () => {

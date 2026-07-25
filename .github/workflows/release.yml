@@ -80,7 +80,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p release
-          package_file="$(npm pack --pack-destination release | tail -1)"
+          package_file="$(node scripts/pack-release.mjs --pack-destination release)"
           node scripts/create-release-assets.mjs \
             --note "$NOTE_FILE" \
             --version "$VERSION" \
