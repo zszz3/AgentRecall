@@ -88,7 +88,7 @@ test("reports release packaging failures without an unhandled rejection stack", 
         },
       }),
       (error) => {
-        assert.match(error.stderr, /npm pack/);
+        assert.match(error.stderr, /npm(?:\.cmd)? pack/);
         assert.doesNotMatch(error.stderr, /node:internal\/errors|Node\.js v/);
         return true;
       },
