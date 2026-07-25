@@ -495,10 +495,6 @@ async function downloadUpdatePackage(manifest, archivePath, options = {}) {
   return { downloadedBytes, totalBytes };
 }
 
-async function prepareStagedPackageDependencies(options = {}) {
-  return materializeStagedPackageDependencies(options);
-}
-
 async function stageUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
@@ -551,7 +547,10 @@ async function stageUpdate(manifest, options = {}) {
     } catch (error) {
       throw new Error(`npm 安装失败：${formatUpdateError(error)}`);
     }
-    await prepareStagedPackageDependencies({ stageRoot, packagePath: stagedPackagePath });
+    await materializeStagedPackageDependencies({
+      stageRoot,
+      packagePath: stagedPackagePath,
+    });
     options.onProgress?.(updateProgress(parsed.version, "validating", {
       message: "正在检查应用和 Electron 运行时…",
     }));
@@ -1156,7 +1155,6 @@ module.exports = {
   launchInstalledApp,
   manualInstallCommand,
   parseUpdateManifest,
-  prepareStagedPackageDependencies,
   readUpdatePreference,
   readInstallStatus,
   skipUpdateVersion,
