@@ -415,6 +415,114 @@ describe("SessionStore", () => {
     expect(results[0].matchSnippet).toContain("refresh token");
   });
 
+  it("keeps short and escaped literal message searches searchable with snippets", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:literal-fallback",
+          rawId: "literal-fallback",
+          originalTitle: "Literal fallback",
+          firstQuestion: "Literal fallback",
+        }),
+        [{
+          role: "user",
+          content: "修复登录进度达到 100%_complete",
+          timestamp: "2026-06-01T10:00:00Z",
+          index: 0,
+        }],
+      );
+
+      for (const query of ["修复", "%_", "100%_complete"]) {
+        const result = store.searchSessions({ query });
+        expect(result.map((session) => session.sessionKey)).toEqual(["codex:literal-fallback"]);
+        expect(result[0].matchSnippet).toContain(query);
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("applies message-content relevance before limiting the search page", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:content-match",
+          rawId: "content-match",
+          originalTitle: "Older transcript result",
+          firstQuestion: "Older transcript result",
+          timestamp: 1,
+          fileMtimeMs: 1,
+        }),
+        [{
+          role: "user",
+          content: "The decisive needle is present in this transcript.",
+          timestamp: "2026-06-01T10:00:00Z",
+          index: 0,
+        }],
+      );
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:raw-id-match",
+          rawId: "needle-in-raw-id",
+          originalTitle: "Newer metadata result",
+          firstQuestion: "Newer metadata result",
+          timestamp: 2,
+          fileMtimeMs: 2,
+        }),
+        [{
+          role: "user",
+          content: "Unrelated transcript text.",
+          timestamp: "2026-06-02T10:00:00Z",
+          index: 0,
+        }],
+      );
+
+      const page = store.searchSessionPage({
+        query: "needle",
+        sortBy: "created",
+        limit: 1,
+      });
+
+      expect(page).toMatchObject({
+        totalCount: 2,
+        hasMore: true,
+        sessions: [{
+          sessionKey: "codex:content-match",
+        }],
+      });
+      expect(page.sessions[0].matchSnippet).toContain("needle");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps original-title and raw-id metadata candidates after a custom rename", () => {
+    const store = createInMemoryStore();
+    try {
+      store.upsertIndexedSession(
+        sampleSession({
+          sessionKey: "codex:metadata-candidate",
+          rawId: "raw-unique-identifier",
+          originalTitle: "Legacy Unique Metadata",
+          firstQuestion: "Other question",
+        }),
+        [{ role: "user", content: "unrelated content", timestamp: "2026-06-01T10:00:00Z", index: 0 }],
+      );
+      store.setCustomTitle("codex:metadata-candidate", "Renamed session");
+
+      expect(store.searchSessions({ query: "Legacy Unique" })).toMatchObject([
+        { sessionKey: "codex:metadata-candidate", metadataMatch: "title" },
+      ]);
+      expect(store.searchSessions({ query: "raw-unique-identifier" })).toMatchObject([
+        { sessionKey: "codex:metadata-candidate" },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("uses the indexed title for display when first question is a long remote summary prompt", () => {
     const store = createInMemoryStore();
     const longFirstQuestion = [

@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const mainSource = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+// These broader query paths are retained in the isolated legacy composition.
+const mainSource = readFileSync(
+  new URL("./legacy-application.ts", import.meta.url),
+  "utf8",
+);
 
 describe("subagent visibility IPC", () => {
   it("injects the stored setting into user-visible session queries", () => {

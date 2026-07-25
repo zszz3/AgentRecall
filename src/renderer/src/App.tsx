@@ -155,6 +155,7 @@ const STATS_PERIOD_OPTIONS: Array<{ label: string; value: SessionStatsPeriod }> 
 ];
 
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
+const CORE_RUNTIME = window.sessionSearch.productProfile.id === "core-v1";
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
 
@@ -772,24 +773,29 @@ export function App(): ReactElement {
   }, [loadSidebarMetadata]);
 
   useEffect(() => {
+    if (CORE_RUNTIME) return;
     void loadStats();
   }, [loadStats]);
 
   useEffect(() => {
+    if (CORE_RUNTIME) return;
     void loadQuotas();
     const timer = window.setInterval(() => void loadQuotas("background"), QUOTA_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadQuotas]);
 
   useEffect(() => {
+    if (CORE_RUNTIME) return;
     void loadRemoteSessionsCache();
   }, [loadRemoteSessionsCache]);
 
   useEffect(() => {
+    if (CORE_RUNTIME) return;
     if (skillsOpen) void loadSkills({ refreshUsage: true, silent: true });
   }, [skillsOpen, loadSkills]);
 
   useEffect(() => {
+    if (CORE_RUNTIME) return;
     if (!settingsOpen) return;
     void window.sessionSearch.getSkillUsageHookStatus().then(setSkillHookInstalled).catch(() => setSkillHookInstalled(false));
     void window.sessionSearch.getSessionSyncHookStatus().then(setSessionHookStatus).catch(() => setSessionHookStatus(null));
@@ -925,7 +931,7 @@ export function App(): ReactElement {
       if (!nextStatus.running) {
         void load();
         void loadSidebarMetadata();
-        void loadStats();
+        if (!CORE_RUNTIME) void loadStats();
       }
     });
     const offFocus = window.sessionSearch.onFocusSearch(() => searchRef.current?.focus());
@@ -936,20 +942,22 @@ export function App(): ReactElement {
       setSettingsOpen(true);
     });
     const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
-    const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
-      setEnvironments(nextEnvironments);
-      setEnvironmentId((current) =>
-        current !== "all" && !nextEnvironments.some((environment) => environment.id === current) ? "all" : current,
-      );
-      setProjectEnvironmentId((current) => {
-        if (current && !nextEnvironments.some((environment) => environment.id === current)) {
-          setProjectPath(undefined);
-          return undefined;
-        }
-        return current;
-      });
-      void load();
-    });
+    const offEnvironments = CORE_RUNTIME
+      ? () => undefined
+      : window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
+          setEnvironments(nextEnvironments);
+          setEnvironmentId((current) =>
+            current !== "all" && !nextEnvironments.some((environment) => environment.id === current) ? "all" : current,
+          );
+          setProjectEnvironmentId((current) => {
+            if (current && !nextEnvironments.some((environment) => environment.id === current)) {
+              setProjectPath(undefined);
+              return undefined;
+            }
+            return current;
+          });
+          void load();
+        });
     return () => {
       offIndex();
       offFocus();
@@ -964,6 +972,7 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
+    if (CORE_RUNTIME) return;
     return window.sessionSearch.onMigrationProgress((progress) => {
       setMigrationProgress(progress);
       setActionStatus({ kind: "running", message: migrationProgressMessage(progress, language) });
@@ -1499,7 +1508,11 @@ export function App(): ReactElement {
     try {
       const status = await window.sessionSearch.refreshIndex();
       setIndexStatus(status);
-      await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
+      await Promise.all([
+        load(),
+        loadSidebarMetadata(),
+        CORE_RUNTIME ? Promise.resolve() : loadStats(),
+      ]);
       if (status.error) {
         setRefreshFeedback({ kind: "error", message: status.error });
         return;
@@ -1608,7 +1621,11 @@ export function App(): ReactElement {
         return;
       }
 
-      await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
+      await Promise.all([
+        load(),
+        loadSidebarMetadata(),
+        CORE_RUNTIME ? Promise.resolve() : loadStats(),
+      ]);
       setSettingsFeedback({ kind: "success", message: t("Settings saved.", "设置已保存。") });
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" ? null : current));
@@ -1770,7 +1787,7 @@ export function App(): ReactElement {
           {refreshFeedback ? <div className={`refresh-feedback ${refreshFeedback.kind}`}>{refreshFeedback.message}</div> : null}
         </div>
 
-        <div className="stats-panel">
+        <div className="stats-panel" hidden={CORE_RUNTIME}>
           <div className="stats-header">
             <span>{t("Usage", "用量")}</span>
             <div className="stats-controls">
@@ -1822,15 +1839,17 @@ export function App(): ReactElement {
           </div>
         </div>
 
-        <QuotaPanel
-          snapshot={quotas}
-          loading={quotaLoading}
-          feedback={quotaFeedback}
-          expanded={sidebarSections.remaining}
-          onToggle={() => toggleSidebarSectionById("remaining")}
-          onRefresh={() => void loadQuotas("manual")}
-          language={language}
-        />
+        {!CORE_RUNTIME ? (
+          <QuotaPanel
+            snapshot={quotas}
+            loading={quotaLoading}
+            feedback={quotaFeedback}
+            expanded={sidebarSections.remaining}
+            onToggle={() => toggleSidebarSectionById("remaining")}
+            onRefresh={() => void loadQuotas("manual")}
+            language={language}
+          />
+        ) : null}
 
         <SidebarSectionHeader title={t("Environments", "环境")} expanded={sidebarSections.environments} onToggle={() => toggleSidebarSectionById("environments")} />
         {sidebarSections.environments ? (
@@ -1925,17 +1944,19 @@ export function App(): ReactElement {
                               {isBranchTag(tagName) ? <GitBranch size={13} /> : <Tag size={13} />}
                               <span>{displayTagName(tagName)}</span>
                             </button>
-                            <button
-                              className="tag-delete"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setDeleteTagName(tagName);
-                              }}
-                              title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                              aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            {!CORE_RUNTIME ? (
+                              <button
+                                className="tag-delete"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setDeleteTagName(tagName);
+                                }}
+                                title={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
+                                aria-label={t(`Delete tag ${displayTagName(tagName)}`, `删除标签 ${displayTagName(tagName)}`)}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -1968,14 +1989,18 @@ export function App(): ReactElement {
               <Star size={14} />
               {t("Favorites", "收藏")}
             </button>
-            <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
-              <Pin size={14} />
-              {t("Pinned", "置顶")}
-            </button>
-            <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
-              <EyeOff size={14} />
-              {t("Hidden", "隐藏")}
-            </button>
+            {!CORE_RUNTIME ? (
+              <>
+                <button className={visibility === "pinned" ? "active" : ""} onClick={() => setVisibility("pinned")}>
+                  <Pin size={14} />
+                  {t("Pinned", "置顶")}
+                </button>
+                <button className={visibility === "hidden" ? "active" : ""} onClick={() => setVisibility("hidden")}>
+                  <EyeOff size={14} />
+                  {t("Hidden", "隐藏")}
+                </button>
+              </>
+            ) : null}
           </nav>
         ) : null}
       </section>
@@ -2044,59 +2069,63 @@ export function App(): ReactElement {
             </div>
           </div>
           <div className="top-actions">
-            <button
-              className={`icon-button toolbar-icon-button ${aiAssistantOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setSkillsOpen(false);
-                setRemoteSessionsOpen(false);
-                setAiAssistantOpen(true);
-              }}
-              title={t("AI session finder", "AI 找会话")}
-              aria-label={t("AI session finder", "AI 找会话")}
-            >
-              <Sparkles size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setRemoteSessionsOpen(false);
-                setSkillsOpen(true);
-              }}
-              title={t("Skills", "Skills 管理")}
-              aria-label={t("Skills", "Skills 管理")}
-            >
-              <PackageSearch size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${remoteSessionsOpen ? "active" : ""}`}
-              onClick={() => {
-                setSettingsOpen(false);
-                setApiConfigOpen(false);
-                setSkillsOpen(false);
-                setRemoteSessionsOpen(true);
-              }}
-              title={t("Remote sessions", "远程会话")}
-              aria-label={t("Remote sessions", "远程会话")}
-            >
-              <Cloud size={15} />
-            </button>
-            <button
-              className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
-              onClick={() => {
-                setSkillsOpen(false);
-                setSettingsOpen(false);
-                setRemoteSessionsOpen(false);
-                setApiConfigOpen(true);
-              }}
-              title={t("API configuration", "API 配置")}
-              aria-label={t("API configuration", "API 配置")}
-            >
-              <KeyRound size={15} />
-            </button>
+            {!CORE_RUNTIME ? (
+              <>
+                <button
+                  className={`icon-button toolbar-icon-button ${aiAssistantOpen ? "active" : ""}`}
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setApiConfigOpen(false);
+                    setSkillsOpen(false);
+                    setRemoteSessionsOpen(false);
+                    setAiAssistantOpen(true);
+                  }}
+                  title={t("AI session finder", "AI 找会话")}
+                  aria-label={t("AI session finder", "AI 找会话")}
+                >
+                  <Sparkles size={15} />
+                </button>
+                <button
+                  className={`icon-button toolbar-icon-button ${skillsOpen ? "active" : ""}`}
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setApiConfigOpen(false);
+                    setRemoteSessionsOpen(false);
+                    setSkillsOpen(true);
+                  }}
+                  title={t("Skills", "Skills 管理")}
+                  aria-label={t("Skills", "Skills 管理")}
+                >
+                  <PackageSearch size={15} />
+                </button>
+                <button
+                  className={`icon-button toolbar-icon-button ${remoteSessionsOpen ? "active" : ""}`}
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setApiConfigOpen(false);
+                    setSkillsOpen(false);
+                    setRemoteSessionsOpen(true);
+                  }}
+                  title={t("Remote sessions", "远程会话")}
+                  aria-label={t("Remote sessions", "远程会话")}
+                >
+                  <Cloud size={15} />
+                </button>
+                <button
+                  className={`icon-button toolbar-icon-button ${apiConfigOpen ? "active" : ""}`}
+                  onClick={() => {
+                    setSkillsOpen(false);
+                    setSettingsOpen(false);
+                    setRemoteSessionsOpen(false);
+                    setApiConfigOpen(true);
+                  }}
+                  title={t("API configuration", "API 配置")}
+                  aria-label={t("API configuration", "API 配置")}
+                >
+                  <KeyRound size={15} />
+                </button>
+              </>
+            ) : null}
             <button
               className={`icon-button toolbar-icon-button ${shouldSignalAppUpdate ? "update-available" : ""}`}
               onClick={() => {
@@ -2150,6 +2179,7 @@ export function App(): ReactElement {
 
       {detail ? (
         <DetailPanel
+          coreMode={CORE_RUNTIME}
           session={detail}
           messages={messages}
           matchedContextMessages={matchedContextMessages}
@@ -2253,6 +2283,7 @@ export function App(): ReactElement {
 
       {contextMenu ? (
         <ContextMenu
+          coreMode={CORE_RUNTIME}
           state={contextMenu}
           language={language}
           revealLabel={FILE_MANAGER_LABEL}
@@ -2379,6 +2410,7 @@ export function App(): ReactElement {
 
       {settingsOpen ? (
         <SettingsDialog
+          coreMode={CORE_RUNTIME}
           platform={RUNTIME_PLATFORM}
           initialSection={settingsInitialSection}
           settings={appSettings}
@@ -2650,6 +2682,7 @@ function migrationProgressMessage(progress: SessionMigrationProgress, language: 
 }
 
 function ContextMenu({
+  coreMode = false,
   state,
   language,
   revealLabel,
@@ -2671,6 +2704,7 @@ function ContextMenu({
   onDelete,
   onReveal,
 }: {
+  coreMode?: boolean;
   state: ContextMenuState;
   language: LanguageMode;
   revealLabel: string;
@@ -2707,52 +2741,62 @@ function ContextMenu({
       <button onClick={onRename}>
         <Clipboard size={14} /> {l("Rename", "重命名")}
       </button>
-      <button onClick={onAddTag}>
-        <Tag size={14} /> {l("Add Tag", "添加标签")}
-      </button>
+      {!coreMode ? (
+        <button onClick={onAddTag}>
+          <Tag size={14} /> {l("Add Tag", "添加标签")}
+        </button>
+      ) : null}
       <button onClick={onFavorite}>
         <Star size={14} fill={state.session.favorited ? "currentColor" : "none"} />{" "}
         {state.session.favorited ? l("Unfavorite", "取消收藏") : l("Favorite", "收藏")}
       </button>
-      <button onClick={onPin}>{state.session.pinned ? <PinOff size={14} /> : <Pin size={14} />} {state.session.pinned ? l("Unpin", "取消置顶") : l("Pin", "置顶")}</button>
-      <button onClick={onHide}>
-        {state.session.hidden ? <Eye size={14} /> : <Archive size={14} />} {state.session.hidden ? l("Unhide", "取消隐藏") : l("Hide", "隐藏")}
-      </button>
+      {!coreMode ? (
+        <>
+          <button onClick={onPin}>{state.session.pinned ? <PinOff size={14} /> : <Pin size={14} />} {state.session.pinned ? l("Unpin", "取消置顶") : l("Pin", "置顶")}</button>
+          <button onClick={onHide}>
+            {state.session.hidden ? <Eye size={14} /> : <Archive size={14} />} {state.session.hidden ? l("Unhide", "取消隐藏") : l("Hide", "隐藏")}
+          </button>
+        </>
+      ) : null}
       <hr />
       {canResume ? (
         <button onClick={onResume}>
           <Play size={14} /> {state.session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : l("Resume in Terminal", "在终端恢复")}
         </button>
       ) : null}
-      {canResume && showMacActions && state.session.source !== "codex-app" ? (
-        <button onClick={onResumeIterm}>
-          <TerminalIcon size={14} /> Resume in iTerm
-        </button>
+      {!coreMode ? (
+        <>
+          {canResume && showMacActions && state.session.source !== "codex-app" ? (
+            <button onClick={onResumeIterm}>
+              <TerminalIcon size={14} /> Resume in iTerm
+            </button>
+          ) : null}
+          {canResume && showMacActions ? (
+            <button onClick={onOpenApp} disabled={localOnlyDisabled} title={openAppTitle}>
+              <AppWindow size={14} /> Open App
+            </button>
+          ) : null}
+          <button onClick={onMigrate} disabled={!canMigrate || localOnlyDisabled} title={migrateTitle}>
+            <ArrowRightLeft size={14} /> {l("Migrate to…", "迁移到…")}
+          </button>
+          {canResume ? (
+            <button onClick={onCopyResume}>
+              <Copy size={14} /> {l("Copy Resume Cmd", "复制 Resume 命令")}
+            </button>
+          ) : null}
+          <button onClick={onCopyMarkdown}>{l("Copy Markdown", "复制 Markdown")}</button>
+          <button onClick={onExportMarkdown}>
+            <Download size={14} /> {l("Export Markdown", "导出 Markdown")}
+          </button>
+          <button onClick={onReveal} disabled={localOnlyDisabled} title={revealTitle}>
+            <FolderOpen size={14} /> Show in {revealLabel}
+          </button>
+          <hr />
+          <button className="danger" onClick={onDelete}>
+            <Trash2 size={14} /> {l("Delete Session", "删除会话")}
+          </button>
+        </>
       ) : null}
-      {canResume && showMacActions ? (
-        <button onClick={onOpenApp} disabled={localOnlyDisabled} title={openAppTitle}>
-          <AppWindow size={14} /> Open App
-        </button>
-      ) : null}
-      <button onClick={onMigrate} disabled={!canMigrate || localOnlyDisabled} title={migrateTitle}>
-        <ArrowRightLeft size={14} /> {l("Migrate to…", "迁移到…")}
-      </button>
-      {canResume ? (
-        <button onClick={onCopyResume}>
-          <Copy size={14} /> {l("Copy Resume Cmd", "复制 Resume 命令")}
-        </button>
-      ) : null}
-      <button onClick={onCopyMarkdown}>{l("Copy Markdown", "复制 Markdown")}</button>
-      <button onClick={onExportMarkdown}>
-        <Download size={14} /> {l("Export Markdown", "导出 Markdown")}
-      </button>
-      <button onClick={onReveal} disabled={localOnlyDisabled} title={revealTitle}>
-        <FolderOpen size={14} /> Show in {revealLabel}
-      </button>
-      <hr />
-      <button className="danger" onClick={onDelete}>
-        <Trash2 size={14} /> {l("Delete Session", "删除会话")}
-      </button>
     </div>
   );
 }

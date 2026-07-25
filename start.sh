@@ -131,7 +131,7 @@ done
 # Build outputs must all exist.
 outputs_exist=true
 for f in \
-  out/main/index.js out/preload/index.mjs out/renderer/index.html \
+  out/main/index.js out/preload/index.cjs out/renderer/index.html \
   out/mcp/migration-entry.js; do
   [ -f "$f" ] || { outputs_exist=false; break; }
 done
@@ -207,21 +207,7 @@ launch_agent_recall() {
   fi
 }
 
-# ── 6. register MCP server (skip if already registered) ────────
-SETUP_MCP="$(npm prefix -g 2>/dev/null)/bin/agent-recall-setup-mcp"
-if [ -x "$SETUP_MCP" ]; then
-  if "$SETUP_MCP" --status >/dev/null 2>&1; then
-    ok "MCP server already registered"
-  else
-    info "Registering MCP server in Claude Code / Codex …"
-    "$SETUP_MCP" || warn "MCP registration failed (non-fatal — run 'agent-recall-setup-mcp' manually later)"
-    ok "MCP server registered"
-  fi
-else
-  warn "setup-mcp command not found — MCP server not registered. Run 'node bin/setup-mcp.cjs' manually after install."
-fi
-
-# ── 7. launch ──────────────────────────────────────────────────
+# ── 6. launch ──────────────────────────────────────────────────
 # The Electron app uses requestSingleInstanceLock: launching the
 # binary a second time focuses the existing window and the new
 # process exits immediately. We use this to our advantage:

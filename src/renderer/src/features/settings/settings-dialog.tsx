@@ -101,6 +101,7 @@ function UpdateReleaseSection({
 }
 
 export function SettingsDialog({
+  coreMode = false,
   platform,
   initialSection,
   settings,
@@ -135,6 +136,7 @@ export function SettingsDialog({
   onOpenRemoteSessions,
   onClose,
 }: {
+  coreMode?: boolean;
   platform: NodeJS.Platform;
   initialSection: SettingsSection;
   settings: AppSettings | null;
@@ -177,11 +179,12 @@ export function SettingsDialog({
   const [mcpBusy, setMcpBusy] = useState(false);
 
   useEffect(() => {
+    if (coreMode) return;
     void window.sessionSearch
       .getMcpStatus()
       .then(setMcpEnabled)
       .catch(() => setMcpEnabled(false));
-  }, []);
+  }, [coreMode]);
 
   async function toggleMcp(next: boolean): Promise<void> {
     setMcpBusy(true);
@@ -195,6 +198,7 @@ export function SettingsDialog({
   }
 
   useEffect(() => {
+    if (coreMode) return;
     const off = window.sessionSearch.onSummaryProgress((progress) => {
       setSummaryBatch((current) =>
         current.running
@@ -210,7 +214,7 @@ export function SettingsDialog({
       );
     });
     return off;
-  }, [language]);
+  }, [coreMode, language]);
 
   async function runSummaryBatch(): Promise<void> {
     setSummaryBatch({ running: true, message: localize(language, "Starting...", "开始...") });
@@ -286,30 +290,34 @@ export function SettingsDialog({
               <Keyboard size={15} />
               <span>{l("Global shortcut", "全局快捷键")}</span>
             </button>
-            <button className={activeSection === "connections" ? "active" : ""} onClick={() => setActiveSection("connections")}>
-              <Server size={15} />
-              <span>{l("Connections", "连接")}</span>
-            </button>
-            <button className={activeSection === "sources" ? "active" : ""} onClick={() => setActiveSection("sources")}>
-              <Folder size={15} />
-              <span>{l("Optional sources", "可选来源")}</span>
-            </button>
-            <button className={activeSection === "usage" ? "active" : ""} onClick={() => setActiveSection("usage")}>
-              <Gauge size={15} />
-              <span>{l("Usage limits", "剩余额度")}</span>
-            </button>
-            <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
-              <Sparkles size={15} />
-              <span>{l("AI", "AI")}</span>
-            </button>
-            <button className={activeSection === "remote" ? "active" : ""} onClick={() => setActiveSection("remote")}>
-              <Cloud size={15} />
-              <span>{l("Remote sync", "远程同步")}</span>
-            </button>
-            <button className={activeSection === "skills" ? "active" : ""} onClick={() => setActiveSection("skills")}>
-              <PackageSearch size={15} />
-              <span>{l("Skills", "Skills")}</span>
-            </button>
+            {!coreMode ? (
+              <>
+                <button className={activeSection === "connections" ? "active" : ""} onClick={() => setActiveSection("connections")}>
+                  <Server size={15} />
+                  <span>{l("Connections", "连接")}</span>
+                </button>
+                <button className={activeSection === "sources" ? "active" : ""} onClick={() => setActiveSection("sources")}>
+                  <Folder size={15} />
+                  <span>{l("Optional sources", "可选来源")}</span>
+                </button>
+                <button className={activeSection === "usage" ? "active" : ""} onClick={() => setActiveSection("usage")}>
+                  <Gauge size={15} />
+                  <span>{l("Usage limits", "剩余额度")}</span>
+                </button>
+                <button className={activeSection === "ai" ? "active" : ""} onClick={() => setActiveSection("ai")}>
+                  <Sparkles size={15} />
+                  <span>{l("AI", "AI")}</span>
+                </button>
+                <button className={activeSection === "remote" ? "active" : ""} onClick={() => setActiveSection("remote")}>
+                  <Cloud size={15} />
+                  <span>{l("Remote sync", "远程同步")}</span>
+                </button>
+                <button className={activeSection === "skills" ? "active" : ""} onClick={() => setActiveSection("skills")}>
+                  <PackageSearch size={15} />
+                  <span>{l("Skills", "Skills")}</span>
+                </button>
+              </>
+            ) : null}
             <button className={activeSection === "appearance" ? "active" : ""} onClick={() => setActiveSection("appearance")}>
               <Sun size={15} />
               <span>{l("Appearance", "外观")}</span>
@@ -1117,7 +1125,7 @@ export function SettingsDialog({
                   <label className="settings-field settings-toggle update-auto-check">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Automatically check for updates", "自动检查更新")}</span>
-                      <span className="settings-field-sub">{l("The terminal and App check for a new version once a day.", "终端与 App 每天自动检查一次新版本。")}</span>
+                      <span className="settings-field-sub">{l("The App checks for a new version once a day.", "App 每天自动检查一次新版本。")}</span>
                     </div>
                     <input
                       type="checkbox"
@@ -1139,4 +1147,3 @@ export function SettingsDialog({
     </div>
   );
 }
-

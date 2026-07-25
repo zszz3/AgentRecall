@@ -28,6 +28,18 @@ test("global command marks npm-installed launches as release builds", () => {
   assert.match(commandSource, /environment\.AGENT_RECALL_SOURCE_BUILD !== "1"/);
 });
 
+test("normal launch defers automatic update checks to the visible application", () => {
+  assert.match(commandSource, /if \(explicitCheck\)/);
+  assert.doesNotMatch(commandSource, /readUpdatePreference/);
+  assert.doesNotMatch(commandSource, /readline/);
+});
+
+test("launcher does not automatically configure MCP", () => {
+  assert.doesNotMatch(source, /SETUP_MCP=/);
+  assert.doesNotMatch(source, /"\$SETUP_MCP"/);
+  assert.match(source, /out\/preload\/index\.cjs/);
+});
+
 test("launcher detects installed and local app instances", () => {
   assert.match(source, /APP_PROCESS_FILE="\$HOME\/\.agent-recall\/app-process\.json"/);
   assert.match(source, /USER_DATA_PATTERN="\$HOME\/Library\/Application Support\/AgentRecall"/);

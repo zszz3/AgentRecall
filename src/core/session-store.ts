@@ -162,7 +162,9 @@ export class SessionStore {
     return this.sessions.listTags(options);
   }
 
-  listTagsByProject(options: { excludeSubagents?: boolean } = {}): ProjectTagEntry[] {
+  listTagsByProject(
+    options: { excludeSubagents?: boolean; environmentId?: string; allowedSources?: readonly SessionSource[] } = {},
+  ): ProjectTagEntry[] {
     return this.sessions.listTagsByProject(options);
   }
 

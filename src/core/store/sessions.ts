@@ -29,13 +29,13 @@ import { EnvironmentStore, localEnvironment } from "./environments";
 
 const LIVE_SESSION_KEY_SQL = `
   CASE
-    WHEN source IN ('claude-cli', 'claude-app', 'claude-internal') THEN 'claude:' || raw_id
-    WHEN source IN ('codex-cli', 'codex-app', 'codex-internal') THEN 'codex:' || raw_id
-    WHEN source = 'tclaude-cli' THEN 'tclaude:' || raw_id
-    WHEN source = 'tcodex-cli' THEN 'tcodex:' || raw_id
-    WHEN source = 'codebuddy-cli' THEN 'codebuddy:' || raw_id
-    WHEN source = 'codewiz-cli' THEN 'codewiz:' || raw_id
-    WHEN source = 'trae' THEN 'trae:' || raw_id
+    WHEN sessions.source IN ('claude-cli', 'claude-app', 'claude-internal') THEN 'claude:' || sessions.raw_id
+    WHEN sessions.source IN ('codex-cli', 'codex-app', 'codex-internal') THEN 'codex:' || sessions.raw_id
+    WHEN sessions.source = 'tclaude-cli' THEN 'tclaude:' || sessions.raw_id
+    WHEN sessions.source = 'tcodex-cli' THEN 'tcodex:' || sessions.raw_id
+    WHEN sessions.source = 'codebuddy-cli' THEN 'codebuddy:' || sessions.raw_id
+    WHEN sessions.source = 'codewiz-cli' THEN 'codewiz:' || sessions.raw_id
+    WHEN sessions.source = 'trae' THEN 'trae:' || sessions.raw_id
     ELSE NULL
   END
 `;
@@ -80,6 +80,11 @@ interface SessionRow {
   ai_summary_basis: number | null;
   is_subagent: 0 | 1;
   parent_session_id: string | null;
+}
+
+interface SearchCandidateRow extends SessionRow {
+  total_count: number;
+  search_score: number;
 }
 
 interface TraceEventRow {
@@ -687,6 +692,11 @@ export class SessionsStore {
     if (options.excludeSubagents) {
       conditions.push("sessions.is_subagent = 0");
     }
+    if (options.allowedSources) {
+      if (options.allowedSources.length === 0) return [];
+      conditions.push(`sessions.source IN (${options.allowedSources.map(() => "?").join(", ")})`);
+      args.push(...options.allowedSources);
+    }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = this.db
       .prepare(
@@ -703,8 +713,21 @@ export class SessionsStore {
     return rows.map((row) => row.name);
   }
 
-  listTagsByProject(options: { excludeSubagents?: boolean } = {}): ProjectTagEntry[] {
-    const subagentPredicate = options.excludeSubagents ? "AND sessions.is_subagent = 0" : "";
+  listTagsByProject(
+    options: { excludeSubagents?: boolean; environmentId?: string; allowedSources?: readonly SessionSource[] } = {},
+  ): ProjectTagEntry[] {
+    const conditions: string[] = ["trim(sessions.project_path) != ''"];
+    const args: SQLInputValue[] = [];
+    if (options.excludeSubagents) conditions.push("sessions.is_subagent = 0");
+    if (options.environmentId && options.environmentId !== "all") {
+      conditions.push("sessions.environment_id = ?");
+      args.push(options.environmentId);
+    }
+    if (options.allowedSources) {
+      if (options.allowedSources.length === 0) return [];
+      conditions.push(`sessions.source IN (${options.allowedSources.map(() => "?").join(", ")})`);
+      args.push(...options.allowedSources);
+    }
     const rows = this.db
       .prepare(
         `
@@ -715,12 +738,11 @@ export class SessionsStore {
         FROM tags
         INNER JOIN session_tags ON session_tags.tag_id = tags.id
         INNER JOIN sessions ON sessions.session_key = session_tags.session_key
-        WHERE trim(sessions.project_path) != ''
-          ${subagentPredicate}
+        WHERE ${conditions.join(" AND ")}
         ORDER BY sessions.environment_id, sessions.project_path, lower(tags.name)
       `,
       )
-      .all() as Array<{ environment_id: string; project_path: string; tag_name: string }>;
+      .all(...args) as Array<{ environment_id: string; project_path: string; tag_name: string }>;
     const map = new Map<string, ProjectTagEntry>();
     for (const row of rows) {
       const key = `${row.environment_id}\0${row.project_path}`;
@@ -742,6 +764,12 @@ export class SessionsStore {
       options.environmentId && options.environmentId !== "all" ? "AND sessions.environment_id = ?" : "";
     const environmentArgs =
       options.environmentId && options.environmentId !== "all" ? [options.environmentId] : [];
+    const sourcePredicate = options.allowedSources
+      ? options.allowedSources.length > 0
+        ? `AND sessions.source IN (${options.allowedSources.map(() => "?").join(", ")})`
+        : "AND 0 = 1"
+      : "";
+    const sourceArgs = options.allowedSources ? [...options.allowedSources] : [];
     const rows = this.db
       .prepare(
         `
@@ -757,10 +785,11 @@ export class SessionsStore {
         WHERE trim(project_path) != ''
           ${subagentPredicate}
           ${environmentPredicate}
+          ${sourcePredicate}
         GROUP BY sessions.project_path, sessions.environment_id
       `,
       )
-      .all(...environmentArgs) as Array<{
+      .all(...environmentArgs, ...sourceArgs) as Array<{
         project_path: string;
         environment_id: string;
         environment_label: string | null;
@@ -972,33 +1001,16 @@ export class SessionsStore {
   searchSessionPage(options: SearchOptions = {}): SessionSearchPage {
     const limit = options.limit ?? 200;
     const query = normalizeExplicitAnd(options.query?.trim() || "");
-    const ftsMatches = query ? this.searchFts(query) : new Map<string, string | null>();
-    const rows = this.getCandidateRows(options, query, limit);
+    const candidatePage = this.getCandidatePage(options, query, limit);
+    const rows = candidatePage.rows;
     const tagsBySession = this.getTagsForSessions(rows.map((row) => row.session_key));
-    const merged = new Map<string, SessionSearchResult>();
-
-    for (const row of rows) {
-      const hasFtsMatch = ftsMatches.has(row.session_key);
-      const ftsSnippet = hasFtsMatch ? (ftsMatches.get(row.session_key) ?? null) : null;
-      const hydrated = this.hydrateRow(row, query ? ftsSnippet : null, tagsBySession.get(row.session_key) ?? []);
-      if (query && !hasFtsMatch && !this.matchesTextFields(hydrated, query)) {
-        const snippet = this.findSnippet(row.session_key, query);
-        if (!snippet) continue;
-        hydrated.matchSnippet = snippet;
-      }
-      merged.set(hydrated.sessionKey, hydrated);
-    }
-
-    const sorted = [...merged.values()].sort(
-      (a, b) => this.score(b, query) - this.score(a, query) || this.sortValue(b, options.sortBy) - this.sortValue(a, options.sortBy),
-    );
-    const totalCount = query ? sorted.length : this.countCandidateRows(options);
-    const sessions = sorted.slice(0, limit);
+    const sessions = rows.map((row) =>
+      this.hydrateRow(row, null, tagsBySession.get(row.session_key) ?? []));
     if (query) this.attachSearchMatchDetails(sessions, query);
     return {
       sessions,
-      totalCount,
-      hasMore: totalCount > sessions.length,
+      totalCount: candidatePage.totalCount,
+      hasMore: candidatePage.totalCount > sessions.length,
     };
   }
 
@@ -1296,12 +1308,15 @@ export class SessionsStore {
     }>;
   }
 
-  private getCandidateRows(options: SearchOptions, query: string, limit: number): SessionRow[] {
-    const { where, args } = this.sessionWhereClause(options);
-
+  private getCandidatePage(
+    options: SearchOptions,
+    query: string,
+    limit: number,
+  ): { rows: SessionRow[]; totalCount: number } {
     if (!query) {
+      const { where, args } = this.sessionWhereClause(options);
       args.push(limit);
-      return this.db
+      const rows = this.db
         .prepare(
           `
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
@@ -1312,11 +1327,161 @@ export class SessionsStore {
         `,
         )
         .all(...args) as unknown as SessionRow[];
+      return {
+        rows,
+        totalCount: this.countCandidateRows(options),
+      };
     }
 
-    return this.db
-      .prepare(`SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at FROM sessions WHERE ${where.join(" AND ")}`)
-      .all(...args) as unknown as SessionRow[];
+    const ftsExpression = ftsSearchExpression(query);
+    if (ftsExpression) {
+      try {
+        return this.querySearchCandidatePage(options, query, ftsExpression, limit);
+      } catch {
+        // A malformed or unavailable FTS index must not make search fail. The
+        // literal fallback is one scoped SQL query rather than one query per
+        // candidate session.
+      }
+    }
+    return this.querySearchCandidatePage(options, query, null, limit);
+  }
+
+  private querySearchCandidatePage(
+    options: SearchOptions,
+    query: string,
+    ftsExpression: string | null,
+    limit: number,
+  ): { rows: SessionRow[]; totalCount: number } {
+    const { where, args: scopeArgs } = this.sessionWhereClause(options);
+    const like = `%${escapeLike(query)}%`;
+    const metadataMatchClauses = [
+      "custom_title",
+      "original_title",
+      "first_question",
+      "project_path",
+      "raw_id",
+    ].map(
+      (column) =>
+        `lower(COALESCE(sessions.${column}, '')) LIKE lower(?) ESCAPE '\\'`,
+    );
+    const shouldMatchLiteralMessages =
+      !ftsExpression || hasFtsLiteralSeparators(query);
+    const generalFtsMatchSql = ftsExpression
+      ? `
+        sessions.session_key IN (
+          SELECT session_key
+          FROM session_fts
+          WHERE session_fts MATCH ?
+        )
+      `
+      : "0 = 1";
+    const literalMessageMatchSql = `
+      sessions.session_key IN (
+        SELECT session_key
+        FROM messages
+        WHERE lower(messages.content) LIKE lower(?) ESCAPE '\\'
+      )
+    `;
+    const candidateMatchClauses = [
+      generalFtsMatchSql,
+      ...metadataMatchClauses,
+    ];
+    if (shouldMatchLiteralMessages) {
+      candidateMatchClauses.push(literalMessageMatchSql);
+    }
+
+    const contentMatchClauses: string[] = [];
+    if (ftsExpression) {
+      contentMatchClauses.push(`
+        candidate_rows.session_key IN (
+          SELECT session_key
+          FROM session_fts
+          WHERE session_fts MATCH ?
+        )
+      `);
+    }
+    if (shouldMatchLiteralMessages) {
+      contentMatchClauses.push(`
+        candidate_rows.session_key IN (
+          SELECT session_key
+          FROM messages
+          WHERE lower(messages.content) LIKE lower(?) ESCAPE '\\'
+        )
+      `);
+    }
+    const displayTitleSql =
+      "COALESCE(NULLIF(candidate_rows.custom_title, ''), NULLIF(candidate_rows.original_title, ''), NULLIF(candidate_rows.first_question, ''), 'Untitled Session')";
+    const scorePrefixArgs: SQLInputValue[] = [
+      query,
+      `${escapeLike(query)}%`,
+      like,
+      like,
+    ];
+    const args: SQLInputValue[] = [
+      ...scopeArgs,
+      ...(ftsExpression ? [ftsExpression] : []),
+      ...metadataMatchClauses.map(() => like),
+      ...(shouldMatchLiteralMessages ? [like] : []),
+      ...scorePrefixArgs,
+      ...(ftsExpression ? [`content_text : (${ftsExpression})`] : []),
+      ...(shouldMatchLiteralMessages ? [like] : []),
+      like,
+      like,
+      limit,
+    ];
+    const sortSql =
+      options.sortBy === "created"
+        ? "scored_rows.timestamp"
+        : "scored_rows.last_activity_at";
+    const rows = this.db
+      .prepare(
+        `
+        WITH
+        candidate_rows AS (
+          SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
+          FROM sessions
+          WHERE ${where.join(" AND ")}
+            AND (${candidateMatchClauses.join(" OR ")})
+        ),
+        scored_rows AS (
+          SELECT
+            candidate_rows.*,
+            (
+              CASE
+                WHEN lower(${displayTitleSql}) = lower(?) THEN 1000
+                WHEN lower(${displayTitleSql}) LIKE lower(?) ESCAPE '\\' THEN 700
+                WHEN lower(${displayTitleSql}) LIKE lower(?) ESCAPE '\\' THEN 500
+                ELSE 0
+              END
+              + CASE
+                  WHEN lower(candidate_rows.first_question) LIKE lower(?) ESCAPE '\\' THEN 300
+                  ELSE 0
+                END
+              + CASE
+                  WHEN ${contentMatchClauses.join(" OR ")} THEN 120
+                  ELSE 0
+                END
+              + CASE
+                  WHEN lower(candidate_rows.project_path) LIKE lower(?) ESCAPE '\\'
+                    OR lower(candidate_rows.raw_id) LIKE lower(?) ESCAPE '\\'
+                    THEN 50
+                  ELSE 0
+                END
+              + CASE WHEN candidate_rows.pinned = 1 THEN 25 ELSE 0 END
+            ) AS search_score
+          FROM candidate_rows
+        )
+        SELECT scored_rows.*, COUNT(*) OVER () AS total_count
+        FROM scored_rows
+        ORDER BY search_score DESC, ${sortSql} DESC
+        LIMIT ?
+      `,
+      )
+      .all(...args) as unknown as SearchCandidateRow[];
+    return {
+      rows,
+      totalCount: rows[0]?.total_count ?? 0,
+    };
   }
 
   private countCandidateRows(options: SearchOptions): number {
@@ -1329,30 +1494,39 @@ export class SessionsStore {
     const where: string[] = [];
     const args: SQLInputValue[] = [];
 
-    if (options.visibility === "hidden") where.push("hidden = 1");
-    else if (options.visibility === "favorites") where.push("hidden = 0 AND favorited = 1");
-    else if (options.visibility === "pinned") where.push("hidden = 0 AND pinned = 1");
-    else where.push("hidden = 0");
+    if (options.visibility === "hidden") where.push("sessions.hidden = 1");
+    else if (options.visibility === "favorites") where.push("sessions.hidden = 0 AND sessions.favorited = 1");
+    else if (options.visibility === "pinned") where.push("sessions.hidden = 0 AND sessions.pinned = 1");
+    else where.push("sessions.hidden = 0");
 
-    if (options.excludeSubagents) where.push("is_subagent = 0");
+    if (options.excludeSubagents) where.push("sessions.is_subagent = 0");
+
+    if (options.allowedSources) {
+      if (options.allowedSources.length === 0) {
+        where.push("0 = 1");
+      } else {
+        where.push(`sessions.source IN (${options.allowedSources.map(() => "?").join(", ")})`);
+        args.push(...options.allowedSources);
+      }
+    }
 
     if (options.projectPath) {
-      where.push("project_path = ?");
+      where.push("sessions.project_path = ?");
       args.push(options.projectPath);
     }
 
     if (options.environmentId && options.environmentId !== "all") {
-      where.push("environment_id = ?");
+      where.push("sessions.environment_id = ?");
       args.push(options.environmentId);
     }
 
     if (options.source && options.source !== "all") {
       if (options.source === "claude") {
-        where.push("source IN ('claude-cli', 'claude-app')");
+        where.push("sessions.source IN ('claude-cli', 'claude-app')");
       } else if (options.source === "codex") {
-        where.push("source IN ('codex-cli', 'codex-app')");
+        where.push("sessions.source IN ('codex-cli', 'codex-app')");
       } else {
-        where.push("source = ?");
+        where.push("sessions.source = ?");
         args.push(options.source);
       }
     }
@@ -1399,59 +1573,11 @@ export class SessionsStore {
     return { where, args };
   }
 
-  private matchesTextFields(result: SessionSearchResult, query: string): boolean {
-    const lower = query.toLowerCase();
-    if (result.displayTitle.toLowerCase().includes(lower)) return true;
-    if (result.originalTitle.toLowerCase().includes(lower)) return true;
-    if (result.firstQuestion.toLowerCase().includes(lower)) return true;
-    if (result.projectPath.toLowerCase().includes(lower)) return true;
-    if (result.rawId.toLowerCase().includes(lower)) return true;
-    return false;
-  }
-
-  private findSnippet(sessionKey: string, query: string): string | null {
-    const like = `%${query.replace(/[%_]/g, "\\$&")}%`;
-    const row = this.db
-      .prepare(
-        `
-        SELECT content
-        FROM messages
-        WHERE session_key = ? AND lower(content) LIKE lower(?) ESCAPE '\\'
-        ORDER BY message_index
-        LIMIT 1
-      `,
-      )
-      .get(sessionKey, like) as { content: string } | undefined;
-    if (!row) return null;
-    const content = row.content.replace(/\s+/g, " ");
-    const idx = content.toLowerCase().indexOf(query.toLowerCase());
-    if (idx < 0) return content.slice(0, 180);
-    const start = Math.max(0, idx - 60);
-    const end = Math.min(content.length, idx + query.length + 80);
-    return `${start > 0 ? "..." : ""}${content.slice(start, end)}${end < content.length ? "..." : ""}`;
-  }
-
-  private searchFts(query: string): Map<string, string | null> {
-    const expression = buildFtsQuery(query);
-    if (!expression) return new Map();
-    try {
-      const rows = this.db
-        .prepare(
-          `
-          SELECT session_key
-          FROM session_fts
-          WHERE session_fts MATCH ?
-        `,
-        )
-        .all(expression) as Array<{ session_key: string }>;
-      return new Map(rows.map((row) => [row.session_key, null]));
-    } catch {
-      return new Map();
-    }
-  }
-
   private attachSearchMatchDetails(sessions: SessionSearchResult[], query: string): void {
-    const terms = searchTerms(query);
+    const parsedTerms = searchTerms(query);
+    const terms = parsedTerms.length > 0
+      ? parsedTerms
+      : [query.toLocaleLowerCase()].filter(Boolean);
     if (sessions.length === 0 || terms.length === 0) return;
     for (const session of sessions) {
       session.matchHits = [];
@@ -1614,25 +1740,6 @@ export class SessionsStore {
     };
   }
 
-  private score(result: SessionSearchResult, query: string): number {
-    if (!query) return result.pinned ? 1_000_000_000_000 : 0;
-    const q = query.toLowerCase();
-    const title = result.displayTitle.toLowerCase();
-    let score = 0;
-    if (title === q) score += 1000;
-    else if (title.startsWith(q)) score += 700;
-    else if (title.includes(q)) score += 500;
-    if (result.firstQuestion.toLowerCase().includes(q)) score += 300;
-    if (result.matchSnippet) score += 120;
-    if (result.projectPath.toLowerCase().includes(q) || result.rawId.toLowerCase().includes(q)) score += 50;
-    if (result.pinned) score += 25;
-    return score;
-  }
-
-  private sortValue(result: SessionSearchResult, sortBy: SessionSortBy = "activity"): number {
-    if (sortBy === "created") return result.timestamp || 0;
-    return result.lastActivityAt || result.fileMtimeMs || result.timestamp || 0;
-  }
 }
 
 function environmentSortValue(environmentId: string): number {
@@ -1732,6 +1839,16 @@ function buildFtsQuery(query: string): string {
     .join(" ");
 }
 
+function ftsSearchExpression(query: string): string | null {
+  const terms = searchTerms(query);
+  if (terms.length === 0 || terms.some((term) => [...term].length < 3)) return null;
+  return buildFtsQuery(query) || null;
+}
+
+function hasFtsLiteralSeparators(query: string): boolean {
+  return /[^\p{L}\p{N}_\s]/u.test(query);
+}
+
 function searchTerms(query: string): string[] {
   const terms = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
   return [...new Set(terms.map((term) => term.toLocaleLowerCase()).filter((term) => term !== "and"))];
@@ -1811,4 +1928,3 @@ function projectParentLabel(projectPath: string): string {
   if (parts.length >= 2) return `${parts.at(-2)}/${parts.at(-1)}`;
   return projectLabel(projectPath);
 }
-

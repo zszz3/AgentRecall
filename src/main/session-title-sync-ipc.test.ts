@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const mainSource = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+// Terminal-title synchronization remains covered as retained legacy behavior.
+const mainSource = readFileSync(
+  new URL("./legacy-application.ts", import.meta.url),
+  "utf8",
+);
 
 describe("session title sync IPC", () => {
   it("routes title changes through the terminal synchronization orchestrator", () => {

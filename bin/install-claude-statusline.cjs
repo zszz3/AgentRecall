@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
-// Auto-installs the Claude Code usage statusline bridge into ~/.claude/settings.json.
-// Runs from package.json "postinstall" so `npm install -g .` wires it up with zero
-// manual steps. Self-contained CommonJS: no build output or dependencies required,
-// so it works from a freshly unpacked global install.
+// Legacy explicit helper for installing the Claude Code usage statusline bridge.
+// AgentRecall does not invoke this file from npm lifecycle scripts or application
+// startup. It remains self-contained for users who previously opted into it.
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -111,7 +110,7 @@ function uninstallClaudeStatuslineBridge(options) {
 }
 
 function runCli() {
-  // Never fail the install: postinstall must always exit 0.
+  // Keep the legacy explicit command non-fatal.
   if (process.env.AGENT_RECALL_SKIP_STATUSLINE_INSTALL) return;
   if (process.env.CI) return;
 

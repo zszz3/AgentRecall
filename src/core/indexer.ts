@@ -13,7 +13,7 @@ import {
 } from "./session-loader";
 import { migrationTargetDescriptor } from "./migration-targets";
 import type { SessionStore } from "./session-store";
-import type { LoadedSession, MigrationTarget } from "./types";
+import type { LoadedSession, MigrationTarget, SessionSource } from "./types";
 
 export interface IndexStatus {
   running: boolean;
@@ -46,6 +46,8 @@ export interface BatchIndexOptions {
   loadOptions?: SessionLoadOptions;
   onProgress?: (status: IndexStatus) => void;
   yieldToEventLoop?: () => Promise<void>;
+  allowedSources?: readonly SessionSource[];
+  pruneMissingSessions?: boolean;
 }
 
 export async function syncLoadedSessionsInBatches(
@@ -55,12 +57,14 @@ export async function syncLoadedSessionsInBatches(
 ): Promise<IndexStatus> {
   const batchSize = Math.max(1, options.batchSize ?? 3);
   const yieldToEventLoop = options.yieldToEventLoop ?? (() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  const allowedSources = options.allowedSources ? new Set(options.allowedSources) : null;
   let indexed = 0;
   let skipped = 0;
   let total = 0;
   let pendingInBatch = 0;
 
   for (const item of loaded) {
+    if (!isAllowedScopedSession(item.session, allowedSources)) continue;
     if (store.isIndexedSessionFresh(item.session)) {
       store.touchIndexedAtIfMissing(item.session.sessionKey);
       skipped++;
@@ -99,6 +103,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   const loadOptions = options.loadOptions ?? {};
   const shouldSkipFile = loadOptions.shouldSkipFile;
   const onSkippedFile = loadOptions.onSkippedFile;
+  const allowedSources = options.allowedSources ? new Set(options.allowedSources) : null;
   const scannedFilePaths = new Set<string>();
   const rawLoaded = loadDefaultSessionsIterator({
     ...loadOptions,
@@ -116,6 +121,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   });
   const loaded = (function* () {
     for (const item of rawLoaded) {
+      if (!isAllowedScopedSession(item.session, allowedSources)) continue;
       if (item.session.filePath) scannedFilePaths.add(item.session.filePath);
       yield item;
     }
@@ -124,6 +130,12 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
     ...options,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   }).then((status) => {
+    // A scoped scan cannot distinguish a removed source file from a source that
+    // was intentionally excluded by the product profile. Never prune outside a
+    // full, unscoped legacy scan.
+    if (options.pruneMissingSessions === false || options.allowedSources !== undefined) {
+      return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
+    }
     // Prune sessions whose source files no longer exist on disk. Only applies to
     // the local environment — remote sessions are synced independently and their
     // file paths are not local filesystem paths. scannedFilePaths is collected
@@ -134,6 +146,18 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
     }
     return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
   });
+}
+
+function isAllowedScopedSession(
+  session: LoadedSession["session"],
+  allowedSources: ReadonlySet<SessionSource> | null,
+): boolean {
+  if (!allowedSources) return true;
+  return (
+    allowedSources.has(session.source)
+    && (session.environmentId ?? "local") === "local"
+    && (session.environmentKind ?? "local") === "local"
+  );
 }
 
 interface SessionFileSnapshot {

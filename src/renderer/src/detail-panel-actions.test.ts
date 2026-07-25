@@ -8,8 +8,10 @@ const detailPanelSource = readFileSync(new URL("./features/session-detail/detail
 const remoteSessionsDialogSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 const settingsDialogSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 const sessionUiSource = readFileSync(new URL("./session-ui.ts", import.meta.url), "utf8");
-const preloadSource = readFileSync(new URL("../../preload/index.ts", import.meta.url), "utf8");
-const mainSource = readFileSync(new URL("../../main/index.ts", import.meta.url), "utf8");
+// Advanced behavior remains covered through the retained legacy composition.
+// The production Core entrypoints have their own strict boundary tests.
+const preloadSource = readFileSync(new URL("../../preload/legacy-preload.ts", import.meta.url), "utf8");
+const mainSource = readFileSync(new URL("../../main/legacy-application.ts", import.meta.url), "utf8");
 const summaryEndpointSource = readFileSync(new URL("../../core/summary-endpoint.ts", import.meta.url), "utf8");
 
 function mainHandlerSource(channel: string): string {

@@ -199,11 +199,17 @@ export interface SearchOptions {
   dateTo?: number;
   limit?: number;
   excludeSubagents?: boolean;
+  /**
+   * Main-process-only product scope. IPC input validation does not accept it;
+   * the main process supplies the allowed sources after validation.
+   */
+  allowedSources?: readonly SessionSource[];
 }
 
 export interface ProjectQueryOptions {
   excludeSubagents?: boolean;
   environmentId?: string;
+  allowedSources?: readonly SessionSource[];
 }
 
 export interface TagListOptions {
@@ -211,6 +217,7 @@ export interface TagListOptions {
   projectPath?: string;
   projectEnvironmentId?: string;
   excludeSubagents?: boolean;
+  allowedSources?: readonly SessionSource[];
 }
 
 export interface ProjectTagEntry {

@@ -8,16 +8,12 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const readline = require("node:readline/promises");
 
 const {
   checkForUpdate,
   currentVersion,
   ensureElectronRuntimeForLaunch,
   formatUpdateNotice,
-  readUpdatePreference,
-  skipUpdateVersion,
-  snoozeUpdatePrompt,
   waitForUpdateCompletion,
 } = require("./update-client.cjs");
 
@@ -44,7 +40,7 @@ async function scheduleUpdate(manifest, { stopApp }) {
   if (exitCode !== 0) throw new Error("更新未完成，请查看上方错误信息。");
 }
 
-function launchApp() {
+function launchApp({ disableUpdateCheck = false } = {}) {
   // The `electron` dependency resolves to the path of the Electron executable.
   const electronPath = require("electron");
   const appEntry = path.join(__dirname, "..", "out", "main", "index.js");
@@ -54,6 +50,9 @@ function launchApp() {
     environment.AGENT_RECALL_RELEASE_BUILD = "1";
   } else {
     delete environment.AGENT_RECALL_RELEASE_BUILD;
+  }
+  if (disableUpdateCheck) {
+    environment.AGENT_RECALL_NO_UPDATE_CHECK = "1";
   }
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(electronPath, [appEntry], { detached: true, stdio: "ignore", env: environment });
@@ -81,10 +80,8 @@ async function main() {
   }
 
   const explicitCheck = args.has("--check-update") || args.has("--update");
-  const preferenceEnabled = await readUpdatePreference();
-  const checkDisabled = args.has("--no-update-check") || process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1" || !preferenceEnabled;
   let result = null;
-  if (!checkDisabled || explicitCheck) {
+  if (explicitCheck) {
     result = await checkForUpdate({ currentVersion: version, force: explicitCheck });
   }
 
@@ -106,26 +103,6 @@ async function main() {
     return;
   }
 
-  if (result?.updateAvailable && result.manifest && !result.updateSkipped && !result.promptSnoozed && process.stdin.isTTY && process.stdout.isTTY) {
-    process.stdout.write(`${formatUpdateNotice(result)}\n\n`);
-    const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await prompt.question("请选择：[1] 更新  [2] 跳过  [3] 跳过，直至下个版本  (默认 2): ");
-    prompt.close();
-    const choice = answer.trim().toLowerCase();
-    if (choice === "1" || choice === "u" || choice === "update" || /^y(?:es)?$/i.test(choice)) {
-      process.stdout.write("正在准备更新，完成后会自动启动应用。\n");
-      await scheduleUpdate(result.manifest, { stopApp: true });
-      return;
-    }
-    if (choice === "3" || choice === "s" || choice === "skip-version") {
-      await skipUpdateVersion(result.manifest.version);
-      process.stdout.write(`已跳过 v${result.manifest.version}，下个版本发布前不再提示。\n`);
-    } else {
-      await snoozeUpdatePrompt(result.manifest.version);
-      process.stdout.write("本次已跳过，之后仍会提示该版本。\n");
-    }
-  }
-
   await waitForUpdateCompletion({
     onWait: () => {
       if (process.stdout.isTTY) process.stdout.write("正在等待自动更新完成...\n");
@@ -138,7 +115,7 @@ async function main() {
       if (process.stdout.isTTY) process.stdout.write("正在等待 Electron 运行时准备完成...\n");
     },
   });
-  launchApp();
+  launchApp({ disableUpdateCheck: args.has("--no-update-check") });
 }
 
 main().catch((error) => {

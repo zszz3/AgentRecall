@@ -64,12 +64,12 @@ describe("app loading performance", () => {
     expect(loadSessionsBlock).not.toContain("window.sessionSearch.getStats");
   });
 
-  it("refreshes skill usage when the Skills dialog is opened before listing skills", () => {
+  it("keeps skill refresh dormant in the Core runtime", () => {
     const loadSkillsBlock = sourceBlock("const loadSkills = useCallback(async (options:", [
       "const deleteSkill = useCallback",
       "useEffect(() => {",
     ]);
-    const skillsOpenEffect = sourceBlock("useEffect(() => {\n    if (skillsOpen)", [
+    const skillsOpenEffect = sourceBlock("useEffect(() => {\n    if (CORE_RUNTIME) return;\n    if (skillsOpen)", [
       "useEffect(() => {\n    if (!settingsOpen)",
       "const toggleSkillUsageHook = useCallback",
     ]);
@@ -78,20 +78,22 @@ describe("app loading performance", () => {
     expect(loadSkillsBlock.indexOf("window.sessionSearch.refreshSkillUsage()")).toBeLessThan(
       loadSkillsBlock.indexOf("window.sessionSearch.listSkills()"),
     );
+    expect(skillsOpenEffect).toContain("if (CORE_RUNTIME) return");
     expect(skillsOpenEffect).toContain("loadSkills({ refreshUsage: true, silent: true })");
   });
 
-  it("preloads and caches remote sessions instead of reloading them whenever the dialog opens", () => {
+  it("keeps remote-session preload dormant in the Core runtime", () => {
     const cacheLoader = sourceBlock("const loadRemoteSessionsCache = useCallback", [
       "const cacheRemoteSessionUpload = useCallback",
     ]);
-    const startupEffect = sourceBlock("useEffect(() => {\n    void loadRemoteSessionsCache();", [
-      "useEffect(() => {\n    if (skillsOpen)",
+    const startupEffect = sourceBlock("useEffect(() => {\n    if (CORE_RUNTIME) return;\n    void loadRemoteSessionsCache();", [
+      "useEffect(() => {\n    if (CORE_RUNTIME) return;\n    if (skillsOpen)",
     ]);
 
     expect(cacheLoader).toContain("window.sessionSearch.getRemoteSessionStatus()");
     expect(cacheLoader).toContain("window.sessionSearch.listSessionSyncItems()");
     expect(cacheLoader).toContain("if (remoteSessionsLoadPromiseRef.current) return remoteSessionsLoadPromiseRef.current");
+    expect(startupEffect).toContain("if (CORE_RUNTIME) return");
     expect(startupEffect).toContain("loadRemoteSessionsCache()");
     expect(appSource).toContain("cache={remoteSessionsCache}");
     expect(appSource).toContain("onRefresh={loadRemoteSessionsCache}");

@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = fs.readFileSync(path.resolve("src", "main", "index.ts"), "utf8");
+// The service remains available for legacy data compatibility, but is no
+// longer composed by the production Core entrypoint.
+const source = fs.readFileSync(
+  path.resolve("src", "main", "legacy-application.ts"),
+  "utf8",
+);
 
 describe("session sync composition wiring", () => {
   it("loads the packaged Hook setup through the RemoteSessionService boundary", () => {

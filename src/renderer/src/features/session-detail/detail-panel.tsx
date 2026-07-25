@@ -103,6 +103,7 @@ function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all
 }
 
 export function DetailPanel({
+  coreMode = false,
   session,
   messages,
   matchedContextMessages,
@@ -141,6 +142,7 @@ export function DetailPanel({
   readOnly = false,
   backdropClassName = "",
 }: {
+  coreMode?: boolean;
   session: SessionSearchResult;
   messages: SessionMessage[];
   matchedContextMessages: SessionMessage[];
@@ -417,55 +419,61 @@ export function DetailPanel({
                 <Play size={15} /> {session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : "Resume"}
               </button>
             ) : null}
-            {canResume && showItermAction ? (
+            {!coreMode && canResume && showItermAction ? (
               <button onClick={onResumeIterm} disabled={actionRunning}>
                 <TerminalIcon size={15} /> iTerm
               </button>
             ) : null}
-            <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
-              <FolderOpen size={15} /> {revealLabel}
-            </button>
-          </div>
-          <div className="detail-action-group">
-            <button onClick={onAddTag} disabled={actionRunning}>
-              <Tag size={15} /> {l("Add Tag", "添加标签")}
-            </button>
-            <button onClick={onSummarize} disabled={actionRunning || summarizing}>
-              <Sparkles size={15} />{" "}
-              {summarizing
-                ? l("Summarizing...", "摘要中...")
-                : session.aiSummary
-                  ? l("Re-summarize", "重新摘要")
-                  : l("AI Summary", "AI 摘要")}
-            </button>
-            <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
-              <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
-            </button>
-            {onUploadRemote ? (
-              <button onClick={onUploadRemote} disabled={actionRunning}>
-                <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
+            {!coreMode ? (
+              <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
+                <FolderOpen size={15} /> {revealLabel}
               </button>
             ) : null}
           </div>
-          <div className="detail-action-group">
-            {canResume ? (
-              <button onClick={onCopyResume} disabled={actionRunning}>
-                <Copy size={15} /> {l("Copy Cmd", "复制命令")}
-              </button>
-            ) : null}
-            <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
-            <button onClick={onExportMarkdown} disabled={actionRunning}>
-              <Download size={15} /> {l("Export MD", "导出 MD")}
-            </button>
-            <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
-          </div>
-          <div className="detail-action-group">
-            <button className="danger" onClick={onDelete} disabled={actionRunning}>
-              <Trash2 size={15} /> {l("Delete", "删除")}
-            </button>
-          </div>
+          {!coreMode ? (
+            <>
+              <div className="detail-action-group">
+                <button onClick={onAddTag} disabled={actionRunning}>
+                  <Tag size={15} /> {l("Add Tag", "添加标签")}
+                </button>
+                <button onClick={onSummarize} disabled={actionRunning || summarizing}>
+                  <Sparkles size={15} />{" "}
+                  {summarizing
+                    ? l("Summarizing...", "摘要中...")
+                    : session.aiSummary
+                      ? l("Re-summarize", "重新摘要")
+                      : l("AI Summary", "AI 摘要")}
+                </button>
+                <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
+                  <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
+                </button>
+                {onUploadRemote ? (
+                  <button onClick={onUploadRemote} disabled={actionRunning}>
+                    <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
+                  </button>
+                ) : null}
+              </div>
+              <div className="detail-action-group">
+                {canResume ? (
+                  <button onClick={onCopyResume} disabled={actionRunning}>
+                    <Copy size={15} /> {l("Copy Cmd", "复制命令")}
+                  </button>
+                ) : null}
+                <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
+                <button onClick={onExportMarkdown} disabled={actionRunning}>
+                  <Download size={15} /> {l("Export MD", "导出 MD")}
+                </button>
+                <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
+              </div>
+              <div className="detail-action-group">
+                <button className="danger" onClick={onDelete} disabled={actionRunning}>
+                  <Trash2 size={15} /> {l("Delete", "删除")}
+                </button>
+              </div>
+            </>
+          ) : null}
         </div> : null}
-        {session.aiSummary ? (
+        {!coreMode && session.aiSummary ? (
           <div className="detail-summary">
             <span className="detail-summary-label">
               <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
@@ -475,11 +483,17 @@ export function DetailPanel({
           </div>
         ) : null}
         <div className="detail-tags">
-          {session.tags.map((tagName) => (
-            <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
-              #{tagName} ×
-            </button>
-          ))}
+          {session.tags.map((tagName) =>
+            coreMode ? (
+              <span key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`}>
+                #{tagName}
+              </span>
+            ) : (
+              <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
+                #{tagName} ×
+              </button>
+            ),
+          )}
         </div>
         <div className="detail-body" ref={bodyRef}>
           {context.length > 0 ? (

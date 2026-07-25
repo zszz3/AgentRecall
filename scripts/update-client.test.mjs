@@ -129,10 +129,12 @@ test("skips the same update version until a newer version is released", async ()
   assert.equal(newer.manifest.version, "0.3.0");
 });
 
-test("terminal launcher does not prompt again for a skipped update version", async () => {
+test("terminal launcher leaves automatic update prompts to the visible application", async () => {
   const launcherSource = await readFile(new URL("../bin/agent-recall.cjs", import.meta.url), "utf8");
-  assert.match(launcherSource, /!result\.updateSkipped && !result\.promptSnoozed/);
-  assert.match(launcherSource, /\[1\] 更新\s+\[2\] 跳过\s+\[3\] 跳过，直至下个版本/);
+  assert.match(launcherSource, /if \(explicitCheck\)/);
+  assert.doesNotMatch(launcherSource, /readUpdatePreference/);
+  assert.doesNotMatch(launcherSource, /readline/);
+  assert.doesNotMatch(launcherSource, /\[1\] 更新\s+\[2\] 跳过/);
 });
 
 test("refuses to install an update whose package checksum does not match", async () => {
