@@ -1,7 +1,3 @@
-import { spawn, type SpawnOptions } from "node:child_process";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { MessageBoxOptions } from "electron";
 import type {
   AppUpdateInstallResult,
@@ -178,62 +174,4 @@ export class AppUpdateService {
       });
     return this.activeCheck;
   }
-}
-
-export interface DetachedAppUpdateInstallerOptions {
-  applyUpdatePath: string;
-  executablePath?: string;
-  processId?: number;
-  environment?: NodeJS.ProcessEnv;
-  spawnProcess?: (
-    command: string,
-    args: string[],
-    options: SpawnOptions,
-  ) => {
-    once(event: "spawn", listener: () => void): unknown;
-    once(event: "error", listener: (error: Error) => void): unknown;
-    unref(): void;
-  };
-}
-
-export async function launchDetachedAppUpdateInstaller(
-  manifest: AppUpdateManifest,
-  options: DetachedAppUpdateInstallerOptions,
-): Promise<void> {
-  const environment = { ...(options.environment ?? process.env) };
-  const executablePath = options.executablePath ?? environment.AGENT_RECALL_NODE_PATH;
-  if (!executablePath) {
-    throw new Error("The npm launcher did not provide a stable Node executable for the update.");
-  }
-  delete environment.ELECTRON_RUN_AS_NODE;
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-recall-app-update-"));
-  const manifestPath = path.join(directory, "update.json");
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  const spawnProcess = options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions));
-  let child: ReturnType<typeof spawnProcess>;
-  try {
-    child = spawnProcess(
-      executablePath,
-      [
-        options.applyUpdatePath,
-        "--manifest",
-        manifestPath,
-        "--wait-pid",
-        String(options.processId ?? process.pid),
-      ],
-      {
-        detached: true,
-        stdio: "ignore",
-        env: environment,
-      },
-    );
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-  } catch (error) {
-    await fs.rm(directory, { recursive: true, force: true });
-    throw error;
-  }
-  child.unref();
 }

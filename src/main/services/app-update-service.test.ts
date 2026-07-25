@@ -1,12 +1,7 @@
-import { EventEmitter } from "node:events";
-import { readFile, rm } from "node:fs/promises";
-import * as path from "node:path";
-import type { SpawnOptions } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import type { AppUpdateManifest, AppUpdateStatus } from "../../core/app-update-types";
 import {
   AppUpdateService,
-  launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
   type AppUpdateServiceDependencies,
 } from "./app-update-service";
@@ -268,65 +263,5 @@ describe("AppUpdateService", () => {
     expect(harness.client.writeAppProcess).toHaveBeenCalledWith(123);
     expect(harness.client.writeUpdatePreference).toHaveBeenCalledWith(true);
     expect(harness.client.clearAppProcess).toHaveBeenCalledWith(123);
-  });
-});
-
-describe("detached update installer", () => {
-  it("writes a temporary manifest and launches the stable npm Node before returning", async () => {
-    const child = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
-    child.unref = vi.fn();
-    let invocation: { command: string; args: string[]; options: SpawnOptions } | undefined;
-    const spawnProcess = vi.fn((command: string, args: string[], options: SpawnOptions) => {
-      invocation = { command, args, options };
-      queueMicrotask(() => child.emit("spawn"));
-      return child;
-    });
-
-    const updateManifest = manifest();
-    await launchDetachedAppUpdateInstaller(updateManifest, {
-      applyUpdatePath: "/app/bin/apply-update.cjs",
-      processId: 456,
-      environment: {
-        EXISTING_VALUE: "kept",
-        AGENT_RECALL_NODE_PATH: "/usr/local/bin/node",
-        ELECTRON_RUN_AS_NODE: "1",
-      },
-      spawnProcess,
-    });
-
-    expect(invocation?.command).toBe("/usr/local/bin/node");
-    expect(invocation?.args).toEqual([
-      "/app/bin/apply-update.cjs",
-      "--manifest",
-      expect.stringMatching(/agent-recall-app-update-.*update\.json$/),
-      "--wait-pid",
-      "456",
-    ]);
-    expect(invocation?.options).toMatchObject({
-      detached: true,
-      stdio: "ignore",
-      env: {
-        EXISTING_VALUE: "kept",
-        AGENT_RECALL_NODE_PATH: "/usr/local/bin/node",
-      },
-    });
-    expect(invocation?.options.env).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
-    expect(child.unref).toHaveBeenCalledOnce();
-
-    const manifestPath = invocation?.args[2];
-    expect(JSON.parse(await readFile(manifestPath!, "utf8"))).toEqual(updateManifest);
-    await rm(path.dirname(manifestPath!), { recursive: true, force: true });
-  });
-
-  it("fails before spawning when the npm launcher did not provide a stable Node path", async () => {
-    const spawnProcess = vi.fn();
-
-    await expect(launchDetachedAppUpdateInstaller(manifest(), {
-      applyUpdatePath: "/app/bin/apply-update.cjs",
-      environment: { EXISTING_VALUE: "kept" },
-      spawnProcess,
-    })).rejects.toThrow("stable Node executable");
-
-    expect(spawnProcess).not.toHaveBeenCalled();
   });
 });
