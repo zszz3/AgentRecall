@@ -7,29 +7,21 @@ const skillsSource = readFileSync(new URL("./features/skills/skills-dialog.tsx",
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("sync overlay navigation and progress", () => {
-  it("keeps the remote session list mounted underneath its preview", () => {
-    const openRemoteDetail = appSource.slice(
-      appSource.indexOf("function openRemoteDetail"),
-      appSource.indexOf("async function loadMoreMessages"),
-    );
-
-    expect(openRemoteDetail).not.toContain("setRemoteSessionsOpen(false)");
-    expect(appSource).toContain("function closeRemoteDetail");
-    expect(appSource).toContain('backdropClassName="remote-detail-backdrop"');
+  it("does not mount remote session navigation in the 1.0 shell", () => {
+    expect(appSource).not.toContain("RemoteSessionsDialog");
+    expect(appSource).not.toContain("function closeRemoteDetail");
+    expect(appSource).not.toContain('backdropClassName="remote-detail-backdrop"');
     expect(detailSource).toContain("backdropClassName?: string");
     expect(stylesheet).toMatch(/\.remote-detail-backdrop\s*\{[^}]*z-index:\s*90/);
   });
 
-  it("closes a remote preview before closing the remote session list", () => {
-    const remoteListCloseIndex = appSource.indexOf("else if (remoteSessionsOpen)");
-    const escapeHandler = appSource.slice(
-      appSource.lastIndexOf('if (event.key === "Escape")', remoteListCloseIndex),
-      remoteListCloseIndex + 240,
-    );
-
-    expect(escapeHandler.indexOf("remoteDetail")).toBeGreaterThanOrEqual(0);
-    expect(escapeHandler.indexOf("remoteDetail")).toBeLessThan(escapeHandler.indexOf("remoteSessionsOpen"));
-    expect(escapeHandler).toContain("closeRemoteDetail()");
+  it("keeps Escape handling limited to core dialogs and local detail", () => {
+    const start = appSource.indexOf('if (event.key === "Escape")');
+    const escapeHandler = appSource.slice(start, appSource.indexOf("if (renameSession ||", start));
+    expect(escapeHandler).toContain("setRenameSession(null)");
+    expect(escapeHandler).toContain("setInfoSection(null)");
+    expect(escapeHandler).toContain("closeDetail()");
+    expect(escapeHandler).not.toContain("remoteDetail");
   });
 
   it("ignores a stale remote preview request after another request or list close", () => {

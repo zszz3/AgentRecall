@@ -3,29 +3,15 @@ import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
-const updateUiSource = `${appSource}\n${settingsSource}`;
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("application update UI", () => {
-  it("shows an update indicator and a dedicated About settings section", () => {
-    expect(updateUiSource).toContain('activeSection === "about"');
-    expect(updateUiSource).toContain('className="update-release-card"');
-    expect(updateUiSource).toContain('className="update-primary-button"');
-    expect(updateUiSource).toContain('className="update-secondary-button"');
-    expect(updateUiSource).toContain('onSkipAppUpdate(false)');
-    expect(updateUiSource).toContain('onSkipAppUpdate(true)');
-    expect(updateUiSource).toContain("!appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed");
-    expect(updateUiSource).toContain(") : shouldSignalAppUpdate && appUpdateStatus?.manifest ? (");
-    expect(updateUiSource).toContain("Update prompt skipped");
-    expect(updateUiSource).toContain("Use Check for updates to show the skipped release again.");
-    expect(updateUiSource).toContain('className="update-indicator"');
-    expect(updateUiSource).toContain('className="update-brand-mark"');
-    expect(updateUiSource).toContain('className="update-state-copy"');
-    expect(updateUiSource).toContain('className="update-available-card"');
-    expect(updateUiSource).toContain('className={`update-release-section ${kind}`}');
-    expect(updateUiSource).toContain("appUpdateStatus.manifest.notes.features");
-    expect(updateUiSource).toContain("appUpdateStatus.manifest.notes.fixes");
-    expect(updateUiSource).not.toContain("<h4>{appUpdateStatus.manifest.title}</h4>");
+  it("keeps a minimal About entry without starting the legacy update UI", () => {
+    expect(appSource).toContain('setInfoSection("about")');
+    expect(appSource).toContain("<h2>AgentRecall 1.0</h2>");
+    expect(appSource).not.toContain("getAppUpdateStatus");
+    expect(appSource).not.toContain("installAppUpdate");
+    expect(appSource).not.toContain('className="update-indicator"');
   });
 
   it("keeps the About page readable and scrolls long release notes", () => {

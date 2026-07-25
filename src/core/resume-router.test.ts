@@ -38,6 +38,12 @@ function session(overrides: Partial<SessionSearchResult> = {}): SessionSearchRes
 }
 
 describe("resume routing", () => {
+  it("returns an actionable error when the selected session disappeared", () => {
+    expect(() => routeResumeSession(undefined, [], { platform: "darwin" })).toThrow(
+      "Refresh the session list",
+    );
+  });
+
   it("focuses an already-open session on macOS", () => {
     const liveSessions: LiveSession[] = [
       { family: "claude", rawId: "codex-1", pid: 10 },
@@ -63,6 +69,17 @@ describe("resume routing", () => {
 
     expect(routeResumeSession(appSession, [{ family: "codex", rawId: appSession.rawId, pid: 20 }], { platform: "darwin" })).toEqual({ route: "app" });
     expect(routeResumeSession(appSession, [], { platform: "win32" })).toEqual({ route: "app" });
+  });
+
+  it("keeps Claude App sessions on the Claude CLI resume route", () => {
+    const appSession = session({
+      sessionKey: "claude-app:claude-1",
+      rawId: "claude-1",
+      source: "claude-app",
+    });
+
+    expect(routeResumeSession(appSession, [], { platform: "darwin" })).toEqual({ route: "resume" });
+    expect(routeResumeSession(appSession, [], { platform: "win32" })).toEqual({ route: "resume" });
   });
 
   it("does not open a local App for remote or unsupported Codex App sessions", () => {

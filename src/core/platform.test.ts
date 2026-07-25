@@ -27,6 +27,7 @@ import {
   migrationBinary,
   openNativeApp,
   openMigrationResumeInTerminal,
+  openResumeInTerminal,
   resolveMacApplicationName,
   terminalOptionsFor,
 } from "./platform";
@@ -159,21 +160,99 @@ describe("native app opening", () => {
     await expect(openNativeApp(
       { source: "codex-app", rawId: "../../not-a-task" },
       { platform: "darwin", openExternal: async () => { opened = true; } },
-    )).rejects.toThrow("valid UUID");
+    )).rejects.toThrow("Refresh the session list");
     expect(opened).toBe(false);
   });
 
-  it("rejects unsupported platforms and propagates URL handler failures", async () => {
+  it("rejects unsupported platforms and returns an actionable URL handler failure", async () => {
     const session = { source: "codex-app" as const, rawId: "550e8400-e29b-41d4-a716-446655440000" };
     await expect(openNativeApp(session, { platform: "linux", openExternal: async () => undefined })).rejects.toThrow("not supported");
     await expect(openNativeApp(session, {
       platform: "darwin",
       openExternal: async () => { throw new Error("Codex is not installed"); },
-    })).rejects.toThrow("Codex is not installed");
+    })).rejects.toThrow("Install or update Codex App");
   });
 });
 
 describe("resume commands", () => {
+  it.each([
+    ["claude-cli", "claude", ["--resume", "会话 id 'single' \"double\" & 50% (draft)"]],
+    ["claude-app", "claude", ["--resume", "会话 id 'single' \"double\" & 50% (draft)"]],
+    ["codex-cli", "codex", ["resume", "会话 id 'single' \"double\" & 50% (draft)"]],
+  ] as const)("routes %s through structured argv", (source, command, args) => {
+    const session = {
+      source,
+      rawId: "会话 id 'single' \"double\" & 50% (draft)",
+      projectPath: "/项目 path/'single' \"double\" & 50% (draft)",
+    } as SessionSearchResult;
+
+    expect(getResumeProcessSpec(session, defaultSettings, { platform: "darwin" })).toMatchObject({
+      command,
+      args: [...args],
+      cwd: "/项目 path/'single' \"double\" & 50% (draft)",
+    });
+  });
+
+  it("quotes the complete special-character set for macOS Terminal", () => {
+    const session = {
+      source: "claude-app",
+      rawId: "会话 id 'single' \"double\" & 50% (draft)",
+      projectPath: "/项目 path/'single' \"double\" & 50% (draft)",
+    } as SessionSearchResult;
+
+    expect(getResumeCommand(session, defaultSettings, { platform: "darwin" })).toBe(
+      "cd '/项目 path/'\\''single'\\'' \"double\" & 50% (draft)' && claude --resume '会话 id '\\''single'\\'' \"double\" & 50% (draft)'",
+    );
+  });
+
+  it("quotes the complete special-character set for Windows PowerShell", () => {
+    const session = {
+      source: "codex-cli",
+      rawId: "会话 id 'single' \"double\" & 50% (draft)",
+      projectPath: "C:\\项目 path\\'single' \"double\" & 50% (draft)",
+    } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
+
+    expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
+      "cd 'C:\\项目 path\\''single'' \"double\" & 50% (draft)'; codex resume '会话 id ''single'' \"double\" & 50% (draft)'",
+    );
+  });
+
+  it("encodes the complete special-character set for Windows Terminal and Cmd", () => {
+    const rawId = "会话 id 'single' \"double\" & 50% (draft)";
+    const projectPath = "C:\\项目 path\\'single' \"double\" & 50% (draft)";
+    const session = { source: "codex-cli", rawId, projectPath } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "Cmd" as const };
+
+    const command = getResumeCommand(session, settings, { platform: "win32" });
+    expect(command).toMatch(/^setlocal DisableDelayedExpansion & powershell\.exe -NoLogo -NoProfile -EncodedCommand [A-Za-z0-9+/=]+ & endlocal$/);
+    expect(decodeEncodedCmdPowerShell(command)).toBe(
+      "$ErrorActionPreference = 'Stop'; Set-Location -LiteralPath 'C:\\项目 path\\''single'' \"double\" & 50% (draft)'; & codex resume '会话 id ''single'' \"double\" & 50% (draft)'",
+    );
+
+    const plan = buildWindowsResumeLaunchPlan(session, settings, {
+      terminal: "WindowsTerminal",
+      platform: "win32",
+    });
+    expect(plan[0]).toMatchObject({ file: "wt.exe" });
+    const launchCommand = plan[0].args.at(-1) ?? "";
+    expect(decodeEncodedCmdPowerShell(launchCommand)).toBe(
+      "$ErrorActionPreference = 'Stop'; & codex resume '会话 id ''single'' \"double\" & 50% (draft)'",
+    );
+  });
+
+  it("returns actionable errors when the session id or CLI configuration is missing", () => {
+    expect(() => getResumeProcessSpec(
+      { source: "claude-cli", rawId: " ", projectPath: "/repo" } as SessionSearchResult,
+      defaultSettings,
+    )).toThrow("Refresh the session list");
+
+    expect(() => getResumeProcessSpec(
+      { source: "codex-cli", rawId: "codex-1", projectPath: "/repo" } as SessionSearchResult,
+      { ...defaultSettings, codexBinary: " " },
+    )).toThrow("Set its executable path in Settings");
+  });
+
   it.each([
     ["codex-cli", "openai"],
     ["tcodex-cli", "tencent"],
@@ -414,6 +493,74 @@ describe("resume commands", () => {
     );
     expect(command).not.toContain("%USERNAME%");
     expect(command).toContain("$HOME");
+  });
+});
+
+describe("resume CLI preflight", () => {
+  it.each([
+    ["claude-cli", "claude"],
+    ["claude-app", "claude"],
+    ["codex-cli", "codex"],
+  ] as const)("checks the configured CLI before opening a terminal for %s", async (source, expectedCommand) => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const session = {
+      source,
+      rawId: "session-1",
+      projectPath: "/repo",
+    } as SessionSearchResult;
+
+    await withPlatform("darwin", async () => {
+      await expect(openResumeInTerminal(session, defaultSettings, {}, {
+        probeCli: async (command, args) => {
+          calls.push({ command, args });
+          const error = new Error("spawn ENOENT") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          throw error;
+        },
+      })).rejects.toThrow(`Install ${source.startsWith("claude") ? "Claude" : "Codex"} CLI`);
+    });
+
+    expect(calls).toEqual([{ command: expectedCommand, args: ["--version"] }]);
+  });
+
+  it("returns an actionable error for a configured CLI that is not executable", async () => {
+    const session = {
+      source: "codex-cli",
+      rawId: "session-1",
+      projectPath: "/repo",
+    } as SessionSearchResult;
+
+    await withPlatform("darwin", async () => {
+      await expect(openResumeInTerminal(session, defaultSettings, {}, {
+        probeCli: async () => {
+          const error = new Error("spawn EACCES") as NodeJS.ErrnoException;
+          error.code = "EACCES";
+          throw error;
+        },
+      })).rejects.toThrow("Make the executable runnable");
+    });
+  });
+
+  it("returns an actionable error when no Windows terminal is installed", async () => {
+    const attempted: string[] = [];
+    const session = {
+      source: "codex-cli",
+      rawId: "session-1",
+      projectPath: "",
+    } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "WindowsTerminal" as const };
+
+    await expect(openResumeInTerminal(session, settings, { platform: "win32" }, {
+      probeCli: async () => undefined,
+      spawnDetached: async (command) => {
+        attempted.push(command);
+        const error = new Error(`spawn ${command} ENOENT`) as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        throw error;
+      },
+    })).rejects.toThrow("Install Windows Terminal or PowerShell");
+
+    expect(attempted).toEqual(["wt.exe", "pwsh.exe", "powershell.exe", "cmd.exe"]);
   });
 });
 

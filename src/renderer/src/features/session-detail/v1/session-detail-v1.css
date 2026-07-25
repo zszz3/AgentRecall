@@ -1,0 +1,343 @@
+.ar-v1-detail {
+  --ar-v1-accent: #4f7cff;
+  --ar-v1-border: color-mix(in srgb, currentColor 14%, transparent);
+  --ar-v1-muted: color-mix(in srgb, currentColor 58%, transparent);
+  background: var(--panel, #15171b);
+  color: var(--text, #f3f4f6);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ar-v1-detail__header,
+.ar-v1-detail__heading,
+.ar-v1-detail__actions {
+  align-items: center;
+  display: flex;
+}
+
+.ar-v1-detail__header {
+  border-bottom: 1px solid var(--ar-v1-border);
+  flex: 0 0 auto;
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 68px;
+  padding: 10px 16px;
+}
+
+.ar-v1-detail__heading,
+.ar-v1-detail__title {
+  min-width: 0;
+}
+
+.ar-v1-detail__heading {
+  gap: 10px;
+}
+
+.ar-v1-detail__title h2,
+.ar-v1-detail__title p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ar-v1-detail__title h2 {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ar-v1-detail__title p {
+  color: var(--ar-v1-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.ar-v1-detail__actions {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.ar-v1-icon-button,
+.ar-v1-detail__resume,
+.ar-v1-message__expand,
+.ar-v1-timeline__load-older {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--ar-v1-border);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  justify-content: center;
+}
+
+.ar-v1-icon-button {
+  height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.ar-v1-icon-button:hover,
+.ar-v1-message__expand:hover,
+.ar-v1-timeline__load-older:hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.ar-v1-icon-button.is-active {
+  color: #f5b942;
+}
+
+.ar-v1-detail__resume {
+  background: var(--ar-v1-accent);
+  border-color: transparent;
+  color: #fff;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px;
+}
+
+.ar-v1-detail__resume:disabled,
+.ar-v1-timeline__load-older:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ar-v1-detail__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ar-v1-detail__state {
+  align-self: center;
+  color: var(--ar-v1-muted);
+  margin: auto;
+}
+
+.ar-v1-timeline-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.ar-v1-timeline {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.ar-v1-timeline--empty {
+  align-items: center;
+  color: var(--ar-v1-muted);
+  display: flex;
+  justify-content: center;
+  padding: 32px;
+}
+
+.ar-v1-timeline__load-older {
+  align-self: center;
+  flex: 0 0 auto;
+  font-size: 12px;
+  margin: 8px 0 0;
+  min-height: 30px;
+  padding: 4px 12px;
+}
+
+.ar-v1-timeline__spacer {
+  min-height: 100%;
+  position: relative;
+  width: 100%;
+}
+
+.ar-v1-timeline__row {
+  box-sizing: border-box;
+  left: 0;
+  padding: 7px clamp(12px, 3vw, 36px);
+  position: absolute;
+  top: 0;
+  width: 100%;
+  will-change: transform;
+}
+
+.ar-v1-message {
+  border: 1px solid var(--ar-v1-border);
+  border-radius: 12px;
+  box-sizing: border-box;
+  margin-left: 0;
+  max-width: min(920px, 96%);
+  overflow-wrap: anywhere;
+  padding: 13px 15px;
+}
+
+.ar-v1-message--user {
+  background: color-mix(in srgb, var(--ar-v1-accent) 11%, transparent);
+  margin-left: auto;
+  max-width: min(780px, 88%);
+}
+
+.ar-v1-message--system,
+.ar-v1-message--tool {
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.ar-v1-message__header {
+  align-items: center;
+  color: var(--ar-v1-muted);
+  display: flex;
+  font-size: 11px;
+  font-weight: 650;
+  justify-content: space-between;
+  letter-spacing: 0.02em;
+  margin-bottom: 9px;
+  text-transform: uppercase;
+}
+
+.ar-v1-message__expand {
+  color: var(--ar-v1-muted);
+  font-size: 12px;
+  margin-top: 10px;
+  padding: 5px 9px;
+}
+
+.ar-v1-markdown {
+  font-size: 13px;
+  line-height: 1.58;
+  min-width: 0;
+}
+
+.ar-v1-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ar-v1-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.ar-v1-markdown p,
+.ar-v1-markdown ul,
+.ar-v1-markdown ol,
+.ar-v1-markdown blockquote,
+.ar-v1-markdown table,
+.ar-v1-markdown pre {
+  margin: 0.7em 0;
+}
+
+.ar-v1-markdown a {
+  color: #7398ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ar-v1-markdown :not(pre) > code {
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  border-radius: 4px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  padding: 0.14em 0.34em;
+}
+
+.ar-v1-markdown__code-block {
+  background: #0e1116;
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: #e6edf3;
+  max-height: 520px;
+  max-width: 100%;
+  overflow: auto;
+  padding: 12px 14px;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.ar-v1-markdown__code-block code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.ar-v1-markdown table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ar-v1-markdown th,
+.ar-v1-markdown td {
+  border: 1px solid var(--ar-v1-border);
+  padding: 6px 9px;
+  text-align: left;
+}
+
+.ar-v1-markdown blockquote {
+  border-left: 3px solid var(--ar-v1-border);
+  color: var(--ar-v1-muted);
+  margin-left: 0;
+  padding-left: 12px;
+}
+
+.ar-v1-markdown img {
+  height: auto;
+  max-width: 100%;
+}
+
+.ar-v1-markdown__blocked-image {
+  color: var(--ar-v1-muted);
+  font-size: 12px;
+}
+
+.ar-v1-markdown .hljs-keyword,
+.ar-v1-markdown .hljs-selector-tag,
+.ar-v1-markdown .hljs-literal {
+  color: #ff7b72;
+}
+
+.ar-v1-markdown .hljs-string,
+.ar-v1-markdown .hljs-attr,
+.ar-v1-markdown .hljs-template-tag {
+  color: #a5d6ff;
+}
+
+.ar-v1-markdown .hljs-title,
+.ar-v1-markdown .hljs-function,
+.ar-v1-markdown .hljs-section {
+  color: #d2a8ff;
+}
+
+.ar-v1-markdown .hljs-comment,
+.ar-v1-markdown .hljs-quote {
+  color: #8b949e;
+  font-style: italic;
+}
+
+.ar-v1-markdown .hljs-number,
+.ar-v1-markdown .hljs-built_in {
+  color: #79c0ff;
+}
+
+@media (max-width: 720px) {
+  .ar-v1-detail__close {
+    display: none;
+  }
+
+  .ar-v1-detail__title p {
+    max-width: 42vw;
+  }
+
+  .ar-v1-timeline__row {
+    padding-inline: 9px;
+  }
+
+  .ar-v1-message,
+  .ar-v1-message--user {
+    max-width: 100%;
+  }
+}

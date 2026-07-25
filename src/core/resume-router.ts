@@ -5,10 +5,13 @@ import type { LiveSession, SessionSearchResult } from "./types";
 export type ResumeRouteResult = { route: "resume" } | { route: "focus"; pid: number } | { route: "app" };
 
 export function routeResumeSession(
-  session: SessionSearchResult,
+  session: SessionSearchResult | null | undefined,
   liveSessions: LiveSession[],
   options: { platform?: NodeJS.Platform } = {},
 ): ResumeRouteResult {
+  if (!session) {
+    throw new Error("This session is no longer available. Refresh the session list, then try Resume again.");
+  }
   const platform = options.platform ?? process.platform;
   if (platform !== "darwin" && platform !== "win32") return { route: "resume" };
   if (session.source === "codex-app") {

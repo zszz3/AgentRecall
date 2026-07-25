@@ -5,6 +5,14 @@ import { filterConversationTimeline } from "./features/session-detail/detail-pan
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
+const detailAdapterSource = readFileSync(
+  new URL("./features/session-detail/core-session-detail-adapter.tsx", import.meta.url),
+  "utf8",
+);
+const virtualTimelineSource = readFileSync(
+  new URL("./features/session-detail/v1/VirtualTimeline.tsx", import.meta.url),
+  "utf8",
+);
 const remoteSessionsDialogSource = readFileSync(new URL("./features/remote-sessions/remote-sessions-dialog.tsx", import.meta.url), "utf8");
 const settingsDialogSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
 const sessionUiSource = readFileSync(new URL("./session-ui.ts", import.meta.url), "utf8");
@@ -23,11 +31,10 @@ function mainHandlerSource(channel: string): string {
 }
 
 describe("detail panel actions", () => {
-  it("loads a separate three-message context and highlights the exact search hit", () => {
-    const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
-    expect(openDetail).toContain("Math.max(0, matchHit.messageIndex - 1), 3");
-    expect(openDetail).toContain("setMatchedContextMessages(loadedMatchContext)");
-    expect(openDetail).toContain("setMatchedMessageIndex(matchHit?.messageIndex ?? null)");
+  it("keeps search-result snippets visible without starting a second detail request", () => {
+    expect(appSource).toContain("session.matchSnippet");
+    expect(appSource).not.toContain("setMatchedContextMessages");
+    expect(appSource).not.toContain("setMatchedMessageIndex");
     expect(detailPanelSource).toContain("matchedContextMessages");
     expect(detailPanelSource).toContain('target={message.index === matchedMessageIndex}');
     expect(detailPanelSource).toContain("HighlightedSearchText");
@@ -50,14 +57,11 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).toContain('detailMeta.join(" · ")');
   });
 
-  it("keeps right-click resume and markdown export without standalone terminal focus or plain text copy", () => {
-    const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"));
-
-    expect(contextMenu).toMatch(/Resume in Terminal/);
-    expect(contextMenu).not.toMatch(/Bring to Front/);
-    expect(contextMenu).not.toContain("onFocusTerminal");
-    expect(contextMenu).toMatch(/Export Markdown/);
-    expect(contextMenu).not.toMatch(/Copy Plain Text/);
+  it("removes the advanced right-click action menu from the 1.0 shell", () => {
+    expect(appSource).not.toContain("function ContextMenu");
+    expect(appSource).not.toContain("onContextMenu");
+    expect(appSource).not.toContain("Export Markdown");
+    expect(appSource).not.toContain("Copy Plain Text");
   });
 
   it("routes resume through one IPC command and hides direct terminal focus IPC", () => {
@@ -80,11 +84,12 @@ describe("detail panel actions", () => {
 
   it("opens detail on the newest message window and pages older messages backward", () => {
     expect(appSource).toContain("Math.max(0, fresh.messageCount - INITIAL_MESSAGE_LIMIT)");
-    expect(appSource).toContain("window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT)");
-    expect(appSource).toContain("const nextOffset = Math.max(0, messageOffset - MESSAGE_PAGE_SIZE)");
-    expect(appSource).toContain("setMessages((current) => [...nextMessages, ...current])");
-    expect(detailPanelSource).toContain("olderMessageCount > 0");
-    expect(detailPanelSource).toContain("Show ${Math.min(messagePageSize, olderMessageCount)} older messages");
+    expect(appSource).toContain("api.getMessages(fresh.sessionKey, offset, INITIAL_MESSAGE_LIMIT)");
+    expect(appSource).toContain("const pageSize = Math.min(MESSAGE_PAGE_SIZE, Math.max(1, request.limit))");
+    expect(appSource).toContain("const nextOffset = Math.max(0, messageOffset - pageSize)");
+    expect(appSource).toContain("setMessages((current) => [...olderMessages, ...current])");
+    expect(detailAdapterSource).toContain("hasOlderMessages={olderMessageCount > 0}");
+    expect(virtualTimelineSource).toContain("olderPageSize = DEFAULT_OLDER_PAGE_SIZE");
   });
 
   it("shows the full indexed message total instead of the loaded page size", () => {
@@ -148,18 +153,15 @@ describe("detail panel actions", () => {
     expect(detailPanelSource).toContain("setShowTools");
   });
 
-  it("loads the visible message window before trace events when opening detail", () => {
+  it("loads only the visible message window for the 1.0 detail entry", () => {
     const openDetail = appSource.slice(appSource.indexOf("async function openDetail"), appSource.indexOf("function closeDetail"));
-    const freshIndex = openDetail.indexOf("const fresh = await window.sessionSearch.getSession(sessionKey)");
+    const freshIndex = openDetail.indexOf("const fresh = await api.getSession(session.sessionKey)");
     const messagesIndex = openDetail.indexOf(
-      "window.sessionSearch.getMessages(sessionKey, initialOffset, INITIAL_MESSAGE_LIMIT)",
+      "api.getMessages(fresh.sessionKey, offset, INITIAL_MESSAGE_LIMIT)",
     );
-    const traceIndex = openDetail.indexOf("window.sessionSearch.getTraceEvents(sessionKey, traceWindowForMessages(loadedMessages))");
-
     expect(freshIndex).toBeGreaterThanOrEqual(0);
     expect(messagesIndex).toBeGreaterThan(freshIndex);
-    expect(traceIndex).toBeGreaterThan(messagesIndex);
-    expect(openDetail).not.toContain("const [fresh, loadedTraceEvents] = await Promise.all");
+    expect(openDetail).not.toContain("getTraceEvents");
   });
 
   it("keeps title rename icon but removes the duplicate rename action from the detail toolbar", () => {
@@ -219,13 +221,10 @@ describe("detail panel actions", () => {
     expect(detailPanel).toContain("environment-badge");
   });
 
-  it("marks local-only context menu actions disabled for remote sessions", () => {
-    const contextMenu = appSource.slice(appSource.indexOf("function ContextMenu"));
-
-    expect(contextMenu).toContain("isRemoteSession(state.session)");
-    expect(sessionUiSource).toContain("remote sessions do not open local native apps");
-    expect(sessionUiSource).toContain("remote paths cannot be revealed locally");
-    expect(contextMenu).toContain("disabled={localOnlyDisabled}");
+  it("removes the context menu instead of exposing local-only actions", () => {
+    expect(appSource).not.toContain("function ContextMenu");
+    expect(appSource).not.toContain("setPinned");
+    expect(appSource).not.toContain("setHidden");
   });
 
   it("guards local-only commands and passes ssh args in main command handlers", () => {
@@ -309,12 +308,12 @@ describe("detail panel actions", () => {
     expect(remoteCommand).not.toContain("fallbackMigrationResumeDisplayCommand(target");
   });
 
-  it("loads the independent session sync list into the app cache and exposes bulk cloud actions", () => {
+  it("keeps the legacy cloud module dormant outside the 1.0 shell", () => {
     expect(appSource).not.toContain("uploadVisibleRemoteSessions");
     expect(appSource).not.toContain("CloudUpload");
     expect(remoteSessionsDialogSource).not.toContain("onUploadVisible");
-    expect(appSource).toContain("listSessionSyncItems");
-    expect(appSource).toContain("cache={remoteSessionsCache}");
+    expect(appSource).not.toContain("listSessionSyncItems");
+    expect(appSource).not.toContain("cache={remoteSessionsCache}");
     expect(remoteSessionsDialogSource).not.toContain("listSessionSyncItems");
     expect(remoteSessionsDialogSource).toContain("Upload to cloud");
     expect(remoteSessionsDialogSource).toContain("selectedIds");
@@ -364,26 +363,25 @@ describe("detail panel actions", () => {
     expect(mainHandlerSource("session:summarize-missing")).toContain("await resolveSummaryEndpointFromSettings()");
   });
 
-  it("renders remote environment diagnostics in settings", () => {
+  it("renders only local core diagnostics in the mounted settings surface", () => {
     const settingsDialog = settingsDialogSource;
-
-    expect(appSource).toContain("environmentHealthReports");
-    expect(appSource).toContain("diagnosingEnvironmentId");
-    expect(appSource).toContain("window.sessionSearch.diagnoseEnvironment(environment.id)");
+    expect(appSource).not.toContain("environmentHealthReports");
+    expect(appSource).not.toContain("diagnosingEnvironmentId");
+    expect(appSource).not.toContain("window.sessionSearch.diagnoseEnvironment");
+    expect(appSource).toContain("Core diagnostics");
     expect(settingsDialog).toContain("onDiagnoseEnvironment");
     expect(settingsDialog).toContain("connection-diagnostics");
     expect(settingsDialog).toContain("connection-diagnostic-check");
   });
 
   it("does not route the selected-session resume shortcut for unsupported sources", () => {
-    const shortcutHandler = appSource.slice(
-      appSource.indexOf('if ((event.metaKey || event.ctrlKey) && event.key === "Enter")'),
-      appSource.indexOf('if (event.key === "ArrowDown" || event.key === "ArrowUp")'),
+    const resumeHandler = appSource.slice(
+      appSource.indexOf("async function resumeSession"),
+      appSource.indexOf("async function toggleFavorite"),
     );
-
-    expect(shortcutHandler).toContain("supportsResumeSource(session.source)");
-    expect(shortcutHandler.indexOf("supportsResumeSource(session.source)")).toBeLessThan(
-      shortcutHandler.indexOf("window.sessionSearch.resumeSession(session.sessionKey)"),
+    expect(resumeHandler).toContain("if (!supportsResumeSource(session.source)) return");
+    expect(resumeHandler.indexOf("supportsResumeSource(session.source)")).toBeLessThan(
+      resumeHandler.indexOf("api.resumeSession(session.sessionKey)"),
     );
   });
 });

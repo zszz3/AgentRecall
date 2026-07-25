@@ -16,7 +16,10 @@ import {
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const sessionRowSource = readFileSync(new URL("./features/search/session-row.tsx", import.meta.url), "utf8");
-const detailPanelSource = readFileSync(new URL("./features/session-detail/detail-panel.tsx", import.meta.url), "utf8");
+const detailAdapterSource = readFileSync(
+  new URL("./features/session-detail/core-session-detail-adapter.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("session source labels", () => {
   it("uses Codex App wording for App resume actions and results", () => {
@@ -27,12 +30,13 @@ describe("session source labels", () => {
     expect(resumeActionLabel("codex-cli", "en")).toBe("Opening terminal");
   });
 
-  it("routes keyboard, detail, and context-menu actions through Codex-aware Resume UI", () => {
-    expect(appSource.match(/resumeActionLabel\(/g)).toHaveLength(4);
-    expect(appSource).toContain('showItermAction={IS_MAC && detail.source !== "codex-app"}');
-    expect(appSource).toContain('state.session.source !== "codex-app"');
-    expect(detailPanelSource).toContain('session.source === "codex-app"');
-    expect(detailPanelSource).toContain('l("Open in Codex", "在 Codex 中打开")');
+  it("routes list, keyboard, and detail actions through the core Resume handler", () => {
+    expect(appSource).toContain("void resumeSession(selected)");
+    expect(appSource).toContain("void resumeSession(detail)");
+    expect(detailAdapterSource).toContain('session.source === "codex-app"');
+    expect(detailAdapterSource).toContain('localize(language, "Open in Codex", "在 Codex 中打开")');
+    expect(appSource).not.toContain("ContextMenu");
+    expect(appSource).not.toContain("resumeSessionInIterm");
   });
 
   it("renders structured message hits with role, count, highlighting, and a dedicated open action", () => {
@@ -153,7 +157,7 @@ describe("session source labels", () => {
   it("treats zero-token sources as unknown usage instead of displayable usage", () => {
     expect(hasTokenUsage({ totalTokens: 0 })).toBe(false);
     expect(hasTokenUsage({ totalTokens: 1 })).toBe(true);
-    expect(appSource).toContain("hasTokenUsage(stats.total)");
+    expect(appSource).not.toContain("hasTokenUsage");
     expect(sessionRowSource).toContain("hasTokenUsage(session.tokenUsage)");
   });
 

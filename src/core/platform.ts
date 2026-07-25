@@ -40,6 +40,8 @@ export {
 } from "./api-config";
 
 type ProcessRunner = (command: string, args: string[]) => Promise<void>;
+type ResumeCliProbe = (command: string, args: string[]) => Promise<void>;
+type DetachedProcessRunner = (command: string, args: string[], cwd?: string) => Promise<void>;
 
 export interface ResumeProcessSpec {
   command: string;
@@ -49,6 +51,11 @@ export interface ResumeProcessSpec {
   // this map over process.env rather than treating it as a complete env.
   env?: Record<string, string>;
   displayCommand: string;
+}
+
+export interface ResumeOpenDependencies {
+  probeCli?: ResumeCliProbe;
+  spawnDetached?: DetachedProcessRunner;
 }
 
 interface ResumeOptions {
@@ -366,6 +373,27 @@ function buildResumeRuntimeProcessSpec(
   if (!target) {
     throw new Error(`Resume is not supported for ${sourceDisplayName(session.source)} sessions yet.`);
   }
+  if (!session.rawId?.trim()) {
+    throw new Error("This session has no resume ID. Refresh the session list, then try Resume again.");
+  }
+  if (session.rawId.includes("\0")) {
+    throw new Error("This session has an invalid resume ID. Refresh the session list, then try Resume again.");
+  }
+  if (session.projectPath?.includes("\0")) {
+    throw new Error("This session has an invalid project path. Reopen the project, then try Resume again.");
+  }
+
+  const command = migrationBinary(target, settings);
+  if (!command.trim()) {
+    throw new Error(
+      `${migrationTargetDisplayName(target)} CLI is not configured. Set its executable path in Settings, then try Resume again.`,
+    );
+  }
+  if (command.includes("\0")) {
+    throw new Error(
+      `${migrationTargetDisplayName(target)} CLI path is invalid. Update its executable path in Settings, then try Resume again.`,
+    );
+  }
 
   const args = migrationResumeArgs(target, session.rawId);
   const legacyProvider = legacyMigratedCodexProvider(session, target);
@@ -379,7 +407,7 @@ function buildResumeRuntimeProcessSpec(
   }
 
   return {
-    command: migrationBinary(target, settings),
+    command,
     args,
     cwd: session.projectPath || undefined,
     env: target === "codex-internal" ? { CODEX_HOME: migrationCodexHome(homeDir, platform) } : undefined,
@@ -655,13 +683,14 @@ async function openResumeInWindowsTerminal(
   session: SessionSearchResult,
   settings: AppSettings,
   opts: ResumeOpenOptions = {},
+  runner: DetachedProcessRunner = spawnDetached,
 ): Promise<void> {
   const plan = buildWindowsResumeLaunchPlan(session, settings, opts);
 
   let lastError: Error | null = null;
   for (const launch of plan) {
     try {
-      await spawnDetached(launch.file, launch.args, launch.cwd);
+      await runner(launch.file, launch.args, launch.cwd);
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -670,7 +699,10 @@ async function openResumeInWindowsTerminal(
       throw lastError;
     }
   }
-  throw new Error(`No Windows terminal could be launched. ${lastError?.message ?? ""}`.trim());
+  throw new Error(
+    `No Windows terminal could be launched. Install Windows Terminal or PowerShell, or choose an installed terminal in Settings, then try Resume again.${lastError?.message ? ` ${lastError.message}` : ""}`,
+    { cause: lastError },
+  );
 }
 
 function existingDirectory(value: string | null | undefined): string {
@@ -877,16 +909,23 @@ export async function openResumeInTerminal(
   session: SessionSearchResult,
   settings: AppSettings,
   opts: ResumeOpenOptions = {},
+  dependencies: ResumeOpenDependencies = {},
 ): Promise<void> {
+  const platform = opts.platform ?? process.platform;
   const sshArgs = resolveSshArgs(opts);
+  if (!sshArgs) {
+    const probe = dependencies.probeCli
+      ?? ((command: string, args: string[]) => probeResumeCli(command, args, platform));
+    await ensureResumeCliAvailable(session, settings, opts, probe);
+  }
   const command = getResumeCommand(session, settings, { ...opts, withCwd: true });
   const title = session.displayTitle || session.originalTitle || session.rawId;
   const titledCommand = withPosixTerminalTitle(command, title);
-  if (process.platform === "win32") {
-    await openResumeInWindowsTerminal(session, settings, opts);
+  if (platform === "win32") {
+    await openResumeInWindowsTerminal(session, settings, opts, dependencies.spawnDetached);
     return;
   }
-  if (process.platform !== "darwin") {
+  if (platform !== "darwin") {
     // Linux / other: best-effort POSIX shell.
     await runProcess("sh", ["-lc", titledCommand]);
     return;
@@ -903,7 +942,11 @@ export async function openResumeInTerminal(
   }
 
   if (settings.defaultTerminal === "Ghostty") {
-    await runProcess("/usr/bin/open", buildGhosttyOpenArgs(session, settings, opts));
+    try {
+      await runProcess("/usr/bin/open", buildGhosttyOpenArgs(session, settings, opts));
+    } catch (error) {
+      throw terminalLaunchError("Ghostty", error);
+    }
     return;
   }
 
@@ -919,20 +962,32 @@ export async function openResumeInTerminal(
         title,
       ),
     );
-    await runProcess("/usr/bin/open", args);
-    return;
-  }
-
-  if (settings.defaultTerminal === "Warp") {
-    if (sshArgs) {
-      await runWarpCommand(titledCommand);
-    } else {
-      await runProcess("/usr/bin/open", session.projectPath ? ["-a", "Warp", session.projectPath] : ["-a", "Warp"]);
+    try {
+      await runProcess("/usr/bin/open", args);
+    } catch (error) {
+      throw terminalLaunchError("WezTerm", error);
     }
     return;
   }
 
-  await runAppleScript(buildTerminalResumeScript(command, title));
+  if (settings.defaultTerminal === "Warp") {
+    try {
+      if (sshArgs) {
+        await runWarpCommand(titledCommand);
+      } else {
+        await runProcess("/usr/bin/open", session.projectPath ? ["-a", "Warp", session.projectPath] : ["-a", "Warp"]);
+      }
+    } catch (error) {
+      throw terminalLaunchError("Warp", error);
+    }
+    return;
+  }
+
+  try {
+    await runAppleScript(buildTerminalResumeScript(command, title));
+  } catch (error) {
+    throw terminalLaunchError("Terminal", error);
+  }
 }
 
 export async function openResumeInSpecificTerminal(
@@ -940,8 +995,9 @@ export async function openResumeInSpecificTerminal(
   settings: AppSettings,
   terminal: AppSettings["defaultTerminal"],
   opts: ResumeOpenOptions = {},
+  dependencies: ResumeOpenDependencies = {},
 ): Promise<void> {
-  await openResumeInTerminal(session, { ...settings, defaultTerminal: terminal }, opts);
+  await openResumeInTerminal(session, { ...settings, defaultTerminal: terminal }, opts, dependencies);
 }
 
 async function launchWindowsPlan(plan: WindowsLaunch[], runner: typeof spawnDetached = spawnDetached): Promise<void> {
@@ -957,7 +1013,10 @@ async function launchWindowsPlan(plan: WindowsLaunch[], runner: typeof spawnDeta
       throw lastError;
     }
   }
-  throw new Error(`No Windows terminal could be launched. ${lastError?.message ?? ""}`.trim());
+  throw new Error(
+    `No Windows terminal could be launched. Install Windows Terminal or PowerShell, or choose an installed terminal in Settings, then try again.${lastError?.message ? ` ${lastError.message}` : ""}`,
+    { cause: lastError },
+  );
 }
 
 async function runAppleScript(script: string, runner: ProcessRunner = runProcess): Promise<void> {
@@ -1097,10 +1156,20 @@ export async function openNativeApp(
       throw new Error(`Opening Codex App sessions is not supported on ${platform}.`);
     }
     if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(session.rawId)) {
-      throw new Error("The Codex App task ID is not a valid UUID.");
+      throw new Error("The Codex App task ID is invalid. Refresh the session list, then try Resume again.");
     }
-    if (!options.openExternal) throw new Error("No system URL opener is available for Codex App sessions.");
-    await options.openExternal(`codex://threads/${encodeURIComponent(session.rawId)}`);
+    if (!options.openExternal) {
+      throw new Error("No system URL opener is available. Restart Agent Recall, then try Resume again.");
+    }
+    try {
+      await options.openExternal(`codex://threads/${encodeURIComponent(session.rawId)}`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Codex App could not open this task. Install or update Codex App, then try Resume again.${detail ? ` ${detail}` : ""}`,
+        { cause: error },
+      );
+    }
     return;
   }
 
@@ -1201,6 +1270,75 @@ function winSshQuote(s: string): string {
 
 function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function terminalLaunchError(terminal: string, error: unknown): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `${terminal} could not be opened. Install it or choose an installed terminal in Settings, then try Resume again.${detail ? ` ${detail}` : ""}`,
+    { cause: error },
+  );
+}
+
+async function ensureResumeCliAvailable(
+  session: SessionSearchResult,
+  settings: AppSettings,
+  opts: ResumeOpenOptions,
+  probe: ResumeCliProbe,
+): Promise<void> {
+  const spec = buildResumeRuntimeProcessSpec(
+    session,
+    settings,
+    opts.skipPermissions ?? false,
+    opts.platform ?? process.platform,
+    opts.homeDir ?? homedir(),
+  );
+  try {
+    await probe(spec.command, ["--version"]);
+  } catch (error) {
+    const target = migrationTargetForResumeSource(session.source);
+    const label = target ? `${migrationTargetDisplayName(target)} CLI` : "Resume CLI";
+    const code = (error as NodeJS.ErrnoException)?.code;
+    const detail = error instanceof Error ? error.message : String(error);
+    const action = code === "EACCES"
+      ? "Make the executable runnable or update its executable path in Settings"
+      : `Install ${label} or update its executable path in Settings`;
+    throw new Error(
+      `${label} could not be launched from ${JSON.stringify(spec.command)}. ${action}, then try Resume again.${detail ? ` ${detail}` : ""}`,
+      { cause: error },
+    );
+  }
+}
+
+function probeResumeCli(command: string, args: string[], platform: NodeJS.Platform): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 5_000 }, (error) => {
+      if (!error) {
+        resolve();
+        return;
+      }
+      const code = (error as NodeJS.ErrnoException).code;
+      // A non-zero --version result still proves that the executable exists.
+      // Only launch-level failures mean Resume cannot start the configured CLI.
+      if (code !== "ENOENT" && code !== "EACCES") {
+        resolve();
+        return;
+      }
+      if (code === "ENOENT" && platform === "darwin") {
+        // Packaged macOS apps often inherit a smaller PATH than Terminal.
+        // Check the same interactive login-shell environment without
+        // interpolating the configured command into shell source.
+        execFile(
+          "/bin/zsh",
+          ["-lic", 'command -v -- "$1" >/dev/null', "agent-recall", command],
+          { timeout: 5_000 },
+          (shellError) => shellError ? reject(shellError) : resolve(),
+        );
+        return;
+      }
+      reject(error);
+    });
+  });
 }
 
 function runProcess(command: string, args: string[]): Promise<void> {

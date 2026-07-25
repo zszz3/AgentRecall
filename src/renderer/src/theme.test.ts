@@ -58,33 +58,16 @@ describe("theme controls", () => {
     expect(settingsDialog).toMatch(/Language/);
   });
 
-  it("keeps API configuration beside Skills instead of inside settings", () => {
-    const toolbarActions = appSource.slice(appSource.indexOf('<div className="top-actions">'), appSource.indexOf("</header>"));
-    const apiDialog = apiConfigDialogSource;
-    const settingsDialog = settingsSource;
-
-    expect(toolbarActions).toContain("setApiConfigOpen(true)");
-    expect(toolbarActions).toContain("PackageSearch");
-    expect(toolbarActions).toContain("KeyRound");
-    expect(settingsDialog).not.toContain("api-settings-form");
-    expect(settingsDialog).not.toContain('activeSection === "api"');
-    expect(apiDialog).toContain("api-settings-form");
-    expect(apiDialog).toContain("apiConfig");
-    expect(apiDialog).toContain("claudeApiConfig");
-    expect(apiDialog).toMatch(/Codex Official/);
-    expect(apiDialog).toMatch(/Claude Official/);
-    expect(apiDialog).toMatch(/Claude Code providers/);
-    expect(apiDialog).toMatch(/Custom/);
-    expect(apiDialog).toMatch(/CodexZH/);
-    expect(apiDialog).toMatch(/DeepSeek/);
-    expect(apiDialog).toMatch(/GLM/);
-    expect(apiDialog).toMatch(/LongCat/);
-    expect(apiDialog).toMatch(/Kimi/);
-    expect(apiDialog).toMatch(/MiMo/);
-    expect(apiDialog).toMatch(/API configuration/);
-    expect(apiDialog).toMatch(/Base URL/);
-    expect(apiDialog).toMatch(/API Key/);
-    expect(apiDialog).toMatch(/Model/);
+  it("keeps advanced provider and Skills controls out of the 1.0 toolbar", () => {
+    const toolbarStart = appSource.indexOf('<div className="top-actions">');
+    const toolbarActions = appSource.slice(toolbarStart, appSource.indexOf("</header>", toolbarStart));
+    expect(toolbarActions).toContain('setInfoSection("settings")');
+    expect(toolbarActions).toContain('setInfoSection("about")');
+    expect(toolbarActions).toContain('setInfoSection("diagnostics")');
+    expect(toolbarActions).not.toContain("PackageSearch");
+    expect(toolbarActions).not.toContain("KeyRound");
+    expect(appSource).not.toContain("ApiConfigDialog");
+    expect(appSource).not.toContain("SkillsDialog");
   });
 
   it("edits API configuration as a local draft before saving", () => {
@@ -193,6 +176,6 @@ describe("theme controls", () => {
 
   it("opens settings with the standard preferences shortcut", () => {
     expect(appSource).toContain('event.key === ","');
-    expect(appSource).toContain("setSettingsOpen(true)");
+    expect(appSource).toContain('setInfoSection("settings")');
   });
 });

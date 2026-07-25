@@ -10,22 +10,20 @@ const dialogSource = readFileSync(new URL("./components/session-migration-dialog
 const sessionUiSource = readFileSync(new URL("./session-ui.ts", import.meta.url), "utf8");
 
 describe("session migration UI wiring", () => {
-  it("wires migration controls through detail panel, context menu, dialog, and progress events", () => {
-    const contextMenuSource = appSource.slice(appSource.indexOf("function ContextMenu"));
-
+  it("keeps the legacy migration components available but unmounted from the 1.0 shell", () => {
     expect(detailPanelSource).toContain("onMigrate");
     expect(detailPanelSource).toMatch(/Migrate to/);
-    expect(appSource).toContain("<SessionMigrationDialog");
-    expect(appSource).toContain("window.sessionSearch.migrateSession");
-    expect(appSource).toContain("window.sessionSearch.onMigrationProgress");
-    expect(contextMenuSource).toMatch(/Migrate to/);
+    expect(appSource).not.toContain("<SessionMigrationDialog");
+    expect(appSource).not.toContain("window.sessionSearch.migrateSession");
+    expect(appSource).not.toContain("window.sessionSearch.onMigrationProgress");
+    expect(appSource).not.toContain("function ContextMenu");
     expect(sessionUiSource).toContain("Remote session migration is not supported yet");
     expect(dialogSource).toContain("targetSessionId");
     expect(dialogSource).toContain("resumeCommand");
   });
 
-  it("renders a compression progress bar inside the migration dialog", () => {
-    expect(appSource).toContain("progress={migrationProgress}");
+  it("retains the dormant legacy dialog implementation without mounting its progress UI", () => {
+    expect(appSource).not.toContain("progress={migrationProgress}");
     expect(dialogSource).toContain("MigrationProgressPanel");
     expect(dialogSource).toContain("migration-progress-bar");
     expect(dialogSource).toContain("migration-progress-fill");
@@ -36,7 +34,7 @@ describe("session migration UI wiring", () => {
     expect(dialogSource).toContain("targets: readonly MigrationTarget[]");
     expect(dialogSource).toContain("availableTargets.map((target)");
     expect(dialogSource).not.toContain('(["claude", "codex", "codebuddy"] as const)');
-    expect(appSource).toContain("targets={migrationTargetsForSession(");
+    expect(appSource).not.toContain("targets={migrationTargetsForSession(");
   });
 
   it("shows an empty state and no target buttons when a remote dialog is opened programmatically", () => {
@@ -81,8 +79,9 @@ describe("session migration UI wiring", () => {
   });
 
   it("keeps Node-backed platform helpers out of the renderer bundle", () => {
-    expect(appSource).toContain('import type { AppSettings, AppSettingsUpdate } from "../../core/platform"');
+    expect(appSource).toContain('import type { AppSettings } from "../../core/platform"');
     expect(appSource).not.toContain("defaultSettings");
-    expect(appSource).toContain("DEFAULT_MIGRATION_TARGET_SETTINGS");
+    expect(appSource).not.toContain("DEFAULT_MIGRATION_TARGET_SETTINGS");
+    expect(appSource).toContain('import { terminalSelectOptions } from "../../core/terminal-options"');
   });
 });
