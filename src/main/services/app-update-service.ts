@@ -40,6 +40,7 @@ export interface AppUpdateServiceDependencies {
 export class AppUpdateService {
   private status: AppUpdateStatus | null = null;
   private activeCheck: Promise<AppUpdateStatus> | null = null;
+  private activeInstall: Promise<AppUpdateInstallResult> | null = null;
   private previousResultShown = false;
 
   constructor(private readonly dependencies: AppUpdateServiceDependencies) {}
@@ -56,10 +57,20 @@ export class AppUpdateService {
     if (!this.dependencies.releaseRuntime) {
       throw new Error("Application updates are unavailable in development builds.");
     }
-    const manifest = this.dependencies.getClient().parseUpdateManifest(this.status?.manifest);
-    await this.dependencies.launchInstaller(manifest);
-    this.dependencies.schedule(() => this.dependencies.requestQuit(), 100);
-    return { started: true, version: manifest.version };
+    if (this.activeInstall) return this.activeInstall;
+    const task = (async () => {
+      const manifest = this.dependencies.getClient().parseUpdateManifest(this.status?.manifest);
+      await this.dependencies.launchInstaller(manifest);
+      this.dependencies.schedule(() => this.dependencies.requestQuit(), 100);
+      return { started: true, version: manifest.version };
+    })();
+    this.activeInstall = task;
+    try {
+      return await task;
+    } catch (error) {
+      if (this.activeInstall === task) this.activeInstall = null;
+      throw error;
+    }
   }
 
   async skip(untilNextVersion: boolean): Promise<AppUpdateStatus> {

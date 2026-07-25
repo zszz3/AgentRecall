@@ -218,6 +218,30 @@ describe("AppUpdateService", () => {
     expect(harness.scheduled.at(-1)?.delayMs).toBe(100);
   });
 
+  it("coalesces repeated install requests while the detached updater is starting", async () => {
+    const availableManifest = manifest();
+    let resolveLaunch: (() => void) | undefined;
+    const launchInstaller = vi.fn(() => new Promise<void>((resolve) => {
+      resolveLaunch = resolve;
+    }));
+    const client = createClient({
+      checkForUpdate: vi.fn(async () => updateStatus({ updateAvailable: true, manifest: availableManifest })),
+    });
+    const harness = createHarness({ client, launchInstaller });
+    await harness.service.getStatus(true);
+
+    const first = harness.service.install();
+    const second = harness.service.install();
+    expect(launchInstaller).toHaveBeenCalledOnce();
+    resolveLaunch?.();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { started: true, version: "0.2.0" },
+      { started: true, version: "0.2.0" },
+    ]);
+    expect(harness.scheduled).toHaveLength(1);
+  });
+
   it("keeps the main app open when the detached updater cannot start", async () => {
     const availableManifest = manifest();
     const client = createClient({

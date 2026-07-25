@@ -110,6 +110,20 @@ describe("detached update window launcher", () => {
 
     await expect(readFile(manifestPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("fails before spawning when the npm launcher did not provide a stable Node path", async () => {
+    const spawnProcess = vi.fn();
+
+    await expect(launchDetachedUpdateWindow(manifest(), {
+      electronExecutable: "/app/electron",
+      updateWindowEntry: "/app/update-window.js",
+      applyUpdatePath: "/app/apply-update.cjs",
+      environment: { EXISTING_VALUE: "kept" },
+      spawnProcess,
+    })).rejects.toThrow("stable Node executable");
+
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
 });
 
 describe("detached update lifecycle", () => {
@@ -202,5 +216,54 @@ describe("detached update lifecycle", () => {
       version: "0.32.0",
       error: "npm staging failed",
     });
+  });
+
+  it("spawns the stable Node apply process with the updater pid", async () => {
+    const child = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
+    child.unref = vi.fn();
+    let invocation: { command: string; args: string[]; options: SpawnOptions } | undefined;
+    const spawnProcess = vi.fn((command: string, args: string[], options: SpawnOptions) => {
+      invocation = { command, args, options };
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    });
+
+    await runDetachedUpdate({
+      manifest: manifest(),
+      manifestPath: "/tmp/control/update.json",
+      mainProcessId: 456,
+      updaterProcessId: 789,
+      stableNodePath: "/usr/local/bin/node",
+      applyUpdatePath: "/app/bin/apply-update.cjs",
+      waitForProcessExit: vi.fn(async () => undefined),
+      stageUpdate: vi.fn(async () => stagedUpdate()),
+      writeStagedDescriptor: vi.fn(async () => "/tmp/control/staged.json"),
+      publishProgress: vi.fn(),
+      formatUpdateError: (error) => String(error),
+      showNativeUpdateFailure: vi.fn(),
+      launchInstalledApp: vi.fn(),
+      environment: {
+        EXISTING_VALUE: "kept",
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+      spawnProcess,
+    });
+
+    expect(invocation).toEqual({
+      command: "/usr/local/bin/node",
+      args: [
+        "/app/bin/apply-update.cjs",
+        "--staged",
+        "/tmp/control/staged.json",
+        "--wait-pid",
+        "789",
+      ],
+      options: {
+        detached: true,
+        stdio: "ignore",
+        env: { EXISTING_VALUE: "kept" },
+      },
+    });
+    expect(child.unref).toHaveBeenCalledOnce();
   });
 });
