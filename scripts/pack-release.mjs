@@ -1,6 +1,7 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
@@ -29,4 +30,22 @@ export async function packReleaseArchive({ root, destination, environment = proc
   });
   const packed = parsePackResult(stdout);
   return path.join(destination, packed.filename);
+}
+
+async function runCli(args) {
+  const destinationIndex = args.indexOf("--pack-destination");
+  const destination = destinationIndex >= 0 ? args[destinationIndex + 1] : undefined;
+  const archive = await packReleaseArchive({
+    root: process.cwd(),
+    destination: destination || process.cwd(),
+  });
+  process.stdout.write(`${path.basename(archive)}\n`);
+}
+
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  runCli(process.argv.slice(2)).catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
 }
