@@ -281,12 +281,7 @@ const appUpdateService = new AppUpdateService({
   getAutoCheckEnabled: () => getSettings().autoCheckUpdates,
   autoCheckDisabled: () => process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1",
   publishStatus: (status) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.status, status),
-  publishProgress: (progress) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.progress, progress),
-  stageInstaller: (manifest, onProgress) => loadUpdateClient().stageUpdate(manifest, {
-    nodePath: process.env.AGENT_RECALL_NODE_PATH,
-    onProgress,
-  }),
-  launchInstaller: (staged) => launchDetachedAppUpdateInstaller(staged, { applyUpdatePath: APPLY_UPDATE_PATH }),
+  launchInstaller: (manifest) => launchDetachedAppUpdateInstaller(manifest, { applyUpdatePath: APPLY_UPDATE_PATH }),
   requestQuit: () => app.quit(),
   schedule: (callback, delayMs) => setTimeout(callback, delayMs),
   showMessageBox: (options) => mainWindow

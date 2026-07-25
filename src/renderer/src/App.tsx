@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { ApiConfig, ClaudeApiConfig } from "../../core/api-config";
 import type { IndexStatus } from "../../core/indexer";
-import type { AppUpdateProgress, AppUpdateStatus } from "../../core/app-update-types";
+import type { AppUpdateStatus } from "../../core/app-update-types";
 import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../../core/refresh-policy";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import type { MigrationTargetSettings } from "../../core/migration-targets";
@@ -322,7 +322,6 @@ export function App(): ReactElement {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection>("terminal");
   const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
-  const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateProgress | null>(null);
   const [appUpdateBusy, setAppUpdateBusy] = useState(false);
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
   const shouldSignalAppUpdate = Boolean(appUpdateStatus?.updateAvailable && !appUpdateStatus.updateSkipped && !appUpdateStatus.promptSnoozed);
@@ -984,15 +983,6 @@ export function App(): ReactElement {
       setSettingsOpen(true);
     });
     const offAppUpdate = window.sessionSearch.onAppUpdateStatus(setAppUpdateStatus);
-    const offAppUpdateProgress = window.sessionSearch.onAppUpdateProgress((progress) => {
-      setAppUpdateProgress(progress);
-      if (progress.phase === "error") {
-        setAppUpdateError(progress.error || progress.message || "更新失败。");
-        setAppUpdateBusy(false);
-      } else if (progress.phase === "completed") {
-        setAppUpdateBusy(false);
-      }
-    });
     const offOpenSession = window.sessionSearch.onOpenSession((sessionKey) => setSelectedKey(sessionKey));
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
       setEnvironments(nextEnvironments);
@@ -1013,7 +1003,6 @@ export function App(): ReactElement {
       offFocus();
       offOpenSettings();
       offAppUpdate();
-      offAppUpdateProgress();
       offOpenSession();
       offEnvironments();
     };
@@ -1590,7 +1579,6 @@ export function App(): ReactElement {
   async function installAppUpdate(): Promise<void> {
     setAppUpdateBusy(true);
     setAppUpdateError(null);
-    setAppUpdateProgress(null);
     try {
       await window.sessionSearch.installAppUpdate();
     } catch (error) {
@@ -2226,7 +2214,6 @@ export function App(): ReactElement {
           initialSection={settingsInitialSection}
           settings={appSettings}
           appUpdateStatus={appUpdateStatus}
-          appUpdateProgress={appUpdateProgress}
           appUpdateBusy={appUpdateBusy}
           appUpdateError={appUpdateError}
           environments={environments}

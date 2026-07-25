@@ -25,7 +25,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { AppUpdateProgress, AppUpdateStatus } from "../../../../core/app-update-types";
+import type { AppUpdateStatus } from "../../../../core/app-update-types";
 import { formatRelativeTime } from "../../../../core/format-session";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { RemoteHealthReport } from "../../../../core/remote-health";
@@ -101,33 +101,11 @@ function UpdateReleaseSection({
   );
 }
 
-function updateProgressLabel(progress: AppUpdateProgress, language: LanguageMode): string {
-  switch (progress.phase) {
-    case "downloading":
-      return localize(language, "Downloading update", "正在下载更新");
-    case "verifying":
-      return localize(language, "Verifying download", "正在校验下载文件");
-    case "staging":
-      return localize(language, "Installing to staging area", "正在安装到临时目录");
-    case "validating":
-      return localize(language, "Validating application", "正在验证应用");
-    case "restarting":
-      return localize(language, "Restarting application", "正在重新启动");
-    case "completed":
-      return localize(language, "Update complete", "更新完成");
-    case "error":
-      return localize(language, "Update failed", "更新失败");
-    default:
-      return localize(language, "Checking for updates", "正在检查更新");
-  }
-}
-
 export function SettingsDialog({
   platform,
   initialSection,
   settings,
   appUpdateStatus,
-  appUpdateProgress,
   appUpdateBusy,
   appUpdateError,
   environments,
@@ -163,7 +141,6 @@ export function SettingsDialog({
   initialSection: SettingsSection;
   settings: AppSettings | null;
   appUpdateStatus: AppUpdateStatus | null;
-  appUpdateProgress: AppUpdateProgress | null;
   appUpdateBusy: boolean;
   appUpdateError: string | null;
   environments: SessionEnvironment[];
@@ -1180,18 +1157,6 @@ export function SettingsDialog({
                       <UpdateReleaseSection kind="features" title={l("New features", "新增功能")} items={appUpdateStatus.manifest.notes.features} />
                       <UpdateReleaseSection kind="fixes" title={l("Fixes", "问题修复")} items={appUpdateStatus.manifest.notes.fixes} />
                     </div>
-                    {appUpdateProgress ? (
-                      <div className="update-progress-panel" role="status" aria-live="polite">
-                        <div className="update-progress-copy">
-                          <strong>{updateProgressLabel(appUpdateProgress, language)}</strong>
-                          {typeof appUpdateProgress.percent === "number" ? <span>{appUpdateProgress.percent}%</span> : null}
-                        </div>
-                        <div className={`update-progress-track ${typeof appUpdateProgress.percent === "number" ? "" : "indeterminate"}`}>
-                          <span style={typeof appUpdateProgress.percent === "number" ? { width: `${appUpdateProgress.percent}%` } : undefined} />
-                        </div>
-                        {appUpdateProgress.message ? <small>{appUpdateProgress.message}</small> : null}
-                      </div>
-                    ) : null}
                     <div className="update-card-footer">
                       <span>{l("The App will reopen automatically after updating.", "更新完成后会自动重新打开应用。")}</span>
                       <div className="update-card-actions">

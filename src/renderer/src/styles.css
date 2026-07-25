@@ -4581,53 +4581,6 @@ select:focus-visible {
   background: var(--panel-subtle);
 }
 
-.update-progress-panel {
-  display: grid;
-  gap: 8px;
-  padding: 13px 19px;
-  border-top: 1px solid var(--border);
-  background: var(--panel-subtle);
-}
-
-.update-progress-copy {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--text);
-  font-size: 12px;
-}
-
-.update-progress-copy span,
-.update-progress-panel small {
-  color: var(--text-muted);
-}
-
-.update-progress-track {
-  overflow: hidden;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--border);
-}
-
-.update-progress-track > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #1677ef, #674cdb);
-  transition: width 160ms ease;
-}
-
-.update-progress-track.indeterminate > span {
-  width: 40%;
-  animation: update-progress-indeterminate 1.1s ease-in-out infinite;
-}
-
-@keyframes update-progress-indeterminate {
-  from { transform: translateX(-110%); }
-  to { transform: translateX(250%); }
-}
-
 .update-card-footer > span {
   color: var(--text-muted);
   font-size: 11.5px;
