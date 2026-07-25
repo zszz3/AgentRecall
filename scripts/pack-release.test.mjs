@@ -50,6 +50,10 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
     files: ["index.js"],
     dependencies: { electron: "42.3.0" },
     bundleDependencies: ["electron"],
+    scripts: {
+      prepare: "node scripts/source-only-build.mjs",
+      postinstall: "node index.js",
+    },
   };
   await writeFile(path.join(root, "package.json"), `${JSON.stringify(rootPackage, null, 2)}\n`, "utf8");
   await writeFile(path.join(electronRoot, "package.json"), `${JSON.stringify({
@@ -110,6 +114,7 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
     "1.0.0",
   );
   assert.equal(packedRootPackage.dependencies.electron, "24.15.0");
+  assert.deepEqual(packedRootPackage.scripts, { postinstall: "node index.js" });
   assert.equal(packedElectronPackage.version, "24.15.0");
   assert.deepEqual(marker, {
     schemaVersion: 1,

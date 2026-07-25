@@ -202,6 +202,12 @@ export async function packReleaseArchive(options = {}) {
   if (rootPackage.dependencies?.electron !== electronVersion) {
     throw new Error("The root Electron dependency does not match the bundled Electron package.");
   }
+  if (rootPackage.scripts && typeof rootPackage.scripts === "object") {
+    rootPackage.scripts = { ...rootPackage.scripts };
+    for (const lifecycle of ["prepack", "prepare", "postpack"]) {
+      delete rootPackage.scripts[lifecycle];
+    }
+  }
   rootPackage.dependencies.electron = bridgedVersion;
   electronPackage.version = bridgedVersion;
   electronPackage.files = Array.isArray(electronPackage.files)
