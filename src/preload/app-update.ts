@@ -1,5 +1,5 @@
 import type { IpcRenderer, IpcRendererEvent } from "electron";
-import type { AppUpdateInstallResult, AppUpdateStatus } from "../core/app-update-types";
+import type { AppUpdateInstallResult, AppUpdateProgress, AppUpdateStatus } from "../core/app-update-types";
 import { APP_UPDATE_EVENTS, APP_UPDATE_IPC } from "../shared/ipc/app-update";
 
 export type AppUpdateIpcRenderer = Pick<IpcRenderer, "invoke" | "on" | "removeListener">;
@@ -16,6 +16,11 @@ export function createAppUpdateApi(ipc: AppUpdateIpcRenderer) {
       const listener = (_event: IpcRendererEvent, status: AppUpdateStatus) => callback(status);
       ipc.on(APP_UPDATE_EVENTS.status, listener);
       return () => ipc.removeListener(APP_UPDATE_EVENTS.status, listener);
+    },
+    onAppUpdateProgress: (callback: (progress: AppUpdateProgress) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, progress: AppUpdateProgress) => callback(progress);
+      ipc.on(APP_UPDATE_EVENTS.progress, listener);
+      return () => ipc.removeListener(APP_UPDATE_EVENTS.progress, listener);
     },
   };
 }

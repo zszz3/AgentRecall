@@ -57,41 +57,11 @@ try {
   }
   if (!installedRoot) throw new Error("Could not locate the package installed into the temporary npm prefix.");
   await access(path.join(installedRoot, "out", "main", "index.js"));
-  await access(path.join(installedRoot, "out", "main", "update-window.js"));
-  await access(path.join(installedRoot, "out", "preload", "update-progress.mjs"));
-  const updateProgressHtmlPath = path.join(installedRoot, "out", "renderer", "update-progress.html");
-  await access(updateProgressHtmlPath);
   await access(path.join(installedRoot, "dist", "main", "index.js"));
   await access(path.join(installedRoot, "bin", "uninstall.cjs"));
-  const updateProgressModulePath = path.join(installedRoot, "bin", "update-progress.cjs");
-  await access(updateProgressModulePath);
   const { stdout: version } = await execFileAsync(process.execPath, [path.join(installedRoot, "bin", "agent-recall.cjs"), "--version"], { env: environment });
   const packageVersion = JSON.parse(await readFile(path.join(installedRoot, "package.json"), "utf8")).version;
   if (version.trim() !== packageVersion) throw new Error(`Packaged CLI reported ${version.trim()} instead of ${packageVersion}.`);
-  const progressFixture = [
-    "const { createTerminalUpdateProgress } = require(process.argv[1]);",
-    "const progress = createTerminalUpdateProgress({ stream: process.stdout });",
-    "progress.report({ phase: 'downloading', version: '9.9.9', downloadedBytes: 50, totalBytes: 100, percent: 50, bytesPerSecond: 1024 });",
-    "progress.report({ phase: 'staging', version: '9.9.9' });",
-    "progress.complete('9.9.9');",
-    "progress.dispose();",
-  ].join("");
-  const { stdout: progressOutput } = await execFileAsync(
-    process.execPath,
-    ["-e", progressFixture, updateProgressModulePath],
-    { env: environment },
-  );
-  if (
-    !progressOutput.includes("50%")
-    || !progressOutput.includes("正在通过 npm 安装")
-    || !progressOutput.includes("v9.9.9")
-  ) {
-    throw new Error("Packaged terminal updater did not report synthetic update progress.");
-  }
-  const updateProgressHtml = await readFile(updateProgressHtmlPath, "utf8");
-  const rendererAssets = [...updateProgressHtml.matchAll(/(?:src|href)="\.\/([^"]+)"/g)].map((match) => match[1]);
-  if (rendererAssets.length === 0) throw new Error("Packaged update window did not reference its renderer assets.");
-  await Promise.all(rendererAssets.map((asset) => access(path.join(installedRoot, "out", "renderer", asset))));
 
   await execFileAsync(npm, ["install", "--prefix", stageRoot, archive, "--ignore-scripts", "--no-audit", "--no-fund"], {
     cwd: root,

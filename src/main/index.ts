@@ -104,9 +104,9 @@ import { registerRulesIpc, type RulesIpcService } from "./ipc/rules";
 import { registerSkillsIpc } from "./ipc/skills";
 import {
   AppUpdateService,
+  launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
 } from "./services/app-update-service";
-import { launchDetachedUpdateWindow } from "./services/detached-update-window";
 import { ProviderService } from "./services/provider-service";
 import {
   codexAuthPath,
@@ -173,7 +173,6 @@ function loadMcpSetup(): McpSetup {
 
 const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
 const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
-const UPDATE_WINDOW_ENTRY = path.join(__dirname, "update-window.js");
 function loadUpdateClient(): AppUpdateClient {
   return requireCjs(UPDATE_CLIENT_PATH) as AppUpdateClient;
 }
@@ -282,12 +281,12 @@ const appUpdateService = new AppUpdateService({
   getAutoCheckEnabled: () => getSettings().autoCheckUpdates,
   autoCheckDisabled: () => process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1",
   publishStatus: (status) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.status, status),
-  launchInstaller: (manifest) => launchDetachedUpdateWindow(manifest, {
-    electronExecutable: process.execPath,
-    updateWindowEntry: UPDATE_WINDOW_ENTRY,
-    applyUpdatePath: APPLY_UPDATE_PATH,
-    stableNodePath: process.env.AGENT_RECALL_NODE_PATH,
+  publishProgress: (progress) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.progress, progress),
+  stageInstaller: (manifest, onProgress) => loadUpdateClient().stageUpdate(manifest, {
+    nodePath: process.env.AGENT_RECALL_NODE_PATH,
+    onProgress,
   }),
+  launchInstaller: (staged) => launchDetachedAppUpdateInstaller(staged, { applyUpdatePath: APPLY_UPDATE_PATH }),
   requestQuit: () => app.quit(),
   schedule: (callback, delayMs) => setTimeout(callback, delayMs),
   showMessageBox: (options) => mainWindow

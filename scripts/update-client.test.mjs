@@ -512,7 +512,6 @@ test("installs through the public registry and records a completed status", asyn
   await mkdir(packagePath, { recursive: true });
   let invocation = null;
   let electronChecked = false;
-  const progress = [];
   await installUpdate(value, {
     fetchImpl: async () => new Response(bytes, { status: 200 }),
     statusPath,
@@ -522,7 +521,6 @@ test("installs through the public registry and records a completed status", asyn
       return { stdout: "", stderr: "" };
     },
     nodePath: "/stable/node",
-    onProgress: (event) => progress.push(event),
     ensureElectronImpl: async ({ env, nodePath }) => {
       electronChecked = true;
       assert.equal("ELECTRON_RUN_AS_NODE" in env, false);
@@ -532,12 +530,6 @@ test("installs through the public registry and records a completed status", asyn
   assert.equal(invocation.args[invocation.args.indexOf("--registry") + 1], DEFAULT_NPM_REGISTRY);
   assert.equal("ELECTRON_RUN_AS_NODE" in invocation.options.env, false);
   assert.equal(electronChecked, true);
-  assert.deepEqual(progress.map((event) => event.phase), [
-    "downloading",
-    "verifying",
-    "staging",
-    "validating",
-  ]);
   assert.deepEqual(JSON.parse(await readFile(statusPath, "utf8")), {
     status: "installed",
     version: "0.2.0",
