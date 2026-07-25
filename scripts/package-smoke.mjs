@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +27,16 @@ const environment = {
   npm_config_cache: path.join(tempRoot, "npm-cache"),
   npm_config_prefix: prefix,
 };
+
+async function relativeFiles(rootDirectory, currentDirectory = rootDirectory) {
+  const files = [];
+  for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
+    const entryPath = path.join(currentDirectory, entry.name);
+    if (entry.isDirectory()) files.push(...await relativeFiles(rootDirectory, entryPath));
+    else files.push(path.relative(rootDirectory, entryPath));
+  }
+  return files.sort();
+}
 
 try {
   await Promise.all([packDir, prefix, stageRoot, home].map((directory) => mkdir(directory, { recursive: true })));
@@ -82,11 +92,50 @@ try {
   if (!stagedElectronInstall.includes("applyAgentRecallStagingBridge")) {
     throw new Error("Release package did not contain the legacy Electron update bridge.");
   }
-  try {
-    await access(path.join(stagedElectronRoot, "path.txt"));
-    throw new Error("Release package must not contain a platform-specific Electron runtime.");
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+  if (
+    stagedBridge.stagingRuntimePlatforms?.length !== 1
+    || stagedBridge.stagingRuntimePlatforms[0] !== "darwin"
+  ) {
+    throw new Error("Release package did not identify the macOS-only staging runtime.");
+  }
+  const stagingExecutable = path.join(
+    stagedElectronRoot,
+    "dist",
+    "Electron.app",
+    "Contents",
+    "MacOS",
+    "Electron",
+  );
+  const stagingDefaultApp = path.join(
+    stagedElectronRoot,
+    "dist",
+    "Electron.app",
+    "Contents",
+    "Resources",
+    "default_app.asar",
+  );
+  const stagedRuntimeFiles = await relativeFiles(path.join(stagedElectronRoot, "dist"));
+  if (JSON.stringify(stagedRuntimeFiles) !== JSON.stringify([
+    path.join("Electron.app", "Contents", "MacOS", "Electron"),
+    path.join("Electron.app", "Contents", "Resources", "default_app.asar"),
+    "version",
+  ].sort())) {
+    throw new Error("Release package contained files outside the minimal staging runtime.");
+  }
+  if (
+    await readFile(path.join(stagedElectronRoot, "path.txt"), "utf8") !== "Electron.app/Contents/MacOS/Electron"
+    || (await readFile(path.join(stagedElectronRoot, "dist", "version"), "utf8")).trim() !== stagedBridge.bridgedVersion
+    || await readFile(stagingDefaultApp, "utf8") !== "agent-recall-staging-runtime\n"
+    || await readFile(stagingExecutable, "utf8") !== `#!/bin/sh\nprintf 'v${stagedBridge.bridgedVersion}\\n'\n`
+  ) {
+    throw new Error("Release package staging runtime did not match its verified sentinel.");
+  }
+  if (process.platform !== "win32" && ((await stat(stagingExecutable)).mode & 0o111) !== 0o111) {
+    throw new Error("Release package staging runtime was not executable.");
+  }
+  const stagedElectronIndex = await readFile(path.join(stagedElectronRoot, "index.js"), "utf8");
+  if (!stagedElectronIndex.includes("getAgentRecallStagingBridgePath")) {
+    throw new Error("Release package did not contain the staging runtime resolver.");
   }
   require.resolve("@electron/get", { paths: [stagedElectronRoot] });
 

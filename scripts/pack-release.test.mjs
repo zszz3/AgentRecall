@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -26,6 +26,11 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
   const installRoot = path.join(root, "installed");
   const electronRoot = path.join(root, "node_modules", "electron");
   const bridgeDependencyRoot = path.join(root, "node_modules", "bridge-dependency");
+  const indexSource = [
+    "const path = require('node:path');",
+    "function getElectronPath() { return path.join(__dirname, 'normal-electron'); }",
+    "module.exports = getElectronPath();",
+  ].join("\n");
   const installSource = [
     "#!/usr/bin/env node",
     "const childProcess = require('node:child_process');",
@@ -59,10 +64,12 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
   await writeFile(path.join(electronRoot, "package.json"), `${JSON.stringify({
     name: "electron",
     version: "42.3.0",
-    files: ["install.js"],
+    files: ["index.js", "install.js", "normal-electron"],
     dependencies: { "bridge-dependency": "1.0.0" },
   }, null, 2)}\n`, "utf8");
+  await writeFile(path.join(electronRoot, "index.js"), indexSource, "utf8");
   await writeFile(path.join(electronRoot, "install.js"), installSource, "utf8");
+  await writeFile(path.join(electronRoot, "normal-electron"), "normal runtime\n", "utf8");
   await writeFile(path.join(bridgeDependencyRoot, "package.json"), `${JSON.stringify({
     name: "bridge-dependency",
     version: "1.0.0",
@@ -103,6 +110,7 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
   const packedElectronRoot = path.join(installRoot, "node_modules", "agent-recall-pack-fixture", "node_modules", "electron");
   const packedInstallPath = path.join(packedElectronRoot, "install.js");
   const packedInstallSource = await readFile(packedInstallPath, "utf8");
+  const packedIndexSource = await readFile(path.join(packedElectronRoot, "index.js"), "utf8");
   const packedRootPackage = JSON.parse(await readFile(
     path.join(installRoot, "node_modules", "agent-recall-pack-fixture", "package.json"),
     "utf8",
@@ -120,6 +128,7 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
     schemaVersion: 1,
     electronVersion: "42.3.0",
     bridgedVersion: "24.15.0",
+    stagingRuntimePlatforms: ["darwin"],
   });
   assert.match(packedInstallSource, /AGENT_RECALL_STAGING_INSTALL/);
   assert.match(packedInstallSource, /AGENT_RECALL_SKIP_LEGACY_ELECTRON_BRIDGE/);
@@ -128,4 +137,51 @@ test("packs a staging-only legacy Electron bridge and restores the source depend
   assert.match(packedInstallSource, /execFileSync\(electronExecutable, \['--version'\]/);
   assert.match(packedInstallSource, /const version = '42\.3\.0'/);
   assert.match(packedInstallSource, /const bridgedVersion = '24\.15\.0'/);
+  assert.match(packedIndexSource, /getAgentRecallStagingBridgePath/);
+  assert.doesNotMatch(packedInstallSource, /\.agent-recall-dist-/);
+
+  const stagingExecutable = path.join(
+    packedElectronRoot,
+    "dist",
+    "Electron.app",
+    "Contents",
+    "MacOS",
+    "Electron",
+  );
+  const stagingDefaultApp = path.join(
+    packedElectronRoot,
+    "dist",
+    "Electron.app",
+    "Contents",
+    "Resources",
+    "default_app.asar",
+  );
+  assert.equal((await readFile(path.join(packedElectronRoot, "dist", "version"), "utf8")).trim(), "24.15.0");
+  assert.equal(await readFile(path.join(packedElectronRoot, "path.txt"), "utf8"), "Electron.app/Contents/MacOS/Electron");
+  assert.equal(await readFile(stagingDefaultApp, "utf8"), "agent-recall-staging-runtime\n");
+  assert.equal((await stat(stagingExecutable)).mode & 0o111, 0o111);
+
+  if (process.platform === "darwin") {
+    const resolved = await execFile(process.execPath, [
+      "-e",
+      `process.stdout.write(require(${JSON.stringify(packedElectronRoot)}));`,
+    ], {
+      env: { ...environment, AGENT_RECALL_STAGING_INSTALL: "1" },
+    });
+    assert.equal(await realpath(resolved.stdout.trim()), await realpath(stagingExecutable));
+    const stagedProbe = await execFile(resolved.stdout.trim(), ["--version"], {
+      env: { ...environment, ELECTRON_RUN_AS_NODE: "1" },
+    });
+    assert.equal(stagedProbe.stdout.trim(), "v24.15.0");
+  } else {
+    const resolved = await execFile(process.execPath, [
+      "-e",
+      `process.stdout.write(require(${JSON.stringify(packedElectronRoot)}));`,
+    ], {
+      env: { ...environment, AGENT_RECALL_STAGING_INSTALL: "1" },
+    });
+    assert.equal(await realpath(resolved.stdout.trim()), await realpath(path.join(packedElectronRoot, "normal-electron")));
+    await assert.rejects(readFile(path.join(packedElectronRoot, "dist", "version"), "utf8"), { code: "ENOENT" });
+    await assert.rejects(readFile(path.join(packedElectronRoot, "path.txt"), "utf8"), { code: "ENOENT" });
+  }
 });

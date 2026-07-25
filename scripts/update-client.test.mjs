@@ -859,6 +859,84 @@ test("repairs a blocked Electron install after restoring packaged bridge metadat
   await assert.rejects(readFile(markerPath, "utf8"), { code: "ENOENT" });
 });
 
+test("replaces the macOS staging runtime after a legacy updater swaps the package", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const directory = await temporaryDirectory("agent-session-electron-macos-staging-runtime-");
+  const packagePath = path.join(directory, "agent-recall");
+  const electronPath = path.join(packagePath, "node_modules", "electron");
+  const relativeExecutable = path.join("Electron.app", "Contents", "MacOS", "Electron");
+  const relativeDefaultApp = path.join("Electron.app", "Contents", "Resources", "default_app.asar");
+  const executablePath = path.join(electronPath, "dist", relativeExecutable);
+  const defaultAppPath = path.join(electronPath, "dist", relativeDefaultApp);
+  const installScript = path.join(electronPath, "install.js");
+  const markerPath = path.join(electronPath, ".agent-recall-staging-bridge.json");
+  await mkdir(path.dirname(executablePath), { recursive: true });
+  await mkdir(path.dirname(defaultAppPath), { recursive: true });
+  await writeFile(path.join(packagePath, "package.json"), JSON.stringify({
+    name: "agent-recall",
+    dependencies: { electron: "24.15.0" },
+  }), "utf8");
+  await writeFile(path.join(electronPath, "package.json"), JSON.stringify({
+    name: "electron",
+    version: "24.15.0",
+    files: [".agent-recall-staging-bridge.json", "dist", "path.txt"],
+  }), "utf8");
+  await writeFile(
+    path.join(electronPath, "index.js"),
+    `module.exports = require("node:path").join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});\n`,
+    "utf8",
+  );
+  await writeFile(installScript, "throw new Error('test executor handles this script');\n", "utf8");
+  await writeFile(path.join(electronPath, "path.txt"), "Electron.app/Contents/MacOS/Electron", "utf8");
+  await writeFile(executablePath, "staging runtime", "utf8");
+  await writeFile(defaultAppPath, "agent-recall-staging-runtime\n", "utf8");
+  await writeFile(path.join(electronPath, "dist", "version"), "24.15.0", "utf8");
+  await writeFile(markerPath, JSON.stringify({
+    schemaVersion: 1,
+    electronVersion: "42.3.0",
+    bridgedVersion: "24.15.0",
+    stagingRuntimePlatforms: ["darwin"],
+  }), "utf8");
+
+  let installRuns = 0;
+  await ensureInstalledElectron({
+    packagePath,
+    platform: "darwin",
+    homeDir: directory,
+    findCachedArchiveImpl: async () => null,
+    timeoutMs: 5_000,
+    execFileImpl: async (command, args, options) => {
+      if (command === process.execPath && args[0] === installScript) {
+        installRuns += 1;
+        assert.equal(options.env.AGENT_RECALL_SKIP_LEGACY_ELECTRON_BRIDGE, "1");
+        await mkdir(path.dirname(executablePath), { recursive: true });
+        await mkdir(path.dirname(defaultAppPath), { recursive: true });
+        await writeFile(executablePath, "real runtime", "utf8");
+        await writeFile(defaultAppPath, "real default app", "utf8");
+        await writeFile(path.join(electronPath, "dist", "version"), "42.3.0", "utf8");
+        await writeFile(path.join(electronPath, "path.txt"), relativeExecutable, "utf8");
+        return { stdout: "", stderr: "" };
+      }
+      if (command === process.execPath && args[0] === "-e") {
+        return { stdout: executablePath, stderr: "" };
+      }
+      if (command === executablePath) {
+        const runtime = await readFile(executablePath, "utf8");
+        return { stdout: runtime === "staging runtime" ? "v24.15.0\n" : "v42.3.0\n", stderr: "" };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    },
+  });
+
+  assert.equal(installRuns, 1);
+  assert.equal(await readFile(executablePath, "utf8"), "real runtime");
+  assert.equal(await readFile(defaultAppPath, "utf8"), "real default app");
+  assert.equal(JSON.parse(await readFile(path.join(packagePath, "package.json"), "utf8")).dependencies.electron, "42.3.0");
+  assert.equal(JSON.parse(await readFile(path.join(electronPath, "package.json"), "utf8")).version, "42.3.0");
+  await assert.rejects(readFile(markerPath, "utf8"), { code: "ENOENT" });
+});
+
 test("uses a stable Node executable for Electron runtime checks after npm replaces Electron", async () => {
   const directory = await temporaryDirectory("agent-session-electron-stable-node-");
   const packagePath = path.join(directory, "agent-recall");
