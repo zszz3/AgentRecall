@@ -2,6 +2,7 @@ import type { MigrationCompressionListener, PreparedMigrationSession } from "./s
 import { BASE_MIGRATION_TARGETS, isMigrationTarget } from "./migration-targets";
 import type { WrittenMigratedSession } from "./session-migration-writers";
 import { isLocalSessionEnvironment } from "./session-environment";
+import { sessionSourceDescriptor } from "./session-sources";
 import type {
   MigrationAgent,
   MigrationCompressionEvent,
@@ -59,26 +60,7 @@ export interface MigrateSessionOptions {
 }
 
 export function migrationAgentForSource(source: SessionSource): MigrationAgent | null {
-  switch (source) {
-    case "claude-cli":
-    case "claude-app":
-    case "claude-internal":
-    case "tclaude-cli":
-      return "claude";
-    case "codex-cli":
-    case "codex-app":
-    case "codex-internal":
-    case "tcodex-cli":
-      return "codex";
-    case "codebuddy-cli":
-      return "codebuddy";
-    case "codewiz-cli":
-      return "codewiz";
-    case "cursor-agent":
-      return "cursor";
-    default:
-      return null;
-  }
+  return sessionSourceDescriptor(source).migrationAgent;
 }
 
 export function supportedMigrationTargets(source: SessionSource): MigrationAgent[];
@@ -101,8 +83,8 @@ export function portableSessionFrom(
   if (!sourceAgent) {
     throw new Error(`Session source ${session.source} cannot be migrated.`);
   }
-  if (!isLocalSessionEnvironment(session)) {
-    throw new Error("Remote session migration is not supported yet.");
+  if (!isLocalSessionEnvironment(session) && session.environmentKind !== "wsl") {
+    throw new Error("SSH session migration is not supported yet.");
   }
   if (!session.projectPath.trim()) {
     throw new Error("Session has no project path.");
@@ -267,8 +249,8 @@ async function validateMigrationRequest(
   if (!sourceAgent) {
     throw new Error(`Session source ${source.source} cannot be migrated.`);
   }
-  if (!isLocalSessionEnvironment(source)) {
-    throw new Error("Remote session migration is not supported yet.");
+  if (!isLocalSessionEnvironment(source) && source.environmentKind !== "wsl") {
+    throw new Error("SSH session migration is not supported yet.");
   }
   if (!isMigrationTarget(target)) {
     throw new Error(`Migration target ${target} is not supported.`);

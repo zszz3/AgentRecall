@@ -70,6 +70,7 @@ function createService(): RemoteSessionsIpcService {
     list: vi.fn(async () => []),
     listSyncItems: vi.fn(async () => []),
     getDetail: vi.fn(async () => ({} as RemoteSessionDetailSnapshot)),
+    previewAttachment: vi.fn(async () => ({ kind: "image" as const, data: "data:image/png;base64,eA==" })),
     chooseProject: vi.fn(async () => "/tmp/project"),
     restore: vi.fn(async (_remoteId, target, _projectPath, onProgress) => {
       onProgress({ sessionKey: "remote-1", target, stage: "writing" });
@@ -112,6 +113,13 @@ describe("Remote sessions IPC", () => {
     await handlers.get(REMOTE_SESSIONS_IPC.list.channel)?.(event, " query ");
     await handlers.get(REMOTE_SESSIONS_IPC.listSyncItems.channel)?.(event);
     await handlers.get(REMOTE_SESSIONS_IPC.getDetail.channel)?.(event, " remote-1 ");
+    await handlers.get(REMOTE_SESSIONS_IPC.previewAttachment.channel)?.(
+      event,
+      `sessions/${"a".repeat(32)}/upload.attachments/image.png`,
+      "b".repeat(64),
+      "image/png",
+      "image",
+    );
     await handlers.get(REMOTE_SESSIONS_IPC.chooseProject.channel)?.(event);
     await handlers.get(REMOTE_SESSIONS_IPC.restore.channel)?.(event, " remote-1 ", "codex", " /tmp/project ");
     await handlers.get(REMOTE_SESSIONS_IPC.restoreToSource.channel)?.(event, "remote-1", "claude");

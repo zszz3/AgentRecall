@@ -47,7 +47,6 @@ function session(
     },
     customTitle: null,
     favorited: false,
-    pinned: false,
     hidden: false,
     tags: [],
     matchSnippet: null,
@@ -183,11 +182,14 @@ describe("session migration model", () => {
     ["codex-internal", "codex"],
     ["tcodex-cli", "codex"],
     ["codebuddy-cli", "codebuddy"],
+    ["codewiz-cli", "codewiz"],
     ["openclaw", null],
     ["hermes", null],
     ["opencode-cli", null],
+    ["zcode-cli", null],
     ["cursor-agent", "cursor"],
     ["trae", null],
+    ["qoder", null],
   ] as const)("maps %s to %s", (source, expected) => {
     expect(migrationAgentForSource(source)).toBe(expected);
   });
@@ -202,6 +204,7 @@ describe("session migration model", () => {
     "codex-internal",
     "tcodex-cli",
     "codebuddy-cli",
+    "codewiz-cli",
     "cursor-agent",
   ] as const)("returns all enabled migration targets for %s", (source) => {
     const enabledTargets = [
@@ -266,10 +269,21 @@ describe("session migration model", () => {
   it.each([
     { environmentKind: "ssh", environmentId: "remote" },
     { environmentKind: "local", environmentId: "imported-local" },
-  ] as const)("rejects a non-local session", (environment) => {
+  ] as const)("rejects an unsupported remote session", (environment) => {
     expect(() => portableSessionFrom(session("claude-cli", environment), messages)).toThrow(
-      "Remote session migration is not supported yet.",
+      "SSH session migration is not supported yet.",
     );
+  });
+
+  it("accepts a WSL session and preserves its Linux project path", () => {
+    expect(portableSessionFrom(session("claude-cli", {
+      environmentKind: "wsl",
+      environmentId: "wsl-ubuntu",
+      projectPath: "/home/alice/project",
+    }), messages)).toMatchObject({
+      sourceAgent: "claude",
+      projectPath: "/home/alice/project",
+    });
   });
 
   it("rejects an unsupported source", () => {
@@ -377,13 +391,13 @@ describe("migrateSession", () => {
       "remote session",
       session("claude-cli", { environmentKind: "ssh", environmentId: "remote" }),
       "codex",
-      "Remote session migration is not supported yet.",
+      "SSH session migration is not supported yet.",
     ],
     [
       "imported local session",
       session("claude-cli", { environmentKind: "local", environmentId: "imported-local" }),
       "codex",
-      "Remote session migration is not supported yet.",
+      "SSH session migration is not supported yet.",
     ],
     [
       "empty project path",

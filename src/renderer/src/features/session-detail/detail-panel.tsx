@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Copy, Download, Edit3, FolderOpen, Laptop, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
@@ -9,7 +9,8 @@ import { localize, type LanguageMode } from "../../language";
 import type { LiveSessionState } from "../../live-filter";
 import type { ActionStatus } from "../../app-types";
 import { HighlightedSearchText, searchHighlightTerms } from "../../search-highlight";
-import { Markdown } from "../../lightweight-markdown";
+import { Markdown } from "../../markdown";
+import { markdownPreview } from "../../markdown-preview";
 import {
   environmentBadgeLabel,
   environmentBadgeTitle,
@@ -21,6 +22,8 @@ import {
   sourceUiFamily,
 } from "../../session-ui";
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
+import type { SessionFamily } from "../../../../core/session-family";
+import { SubagentSessionTree } from "./subagent-session-tree";
 
 export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
@@ -103,7 +106,6 @@ function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all
 }
 
 export function DetailPanel({
-  coreMode = false,
   session,
   messages,
   matchedContextMessages,
@@ -133,16 +135,19 @@ export function DetailPanel({
   onResumeIterm,
   onMigrate,
   onUploadRemote,
+  remoteUploadDisabled = false,
   onCopyResume,
   onCopyMarkdown,
   onExportMarkdown,
+  onExportJson,
   onCopyPlain,
   onDelete,
   onReveal,
   readOnly = false,
   backdropClassName = "",
+  sessionFamily,
+  onOpenFamilySession,
 }: {
-  coreMode?: boolean;
   session: SessionSearchResult;
   messages: SessionMessage[];
   matchedContextMessages: SessionMessage[];
@@ -172,14 +177,18 @@ export function DetailPanel({
   onResumeIterm: () => void;
   onMigrate: () => void;
   onUploadRemote?: () => void;
+  remoteUploadDisabled?: boolean;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
   onExportMarkdown: () => void;
+  onExportJson: () => void;
   onCopyPlain: () => void;
   onDelete: () => void;
   onReveal: () => void;
   readOnly?: boolean;
   backdropClassName?: string;
+  sessionFamily: SessionFamily;
+  onOpenFamilySession?: (sessionKey: string) => void;
 }): ReactElement {
   const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
@@ -205,6 +214,7 @@ export function DetailPanel({
     && roleFilter !== "all"
     && !messages.some((message) => message.role === roleFilter);
   const localOnlyDisabled = isRemoteSession(session);
+  const canDelete = session.environmentKind !== "ssh";
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
 
   const toggleTools = () => {
@@ -382,7 +392,7 @@ export function DetailPanel({
                 {localizedLiveStateLabel(liveState, language)}
               </span>
               <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-                {isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
+                {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
                 {environmentBadgeLabel(session, language)}
               </span>
             </div>
@@ -419,61 +429,64 @@ export function DetailPanel({
                 <Play size={15} /> {session.source === "codex-app" ? l("Open in Codex", "在 Codex 中打开") : "Resume"}
               </button>
             ) : null}
-            {!coreMode && canResume && showItermAction ? (
+            {canResume && showItermAction ? (
               <button onClick={onResumeIterm} disabled={actionRunning}>
                 <TerminalIcon size={15} /> iTerm
               </button>
             ) : null}
-            {!coreMode ? (
-              <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
-                <FolderOpen size={15} /> {revealLabel}
+            <button onClick={onReveal} disabled={actionRunning || localOnlyDisabled} title={revealTitle}>
+              <FolderOpen size={15} /> {revealLabel}
+            </button>
+          </div>
+          <div className="detail-action-group">
+            <button onClick={onAddTag} disabled={actionRunning}>
+              <Tag size={15} /> {l("Add Tag", "添加标签")}
+            </button>
+            <button onClick={onSummarize} disabled={actionRunning || summarizing}>
+              <Sparkles size={15} />{" "}
+              {summarizing
+                ? l("Summarizing...", "摘要中...")
+                : session.aiSummary
+                  ? l("Re-summarize", "重新摘要")
+                  : l("AI Summary", "AI 摘要")}
+            </button>
+            <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
+              <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
+            </button>
+            {onUploadRemote ? (
+              <button
+                onClick={onUploadRemote}
+                disabled={actionRunning || remoteUploadDisabled}
+                title={remoteUploadDisabled ? l("This session cannot be saved to cloud.", "此会话不能保存到云端。") : undefined}
+              >
+                <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
               </button>
             ) : null}
           </div>
-          {!coreMode ? (
-            <>
-              <div className="detail-action-group">
-                <button onClick={onAddTag} disabled={actionRunning}>
-                  <Tag size={15} /> {l("Add Tag", "添加标签")}
-                </button>
-                <button onClick={onSummarize} disabled={actionRunning || summarizing}>
-                  <Sparkles size={15} />{" "}
-                  {summarizing
-                    ? l("Summarizing...", "摘要中...")
-                    : session.aiSummary
-                      ? l("Re-summarize", "重新摘要")
-                      : l("AI Summary", "AI 摘要")}
-                </button>
-                <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
-                  <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
-                </button>
-                {onUploadRemote ? (
-                  <button onClick={onUploadRemote} disabled={actionRunning}>
-                    <CloudUpload size={15} /> {l("Save to Remote", "保存到远程")}
-                  </button>
-                ) : null}
-              </div>
-              <div className="detail-action-group">
-                {canResume ? (
-                  <button onClick={onCopyResume} disabled={actionRunning}>
-                    <Copy size={15} /> {l("Copy Cmd", "复制命令")}
-                  </button>
-                ) : null}
-                <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
-                <button onClick={onExportMarkdown} disabled={actionRunning}>
-                  <Download size={15} /> {l("Export MD", "导出 MD")}
-                </button>
-                <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
-              </div>
-              <div className="detail-action-group">
-                <button className="danger" onClick={onDelete} disabled={actionRunning}>
-                  <Trash2 size={15} /> {l("Delete", "删除")}
-                </button>
-              </div>
-            </>
+          <div className="detail-action-group">
+            {canResume ? (
+              <button onClick={onCopyResume} disabled={actionRunning}>
+                <Copy size={15} /> {l("Copy Cmd", "复制命令")}
+              </button>
+            ) : null}
+            <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
+            <button onClick={onExportMarkdown} disabled={actionRunning}>
+              <Download size={15} /> {l("Export MD", "导出 MD")}
+            </button>
+            <button onClick={onExportJson} disabled={actionRunning}>
+              <Download size={15} /> {l("Export JSON", "导出 JSON")}
+            </button>
+            <button onClick={onCopyPlain} disabled={actionRunning}>{l("Plain Text", "纯文本")}</button>
+          </div>
+          {canDelete ? (
+            <div className="detail-action-group">
+              <button className="danger" onClick={onDelete} disabled={actionRunning}>
+                <Trash2 size={15} /> {l("Delete", "删除")}
+              </button>
+            </div>
           ) : null}
         </div> : null}
-        {!coreMode && session.aiSummary ? (
+        {session.aiSummary ? (
           <div className="detail-summary">
             <span className="detail-summary-label">
               <Sparkles size={12} /> {l("AI summary", "AI 摘要")}
@@ -483,17 +496,11 @@ export function DetailPanel({
           </div>
         ) : null}
         <div className="detail-tags">
-          {session.tags.map((tagName) =>
-            coreMode ? (
-              <span key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`}>
-                #{tagName}
-              </span>
-            ) : (
-              <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
-                #{tagName} ×
-              </button>
-            ),
-          )}
+          {session.tags.map((tagName) => (
+            <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
+              #{tagName} ×
+            </button>
+          ))}
         </div>
         <div className="detail-body" ref={bodyRef}>
           {context.length > 0 ? (
@@ -503,6 +510,7 @@ export function DetailPanel({
                 <MessageBlock
                   key={message.index}
                   timelineKey={`ctx-${message.index}`}
+                  sessionKey={session.sessionKey}
                   message={message}
                   query={query}
                   language={language}
@@ -608,6 +616,7 @@ export function DetailPanel({
                 <MessageBlock
                   key={item.key}
                   timelineKey={item.key}
+                  sessionKey={session.sessionKey}
                   message={item.message}
                   query={panelSearchQuery || query}
                   language={language}
@@ -618,6 +627,14 @@ export function DetailPanel({
               )
             ))}
           </section>
+          {onOpenFamilySession ? (
+            <SubagentSessionTree
+              key={session.sessionKey}
+              family={sessionFamily}
+              language={language}
+              onOpen={onOpenFamilySession}
+            />
+          ) : null}
         </div>
       </aside>
     </div>
@@ -628,6 +645,7 @@ const MESSAGE_TRUNCATE_LIMIT = 3000;
 
 function MessageBlock({
   message,
+  sessionKey,
   query,
   language,
   highlight = false,
@@ -635,6 +653,7 @@ function MessageBlock({
   timelineKey,
 }: {
   message: SessionMessage;
+  sessionKey: string;
   query: string;
   language: LanguageMode;
   highlight?: boolean;
@@ -643,9 +662,14 @@ function MessageBlock({
 }): ReactElement {
   const truncated = message.content.length > MESSAGE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState<{ name: string; kind: "image" | "text"; data: string } | null>(null);
   const content = useMemo(() => {
     if (!truncated || expanded) return message.content;
-    return `${message.content.slice(0, MESSAGE_TRUNCATE_LIMIT)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
+    return markdownPreview(
+      message.content,
+      MESSAGE_TRUNCATE_LIMIT,
+      localize(language, "...(truncated)", "...（已截断）"),
+    );
   }, [message.content, truncated, expanded, language]);
   const highlightTerms = useMemo(() => (highlight ? searchHighlightTerms(query) : []), [highlight, query]);
 
@@ -659,16 +683,62 @@ function MessageBlock({
       </div>
       {useMarkdown ? (
         <div className="message-md">
-          <Markdown text={content} />
+          <Markdown text={content} language={language} />
         </div>
       ) : (
         <pre>{highlight ? <HighlightedSearchText text={content} terms={highlightTerms} /> : content}</pre>
       )}
+      {(message.attachments?.length ?? 0) > 0 ? (
+        <div className="message-attachments">
+          {message.attachments?.map((attachment) => (
+            <button
+              type="button"
+              key={attachment.id}
+              disabled={attachment.status !== "available"}
+              title={attachment.status === "available" ? attachment.fileName : localize(language, "Attachment unavailable", "附件不可用")}
+              onClick={() => {
+                const previewRequest = attachment.remoteObjectKey && attachment.sha256
+                  ? window.sessionSearch.previewRemoteSessionAttachment(
+                    attachment.remoteObjectKey,
+                    attachment.sha256,
+                    attachment.mimeType,
+                    attachment.previewKind,
+                  )
+                  : window.sessionSearch.previewAttachment(sessionKey, attachment.id);
+                void previewRequest.then((preview) => {
+                  if ((preview.kind === "image" || preview.kind === "text") && preview.data) {
+                    setAttachmentPreview({ name: attachment.fileName, kind: preview.kind, data: preview.data });
+                  }
+                });
+              }}
+            >
+              <Paperclip size={14} />
+              <span>{attachment.fileName}</span>
+              {attachment.sizeBytes ? <small>{Math.ceil(attachment.sizeBytes / 1024)} KB</small> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {truncated ? (
         <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((prev) => !prev)}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full content", "展开全文")}
         </button>
+      ) : null}
+      {attachmentPreview ? (
+        <div className="attachment-preview-backdrop" onClick={() => setAttachmentPreview(null)}>
+          <div className="attachment-preview-dialog" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <strong>{attachmentPreview.name}</strong>
+              <button type="button" onClick={() => setAttachmentPreview(null)} aria-label={localize(language, "Close", "关闭")}>
+                <X size={16} />
+              </button>
+            </header>
+            {attachmentPreview.kind === "image"
+              ? <img src={attachmentPreview.data} alt={attachmentPreview.name} />
+              : <pre>{attachmentPreview.data}</pre>}
+          </div>
+        </div>
       ) : null}
     </div>
   );

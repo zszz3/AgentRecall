@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { Eye, EyeOff, X } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, X } from "lucide-react";
 import {
   API_PROVIDER_PRESETS,
   CLAUDE_API_PROVIDER_PRESETS,
@@ -18,53 +18,59 @@ import { localize, type LanguageMode } from "../../language";
 
 const SUMMARY_API_PROVIDER_PRESETS = API_PROVIDER_PRESETS.filter((preset) => preset.id !== "codexzh");
 
+// A Custom provider only counts as "configured" once it has any of baseUrl/model/apiKey filled.
+function hasCustomProviderValues(config: { customBaseUrl: string; customModel: string; customApiKey: string } | null | undefined): boolean {
+  return Boolean(config && (config.customBaseUrl.trim() || config.customModel.trim() || config.customApiKey.trim()));
+}
+
+// Derives a summary ApiConfig from a Custom Codex config. Returns null when the Codex
+// config is not a configured Custom provider.
+function summaryFromCustomCodex(codex: ApiConfig | null | undefined, base: ApiConfig): ApiConfig | null {
+  if (codex?.activeProvider !== "custom" || !hasCustomProviderValues(codex)) return null;
+  return {
+    ...base,
+    ...codex,
+    activeProvider: "custom",
+    customProviderId: "custom",
+  };
+}
+
+// Derives a summary ApiConfig from a Custom Claude config. Claude's api format is mapped
+// onto the summary (openai_chat/openai_responses) format space. Returns null when not configured.
+function summaryFromCustomClaude(claude: ClaudeApiConfig | null | undefined, base: ApiConfig): ApiConfig | null {
+  if (claude?.activeProvider !== "custom" || !hasCustomProviderValues(claude)) return null;
+  return {
+    ...base,
+    activeProvider: "custom",
+    customProviderId: "custom",
+    customProviderName: claude.customProviderName.trim() || "Custom Claude",
+    customBaseUrl: claude.customBaseUrl,
+    customApiKey: claude.customApiKey,
+    customModel: claude.customModel,
+    customApiFormat: claude.customApiFormat === "openai_chat" || claude.customApiFormat === "openai_responses"
+      ? claude.customApiFormat
+      : "openai_chat",
+  };
+}
+
 function buildSummaryDraftFromSettings(settings: AppSettings | null): ApiConfig {
   const summary = settings?.summaryApiConfig;
-  const codex = settings?.apiConfig;
-  if (codex?.activeProvider === "custom" && (codex.customBaseUrl.trim() || codex.customModel.trim() || codex.customApiKey.trim())) {
-    return {
-      ...(summary ?? defaultApiConfig),
-      ...codex,
-      activeProvider: "custom",
-      customProviderId: "custom",
-    };
-  }
-
-  const claude = settings?.claudeApiConfig;
-  if (claude?.activeProvider === "custom" && (claude.customBaseUrl.trim() || claude.customModel.trim() || claude.customApiKey.trim())) {
-    return {
-      ...(summary ?? defaultApiConfig),
-      activeProvider: "custom",
-      customProviderId: "custom",
-      customProviderName: claude.customProviderName.trim() || "Custom Claude",
-      customBaseUrl: claude.customBaseUrl,
-      customApiKey: claude.customApiKey,
-      customModel: claude.customModel,
-      customApiFormat: claude.customApiFormat === "openai_chat" || claude.customApiFormat === "openai_responses"
-        ? claude.customApiFormat
-        : "openai_chat",
-    };
-  }
-
-  if (summary?.customBaseUrl.trim() || summary?.customModel.trim() || summary?.customApiKey.trim()) return summary;
-
-  return summary ?? { ...defaultApiConfig };
+  const base = summary ?? { ...defaultApiConfig };
+  return (
+    summaryFromCustomCodex(settings?.apiConfig, base) ??
+    summaryFromCustomClaude(settings?.claudeApiConfig, base) ??
+    (hasCustomProviderValues(summary) ? summary! : base)
+  );
 }
 
 function buildSummarySourceFromSettings(settings: AppSettings | null): AppSettings["summarySource"] {
-  const codex = settings?.apiConfig;
-  if (codex?.activeProvider === "custom" && (codex.customBaseUrl.trim() || codex.customModel.trim() || codex.customApiKey.trim())) {
+  if (
+    (settings?.apiConfig?.activeProvider === "custom" && hasCustomProviderValues(settings.apiConfig)) ||
+    (settings?.claudeApiConfig?.activeProvider === "custom" && hasCustomProviderValues(settings.claudeApiConfig)) ||
+    hasCustomProviderValues(settings?.summaryApiConfig)
+  ) {
     return "custom";
   }
-
-  const claude = settings?.claudeApiConfig;
-  if (claude?.activeProvider === "custom" && (claude.customBaseUrl.trim() || claude.customModel.trim() || claude.customApiKey.trim())) {
-    return "custom";
-  }
-
-  const summary = settings?.summaryApiConfig;
-  if (summary?.customBaseUrl.trim() || summary?.customModel.trim() || summary?.customApiKey.trim()) return "custom";
-
   return settings?.summarySource ?? "custom";
 }
 
@@ -101,9 +107,8 @@ export function ApiConfigDialog({
   const [codexConfigError, setCodexConfigError] = useState("");
   const [selectedCodexConfigProviderId, setSelectedCodexConfigProviderId] = useState("");
   const [codexModelOptions, setCodexModelOptions] = useState<string[]>([]);
-  const [selectedDetectedCodexModel, setSelectedDetectedCodexModel] = useState("");
+  const [codexModelMenuOpen, setCodexModelMenuOpen] = useState(false);
   const [codexModelProbeStatus, setCodexModelProbeStatus] = useState<SettingsFeedback>(null);
-  const [codexModelConflictAction, setCodexModelConflictAction] = useState<"save" | "apply" | null>(null);
   const apiPresetSelectionRef = useRef(0);
   const claudeApiPresetSelectionRef = useRef(0);
   const summaryApiPresetSelectionRef = useRef(0);
@@ -177,7 +182,7 @@ export function ApiConfigDialog({
     }
     setShowCodexApiKey(false);
     setCodexModelOptions([]);
-    setSelectedDetectedCodexModel("");
+    setCodexModelMenuOpen(false);
   };
 
   const refreshCodexConfig = async () => {
@@ -207,7 +212,7 @@ export function ApiConfigDialog({
       customApiFormat: provider.wireApi === "chat" ? "openai_chat" : "openai_responses",
     });
     setCodexModelOptions([]);
-    setSelectedDetectedCodexModel("");
+    setCodexModelMenuOpen(false);
   };
 
   const detectCodexModels = async () => {
@@ -219,7 +224,10 @@ export function ApiConfigDialog({
         providerId: selectedCodexConfigProviderId || codexConfig?.activeProviderId,
       });
       setCodexModelOptions(result.models);
-      setSelectedDetectedCodexModel(result.models.includes(draftApiConfig.customModel) ? draftApiConfig.customModel : "");
+      if (!draftApiConfig.customModel.trim() && result.models.length === 1) {
+        updateDraftApiConfig({ customModel: result.models[0] });
+      }
+      setCodexModelMenuOpen(result.models.length > 0);
       setCodexModelProbeStatus({ kind: "success", message: l(`Found ${result.models.length} models from ${result.endpoint}.`, `已从 ${result.endpoint} 找到 ${result.models.length} 个模型。`) });
     } catch (error) {
       setCodexModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -300,22 +308,21 @@ export function ApiConfigDialog({
     if (apiTarget === "codex") void refreshCodexConfig();
   }, [apiTarget]);
 
-  const codexModelConflict =
-    apiTarget === "codex" &&
-    draftApiConfig.activeProvider === "custom" &&
-    selectedDetectedCodexModel &&
-    draftApiConfig.customModel.trim() &&
-    selectedDetectedCodexModel !== draftApiConfig.customModel.trim()
-      ? { selected: selectedDetectedCodexModel, typed: draftApiConfig.customModel.trim() }
-      : null;
-
-  const runCodexAction = (action: "save" | "apply", model?: string) => {
-    const fallbackSelectedModel = selectedDetectedCodexModel && !draftApiConfig.customModel.trim() ? selectedDetectedCodexModel : "";
-    const nextModel = model || fallbackSelectedModel;
-    const next = nextModel ? { ...draftApiConfig, customModel: nextModel } : draftApiConfig;
-    setCodexModelConflictAction(null);
-    if (model) setDraftApiConfig(next);
-    if (action === "save") onSettingsChange({ apiConfig: next });
+  const runCodexAction = (action: "save" | "apply") => {
+    const next = draftApiConfig;
+    if (action === "save") {
+      // Saving a configured Custom Codex provider should immediately drive AI summary/search
+      // too, so users don't have to separately save the summary tab. Explicit summary-tab
+      // edits still override this on their own save.
+      const derivedSummary = summaryFromCustomCodex(next, draftSummaryApiConfig);
+      if (derivedSummary) {
+        setDraftSummaryApiConfig(derivedSummary);
+        setDraftSummarySource("custom");
+        onSettingsChange({ apiConfig: next, summarySource: "custom", summaryApiConfig: derivedSummary });
+      } else {
+        onSettingsChange({ apiConfig: next });
+      }
+    }
     else {
       onApplyToCodex(next);
       window.setTimeout(() => void refreshCodexConfig(), 600);
@@ -324,22 +331,23 @@ export function ApiConfigDialog({
 
   const saveDraft = () => {
     if (apiTarget === "codex") {
-      if (codexModelConflict) {
-        setCodexModelConflictAction("save");
-        return;
-      }
       runCodexAction("save");
     }
-    else if (apiTarget === "claude") onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
+    else if (apiTarget === "claude") {
+      const derivedSummary = summaryFromCustomClaude(draftClaudeApiConfig, draftSummaryApiConfig);
+      if (derivedSummary) {
+        setDraftSummaryApiConfig(derivedSummary);
+        setDraftSummarySource("custom");
+        onSettingsChange({ claudeApiConfig: draftClaudeApiConfig, summarySource: "custom", summaryApiConfig: derivedSummary });
+      } else {
+        onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
+      }
+    }
     else onSettingsChange({ summarySource: draftSummarySource, summaryApiConfig: draftSummaryApiConfig });
   };
 
   const applyDraft = () => {
     if (apiTarget === "codex") {
-      if (codexModelConflict) {
-        setCodexModelConflictAction("apply");
-        return;
-      }
       runCodexAction("apply");
     }
     else if (apiTarget === "claude") onApplyToClaude(draftClaudeApiConfig);
@@ -524,12 +532,58 @@ export function ApiConfigDialog({
                       </button>
                     </div>
                   </label>
-                  <div className="settings-field codex-model-detect-field">
+                  <div className="settings-field codex-model-field">
                     <div className="settings-field-text">
-                      <span className="settings-field-title">{l("Available models", "可用模型")}</span>
-                      <span className="settings-field-sub">{l("Detect /v1/models with the typed key or the saved key, then choose or type manually.", "使用输入框或已保存的 API Key 探测 /v1/models 后选择，也可以继续手动填写。")}</span>
+                      <span className="settings-field-title">{l("Model", "模型")}</span>
+                      <span className="settings-field-sub">{l("Type a model name, or detect /v1/models and pick from the suggestions.", "输入模型名称，或探测 /v1/models 后从建议中选择。")}</span>
                     </div>
-                    <div className="codex-model-detect">
+                    <div
+                      className="codex-model-input"
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCodexModelMenuOpen(false);
+                      }}
+                    >
+                      <div className="codex-model-combo">
+                        <input
+                          type="text"
+                          value={draftApiConfig.customModel}
+                          disabled={!settings || saving}
+                          placeholder="gpt-5.5"
+                          onChange={(event) => updateDraftApiConfig({ customModel: event.currentTarget.value })}
+                          onFocus={() => {
+                            if (codexModelOptions.length > 0) setCodexModelMenuOpen(true);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="codex-model-toggle"
+                          disabled={!settings || saving || codexModelOptions.length === 0}
+                          aria-label={l("Show detected models", "显示探测到的模型")}
+                          aria-expanded={codexModelMenuOpen}
+                          onClick={() => setCodexModelMenuOpen((open) => !open)}
+                        >
+                          <ChevronDown size={15} />
+                        </button>
+                        {codexModelMenuOpen && codexModelOptions.length > 0 ? (
+                          <div className="codex-model-menu" onMouseDown={(event) => event.preventDefault()}>
+                            {codexModelOptions.map((model) => (
+                              <button
+                                type="button"
+                                key={model}
+                                className={`codex-model-option${model === draftApiConfig.customModel ? " selected" : ""}`}
+                                onClick={() => {
+                                  updateDraftApiConfig({ customModel: model });
+                                  setCodexModelMenuOpen(false);
+                                }}
+                                title={model}
+                              >
+                                <span className="codex-model-option-label">{model}</span>
+                                {model === draftApiConfig.customModel ? <Check size={14} /> : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
                         className="codex-model-detect-button"
@@ -538,49 +592,9 @@ export function ApiConfigDialog({
                       >
                         {l("Detect models", "探测模型")}
                       </button>
-                      {codexModelOptions.length > 0 ? (
-                        <select
-                          value={selectedDetectedCodexModel}
-                          disabled={!settings || saving}
-                          onChange={(event) => setSelectedDetectedCodexModel(event.currentTarget.value)}
-                        >
-                          <option value="">{l("Select detected model", "选择探测到的模型")}</option>
-                          {codexModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
-                        </select>
-                      ) : null}
                     </div>
                     {codexModelProbeStatus ? <div className={`api-config-status ${codexModelProbeStatus.kind}`}>{codexModelProbeStatus.message}</div> : null}
                   </div>
-                  <label className="settings-field">
-                    <div className="settings-field-text">
-                      <span className="settings-field-title">{l("Model", "模型")}</span>
-                      <span className="settings-field-sub">{l("Model name for this Codex route.", "这个 Codex 路径使用的模型名称。")}</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={draftApiConfig.customModel}
-                      disabled={!settings || saving}
-                      placeholder="gpt-5.5"
-                      onChange={(event) => updateDraftApiConfig({ customModel: event.currentTarget.value })}
-                    />
-                  </label>
-                  {codexModelConflictAction && codexModelConflict ? (
-                    <div className="codex-model-conflict" role="alertdialog" aria-label={l("Choose Codex model", "选择 Codex 模型")}>
-                      <div>
-                        <strong>{l("Choose which model to use", "选择要使用的模型")}</strong>
-                        <span>{l("The detected selection and typed model are different.", "探测选择和手写模型不一致。")}</span>
-                      </div>
-                      <button type="button" disabled={!settings || saving} onClick={() => runCodexAction(codexModelConflictAction, codexModelConflict.selected)}>
-                        {codexModelConflict.selected}
-                      </button>
-                      <button type="button" disabled={!settings || saving} onClick={() => runCodexAction(codexModelConflictAction, codexModelConflict.typed)}>
-                        {codexModelConflict.typed}
-                      </button>
-                      <button type="button" className="ghost-action" disabled={!settings || saving} onClick={() => setCodexModelConflictAction(null)}>
-                        {l("Cancel", "取消")}
-                      </button>
-                    </div>
-                  ) : null}
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("API format", "API 格式")}</span>

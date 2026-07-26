@@ -9,7 +9,9 @@ import {
   loadHermesSessions,
   loadOpenClawSessions,
   loadOpenCodeSessions,
+  loadDefaultSessions,
   loadTraeSessions,
+  loadQoderSessions,
 } from "./session-loader";
 
 const require = createRequire(import.meta.url);
@@ -22,6 +24,93 @@ function tmpDir(name: string): string {
 function writeJsonl(filePath: string, rows: unknown[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join("\n"));
+}
+
+function writeCursorStateDb(
+  dbPath: string,
+  headers: Array<{
+    composerId: string;
+    name: string;
+    projectPath: string;
+    createdAt?: number;
+    isSubagent?: boolean;
+    parentComposerId?: string;
+    uriScheme?: string;
+    uriAuthority?: string;
+  }>,
+  bubbles: Array<{
+    composerId: string;
+    bubbleId: string;
+    type: 1 | 2;
+    text?: string;
+    richText?: unknown;
+    createdAt: string;
+  }> = [],
+): void {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE composerHeaders (
+      composerId TEXT PRIMARY KEY,
+      workspaceId TEXT,
+      createdAt INTEGER,
+      lastUpdatedAt INTEGER,
+      isArchived INTEGER,
+      isSubagent INTEGER,
+      recency INTEGER,
+      checkpointAt INTEGER,
+      value TEXT
+    );
+    CREATE TABLE cursorDiskKV (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);
+  `);
+
+  const insertHeader = db.prepare(`
+    INSERT INTO composerHeaders (
+      composerId, workspaceId, createdAt, lastUpdatedAt, isArchived, isSubagent, recency, checkpointAt, value
+    ) VALUES (?, ?, ?, ?, 0, ?, 0, 0, ?)
+  `);
+  for (const header of headers) {
+    const createdAt = header.createdAt ?? Date.parse("2026-07-22T10:00:00Z");
+    insertHeader.run(
+      header.composerId,
+      `workspace-${header.composerId}`,
+      createdAt,
+      createdAt,
+      header.isSubagent ? 1 : 0,
+      JSON.stringify({
+        composerId: header.composerId,
+        name: header.name,
+        createdAt,
+        isDraft: false,
+        workspaceIdentifier: {
+          id: `workspace-${header.composerId}`,
+          uri: {
+            scheme: header.uriScheme ?? "file",
+            authority: header.uriAuthority ?? "",
+            fsPath: header.projectPath,
+          },
+        },
+        ...(header.parentComposerId
+          ? { subagentInfo: { parentComposerId: header.parentComposerId } }
+          : {}),
+      }),
+    );
+  }
+
+  const insertBubble = db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)");
+  for (const bubble of bubbles) {
+    insertBubble.run(
+      `bubbleId:${bubble.composerId}:${bubble.bubbleId}`,
+      JSON.stringify({
+        bubbleId: bubble.bubbleId,
+        type: bubble.type,
+        text: bubble.text ?? "",
+        ...(bubble.richText === undefined ? {} : { richText: JSON.stringify(bubble.richText) }),
+        createdAt: bubble.createdAt,
+      }),
+    );
+  }
+  db.close();
 }
 
 describe("extra session sources", () => {
@@ -79,7 +168,9 @@ describe("extra session sources", () => {
 
   it("loads Trae memory JSONL as searchable summary sessions", () => {
     const root = tmpDir("trae");
+    const siblingRoot = tmpDir("trae-sibling");
     const filePath = path.join(root, "memory", "projects", "-tmp-demo-project", "20260610", "session_memory_abc.jsonl");
+    const siblingFilePath = path.join(siblingRoot, "memory", "projects", "-tmp-demo-project", "20260610", "session_memory_sibling.jsonl");
     writeJsonl(filePath, [
       {
         intent: "Investigate slow checkout",
@@ -90,6 +181,7 @@ describe("extra session sources", () => {
         message_id: "m1",
       },
     ]);
+    writeJsonl(siblingFilePath, [{ intent: "Must not be loaded from an unselected Trae root" }]);
 
     const loaded = loadTraeSessions(root);
 
@@ -104,6 +196,175 @@ describe("extra session sources", () => {
     });
     expect(loaded[0].messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(loaded[0].messages[1].content).toContain("Found redundant API polling");
+
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(siblingRoot, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === "win32")("resolves legacy Trae project directories containing underscores", () => {
+    const root = tmpDir("trae-underscore-data");
+    const projectRoot = fs.mkdtempSync("/tmp/agentrecall");
+    const projectPath = path.join(projectRoot, "trae_projects");
+    const projectSegment = projectPath.replace(/[/_]/g, "-");
+    const filePath = path.join(root, "memory", "projects", projectSegment, "20260610", "session_memory_underscore.jsonl");
+
+    try {
+      fs.mkdirSync(projectPath, { recursive: true });
+      writeJsonl(filePath, [
+        {
+          intent: "Resolve a Trae project path",
+          outcome: "Resolved from the filesystem",
+          message_summary_time: "2026-06-10T09:00:00Z",
+        },
+      ]);
+
+      const loaded = loadTraeSessions(root);
+
+      expect(loaded).toHaveLength(1);
+      expect(loaded[0].session.projectPath).toBe(projectPath);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([".trae", ".trae-cn"] as const)("discovers Trae sessions from the default %s home directory", (directory) => {
+    const homeDir = tmpDir("trae-default-single");
+    try {
+      const filePath = path.join(homeDir, directory, "memory", "projects", "-tmp-demo-project", "20260721", "session_memory_single.jsonl");
+      writeJsonl(filePath, [{ intent: `Inspect ${directory}`, projectPath: "/tmp/demo/project" }]);
+
+      const loaded = loadDefaultSessions({ homeDir, includeTrae: true });
+
+      expect(loaded.filter((item) => item.session.source === "trae").map((item) => item.session.rawId)).toEqual(["session_memory_single"]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers Trae sessions from both official and CN home directories", () => {
+    const homeDir = tmpDir("trae-default");
+    try {
+      for (const [directory, id] of [[".trae", "international"], [".trae-cn", "china"]] as const) {
+        const filePath = path.join(homeDir, directory, "memory", "projects", "-tmp-demo-project", "20260721", `session_memory_${id}.jsonl`);
+        writeJsonl(filePath, [
+          {
+            intent: `Investigate ${id} checkout`,
+            projectPath: "/tmp/demo/project",
+            message_summary_time: "2026-07-21T09:00:00Z",
+          },
+        ]);
+      }
+
+      const loaded = loadDefaultSessions({ homeDir, includeTrae: true });
+
+      expect(loaded.filter((item) => item.session.source === "trae").map((item) => item.session.rawId)).toEqual([
+        "session_memory_international",
+        "session_memory_china",
+      ]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads Qoder conversation history JSONL as searchable sessions", () => {
+    const root = tmpDir("qoder");
+    const filePath = path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-fe3", "task-fe3.jsonl");
+    writeJsonl(filePath, [
+      { role: "user", message: { content: [{ type: "text", text: "Fix the login bug" }] } },
+      { role: "assistant", message: { content: [{ type: "text", text: "I will check the auth module." }] } },
+    ]);
+
+    const loaded = loadQoderSessions(root);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      sessionKey: "qoder:demo-app-1a2b3c4d/task-fe3",
+      rawId: "demo-app-1a2b3c4d/task-fe3",
+      source: "qoder",
+      projectPath: "demo-app",
+      firstQuestion: "Fix the login bug",
+      originalTitle: "Fix the login bug",
+    });
+    expect(loaded[0].messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(loaded[0].messages[0].content).toBe("Fix the login bug");
+    expect(loaded[0].messages[1].content).toBe("I will check the auth module.");
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("skips empty Qoder conversation files and concatenates multi-element content", () => {
+    const root = tmpDir("qoder-edge");
+    const emptyPath = path.join(root, "cache", "projects", "proj-aabbccdd", "conversation-history", "task-empty", "task-empty.jsonl");
+    writeJsonl(emptyPath, []);
+    const multiPath = path.join(root, "cache", "projects", "proj-aabbccdd", "conversation-history", "task-multi", "task-multi.jsonl");
+    writeJsonl(multiPath, [
+      { role: "user", message: { content: [{ type: "text", text: "First part" }, { type: "text", text: "Second part" }] } },
+    ]);
+
+    const loaded = loadQoderSessions(root);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session.rawId).toBe("proj-aabbccdd/task-multi");
+    expect(loaded[0].messages[0].content).toBe("First part\nSecond part");
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("strips Qoder wrapper tags and uses user_query as title", () => {
+    const root = tmpDir("qoder-wrapped");
+    const filePath = path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-wrap", "task-wrap.jsonl");
+    writeJsonl(filePath, [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<system-reminder>\n[IMPORTANT] You must always respond in 中文.\n</system-reminder>\n\n<user_query>\n我的目标在：D:\\oss-contrib\\giki\\IMPROVEMENT-LOOP.md\n</user_query>",
+            },
+          ],
+        },
+      },
+      { role: "assistant", message: { content: [{ type: "text", text: "明白，开始执行。" }] } },
+    ]);
+
+    const loaded = loadQoderSessions(root);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session.originalTitle).toBe("我的目标在：D:\\oss-contrib\\giki\\IMPROVEMENT-LOOP.md");
+    expect(loaded[0].session.firstQuestion).toBe("我的目标在：D:\\oss-contrib\\giki\\IMPROVEMENT-LOOP.md");
+    expect(loaded[0].messages[0].content).toBe("我的目标在：D:\\oss-contrib\\giki\\IMPROVEMENT-LOOP.md");
+    // system-reminder content should not appear in searchable message text
+    expect(loaded[0].messages[0].content).not.toContain("system-reminder");
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("strips attached_files wrapper from Qoder messages without user_query", () => {
+    const root = tmpDir("qoder-attached");
+    const filePath = path.join(root, "cache", "projects", "proj-aabbccdd", "conversation-history", "task-att", "task-att.jsonl");
+    writeJsonl(filePath, [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<attached_files>\n#file:d:\\project\\architecture.zip\n#file:d:\\project\\ux-report.md\n</attached_files>\n\n直接帮我重构这个模块",
+            },
+          ],
+        },
+      },
+      { role: "assistant", message: { content: [{ type: "text", text: "好的。" }] } },
+    ]);
+
+    const loaded = loadQoderSessions(root);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session.originalTitle).toBe("直接帮我重构这个模块");
+    expect(loaded[0].messages[0].content).toBe("直接帮我重构这个模块");
+    expect(loaded[0].messages[0].content).not.toContain("attached_files");
 
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -449,6 +710,181 @@ describe("extra session sources", () => {
       source: "cursor",
       title: "Read · src/App.tsx",
     });
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("uses the Cursor composer title instead of the opening prompt", () => {
+    const root = tmpDir("cursor-title");
+    const stateDbPath = path.join(root, "cursor-state.vscdb");
+    const workspaceSlug = "Users-mac-work-cursor-app";
+    const composerId = "cursor-title-1";
+    const transcript = path.join(root, "projects", workspaceSlug, "agent-transcripts", composerId, `${composerId}.jsonl`);
+    writeJsonl(transcript, [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>Fix Cursor sidebar</user_query>" }] },
+      },
+    ]);
+    writeCursorStateDb(stateDbPath, [
+      {
+        composerId,
+        name: "修复 Cursor 会话标题",
+        projectPath: "/Users/mac/work/cursor-app",
+      },
+    ]);
+
+    const loaded = loadCursorAgentSessions(root, {
+      cursorStateDbPath: stateDbPath,
+      cursorWorkspacePathMap: new Map([[workspaceSlug, "/Users/mac/work/cursor-app"]]),
+    });
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      originalTitle: "修复 Cursor 会话标题",
+      firstQuestion: "Fix Cursor sidebar",
+    });
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("loads Cursor composer sessions that do not have transcript files", () => {
+    const root = tmpDir("cursor-database-only");
+    const stateDbPath = path.join(root, "cursor-state.vscdb");
+    const composerId = "cursor-database-only-1";
+    writeCursorStateDb(
+      stateDbPath,
+      [
+        {
+          composerId,
+          name: "Repair Windows login flow",
+          projectPath: "C:\\Users\\me\\cursor-app",
+        },
+      ],
+      [
+        {
+          composerId,
+          bubbleId: "bubble-user",
+          type: 1,
+          richText: {
+            type: "doc",
+            content: [{ type: "paragraph", content: [{ type: "text", text: "Investigate login failures" }] }],
+          },
+          createdAt: "2026-07-22T10:01:00Z",
+        },
+        {
+          composerId,
+          bubbleId: "bubble-assistant",
+          type: 2,
+          text: "I will inspect the authentication flow.",
+          createdAt: "2026-07-22T10:02:00Z",
+        },
+      ],
+    );
+
+    const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].session).toMatchObject({
+      sessionKey: `cursor:C-Users-me-cursor-app:${composerId}`,
+      rawId: composerId,
+      projectPath: "C:\\Users\\me\\cursor-app",
+      originalTitle: "Repair Windows login flow",
+      firstQuestion: "Investigate login failures",
+    });
+    expect(loaded[0].messages.map((message) => `${message.role}:${message.content}`)).toEqual([
+      "user:Investigate login failures",
+      "assistant:I will inspect the authentication flow.",
+    ]);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("omits empty Cursor composer headers even when Cursor does not mark them as drafts", () => {
+    const root = tmpDir("cursor-empty-header");
+    const stateDbPath = path.join(root, "cursor-state.vscdb");
+    writeCursorStateDb(stateDbPath, [
+      {
+        composerId: "cursor-empty-1",
+        name: "",
+        projectPath: "",
+      },
+    ]);
+
+    const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
+
+    expect(loaded).toEqual([]);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("describes Cursor Remote SSH execution separately from local storage", () => {
+    const root = tmpDir("cursor-remote-ssh");
+    const stateDbPath = path.join(root, "cursor-state.vscdb");
+    writeCursorStateDb(stateDbPath, [
+      {
+        composerId: "cursor-remote-1",
+        name: "Remote Cursor session",
+        projectPath: "/home/me/project",
+        uriScheme: "vscode-remote",
+        uriAuthority: "ssh-remote+dev",
+      },
+      {
+        composerId: "cursor-local-1",
+        name: "Local Cursor session",
+        projectPath: "/Users/me/project",
+      },
+    ]);
+
+    const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
+    const remote = loaded.find((item) => item.session.rawId === "cursor-remote-1");
+    const local = loaded.find((item) => item.session.rawId === "cursor-local-1");
+
+    expect(remote).toMatchObject({
+      session: { storageEnvironmentId: "local" },
+      executionEnvironmentHint: { kind: "ssh", label: "dev", hostAlias: "dev" },
+    });
+    expect(local?.executionEnvironmentHint).toBeUndefined();
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("treats Cursor composer metadata as a transcript refresh dependency", () => {
+    const root = tmpDir("cursor-title-refresh");
+    const stateDbPath = path.join(root, "cursor-state.vscdb");
+    const workspaceSlug = "Users-mac-work-cursor-app";
+    const composerId = "cursor-refresh-1";
+    const transcript = path.join(root, "projects", workspaceSlug, "agent-transcripts", composerId, `${composerId}.jsonl`);
+    writeJsonl(transcript, [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>Refresh my title</user_query>" }] },
+      },
+    ]);
+    writeCursorStateDb(stateDbPath, [
+      {
+        composerId,
+        name: "Current Cursor title",
+        projectPath: "/Users/mac/work/cursor-app",
+      },
+    ]);
+    const walPath = `${stateDbPath}-wal`;
+    fs.writeFileSync(walPath, "");
+    const walTimestamp = new Date(fs.statSync(stateDbPath).mtimeMs + 60_000);
+    fs.utimesSync(walPath, walTimestamp, walTimestamp);
+    const stateMtimeMs = fs.statSync(walPath).mtimeMs;
+    let observedDependencyMtimeMs = 0;
+
+    loadCursorAgentSessions(root, {
+      cursorStateDbPath: stateDbPath,
+      cursorWorkspacePathMap: new Map([[workspaceSlug, "/Users/mac/work/cursor-app"]]),
+      shouldSkipFile: (_filePath, _stat, dependencyMtimeMs) => {
+        observedDependencyMtimeMs = dependencyMtimeMs ?? 0;
+        return false;
+      },
+    });
+
+    expect(observedDependencyMtimeMs).toBe(stateMtimeMs);
 
     fs.rmSync(root, { recursive: true, force: true });
   });

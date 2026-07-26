@@ -33,3 +33,24 @@ export interface AppUpdateInstallResult {
   started: boolean;
   version: string;
 }
+
+export type AppUpdatePhase =
+  | "checking"
+  | "downloading"
+  | "verifying"
+  | "staging"
+  | "validating"
+  | "restarting"
+  | "completed"
+  | "error";
+
+export interface AppUpdateProgress {
+  phase: AppUpdatePhase;
+  version: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  percent?: number;
+  bytesPerSecond?: number;
+  message?: string;
+  error?: string;
+}

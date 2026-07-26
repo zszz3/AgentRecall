@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
-import type { UsageQuota, UsageQuotaCard, UsageQuotaSnapshot } from "./types";
+import type { UsageQuota, UsageQuotaCard, UsageQuotaProvider, UsageQuotaSnapshot } from "./types";
 
 const CODEX_USAGE_PRIMARY_URL = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_USAGE_FALLBACK_URL = "https://chatgpt.com/api/codex/usage";
@@ -103,14 +103,19 @@ interface ClaudeStatuslineQuota {
 
 export async function loadUsageQuotaSnapshot(options: UsageQuotaLoadOptions = {}): Promise<UsageQuotaSnapshot> {
   const now = options.now ?? new Date();
-  // Hidden providers are skipped at the source: no HTTP/file load and no card.
+  // Hidden providers are skipped at the source: no HTTP/file load and no card. They are still
+  // reported in hiddenProviders so the UI can distinguish "user hid everything" from a real failure.
   const [codex, claudeCode] = await Promise.all([
     options.hideCodexQuota ? Promise.resolve(null) : loadCodexQuotaCard({ ...options, now }),
     options.hideClaudeQuota ? Promise.resolve(null) : Promise.resolve(loadClaudeQuotaCard({ ...options, now })),
   ]);
+  const hiddenProviders: UsageQuotaProvider[] = [];
+  if (options.hideCodexQuota) hiddenProviders.push("codex");
+  if (options.hideClaudeQuota) hiddenProviders.push("claude-code");
   return {
     generatedAt: now.toISOString(),
     providers: [codex, claudeCode].filter((card): card is UsageQuotaCard => card !== null),
+    hiddenProviders,
   };
 }
 
@@ -172,6 +177,7 @@ export async function loadCodexQuotaCard(options: UsageQuotaLoadOptions = {}): P
       ...card,
       status: "error",
       source: "auth.json",
+      errorKind: classifyCodexQuotaError(error),
       detail: sanitizeCodexError(error),
     };
   }
@@ -727,7 +733,7 @@ else:
   });
 }
 
-class CodexHttpError extends Error {
+export class CodexHttpError extends Error {
   constructor(message: string, readonly statusCode?: number) {
     super(message);
     this.name = "CodexHttpError";
@@ -857,9 +863,36 @@ function codexHttpStatusMessage(statusCode: number): string {
   return `Codex quota endpoint returned HTTP ${statusCode}.`;
 }
 
-function sanitizeCodexError(error: unknown): string {
+export function classifyCodexQuotaError(error: unknown): "transient" | "auth" | "rate_limit" | "permanent" {
+  if (error instanceof CodexHttpError) {
+    if (error.statusCode === 401 || error.statusCode === 403) return "auth";
+    if (error.statusCode === 429) return "rate_limit";
+    return "permanent";
+  }
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [redacted]").replace(/sk-[A-Za-z0-9._-]+/g, "sk-[redacted]");
+  if (
+    /timed?\s*out|timeout|socket hang up|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|Temporary failure/i.test(
+      message,
+    )
+  ) {
+    return "transient";
+  }
+  return "permanent";
+}
+
+function sanitizeCodexError(error: unknown): string {
+  const kind = classifyCodexQuotaError(error);
+  const message = error instanceof Error ? error.message : String(error);
+  if (kind === "transient") {
+    if (/timed?\s*out|timeout/i.test(message)) return "Codex 额度请求超时，请检查网络后重试。";
+    return "暂时无法连接 Codex 额度服务，请稍后重试。";
+  }
+  if (kind === "auth") return "Codex 登录状态已失效，请重新登录。";
+  if (kind === "rate_limit") return "Codex 额度查询过于频繁，请稍后重试。";
+  return message
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/g, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9._-]+/g, "sk-[redacted]")
+    .slice(0, 300);
 }
 
 function looksLikeClaudeApiUsage(raw: ClaudeStatuslineFile): boolean {

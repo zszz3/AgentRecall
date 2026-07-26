@@ -1,6 +1,9 @@
 node_modules/
 out/
-dist/
+dist/*
+!dist/main/
+dist/main/*
+!dist/main/index.js
 *.log
 .DS_Store
 *.sqlite
@@ -8,10 +11,12 @@ dist/
 *.sqlite-wal
 *.db
 .worktrees/
+.superpowers/
 
 # 本地设计/计划文档，不入库
 *.timestamp-*.mjs
 docs/plans/
 docs/specs/
+docs/superpowers/
 .build-sentinel
 .qoder/

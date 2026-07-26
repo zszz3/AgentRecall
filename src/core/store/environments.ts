@@ -10,6 +10,7 @@ interface EnvironmentRow {
   id: string;
   kind: EnvironmentKind;
   label: string;
+  wsl_distribution: string | null;
   host_alias: string | null;
   host: string | null;
   user: string | null;
@@ -34,6 +35,7 @@ export class EnvironmentStore {
   }
 
   upsertEnvironment(input: EnvironmentUpsertInput): SessionEnvironment {
+    if (input.kind === "wsl") return this.upsertWslEnvironment(input);
     const now = Date.now();
     const id = input.id ?? this.findEnvironmentIdByHostAlias(input) ?? this.createUniqueEnvironmentId(input.label);
     const existing = this.getEnvironment(id);
@@ -71,11 +73,49 @@ export class EnvironmentStore {
     return environment;
   }
 
+  private upsertWslEnvironment(input: EnvironmentUpsertInput): SessionEnvironment {
+    const now = Date.now();
+    const wslDistribution = input.wslDistribution?.trim() || null;
+    if (!wslDistribution) throw new Error("WSL distribution is required.");
+    const id = input.id
+      ?? this.findEnvironmentIdByWslDistribution(wslDistribution)
+      ?? this.createUniqueEnvironmentId(input.label);
+    const existing = this.getEnvironment(id);
+    const environment: SessionEnvironment = {
+      id,
+      kind: "wsl",
+      label: input.label,
+      wslDistribution,
+      hostAlias: null,
+      host: null,
+      user: null,
+      port: null,
+      authMode: "none",
+      identityFile: null,
+      enabled: input.enabled ?? true,
+      syncState: existing?.syncState ?? "idle",
+      lastSyncedAt: existing?.lastSyncedAt ?? null,
+      lastError: existing?.lastError ?? null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.writeEnvironment(environment);
+    return environment;
+  }
+
   private findEnvironmentIdByHostAlias(input: EnvironmentUpsertInput): string | null {
     if (input.kind !== "ssh" || !input.hostAlias) return null;
     const row = this.db.prepare("SELECT id FROM environments WHERE kind = 'ssh' AND host_alias = ? ORDER BY created_at, id LIMIT 1").get(
       input.hostAlias,
     ) as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  private findEnvironmentIdByWslDistribution(distribution: string | null): string | null {
+    if (!distribution) return null;
+    const row = this.db
+      .prepare("SELECT id FROM environments WHERE kind = 'wsl' AND wsl_distribution = ? ORDER BY created_at, id LIMIT 1")
+      .get(distribution) as { id: string } | undefined;
     return row?.id ?? null;
   }
 
@@ -95,13 +135,14 @@ export class EnvironmentStore {
       .prepare(
         `
         INSERT INTO environments (
-          id, kind, label, host_alias, host, user, port, auth_mode, identity_file,
+          id, kind, label, wsl_distribution, host_alias, host, user, port, auth_mode, identity_file,
           enabled, sync_state, last_synced_at, last_error, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           kind = excluded.kind,
           label = excluded.label,
+          wsl_distribution = excluded.wsl_distribution,
           host_alias = excluded.host_alias,
           host = excluded.host,
           user = excluded.user,
@@ -116,6 +157,7 @@ export class EnvironmentStore {
         environment.id,
         environment.kind,
         environment.label,
+        environment.wslDistribution ?? null,
         environment.hostAlias,
         environment.host,
         environment.user,
@@ -213,6 +255,7 @@ function hydrateEnvironmentRow(row: EnvironmentRow): SessionEnvironment {
     id: row.id,
     kind: row.kind,
     label: row.label,
+    wslDistribution: row.wsl_distribution,
     hostAlias: row.host_alias,
     host: row.host,
     user: row.user,

@@ -23,6 +23,7 @@
   },
   "files": [
     "out",
+    "dist/main/index.js",
     "bin",
     "assets"
   ],

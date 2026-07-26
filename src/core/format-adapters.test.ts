@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeAdapter, codebuddyAdapter, codexAdapter, cleanTitle, cursorAdapter, extractCursorUserQuery, isMeaningfulUserMessage } from "./format-adapters";
+import { claudeAdapter, codebuddyAdapter, codexAdapter, cleanTitle, cursorAdapter, extractCursorUserQuery, getAdapter, getFormatForSource, isMeaningfulUserMessage } from "./format-adapters";
 import { decodeCursorWorkspaceSlug, parseCursorTranscriptPath } from "./session-loader";
 import * as path from "node:path";
 
@@ -50,6 +50,35 @@ describe("format adapters", () => {
     ).toBeNull();
   });
 
+  it("keeps explicit image attachments without treating tool paths as files", () => {
+    const parsed = codexAdapter.parseLine({
+      type: "response_item",
+      timestamp: "2026-06-01T10:00:00Z",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "看一下这张图" },
+          { type: "input_image", image_url: "data:image/png;base64,aGVsbG8=" },
+          { type: "tool_use", input: { path: "/private/secret.txt" } },
+        ],
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      content: "看一下这张图",
+      attachments: [
+        expect.objectContaining({
+          fileName: "image.png",
+          mimeType: "image/png",
+          previewKind: "image",
+          status: "available",
+        }),
+      ],
+    });
+    expect(JSON.stringify(parsed)).not.toContain("/private/secret.txt");
+  });
+
   it("extracts visible CodeBuddy CLI messages", () => {
     expect(
       codebuddyAdapter.parseLine({
@@ -63,6 +92,15 @@ describe("format adapters", () => {
       content: "我来处理",
       timestamp: new Date(1_780_321_303_135).toISOString(),
     });
+  });
+
+  it("resolves Qoder through its declared format instead of the Codex fallback", () => {
+    expect(getFormatForSource("qoder")).toBe("qoder");
+    expect(getFormatForSource("zcode-cli")).toBe("zcode");
+    expect(getAdapter("qoder").parseLine({
+      role: "assistant",
+      message: { content: [{ type: "text", text: "Qoder reply" }] },
+    })).toMatchObject({ role: "assistant", content: "Qoder reply" });
   });
 
   it("skips the CodeBuddy CLI bootstrap 'code' root message", () => {

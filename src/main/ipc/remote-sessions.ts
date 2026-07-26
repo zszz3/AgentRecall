@@ -14,6 +14,12 @@ export interface RemoteSessionsIpcService {
   list(query: string): Promise<RemoteSessionListItem[]>;
   listSyncItems(): Promise<SessionSyncItem[]>;
   getDetail(remoteId: string): Promise<RemoteSessionDetailSnapshot>;
+  previewAttachment(
+    objectKey: string,
+    sha256: string,
+    mimeType: string,
+    previewKind: "image" | "pdf" | "text" | "file",
+  ): Promise<{ kind: "image" | "text" | "unavailable"; data?: string }>;
   chooseProject(): Promise<string | null>;
   restore(remoteId: string, target: MigrationAgent, projectPath: string, onProgress: (progress: SessionMigrationProgress) => void): Promise<SessionMigrationResult>;
   restoreToSource(remoteId: string, target: MigrationAgent, onProgress: (progress: SessionMigrationProgress) => void): Promise<SessionMigrationResult>;
@@ -32,6 +38,8 @@ export function registerRemoteSessionsIpc(ipc: IpcMainRegistrar, service: Remote
     registerIpcHandler(ipc, REMOTE_SESSIONS_IPC.list, (_event, query) => service.list(query)),
     registerIpcHandler(ipc, REMOTE_SESSIONS_IPC.listSyncItems, () => service.listSyncItems()),
     registerIpcHandler(ipc, REMOTE_SESSIONS_IPC.getDetail, (_event, id) => service.getDetail(id)),
+    registerIpcHandler(ipc, REMOTE_SESSIONS_IPC.previewAttachment, (_event, objectKey, sha256, mimeType, previewKind) =>
+      service.previewAttachment(objectKey, sha256, mimeType, previewKind)),
     registerIpcHandler(ipc, REMOTE_SESSIONS_IPC.chooseProject, () => service.chooseProject()),
     registerIpcHandler(ipc, REMOTE_SESSIONS_IPC.restore, (event, id, target, projectPath) =>
       service.restore(id, target, projectPath, (progress) => event.sender.send("session:migration-progress", progress))),

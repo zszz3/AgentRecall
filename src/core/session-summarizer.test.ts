@@ -35,57 +35,101 @@ afterAll(async () => {
 async function writeCodexExecFake(): Promise<{ executable: string; callsPath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "session-summary-codex-"));
   temporaryExecutableDirectories.add(dir);
-  const executable = path.join(dir, "codex-fake");
+  const executable = path.join(dir, process.platform === "win32" ? "codex-fake.cmd" : "codex-fake");
+  const scriptPath = process.platform === "win32" ? path.join(dir, "codex-fake.cjs") : executable;
   const callsPath = path.join(dir, "calls.jsonl");
   const script = `#!/usr/bin/env node
 const fs = require("fs");
 const callsPath = ${JSON.stringify(callsPath)};
 
-fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
-if (!process.argv.includes("exec") || !process.argv.includes("--ephemeral") || !process.argv.includes("--json")) {
-  console.error("expected codex exec --ephemeral --json");
-  process.exit(2);
-}
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2), input }) + "\\n");
+  if (!process.argv.includes("exec") || !process.argv.includes("--ephemeral") || !process.argv.includes("--json")) {
+    console.error("expected codex exec --ephemeral --json");
+    process.exit(2);
+  }
 
-function write(message) {
-  process.stdout.write(JSON.stringify(message) + "\\n");
-}
+  function write(message) {
+    process.stdout.write(JSON.stringify(message) + "\\n");
+  }
 
-write({ type: "thread.started", thread_id: "thread-summary-1" });
-write({ type: "turn.started" });
-write({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "{\\"summary\\":\\"Summarized with current Codex config.\\",\\"title\\":\\"Codex summary\\",\\"tags\\":[\\"summary\\"]}" } });
-write({ type: "turn.completed" });
+  write({ type: "thread.started", thread_id: "thread-summary-1" });
+  write({ type: "turn.started" });
+  write({ type: "item.completed", item: { id: "item-1", type: "agent_message", text: "{\\"summary\\":\\"Summarized with current Codex config.\\",\\"title\\":\\"Codex summary\\",\\"tags\\":[\\"summary\\"]}" } });
+  write({ type: "turn.completed" });
+});
 `;
-  await writeFile(executable, script, "utf8");
-  await chmod(executable, 0o755);
+  await writeFile(scriptPath, script, "utf8");
+  if (process.platform === "win32") await writeFile(executable, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, "utf8");
+  else await chmod(executable, 0o755);
+  return { executable, callsPath };
+}
+
+async function writeCodexExecTerminatingFake(): Promise<{ executable: string; callsPath: string }> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "session-summary-codex-term-"));
+  temporaryExecutableDirectories.add(dir);
+  const executable = path.join(dir, process.platform === "win32" ? "codex-fake.cmd" : "codex-fake");
+  const scriptPath = process.platform === "win32" ? path.join(dir, "codex-fake.cjs") : executable;
+  const callsPath = path.join(dir, "calls.jsonl");
+  // Emits the thread start then kills itself with SIGTERM, mimicking an aborted/timed-out
+  // run where the process exits via signal (exit code null).
+  const script = `#!/usr/bin/env node
+const fs = require("fs");
+const callsPath = ${JSON.stringify(callsPath)};
+fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
+process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "thread-summary-term" }) + "\\n");
+process.kill(process.pid, "SIGTERM");
+setTimeout(() => process.exit(0), 1000);
+`;
+  await writeFile(scriptPath, script, "utf8");
+  if (process.platform === "win32") await writeFile(executable, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, "utf8");
+  else await chmod(executable, 0o755);
   return { executable, callsPath };
 }
 
 async function writeClaudeExecFake(): Promise<{ executable: string; callsPath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "session-summary-claude-"));
   temporaryExecutableDirectories.add(dir);
-  const executable = path.join(dir, "claude-fake");
+  const executable = path.join(dir, process.platform === "win32" ? "claude-fake.cmd" : "claude-fake");
+  const scriptPath = process.platform === "win32" ? path.join(dir, "claude-fake.cjs") : executable;
   const callsPath = path.join(dir, "calls.jsonl");
   const script = `#!/usr/bin/env node
 const fs = require("fs");
 const callsPath = ${JSON.stringify(callsPath)};
 
-fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
-if (!process.argv.includes("--print") || !process.argv.includes("stream-json")) {
-  console.error("expected claude --print --output-format stream-json");
-  process.exit(2);
-}
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2), input }) + "\\n");
+  if (!process.argv.includes("--print") || !process.argv.includes("stream-json")) {
+    console.error("expected claude --print --output-format stream-json");
+    process.exit(2);
+  }
 
-function write(message) {
-  process.stdout.write(JSON.stringify(message) + "\\n");
-}
+  function write(message) {
+    process.stdout.write(JSON.stringify(message) + "\\n");
+  }
 
-write({ type: "system", session_id: "claude-summary-1" });
-write({ type: "result", subtype: "success", session_id: "claude-summary-1", result: "{\\"summary\\":\\"Summarized with current Claude Code settings.\\",\\"title\\":\\"Claude summary\\",\\"tags\\":[\\"summary\\"]}" });
+  write({ type: "system", session_id: "claude-summary-1" });
+  write({ type: "result", subtype: "success", session_id: "claude-summary-1", result: "{\\"summary\\":\\"Summarized with current Claude Code settings.\\",\\"title\\":\\"Claude summary\\",\\"tags\\":[\\"summary\\"]}" });
+});
 `;
-  await writeFile(executable, script, "utf8");
-  await chmod(executable, 0o755);
+  await writeFile(scriptPath, script, "utf8");
+  if (process.platform === "win32") await writeFile(executable, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, "utf8");
+  else await chmod(executable, 0o755);
   return { executable, callsPath };
+}
+
+function longSummaryExcerpt(label: string) {
+  return {
+    head: Array.from({ length: 24 }, (_, index) => ({ role: "user" as const, content: `${label} ${index} ${"x".repeat(1180)}` })),
+    tail: [],
+    omittedCount: 0,
+  };
 }
 
 describe("resolveSummaryEndpoint", () => {
@@ -242,12 +286,46 @@ describe("summarizeSession", () => {
     }
   });
 
-  it("uses Codex exec ephemeral with the current Codex config", async () => {
+  it("retries without temperature when the model rejects it (HTTP 400 deprecated)", async () => {
+    const originalFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      bodies.push(body);
+      if ("temperature" in body) {
+        return new Response(JSON.stringify({ message: "`temperature` is deprecated for this model." }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"summary":"Summarized without temperature.","title":"Ok","tags":["summary"]}' } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const result = await summarizeSession(
+        { head: [{ role: "user", content: "summarize with a temperature-less model" }], tail: [], omittedCount: 0 },
+        { baseUrl: "https://api.example/v1", model: "gpt-5.5", apiKey: "sk-test", apiFormat: "openai_chat" },
+        requestSummaryCompletion,
+      );
+
+      expect(result.summary).toBe("Summarized without temperature.");
+      expect(bodies).toHaveLength(2);
+      expect(bodies[0]).toHaveProperty("temperature", 0.2);
+      expect(bodies[1]).not.toHaveProperty("temperature");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uses the current Codex config through codex_exec and records the temporary session", async () => {
     const fake = await writeCodexExecFake();
     const temporarySessions: string[] = [];
 
     const result = await summarizeSession(
-      { head: [{ role: "user", content: "summarize using official codex" }], tail: [], omittedCount: 0 },
+      longSummaryExcerpt("summarize using official codex"),
       {
         baseUrl: "",
         model: "codex",
@@ -263,10 +341,32 @@ describe("summarizeSession", () => {
     const calls = (await readFile(fake.callsPath, "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { args: string[] });
+      .map((line) => JSON.parse(line) as { args: string[]; input: string });
     expect(result.summary).toBe("Summarized with current Codex config.");
     expect(temporarySessions).toEqual(["codex:thread-summary-1"]);
     expect(calls[0].args).toEqual(expect.arrayContaining(["exec", "--ephemeral", "--json", "--skip-git-repo-check"]));
+    expect(calls[0].args).not.toContain(expect.stringContaining("summarize using official codex"));
+    expect(calls[0].input).toContain("summarize using official codex");
+    expect(calls[0].input.length).toBeGreaterThan(20_000);
+  });
+
+  it.skipIf(process.platform === "win32")("does not fall back to claude when the codex run is terminated by a signal", async () => {
+    const codexFake = await writeCodexExecTerminatingFake();
+
+    await expect(
+      summarizeSession(
+        { head: [{ role: "user", content: "summarize but get killed" }], tail: [], omittedCount: 0 },
+        {
+          baseUrl: "",
+          model: "codex",
+          apiKey: "",
+          apiFormat: "codex_exec",
+          command: codexFake.executable,
+          cwd: path.dirname(codexFake.executable),
+        },
+        requestSummaryCompletion,
+      ),
+    ).rejects.toThrow(/timed out/i);
   });
 
   it("uses Claude Code print mode with the current Claude Code settings and records the temporary session", async () => {
@@ -274,7 +374,7 @@ describe("summarizeSession", () => {
     const temporarySessions: string[] = [];
 
     const result = await summarizeSession(
-      { head: [{ role: "user", content: "summarize using official claude" }], tail: [], omittedCount: 0 },
+      longSummaryExcerpt("summarize using official claude"),
       {
         baseUrl: "",
         model: "claude",
@@ -290,10 +390,13 @@ describe("summarizeSession", () => {
     const calls = (await readFile(fake.callsPath, "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { args: string[] });
+      .map((line) => JSON.parse(line) as { args: string[]; input: string });
     expect(result.summary).toBe("Summarized with current Claude Code settings.");
     expect(temporarySessions).toEqual(["claude:claude-summary-1"]);
     expect(calls[0].args).toEqual(expect.arrayContaining(["--print", "--output-format", "stream-json"]));
+    expect(calls[0].args).not.toContain(expect.stringContaining("summarize using official claude"));
+    expect(calls[0].input).toContain("summarize using official claude");
+    expect(calls[0].input.length).toBeGreaterThan(20_000);
   });
 });
 

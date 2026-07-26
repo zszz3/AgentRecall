@@ -29,14 +29,6 @@ describe("language storage", () => {
 });
 
 describe("theme controls", () => {
-  it("offers a persisted subagent visibility toggle in settings", () => {
-    const settingsDialog = settingsSource;
-    expect(settingsDialog).toContain("Hide subagent sessions");
-    expect(settingsDialog).toContain("隐藏 Subagent 会话");
-    expect(settingsDialog).toContain("checked={Boolean(settings?.hideSubagentSessions)}");
-    expect(settingsDialog).toContain("onSettingsChange({ hideSubagentSessions: event.currentTarget.checked })");
-  });
-
   it("keeps light and dark mode selection inside settings", () => {
     const toolbar = appSource.slice(
       appSource.indexOf('<header className="toolbar">'),
@@ -92,27 +84,6 @@ describe("theme controls", () => {
     expect(apiDialog).toMatch(/Save summary settings/);
   });
 
-  it("visualizes Codex config.toml and supports detected model selection", () => {
-    const apiDialog = apiConfigDialogSource;
-
-    expect(apiDialog).toContain("codex-config-visualizer");
-    expect(apiDialog).toContain("getCodexConfig");
-    expect(apiDialog).toContain("probeCodexModels");
-    expect(apiDialog).toContain("Detect models");
-    expect(apiDialog).toContain("codex-model-detect-button");
-    expect(apiDialog).toContain("selectedCodexConfigProviderId");
-    expect(apiDialog).toContain("hydrateDraftFromCodexConfig");
-    expect(apiDialog).toContain("Config provider");
-    expect(apiDialog).toContain('customProviderId: "custom"');
-    expect(apiDialog).toContain('data-provider-labels="Codex Official CodexZH DeepSeek GLM LongCat Kimi MiMo Custom"');
-    expect(apiDialog).toContain("codexModelOptions.map");
-    expect(apiDialog).toContain("selectedDetectedCodexModel");
-    expect(apiDialog).toContain("codexModelConflictAction");
-    expect(apiDialog).toContain("codex-model-conflict");
-    expect(apiDialog).toContain("runCodexAction(codexModelConflictAction, codexModelConflict.selected)");
-    expect(apiDialog).toContain("runCodexAction(codexModelConflictAction, codexModelConflict.typed)");
-  });
-
   it("omits CodexZH from direct AI summary API providers", () => {
     const summarySection = apiConfigDialogSource.slice(apiConfigDialogSource.indexOf("AI summary & search source"));
 
@@ -149,22 +120,6 @@ describe("theme controls", () => {
     expect(selectClaudeApiPreset).toContain("customApiKey: apiKey");
     expect(selectSummaryPreset).toContain('getApiProviderKey("summary", preset.id)');
     expect(selectSummaryPreset).not.toContain("onSettingsChange({ summarySource: \"custom\", summaryApiConfig: next })");
-  });
-
-  it("hydrates summary custom draft from local Codex first, then Claude", () => {
-    const apiDialog = apiConfigDialogSource;
-
-    expect(apiDialog).toContain("function buildSummaryDraftFromSettings");
-    expect(apiDialog).toContain("function buildSummarySourceFromSettings");
-    expect(apiDialog).toContain('if (codex?.activeProvider === "custom"');
-    expect(apiDialog).toContain('if (claude?.activeProvider === "custom"');
-    expect(apiDialog).toContain('...codex');
-    expect(apiDialog).toContain('customProviderId: "custom"');
-    expect(apiDialog).toContain('setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings))');
-    expect(apiDialog).toContain('setDraftSummarySource(buildSummarySourceFromSettings(settings))');
-    expect(apiDialog).toContain("优先使用当前本机 Codex 配置");
-    expect(apiDialog).toContain("回退到当前本机 Claude 配置");
-    expect(apiDialog).toContain("api-provider-switch--compact");
   });
 
   it("keeps unknown Codex providers as Custom instead of forcing CodexZH", () => {

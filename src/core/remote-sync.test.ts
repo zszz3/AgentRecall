@@ -38,6 +38,16 @@ function upsertSshEnvironment(store: ReturnType<typeof createInMemoryStore>) {
   });
 }
 
+function upsertWslEnvironment(store: ReturnType<typeof createInMemoryStore>) {
+  return store.upsertEnvironment({
+    id: "wsl-ubuntu",
+    kind: "wsl",
+    label: "WSL · Ubuntu",
+    wslDistribution: "Ubuntu",
+    enabled: true,
+  });
+}
+
 function validCodexPayload(rawId = "remote-codex"): RemoteSessionFilePayload {
   return {
     kind: "codex-session",
@@ -63,8 +73,121 @@ describe("remote sync", () => {
     ["tcodex-cli", "codex"],
     ["codebuddy-cli", "codebuddy"],
     ["codewiz-cli", "codewiz"],
+    ["qoder", "qoder"],
   ] as const)("maps %s to the %s remote family", (source, family) => {
     expect(remoteFamilyForSource(source)).toBe(family);
+  });
+
+  it("limits WSL indexing to Codex and Claude and uses a WSL-scoped session key", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertWslEnvironment(store);
+    let collectorCommand = "";
+    try {
+      await syncRemoteEnvironment(store, environment, {
+        enabledOptionalSources: ["codebuddy-cli", "tclaude-cli"],
+        runSsh: async (_environment, command) => {
+          collectorCommand = command;
+          return [
+            JSON.stringify({ kind: "codex-session", source: "codex-cli", path: "/home/me/.codex/sessions/a.jsonl", mtimeMs: 1, size: 1, rawId: "same", projectPath: "/repo", timestamp: 1, originalTitle: "Codex", firstQuestion: "q", messageCount: 1 }),
+            JSON.stringify({ kind: "claude-project", source: "claude-cli", path: "/home/me/.claude/projects/repo/same.jsonl", mtimeMs: 1, size: 1, rawId: "same-claude", projectPath: "/repo", timestamp: 1, originalTitle: "Claude", firstQuestion: "q", messageCount: 1 }),
+            JSON.stringify({ kind: "codebuddy-project", source: "codebuddy-cli", path: "/home/me/.codebuddy/projects/repo/same.jsonl", mtimeMs: 1, size: 1, rawId: "same-codebuddy", projectPath: "/repo", timestamp: 1, originalTitle: "CodeBuddy", firstQuestion: "q", messageCount: 1 }),
+          ].join("\n");
+        },
+      });
+      const collectorScript = decodeCollectorScript(collectorCommand);
+      expect(collectorScript).not.toContain("codewiz_db = home");
+      expect(collectorScript).not.toContain("emit_codewiz_summaries(codewiz_db");
+      expect(store.getSession("wsl:wsl-ubuntu:codex-cli:same")).toBeTruthy();
+      expect(store.getSession("wsl:wsl-ubuntu:claude-cli:same-claude")).toBeTruthy();
+      expect(store.searchSessions({ environmentId: environment.id }).map((session) => session.source)).not.toContain("codebuddy-cli");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("preserves Subagent relationships from remote summary records", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    try {
+      await syncRemoteEnvironment(store, environment, {
+        runSsh: async () => `${JSON.stringify({
+          kind: "codex-session",
+          source: "codex-cli",
+          path: "/home/me/.codex/sessions/child.jsonl",
+          mtimeMs: 1,
+          size: 1,
+          rawId: "child",
+          projectPath: "/repo",
+          timestamp: 1,
+          originalTitle: "Child",
+          firstQuestion: "subtask",
+          messageCount: 1,
+          isSubagent: true,
+          parentSessionId: "parent",
+        })}\n`,
+      });
+
+      expect(store.getSession("ssh:ssh-devbox:codex-cli:child")).toMatchObject({
+        isSubagent: true,
+        parentSessionId: "parent",
+      });
+      expect(store.searchSessions({ environmentId: environment.id, excludeSubagents: true })).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("detects Codex and Claude Subagents in the remote collector", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-subagents-"));
+    const writeJsonl = (filePath: string, rows: unknown[]) => {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join("\n"), "utf8");
+    };
+    try {
+      writeJsonl(path.join(tempHome, ".codex", "sessions", "2026", "07", "24", "child.jsonl"), [
+        {
+          type: "session_meta",
+          timestamp: "2026-07-24T10:00:00Z",
+          payload: {
+            id: "codex-child",
+            cwd: "/repo",
+            source: { subagent: { thread_spawn: { parent_thread_id: "codex-parent", depth: 1 } } },
+          },
+        },
+      ]);
+      writeJsonl(path.join(tempHome, ".claude", "projects", "repo", "claude-parent", "subagents", "claude-child.jsonl"), [
+        {
+          type: "user",
+          timestamp: "2026-07-24T10:00:00Z",
+          cwd: "/repo",
+          sessionId: "claude-parent",
+          agentId: "claude-child",
+          message: { role: "user", content: "subtask" },
+        },
+      ]);
+
+      await syncRemoteEnvironment(store, environment, {
+        runSsh: async (_environment, remoteCommand) => execFileSync(
+          "python3",
+          ["-c", decodeCollectorScript(remoteCommand)],
+          { encoding: "utf8", env: { ...process.env, HOME: tempHome } },
+        ),
+      });
+
+      expect(store.getSession("ssh:ssh-devbox:codex-cli:codex-child")).toMatchObject({
+        isSubagent: true,
+        parentSessionId: "codex-parent",
+      });
+      expect(store.getSession("ssh:ssh-devbox:claude-cli:claude-child")).toMatchObject({
+        isSubagent: true,
+        parentSessionId: "claude-parent",
+      });
+    } finally {
+      store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 
   it("collects summaries from all five CLI sources and keeps same raw IDs isolated by source", async () => {
@@ -105,6 +228,38 @@ describe("remote sync", () => {
               inputTokensDetails: [{ cached_tokens: 20 }],
               outputTokensDetails: [{ reasoning_tokens: 10 }],
               totalTokens: 140,
+            },
+          },
+        },
+        {
+          id: "codebuddy-fc-a",
+          type: "function_call",
+          callId: "call-a",
+          messageId: "m-tool",
+          timestamp: 1_752_573_603_000,
+          providerData: {
+            usage: {
+              inputTokens: 200,
+              outputTokens: 50,
+              inputTokensDetails: [{ cached_tokens: 0 }],
+              outputTokensDetails: [{ reasoning_tokens: 0 }],
+              totalTokens: 250,
+            },
+          },
+        },
+        {
+          id: "codebuddy-fc-b",
+          type: "function_call",
+          callId: "call-b",
+          messageId: "m-tool",
+          timestamp: 1_752_573_604_000,
+          providerData: {
+            usage: {
+              inputTokens: 300,
+              outputTokens: 60,
+              inputTokensDetails: [{ cached_tokens: 0 }],
+              outputTokensDetails: [{ reasoning_tokens: 0 }],
+              totalTokens: 360,
             },
           },
         },
@@ -163,11 +318,11 @@ describe("remote sync", () => {
       expect(store.getSession("ssh:ssh-devbox:claude-cli:same-id")).not.toBeNull();
       expect(store.getSession("ssh:ssh-devbox:tclaude-cli:same-id")).not.toBeNull();
       expect(store.getSession("ssh:ssh-devbox:codebuddy-cli:codebuddy-1")?.tokenUsage).toEqual({
-        inputTokens: 80,
-        outputTokens: 30,
+        inputTokens: 580,
+        outputTokens: 140,
         cachedInputTokens: 20,
         reasoningOutputTokens: 10,
-        totalTokens: 140,
+        totalTokens: 750,
       });
     } finally {
       store.close();
@@ -262,7 +417,6 @@ describe("remote sync", () => {
     }, []);
     store.setCustomTitle(legacyKey, "Legacy custom title");
     store.setFavorited(legacyKey, true);
-    store.setPinned(legacyKey, true);
     store.setHidden(legacyKey, true);
     store.setAiSummary(legacyKey, "Legacy AI summary", "legacy-model");
     store.addTag(legacyKey, "legacy-tag");
@@ -293,7 +447,6 @@ describe("remote sync", () => {
     expect(store.getSession(`ssh:ssh-devbox:${source}:${rawId}`)).toMatchObject({
       customTitle: "Legacy custom title",
       favorited: true,
-      pinned: true,
       hidden: true,
       aiSummary: "Legacy AI summary",
       lastOpenedAt: new Date("2026-07-15T10:00:00Z").getTime(),
@@ -333,14 +486,12 @@ describe("remote sync", () => {
     seed(legacyKey, "Legacy");
     store.setCustomTitle(legacyKey, "Legacy custom");
     store.setFavorited(legacyKey, legacyState);
-    store.setPinned(legacyKey, legacyState);
     store.setHidden(legacyKey, legacyState);
     store.setAiSummary(legacyKey, "Legacy summary", "legacy-model");
     store.addTag(legacyKey, "legacy-tag");
     seed(targetKey, "Target");
     store.setCustomTitle(targetKey, "Target custom");
     store.setFavorited(targetKey, targetState);
-    store.setPinned(targetKey, targetState);
     store.setHidden(targetKey, targetState);
     store.setAiSummary(targetKey, "Target summary", "target-model");
     store.addTag(targetKey, "target-tag");
@@ -364,7 +515,6 @@ describe("remote sync", () => {
     expect(store.getSession(targetKey)).toMatchObject({
       customTitle: "Target custom",
       favorited: true,
-      pinned: true,
       hidden: true,
       aiSummary: "Target summary",
       tags: ["legacy-tag", "target-tag"],
@@ -1006,7 +1156,6 @@ db.close()
       customTitle: null,
       displayTitle: "Remote Summary",
       favorited: false,
-      pinned: false,
       hidden: false,
       tags: [],
       matchSnippet: null,
@@ -1257,6 +1406,7 @@ db.close()
     ["tclaude-cli", "claude-project"],
     ["tcodex-cli", "codex-session"],
     ["codebuddy-cli", "codebuddy-project"],
+    ["qoder", "qoder-project"],
   ] as const)("fetches %s files with an explicit source", async (source, kind) => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);
@@ -1312,6 +1462,15 @@ db.close()
         { type: "message", role: "assistant", content: [{ type: "output_text", text: "remote answer" }], timestamp: 1_752_573_601_000 },
       ],
       [new Date(1_752_573_600_000).toISOString(), new Date(1_752_573_601_000).toISOString()],
+    ],
+    [
+      "qoder",
+      [
+        { role: "assistant", message: { content: [{ type: "text", text: "older answer" }] } },
+        { role: "user", message: { content: [{ type: "text", text: "remote question" }] } },
+        { role: "assistant", message: { content: [{ type: "text", text: "remote answer" }] } },
+      ],
+      ["", ""],
     ],
   ] as const)("fetches the tail message page for %s", async (source, rows, expectedTimestamps) => {
     const store = createInMemoryStore();

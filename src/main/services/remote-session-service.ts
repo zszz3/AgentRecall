@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import type { AppSettings } from "../../core/platform";
 import { migrationAgentForSource } from "../../core/session-migration";
@@ -23,7 +24,10 @@ import {
   type SessionSyncHookStatus,
   type SessionSyncQueueEvent,
 } from "../../core/session-sync-queue";
-import { AUTO_SESSION_SYNC_QUEUE_INTERVAL_MS } from "../../core/refresh-policy";
+import {
+  AUTO_SESSION_SYNC_QUEUE_INTERVAL_MS,
+  STALE_SESSION_SYNC_EVENT_AGE_MS,
+} from "../../core/refresh-policy";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 import type {
   MigrationAgent,
@@ -38,6 +42,7 @@ export type RemoteSessionStorePort = Pick<
   | "getSession"
   | "getAllMessages"
   | "getTraceEvents"
+  | "getAttachmentFile"
   | "searchSessions"
   | "getEnvironment"
   | "getSessionSyncBindingForLocalKey"
@@ -61,8 +66,14 @@ export interface RemoteSessionClientPort {
   checkStatus(): Promise<RemoteSessionStatus>;
   listRemoteSessions(query?: string): Promise<RemoteSessionListItem[]>;
   getRemoteSession(remoteId: string): Promise<RemoteSessionListItem>;
-  uploadSession(payload: Parameters<SupabaseRemoteSessionClient["uploadSession"]>[0], detailJson: string, portableJson: string): Promise<RemoteSessionUploadResult>;
+  uploadSession(
+    payload: Parameters<SupabaseRemoteSessionClient["uploadSession"]>[0],
+    detailJson: string,
+    portableJson: string,
+    attachmentObjects?: Parameters<SupabaseRemoteSessionClient["uploadSession"]>[3],
+  ): Promise<RemoteSessionUploadResult>;
   getDetailSnapshot(remoteId: string): Promise<RemoteSessionDetailSnapshot>;
+  downloadAttachment?(objectKey: string): Promise<Uint8Array>;
   getPortableSession(remoteId: string): ReturnType<SupabaseRemoteSessionClient["getPortableSession"]>;
   deleteRemoteSessions(remoteIds: string[]): Promise<RemoteSessionDeleteResult>;
 }
@@ -191,13 +202,18 @@ export class RemoteSessionService {
   async upload(sessionKey: string, force = false): Promise<RemoteSessionUploadResult> {
     const client = this.createClient();
     const store = this.dependencies.getStore();
+    const session = store.getSession(sessionKey);
+    if (!session) throw new Error("Session not found.");
+    if (session.source === "zcode-cli") throw new Error("ZCode sessions cannot be saved remotely yet.");
+    if (session.environmentKind === "wsl") throw new Error("WSL sessions cannot be saved to cloud yet.");
     await this.dependencies.ensureSessionDetails(sessionKey);
     const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
-    const { payload, detailJson, portableJson } = this.operations.buildUpload(
+    const { payload, detailJson, portableJson, attachmentObjects } = this.operations.buildUpload(
       store,
       sessionKey,
       this.dependencies.now(),
       binding?.remoteSessionId,
+      this.dependencies.getSettings().syncSessionAttachments,
     );
     if (binding && !force) {
       const remote = await client.getRemoteSession(binding.remoteSessionId).catch((error) => {
@@ -212,7 +228,7 @@ export class RemoteSessionService {
         }
       }
     }
-    const result = await client.uploadSession(payload, detailJson, portableJson);
+    const result = await client.uploadSession(payload, detailJson, portableJson, attachmentObjects);
     store.upsertSessionSyncBinding({
       localSessionKey: sessionKey,
       remoteSessionId: result.remoteSession.id,
@@ -230,10 +246,12 @@ export class RemoteSessionService {
 
   async listSyncItems(): Promise<SessionSyncItem[]> {
     const store = this.dependencies.getStore();
+    const includeAttachments = this.dependencies.getSettings().syncSessionAttachments;
     const remotes = (await this.createClient().listRemoteSessions())
       .filter((remote) => store.getSession(remote.sourceSessionKey)?.isSubagent !== true);
     const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
     await this.runBounded(store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
+      if (session.environmentKind === "wsl") return;
       if (!migrationAgentForSource(session.source) || !session.projectPath.trim()) return;
       try {
         await this.dependencies.ensureSessionDetails(session.sessionKey);
@@ -244,6 +262,7 @@ export class RemoteSessionService {
           session.sessionKey,
           0,
           store.getSessionSyncBindingForLocalKey(session.sessionKey)?.remoteSessionId,
+          includeAttachments,
         );
         locals.push({ session: hydrated, revision: built.payload.content_hash });
       } catch (error) {
@@ -255,6 +274,30 @@ export class RemoteSessionService {
 
   getDetail(remoteId: string): Promise<RemoteSessionDetailSnapshot> {
     return this.createClient().getDetailSnapshot(remoteId);
+  }
+
+  async previewAttachment(
+    objectKey: string,
+    expectedSha256: string,
+    mimeType: string,
+    previewKind: "image" | "pdf" | "text" | "file",
+  ): Promise<{ kind: "image" | "text" | "unavailable"; data?: string }> {
+    const client = this.createClient();
+    const download = client.downloadAttachment;
+    if (!download) throw new Error("Remote attachment preview is unavailable.");
+    const bytes = await download.call(client, objectKey);
+    if (bytes.byteLength > 25 * 1024 * 1024) {
+      throw new Error("Remote attachment is too large to preview.");
+    }
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== expectedSha256) throw new Error("Remote attachment checksum mismatch.");
+    if (previewKind === "image") {
+      return { kind: "image", data: `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}` };
+    }
+    if (previewKind === "text") {
+      return { kind: "text", data: Buffer.from(bytes).toString("utf8").slice(0, 256 * 1024) };
+    }
+    return { kind: "unavailable" };
   }
 
   chooseProject(): Promise<string | null> {
@@ -354,7 +397,12 @@ export class RemoteSessionService {
       migrationAgentForSource(candidate.source) === event.agent
       && ((event.transcriptPath && path.resolve(candidate.filePath) === path.resolve(event.transcriptPath))
         || candidate.rawId === event.sessionId));
-    if (!session) return;
+    if (!session) {
+      if (this.dependencies.now() - Date.parse(event.queuedAt) >= STALE_SESSION_SYNC_EVENT_AGE_MS) {
+        this.operations.removeQueueFiles([event.filePath]);
+      }
+      return;
+    }
     if (session.isSubagent) {
       this.operations.removeQueueFiles([event.filePath]);
       return;

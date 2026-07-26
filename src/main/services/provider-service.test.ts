@@ -134,6 +134,37 @@ describe("ProviderService settings and keys", () => {
     expect(hydrated.summaryApiConfig.customApiKey).toBe("summary-key");
   });
 
+  it("hydrates a saved custom summary provider so summary/search use it", async () => {
+    const settings = cloneSettings();
+    // The in-memory settings already reflect the persisted custom summary provider.
+    settings.summaryApiConfig = {
+      ...settings.summaryApiConfig,
+      activeProvider: "custom",
+      customProviderId: "custom",
+      customBaseUrl: "https://summary.example/v1",
+      customModel: "summary-model",
+      customApiKey: "",
+      customApiFormat: "openai_responses",
+    };
+    const harness = createHarness(settings);
+    // The saved patch marks the summary fields as user-customized so profile defaults
+    // do not clobber them.
+    harness.savedSettings.set("summaryApiConfig.activeProvider", "custom");
+    harness.savedSettings.set("summaryApiConfig.customBaseUrl", "https://summary.example/v1");
+    harness.savedSettings.set("summaryApiConfig.customModel", "summary-model");
+    harness.keys.set("summary:custom", "summary-key");
+    // A Codex profile default that must NOT override the user's saved summary values.
+    vi.mocked(harness.operations.loadCodexProfileDefaults).mockResolvedValue({ customModel: "profile-model" });
+
+    const hydrated = await harness.service.hydrateSettings();
+
+    expect(hydrated.summaryApiConfig.activeProvider).toBe("custom");
+    expect(hydrated.summaryApiConfig.customBaseUrl).toBe("https://summary.example/v1");
+    expect(hydrated.summaryApiConfig.customModel).toBe("summary-model");
+    expect(hydrated.summaryApiConfig.customApiFormat).toBe("openai_responses");
+    expect(hydrated.summaryApiConfig.customApiKey).toBe("summary-key");
+  });
+
   it("persists updated custom keys while keeping them out of the settings document", () => {
     const settings = cloneSettings();
     settings.apiConfig = customCodexConfig({ customApiKey: "codex-key" });

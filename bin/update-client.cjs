@@ -8,6 +8,7 @@ const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { promisify } = require("node:util");
+const { materializeStagedPackageDependencies } = require("./staged-package-dependencies.cjs");
 
 const execFileAsync = promisify(execFile);
 const GITHUB_REPOSITORY = "zszz3/AgentRecall";
@@ -20,17 +21,48 @@ const LATEST_UPDATE_MANIFEST_URL = `https://github.com/${GITHUB_REPOSITORY}/rele
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
+const TRANSIENT_REMOVE_ERROR_CODES = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 
 function packageRoot() {
   return path.resolve(__dirname, "..");
 }
 
-function currentVersion() {
+function currentVersion(options = {}) {
+  const root = options.packageRoot || packageRoot();
+  const readPackageVersion = () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version || "0.0.0";
+    } catch {
+      return "0.0.0";
+    }
+  };
+
+  // The repo's package.json version is a placeholder; the real version lives in git tags. Prefer the
+  // tag when running from a checkout so source builds don't misreport their version. Installed npm
+  // tarballs have no `.git`, so they keep reading the CI-stamped package.json version. A worktree
+  // stores `.git` as a file, so accept any existing entry rather than requiring a directory.
+  let hasGit = false;
   try {
-    return JSON.parse(fs.readFileSync(path.join(packageRoot(), "package.json"), "utf8")).version || "0.0.0";
+    hasGit = fs.existsSync(path.join(root, ".git"));
   } catch {
-    return "0.0.0";
+    hasGit = false;
   }
+  if (!hasGit) return readPackageVersion();
+
+  try {
+    const runGit = options.execFileSyncImpl || execFileSync;
+    const described = runGit("git", ["describe", "--tags", "--abbrev=0"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 2_000,
+    }).trim();
+    const normalized = described.replace(/^v/, "");
+    // Guard compareVersions/parseStableVersion, which throw on anything but strict x.y.z.
+    if (/^\d+\.\d+\.\d+$/.test(normalized)) return normalized;
+  } catch {
+    // git missing, shallow clone with no tags, permission error, etc. -> fall back below.
+  }
+  return readPackageVersion();
 }
 
 function stateDirectory(homeDir = os.homedir()) {
@@ -411,6 +443,155 @@ function showNativeUpdateFailure(errorMessage, options = {}) {
   return false;
 }
 
+function updateProgress(version, phase, values = {}) {
+  return { phase, version, ...values };
+}
+
+async function downloadUpdatePackage(manifest, archivePath, options = {}) {
+  const response = await fetchWithTimeout(
+    options.fetchImpl || globalThis.fetch,
+    manifest.package.url,
+    { headers: { "User-Agent": "agent-recall-updater" } },
+    options.timeoutMs ?? 120_000,
+  );
+  if (!response.ok || !response.body) {
+    throw new Error(`Update package download failed (${response.status}).`);
+  }
+  const declaredLength = Number(response.headers.get("content-length"));
+  const totalBytes = Number.isFinite(declaredLength) && declaredLength > 0 ? declaredLength : undefined;
+  const reader = response.body.getReader();
+  const output = await fsp.open(archivePath, "w");
+  const hash = createHash("sha256");
+  const startedAt = (options.now || Date.now)();
+  let downloadedBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      await output.write(chunk);
+      hash.update(chunk);
+      downloadedBytes += chunk.length;
+      const elapsedMs = Math.max(1, (options.now || Date.now)() - startedAt);
+      options.onProgress?.(updateProgress(manifest.version, "downloading", {
+        downloadedBytes,
+        totalBytes,
+        percent: totalBytes ? Math.min(100, Math.round(downloadedBytes / totalBytes * 100)) : undefined,
+        bytesPerSecond: Math.round(downloadedBytes * 1000 / elapsedMs),
+      }));
+    }
+  } finally {
+    await output.close();
+  }
+  options.onProgress?.(updateProgress(manifest.version, "verifying", {
+    downloadedBytes,
+    totalBytes,
+    percent: totalBytes ? 100 : undefined,
+  }));
+  if (hash.digest("hex") !== manifest.package.sha256) {
+    throw new Error("Update package checksum mismatch.");
+  }
+  return { downloadedBytes, totalBytes };
+}
+
+async function stageUpdate(manifest, options = {}) {
+  const parsed = parseUpdateManifest(manifest);
+  const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
+  const stageRoot = options.stageRoot
+    || path.join(path.dirname(packagePath), `.agent-recall-stage-${process.pid}-${randomUUID()}`);
+  const archivePath = path.join(stageRoot, parsed.package.name);
+  const stagedPackagePath = path.join(stageRoot, "node_modules", "agent-recall");
+  const backupPath = path.join(path.dirname(packagePath), `.agent-recall-backup-${process.pid}-${randomUUID()}`);
+  const statusPath = options.statusPath || installStatusPath(options.homeDir);
+  await fsp.mkdir(stageRoot, { recursive: true });
+  await writeJsonAtomic(statusPath, {
+    status: "installing",
+    version: parsed.version,
+    updatedAt: Date.now(),
+    error: null,
+  });
+  try {
+    await downloadUpdatePackage(parsed, archivePath, options);
+    options.onProgress?.(updateProgress(parsed.version, "staging", {
+      message: "正在安装到临时目录…",
+    }));
+    const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
+    const registry = options.registry || process.env.AGENT_RECALL_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
+    const installEnvironment = {
+      ...process.env,
+      AGENT_RECALL_STAGING_INSTALL: "1",
+      AGENT_RECALL_STAGE_ROOT: stageRoot,
+    };
+    delete installEnvironment.ELECTRON_RUN_AS_NODE;
+    try {
+      await (options.execFileImpl || execFileAsync)(npmCommand, [
+        "install",
+        "--prefix",
+        stageRoot,
+        archivePath,
+        "--registry",
+        registry,
+        "--no-audit",
+        "--no-fund",
+        "--fetch-retries",
+        "2",
+        "--fetch-timeout",
+        "30000",
+      ], {
+        shell: process.platform === "win32",
+        timeout: options.installTimeoutMs ?? 10 * 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: installEnvironment,
+      });
+    } catch (error) {
+      throw new Error(`npm 安装失败：${formatUpdateError(error)}`);
+    }
+    await materializeStagedPackageDependencies({
+      stageRoot,
+      packagePath: stagedPackagePath,
+    });
+    options.onProgress?.(updateProgress(parsed.version, "validating", {
+      message: "正在检查应用和 Electron 运行时…",
+    }));
+    const stagedPackage = JSON.parse(await fsp.readFile(path.join(stagedPackagePath, "package.json"), "utf8"));
+    if (stagedPackage.name !== "agent-recall" || stagedPackage.version !== parsed.version) {
+      throw new Error("Staged update package metadata does not match the release.");
+    }
+    await Promise.all([
+      fsp.access(path.join(stagedPackagePath, "bin", "agent-recall.cjs")),
+      fsp.access(path.join(stagedPackagePath, "out", "main", "index.js")),
+    ]);
+    await (options.ensureElectronImpl || ensureInstalledElectron)({
+      npmCommand,
+      nodePath: options.nodePath,
+      packagePath: stagedPackagePath,
+      runtimeSourcePath: packagePath,
+      env: installEnvironment,
+      timeoutMs: options.electronInstallTimeoutMs,
+    });
+    return {
+      version: parsed.version,
+      stageRoot,
+      archivePath,
+      stagedPackagePath,
+      livePackagePath: packagePath,
+      backupPath,
+      statusPath,
+    };
+  } catch (error) {
+    await writeJsonAtomic(statusPath, {
+      status: "error",
+      version: parsed.version,
+      updatedAt: Date.now(),
+      error: error instanceof Error ? error.message : String(error),
+    }).catch(() => undefined);
+    if (!options.keepStageOnError) {
+      await fsp.rm(stageRoot, { recursive: true, force: true }).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 async function installUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -428,12 +609,12 @@ async function installUpdate(manifest, options = {}) {
     error: null,
   });
   try {
-    const response = await fetchWithTimeout(fetchImpl, parsed.package.url, { headers: { "User-Agent": "agent-recall-updater" } }, options.timeoutMs ?? 120_000);
-    if (!response.ok) throw new Error(`Update package download failed (${response.status}).`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const checksum = createHash("sha256").update(bytes).digest("hex");
-    if (checksum !== parsed.package.sha256) throw new Error("Update package checksum mismatch.");
-    await fsp.writeFile(archivePath, bytes);
+    await downloadUpdatePackage(parsed, archivePath, {
+      fetchImpl,
+      timeoutMs: options.timeoutMs,
+      onProgress: options.onProgress,
+      now: options.now,
+    });
     if (fs.existsSync(packagePath)) {
       await fsp.cp(packagePath, packageBackupPath, { recursive: true, force: true });
       packageBackedUp = true;
@@ -519,6 +700,12 @@ function nodeSubprocessEnvironment(baseEnvironment = {}) {
   return environment;
 }
 
+function electronSubprocessEnvironment(baseEnvironment = {}) {
+  const environment = { ...process.env, ...baseEnvironment };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  return environment;
+}
+
 function nodeSubprocessPath(options = {}) {
   if (!process.versions.electron) return process.execPath;
   const candidate = options.nodePath || process.env.NODE || "node";
@@ -526,14 +713,126 @@ function nodeSubprocessPath(options = {}) {
   return "node";
 }
 
+function electronRuntimePaths(platform = process.platform) {
+  const relativeExecutable = platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : platform === "win32"
+      ? "electron.exe"
+      : "electron";
+  const relativeDefaultApp = platform === "darwin"
+    ? path.join("Electron.app", "Contents", "Resources", "default_app.asar")
+    : path.join("resources", "default_app.asar");
+  return { relativeExecutable, relativeDefaultApp };
+}
+
+function electronCacheRoot(environment = process.env, homeDir = os.homedir(), platform = process.platform) {
+  if (environment.electron_config_cache) return environment.electron_config_cache;
+  if (platform === "win32") {
+    return path.join(environment.LOCALAPPDATA || path.join(homeDir, "AppData", "Local"), "electron", "Cache");
+  }
+  if (platform === "darwin") return path.join(homeDir, "Library", "Caches", "electron");
+  return path.join(environment.XDG_CACHE_HOME || path.join(homeDir, ".cache"), "electron");
+}
+
+async function findFileRecursive(rootPath, fileName) {
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    let entries = [];
+    try {
+      entries = await fsp.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isFile() && entry.name === fileName) return entryPath;
+      if (entry.isDirectory()) pending.push(entryPath);
+    }
+  }
+  return null;
+}
+
+async function removeRuntimeDirectory(directoryPath, options = {}) {
+  const maxRetries = options.maxRetries ?? 5;
+  const retryDelayMs = options.retryDelayMs ?? 50;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fsp.rm(directoryPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!TRANSIENT_REMOVE_ERROR_CODES.has(error?.code) || attempt >= maxRetries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  }
+}
+
 async function ensureInstalledElectron(options = {}) {
   const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
   const electronModulePath = path.join(packagePath, "node_modules", "electron");
   const installScript = path.join(electronModulePath, "install.js");
-  const environment = nodeSubprocessEnvironment(options.env);
+  const nodeEnvironment = nodeSubprocessEnvironment(options.env);
+  nodeEnvironment.AGENT_RECALL_SKIP_LEGACY_ELECTRON_BRIDGE = "1";
+  const electronEnvironment = electronSubprocessEnvironment(options.env);
   const run = options.execFileImpl || execFileAsync;
   const nodePath = nodeSubprocessPath(options);
   const timeout = options.timeoutMs ?? 5 * 60_000;
+  const homeDir = options.homeDir || os.homedir();
+  const { relativeExecutable, relativeDefaultApp } = electronRuntimePaths(options.platform);
+  const bridgeMarkerPath = path.join(electronModulePath, ".agent-recall-staging-bridge.json");
+  let bridgeMarker = null;
+  if (fs.existsSync(bridgeMarkerPath)) {
+    try {
+      bridgeMarker = JSON.parse(await fsp.readFile(bridgeMarkerPath, "utf8"));
+    } catch {
+      throw new Error("Electron staging bridge metadata is invalid.");
+    }
+    if (!bridgeMarker || typeof bridgeMarker !== "object" || Array.isArray(bridgeMarker)) {
+      throw new Error("Electron staging bridge metadata is invalid.");
+    }
+  }
+  if (bridgeMarker) {
+    const electronVersion = String(bridgeMarker.electronVersion || "").trim();
+    const bridgedVersion = String(bridgeMarker.bridgedVersion || "").trim();
+    if (
+      bridgeMarker.schemaVersion !== 1
+      || !/^\d+\.\d+\.\d+$/.test(electronVersion)
+      || !/^\d+\.\d+\.\d+$/.test(bridgedVersion)
+    ) {
+      throw new Error("Electron staging bridge metadata is invalid.");
+    }
+    const agentRecallPackagePath = path.join(packagePath, "package.json");
+    const packageJsonPath = path.join(electronModulePath, "package.json");
+    const distVersionPath = path.join(electronModulePath, "dist", "version");
+    const agentRecallPackage = JSON.parse(await fsp.readFile(agentRecallPackagePath, "utf8"));
+    const electronPackage = JSON.parse(await fsp.readFile(packageJsonPath, "utf8"));
+    let installedVersion = "";
+    try {
+      installedVersion = (await fsp.readFile(distVersionPath, "utf8")).trim().replace(/^v/, "");
+    } catch {
+      // Install scripts may be blocked; normal runtime repair will populate dist after metadata restoration.
+    }
+    const dependencyVersion = String(agentRecallPackage.dependencies?.electron || "").trim();
+    const expectedMetadataVersions = new Set([electronVersion, bridgedVersion]);
+    if (
+      !expectedMetadataVersions.has(electronPackage.version)
+      || !expectedMetadataVersions.has(dependencyVersion)
+      || (installedVersion !== "" && !expectedMetadataVersions.has(installedVersion))
+    ) {
+      throw new Error("Electron staging bridge metadata does not match the installed runtime.");
+    }
+    agentRecallPackage.dependencies.electron = electronVersion;
+    electronPackage.version = electronVersion;
+    if (Array.isArray(electronPackage.files)) {
+      electronPackage.files = electronPackage.files.filter((entry) => entry !== ".agent-recall-staging-bridge.json");
+    }
+    await writeJsonAtomic(agentRecallPackagePath, agentRecallPackage);
+    await writeJsonAtomic(packageJsonPath, electronPackage);
+    if (installedVersion && installedVersion !== electronVersion) {
+      await fsp.writeFile(distVersionPath, electronVersion, "utf8");
+    }
+    await fsp.rm(bridgeMarkerPath, { force: true });
+  }
   let expectedVersion = "";
   try {
     expectedVersion = String(JSON.parse(await fsp.readFile(path.join(electronModulePath, "package.json"), "utf8")).version || "").trim();
@@ -542,25 +841,108 @@ async function ensureInstalledElectron(options = {}) {
   }
   if (!/^\d+\.\d+\.\d+$/.test(expectedVersion)) throw new Error("Electron package version is invalid.");
   const validationScript = `process.stdout.write(require(${JSON.stringify(electronModulePath)}));`;
+  const distPath = path.join(electronModulePath, "dist");
+  const pathFile = path.join(electronModulePath, "path.txt");
   const validate = async () => {
     const resolved = await run(nodePath, ["-e", validationScript], {
-      env: environment,
+      env: nodeEnvironment,
       timeout,
       maxBuffer: 4 * 1024 * 1024,
     });
     const executable = String(resolved?.stdout || "").trim();
     if (!executable || !fs.existsSync(executable)) throw new Error(`Electron executable is missing: ${executable || "unknown"}`);
     const loaded = await run(executable, ["--version"], {
-      env: environment,
+      env: electronEnvironment,
       timeout,
       maxBuffer: 4 * 1024 * 1024,
       windowsHide: true,
     });
     const loadedVersion = String(loaded?.stdout || loaded?.stderr || "").trim().replace(/^v/, "");
-    if (loadedVersion !== expectedVersion) throw new Error(`Electron executable version mismatch: expected ${expectedVersion}, got ${loadedVersion || "unknown"}.`);
-    const installedVersion = (await fsp.readFile(path.join(electronModulePath, "dist", "version"), "utf8")).trim();
+    if (loadedVersion && loadedVersion !== expectedVersion) {
+      throw new Error(`Electron executable version mismatch: expected ${expectedVersion}, got ${loadedVersion}.`);
+    }
+    const installedVersion = (await fsp.readFile(path.join(distPath, "version"), "utf8")).trim();
     if (installedVersion !== expectedVersion) throw new Error(`Electron runtime version mismatch: expected ${expectedVersion}, got ${installedVersion || "unknown"}.`);
     if (!isElectronRuntimeReady(packagePath)) throw new Error("Electron runtime files are incomplete.");
+  };
+  const cleanupBackups = async (distBackup, pathBackup) => {
+    await removeRuntimeDirectory(distBackup);
+    await fsp.rm(pathBackup, { force: true });
+  };
+  const repairViaInstallScript = async (forceNoCache = false) => {
+    await run(nodePath, [installScript], {
+      cwd: electronModulePath,
+      env: forceNoCache ? { ...nodeEnvironment, force_no_cache: "true" } : nodeEnvironment,
+      timeout,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  };
+  const repairMissingPathFile = async () => {
+    if (fs.existsSync(pathFile)) return false;
+    const executablePath = path.join(distPath, relativeExecutable);
+    const defaultAppPath = path.join(distPath, relativeDefaultApp);
+    const versionFilePath = path.join(distPath, "version");
+    if (!fs.existsSync(executablePath) || !fs.existsSync(defaultAppPath) || !fs.existsSync(versionFilePath)) return false;
+    await fsp.writeFile(pathFile, relativeExecutable, "utf8");
+    return true;
+  };
+  const repairFromRuntimeSource = async () => {
+    const sourceRoot = options.runtimeSourcePath;
+    if (!sourceRoot || sourceRoot === packagePath) return false;
+    if (!isElectronRuntimeReady(sourceRoot)) return false;
+    const sourceElectronPath = path.join(sourceRoot, "node_modules", "electron");
+    let sourcePackageVersion = "";
+    let sourceDistVersion = "";
+    try {
+      sourcePackageVersion = String(JSON.parse(await fsp.readFile(path.join(sourceElectronPath, "package.json"), "utf8")).version || "").trim();
+      sourceDistVersion = (await fsp.readFile(path.join(sourceElectronPath, "dist", "version"), "utf8")).trim().replace(/^v/, "");
+    } catch {
+      return false;
+    }
+    if (sourcePackageVersion !== expectedVersion || sourceDistVersion !== expectedVersion) return false;
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
+    await fsp.rm(pathFile, { force: true }).catch(() => undefined);
+    await fsp.cp(path.join(sourceElectronPath, "dist"), distPath, { recursive: true, force: true });
+    await fsp.copyFile(path.join(sourceElectronPath, "path.txt"), pathFile);
+    return true;
+  };
+  const repairFromCachedArchive = async () => {
+    const archivePath = options.findCachedArchiveImpl
+      ? await options.findCachedArchiveImpl({ expectedVersion, environment: nodeEnvironment, homeDir, platform: options.platform || process.platform, arch: options.arch || process.arch })
+      : await findFileRecursive(
+        electronCacheRoot(nodeEnvironment, homeDir, options.platform || process.platform),
+        `electron-v${expectedVersion}-${options.platform || process.platform}-${options.arch || process.arch}.zip`,
+      );
+    if (!archivePath) return false;
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
+    await fsp.rm(pathFile, { force: true }).catch(() => undefined);
+    await fsp.mkdir(distPath, { recursive: true });
+    if (options.extractArchiveImpl) {
+      await options.extractArchiveImpl({ archivePath, distPath, electronModulePath });
+    } else {
+      // Extract in a Node subprocess. Running extract-zip inside Electron's main
+      // process can deadlock while holding the update UI on "validating".
+      const extractScript = [
+        "const { createRequire } = require(\"node:module\");",
+        `const requireFromElectron = createRequire(${JSON.stringify(path.join(electronModulePath, "package.json"))});`,
+        "const extractZip = requireFromElectron(\"extract-zip\");",
+        `extractZip(${JSON.stringify(archivePath)}, { dir: ${JSON.stringify(distPath)} }).then(`,
+        "  () => process.exit(0),",
+        "  (error) => {",
+        "    console.error(error instanceof Error ? (error.stack || error.message) : String(error));",
+        "    process.exit(1);",
+        "  }",
+        ");",
+      ].join("");
+      await run(nodePath, ["-e", extractScript], {
+        cwd: electronModulePath,
+        env: nodeEnvironment,
+        timeout,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+    }
+    await repairMissingPathFile();
+    return true;
   };
 
   try {
@@ -571,27 +953,44 @@ async function ensureInstalledElectron(options = {}) {
   }
 
   const repairId = `${process.pid}-${randomUUID()}`;
-  const distPath = path.join(electronModulePath, "dist");
-  const pathFile = path.join(electronModulePath, "path.txt");
   const distBackup = path.join(electronModulePath, `.agent-recall-dist-${repairId}.backup`);
   const pathBackup = path.join(electronModulePath, `.agent-recall-path-${repairId}.backup`);
   if (fs.existsSync(distPath)) await fsp.rename(distPath, distBackup);
   if (fs.existsSync(pathFile)) await fsp.rename(pathFile, pathBackup);
+  let repairError = null;
+  const attemptRepair = async (operation) => {
+    try {
+      const result = await operation();
+      if (result === false) return false;
+      await validate();
+      await cleanupBackups(distBackup, pathBackup);
+      return true;
+    } catch (error) {
+      repairError = error;
+      return false;
+    }
+  };
   try {
-    await run(nodePath, [installScript], {
-      cwd: electronModulePath,
-      env: environment,
-      timeout,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    await validate();
-    await fsp.rm(distBackup, { recursive: true, force: true });
-    await fsp.rm(pathBackup, { force: true });
+    if (await attemptRepair(repairFromRuntimeSource)) return;
+    if (await attemptRepair(() => repairViaInstallScript(false))) return;
+    if (await attemptRepair(repairMissingPathFile)) return;
+    if (await attemptRepair(repairFromCachedArchive)) return;
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
+    await fsp.rm(pathFile, { force: true }).catch(() => undefined);
+    if (await attemptRepair(() => repairViaInstallScript(true))) return;
+    if (await attemptRepair(repairMissingPathFile)) return;
+    throw repairError || new Error("Electron runtime files are incomplete.");
   } catch (error) {
-    await fsp.rm(distPath, { recursive: true, force: true }).catch(() => undefined);
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
     if (fs.existsSync(distBackup)) await fsp.rename(distBackup, distPath).catch(() => undefined);
     if (fs.existsSync(pathBackup)) await fsp.rename(pathBackup, pathFile).catch(() => undefined);
+    try {
+      await validate();
+      return;
+    } catch {
+      // Fall through to the original installation failure when the restored runtime is still unusable.
+    }
     const detail = formatUpdateError(error);
     throw new Error(`Electron 运行时安装失败：${detail}`);
   }
@@ -790,6 +1189,7 @@ module.exports = {
   globalCommandPath,
   installStatusPath,
   installUpdate,
+  downloadUpdatePackage,
   isElectronRuntimeReady,
   launchInstalledApp,
   manualInstallCommand,
@@ -799,6 +1199,7 @@ module.exports = {
   skipUpdateVersion,
   snoozeUpdatePrompt,
   showNativeUpdateFailure,
+  stageUpdate,
   stateDirectory,
   stopRunningApp,
   updateLockPath,

@@ -40,19 +40,61 @@ describe("SessionsStore", () => {
         { role: "assistant", content: "Rotate the token and retry", timestamp: "2026-07-16T00:01:00.000Z", index: 1 },
       ]);
       store.setCustomTitle(session.sessionKey, "Token repair");
-      store.setPinned(session.sessionKey, true);
       store.addTag(session.sessionKey, "authentication");
 
       expect(store.searchSessions({ query: "refresh token" })).toEqual([
         expect.objectContaining({
           sessionKey: session.sessionKey,
           displayTitle: "Token repair",
-          pinned: true,
           tags: ["authentication"],
           messageCount: 2,
         }),
       ]);
       expect(store.getMessages(session.sessionKey)).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("smart sort ranks recent partial matches above ancient exact title matches", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+
+      // Ancient session whose title exactly matches the query (90 days old).
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:ancient",
+        rawId: "ancient",
+        originalTitle: "deploy",
+        firstQuestion: "deploy the app",
+        timestamp: now - 90 * dayMs,
+        fileMtimeMs: now - 90 * dayMs,
+      }), [
+        { role: "user", content: "deploy the app", timestamp: new Date(now - 90 * dayMs).toISOString(), index: 0 },
+      ]);
+
+      // Recent session that only mentions the query in body text (1 day old).
+      store.upsertIndexedSession(indexedSession({
+        sessionKey: "codex:recent",
+        rawId: "recent",
+        originalTitle: "Fix login bug",
+        firstQuestion: "deploy pipeline broke after merge",
+        timestamp: now - 1 * dayMs,
+        fileMtimeMs: now - 1 * dayMs,
+      }), [
+        { role: "user", content: "deploy pipeline broke after merge", timestamp: new Date(now - 1 * dayMs).toISOString(), index: 0 },
+      ]);
+
+      // Smart sort: recent partial match should outrank ancient exact title match.
+      const smartResults = store.searchSessions({ query: "deploy", sortBy: "smart" });
+      expect(smartResults.map((s) => s.sessionKey)).toEqual(["codex:recent", "codex:ancient"]);
+
+      // Activity sort: exact title match still wins (pure relevance first).
+      const activityResults = store.searchSessions({ query: "deploy", sortBy: "activity" });
+      expect(activityResults[0].sessionKey).toBe("codex:ancient");
     } finally {
       db.close();
     }
@@ -86,6 +128,35 @@ describe("SessionsStore", () => {
         "/work/project",
       ]);
       expect(store.getStats({ period: "allTime", excludeSubagents: true }, 1_000).total.sessionCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports the previous comparable period for day/week/month and none for allTime", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = new Date("2026-07-20T12:00:00.000Z").getTime();
+      const at = (offsetMs: number): string => new Date(now - offsetMs).toISOString();
+
+      // Two messages "today", one message "yesterday".
+      store.upsertIndexedSession(indexedSession({ sessionKey: "codex:today", rawId: "today", filePath: "/tmp/today.jsonl" }), [
+        { role: "user", content: "a", timestamp: at(1 * 60 * 60 * 1000), index: 0 },
+        { role: "assistant", content: "b", timestamp: at(2 * 60 * 60 * 1000), index: 1 },
+      ]);
+      store.upsertIndexedSession(indexedSession({ sessionKey: "codex:yesterday", rawId: "yesterday", filePath: "/tmp/yesterday.jsonl" }), [
+        { role: "user", content: "c", timestamp: at(DAY + 1 * 60 * 60 * 1000), index: 0 },
+      ]);
+
+      const today = store.getStats({ period: "today" }, now);
+      expect(today.total.messageCount).toBe(2);
+      expect(today.previousTotal?.messageCount).toBe(1);
+
+      const allTime = store.getStats({ period: "allTime" }, now);
+      expect(allTime.previousTotal).toBeNull();
     } finally {
       db.close();
     }

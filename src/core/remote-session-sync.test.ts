@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   buildRemoteSessionPayload,
   buildRemoteSessionSetupSql,
@@ -43,7 +46,6 @@ const SESSION: SessionSearchResult = {
   customTitle: null,
   displayTitle: "Fix login bug",
   favorited: false,
-  pinned: false,
   hidden: false,
   tags: ["auth", "react"],
   matchSnippet: null,
@@ -181,6 +183,47 @@ describe("remote session sync model", () => {
     expect(payload.source_environment_label).toBe("SSH dev");
   });
 
+  it("adds managed attachments to schema 2 snapshots without exposing local paths", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "agent-recall-remote-attachment-"));
+    try {
+      const cachePath = path.join(directory, "shot.png");
+      writeFileSync(cachePath, "image", "utf8");
+      const store = {
+        getSession: () => SESSION,
+        getAllMessages: () => [{
+          ...MESSAGES[0],
+          attachments: [{
+            id: "0-0-image",
+            fileName: "shot.png",
+            mimeType: "image/png",
+            previewKind: "image" as const,
+            status: "available" as const,
+          }],
+        }],
+        getTraceEvents: () => [],
+        getAttachmentFile: () => ({
+          cachePath,
+          fileName: "shot.png",
+          mimeType: "image/png",
+          previewKind: "image" as const,
+        }),
+      };
+
+      const built = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
+
+      expect(built.detail.schemaVersion).toBe(2);
+      expect(built.attachmentObjects).toHaveLength(1);
+      expect(built.attachmentObjects[0].objectKey).toMatch(/^sessions\/[a-f0-9]{32}\/attachments\/[a-f0-9]{64}-shot\.png$/);
+      expect(built.detail.messages[0].attachments?.[0]).toMatchObject({
+        remoteObjectKey: built.attachmentObjects[0].objectKey,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      });
+      expect(JSON.stringify(built.detail)).not.toContain(directory);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rounds timestamp fields for Supabase bigint columns", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000.9);
     const { payload } = buildRemoteSessionPayload({
@@ -312,7 +355,7 @@ describe("remote session sync model", () => {
         const method = init?.method ?? "GET";
         if (String(url).includes("/storage/v1/object/")) {
           calls.push(`storage-${method}`);
-          return new Response("{}", { status: 200 });
+          return new Response(method === "GET" ? JSON.stringify(detail) : "{}", { status: 200 });
         }
         if (method === "DELETE") {
           calls.push("row-DELETE");
@@ -330,8 +373,9 @@ describe("remote session sync model", () => {
       failures: [],
     });
     expect(calls[0]).toBe("row-GET");
-    expect(calls.slice(1, 3).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
-    expect(calls[3]).toBe("row-DELETE");
+    expect(calls[1]).toBe("storage-GET");
+    expect(calls.slice(2, 4).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
+    expect(calls[4]).toBe("row-DELETE");
   });
 
   it("keeps a selected session as failed when its delete preflight cannot reach Supabase", async () => {
@@ -364,6 +408,66 @@ describe("remote session sync model", () => {
 
     await expect(client.uploadSession(payload, detailJson, portableJson)).rejects.toThrow("temporary gateway failure");
     expect(storageWrites).toBe(0);
+  });
+
+  it("does not delete an existing attachment when a remote update fails", async () => {
+    const attachmentKey = `sessions/${remoteSessionId(SESSION.sessionKey)}/attachments/abc-shot.png`;
+    const previousDetail = {
+      ...buildRemoteSessionSnapshot(SESSION, [{
+        ...MESSAGES[0],
+        attachments: [{
+          id: "0-0-image",
+          fileName: "shot.png",
+          mimeType: "image/png",
+          previewKind: "image" as const,
+          status: "available" as const,
+          remoteObjectKey: attachmentKey,
+          sha256: "abc",
+        }],
+      }], [], 10_000),
+      schemaVersion: 2 as const,
+    };
+    const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
+      session: SESSION,
+      detail: previousDetail,
+      portable: PORTABLE,
+      now: 11_000,
+    });
+    const existing = {
+      ...payload,
+      content_hash: "previous-revision",
+      detail_object_key: `sessions/${payload.id}/previous.detail.json`,
+      detail_sha256: "unused-by-fixture",
+    };
+    const deletedKeys: string[] = [];
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url, init) => {
+        const requestUrl = String(url);
+        const method = init?.method ?? "GET";
+        if (requestUrl.includes("/rest/v1/")) {
+          if (method === "POST") {
+            return new Response(JSON.stringify({ message: "database unavailable" }), { status: 503 });
+          }
+          return new Response(JSON.stringify([existing]), { status: 200 });
+        }
+        const objectKey = decodeURIComponent(requestUrl.split("/agent-session-remote/")[1] ?? "");
+        if (method === "GET") return new Response(JSON.stringify(previousDetail), { status: 200 });
+        if (method === "DELETE") deletedKeys.push(objectKey);
+        return new Response("{}", { status: 200 });
+      },
+    });
+
+    await expect(client.uploadSession(payload, detailJson, portableJson, [{
+      objectKey: attachmentKey,
+      bytes: Buffer.from("image"),
+      mimeType: "image/png",
+    }])).rejects.toThrow("database unavailable");
+
+    expect(deletedKeys).not.toContain(attachmentKey);
+    expect(deletedKeys).toContain(payload.detail_object_key);
+    expect(deletedKeys).toContain(payload.portable_object_key);
   });
 
   it("falls back to legacy remote session rows when source environment columns are missing", async () => {

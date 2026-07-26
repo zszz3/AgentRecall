@@ -34,6 +34,13 @@ test("normal npm launch performs update work only for explicit fallback commands
   assert.doesNotMatch(commandSource, /readline/);
 });
 
+test("normal launch falls back to a ready Electron runtime after validation errors", () => {
+  assert.match(commandSource, /isElectronRuntimeReady/);
+  assert.match(commandSource, /try \{\s*await ensureElectronRuntimeForLaunch\(/);
+  assert.match(commandSource, /if \(!isElectronRuntimeReady\(packagePath\)\) throw error;/);
+  assert.match(commandSource, /继续启动应用/);
+});
+
 test("launcher does not automatically configure MCP", () => {
   assert.doesNotMatch(source, /SETUP_MCP=/);
   assert.doesNotMatch(source, /"\$SETUP_MCP"/);

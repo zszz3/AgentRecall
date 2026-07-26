@@ -6,7 +6,8 @@ import type { SkillDiffSnapshot } from "../../../../core/skill-diff";
 import type { InstalledSkill, InstalledSkillsSnapshot, SkillRootStatus, SkillSource } from "../../../../core/skill-manager";
 import { formatCompactNumber } from "../../format-count";
 import { localize, type LanguageMode } from "../../language";
-import { Markdown } from "../../lightweight-markdown";
+import { Markdown } from "../../markdown";
+import { markdownPreview } from "../../markdown-preview";
 import { skillSourceLabel, type SkillSortKey, type SkillSourceFilter } from "../../skill-manager";
 import { buildUnifiedSkillEntries, type UnifiedSkillEntry } from "../../skill-sync-view-model";
 import type { SkillsFeedback } from "../../app-types";
@@ -54,6 +55,7 @@ export function SkillsDialog({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [query, setQuery] = useState("");
+  const [previewView, setPreviewView] = useState<"overview" | "details">("overview");
   const [detailView, setDetailView] = useState<"local" | "remote" | "diff">("local");
   const [sourceFilter, setSourceFilter] = useState<SkillSourceFilter>("all");
   const [sortKey, setSortKey] = useState<SkillSortKey>("usage");
@@ -153,7 +155,7 @@ export function SkillsDialog({
 
   // The version list is lightweight (no markdown); fetch the body on demand for preview.
   useEffect(() => {
-    const id = detailView === "remote" ? selectedVersion?.id : null;
+    const id = previewView === "details" && detailView === "remote" ? selectedVersion?.id : null;
     if (!syncReady || !id || versionContent[id] !== undefined) return;
     let cancelled = false;
     setVersionLoadingId(id);
@@ -171,10 +173,10 @@ export function SkillsDialog({
     return () => {
       cancelled = true;
     };
-  }, [detailView, selectedVersion?.id, versionContent, onFetchVersion, syncReady]);
+  }, [detailView, previewView, selectedVersion?.id, versionContent, onFetchVersion, syncReady]);
 
   useEffect(() => {
-    if (detailView !== "diff" || !selectedEntry || !syncReady || !selectedSkill || !selectedVersion) {
+    if (previewView !== "details" || detailView !== "diff" || !selectedEntry || !syncReady || !selectedSkill || !selectedVersion) {
       setDiffSnapshot(null);
       setDiffError(null);
       return;
@@ -195,7 +197,7 @@ export function SkillsDialog({
     return () => {
       cancelled = true;
     };
-  }, [detailView, selectedEntry?.id, selectedSkill?.path, selectedVersion?.id, syncReady]);
+  }, [detailView, previewView, selectedEntry?.id, selectedSkill?.path, selectedVersion?.id, syncReady]);
 
   const handleListKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
@@ -438,68 +440,90 @@ export function SkillsDialog({
                   <SkillSourceBadge source={selectedEntry.source} language={language} />
                   {selectedEntry.state ? <SkillSyncStateBadge state={selectedEntry.state} language={language} /> : null}
                 </div>
-                <p>{selectedEntry.description || l("No description", "无描述")}</p>
               </div>
-              {selectedVersions ? <div className="skill-version-strip">
-                {selectedVersions.managed ? <span className="skill-version-managed">{selectedVersions.managed}</span> : <>
-                  <span className="skill-version-copy"><small>{l("Local", "本地")}</small><strong>{selectedVersions.local}</strong></span>
-                  <span className="skill-version-divider" aria-hidden="true" />
-                  <span className="skill-version-copy"><small>{l("Cloud", "云端")}</small><strong>{selectedVersions.cloud}</strong></span>
-                </>}
-              </div> : null}
-              <div className="skill-detail-tabs" role="tablist" aria-label={l("Skill details", "Skill 详情")}>
-                <button type="button" className={detailView === "local" ? "active" : ""} onClick={() => setDetailView("local")}>{l("Local", "本地")}</button>
-                <button type="button" className={detailView === "remote" ? "active" : ""} onClick={() => setDetailView("remote")}>{l("Remote", "云端")}</button>
-                <button type="button" className={detailView === "diff" ? "active" : ""} onClick={() => setDetailView("diff")} disabled={!selectedSkill || !selectedGroup}>{l("Diff", "差异")}</button>
+              <div className="skill-preview-mode-tabs" role="tablist" aria-label={l("Skill view", "Skill 查看方式")}>
+                <button type="button" role="tab" aria-selected={previewView === "overview"} className={previewView === "overview" ? "active" : ""} onClick={() => setPreviewView("overview")}>{l("Overview", "概述")}</button>
+                <button type="button" role="tab" aria-selected={previewView === "details"} className={previewView === "details" ? "active" : ""} onClick={() => setPreviewView("details")}>{l("Details", "详情")}</button>
               </div>
-              <div className="skill-preview-content">
-                {detailView === "local" ? (
-                  selectedSkill ? <>
-                    <div className="skill-detail-actions">
-                      <span>{skillManagementLabel(selectedSkill.source, language) ?? l("Installed on this device", "已安装在此设备")}</span>
-                      {(selectedSkill.source === "codex-user" || selectedSkill.source === "claude-user" || selectedSkill.source === "codex-shared")
-                        && syncReady
-                        && (selectedEntry.state === "local-only" || selectedEntry.state === "local-newer" || selectedEntry.state === "conflict")
-                        ? <button type="button" disabled={loading} onClick={() => void handleUpload(selectedSkill)}><Upload size={14} />{selectedSkillBinding ? l("Upload new version", "上传新版本") : l("Upload", "上传")}</button>
-                        : null}
-                    </div>
-                    <dl className="skill-meta">
-                      <div><dt>{l("Agent", "Agent")}</dt><dd>{selectedSkill.agent === "codex" ? "Codex" : "Claude Code"}</dd></div>
-                      <div><dt>{l("Used", "使用次数")}</dt><dd>{selectedSkill.usageCount ? l(`${selectedSkill.usageCount} times`, `${selectedSkill.usageCount} 次`) : l("Not yet", "暂无")}</dd></div>
-                      <div><dt>{l("Updated", "更新时间")}</dt><dd>{new Date(selectedSkill.mtimeMs).toLocaleString()}</dd></div>
-                      <div><dt>{l("Path", "路径")}</dt><dd title={selectedSkill.path}>{selectedSkill.path}</dd></div>
-                    </dl>
-                    <div className="skill-markdown-preview"><Markdown text={skillPreviewMarkdown(selectedSkill.markdown, language)} /></div>
-                  </> : <div className="skills-empty">{l("This Skill is not installed on this device.", "此设备尚未安装这个 Skill。")}</div>
-                ) : null}
-                {detailView === "remote" ? (
-                  !syncReady ? <SkillSyncStatusPanel snapshot={syncSnapshot} language={language} busy={loading || batchBusy} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} onRefresh={onRefreshRemote} />
-                    : selectedGroup && selectedVersion ? <>
+              {previewView === "overview" ? (
+                <div className="skill-overview-content">
+                  <section className="skill-overview-intro">
+                    <h4>{l("Description", "说明")}</h4>
+                    <p>{selectedEntry.description || l("No description", "无描述")}</p>
+                  </section>
+                  {selectedVersions ? <div className="skill-version-strip">
+                    {selectedVersions.managed ? <span className="skill-version-managed">{selectedVersions.managed}</span> : <>
+                      <span className="skill-version-copy"><small>{l("Local", "本地")}</small><strong>{selectedVersions.local}</strong></span>
+                      <span className="skill-version-divider" aria-hidden="true" />
+                      <span className="skill-version-copy"><small>{l("Cloud", "云端")}</small><strong>{selectedVersions.cloud}</strong></span>
+                    </>}
+                  </div> : null}
+                  <div className="skill-overview-cards">
+                    <section className="skill-overview-card">
+                      <h4>{l("Local copy", "本地概述")}</h4>
+                      {selectedSkill ? <dl className="skill-meta">
+                        <div><dt>{l("Agent", "Agent")}</dt><dd>{selectedSkill.agent === "codex" ? "Codex" : "Claude Code"}</dd></div>
+                        <div><dt>{l("Management", "管理方式")}</dt><dd>{skillManagementLabel(selectedSkill.source, language) ?? l("Installed on this device", "已安装在此设备")}</dd></div>
+                        <div><dt>{l("Used", "使用次数")}</dt><dd>{selectedSkill.usageCount ? l(`${selectedSkill.usageCount} times`, `${selectedSkill.usageCount} 次`) : l("Not yet", "暂无")}</dd></div>
+                        <div><dt>{l("Updated", "更新时间")}</dt><dd>{new Date(selectedSkill.mtimeMs).toLocaleString()}</dd></div>
+                        <div className="skill-meta-wide"><dt>{l("Path", "路径")}</dt><dd title={selectedSkill.path}>{selectedSkill.path}</dd></div>
+                      </dl> : <p className="skill-overview-empty">{l("This Skill is not installed on this device.", "此设备尚未安装这个 Skill。")}</p>}
+                    </section>
+                    <section className="skill-overview-card">
+                      <h4>{l("Cloud copy", "云端概述")}</h4>
+                      {selectedGroup ? <dl className="skill-meta">
+                        <div><dt>{l("Latest version", "最新版本")}</dt><dd>v{selectedGroup.latest.version}</dd></div>
+                        <div><dt>{l("Versions", "版本数量")}</dt><dd>{selectedGroup.versions.length}</dd></div>
+                        <div><dt>{l("Updated", "更新时间")}</dt><dd>{new Date(selectedGroup.latest.updatedAt).toLocaleString()}</dd></div>
+                        <div className="skill-meta-wide"><dt>{l("Location", "位置")}</dt><dd>{selectedGroup.legacy ? l("Legacy record", "旧版记录") : `${selectedGroup.portableScope}/${selectedGroup.relativePath}`}</dd></div>
+                      </dl> : <p className="skill-overview-empty">{syncReady ? l("No cloud copy yet.", "还没有云端副本。") : l("Cloud sync is not configured.", "尚未配置云端同步。")}</p>}
+                    </section>
+                  </div>
+                </div>
+              ) : <>
+                <div className="skill-detail-tabs" role="tablist" aria-label={l("Skill details", "Skill 详情")}>
+                  <button type="button" className={detailView === "local" ? "active" : ""} onClick={() => setDetailView("local")}>{l("Local", "本地")}</button>
+                  <button type="button" className={detailView === "remote" ? "active" : ""} onClick={() => setDetailView("remote")}>{l("Remote", "云端")}</button>
+                  <button type="button" className={detailView === "diff" ? "active" : ""} onClick={() => setDetailView("diff")} disabled={!selectedSkill || !selectedGroup}>{l("Diff", "差异")}</button>
+                </div>
+                <div className="skill-preview-content">
+                  {detailView === "local" ? (
+                    selectedSkill ? <>
                       <div className="skill-detail-actions">
-                        <label className="skills-sort" title={l("Version", "版本")}>
-                          <span>{l("Version", "版本")}</span>
-                          <select value={selectedVersion.id} onChange={(event) => setSelectedVersionId(event.currentTarget.value)} aria-label={l("Select version", "选择版本")}>
-                            {selectedGroup.versions.map((version) => <option key={version.id} value={version.id}>{versionOptionLabel(version, selectedGroup.latest.id, language)}</option>)}
-                          </select>
-                        </label>
-                        <button type="button" disabled={loading || selectedGroup.legacy || selectedEntry.state === "local-newer" || selectedEntry.state === "conflict"} onClick={() => void onInstallRemote(selectedVersion.id)} title={selectedGroup.legacy ? l("Legacy record has no safe install location.", "旧版记录无法安全确定安装位置。") : ""}><Download size={14} />{selectedGroupBinding ? l("Update local", "更新本地") : l("Install locally", "安装到本地")}</button>
+                        <span>{skillManagementLabel(selectedSkill.source, language) ?? l("Installed on this device", "已安装在此设备")}</span>
+                        {(selectedSkill.source === "codex-user" || selectedSkill.source === "claude-user" || selectedSkill.source === "codex-shared")
+                          && syncReady
+                          && (selectedEntry.state === "local-only" || selectedEntry.state === "local-newer" || selectedEntry.state === "conflict")
+                          ? <button type="button" disabled={loading} onClick={() => void handleUpload(selectedSkill)}><Upload size={14} />{selectedSkillBinding ? l("Upload new version", "上传新版本") : l("Upload", "上传")}</button>
+                          : null}
                       </div>
-                      <dl className="skill-meta">
-                        <div><dt>{l("Version", "版本")}</dt><dd>{versionOptionLabel(selectedVersion, selectedGroup.latest.id, language)}</dd></div>
-                        <div><dt>{l("Updated", "更新时间")}</dt><dd>{new Date(selectedVersion.updatedAt).toLocaleString()}</dd></div>
-                        <div><dt>{l("Location", "位置")}</dt><dd>{selectedGroup.legacy ? l("Legacy record", "旧版记录") : `${selectedGroup.portableScope}/${selectedGroup.relativePath}`}</dd></div>
-                      </dl>
-                      <div className="skill-markdown-preview"><Markdown text={remoteVersionPreview(selectedVersion.id, versionContent, versionLoadingId, versionError, language)} /></div>
-                    </> : <div className="skills-empty skill-cloud-empty"><p>{l("No cloud copy yet.", "还没有云端副本。")}</p>{selectedSkill && selectedEntry.syncable ? <button type="button" onClick={() => void handleUpload(selectedSkill)}><Upload size={14} />{l("Upload this Skill", "上传这个 Skill")}</button> : null}</div>
-                ) : null}
-                {detailView === "diff" ? (
-                  !syncReady ? <SkillSyncStatusPanel snapshot={syncSnapshot} language={language} busy={loading || batchBusy} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} onRefresh={onRefreshRemote} />
-                    : diffLoading ? <div className="skills-empty">{l("Comparing local and cloud files...", "正在比较本地与云端文件...")}</div>
-                      : diffError ? <div className="skills-empty danger-copy">{diffError}</div>
-                        : diffSnapshot ? <SkillDiffView snapshot={diffSnapshot} language={language} />
-                          : <div className="skills-empty">{l("Both a local and cloud copy are required to compare.", "需要同时存在本地和云端副本才能比较。")}</div>
-                ) : null}
-              </div>
+                      <div className="skill-markdown-preview"><Markdown text={skillPreviewMarkdown(selectedSkill.markdown, language)} language={language} /></div>
+                    </> : <div className="skills-empty">{l("This Skill is not installed on this device.", "此设备尚未安装这个 Skill。")}</div>
+                  ) : null}
+                  {detailView === "remote" ? (
+                    !syncReady ? <SkillSyncStatusPanel snapshot={syncSnapshot} language={language} busy={loading || batchBusy} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} onRefresh={onRefreshRemote} />
+                      : selectedGroup && selectedVersion ? <>
+                        <div className="skill-detail-actions">
+                          <label className="skills-sort" title={l("Version", "版本")}>
+                            <span>{l("Version", "版本")}</span>
+                            <select value={selectedVersion.id} onChange={(event) => setSelectedVersionId(event.currentTarget.value)} aria-label={l("Select version", "选择版本")}>
+                              {selectedGroup.versions.map((version) => <option key={version.id} value={version.id}>{versionOptionLabel(version, selectedGroup.latest.id, language)}</option>)}
+                            </select>
+                          </label>
+                          <button type="button" disabled={loading || selectedGroup.legacy || selectedEntry.state === "local-newer" || selectedEntry.state === "conflict"} onClick={() => void onInstallRemote(selectedVersion.id)} title={selectedGroup.legacy ? l("Legacy record has no safe install location.", "旧版记录无法安全确定安装位置。") : ""}><Download size={14} />{selectedGroupBinding ? l("Update local", "更新本地") : l("Install locally", "安装到本地")}</button>
+                        </div>
+                        <div className="skill-markdown-preview"><Markdown text={remoteVersionPreview(selectedVersion.id, versionContent, versionLoadingId, versionError, language)} language={language} /></div>
+                      </> : <div className="skills-empty skill-cloud-empty"><p>{l("No cloud copy yet.", "还没有云端副本。")}</p>{selectedSkill && selectedEntry.syncable ? <button type="button" onClick={() => void handleUpload(selectedSkill)}><Upload size={14} />{l("Upload this Skill", "上传这个 Skill")}</button> : null}</div>
+                  ) : null}
+                  {detailView === "diff" ? (
+                    !syncReady ? <SkillSyncStatusPanel snapshot={syncSnapshot} language={language} busy={loading || batchBusy} onCopySetupSql={onCopySetupSql} onOpenSqlEditor={onOpenSqlEditor} onRefresh={onRefreshRemote} />
+                      : diffLoading ? <div className="skills-empty">{l("Comparing local and cloud files...", "正在比较本地与云端文件...")}</div>
+                        : diffError ? <div className="skills-empty danger-copy">{diffError}</div>
+                          : diffSnapshot ? <SkillDiffView snapshot={diffSnapshot} language={language} />
+                            : <div className="skills-empty">{l("Both a local and cloud copy are required to compare.", "需要同时存在本地和云端副本才能比较。")}</div>
+                  ) : null}
+                </div>
+              </>}
             </> : <div className="skills-empty">{l("Select a skill to preview it.", "选择一个 Skill 查看内容。")}</div>}
           </div>
         </div>
@@ -562,8 +586,8 @@ export function SkillsDialog({
 
 function skillSyncVersions(entry: UnifiedSkillEntry, language: LanguageMode): { managed: string | null; local: string; cloud: string } {
   const managed = entry.local ? skillManagementLabel(entry.local.source, language) : null;
-  const localVersion = entry.relation?.localSkillPath
-    ? entry.remote && entry.relation.remoteContentHash === entry.relation.localContentHash
+  const localVersion = entry.local
+    ? entry.remote && entry.relation?.remoteContentHash && entry.relation.remoteContentHash === entry.relation.localContentHash
       ? `v${entry.remote.latest.version}`
       : localize(language, "present", "已安装")
     : localize(language, "not installed", "未安装");
@@ -895,6 +919,5 @@ function UploadVersionConfirmDialog({
 
 function skillPreviewMarkdown(markdown: string, language: LanguageMode): string {
   const limit = 12000;
-  if (markdown.length <= limit) return markdown;
-  return `${markdown.slice(0, limit)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
+  return markdownPreview(markdown, limit, localize(language, "...(truncated)", "...（已截断）"));
 }

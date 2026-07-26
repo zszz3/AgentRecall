@@ -3,11 +3,13 @@
 
 // Legacy explicit helper for installing the Claude Code usage statusline bridge.
 // AgentRecall does not invoke this file from npm lifecycle scripts or application
-// startup. It remains self-contained for users who previously opted into it.
+// startup. The staging-only branch prepares an isolated release package without
+// reading or changing the user's Claude Code configuration.
 
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { materializeStagedPackageDependencies } = require("./staged-package-dependencies.cjs");
 
 const BRIDGE_SCRIPT_BASENAME = "claude-statusline-snapshot.cjs";
 const BRIDGE_BIN_NAME = "agent-recall-claude-statusline";
@@ -109,7 +111,16 @@ function uninstallClaudeStatuslineBridge(options) {
   return { status: "removed", settingsPath };
 }
 
-function runCli() {
+async function runCli() {
+  if (process.env.AGENT_RECALL_STAGING_INSTALL === "1") {
+    const stageRoot = process.env.AGENT_RECALL_STAGE_ROOT;
+    if (!stageRoot) throw new Error("AgentRecall staging install is missing its stage root.");
+    await materializeStagedPackageDependencies({
+      stageRoot,
+      packagePath: path.resolve(__dirname, ".."),
+    });
+    return;
+  }
   // Keep the legacy explicit command non-fatal.
   if (process.env.AGENT_RECALL_SKIP_STATUSLINE_INSTALL) return;
   if (process.env.CI) return;
@@ -152,5 +163,10 @@ module.exports = {
 };
 
 if (require.main === module) {
-  runCli();
+  runCli().catch((error) => {
+    process.stderr.write(
+      `AgentRecall statusline setup failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    process.exitCode = 1;
+  });
 }

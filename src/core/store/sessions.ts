@@ -1,5 +1,9 @@
 import * as fs from "node:fs";
 import type { SQLInputValue } from "node:sqlite";
+import {
+  materializeSessionAttachment,
+  MAX_SESSION_ATTACHMENT_BYTES,
+} from "../session-attachments";
 import { truncateTraceDetail } from "../trace-detail";
 import type {
   IndexedSession,
@@ -15,10 +19,14 @@ import type {
   SessionSearchResult,
   SessionSortBy,
   SessionSource,
+  SessionSourceStats,
   SessionStats,
   SessionStatsOptions,
   SessionStatsPeriod,
   SessionStatsSummary,
+  SessionStatsTrend,
+  SessionStatsTrendBucket,
+  SessionStatsTrendGranularity,
   SessionTraceEvent,
   TagListOptions,
   TokenUsage,
@@ -26,6 +34,7 @@ import type {
 } from "../types";
 import type { SessionStoreDatabase } from "./database";
 import { EnvironmentStore, localEnvironment } from "./environments";
+import { deleteZcodeSession } from "../zcode-session-writer";
 
 const LIVE_SESSION_KEY_SQL = `
   CASE
@@ -35,7 +44,13 @@ const LIVE_SESSION_KEY_SQL = `
     WHEN sessions.source = 'tcodex-cli' THEN 'tcodex:' || sessions.raw_id
     WHEN sessions.source = 'codebuddy-cli' THEN 'codebuddy:' || sessions.raw_id
     WHEN sessions.source = 'codewiz-cli' THEN 'codewiz:' || sessions.raw_id
+    WHEN sessions.source = 'openclaw' THEN 'openclaw:' || sessions.raw_id
+    WHEN sessions.source = 'hermes' THEN 'hermes:' || sessions.raw_id
+    WHEN sessions.source = 'opencode-cli' THEN 'opencode:' || sessions.raw_id
+    WHEN sessions.source = 'zcode-cli' THEN 'zcode:' || sessions.raw_id
+    WHEN sessions.source = 'cursor-agent' THEN 'cursor:' || sessions.raw_id
     WHEN sessions.source = 'trae' THEN 'trae:' || sessions.raw_id
+    WHEN sessions.source = 'qoder' THEN 'qoder:' || sessions.raw_id
     ELSE NULL
   END
 `;
@@ -46,11 +61,19 @@ interface StatsRange {
   until: number;
 }
 
+interface StatsTrendWindow {
+  since: number;
+  until: number;
+  granularity: SessionStatsTrendGranularity;
+  buckets: SessionStatsTrendBucket[];
+}
+
 interface SessionRow {
   session_key: string;
   raw_id: string;
   source: SessionSource;
   environment_id: string;
+  storage_environment_id: string;
   project_path: string;
   file_path: string;
   original_title: string;
@@ -87,6 +110,27 @@ interface SearchCandidateRow extends SessionRow {
   search_score: number;
 }
 
+type ProjectAggregateRow = {
+  project_path: string;
+  environment_id: string;
+  environment_label: string | null;
+  session_count: number;
+  created_at: number;
+  last_activity_at: number;
+  root_count: number;
+  root_source: SessionSource | null;
+  root_custom_title: string | null;
+  root_original_title: string | null;
+  root_first_question: string | null;
+  root_started_at: number | null;
+};
+
+type ProjectSummaryDraft = ProjectSummary & {
+  taskWorkspaceDate: string | null;
+  rootStartedAt: number;
+  taskBasenameApplied: boolean;
+};
+
 interface TraceEventRow {
   trace_index: number;
   kind: SessionTraceEvent["kind"];
@@ -109,6 +153,7 @@ export class SessionsStore {
   constructor(
     private readonly db: SessionStoreDatabase,
     private readonly environments: EnvironmentStore,
+    private readonly attachmentCacheRoot: string | null = null,
   ) {}
 
   private transaction(run: () => void): void {
@@ -131,21 +176,24 @@ export class SessionsStore {
     const normalizedTokenEvents = tokenEvents.map(normalizeTokenEvent).filter((event) => event.totalTokens > 0 && event.dedupeKey);
     const tokenUsage = normalizedTokenEvents.length > 0 ? tokenUsageFromEvents(normalizedTokenEvents) : normalizeTokenUsage(session.tokenUsage);
     const indexedAt = Date.now();
+    const environmentId = session.environmentId ?? "local";
+    const storageEnvironmentId = session.storageEnvironmentId ?? environmentId;
     this.transaction(() => {
       this.db
         .prepare(
           `
           INSERT INTO sessions (
-            session_key, raw_id, source, environment_id, project_path, file_path, original_title, first_question,
+            session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
             input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             is_subagent, parent_session_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
             environment_id = excluded.environment_id,
+            storage_environment_id = excluded.storage_environment_id,
             project_path = excluded.project_path,
             file_path = excluded.file_path,
             original_title = excluded.original_title,
@@ -170,7 +218,8 @@ export class SessionsStore {
           session.sessionKey,
           session.rawId,
           session.source,
-          session.environmentId ?? "local",
+          environmentId,
+          storageEnvironmentId,
           session.projectPath,
           session.filePath,
           session.originalTitle,
@@ -192,6 +241,7 @@ export class SessionsStore {
         );
 
       this.db.prepare("DELETE FROM messages WHERE session_key = ?").run(session.sessionKey);
+      this.db.prepare("DELETE FROM message_attachments WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM message_events WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM token_events WHERE session_key = ?").run(session.sessionKey);
       this.db.prepare("DELETE FROM trace_events WHERE session_key = ?").run(session.sessionKey);
@@ -202,6 +252,40 @@ export class SessionsStore {
       );
       for (const message of messages) {
         insertMessage.run(session.sessionKey, message.index, message.role, message.content, message.timestamp);
+      }
+
+      const insertAttachment = this.db.prepare(
+        `INSERT INTO message_attachments (
+          session_key, message_index, attachment_id, attachment_index, file_name,
+          mime_type, size_bytes, preview_kind, status, cache_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let sessionAttachmentBytes = 0;
+      for (const message of messages) {
+        for (const [attachmentIndex, attachment] of (message.attachments ?? []).entries()) {
+          const attachmentId = `${message.index}-${attachmentIndex}-${attachment.id}`;
+          const materialized = materializeSessionAttachment(attachment, {
+            cacheRoot: this.attachmentCacheRoot,
+            sessionFilePath: session.filePath,
+            attachmentId,
+            remainingSessionBytes: MAX_SESSION_ATTACHMENT_BYTES - sessionAttachmentBytes,
+          });
+          if (materialized.status === "available") {
+            sessionAttachmentBytes += materialized.sizeBytes ?? 0;
+          }
+          insertAttachment.run(
+            session.sessionKey,
+            message.index,
+            materialized.id,
+            attachmentIndex,
+            materialized.fileName,
+            materialized.mimeType,
+            materialized.sizeBytes ?? null,
+            materialized.previewKind,
+            materialized.status,
+            materialized.cachePath,
+          );
+        }
       }
 
       const insertMessageEvent = this.db.prepare(
@@ -262,9 +346,8 @@ export class SessionsStore {
         );
       }
 
-      this.refreshFtsForSession(session.sessionKey);
-      const branchTag = branchTagName(session.gitBranch);
-      if (branchTag) this.addTagToSession(session.sessionKey, branchTag);
+      this.refreshFtsForSession(session.sessionKey, messages);
+      this.replaceBranchTag(session.sessionKey, session.gitBranch);
     });
   }
 
@@ -273,7 +356,7 @@ export class SessionsStore {
     const row = this.db
       .prepare(
         `
-        SELECT raw_id, source, environment_id, project_path, file_path, original_title, first_question,
+        SELECT raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
           timestamp, file_mtime_ms, file_size, pr_url, pr_number, is_subagent, parent_session_id
         FROM sessions
         WHERE session_key = ?
@@ -285,6 +368,7 @@ export class SessionsStore {
         | "raw_id"
         | "source"
         | "environment_id"
+        | "storage_environment_id"
         | "project_path"
         | "file_path"
         | "original_title"
@@ -303,6 +387,7 @@ export class SessionsStore {
       row.raw_id === session.rawId &&
       row.source === session.source &&
       row.environment_id === (session.environmentId ?? "local") &&
+      row.storage_environment_id === (session.storageEnvironmentId ?? session.environmentId ?? "local") &&
       row.project_path === session.projectPath &&
       row.file_path === session.filePath &&
       row.original_title === session.originalTitle &&
@@ -327,7 +412,7 @@ export class SessionsStore {
         `
         SELECT file_path AS filePath, file_mtime_ms AS fileMtimeMs, file_size AS fileSize, indexed_at AS indexedAt
         FROM sessions
-        WHERE environment_id = ?
+        WHERE storage_environment_id = ?
           AND file_path != ''
           AND file_mtime_ms > 0
       `,
@@ -344,20 +429,24 @@ export class SessionsStore {
     const normalizedTokenEvents = tokenEvents?.map(normalizeTokenEvent).filter((event) => event.totalTokens > 0 && event.dedupeKey);
     const tokenUsage = normalizedTokenEvents === undefined ? normalizeTokenUsage(session.tokenUsage) : tokenUsageFromEvents(normalizedTokenEvents);
     const indexedAt = Date.now();
+    const environmentId = session.environmentId ?? "local";
+    const storageEnvironmentId = session.storageEnvironmentId ?? environmentId;
     this.transaction(() => {
       this.db
         .prepare(
           `
           INSERT INTO sessions (
-            session_key, raw_id, source, environment_id, project_path, file_path, original_title, first_question,
+            session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
-            input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at
+            input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
+            is_subagent, parent_session_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
             environment_id = excluded.environment_id,
+            storage_environment_id = excluded.storage_environment_id,
             project_path = excluded.project_path,
             file_path = excluded.file_path,
             original_title = excluded.original_title,
@@ -373,14 +462,17 @@ export class SessionsStore {
             cached_input_tokens = excluded.cached_input_tokens,
             reasoning_output_tokens = excluded.reasoning_output_tokens,
             total_tokens = excluded.total_tokens,
-            indexed_at = excluded.indexed_at
+            indexed_at = excluded.indexed_at,
+            is_subagent = excluded.is_subagent,
+            parent_session_id = excluded.parent_session_id
         `,
         )
         .run(
           session.sessionKey,
           session.rawId,
           session.source,
-          session.environmentId ?? "local",
+          environmentId,
+          storageEnvironmentId,
           session.projectPath,
           session.filePath,
           session.originalTitle,
@@ -397,6 +489,8 @@ export class SessionsStore {
           tokenUsage.reasoningOutputTokens,
           tokenUsage.totalTokens,
           indexedAt,
+          session.isSubagent ? 1 : 0,
+          session.parentSessionId ?? null,
         );
 
       if (normalizedTokenEvents !== undefined) {
@@ -435,8 +529,7 @@ export class SessionsStore {
       }
 
       this.refreshFtsForSession(session.sessionKey);
-      const branchTag = branchTagName(session.gitBranch);
-      if (branchTag) this.addTagToSession(session.sessionKey, branchTag);
+      this.replaceBranchTag(session.sessionKey, session.gitBranch);
     });
   }
 
@@ -444,10 +537,6 @@ export class SessionsStore {
     const normalized = title?.trim() || null;
     this.db.prepare("UPDATE sessions SET custom_title = ? WHERE session_key = ?").run(normalized, sessionKey);
     this.refreshFtsForSession(sessionKey);
-  }
-
-  setPinned(sessionKey: string, pinned: boolean): void {
-    this.db.prepare("UPDATE sessions SET pinned = ? WHERE session_key = ?").run(pinned ? 1 : 0, sessionKey);
   }
 
   setFavorited(sessionKey: string, favorited: boolean): void {
@@ -459,14 +548,24 @@ export class SessionsStore {
   }
 
   deleteSession(sessionKey: string): boolean {
+    const row = this.db.prepare("SELECT source, raw_id, file_path FROM sessions WHERE session_key = ?").get(sessionKey) as
+      | { source: SessionSource; raw_id: string; file_path: string }
+      | undefined;
+    if (!row) return false;
+    if (row.source === "zcode-cli") {
+      const sourceDeleted = deleteZcodeSession(row.file_path, row.raw_id);
+      const indexDeleted = this.deleteSessionRecord(sessionKey);
+      return sourceDeleted || indexDeleted;
+    }
+    if (row.source === "cursor-agent" && /(^|[\\/])state\.vscdb$/i.test(row.file_path)) {
+      throw new Error("Cannot delete shared Cursor source database.");
+    }
+
     let deleted = false;
     this.transaction(() => {
-      const row = this.db.prepare("SELECT source, file_path FROM sessions WHERE session_key = ?").get(sessionKey) as
-        | { source: SessionSource; file_path: string }
-        | undefined;
-      if (!row) return;
       if (row.source === "hermes") throw new Error("Cannot delete shared Hermes source database.");
       if (row.source === "opencode-cli") throw new Error("Cannot delete shared OpenCode source database.");
+      if (row.source === "codewiz-cli") throw new Error("Cannot delete shared CodeWiz source database.");
       this.deleteSessionSourceFile(row.file_path);
       this.db.prepare("DELETE FROM session_fts WHERE session_key = ?").run(sessionKey);
       this.db.prepare("DELETE FROM sessions WHERE session_key = ?").run(sessionKey);
@@ -495,7 +594,7 @@ export class SessionsStore {
     this.transaction(() => {
       const legacy = this.db
         .prepare(
-          `SELECT custom_title, favorited, pinned, hidden, last_opened_at, last_resumed_at,
+          `SELECT custom_title, favorited, hidden, last_opened_at, last_resumed_at,
              ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis
            FROM sessions WHERE session_key = ?`,
         )
@@ -504,7 +603,6 @@ export class SessionsStore {
           SessionRow,
           | "custom_title"
           | "favorited"
-          | "pinned"
           | "hidden"
           | "last_opened_at"
           | "last_resumed_at"
@@ -534,7 +632,6 @@ export class SessionsStore {
             `UPDATE sessions SET
                custom_title = COALESCE(custom_title, ?),
                favorited = CASE WHEN favorited = 1 OR ? = 1 THEN 1 ELSE 0 END,
-               pinned = CASE WHEN pinned = 1 OR ? = 1 THEN 1 ELSE 0 END,
                hidden = CASE WHEN hidden = 1 OR ? = 1 THEN 1 ELSE 0 END,
                last_opened_at = CASE
                  WHEN ? IS NULL THEN last_opened_at
@@ -555,7 +652,6 @@ export class SessionsStore {
           .run(
             legacy.custom_title,
             legacy.favorited,
-            legacy.pinned,
             legacy.hidden,
             legacy.last_opened_at,
             legacy.last_opened_at,
@@ -638,7 +734,7 @@ export class SessionsStore {
 
   listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
     const rows = this.db
-      .prepare("SELECT session_key, file_path FROM sessions WHERE environment_id = ? AND file_path != ''")
+      .prepare("SELECT session_key, file_path FROM sessions WHERE storage_environment_id = ? AND file_path != ''")
       .all(environmentId) as Array<{ session_key: string; file_path: string }>;
     return rows.filter((row) => !filePaths.has(row.file_path)).map((row) => row.session_key);
   }
@@ -779,7 +875,20 @@ export class SessionsStore {
           environments.label AS environment_label,
           COUNT(*) AS session_count,
           MAX(COALESCE(sessions.timestamp, 0)) AS created_at,
-          MAX(${sessionActivitySql("sessions")}) AS last_activity_at
+          MAX(${sessionActivitySql("sessions")}) AS last_activity_at,
+          SUM(CASE WHEN sessions.is_subagent = 0 THEN 1 ELSE 0 END) AS root_count,
+          MAX(CASE WHEN sessions.is_subagent = 0 THEN sessions.source END) AS root_source,
+          MAX(CASE WHEN sessions.is_subagent = 0 THEN sessions.custom_title END) AS root_custom_title,
+          MAX(CASE WHEN sessions.is_subagent = 0 THEN sessions.original_title END) AS root_original_title,
+          MAX(CASE WHEN sessions.is_subagent = 0 THEN sessions.first_question END) AS root_first_question,
+          MAX(
+            CASE WHEN sessions.is_subagent = 0 THEN (
+              SELECT MIN(message_events.timestamp)
+              FROM message_events
+              WHERE message_events.session_key = sessions.session_key
+                AND message_events.timestamp > 0
+            ) END
+          ) AS root_started_at
         FROM sessions
         LEFT JOIN environments ON environments.id = sessions.environment_id
         WHERE trim(project_path) != ''
@@ -789,48 +898,82 @@ export class SessionsStore {
         GROUP BY sessions.project_path, sessions.environment_id
       `,
       )
-      .all(...environmentArgs, ...sourceArgs) as Array<{
-        project_path: string;
-        environment_id: string;
-        environment_label: string | null;
-        session_count: number;
-        created_at: number;
-        last_activity_at: number;
-      }>;
-    const summaries = rows.map((row) => ({
-      path: row.project_path,
-      label: projectLabel(row.project_path),
-      sessionCount: row.session_count,
-      environmentId: row.environment_id,
-      environmentLabel: row.environment_label ?? localEnvironment().label,
-      createdAt: row.created_at,
-      lastActivityAt: row.last_activity_at,
-    }));
+      .all(...environmentArgs, ...sourceArgs) as ProjectAggregateRow[];
+    const summaries: ProjectSummaryDraft[] = rows.map((row) => {
+      const taskDate =
+        row.root_count === 1 && row.root_source === "codex-app"
+          ? codexTaskWorkspaceDate(row.project_path)
+          : null;
+      const rootTitle = rootProjectTitle(row);
+      const untitled = !rootTitle;
+      const taskWorkspace = taskDate !== null;
+
+      return {
+        path: row.project_path,
+        label: taskWorkspace ? (rootTitle || "Untitled session") : projectLabel(row.project_path),
+        labelKind: taskWorkspace ? (untitled ? "codex-task-untitled" : "codex-task-title") : "path",
+        labelSuffix: null,
+        sessionCount: row.session_count,
+        environmentId: row.environment_id,
+        environmentLabel: row.environment_label ?? localEnvironment().label,
+        createdAt: row.created_at,
+        lastActivityAt: row.last_activity_at,
+        taskWorkspaceDate: taskDate,
+        rootStartedAt: row.root_started_at ?? 0,
+        taskBasenameApplied: false,
+      };
+    });
     const basenameCounts = new Map<string, number>();
     const environmentsByPath = new Map<string, Set<string>>();
     for (const summary of summaries) {
-      const basename = projectBasename(summary.path);
-      basenameCounts.set(basename, (basenameCounts.get(basename) || 0) + 1);
+      if (summary.labelKind === "path") {
+        const basename = projectBasename(summary.path);
+        basenameCounts.set(basename, (basenameCounts.get(basename) || 0) + 1);
+      }
       const environmentIds = environmentsByPath.get(summary.path) ?? new Set<string>();
       environmentIds.add(summary.environmentId);
       environmentsByPath.set(summary.path, environmentIds);
     }
 
-    return summaries
-      .map((summary) => ({
-        ...summary,
-        label:
-          (environmentsByPath.get(summary.path)?.size ?? 0) > 1
-            ? `${summary.label} · ${summary.environmentLabel}`
-            : (basenameCounts.get(projectBasename(summary.path)) || 0) > 1
-              ? projectParentLabel(summary.path)
-              : summary.label,
-      }))
+    return disambiguateTaskLabels(
+      summaries
+        .map((summary) => {
+          const repeatedAcrossEnvironments = (environmentsByPath.get(summary.path)?.size ?? 0) > 1;
+          return {
+            ...summary,
+            label:
+              summary.labelKind === "path" &&
+              !repeatedAcrossEnvironments &&
+              (basenameCounts.get(projectBasename(summary.path)) || 0) > 1
+                ? projectParentLabel(summary.path)
+                : summary.label,
+            labelSuffix: repeatedAcrossEnvironments
+              ? appendLabelSuffix(summary.labelSuffix, summary.environmentLabel)
+              : summary.labelSuffix,
+          };
+        })
+        .map((summary) => {
+          if (summary.labelKind !== "codex-task-untitled") return summary;
+          const startedAtSuffix = formatMonthDayTime(summary.rootStartedAt);
+          return {
+            ...summary,
+            labelSuffix: appendLabelSuffix(
+              summary.labelSuffix,
+              startedAtSuffix || projectBasename(summary.path),
+            ),
+            taskBasenameApplied: summary.taskBasenameApplied || !startedAtSuffix,
+          };
+        }),
+    )
+      .map(publicProjectSummary)
       .sort(
         (a, b) =>
           environmentSortValue(a.environmentId) - environmentSortValue(b.environmentId) ||
           b.lastActivityAt - a.lastActivityAt ||
-          a.label.localeCompare(b.label),
+          compareProjectText(a.label, b.label) ||
+          compareProjectText(a.labelSuffix ?? "", b.labelSuffix ?? "") ||
+          compareProjectText(a.path, b.path) ||
+          compareProjectText(a.environmentId, b.environmentId),
       );
   }
 
@@ -883,7 +1026,7 @@ export class SessionsStore {
   }
 
   getMessages(sessionKey: string, offset = 0, limit = 120): SessionMessage[] {
-    return (
+    const messages: SessionMessage[] = (
       this.db
         .prepare(
           `
@@ -901,6 +1044,59 @@ export class SessionsStore {
         timestamp: string;
       }>
     ).map((row) => ({ index: row.message_index, role: row.role, content: row.content, timestamp: row.timestamp }));
+    if (messages.length === 0) return messages;
+    const messageIndexes = new Set(messages.map((message) => message.index));
+    const attachments = this.db.prepare(
+      `SELECT message_index, attachment_id, file_name, mime_type, size_bytes, preview_kind, status
+       FROM message_attachments
+       WHERE session_key = ?
+       ORDER BY message_index, attachment_index`,
+    ).all(sessionKey) as Array<{
+      message_index: number;
+      attachment_id: string;
+      file_name: string;
+      mime_type: string;
+      size_bytes: number | null;
+      preview_kind: "image" | "pdf" | "text" | "file";
+      status: "available" | "unsafe" | "missing" | "too_large";
+    }>;
+    for (const message of messages) {
+      const matching = attachments
+        .filter((attachment) => attachment.message_index === message.index && messageIndexes.has(attachment.message_index))
+        .map((attachment) => ({
+          id: attachment.attachment_id,
+          fileName: attachment.file_name,
+          mimeType: attachment.mime_type,
+          sizeBytes: attachment.size_bytes ?? undefined,
+          previewKind: attachment.preview_kind,
+          status: attachment.status,
+        }));
+      if (matching.length > 0) message.attachments = matching;
+    }
+    return messages;
+  }
+
+  getAttachmentFile(
+    sessionKey: string,
+    attachmentId: string,
+  ): { cachePath: string; fileName: string; mimeType: string; previewKind: "image" | "pdf" | "text" | "file" } | null {
+    const row = this.db.prepare(
+      `SELECT cache_path, file_name, mime_type, preview_kind
+       FROM message_attachments
+       WHERE session_key = ? AND attachment_id = ? AND status = 'available'`,
+    ).get(sessionKey, attachmentId) as {
+      cache_path: string | null;
+      file_name: string;
+      mime_type: string;
+      preview_kind: "image" | "pdf" | "text" | "file";
+    } | undefined;
+    if (!row?.cache_path) return null;
+    return {
+      cachePath: row.cache_path,
+      fileName: row.file_name,
+      mimeType: row.mime_type,
+      previewKind: row.preview_kind,
+    };
   }
 
   getAllMessages(sessionKey: string): SessionMessage[] {
@@ -947,19 +1143,60 @@ export class SessionsStore {
 
   getStats(options: SessionStatsOptions = {}, now = Date.now()): SessionStats {
     const range = resolveStatsRange(options, now);
+    const excludeSubagents = options.excludeSubagents ?? false;
+    const { total, bySource } = this.aggregateStatsForRange(range, excludeSubagents);
+
+    const previousRange = resolvePreviousStatsRange(range);
+    const previousTotal = previousRange
+      ? this.aggregateStatsForRange(previousRange, excludeSubagents).total
+      : null;
+
+    return {
+      total,
+      bySource,
+      range,
+      previousTotal,
+    };
+  }
+
+  getStatsTrend(options: SessionStatsOptions = {}, now = Date.now()): SessionStatsTrend {
+    const period = options.period ?? "today";
+    const window = resolveStatsTrendWindow(period, now);
+    if (!window) return { period, granularity: null, buckets: [] };
+
+    const buckets = window.buckets.map((bucket) => ({ ...bucket, totalTokens: 0 }));
+    const bucketByStart = new Map(buckets.map((bucket) => [bucket.start, bucket]));
+
+    for (const row of this.aggregateTokenEventsForTrend(window.since, window.until, window.granularity, options.excludeSubagents ?? false)) {
+      const bucket = bucketByStart.get(row.bucket_start);
+      if (bucket) bucket.totalTokens = row.total_tokens;
+    }
+
+    const firstNonZero = buckets.findIndex((bucket) => bucket.totalTokens > 0);
+    return {
+      period,
+      granularity: window.granularity,
+      buckets: firstNonZero === -1 ? [] : buckets.slice(firstNonZero),
+    };
+  }
+
+  private aggregateStatsForRange(
+    range: StatsRange,
+    excludeSubagents: boolean,
+  ): { total: SessionStatsSummary; bySource: SessionSourceStats[] } {
     const summariesBySource = new Map<SessionSource, SessionStatsSummary>();
 
-    for (const row of this.aggregateActiveSessionsBySource(range, options.excludeSubagents ?? false)) {
+    for (const row of this.aggregateActiveSessionsBySource(range, excludeSubagents)) {
       summaryForSource(summariesBySource, row.source).sessionCount = row.session_count;
     }
-    for (const row of this.aggregateMessagesBySource(range, options.excludeSubagents ?? false)) {
+    for (const row of this.aggregateMessagesBySource(range, excludeSubagents)) {
       summaryForSource(summariesBySource, row.source).messageCount = row.message_count;
     }
 
-    const tokenRows = this.aggregateTokenEventsBySource(range, options.excludeSubagents ?? false);
+    const tokenRows = this.aggregateTokenEventsBySource(range, excludeSubagents);
     const tokenSourceRows =
       range.since === null && tokenRows.length === 0
-        ? this.aggregateSessionTokensBySource(options.excludeSubagents ?? false)
+        ? this.aggregateSessionTokensBySource(excludeSubagents)
         : tokenRows;
     for (const row of tokenSourceRows) {
       const summary = summaryForSource(summariesBySource, row.source);
@@ -987,11 +1224,7 @@ export class SessionsStore {
       emptyStatsSummary(),
     );
 
-    return {
-      total,
-      bySource,
-      range,
-    };
+    return { total, bySource };
   }
 
   searchSessions(options: SearchOptions = {}): SessionSearchResult[] {
@@ -1051,14 +1284,15 @@ export class SessionsStore {
     });
   }
 
-  private refreshFtsForSession(sessionKey: string): void {
+  private refreshFtsForSession(sessionKey: string, indexedMessages?: SessionMessage[]): void {
     const row = this.db.prepare("SELECT * FROM sessions WHERE session_key = ?").get(sessionKey) as SessionRow | undefined;
     if (!row) return;
-    const contentText = (this.db.prepare("SELECT content FROM messages WHERE session_key = ? ORDER BY message_index").all(
-      sessionKey,
-    ) as Array<{ content: string }>)
-      .map((message) => message.content)
-      .join("\n\n");
+    const messages =
+      indexedMessages ??
+      (this.db
+        .prepare("SELECT content FROM messages WHERE session_key = ? ORDER BY message_index")
+        .all(sessionKey) as Array<{ content: string }>);
+    const contentText = messages.map((message) => message.content).join("\n\n");
     const title = row.custom_title || row.original_title || row.first_question || "Untitled Session";
     // Prepend the AI summary so its normalized wording is searchable alongside the raw transcript.
     const summary = row.ai_summary?.trim();
@@ -1098,6 +1332,25 @@ export class SessionsStore {
       `,
       )
       .run(tagName);
+  }
+
+  private replaceBranchTag(sessionKey: string, branch: string | null | undefined): void {
+    this.db
+      .prepare(
+        `
+        DELETE FROM session_tags
+        WHERE session_key = ?
+          AND tag_id IN (
+            SELECT id
+            FROM tags
+            WHERE substr(name, 1, 7) = 'branch:'
+          )
+      `,
+      )
+      .run(sessionKey);
+    const branchTag = branchTagName(branch);
+    if (branchTag) this.addTagToSession(sessionKey, branchTag);
+    this.deleteUnusedTags();
   }
 
   private deleteUnusedTags(): void {
@@ -1274,6 +1527,55 @@ export class SessionsStore {
     }>;
   }
 
+  private aggregateTokenEventsForTrend(
+    since: number,
+    until: number,
+    granularity: SessionStatsTrendGranularity,
+    excludeSubagents: boolean,
+  ): Array<{ bucket_start: number; total_tokens: number }> {
+    const subagentAnd = excludeSubagents ? "AND sessions.is_subagent = 0" : "";
+    const rows = this.db
+      .prepare(
+        `
+        WITH ranked AS (
+          SELECT
+            token_events.dedupe_key AS dedupe_key,
+            token_events.timestamp AS timestamp,
+            token_events.total_tokens AS total_tokens,
+            ROW_NUMBER() OVER (
+              PARTITION BY token_events.dedupe_key
+              ORDER BY
+                token_events.total_tokens DESC,
+                CASE sessions.source
+                  WHEN 'codex-cli' THEN 1
+                  WHEN 'claude-cli' THEN 1
+                  WHEN 'codex-app' THEN 2
+                  WHEN 'claude-app' THEN 2
+                  ELSE 9
+                END,
+                token_events.timestamp ASC
+            ) AS row_rank
+          FROM token_events
+          JOIN sessions ON sessions.session_key = token_events.session_key
+          WHERE token_events.timestamp >= ? AND token_events.timestamp <= ? ${subagentAnd}
+        )
+        SELECT timestamp, total_tokens
+        FROM ranked
+        WHERE row_rank = 1
+      `,
+      )
+      .all(since, until) as Array<{ timestamp: number; total_tokens: number }>;
+
+    const totals = new Map<number, number>();
+    for (const row of rows) {
+      const bucketStart = startOfTrendBucket(row.timestamp, granularity);
+      totals.set(bucketStart, (totals.get(bucketStart) ?? 0) + row.total_tokens);
+    }
+    return [...totals.entries()]
+      .map(([bucket_start, total_tokens]) => ({ bucket_start, total_tokens }))
+      .sort((a, b) => a.bucket_start - b.bucket_start);
+  }
+
   private aggregateSessionTokensBySource(excludeSubagents: boolean): Array<{
     source: SessionSource;
     input_tokens: number;
@@ -1322,7 +1624,7 @@ export class SessionsStore {
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
-          ORDER BY pinned DESC, ${sessionSortSql(options.sortBy)} DESC
+          ORDER BY ${sessionSortSql(options.sortBy)}
           LIMIT ?
         `,
         )
@@ -1417,6 +1719,28 @@ export class SessionsStore {
       like,
       like,
     ];
+    const smartSort = (options.sortBy ?? "smart") === "smart";
+    const orderSql =
+      options.sortBy === "created"
+        ? "scored_rows.timestamp ASC"
+        : options.sortBy === "activity"
+          ? "scored_rows.search_score DESC, scored_rows.last_activity_at DESC"
+          : `(
+              scored_rows.search_score
+              * CASE WHEN scored_rows.favorited = 1 THEN 1.2 ELSE 1.0 END
+              * (
+                  0.08
+                  + 0.92 * CASE MIN(
+                    3,
+                    CAST(MAX(0, ? - scored_rows.last_activity_at) / 2592000000.0 AS INTEGER)
+                  )
+                    WHEN 0 THEN 1.0
+                    WHEN 1 THEN 0.5
+                    WHEN 2 THEN 0.125
+                    ELSE 0.0
+                  END
+                )
+            ) DESC, scored_rows.last_activity_at DESC`;
     const args: SQLInputValue[] = [
       ...scopeArgs,
       ...(ftsExpression ? [ftsExpression] : []),
@@ -1427,12 +1751,9 @@ export class SessionsStore {
       ...(shouldMatchLiteralMessages ? [like] : []),
       like,
       like,
+      ...(smartSort ? [Date.now()] : []),
       limit,
     ];
-    const sortSql =
-      options.sortBy === "created"
-        ? "scored_rows.timestamp"
-        : "scored_rows.last_activity_at";
     const rows = this.db
       .prepare(
         `
@@ -1467,13 +1788,13 @@ export class SessionsStore {
                     THEN 50
                   ELSE 0
                 END
-              + CASE WHEN candidate_rows.pinned = 1 THEN 25 ELSE 0 END
+              + CASE WHEN candidate_rows.favorited = 1 THEN 25 ELSE 0 END
             ) AS search_score
           FROM candidate_rows
         )
         SELECT scored_rows.*, COUNT(*) OVER () AS total_count
         FROM scored_rows
-        ORDER BY search_score DESC, ${sortSql} DESC
+        ORDER BY ${orderSql}
         LIMIT ?
       `,
       )
@@ -1496,7 +1817,6 @@ export class SessionsStore {
 
     if (options.visibility === "hidden") where.push("sessions.hidden = 1");
     else if (options.visibility === "favorites") where.push("sessions.hidden = 0 AND sessions.favorited = 1");
-    else if (options.visibility === "pinned") where.push("sessions.hidden = 0 AND sessions.pinned = 1");
     else where.push("sessions.hidden = 0");
 
     if (options.excludeSubagents) where.push("sessions.is_subagent = 0");
@@ -1574,10 +1894,7 @@ export class SessionsStore {
   }
 
   private attachSearchMatchDetails(sessions: SessionSearchResult[], query: string): void {
-    const parsedTerms = searchTerms(query);
-    const terms = parsedTerms.length > 0
-      ? parsedTerms
-      : [query.toLocaleLowerCase()].filter(Boolean);
+    const terms = searchTerms(query);
     if (sessions.length === 0 || terms.length === 0) return;
     for (const session of sessions) {
       session.matchHits = [];
@@ -1701,6 +2018,7 @@ export class SessionsStore {
       rawId: row.raw_id,
       source: row.source,
       environmentId: environment.id,
+      storageEnvironmentId: row.storage_environment_id,
       environmentKind: environment.kind,
       environmentLabel: environment.label,
       projectPath: row.project_path,
@@ -1722,7 +2040,6 @@ export class SessionsStore {
       customTitle: row.custom_title,
       displayTitle,
       favorited: row.favorited === 1,
-      pinned: row.pinned === 1,
       hidden: row.hidden === 1,
       tags,
       matchSnippet: snippet,
@@ -1824,10 +2141,77 @@ function resolveStatsRange(options: SessionStatsOptions, now: number): StatsRang
   return { period: "sevenDay", since: now - 7 * 24 * 60 * 60 * 1000, until: now };
 }
 
+// The immediately preceding comparable window: today→yesterday, 7d→prior 7d, 30d→prior 30d.
+// allTime has no comparison and returns null.
+function resolvePreviousStatsRange(range: StatsRange): StatsRange | null {
+  if (range.period === "allTime" || range.since === null) return null;
+  if (range.period === "today") {
+    const startOfToday = range.since;
+    return { period: range.period, since: startOfToday - 24 * 60 * 60 * 1000, until: startOfToday };
+  }
+  const windowMs = range.until - range.since;
+  return { period: range.period, since: range.since - windowMs, until: range.since };
+}
+
 function startOfLocalDay(timestamp: number): number {
   const date = new Date(timestamp);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
+}
+
+function resolveStatsTrendWindow(period: SessionStatsPeriod, now: number): StatsTrendWindow | null {
+  const granularity = TREND_GRANULARITY_BY_PERIOD[period];
+  if (!granularity) return null;
+  const currentStart = startOfTrendBucket(now, granularity);
+  const firstStart = addTrendBuckets(currentStart, granularity, -29);
+  const buckets: SessionStatsTrendBucket[] = [];
+  for (let index = 0; index < 30; index += 1) {
+    const start = addTrendBuckets(firstStart, granularity, index);
+    const nextStart = addTrendBuckets(start, granularity, 1);
+    buckets.push({
+      start,
+      end: nextStart - 1,
+      label: formatTrendBucketLabel(start, granularity),
+      totalTokens: 0,
+    });
+  }
+  return { since: buckets[0]?.start ?? currentStart, until: now, granularity, buckets };
+}
+
+const TREND_GRANULARITY_BY_PERIOD: Record<SessionStatsPeriod, SessionStatsTrendGranularity | null> = {
+  today: "day",
+  sevenDay: "week",
+  thirtyDay: "month",
+  allTime: null,
+};
+
+function startOfTrendBucket(timestamp: number, granularity: SessionStatsTrendGranularity): number {
+  if (granularity === "day") return startOfLocalDay(timestamp);
+  const date = new Date(startOfLocalDay(timestamp));
+  if (granularity === "week") {
+    const day = date.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    date.setDate(date.getDate() + mondayOffset);
+  } else {
+    date.setDate(1);
+  }
+  return date.getTime();
+}
+
+function addTrendBuckets(timestamp: number, granularity: SessionStatsTrendGranularity, amount: number): number {
+  const date = new Date(timestamp);
+  if (granularity === "day") date.setDate(date.getDate() + amount);
+  else if (granularity === "week") date.setDate(date.getDate() + amount * 7);
+  else date.setMonth(date.getMonth() + amount);
+  return date.getTime();
+}
+
+function formatTrendBucketLabel(timestamp: number, granularity: SessionStatsTrendGranularity): string {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  if (granularity === "month") return `${date.getFullYear()}-${month}`;
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${month}-${day}`;
 }
 
 function buildFtsQuery(query: string): string {
@@ -1882,8 +2266,8 @@ function normalizeExplicitAnd(query: string): string {
 }
 
 function sessionSortSql(sortBy: SessionSortBy = "activity"): string {
-  if (sortBy === "activity") return sessionActivitySql("sessions");
-  return "COALESCE(timestamp, 0)";
+  if (sortBy === "created") return "timestamp ASC";
+  return `favorited DESC, ${sessionActivitySql("sessions")} DESC`;
 }
 
 function sessionActivitySql(sessionTable: string): string {
@@ -1914,6 +2298,216 @@ function projectParts(projectPath: string): string[] {
   return projectPath.split(/[\\/]+/).filter(Boolean);
 }
 
+function validIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function codexTaskWorkspaceDate(projectPath: string): string | null {
+  const parts = projectParts(projectPath);
+  if (parts.length < 3) return null;
+  const codexSegment = parts.at(-3) || "";
+  const dateSegment = parts.at(-2) || "";
+  const taskSegment = parts.at(-1) || "";
+  if (codexSegment.toLowerCase() !== "codex" || !taskSegment || !validIsoDate(dateSegment)) return null;
+  return dateSegment;
+}
+
+function rootProjectTitle(row: ProjectAggregateRow): string | null {
+  const customTitle = row.root_custom_title?.trim();
+  if (customTitle) return customTitle;
+  const originalTitle = row.root_original_title?.trim();
+  if (originalTitle && originalTitle !== "Untitled Session") return originalTitle;
+  return row.root_first_question?.trim() || null;
+}
+
+function normalizedProjectTitle(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function formatMonthDay(taskDate: string): string {
+  return taskDate.slice(5);
+}
+
+function formatClock(timestamp: number): string | null {
+  if (!timestamp || !Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function disambiguateTaskLabels(summaries: ProjectSummaryDraft[]): ProjectSummaryDraft[] {
+  const titleGroups = new Map<string, ProjectSummaryDraft[]>();
+  for (const summary of summaries) {
+    if (summary.labelKind !== "codex-task-title") continue;
+    const key = `${summary.environmentId}\0${normalizedProjectTitle(summary.label)}`;
+    const group = titleGroups.get(key) ?? [];
+    group.push(summary);
+    titleGroups.set(key, group);
+  }
+
+  const withTimeSuffixes = summaries.map((summary) => ({ ...summary }));
+  const byIdentity = new Map(
+    withTimeSuffixes.map((summary) => [`${summary.environmentId}\0${summary.path}`, summary]),
+  );
+  for (const group of titleGroups.values()) {
+    if (group.length < 2) continue;
+    const dateCounts = new Map<string, number>();
+    for (const summary of group) {
+      const date = summary.taskWorkspaceDate || "";
+      dateCounts.set(date, (dateCounts.get(date) || 0) + 1);
+    }
+    for (const summary of group) {
+      const target = byIdentity.get(`${summary.environmentId}\0${summary.path}`)!;
+      const date = summary.taskWorkspaceDate;
+      const clock = formatClock(summary.rootStartedAt);
+      const suffix = date
+        ? (dateCounts.get(date) || 0) > 1 && clock
+          ? `${formatMonthDay(date)} ${clock}`
+          : formatMonthDay(date)
+        : projectBasename(summary.path);
+      target.labelSuffix = appendLabelSuffix(target.labelSuffix, suffix);
+    }
+  }
+
+  for (const group of visibleTaskCollisionGroups(withTimeSuffixes)) {
+    for (const summary of group) {
+      if (!summary.taskBasenameApplied) {
+        summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, projectBasename(summary.path));
+        summary.taskBasenameApplied = true;
+      }
+    }
+  }
+
+  for (const group of visibleTaskCollisionGroups(withTimeSuffixes)) {
+    const partsBySummary = group.map((summary) => projectParts(summary.path));
+    const maxParentDepth = Math.max(...partsBySummary.map((parts) => parts.length - 1));
+    let uniqueFragments: string[] | null = null;
+    for (let parentDepth = 1; parentDepth <= maxParentDepth; parentDepth += 1) {
+      const fragments = partsBySummary.map((parts) => parts.at(-1 - parentDepth) || "");
+      if (fragments.every(Boolean) && new Set(fragments).size === group.length) {
+        uniqueFragments = fragments;
+        break;
+      }
+    }
+    group.forEach((summary, index) => {
+      summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, uniqueFragments?.[index] || summary.path);
+    });
+  }
+
+  let remainingGroups = visibleTaskCollisionGroups(withTimeSuffixes);
+  while (remainingGroups.length > 0) {
+    for (const group of remainingGroups) {
+      for (const summary of group) {
+        summary.labelSuffix = appendLabelSuffix(summary.labelSuffix, stableTaskIdentityDiscriminator(summary));
+      }
+    }
+    remainingGroups = visibleTaskCollisionGroups(withTimeSuffixes);
+  }
+  return withTimeSuffixes;
+}
+
+function visibleTaskLabelVariants(summary: ProjectSummaryDraft): string[] {
+  const suffix = summary.labelSuffix ? ` · ${summary.labelSuffix}` : "";
+  const bases = summary.labelKind === "codex-task-untitled"
+    ? ["Untitled session", "未命名会话"]
+    : [summary.label];
+  return bases.map((base) => `${base}${suffix}`);
+}
+
+function visibleTaskCollisionGroups(summaries: ProjectSummaryDraft[]): ProjectSummaryDraft[][] {
+  const parents = new Map<ProjectSummaryDraft, ProjectSummaryDraft>();
+  const collided = new Set<ProjectSummaryDraft>();
+  const ownerByVisibleLabel = new Map<string, ProjectSummaryDraft>();
+
+  const findRoot = (summary: ProjectSummaryDraft): ProjectSummaryDraft => {
+    const parent = parents.get(summary) ?? summary;
+    if (parent === summary) return summary;
+    const root = findRoot(parent);
+    parents.set(summary, root);
+    return root;
+  };
+  const union = (left: ProjectSummaryDraft, right: ProjectSummaryDraft): void => {
+    const leftRoot = findRoot(left);
+    const rightRoot = findRoot(right);
+    if (leftRoot !== rightRoot) parents.set(rightRoot, leftRoot);
+  };
+
+  for (const summary of summaries) {
+    if (!summary.labelKind.startsWith("codex-task")) continue;
+    parents.set(summary, summary);
+    for (const visibleLabel of visibleTaskLabelVariants(summary)) {
+      const key = `${summary.environmentId}\0${visibleLabel}`;
+      const owner = ownerByVisibleLabel.get(key);
+      if (owner) {
+        union(owner, summary);
+        collided.add(owner);
+        collided.add(summary);
+      } else {
+        ownerByVisibleLabel.set(key, summary);
+      }
+    }
+  }
+
+  const groupsByRoot = new Map<ProjectSummaryDraft, ProjectSummaryDraft[]>();
+  for (const summary of collided) {
+    const root = findRoot(summary);
+    const group = groupsByRoot.get(root) ?? [];
+    group.push(summary);
+    groupsByRoot.set(root, group);
+  }
+  const groups = [...groupsByRoot.values()];
+  for (const group of groups) group.sort(compareTaskIdentity);
+  return groups.sort((left, right) => compareTaskIdentity(left[0], right[0]));
+}
+
+function compareTaskIdentity(left: ProjectSummaryDraft, right: ProjectSummaryDraft): number {
+  return compareProjectText(left.environmentId, right.environmentId) || compareProjectText(left.path, right.path);
+}
+
+function stableTaskIdentityDiscriminator(summary: ProjectSummaryDraft): string {
+  const identity = `${summary.environmentId}\0${summary.path}`;
+  let encoded = "";
+  for (let index = 0; index < identity.length; index += 1) {
+    encoded += identity.charCodeAt(index).toString(16).padStart(4, "0");
+  }
+  return `id:${encoded}`;
+}
+
+function formatMonthDayTime(timestamp: number | null): string | null {
+  if (!timestamp || !Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function compareProjectText(left: string, right: string): number {
+  const localized = left.localeCompare(right);
+  if (localized !== 0 || left === right) return localized;
+  return left < right ? -1 : 1;
+}
+
+function publicProjectSummary(draft: ProjectSummaryDraft): ProjectSummary {
+  return {
+    path: draft.path,
+    label: draft.label,
+    labelKind: draft.labelKind,
+    labelSuffix: draft.labelSuffix,
+    sessionCount: draft.sessionCount,
+    environmentId: draft.environmentId,
+    environmentLabel: draft.environmentLabel,
+    createdAt: draft.createdAt,
+    lastActivityAt: draft.lastActivityAt,
+  };
+}
+
 function projectBasename(projectPath: string): string {
   const parts = projectParts(projectPath);
   return parts.at(-1) || projectPath;
@@ -1921,6 +2515,11 @@ function projectBasename(projectPath: string): string {
 
 function projectLabel(projectPath: string): string {
   return projectBasename(projectPath) || projectPath;
+}
+
+function appendLabelSuffix(current: string | null, next: string | null): string | null {
+  if (!next) return current;
+  return current ? `${current} · ${next}` : next;
 }
 
 function projectParentLabel(projectPath: string): string {

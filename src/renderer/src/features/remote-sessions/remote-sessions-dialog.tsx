@@ -4,9 +4,10 @@ import { ArrowRightLeft, Cloud, CloudUpload, Eye, FolderOpen, Laptop, MoreHorizo
 import type { RemoteSessionDetailSnapshot, RemoteSessionListItem, RemoteSessionStatus, SessionSyncItem, SessionSyncState } from "../../../../core/remote-session-sync";
 import type { MigrationAgent, SessionMigrationResult } from "../../../../core/types";
 import { migrationAgentForSource } from "../../../../core/session-migration";
+import { isSessionSource, sessionSourceDescriptor } from "../../../../core/session-sources";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
-import { migrationAgentLabel, SOURCE_LABEL, sourceUiFamily } from "../../session-ui";
+import { migrationAgentLabel, sourceUiFamily } from "../../session-ui";
 import type { ActionStatus } from "../../app-types";
 import type { RemoteSessionsCache } from "../../remote-sessions-cache";
 import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
@@ -371,6 +372,7 @@ export function RemoteSessionsDialog({
              const remote = item.remote;
              const local = item.local;
              const source = remote?.sourceSource ?? local?.source ?? "";
+             const sourceDescriptor = isSessionSource(source) ? sessionSourceDescriptor(source) : null;
              const title = syncItemTitle(item);
              const localCopy = sessionCopySummary(item, "local");
              const remoteCopy = sessionCopySummary(item, "remote");
@@ -387,8 +389,8 @@ export function RemoteSessionsDialog({
               <div className="remote-session-main">
                  <div className="remote-session-heading">
                    <strong>{title}</strong>
-                   <span className={`source-badge ${sourceUiFamily(source as never)}`}>
-                     {SOURCE_LABEL[source as keyof typeof SOURCE_LABEL] ?? remote?.sourceAgent ?? (local ? migrationAgentForSource(local.source) : "")}
+                   <span className={`source-badge ${sourceDescriptor ? sourceUiFamily(sourceDescriptor.id) : "other"}`}>
+                     {sourceDescriptor?.label ?? remote?.sourceAgent ?? (local ? migrationAgentForSource(local.source) : "")}
                    </span>
                    <span className={`sync-state-badge ${item.state}`}>{syncStateLabel(item.state, language)}</span>
                  </div>

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { sourceFamily } from "./platform";
+import { sessionSourceDescriptor } from "./session-sources";
 import { normalizeTerminalTitle } from "./terminal-title";
 import type { LiveSession, SessionSearchResult } from "./types";
 
@@ -30,7 +30,8 @@ interface WezTermTarget {
 }
 
 export function liveSessionPidForSession(session: SessionSearchResult, liveSessions: LiveSession[]): number | null {
-  const family = sourceFamily(session.source);
+  const family = sessionSourceDescriptor(session.source).liveFamily;
+  if (!family) return null;
   return liveSessions.find((liveSession) => liveSession.family === family && liveSession.rawId === session.rawId)?.pid ?? null;
 }
 

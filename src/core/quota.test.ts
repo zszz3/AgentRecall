@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadClaudeQuotaCard, loadCodexQuotaCard, loadUsageQuotaSnapshot } from "./quota";
+import {
+  classifyCodexQuotaError,
+  CodexHttpError,
+  loadClaudeQuotaCard,
+  loadCodexQuotaCard,
+  loadUsageQuotaSnapshot,
+} from "./quota";
 
 const NOW = new Date("2026-06-01T12:00:00.000Z");
 
@@ -16,6 +22,41 @@ function writeJson(filePath: string, value: unknown): void {
 }
 
 describe("usage quota loader", () => {
+  it.each([
+    [new Error("URLError: <urlopen error timed out>"), "transient"],
+    [new Error("socket hang up"), "transient"],
+    [new CodexHttpError("HTTP 401", 401), "auth"],
+    [new CodexHttpError("HTTP 403", 403), "auth"],
+    [new CodexHttpError("HTTP 429", 429), "rate_limit"],
+    [new CodexHttpError("HTTP 500", 500), "permanent"],
+  ] as const)("classifies Codex quota errors as %s", (error, expected) => {
+    expect(classifyCodexQuotaError(error)).toBe(expected);
+  });
+
+  it("turns a Python timeout into bounded user-facing copy", async () => {
+    const homeDir = makeHome();
+    try {
+      writeJson(path.join(homeDir, ".codex", "auth.json"), {
+        tokens: { access_token: "codex-access", account_id: "account-1" },
+      });
+
+      const card = await loadCodexQuotaCard({
+        homeDir,
+        codexFetcher: async () => {
+          throw new Error("URLError: <urlopen error timed out>");
+        },
+      });
+
+      expect(card).toMatchObject({
+        status: "error",
+        errorKind: "transient",
+        detail: "Codex 额度请求超时，请检查网络后重试。",
+      });
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("loads Codex subscription quota from OAuth auth and normalizes remaining percentages", async () => {
     const homeDir = makeHome();
     try {
@@ -359,7 +400,7 @@ describe("usage quota loader", () => {
     }
   });
 
-  it("returns an empty provider list when both quotas are hidden", async () => {
+  it("returns an empty provider list but records hidden providers when both quotas are hidden", async () => {
     const homeDir = makeHome();
     try {
       const snapshot = await loadUsageQuotaSnapshot({
@@ -372,6 +413,7 @@ describe("usage quota loader", () => {
       });
 
       expect(snapshot.providers).toEqual([]);
+      expect(snapshot.hiddenProviders).toEqual(["codex", "claude-code"]);
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }

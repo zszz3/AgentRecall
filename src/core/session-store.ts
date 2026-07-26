@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import path from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type {
   SkillUsageEvent,
@@ -12,6 +13,8 @@ import {
   type ApiProviderKeyTarget,
   type SessionSyncBinding,
 } from "./store/metadata";
+import { SavedSearchStore, type SavedSearch } from "./store/saved-searches";
+import { SearchHistoryStore, type SearchHistoryEntry } from "./store/search-history-store";
 import { migrateSessionStore } from "./store/schema";
 import {
   SessionsStore,
@@ -21,6 +24,10 @@ import {
   SkillStore,
   type SkillSyncBinding,
 } from "./store/skills";
+import {
+  findSessionFamily,
+  type SessionFamily,
+} from "./session-family";
 import type {
   EnvironmentSyncState,
   EnvironmentUpsertInput,
@@ -38,6 +45,7 @@ import type {
   SessionSource,
   SessionStats,
   SessionStatsOptions,
+  SessionStatsTrend,
   SessionTraceEvent,
   TagListOptions,
   TokenUsageEvent,
@@ -48,6 +56,13 @@ export type {
   SessionSyncBinding,
   SessionSyncDirection,
 } from "./store/metadata";
+export type { SavedSearch } from "./store/saved-searches";
+export type { SearchHistoryEntry } from "./store/search-history-store";
+export type {
+  SessionFamily,
+  SubagentSessionNode,
+  SubagentSessionSummary,
+} from "./session-family";
 export type { TraceEventQueryOptions } from "./store/sessions";
 export type { SkillSyncBinding, SkillSyncDirection } from "./store/skills";
 
@@ -60,14 +75,21 @@ export class SessionStore {
   private readonly metadata: MetadataStore;
   private readonly sessions: SessionsStore;
   private readonly skills: SkillStore;
+  private readonly savedSearches: SavedSearchStore;
+  private readonly historyStore: SearchHistoryStore;
 
   constructor(dbPathOrInstance: string | SessionStoreDatabase) {
     this.db = typeof dbPathOrInstance === "string" ? new DatabaseSync(dbPathOrInstance) : dbPathOrInstance;
     migrateSessionStore(this.db);
     this.environments = new EnvironmentStore(this.db);
     this.metadata = new MetadataStore(this.db);
-    this.sessions = new SessionsStore(this.db, this.environments);
+    const attachmentCacheRoot = typeof dbPathOrInstance === "string"
+      ? path.join(path.dirname(dbPathOrInstance), "attachments")
+      : null;
+    this.sessions = new SessionsStore(this.db, this.environments, attachmentCacheRoot);
     this.skills = new SkillStore(this.db);
+    this.savedSearches = new SavedSearchStore(this.db);
+    this.historyStore = new SearchHistoryStore(this.db);
   }
 
   close(): void {
@@ -108,10 +130,6 @@ export class SessionStore {
 
   setCustomTitle(sessionKey: string, title: string | null): void {
     this.sessions.setCustomTitle(sessionKey, title);
-  }
-
-  setPinned(sessionKey: string, pinned: boolean): void {
-    this.sessions.setPinned(sessionKey, pinned);
   }
 
   setFavorited(sessionKey: string, favorited: boolean): void {
@@ -220,6 +238,10 @@ export class SessionStore {
     return this.sessions.getAllMessages(sessionKey);
   }
 
+  getAttachmentFile(sessionKey: string, attachmentId: string) {
+    return this.sessions.getAttachmentFile(sessionKey, attachmentId);
+  }
+
   getTraceEvents(sessionKey: string, options: TraceEventQueryOptions = {}): SessionTraceEvent[] {
     return this.sessions.getTraceEvents(sessionKey, options);
   }
@@ -304,6 +326,10 @@ export class SessionStore {
     return this.sessions.getStats(options, now);
   }
 
+  getStatsTrend(options: SessionStatsOptions = {}, now = Date.now()): SessionStatsTrend {
+    return this.sessions.getStatsTrend(options, now);
+  }
+
   searchSessions(options: SearchOptions = {}): SessionSearchResult[] {
     return this.sessions.searchSessions(options);
   }
@@ -326,6 +352,42 @@ export class SessionStore {
 
   deleteEnvironmentSessions(environmentId: string): void {
     this.environments.deleteEnvironmentSessions(environmentId);
+  }
+
+  listSavedSearches(): SavedSearch[] {
+    return this.savedSearches.listSavedSearches();
+  }
+
+  createSavedSearch(name: string, options: SearchOptions): SavedSearch {
+    return this.savedSearches.createSavedSearch(name, options);
+  }
+
+  deleteSavedSearch(id: number): boolean {
+    return this.savedSearches.deleteSavedSearch(id);
+  }
+
+  touchSavedSearch(id: number): void {
+    this.savedSearches.touchSavedSearch(id);
+  }
+
+  recordSearch(query: string, resultCount: number, options?: SearchOptions): void {
+    this.historyStore.recordSearch(query, resultCount, options);
+  }
+
+  listRecentSearches(limit = 20): SearchHistoryEntry[] {
+    return this.historyStore.listRecentSearches(limit);
+  }
+
+  searchHistory(query: string, limit = 20): SearchHistoryEntry[] {
+    return this.historyStore.searchHistory(query, limit);
+  }
+
+  clearSearchHistory(): void {
+    this.historyStore.clearHistory();
+  }
+
+  getSessionFamily(sessionKey: string): SessionFamily {
+    return findSessionFamily(this.db, sessionKey);
   }
 }
 

@@ -5,7 +5,7 @@ import type { AiChatMessage } from "../../../core/ai-assistant";
 import type { SessionSearchResult } from "../../../core/types";
 import { SOURCE_LABEL } from "../session-ui";
 import { localize, type LanguageMode } from "../language";
-import { Markdown } from "../lightweight-markdown";
+import { Markdown } from "../markdown";
 
 // A single chat turn shown in the dialog. Assistant turns may carry the sessions
 // the model surfaced, rendered as clickable cards under the reply.
@@ -170,7 +170,7 @@ export function AiAssistantDialog({
                         </div>
                         {session.aiSummary ? (
                           <div className="ai-session-card-summary">
-                            <Markdown text={session.aiSummary} />
+                            <Markdown text={session.aiSummary} language={language} />
                           </div>
                         ) : null}
                       </div>
@@ -179,7 +179,7 @@ export function AiAssistantDialog({
                 ) : null}
                 {showBubble ? (
                   <div className="ai-message-bubble">
-                    {message.role === "assistant" ? <Markdown text={message.content} /> : message.content}
+                    {message.role === "assistant" ? <Markdown text={message.content} language={language} /> : message.content}
                   </div>
                 ) : null}
               </div>

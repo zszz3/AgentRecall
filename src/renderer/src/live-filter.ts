@@ -1,4 +1,5 @@
 import type { SessionSource } from "../../core/types";
+import { sessionSourceDescriptor } from "../../core/session-sources";
 
 export type LiveSessionState = "open" | "closed";
 export type LiveStatusFilter = "all" | "open" | "closed";
@@ -9,17 +10,7 @@ export interface LiveFilterableSession {
 }
 
 export function liveSessionKeyForSession(session: LiveFilterableSession): string | null {
-  const family = session.source.startsWith("claude")
-    ? "claude"
-    : session.source.startsWith("codex")
-      ? "codex"
-      : session.source === "codebuddy-cli"
-        ? "codebuddy"
-        : session.source === "codewiz-cli"
-          ? "codewiz"
-        : session.source === "trae"
-          ? "trae"
-          : null;
+  const family = sessionSourceDescriptor(session.source).liveFamily;
   if (!family) return null;
   return `${family}:${session.rawId}`;
 }

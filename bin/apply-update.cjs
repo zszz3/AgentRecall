@@ -43,26 +43,74 @@ function argumentValue(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+async function applyStagedUpdate(staged) {
+  let backedUp = false;
+  await fs.rm(staged.backupPath, { recursive: true, force: true });
+  try {
+    try {
+      await fs.rename(staged.livePackagePath, staged.backupPath);
+      backedUp = true;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    try {
+      await fs.rename(staged.stagedPackagePath, staged.livePackagePath);
+    } catch (error) {
+      if (error?.code !== "EXDEV") throw error;
+      await fs.cp(staged.stagedPackagePath, staged.livePackagePath, { recursive: true, force: true });
+      await fs.rm(staged.stagedPackagePath, { recursive: true, force: true });
+    }
+    await fs.mkdir(path.dirname(staged.statusPath), { recursive: true });
+    await fs.writeFile(staged.statusPath, `${JSON.stringify({
+      status: "installed",
+      version: staged.version,
+      updatedAt: Date.now(),
+      error: null,
+    }, null, 2)}\n`, "utf8");
+    await fs.rm(staged.backupPath, { recursive: true, force: true });
+    await fs.rm(staged.stageRoot, { recursive: true, force: true });
+  } catch (error) {
+    await fs.rm(staged.livePackagePath, { recursive: true, force: true }).catch(() => undefined);
+    if (backedUp) {
+      await fs.rename(staged.backupPath, staged.livePackagePath).catch((rollbackError) => {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      });
+    }
+    throw error;
+  }
+}
+
 async function main() {
   const manifestPath = argumentValue("--manifest");
+  const stagedPath = argumentValue("--staged");
   const waitPid = Number(argumentValue("--wait-pid"));
-  if (!manifestPath) throw new Error("--manifest is required.");
+  if (!manifestPath && !stagedPath) throw new Error("--manifest or --staged is required.");
   let lock = null;
   try {
     lock = await acquireUpdateLock();
-    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
     if (Number.isInteger(waitPid) && waitPid > 0 && waitPid !== process.pid) await waitForProcessExit(waitPid, 30_000);
     if (process.argv.includes("--stop-app")) await stopRunningApp();
-    process.stdout.write(`正在安装 AgentRecall v${manifest.version}...\n`);
-    await installUpdate(manifest, {
-      nodePath: process.env.AGENT_RECALL_NODE_PATH,
-    });
-    await clearInstallStatus().catch(() => undefined);
-    process.stdout.write(`AgentRecall v${manifest.version} 安装完成，正在重新启动。\n`);
+    let version;
+    if (stagedPath) {
+      const staged = JSON.parse(await fs.readFile(stagedPath, "utf8"));
+      version = staged.version;
+      process.stdout.write(`正在应用 AgentRecall v${version}...\n`);
+      await applyStagedUpdate(staged);
+    } else {
+      const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+      version = manifest.version;
+      process.stdout.write(`正在安装 AgentRecall v${version}...\n`);
+      await installUpdate(manifest, {
+        nodePath: process.env.AGENT_RECALL_NODE_PATH,
+      });
+      await clearInstallStatus().catch(() => undefined);
+    }
+    process.stdout.write(`AgentRecall v${version} 安装完成，正在重新启动。\n`);
     await relaunchInstalledApp();
   } finally {
     await lock?.release().catch(() => undefined);
-    await fs.rm(path.dirname(manifestPath), { recursive: true, force: true }).catch(() => undefined);
+    const controlPath = stagedPath || manifestPath;
+    await fs.rm(path.dirname(controlPath), { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -80,4 +128,4 @@ if (require.main === module) main().catch(async (error) => {
   process.exitCode = 1;
 });
 
-module.exports = { relaunchInstalledApp };
+module.exports = { applyStagedUpdate, relaunchInstalledApp };

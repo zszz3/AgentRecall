@@ -232,7 +232,14 @@ const appUpdateService = new AppUpdateService({
   getAutoCheckEnabled: () => getSettings().autoCheckUpdates,
   autoCheckDisabled: () => process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1",
   publishStatus: (status) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.status, status),
-  launchInstaller: (manifest) => launchDetachedAppUpdateInstaller(manifest, { applyUpdatePath: APPLY_UPDATE_PATH }),
+  publishProgress: (progress) => mainWindow?.webContents.send(APP_UPDATE_EVENTS.progress, progress),
+  stageInstaller: (manifest, onProgress) =>
+    loadUpdateClient().stageUpdate(manifest, {
+      nodePath: process.env.AGENT_RECALL_NODE_PATH || process.execPath,
+      onProgress,
+    }),
+  launchInstaller: (staged) =>
+    launchDetachedAppUpdateInstaller(staged, { applyUpdatePath: APPLY_UPDATE_PATH }),
   requestQuit: () => app.quit(),
   schedule: (callback, delayMs) => setTimeout(callback, delayMs),
   showMessageBox: (options) => mainWindow
@@ -1314,7 +1321,6 @@ function registerIpc(): void {
   ipcMain.handle("tag:remove", (_event, sessionKey: string, tagName: string) => store.removeTag(sessionKey, tagName));
   ipcMain.handle("tag:delete", (_event, tagName: string) => store.deleteTag(tagName));
   ipcMain.handle("favorite:set", (_event, sessionKey: string, favorited: boolean) => store.setFavorited(sessionKey, favorited));
-  ipcMain.handle("pin:set", (_event, sessionKey: string, pinned: boolean) => store.setPinned(sessionKey, pinned));
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
   ipcMain.handle("session:delete", (_event, sessionKey: string) => store.deleteSession(sessionKey));
   ipcMain.handle("index:refresh", () => runIndexSync());

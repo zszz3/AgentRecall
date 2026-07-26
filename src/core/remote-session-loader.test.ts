@@ -77,6 +77,27 @@ describe("remote session loader", () => {
     expect(loaded.session.sessionKey).toBe(`ssh:ssh-devbox:${expectedSource}:${loaded.session.rawId}`);
   });
 
+  it("loads remote Qoder payloads", () => {
+    const qoderRows = [
+      { role: "user", message: { content: [{ type: "text", text: "remote qoder question" }] } },
+      { role: "assistant", message: { content: [{ type: "text", text: "remote qoder answer" }] } },
+    ];
+    const [loaded] = loadRemoteSessionPayloads(env, [{
+      source: "qoder",
+      kind: "qoder-project",
+      path: "/home/me/.qoder/cache/projects/demo-app-1a2b3c4d/conversation-history/task-remote/task-remote.jsonl",
+      mtimeMs: 100,
+      size: 200,
+      content: qoderRows.map((row) => JSON.stringify(row)).join("\n"),
+    } as RemoteSessionFilePayload]);
+
+    expect(loaded.session.source).toBe("qoder");
+    expect(loaded.session.sessionKey).toBe("ssh:ssh-devbox:qoder:demo-app-1a2b3c4d/task-remote");
+    expect(loaded.session.projectPath).toBe("demo-app");
+    expect(loaded.messages[0].content).toBe("remote qoder question");
+    expect(loaded.messages[1].content).toBe("remote qoder answer");
+  });
+
   it("detects remote Claude subagent payloads from structured metadata and path", () => {
     const loaded = loadRemoteSessionPayloads(env, [
       payload(
@@ -149,7 +170,6 @@ describe("remote session loader", () => {
       customTitle: null,
       displayTitle: "Remote summary title",
       favorited: false,
-      pinned: false,
       hidden: false,
       tags: [],
       matchSnippet: null,

@@ -11,14 +11,25 @@ import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
 
 export function existingSshHostAliases(
-  environments: Array<Pick<SessionEnvironment, "kind" | "label" | "hostAlias">>,
+  environments: Array<Pick<SessionEnvironment, "kind" | "hostAlias" | "enabled">>,
 ): Set<string> {
   const aliases = new Set<string>();
   for (const environment of environments) {
-    if (environment.kind !== "ssh") continue;
+    if (environment.kind !== "ssh" || !environment.enabled) continue;
     if (environment.hostAlias) aliases.add(environment.hostAlias);
   }
   return aliases;
+}
+
+export function disabledSshEnvironmentIdsByHostAlias(
+  environments: Array<Pick<SessionEnvironment, "id" | "kind" | "hostAlias" | "enabled">>,
+): Map<string, string> {
+  const environmentIds = new Map<string, string>();
+  for (const environment of environments) {
+    if (environment.kind !== "ssh" || environment.enabled || !environment.hostAlias) continue;
+    environmentIds.set(environment.hostAlias, environment.id);
+  }
+  return environmentIds;
 }
 
 export function SshEnvironmentDialog({
@@ -47,6 +58,10 @@ export function SshEnvironmentDialog({
   const [manualIdentityFile, setManualIdentityFile] = useState("");
   const saving = feedback?.kind === "running";
   const existingAliases = useMemo(() => existingSshHostAliases(environments), [environments]);
+  const disabledEnvironmentIds = useMemo(
+    () => disabledSshEnvironmentIdsByHostAlias(environments),
+    [environments],
+  );
   const selectableAliasCount = [...selectedAliases].filter((alias) => !existingAliases.has(alias)).length;
 
   useEffect(() => {
@@ -93,6 +108,7 @@ export function SshEnvironmentDialog({
       setLocalError(null);
       for (const host of selectedHosts) {
         await onSaveEnvironment({
+          id: disabledEnvironmentIds.get(host.alias),
           kind: "ssh",
           label: host.alias,
           hostAlias: host.alias,
@@ -311,4 +327,3 @@ function sshConfigHostDetail(host: SshConfigHost): string {
   ].filter((part): part is string => Boolean(part));
   return parts.join(" · ") || host.alias;
 }
-

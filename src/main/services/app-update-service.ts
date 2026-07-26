@@ -3,7 +3,22 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { MessageBoxOptions } from "electron";
-import type { AppUpdateInstallResult, AppUpdateManifest, AppUpdateStatus } from "../../core/app-update-types";
+import type {
+  AppUpdateInstallResult,
+  AppUpdateManifest,
+  AppUpdateProgress,
+  AppUpdateStatus,
+} from "../../core/app-update-types";
+
+export interface StagedAppUpdate {
+  version: string;
+  stageRoot: string;
+  archivePath: string;
+  stagedPackagePath: string;
+  livePackagePath: string;
+  backupPath: string;
+  statusPath: string;
+}
 
 export interface AppUpdateClient {
   LATEST_RELEASE_URL: string;
@@ -19,6 +34,13 @@ export interface AppUpdateClient {
   snoozeUpdatePrompt(version: string): Promise<void>;
   writeAppProcess(pid?: number): Promise<string>;
   writeUpdatePreference(enabled: boolean): Promise<void>;
+  stageUpdate(
+    manifest: AppUpdateManifest,
+    options?: {
+      nodePath?: string;
+      onProgress?: (progress: AppUpdateProgress) => void;
+    },
+  ): Promise<StagedAppUpdate>;
 }
 
 export interface AppUpdateServiceDependencies {
@@ -27,7 +49,12 @@ export interface AppUpdateServiceDependencies {
   getAutoCheckEnabled(): boolean;
   autoCheckDisabled(): boolean;
   publishStatus(status: AppUpdateStatus): void;
-  launchInstaller(manifest: AppUpdateManifest): Promise<void>;
+  publishProgress(progress: AppUpdateProgress): void;
+  stageInstaller(
+    manifest: AppUpdateManifest,
+    onProgress: (progress: AppUpdateProgress) => void,
+  ): Promise<StagedAppUpdate>;
+  launchInstaller(staged: StagedAppUpdate): Promise<void>;
   requestQuit(): void;
   schedule(callback: () => void, delayMs: number): unknown;
   showMessageBox(options: MessageBoxOptions): Promise<{ response: number }>;
@@ -40,6 +67,7 @@ export interface AppUpdateServiceDependencies {
 export class AppUpdateService {
   private status: AppUpdateStatus | null = null;
   private activeCheck: Promise<AppUpdateStatus> | null = null;
+  private activeInstall: { version: string; task: Promise<void> } | null = null;
   private previousResultShown = false;
 
   constructor(private readonly dependencies: AppUpdateServiceDependencies) {}
@@ -56,10 +84,69 @@ export class AppUpdateService {
     if (!this.dependencies.releaseRuntime) {
       throw new Error("Application updates are unavailable in development builds.");
     }
+    if (this.activeInstall) {
+      return { started: true, version: this.activeInstall.version };
+    }
     const manifest = this.dependencies.getClient().parseUpdateManifest(this.status?.manifest);
-    await this.dependencies.launchInstaller(manifest);
-    this.dependencies.schedule(() => this.dependencies.requestQuit(), 100);
+    const task = this.runInstall(manifest);
+    this.activeInstall = { version: manifest.version, task };
+    void task.then(
+      () => this.clearActiveInstall(task),
+      (error) => {
+        this.reportInstallFailure(manifest.version, error);
+        this.clearActiveInstall(task);
+      },
+    );
     return { started: true, version: manifest.version };
+  }
+
+  private async runInstall(manifest: AppUpdateManifest): Promise<void> {
+    const staged = await this.dependencies.stageInstaller(
+      manifest,
+      (progress) => this.dependencies.publishProgress(progress),
+    );
+    this.dependencies.publishProgress({
+      phase: "restarting",
+      version: manifest.version,
+      message: "更新准备完成，正在重新启动…",
+    });
+    await this.dependencies.launchInstaller(staged);
+    this.dependencies.schedule(() => this.dependencies.requestQuit(), 300);
+  }
+
+  private clearActiveInstall(task: Promise<void>): void {
+    if (this.activeInstall?.task === task) this.activeInstall = null;
+  }
+
+  private reportInstallFailure(version: string, error: unknown): void {
+    let formatted = "Unknown update error";
+    try {
+      formatted = this.dependencies.getClient().formatUpdateError(error);
+    } catch {
+      try {
+        formatted = error instanceof Error ? error.message : String(error);
+      } catch {
+        // Keep the generic fallback when even converting an unusual thrown value fails.
+      }
+    }
+    try {
+      this.dependencies.publishProgress({
+        phase: "error",
+        version,
+        error: formatted,
+      });
+    } catch (publishError) {
+      try {
+        this.dependencies.logError(`Failed to publish app update error: ${String(publishError)}`);
+      } catch {
+        // Background failure reporting must never reject the detached install task.
+      }
+    }
+    try {
+      this.dependencies.logError(`App update installation failed: ${formatted}`);
+    } catch {
+      // Background failure reporting must never reject the detached install task.
+    }
   }
 
   async skip(untilNextVersion: boolean): Promise<AppUpdateStatus> {
@@ -193,7 +280,7 @@ export interface DetachedAppUpdateInstallerOptions {
 }
 
 export async function launchDetachedAppUpdateInstaller(
-  manifest: AppUpdateManifest,
+  staged: StagedAppUpdate,
   options: DetachedAppUpdateInstallerOptions,
 ): Promise<void> {
   const environment = { ...(options.environment ?? process.env) };
@@ -203,8 +290,8 @@ export async function launchDetachedAppUpdateInstaller(
   }
   delete environment.ELECTRON_RUN_AS_NODE;
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-recall-app-update-"));
-  const manifestPath = path.join(directory, "update.json");
-  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const stagedPath = path.join(directory, "staged.json");
+  await fs.writeFile(stagedPath, `${JSON.stringify(staged, null, 2)}\n`, "utf8");
   const spawnProcess = options.spawnProcess ?? ((command, args, spawnOptions) => spawn(command, args, spawnOptions));
   let child: ReturnType<typeof spawnProcess>;
   try {
@@ -212,8 +299,8 @@ export async function launchDetachedAppUpdateInstaller(
       executablePath,
       [
         options.applyUpdatePath,
-        "--manifest",
-        manifestPath,
+        "--staged",
+        stagedPath,
         "--wait-pid",
         String(options.processId ?? process.pid),
       ],

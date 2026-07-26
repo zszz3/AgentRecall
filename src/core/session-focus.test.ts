@@ -23,7 +23,6 @@ function session(overrides: Partial<SessionSearchResult>): SessionSearchResult {
     customTitle: null,
     displayTitle: "",
     favorited: false,
-    pinned: false,
     hidden: false,
     tags: [],
     matchSnippet: null,

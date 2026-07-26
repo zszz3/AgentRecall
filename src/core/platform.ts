@@ -24,6 +24,7 @@ import {
   withPosixTerminalTitle,
   withPowerShellTerminalTitle,
 } from "./terminal-title";
+import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
@@ -65,9 +66,10 @@ interface ResumeOptions {
   homeDir?: string;
   sshTarget?: string;
   sshArgs?: string[];
+  wslDistribution?: string;
 }
 
-type ResumeOpenOptions = Pick<ResumeOptions, "skipPermissions" | "platform" | "homeDir" | "sshTarget" | "sshArgs">;
+type ResumeOpenOptions = Pick<ResumeOptions, "skipPermissions" | "platform" | "homeDir" | "sshTarget" | "sshArgs" | "wslDistribution">;
 
 export interface AppSettings {
   defaultTerminal: TerminalChoice;
@@ -89,12 +91,17 @@ export interface AppSettings {
   includeOpenClaw: boolean;
   includeHermes: boolean;
   includeOpenCode: boolean;
+  includeZcode: boolean;
   includeCursorAgent: boolean;
   includeTrae: boolean;
+  includeQoder: boolean;
+  rulesSyncEnabled: boolean;
+  memoriesSyncEnabled: boolean;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   hideSubagentSessions: boolean;
   autoCheckUpdates: boolean;
+  showInDock: boolean;
   summaryAutoBackfill: boolean;
   summaryMaxAgeDays: number;
   compressionConcurrency: number;
@@ -104,6 +111,7 @@ export interface AppSettings {
   skillSyncSupabaseUrl: string;
   skillSyncSupabaseAnonKey: string;
   remoteSyncEnabled: boolean;
+  syncSessionAttachments: boolean;
   remoteSyncSupabaseUrl: string;
   remoteSyncSupabaseAnonKey: string;
   apiConfig: ApiConfig;
@@ -145,12 +153,17 @@ export const defaultSettings: AppSettings = {
   includeOpenClaw: false,
   includeHermes: false,
   includeOpenCode: false,
+  includeZcode: false,
   includeCursorAgent: false,
   includeTrae: false,
+  includeQoder: false,
+  rulesSyncEnabled: false,
+  memoriesSyncEnabled: false,
   hideCodexQuota: false,
   hideClaudeQuota: false,
   hideSubagentSessions: true,
   autoCheckUpdates: true,
+  showInDock: true,
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
@@ -160,6 +173,7 @@ export const defaultSettings: AppSettings = {
   skillSyncSupabaseUrl: "",
   skillSyncSupabaseAnonKey: "",
   remoteSyncEnabled: false,
+  syncSessionAttachments: true,
   remoteSyncSupabaseUrl: "",
   remoteSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
@@ -176,11 +190,13 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     summaryMaxAgeDays: normalizeSummaryMaxAgeDays(merged.summaryMaxAgeDays),
     compressionConcurrency: normalizeCompressionConcurrency(merged.compressionConcurrency),
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
+    showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),
     remoteSyncEnabled: Boolean(merged.remoteSyncEnabled),
+    syncSessionAttachments: merged.syncSessionAttachments !== false,
     remoteSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.remoteSyncSupabaseUrl),
     remoteSyncSupabaseAnonKey: String(merged.remoteSyncSupabaseAnonKey ?? "").trim(),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),
@@ -205,33 +221,8 @@ function normalizeCompressionConcurrency(value: number): number {
 
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
 
-type SourceFamily = "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "cursor" | "trae";
-
 function sourceDisplayName(source: SessionSource): string {
-  if (source === "opencode-cli") return "OpenCode";
-  if (source === "cursor-agent") return "Cursor Agent";
-  if (source === "openclaw") return "OpenClaw";
-  if (source === "hermes") return "Hermes";
-  if (source === "trae") return "Trae";
-  if (source === "tclaude-cli") return "TClaude";
-  if (source === "tcodex-cli") return "TCodex";
-  if (source === "codebuddy-cli") return "CodeBuddy";
-  if (source === "codewiz-cli") return "CodeWiz";
-  if (source.startsWith("claude")) return "Claude";
-  return "Codex";
-}
-
-export function sourceFamily(source: SessionSource): SourceFamily {
-  if (source === "tclaude-cli") return "tclaude";
-  if (source === "tcodex-cli") return "tcodex";
-  if (source === "codebuddy-cli") return "codebuddy";
-  if (source === "codewiz-cli") return "codewiz";
-  if (source === "openclaw") return "openclaw";
-  if (source === "hermes") return "hermes";
-  if (source === "opencode-cli") return "opencode";
-  if (source === "cursor-agent") return "cursor";
-  if (source === "trae") return "trae";
-  return source === "claude-cli" || source === "claude-app" || source === "claude-internal" ? "claude" : "codex";
+  return sessionSourceDescriptor(source).label;
 }
 
 export function migrationBinary(target: MigrationTarget, settings: AppSettings): string {
@@ -320,16 +311,7 @@ function migrationCodexHome(homeDir: string, platform: NodeJS.Platform): string 
 }
 
 function migrationTargetForResumeSource(source: SessionSource): MigrationTarget | null {
-  if (source === "claude-cli" || source === "claude-app") return "claude";
-  if (source === "claude-internal") return "claude-internal";
-  if (source === "codex-cli" || source === "codex-app") return "codex";
-  if (source === "codex-internal") return "codex-internal";
-  if (source === "tclaude-cli") return "tclaude";
-  if (source === "tcodex-cli") return "tcodex";
-  if (source === "codebuddy-cli") return "codebuddy";
-  if (source === "codewiz-cli") return "codewiz";
-  if (source === "cursor-agent") return "cursor";
-  return null;
+  return sessionSourceDescriptor(source).resumeTarget;
 }
 
 function legacyMigratedCodexProvider(session: SessionSearchResult, target: MigrationTarget): string | null {
@@ -546,7 +528,15 @@ export function getResumeCommand(
 ): string {
   const { withCwd = true, skipPermissions = false, platform = process.platform, homeDir = homedir() } = opts;
   const sshArgs = resolveSshArgs(opts);
+  const wslDistribution = resolveWslDistribution(opts);
   const shell = localShellKind(platform, settings);
+  if (wslDistribution) {
+    const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, "linux", homeDir);
+    const innerCommand = buildMigrationResumeShellCommand(spec, session.projectPath ?? "", "posix", withCwd);
+    return shell === "powershell"
+      ? formatPowershellWslDisplay(wslDistribution, innerCommand)
+      : formatWslDisplayCommand(wslDistribution, innerCommand, platform);
+  }
   const runtimePlatform = sshArgs ? "linux" : platform;
   const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, runtimePlatform, homeDir);
   if (sshArgs) {
@@ -654,6 +644,8 @@ export function buildWindowsResumeLaunchPlan(
   opts: ResumeOpenOptions & { terminal?: TerminalChoice } = {},
 ): WindowsLaunch[] {
   const platform = opts.platform ?? "win32";
+  const wslDistribution = resolveWslDistribution(opts);
+  if (wslDistribution) return buildWindowsWslResumeLaunchPlan(session, settings, opts, platform, wslDistribution);
   const sshArgs = resolveSshArgs(opts);
   // The launch plan wraps this string in `cmd.exe /d /k`, so it must always be
   // cmd-syntax even when the user's preferred terminal is PowerShell (that
@@ -679,6 +671,31 @@ export function buildWindowsResumeLaunchPlan(
   const title = session.displayTitle || undefined;
   if (!sshArgs) return buildWindowsLaunchPlan(terminal, cmdCommand, cwd, powershellCommand, title);
   return buildWindowsShellSpecificLaunchPlan(terminal, cmdCommand, powershellCommand, cwd, title);
+}
+
+function buildWindowsWslResumeLaunchPlan(
+  session: SessionSearchResult,
+  settings: AppSettings,
+  opts: ResumeOpenOptions & { terminal?: TerminalChoice },
+  platform: NodeJS.Platform,
+  wslDistribution: string,
+): WindowsLaunch[] {
+  const cmdCommand = getResumeCommand(session, { ...settings, defaultTerminal: "Cmd" }, {
+    withCwd: true,
+    skipPermissions: opts.skipPermissions,
+    platform,
+    homeDir: opts.homeDir,
+    wslDistribution,
+  });
+  const powershellCommand = getResumeWslPowerShellCommand(session, settings, { ...opts, wslDistribution });
+  const terminal = normalizeTerminal(opts.terminal ?? settings.defaultTerminal, "win32");
+  return buildWindowsShellSpecificLaunchPlan(
+    terminal,
+    cmdCommand,
+    powershellCommand,
+    "",
+    session.displayTitle || undefined,
+  );
 }
 
 async function openResumeInWindowsTerminal(
@@ -730,10 +747,26 @@ function spawnDetached(command: string, args: string[], cwd?: string): Promise<v
 export function getResumeProcessSpec(
   session: SessionSearchResult,
   settings: AppSettings = defaultSettings,
-  opts: Pick<ResumeOptions, "skipPermissions" | "platform" | "homeDir" | "sshTarget" | "sshArgs"> = {},
+  opts: Pick<ResumeOptions, "skipPermissions" | "platform" | "homeDir" | "sshTarget" | "sshArgs" | "wslDistribution"> = {},
 ): ResumeProcessSpec {
   const { skipPermissions = false, platform = process.platform, homeDir = homedir() } = opts;
   const sshArgs = resolveSshArgs(opts);
+  const wslDistribution = resolveWslDistribution(opts);
+  if (wslDistribution) {
+    const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, "linux", homeDir);
+    const innerCommand = buildMigrationResumeShellCommand(spec, session.projectPath ?? "", "posix", true);
+    return {
+      command: "wsl.exe",
+      args: ["--distribution", wslDistribution, "--exec", "bash", "-lc", innerCommand],
+      cwd: undefined,
+      displayCommand: getResumeCommand(session, settings, {
+        withCwd: true,
+        skipPermissions,
+        platform,
+        wslDistribution,
+      }),
+    };
+  }
   const runtimePlatform = sshArgs ? "linux" : platform;
   const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, runtimePlatform, homeDir);
 
@@ -1175,8 +1208,8 @@ export async function openNativeApp(
     return;
   }
 
-  const family = sourceFamily(session.source);
-  if (family !== "claude" && family !== "codex" && family !== "codebuddy") {
+  const family = sessionSourceDescriptor(session.source).nativeAppFamily;
+  if (!family) {
     throw new Error(`Native app opening is not configured for ${sourceDisplayName(session.source)} sessions yet.`);
   }
   const appName = family === "claude" ? "Claude" : family === "codebuddy" ? "CodeBuddy CN" : "Codex";
@@ -1225,9 +1258,23 @@ function resolveSshArgs(opts: Pick<ResumeOptions, "sshTarget" | "sshArgs">): str
   return undefined;
 }
 
+function resolveWslDistribution(opts: Pick<ResumeOptions, "wslDistribution">): string | undefined {
+  const value = opts.wslDistribution?.trim();
+  return value || undefined;
+}
+
 function formatSshDisplayCommand(sshArgs: string[], innerCommand: string, platform: NodeJS.Platform): string {
   const quoteArg = platform === "win32" ? winSshArgQuote : shellQuote;
   return ["ssh", ...sshArgs.map(quoteArg), quoteArg(innerCommand)].join(" ");
+}
+
+function formatPowershellWslDisplay(distribution: string, innerCommand: string): string {
+  return ["wsl.exe", "--distribution", powershellQuote(distribution), "--exec", "bash", "-lc", powershellQuote(innerCommand)].join(" ");
+}
+
+function formatWslDisplayCommand(distribution: string, innerCommand: string, platform: NodeJS.Platform): string {
+  const quote = platform === "win32" ? winSshQuote : shellQuote;
+  return ["wsl.exe", "--distribution", quote(distribution), "--exec", "bash", "-lc", quote(innerCommand)].join(" ");
 }
 
 function getResumePowerShellCommand(
@@ -1243,6 +1290,21 @@ function getResumePowerShellCommand(
     homeDir: opts.homeDir,
   });
   return formatPowershellSshDisplay(opts.sshArgs, innerCommand);
+}
+
+function getResumeWslPowerShellCommand(
+  session: SessionSearchResult,
+  settings: AppSettings,
+  opts: ResumeOpenOptions & { wslDistribution: string },
+): string {
+  const innerCommand = buildResumeShellCommand(session, settings, {
+    withCwd: true,
+    skipPermissions: opts.skipPermissions ?? false,
+    shell: "posix",
+    platform: "linux",
+    homeDir: opts.homeDir,
+  });
+  return formatPowershellWslDisplay(opts.wslDistribution, innerCommand);
 }
 
 function powershellSshArgQuote(s: string): string {
@@ -1371,6 +1433,43 @@ export function mergeProcessEnvOverrides(overrides?: Record<string, string>): No
 }
 
 function runCliVersion(command: string, args: string[], env?: Record<string, string>): Promise<string> {
+  if (process.platform === "win32") {
+    // npm installs Windows CLI shims as .cmd files. PowerShell invokes those
+    // shims, while single-quoted arguments keep paths and values literal.
+    const childEnv = mergeProcessEnvOverrides(env);
+    return resolveWindowsCliCommand(command, childEnv).then(
+      (resolvedCommand) => new Promise((resolve, reject) => {
+        const commandLine = ["&", quotePowerShellCliArg(resolvedCommand), ...args.map(quotePowerShellCliArg)].join(" ");
+        const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", commandLine], {
+          env: childEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk: string) => {
+          stdout += chunk;
+        });
+        child.stderr?.on("data", (chunk: string) => {
+          stderr += chunk;
+        });
+        child.once("error", (error) => {
+          reject(Object.assign(error instanceof Error ? error : new Error(String(error)), { stdout, stderr }));
+        });
+        child.once("close", (code) => {
+          if (code === 0) {
+            resolve(stdout);
+            return;
+          }
+          const failure = new Error(`CLI exited with code ${code ?? "unknown"}`);
+          reject(Object.assign(failure, { stdout, stderr }));
+        });
+      }),
+    );
+  }
+
   return new Promise((resolve, reject) => {
     execFile(command, args, { env: mergeProcessEnvOverrides(env) }, (error, stdout, stderr) => {
       if (!error) {
@@ -1379,6 +1478,33 @@ function runCliVersion(command: string, args: string[], env?: Record<string, str
       }
       const failure = error instanceof Error ? error : new Error(String(error));
       reject(Object.assign(failure, { stdout, stderr }));
+    });
+  });
+}
+
+function quotePowerShellCliArg(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function resolveWindowsCliCommand(command: string, env: NodeJS.ProcessEnv): Promise<string> {
+  if (path.win32.isAbsolute(command) || /[\\/]/.test(command)) {
+    if (existsSync(command)) return Promise.resolve(command);
+    return Promise.reject(Object.assign(new Error(`CLI binary not found: ${command}`), { code: "ENOENT" }));
+  }
+  // where.exe gives a consistent missing-binary result even when cmd.exe is localized.
+  return new Promise((resolve, reject) => {
+    execFile("where.exe", [command], { env }, (error, stdout) => {
+      if (!error) {
+        const candidates = stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+        const resolved = candidates.find((value) => /\.cmd$/i.test(value)) ?? candidates[0];
+        if (resolved) {
+          resolve(resolved);
+          return;
+        }
+        reject(Object.assign(new Error(`CLI binary not found: ${command}`), { code: "ENOENT" }));
+        return;
+      }
+      reject(Object.assign(error instanceof Error ? error : new Error(String(error)), { code: "ENOENT" }));
     });
   });
 }

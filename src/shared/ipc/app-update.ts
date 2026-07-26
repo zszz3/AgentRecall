@@ -13,4 +13,5 @@ export const APP_UPDATE_IPC = {
 
 export const APP_UPDATE_EVENTS = {
   status: "app-update:status",
+  progress: "app-update:progress",
 } as const;

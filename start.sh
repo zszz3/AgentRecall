@@ -101,10 +101,25 @@ command -v npm >/dev/null 2>&1 || fail "npm not found after Node check."
 ok "npm $(npm --version) detected"
 
 # ── 3. dependencies (node_modules) ─────────────────────────────
-if [ -d "node_modules" ] && [ -f "node_modules/.package-lock.json" ]; then
-  ok "Dependencies installed (node_modules/ exists)"
+# node_modules/ existing is not enough: a `git pull` can add or bump
+# dependencies in package.json/package-lock.json without touching the
+# installed tree, which then makes the build fail on missing modules.
+# `npm ls` compares the installed tree against package.json and exits
+# non-zero when a declared dependency is missing or version-mismatched,
+# so use it to detect drift and reinstall only when needed.
+deps_in_sync() {
+  [ -d "node_modules" ] || return 1
+  npm ls --depth=0 >/dev/null 2>&1
+}
+
+if deps_in_sync; then
+  ok "Dependencies installed and satisfy package.json"
 else
-  info "Installing dependencies (npm ci) — first run may take a few minutes …"
+  if [ -d "node_modules" ]; then
+    info "Dependencies out of date (package.json changed) — reinstalling (npm ci) …"
+  else
+    info "Installing dependencies (npm ci) — first run may take a few minutes …"
+  fi
   npm ci || fail "npm ci failed"
   ok "Dependencies installed"
 fi

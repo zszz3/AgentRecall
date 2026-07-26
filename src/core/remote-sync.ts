@@ -1,10 +1,14 @@
-import { execFile, type ExecFileOptions } from "node:child_process";
 import {
   loadRemoteSessionPayloads,
+  loadWslSessionPayloads,
   type RemoteSessionFileKind,
   type RemoteSessionFilePayload,
 } from "./remote-session-loader";
 import type { SessionStore } from "./session-store";
+import { remoteSessionKey } from "./session-environment";
+import { execFile, type ExecFileOptions } from "node:child_process";
+import { runRemoteCommand } from "./remote-process";
+import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "./session-sources";
 import { buildSshArgs } from "./ssh-config";
 import type {
   IndexedSession,
@@ -29,7 +33,7 @@ export interface RemoteSyncOptions {
 }
 
 export interface RemoteSessionSummaryPayload {
-  kind: "codex-session" | "claude-project" | "codebuddy-project" | "codewiz-session";
+  kind: "codex-session" | "claude-project" | "codebuddy-project" | "codewiz-session" | "qoder-project";
   source?: SessionSource;
   path: string;
   mtimeMs: number;
@@ -41,6 +45,8 @@ export interface RemoteSessionSummaryPayload {
   firstQuestion: string;
   messageCount: number;
   gitBranch?: string | null;
+  isSubagent?: boolean;
+  parentSessionId?: string | null;
   tokenUsage?: TokenUsage;
   tokenEvents?: TokenUsageEvent[];
   messageEvents?: SessionMessageEvent[];
@@ -138,6 +144,16 @@ def parse_message(row, kind):
     if role == "user" and row.get("parentId") is None and text.strip() == "code":
       return None
     return {"role": role, "content": text, "timestamp": codebuddy_timestamp(row.get("timestamp"))}
+  if kind == "qoder":
+    role = row.get("role")
+    if role not in {"user", "assistant"}:
+      return None
+    message = row.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    text = text_from_blocks(content)
+    if not text or (role == "user" and not meaningful_user(text)):
+      return None
+    return {"role": role, "content": text, "timestamp": ""}
   if row.get("type") not in {"user", "assistant"}:
     return None
   message = row.get("message")
@@ -335,6 +351,7 @@ export async function syncRemoteEnvironment(
   environment: SessionEnvironment,
   options: RemoteSyncOptions = {},
 ): Promise<RemoteSyncStatus> {
+  if (environment.kind === "wsl") return syncWslEnvironment(store, environment, options);
   const runSsh = options.runSsh ?? runSystemSsh;
   store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
   try {
@@ -357,6 +374,41 @@ export async function syncRemoteEnvironment(
     const loaded = loadRemoteSessionPayloads(environment, payloads);
     for (const item of loaded) {
       migrateLegacyRemoteSessionRecord(store, item.session);
+      store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
+    }
+    store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
+    return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    store.updateEnvironmentSyncState(environment.id, "error", { lastError: message });
+    throw error;
+  }
+}
+
+async function syncWslEnvironment(
+  store: SessionStore,
+  environment: SessionEnvironment,
+  options: RemoteSyncOptions,
+): Promise<RemoteSyncStatus> {
+  const runWsl = options.runSsh ?? runSystemRemote;
+  store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
+  try {
+    const output = await runWsl(environment, buildRemoteCollectorCommand([], { includeCodeWiz: false }));
+    const { payloads, summaries } = decodeRemoteSyncOutput(output);
+    const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary)));
+    for (const summary of enabledSummaries) {
+      store.upsertIndexedSessionSummary(
+        wslSummaryToIndexedSession(environment, summary),
+        summary.messageCount,
+        summary.tokenEvents,
+        summary.messageEvents,
+      );
+    }
+    const loaded = loadWslSessionPayloads(
+      environment,
+      payloads.filter((payload) => isSupportedWslSource(payloadSourceForPayload(payload))),
+    );
+    for (const item of loaded) {
       store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents);
     }
     store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
@@ -394,10 +446,20 @@ function remoteSummaryToIndexedSession(environment: SessionEnvironment, summary:
     prUrl: null,
     prNumber: null,
     gitBranch: summary.gitBranch,
+    isSubagent: summary.isSubagent === true,
+    parentSessionId: summary.parentSessionId ?? null,
     tokenUsage: summary.tokenUsage,
     environmentId: environment.id,
     environmentKind: environment.kind,
     environmentLabel: environment.label,
+  };
+}
+
+function wslSummaryToIndexedSession(environment: SessionEnvironment, summary: RemoteSessionSummaryPayload): IndexedSession {
+  const source = summarySource(summary);
+  return {
+    ...remoteSummaryToIndexedSession(environment, summary),
+    sessionKey: remoteSessionKey(environment, source, summary.rawId),
   };
 }
 
@@ -409,8 +471,21 @@ function summarySource(summary: RemoteSessionSummaryPayload): SessionSource {
   return "claude-cli";
 }
 
+function payloadSourceForPayload(payload: RemoteSessionFilePayload): SessionSource {
+  if (payload.source) return payload.source;
+  if (payload.kind === "codex-session" || payload.kind === "codex-index") return "codex-cli";
+  if (payload.kind === "codebuddy-project") return "codebuddy-cli";
+  if (payload.kind === "codewiz-session") return "codewiz-cli";
+  if (payload.kind === "qoder-project") return "qoder";
+  return "claude-cli";
+}
+
+function isSupportedWslSource(source: SessionSource): boolean {
+  return source === "codex-cli" || source === "claude-cli";
+}
+
 function isOptionalRemoteSource(source: SessionSource): boolean {
-  return source === "tclaude-cli" || source === "tcodex-cli" || source === "codebuddy-cli";
+  return sessionSourceDescriptor(source).remoteCollectorOptional;
 }
 
 export function encodeRemotePayloadForTest(payloads: RemoteSessionFilePayload[]): string {
@@ -464,6 +539,11 @@ export function buildRemoteSyncSshArgs(environment: SessionEnvironment, remoteCo
   return [...baseArgs.slice(0, separatorIndex), ...REMOTE_SYNC_SSH_OPTIONS, ...baseArgs.slice(separatorIndex)];
 }
 
+async function runSystemRemote(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
+  if (environment.kind === "wsl") return runRemoteCommand(environment, remoteCommand, REMOTE_SYNC_EXEC_OPTIONS);
+  return runSystemSsh(environment, remoteCommand);
+}
+
 async function runSystemSsh(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
   const args = buildRemoteSyncSshArgs(environment, remoteCommand);
   return new Promise((resolve, reject) => {
@@ -479,9 +559,24 @@ export async function fetchRemoteSessionFilePayload(
   session: SessionSearchResult,
   options: RemoteSessionFileFetchOptions = {},
 ): Promise<RemoteSessionFilePayload> {
+  if (environment.kind === "wsl") return fetchWslSessionFilePayload(environment, session, options);
   const runSsh = options.runSsh ?? runSystemSsh;
   const kind = remoteKindForSource(session.source);
   const output = await runSsh(environment, buildRemoteFileFetchCommand({ path: session.filePath, source: session.source, kind }));
+  const payloads = decodeRemotePayload(output);
+  const payload = payloads.find((item) => item.path === session.filePath && item.kind === kind) ?? payloads[0];
+  if (!payload) throw new Error("Remote session file fetch returned no payload.");
+  return payload;
+}
+
+async function fetchWslSessionFilePayload(
+  environment: SessionEnvironment,
+  session: SessionSearchResult,
+  options: RemoteSessionFileFetchOptions,
+): Promise<RemoteSessionFilePayload> {
+  const runWsl = options.runSsh ?? runSystemRemote;
+  const kind = remoteKindForSource(session.source);
+  const output = await runWsl(environment, buildRemoteFileFetchCommand({ path: session.filePath, source: session.source, kind }));
   const payloads = decodeRemotePayload(output);
   const payload = payloads.find((item) => item.path === session.filePath && item.kind === kind) ?? payloads[0];
   if (!payload) throw new Error("Remote session file fetch returned no payload.");
@@ -495,18 +590,26 @@ export async function fetchRemoteSessionMessagePage(
   limit = 120,
   options: RemoteSessionFileFetchOptions = {},
 ): Promise<SessionMessage[]> {
+  if (environment.kind === "wsl") return fetchWslSessionMessagePage(environment, session, offset, limit, options);
   const runSsh = options.runSsh ?? runSystemSsh;
   const output = await runSsh(environment, buildRemoteMessagePageCommand(session, offset, limit));
   return decodeRemoteMessagePage(output);
 }
 
-export function remoteFamilyForSource(source: SessionSource): "claude" | "codex" | "codebuddy" | "codewiz" {
-  if (source === "codewiz-cli") return "codewiz";
-  if (source === "codebuddy-cli") return "codebuddy";
-  if (source === "claude-cli" || source === "claude-app" || source === "claude-internal" || source === "tclaude-cli") {
-    return "claude";
-  }
-  return "codex";
+async function fetchWslSessionMessagePage(
+  environment: SessionEnvironment,
+  session: SessionSearchResult,
+  offset: number,
+  limit: number,
+  options: RemoteSessionFileFetchOptions,
+): Promise<SessionMessage[]> {
+  const runWsl = options.runSsh ?? runSystemRemote;
+  const output = await runWsl(environment, buildRemoteMessagePageCommand(session, offset, limit));
+  return decodeRemoteMessagePage(output);
+}
+
+export function remoteFamilyForSource(source: SessionSource): "claude" | "codex" | "codebuddy" | "codewiz" | "qoder" {
+  return sessionSourceDescriptor(source).remoteFamily ?? "codex";
 }
 
 function remoteKindForSource(source: SessionSource): RemoteSessionFileKind {
@@ -514,6 +617,7 @@ function remoteKindForSource(source: SessionSource): RemoteSessionFileKind {
   if (family === "codewiz") return "codewiz-session";
   if (family === "claude") return "claude-project";
   if (family === "codebuddy") return "codebuddy-project";
+  if (family === "qoder") return "qoder-project";
   return "codex-session";
 }
 
@@ -692,20 +796,12 @@ const REMOTE_SESSION_FILE_KINDS = new Set<RemoteSessionFilePayload["kind"]>([
   "claude-session-index",
   "codewiz-session",
   "codebuddy-project",
+  "qoder-project",
 ]);
 
-const REMOTE_SUMMARY_SOURCES = new Set<SessionSource>([
-  "claude-cli",
-  "claude-app",
-  "claude-internal",
-  "codex-cli",
-  "codex-app",
-  "codex-internal",
-  "tclaude-cli",
-  "tcodex-cli",
-  "codebuddy-cli",
-  "codewiz-cli",
-]);
+const REMOTE_SUMMARY_SOURCES = new Set<SessionSource>(
+  SESSION_SOURCE_DESCRIPTORS.filter(({ remoteFamily }) => remoteFamily !== null).map(({ id }) => id),
+);
 
 const REMOTE_SYNC_SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
 
@@ -775,6 +871,8 @@ function parseRemoteSummaryRecord(
     firstQuestion,
     messageCount,
     gitBranch: stringField(parsed, "gitBranch") || null,
+    isSubagent: parsed.isSubagent === true,
+    parentSessionId: stringField(parsed, "parentSessionId") || null,
     tokenUsage: tokenUsageField(parsed, "tokenUsage"),
     tokenEvents: tokenEventsField(parsed, "tokenEvents", lineNumber),
     messageEvents: messageEventsField(parsed, "messageEvents", lineNumber),
@@ -946,6 +1044,8 @@ def emit_codex_summary(path, stat, titles, source):
   message_count = 0
   message_events = []
   git_branch = ""
+  is_subagent = False
+  parent_session_id = None
   token_state = new_codex_token_state()
   try:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -962,7 +1062,28 @@ def emit_codex_summary(path, stat, titles, source):
             raw_id = payload.get("id") if isinstance(payload.get("id"), str) else raw_id
             project_path = payload.get("cwd") if isinstance(payload.get("cwd"), str) else project_path
             git = payload.get("git")
-            if isinstance(git, dict) and isinstance(git.get("branch"), str):
+            if not git_branch and isinstance(git, dict) and isinstance(git.get("branch"), str):
+              git_branch = git.get("branch")
+            structured_source = payload.get("source")
+            if isinstance(structured_source, dict):
+              subagent = structured_source.get("subagent")
+              thread_spawn = subagent.get("thread_spawn") if isinstance(subagent, dict) else None
+              if isinstance(thread_spawn, dict) and isinstance(thread_spawn.get("parent_thread_id"), str):
+                is_subagent = True
+                parent_session_id = thread_spawn.get("parent_thread_id")
+            if payload.get("thread_source") == "subagent" and isinstance(payload.get("parent_thread_id"), str):
+              is_subagent = True
+              parent_session_id = payload.get("parent_thread_id")
+          parsed_timestamp = _iso_timestamp_ms(row.get("timestamp"))
+          if parsed_timestamp is not None:
+            timestamp = parsed_timestamp
+          continue
+        if not row.get("type") and isinstance(row.get("id"), str) and isinstance(row.get("timestamp"), str):
+          raw_id = row.get("id")
+          git = row.get("git")
+          if isinstance(git, dict):
+            project_path = git.get("cwd") if isinstance(git.get("cwd"), str) else project_path
+            if not git_branch and isinstance(git.get("branch"), str):
               git_branch = git.get("branch")
           parsed_timestamp = _iso_timestamp_ms(row.get("timestamp"))
           if parsed_timestamp is not None:
@@ -977,7 +1098,10 @@ def emit_codex_summary(path, stat, titles, source):
             first_question = parsed["content"]
   except Exception:
     return
-  indexed_title = titles.get(raw_id, ("", ""))[0]
+  indexed_title, indexed_updated_at = titles.get(raw_id, ("", ""))
+  indexed_timestamp = _iso_timestamp_ms(indexed_updated_at)
+  if indexed_timestamp is not None:
+    timestamp = max(timestamp, indexed_timestamp)
   emit({
     "kind": "codex-session",
     "source": source,
@@ -992,12 +1116,18 @@ def emit_codex_summary(path, stat, titles, source):
     "messageCount": message_count,
     "messageEvents": message_events,
     "gitBranch": git_branch,
+    "isSubagent": is_subagent,
+    "parentSessionId": parent_session_id,
     "tokenUsage": finalize_codex_tokens(token_state),
     "tokenEvents": finalize_codex_events(token_state),
   })
 
 def emit_claude_summary(path, stat, index, source):
   raw_id = path.stem
+  path_parts = path.parts
+  subagents_index = path_parts.index("subagents") if "subagents" in path_parts else -1
+  is_subagent = subagents_index > 0
+  parent_session_id = path_parts[subagents_index - 1] if is_subagent else None
   meta = index.get(raw_id, {})
   project_path = meta.get("cwd", "")
   timestamp = int(meta.get("startedAt") or stat.st_mtime * 1000)
@@ -1017,6 +1147,9 @@ def emit_claude_summary(path, stat, index, source):
           continue
         if not project_path and isinstance(row.get("cwd"), str):
           project_path = row.get("cwd")
+        if is_subagent:
+          raw_id = row.get("agentId") if isinstance(row.get("agentId"), str) else raw_id
+          parent_session_id = row.get("sessionId") if isinstance(row.get("sessionId"), str) else parent_session_id
         if not git_branch and isinstance(row.get("gitBranch"), str):
           git_branch = row.get("gitBranch")
         accumulate_claude_tokens(token_state, row)
@@ -1042,6 +1175,8 @@ def emit_claude_summary(path, stat, index, source):
     "messageCount": message_count,
     "messageEvents": message_events,
     "gitBranch": git_branch,
+    "isSubagent": is_subagent,
+    "parentSessionId": parent_session_id,
     "tokenUsage": finalize_claude_tokens(token_state),
     "tokenEvents": finalize_claude_events(token_state),
   })
@@ -1229,6 +1364,15 @@ def emit_codebuddy_summary(path, stat):
             if not key.startswith("codebuddy:"):
               key = "codebuddy:" + key
             _tok_put(token_entries, key, _tok_event(row_timestamp, key, usage))
+        elif row.get("type") == "function_call":
+          provider_data = row.get("providerData")
+          usage = _codebuddy_usage(provider_data) if isinstance(provider_data, dict) else None
+          if usage:
+            key_value = row.get("callId") or row.get("id") or "%s:%s:%s" % (index, usage["inputTokens"], usage["outputTokens"])
+            key = str(key_value)
+            if not key.startswith("codebuddy:"):
+              key = "codebuddy:" + key
+            _tok_put(token_entries, key, _tok_event(row_timestamp, key, usage))
         parsed = parse_message(row, "codebuddy")
         if parsed:
           message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
@@ -1255,6 +1399,55 @@ def emit_codebuddy_summary(path, stat):
     "tokenUsage": _tok_total(token_events),
     "tokenEvents": token_events,
   })
+def emit_qoder_summary(path, stat):
+  raw_id = path.stem
+  project_path = ""
+  timestamp = int(stat.st_mtime * 1000)
+  first_question = ""
+  message_count = 0
+  message_events = []
+  path_str = str(path)
+  slug = ""
+  if "/projects/" in path_str:
+    after_projects = path_str.split("/projects/")[1]
+    slug = after_projects.split("/")[0]
+  if slug:
+    raw_id = "%s/%s" % (slug, path.stem)
+    project_path = re.sub(r"-[0-9a-f]{8}$", "", slug) or slug
+  try:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+      for index, line in enumerate(handle):
+        try:
+          row = json.loads(line)
+        except Exception:
+          continue
+        if not isinstance(row, dict):
+          continue
+        parsed = parse_message(row, "qoder")
+        if parsed:
+          message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
+          message_count += 1
+          if parsed["role"] == "user" and not first_question:
+            first_question = parsed["content"]
+  except Exception:
+    return
+  emit({
+    "kind": "qoder-project",
+    "source": "qoder",
+    "path": str(path),
+    "mtimeMs": int(stat.st_mtime * 1000),
+    "size": stat.st_size,
+    "rawId": raw_id,
+    "projectPath": project_path,
+    "timestamp": timestamp,
+    "originalTitle": title_from(first_question) or raw_id,
+    "firstQuestion": first_question,
+    "messageCount": message_count,
+    "messageEvents": message_events,
+    "gitBranch": "",
+    "tokenUsage": _tok_empty(),
+    "tokenEvents": [],
+  })
 candidates = []
 sources = [
   ("codex-session", "codex-cli", home / ".codex" / "sessions", "*.jsonl"),
@@ -1273,12 +1466,7 @@ for kind, source, root, pattern in sources:
     except Exception:
       pass
 
-codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
-try:
-  if codewiz_db.exists():
-    emit_codewiz_summaries(codewiz_db, codewiz_db.stat())
-except Exception:
-  pass
+__CODEWIZ_COLLECTION__
 codex_titles = {
   "codex-cli": load_codex_titles(".codex"),
   __OPTIONAL_CODEX_TITLE_INDEXES__
@@ -1294,16 +1482,22 @@ for _mtime, kind, source, path, _size in sorted(candidates, key=lambda item: ite
       emit_codex_summary(path, stat, codex_titles.get(source, {}), source)
     elif kind == "claude-project":
       emit_claude_summary(path, stat, claude_indexes.get(source, {}), source)
+    elif kind == "qoder-project":
+      emit_qoder_summary(path, stat)
     else:
       emit_codebuddy_summary(path, stat)
   except Exception:
     pass`;
 
-function buildRemoteCollectorCommand(enabledOptionalSources: SessionSource[]): string {
+function buildRemoteCollectorCommand(
+  enabledOptionalSources: SessionSource[],
+  options: { includeCodeWiz?: boolean } = {},
+): string {
   const descriptors: Record<string, string> = {
     "tclaude-cli": '("claude-project", "tclaude-cli", home / ".tclaude" / "projects", "*.jsonl")',
     "tcodex-cli": '("codex-session", "tcodex-cli", home / ".tcodex" / "sessions", "*.jsonl")',
     "codebuddy-cli": '("codebuddy-project", "codebuddy-cli", home / ".codebuddy" / "projects", "*.jsonl")',
+    "qoder": '("qoder-project", "qoder", home / ".qoder" / "cache" / "projects", "*.jsonl")',
   };
   const optionalSources = enabledOptionalSources.filter((source) => source in descriptors);
   const optionalCodexTitleIndexes = optionalSources.includes("tcodex-cli")
@@ -1312,11 +1506,20 @@ function buildRemoteCollectorCommand(enabledOptionalSources: SessionSource[]): s
   const optionalClaudeIndexes = optionalSources.includes("tclaude-cli")
     ? '"tclaude-cli": load_claude_index(".tclaude"),'
     : "";
+  const codewizCollection = options.includeCodeWiz === false
+    ? ""
+    : String.raw`codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
+try:
+  if codewiz_db.exists():
+    emit_codewiz_summaries(codewiz_db, codewiz_db.stat())
+except Exception:
+  pass`;
   const script = REMOTE_COLLECTOR_SCRIPT
     .replace("__ENABLED_OPTIONAL_SOURCES__", JSON.stringify(optionalSources))
     .replace("__OPTIONAL_SOURCE_DESCRIPTORS__", optionalSources.map((source) => descriptors[source]).join(",\n  "))
     .replace("__OPTIONAL_CODEX_TITLE_INDEXES__", optionalCodexTitleIndexes)
-    .replace("__OPTIONAL_CLAUDE_INDEXES__", optionalClaudeIndexes);
+    .replace("__OPTIONAL_CLAUDE_INDEXES__", optionalClaudeIndexes)
+    .replace("__CODEWIZ_COLLECTION__", codewizCollection);
   return buildPythonBase64Command(script);
 }
 

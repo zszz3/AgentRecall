@@ -9,6 +9,7 @@ import {
   loadCodeBuddyCliSessionRows,
   loadCodeBuddyCliSessions,
   loadCodexSessionFile,
+  loadCodexSessionRows,
   loadCodexSessionsIterator,
   loadCodexSessions,
   loadDefaultSessions,
@@ -102,6 +103,34 @@ describe("Codex session loading", () => {
       gitBranch: "feat/session-tags",
     });
     expect(loaded?.messages.map((m) => m.content)).toEqual(["修复登录态失效", "我来检查 auth 逻辑"]);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("recognizes the current Codex desktop originator", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-app-originator-"));
+    const filePath = path.join(dir, "rollout.jsonl");
+    fs.writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-07-19T14:37:55Z",
+          payload: {
+            id: "codex-current-desktop",
+            cwd: "/Users/test/Documents/Codex/2026-07-19/rewrite-feishu-doc",
+            originator: "codex_work_desktop",
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-07-19T14:38:17Z",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "重写飞书文档" }] },
+        }),
+      ].join("\n"),
+    );
+
+    expect(loadCodexSessionFile(filePath)?.session.source).toBe("codex-app");
 
     fs.rmSync(dir, { recursive: true, force: true });
   });
@@ -535,9 +564,60 @@ describe("Codex session loading", () => {
         id: "old-id",
         timestamp: "2025-01-01T00:00:00Z",
         instructions: "...",
-        git: { cwd: "/old" },
+        git: { cwd: "/old", branch: "legacy/branch" },
       }),
-    ).toMatchObject({ id: "old-id", projectPath: "/old" });
+    ).toMatchObject({ id: "old-id", projectPath: "/old", gitBranch: "legacy/branch" });
+  });
+
+  it("finds Codex metadata and branch information after an earlier rollout row", () => {
+    const loaded = loadCodexSessionRows("/tmp/later-meta.jsonl", [
+      { type: "event_msg", timestamp: "2026-06-01T09:59:59Z", payload: { type: "startup" } },
+      {
+        type: "session_meta",
+        timestamp: "2026-06-01T10:00:00Z",
+        payload: { id: "later-meta", cwd: "/repo", git: { branch: "feat/later-meta" } },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-01T10:01:00Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "later metadata" }] },
+      },
+    ]);
+
+    expect(loaded?.session).toMatchObject({
+      rawId: "later-meta",
+      projectPath: "/repo",
+      gitBranch: "feat/later-meta",
+    });
+  });
+
+  it("reuses previously resolved Codex metadata instead of rescanning the rows", () => {
+    const loaded = loadCodexSessionRows(
+      "/tmp/pre-resolved-meta.jsonl",
+      [
+        {
+          type: "response_item",
+          timestamp: "2026-06-01T10:01:00Z",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "reuse metadata" }] },
+        },
+      ],
+      {
+        sessionMeta: {
+          id: "pre-resolved-meta",
+          projectPath: "/repo",
+          ts: Date.parse("2026-06-01T10:00:00Z"),
+          gitBranch: "feat/pre-resolved",
+          isSubagent: false,
+          parentSessionId: null,
+        },
+      },
+    );
+
+    expect(loaded?.session).toMatchObject({
+      rawId: "pre-resolved-meta",
+      projectPath: "/repo",
+      gitBranch: "feat/pre-resolved",
+    });
   });
 
   it("prefers an explicit Codex title over the embedded metadata title", () => {
@@ -1027,6 +1107,99 @@ describe("CodeBuddy session loading", () => {
         reasoningOutputTokens: 5,
         totalTokens: 150,
       },
+    ]);
+
+    fs.rmSync(codeBuddyDir, { recursive: true, force: true });
+  });
+
+  it("sums token usage from function_call records, counting parallel tool calls separately", () => {
+    const codeBuddyDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codebuddy-fc-"));
+    const projectDir = path.join(codeBuddyDir, "projects", "Users-xjx");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "codebuddy-fc.jsonl"),
+      [
+        JSON.stringify({
+          id: "msg-user",
+          timestamp: 1_780_000_000_000,
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "edit some files" }],
+          sessionId: "codebuddy-fc",
+          cwd: "/repo",
+        }),
+        // A tool-ending assistant turn keeps no usage on the message; the usage
+        // lives on each function_call. Two parallel tool calls in one turn share
+        // a messageId but are separately billed requests keyed by callId.
+        JSON.stringify({
+          id: "asst-1",
+          timestamp: 1_780_000_001_000,
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "" }],
+          providerData: { messageId: "m-1", model: "gpt" },
+          sessionId: "codebuddy-fc",
+          cwd: "/repo",
+        }),
+        JSON.stringify({
+          id: "fc-1",
+          callId: "call-a",
+          timestamp: 1_780_000_001_100,
+          type: "function_call",
+          name: "Read",
+          providerData: {
+            messageId: "m-1",
+            usage: { requests: 1, inputTokens: 1000, outputTokens: 10, totalTokens: 1010 },
+          },
+          sessionId: "codebuddy-fc",
+          cwd: "/repo",
+        }),
+        JSON.stringify({
+          id: "fc-2",
+          callId: "call-b",
+          timestamp: 1_780_000_001_200,
+          type: "function_call",
+          name: "Edit",
+          providerData: {
+            messageId: "m-1",
+            usage: { requests: 1, inputTokens: 2000, outputTokens: 20, totalTokens: 2020 },
+          },
+          sessionId: "codebuddy-fc",
+          cwd: "/repo",
+        }),
+        // A later text-ending turn keeps usage on the assistant message itself.
+        JSON.stringify({
+          id: "asst-2",
+          timestamp: 1_780_000_002_000,
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "done" }],
+          providerData: {
+            messageId: "m-2",
+            usage: { requests: 1, inputTokens: 3000, outputTokens: 30, totalTokens: 3030 },
+          },
+          sessionId: "codebuddy-fc",
+          cwd: "/repo",
+        }),
+      ].join("\n"),
+    );
+
+    const loaded = loadCodeBuddyCliSessions(codeBuddyDir);
+
+    expect(loaded).toHaveLength(1);
+    const session = loaded[0]!;
+    // 1010 + 2020 (two parallel tool calls) + 3030 (text turn) = 6060.
+    expect(session.session.tokenUsage).toEqual({
+      inputTokens: 6000,
+      outputTokens: 60,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens: 6060,
+    });
+    expect(session.tokenEvents?.map((event) => event.dedupeKey).sort()).toEqual([
+      "codebuddy:call-a",
+      "codebuddy:call-b",
+      "codebuddy:m-2",
     ]);
 
     fs.rmSync(codeBuddyDir, { recursive: true, force: true });

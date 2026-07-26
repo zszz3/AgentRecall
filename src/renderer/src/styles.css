@@ -1344,21 +1344,34 @@ select:focus-visible {
   position: relative;
   z-index: 5;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(0, max-content) auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(2, 38px);
+  gap: 8px;
+}
+
+.toolbar-primary,
+.toolbar-secondary {
+  display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.toolbar-secondary {
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .toolbar-filters {
   --toolbar-filter-gap: 8px;
   --live-filter-width: 166px;
   --date-filter-width: 214px;
+  --sort-filter-width: 214px;
   display: flex;
-  width: fit-content;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: min(636px, 48vw);
   flex-wrap: nowrap;
-  justify-self: end;
   justify-content: flex-start;
   align-items: center;
   gap: var(--toolbar-filter-gap);
@@ -1413,6 +1426,11 @@ select:focus-visible {
   border-radius: 9px;
   background: var(--panel-bg);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.toolbar-primary > .searchbox {
+  flex: 1 1 180px;
+  width: auto;
 }
 
 .searchbox:focus-within {

@@ -5,10 +5,10 @@ import type {
 } from "react";
 import {
   Code2,
+  Container,
   Edit3,
   EyeOff,
   Laptop,
-  Pin,
   Server,
   Star,
   Terminal as TerminalIcon,
@@ -17,6 +17,7 @@ import { formatRelativeTime } from "../../../../core/format-session";
 import type {
   SessionMatchHit,
   SessionSearchResult,
+  SessionSortBy,
 } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
 import { HighlightedSearchText } from "../../search-highlight";
@@ -37,6 +38,7 @@ import {
 
 export const SessionRow = memo(function SessionRow({
   session,
+  sortBy,
   selected,
   liveState,
   language,
@@ -48,6 +50,7 @@ export const SessionRow = memo(function SessionRow({
   onContextMenu,
 }: {
   session: SessionSearchResult;
+  sortBy?: SessionSortBy;
   selected: boolean;
   liveState: LiveSessionState;
   language: LanguageMode;
@@ -90,7 +93,6 @@ export const SessionRow = memo(function SessionRow({
           >
             <Star size={14} fill={session.favorited ? "currentColor" : "none"} />
           </button>
-          {session.pinned ? <Pin size={14} /> : null}
           {session.hidden ? <EyeOff size={14} /> : null}
           <span className="session-name">{session.displayTitle}</span>
           <button
@@ -115,11 +117,11 @@ export const SessionRow = memo(function SessionRow({
             {SOURCE_LABEL[session.source]}
           </span>
           <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
-            {isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
+              {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
             {environmentBadgeLabel(session, language)}
           </span>
           <span>{session.projectPath || l("No project path", "无项目路径")}</span>
-          <span>{formatRelativeTime(sessionSortTimestamp(session))}</span>
+          <span>{formatRelativeTime(sessionSortTimestamp(session, sortBy))}</span>
           <span>{l(`${session.messageCount} messages`, `${session.messageCount} 条消息`)}</span>
           {hasTokenUsage(session.tokenUsage) ? <span>{l(`${formatTokenCount(session.tokenUsage.totalTokens)} tokens`, `${formatTokenCount(session.tokenUsage.totalTokens)} token`)}</span> : null}
         </div>
@@ -169,5 +171,4 @@ export const SessionRow = memo(function SessionRow({
     </article>
   );
 });
-
 

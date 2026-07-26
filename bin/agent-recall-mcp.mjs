@@ -232,36 +232,30 @@ export function toggleFavorite(db, { sessionKey, favorited } = {}) {
   return { ok: true, sessionKey, favorited: Boolean(favorited) };
 }
 
-// Visibility is not a single column: it's derived from independent favorited /
-// pinned / hidden flags (see App.tsx ViewMode). Each call sets the requested
-// dimension and clears what would otherwise hide the session from that view,
-// without disturbing unrelated flags (e.g. favoriting doesn't unpin).
+// Visibility is derived from favorited / hidden flags (see App.tsx ViewMode).
+// Each call sets the requested dimension and clears what would otherwise hide
+// the session from that view without disturbing unrelated flags.
 export function setVisibility(db, { sessionKey, visibility } = {}) {
   if (!sessionKey || !sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
   switch (visibility) {
     case "default":
-      // Return to the normal list: un-hide and un-pin, leave favorite as-is.
-      db.prepare("UPDATE sessions SET hidden = 0, pinned = 0 WHERE session_key = ?").run(sessionKey);
+      db.prepare("UPDATE sessions SET hidden = 0 WHERE session_key = ?").run(sessionKey);
       break;
     case "favorites":
       db.prepare("UPDATE sessions SET favorited = 1, hidden = 0 WHERE session_key = ?").run(sessionKey);
-      break;
-    case "pinned":
-      db.prepare("UPDATE sessions SET pinned = 1, hidden = 0 WHERE session_key = ?").run(sessionKey);
       break;
     case "hidden":
       db.prepare("UPDATE sessions SET hidden = 1 WHERE session_key = ?").run(sessionKey);
       break;
     default:
-      return { ok: false, error: 'visibility must be one of "default", "favorites", "hidden", "pinned".' };
+      return { ok: false, error: 'visibility must be one of "default", "favorites", or "hidden".' };
   }
-  const row = db.prepare("SELECT favorited, pinned, hidden FROM sessions WHERE session_key = ?").get(sessionKey);
+  const row = db.prepare("SELECT favorited, hidden FROM sessions WHERE session_key = ?").get(sessionKey);
   return {
     ok: true,
     sessionKey,
     visibility,
     favorited: row.favorited === 1,
-    pinned: row.pinned === 1,
     hidden: row.hidden === 1,
   };
 }
@@ -477,10 +471,10 @@ async function runServer() {
     "set_visibility",
     {
       description:
-        "Set a session's visibility dimension. 'default' un-hides and un-pins; 'favorites' favorites it; 'pinned' pins it; 'hidden' hides it. These flags are independent (favoriting does not unpin), so this sets the chosen dimension rather than toggling exclusively.",
+        "Set a session's visibility dimension. 'default' makes it visible, 'favorites' favorites it, and 'hidden' hides it.",
       inputSchema: {
         sessionKey: z.string().describe("The sessionKey from search_sessions."),
-        visibility: z.enum(["default", "favorites", "hidden", "pinned"]).describe("Target visibility."),
+        visibility: z.enum(["default", "favorites", "hidden"]).describe("Target visibility."),
       },
     },
     async (args) => {

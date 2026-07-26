@@ -190,7 +190,7 @@ export function buildSkillSyncSetupSql(tableName = AGENT_RECALL_SKILLS_TABLE): s
     "  id uuid primary key default gen_random_uuid(),",
     "  name text not null,",
     "  description text not null default '',",
-    "  agent text not null check (agent in ('codex', 'claude')),",
+    "  agent text not null check (agent in ('codex', 'claude', 'qoder')),",
     "  source text not null,",
     "  markdown text not null,",
     "  local_fingerprint text not null,",
@@ -204,6 +204,10 @@ export function buildSkillSyncSetupSql(tableName = AGENT_RECALL_SKILLS_TABLE): s
     "  created_at timestamptz not null default now(),",
     "  updated_at timestamptz not null default now()",
     ");",
+    "",
+    "-- Upgrade the agent check constraint for tables created before Qoder was added.",
+    `alter table public.${tableName} drop constraint if exists ${tableName}_agent_check;`,
+    `alter table public.${tableName} add constraint ${tableName}_agent_check check (agent in ('codex', 'claude', 'qoder'));`,
     "",
     "-- Upgrade an existing table created before version history was added.",
     `alter table public.${tableName} add column if not exists content_hash text not null default '';`,
@@ -698,7 +702,7 @@ function isVersionRow(value: unknown): value is SupabaseSkillRow {
   return (
     typeof row.id === "string" &&
     typeof row.name === "string" &&
-    (row.agent === "codex" || row.agent === "claude") &&
+    (row.agent === "codex" || row.agent === "claude" || row.agent === "qoder") &&
     typeof row.source === "string" &&
     typeof row.local_fingerprint === "string" &&
     typeof row.created_at === "string" &&
@@ -734,7 +738,7 @@ function versionFromRow(row: SupabaseSkillRow): RemoteSkillVersion {
 }
 
 function parsePortableScope(value: unknown): SkillPortableScope | null {
-  return value === "codex-user" || value === "claude-user" || value === "shared" ? value : null;
+  return value === "codex-user" || value === "claude-user" || value === "qoder-user" || value === "shared" ? value : null;
 }
 
 function legacyRelativePath(uploadedFromPath: string): string {

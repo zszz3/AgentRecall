@@ -46,6 +46,13 @@ const api = {
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   getMessages: (sessionKey: string, offset?: number, limit?: number): Promise<SessionMessage[]> =>
     ipcRenderer.invoke("session:messages", sessionKey, offset, limit),
+  previewAttachment: (
+    sessionKey: string,
+    attachmentId: string,
+  ): Promise<{ kind: "image" | "text" | "external"; data?: string }> =>
+    ipcRenderer.invoke("attachment:preview", sessionKey, attachmentId),
+  openAttachment: (sessionKey: string, attachmentId: string): Promise<void> =>
+    ipcRenderer.invoke("attachment:open", sessionKey, attachmentId),
   getTraceEvents: (sessionKey: string, options?: TraceEventQueryOptions): Promise<SessionTraceEvent[]> =>
     ipcRenderer.invoke("session:trace-events", sessionKey, options),
   getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),
@@ -67,6 +74,7 @@ const api = {
   listTagsByProject: (): Promise<ProjectTagEntry[]> => ipcRenderer.invoke("tags:by-project"),
   listEnvironments: (): Promise<SessionEnvironment[]> => ipcRenderer.invoke("environments:list"),
   listSshConfigHosts: (): Promise<SshConfigHost[]> => ipcRenderer.invoke("ssh-config:list-hosts"),
+  listWslDistributions: (): Promise<string[]> => ipcRenderer.invoke("wsl:list-distributions"),
   saveEnvironment: (environment: EnvironmentUpsertInput): Promise<SessionEnvironment> =>
     ipcRenderer.invoke("environment:save", environment),
   deleteEnvironment: (environmentId: string): Promise<void> => ipcRenderer.invoke("environment:delete", environmentId),
@@ -100,6 +108,7 @@ const api = {
   copyMarkdown: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-markdown", sessionKey),
   exportMarkdown: (sessionKey: string): Promise<boolean> => ipcRenderer.invoke("command:export-markdown", sessionKey),
   copyPlainText: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-plain", sessionKey),
+  openExternalLink: (url: string): Promise<void> => ipcRenderer.invoke("markdown:open-external", url),
   onIndexStatus: (callback: (status: IndexStatus) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: IndexStatus) => callback(status);
     ipcRenderer.on("index-status", listener);
@@ -120,6 +129,8 @@ const api = {
     ipcRenderer.on("focus-search", listener);
     return () => ipcRenderer.removeListener("focus-search", listener);
   },
+  openQuickSearchSession: (sessionKey: string): Promise<void> =>
+    ipcRenderer.invoke("quick-search:open-session", sessionKey),
   onOpenSettings: (callback: () => void): (() => void) => {
     const listener = () => callback();
     ipcRenderer.on("open-settings", listener);

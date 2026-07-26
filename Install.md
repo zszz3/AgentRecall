@@ -9,6 +9,15 @@ npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/age
 agent-recall
 ```
 
+国内网络访问 npm 较慢时，可以只为本次安装使用阿里云 npm 镜像（macOS、Linux 和 Windows PowerShell 均适用）：
+
+```bash
+npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz --registry=https://registry.npmmirror.com
+agent-recall
+```
+
+`--registry` 只影响本次命令，不会修改 npm 的全局镜像配置。安装包仍从 GitHub Release 下载；如果 Electron 运行时下载较慢，请继续使用下文的 `ELECTRON_MIRROR`。
+
 该方式不会克隆仓库，也不需要在本机执行构建。npm 会把编译后的应用安装到当前 Node.js 的全局目录，并下载当前操作系统对应的 Electron 运行时。
 
 装好后，在任意终端运行即可启动：
@@ -20,6 +29,8 @@ agent-recall
 应用启动后常驻后台（菜单栏有图标），默认按 **⌥ Option + Space** 唤起搜索窗口；如果和 Raycast 等工具冲突，可以在 Settings 里修改或关闭全局快捷键。Settings 也可以用 `Cmd+,` 打开，Appearance 里可以切换明暗主题和 English / 中文界面。
 
 如果要使用 SSH 远程会话，请确保本机可以用系统 `ssh` 非交互连接远端机器，远端安装了 `python3`。实时监听需要远端有 `inotifywait` 或 `fswatch`；没有时应用会退化为轮询同步。
+
+Windows 用户还可以在设置中添加已安装的 WSL 发行版。WSL 会话搜索和 Resume 需要发行版可运行 `bash`、`python3`，并在 WSL 内安装对应的 Codex 或 Claude Code CLI。WSL 发行版中安装 `inotifywait` 或 `fswatch` 后可以实时监听会话变化；如果两者都没有，应用会自动退化为定时轮询同步。WSL 会话目前支持搜索、查看和 Resume，暂不支持会话迁移。
 
 ### 后续启动还要 `nvm use 22` 吗？
 
@@ -72,6 +83,7 @@ $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 - macOS 或 Windows
 - Node.js 22.13 或更高版本（含 npm）
 - SSH 远程会话可选依赖：本机 `ssh`，远端 `python3`，远端 `inotifywait` 或 `fswatch` 用于实时监听
+- Windows WSL 会话可选依赖：已安装的 WSL 发行版、发行版内的 `bash` 和 `python3`；Resume 还需要对应的 Codex 或 Claude Code CLI
 
 温馨提示：Electron binary 默认从 GitHub release 下载。如果下载很慢或失败，可在安装前设置镜像后再执行安装命令：
 
@@ -292,7 +304,7 @@ The app creates a local SQLite database at Electron's `userData` path:
 <Electron userData>/session-search.sqlite
 ```
 
-This database contains the search index and app-only metadata such as custom titles, tags, pinned state, and hidden state. It is runtime state, not source code.
+This database contains the search index and app-only metadata such as custom titles, tags, favorites, and hidden state. It is runtime state, not source code.
 
 SSH remote sessions are read-only inputs. The app stores remote summaries and on-demand details in the local SQLite index, but it does not install a remote daemon or create a remote database.
 

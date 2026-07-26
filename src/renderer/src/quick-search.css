@@ -1,0 +1,94 @@
+@import "@fontsource-variable/geist";
+
+:root {
+  color: #172033;
+  font-family: "Geist Variable", system-ui, sans-serif;
+  background: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.quick-search-shell {
+  height: 100vh;
+  padding: 12px;
+  border: 1px solid rgba(25, 39, 65, 0.14);
+  border-radius: 16px;
+  background: rgba(250, 252, 255, 0.98);
+  box-shadow: 0 18px 60px rgba(22, 32, 52, 0.24);
+}
+
+.quick-search-input {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid #cfd8e8;
+  border-radius: 11px;
+  color: #667085;
+  background: #fff;
+}
+
+.quick-search-input input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: #172033;
+  background: transparent;
+}
+
+.quick-search-results {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.quick-search-results button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  color: #172033;
+  text-align: left;
+  background: transparent;
+}
+
+.quick-search-results button.selected {
+  background: #e9f2ff;
+}
+
+.quick-search-results strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.quick-search-results span,
+.quick-search-results p {
+  overflow: hidden;
+  margin: 0;
+  color: #778197;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.quick-search-results p {
+  padding: 20px 10px;
+  text-align: center;
+}

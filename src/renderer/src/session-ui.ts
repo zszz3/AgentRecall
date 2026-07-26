@@ -4,36 +4,29 @@ import type {
   ProjectSummary,
   SearchOptions,
   SessionSearchResult,
+  SessionSortBy,
   SessionSource,
   SessionSourceStats,
   SessionStatsPeriod,
   SessionStatsSummary,
 } from "../../core/types";
-import { migrationAgentForSource, supportedMigrationTargets } from "../../core/session-migration";
+import { supportedMigrationTargets } from "../../core/session-migration";
 import { enabledMigrationTargets, migrationTargetDescriptor, type MigrationTargetSettings } from "../../core/migration-targets";
+import {
+  OPTIONAL_SESSION_SOURCE_DESCRIPTORS,
+  SESSION_SOURCE_DESCRIPTORS,
+  sessionSourceDescriptor,
+  type SessionSourceUiFamily,
+} from "../../core/session-sources";
 import type { AppSettings } from "../../core/platform";
 import type { ResumeRouteResult } from "../../core/resume-router";
 import { localize, type LanguageMode } from "./language";
 import { liveStateLabel, type LiveSessionState, type LiveStatusFilter } from "./live-filter";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
 
-export const SOURCE_LABEL: Record<SessionSource, string> = {
-  "claude-cli": "Claude Code",
-  "claude-app": "Claude Code",
-  "claude-internal": "Claude Code Internal",
-  "codex-cli": "Codex",
-  "codex-app": "Codex",
-  "codex-internal": "Codex Internal",
-  "tclaude-cli": "TClaude",
-  "tcodex-cli": "TCodex",
-  "codebuddy-cli": "CodeBuddy CLI",
-  "codewiz-cli": "CodeWiz",
-  openclaw: "OpenClaw",
-  hermes: "Hermes",
-  "opencode-cli": "OpenCode",
-  "cursor-agent": "Cursor Agent",
-  trae: "Trae",
-};
+export const SOURCE_LABEL = Object.fromEntries(
+  SESSION_SOURCE_DESCRIPTORS.map(({ id, label }) => [id, label]),
+) as Record<SessionSource, string>;
 
 export interface UsageStatsDisplayRow extends SessionStatsSummary {
   key: string;
@@ -41,9 +34,11 @@ export interface UsageStatsDisplayRow extends SessionStatsSummary {
 }
 
 function usageStatsDisplayGroup(source: SessionSource): { key: string; label: string } {
-  if (source === "codex-cli" || source === "codex-app") return { key: "codex", label: "Codex" };
-  if (source === "claude-cli" || source === "claude-app") return { key: "claude", label: "Claude Code" };
-  return { key: source, label: SOURCE_LABEL[source] };
+  const descriptor = sessionSourceDescriptor(source);
+  if (descriptor.statsGroup) {
+    return { key: descriptor.statsGroup, label: descriptor.statsGroup === "claude" ? "Claude Code" : "Codex" };
+  }
+  return { key: source, label: descriptor.label };
 }
 
 export function usageStatsDisplayRows(rows: SessionSourceStats[]): UsageStatsDisplayRow[] {
@@ -76,6 +71,35 @@ export function hasTokenUsage(value: Pick<SessionStatsSummary, "totalTokens">): 
   return value.totalTokens > 0;
 }
 
+export type UsageDeltaKind = "new" | "up" | "down" | "flat";
+
+export interface UsageDelta {
+  kind: UsageDeltaKind;
+  // Rounded percentage change (absolute value). Undefined for "new" and "flat".
+  percent?: number;
+}
+
+// Compares a metric against the previous period. Returns "new" when the previous period had zero
+// usage but the current period has some; otherwise a signed percentage change. Returns null when
+// there is no previous period to compare against (e.g. allTime).
+export function usageDelta(current: number, previous: number | null | undefined): UsageDelta | null {
+  if (previous === null || previous === undefined) return null;
+  if (previous === 0) {
+    if (current === 0) return { kind: "flat" };
+    return { kind: "new" };
+  }
+  if (current === previous) return { kind: "flat" };
+  const change = ((current - previous) / previous) * 100;
+  return { kind: change > 0 ? "up" : "down", percent: Math.round(Math.abs(change)) };
+}
+
+export function formatUsageDelta(delta: UsageDelta): string {
+  if (delta.kind === "new") return "NEW";
+  if (delta.kind === "flat") return "0%";
+  const sign = delta.kind === "up" ? "+" : "-";
+  return `${sign}${delta.percent ?? 0}%`;
+}
+
 const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"] }> = [
   { label: "All", value: "all" },
   { label: "Claude Code", value: "claude" },
@@ -85,17 +109,8 @@ const BASE_SOURCE_FILTERS: Array<{ label: string; value: SearchOptions["source"]
 export function sourceFilters(settings: AppSettings | null): Array<{ label: string; value: SearchOptions["source"] }> {
   return [
     ...BASE_SOURCE_FILTERS,
-    ...(settings?.includeClaudeInternal ? [{ label: migrationTargetDescriptor("claude-internal").label, value: "claude-internal" as const }] : []),
-    ...(settings?.includeCodexInternal ? [{ label: migrationTargetDescriptor("codex-internal").label, value: "codex-internal" as const }] : []),
-    ...(settings?.includeTclaude ? [{ label: "TClaude", value: "tclaude-cli" as const }] : []),
-    ...(settings?.includeTcodex ? [{ label: "TCodex", value: "tcodex-cli" as const }] : []),
-    ...(settings?.includeCodeBuddyCli ? [{ label: "CodeBuddy CLI", value: "codebuddy-cli" as const }] : []),
-    ...(settings?.includeCodeWizCli ? [{ label: "CodeWiz", value: "codewiz-cli" as const }] : []),
-    ...(settings?.includeOpenClaw ? [{ label: "OpenClaw", value: "openclaw" as const }] : []),
-    ...(settings?.includeHermes ? [{ label: "Hermes", value: "hermes" as const }] : []),
-    ...(settings?.includeOpenCode ? [{ label: "OpenCode", value: "opencode-cli" as const }] : []),
-    ...(settings?.includeCursorAgent ? [{ label: "Cursor Agent", value: "cursor-agent" as const }] : []),
-    ...(settings?.includeTrae ? [{ label: "Trae", value: "trae" as const }] : []),
+    ...OPTIONAL_SESSION_SOURCE_DESCRIPTORS.flatMap((descriptor) =>
+      settings?.[descriptor.optionalSetting] ? [{ label: descriptor.label, value: descriptor.id }] : []),
   ];
 }
 
@@ -107,16 +122,12 @@ export function displayTagName(tagName: string): string {
   return tagName.startsWith("branch:") ? tagName.slice("branch:".length) : tagName;
 }
 
-export function sourceUiFamily(source: SessionSource): "claude" | "codex" | "codebuddy" | "codewiz" | "other" {
-  if (source.startsWith("claude")) return "claude";
-  if (source.startsWith("codex")) return "codex";
-  if (source === "codebuddy-cli") return "codebuddy";
-  if (source === "codewiz-cli") return "codewiz";
-  return "other";
+export function sourceUiFamily(source: SessionSource): SessionSourceUiFamily {
+  return sessionSourceDescriptor(source).uiFamily;
 }
 
 export function supportsResumeSource(source: SessionSource): boolean {
-  return source.startsWith("claude") || source.startsWith("codex") || source === "codebuddy-cli" || source === "codewiz-cli";
+  return sessionSourceDescriptor(source).capabilities.resume;
 }
 
 export function supportsMigrationSource(source: SessionSource): boolean {
@@ -131,6 +142,9 @@ export function migrationTargetsForSession(
   session: Pick<SessionSearchResult, "source" | "environmentId" | "environmentKind">,
   settings: MigrationTargetSettings,
 ): MigrationTarget[] {
+  if (session.environmentKind === "wsl") {
+    return migrationTargetsForSource(session.source, settings).filter((target) => target === "claude" || target === "codex");
+  }
   return isLocalSessionEnvironment(session) ? migrationTargetsForSource(session.source, settings) : [];
 }
 
@@ -139,17 +153,29 @@ export function migrationAgentLabel(target: MigrationTarget): string {
 }
 
 export function sourceMigrationAgent(source: SessionSource): MigrationAgent | null {
-  return migrationAgentForSource(source);
+  return sessionSourceDescriptor(source).migrationAgent;
 }
 
 export function sessionSortTimestamp(
   session: Pick<SessionSearchResult, "timestamp" | "fileMtimeMs" | "lastActivityAt">,
+  sortBy?: SessionSortBy,
 ): number {
+  if (sortBy === "created") return session.timestamp || 0;
   return session.lastActivityAt || session.fileMtimeMs || session.timestamp || 0;
 }
 
 export function projectSortTimestamp(project: Pick<ProjectSummary, "createdAt" | "lastActivityAt">): number {
   return project.lastActivityAt || project.createdAt || 0;
+}
+
+export function projectDisplayLabel(
+  project: Pick<ProjectSummary, "label" | "labelKind" | "labelSuffix">,
+  language: LanguageMode,
+): string {
+  const base = project.labelKind === "codex-task-untitled"
+    ? localize(language, "Untitled session", "未命名会话")
+    : project.label;
+  return project.labelSuffix ? `${base} · ${project.labelSuffix}` : base;
 }
 
 export function statsPeriodLabel(value: SessionStatsPeriod, language: LanguageMode): string {
@@ -195,6 +221,7 @@ export function environmentBadgeLabel(
   language: LanguageMode,
 ): string {
   if (session.environmentKind === "ssh") return `SSH · ${session.environmentLabel}`;
+  if (session.environmentKind === "wsl") return `WSL · ${session.environmentLabel}`;
   return localize(language, "Local", "本地");
 }
 
@@ -204,6 +231,9 @@ export function environmentBadgeTitle(
 ): string {
   if (session.environmentKind === "ssh") {
     return localize(language, `Remote SSH environment: ${session.environmentLabel}`, `远程 SSH 环境：${session.environmentLabel}`);
+  }
+  if (session.environmentKind === "wsl") {
+    return localize(language, `Local WSL environment: ${session.environmentLabel}`, `本地 WSL 环境：${session.environmentLabel}`);
   }
   return localize(language, "Local session on this computer", "这台电脑上的本地会话");
 }

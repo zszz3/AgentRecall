@@ -87,7 +87,8 @@ describe("SessionStore search performance", () => {
     const candidatesBlock = sourceBlock("private getCandidatePage(", "private querySearchCandidatePage");
 
     expect(candidatesBlock).toContain("LIMIT ?");
-    expect(candidatesBlock).toContain("ORDER BY pinned DESC");
+    expect(candidatesBlock).toContain("ORDER BY ${sessionSortSql(options.sortBy)}");
+    expect(storeSource).toContain("favorited DESC");
   });
 
   it("ranks and limits scoped FTS candidates before hydration and snippets", () => {
@@ -96,7 +97,7 @@ describe("SessionStore search performance", () => {
 
     expect(candidatesBlock).toContain("WHERE session_fts MATCH ?");
     expect(candidatesBlock).toContain("COUNT(*) OVER () AS total_count");
-    expect(candidatesBlock).toContain("ORDER BY search_score DESC");
+    expect(candidatesBlock).toContain("ORDER BY ${orderSql}");
     expect(candidatesBlock).toContain("LIMIT ?");
     expect(candidatesBlock).not.toContain("findSnippet");
     expect(storeSource).not.toContain("private findSnippet(");

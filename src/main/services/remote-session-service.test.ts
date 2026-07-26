@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultSettings, type AppSettings } from "../../core/platform";
+import { STALE_SESSION_SYNC_EVENT_AGE_MS } from "../../core/refresh-policy";
 import type { RemoteSessionRestoreDependencies } from "../../core/remote-session-restore";
 import type {
   RemoteSessionDetailSnapshot,
@@ -56,7 +57,6 @@ function localSession(overrides: Partial<SessionSearchResult> = {}): SessionSear
     customTitle: null,
     displayTitle: "Session 1",
     favorited: false,
-    pinned: false,
     hidden: false,
     tags: [],
     matchSnippet: null,
@@ -161,6 +161,7 @@ function createHarness(options: {
   environment?: SessionEnvironment | null;
   queueEvents?: SessionSyncQueueEvent[];
   localRevision?: string;
+  now?: number;
 } = {}) {
   const settings = options.settings ?? structuredClone(defaultSettings);
   const sessions = options.sessions ?? [localSession()];
@@ -266,7 +267,7 @@ function createHarness(options: {
     createLocalRestoreDependencies,
     createSourceRestoreDependencies,
     copyText: vi.fn(),
-    now: () => 123,
+    now: () => options.now ?? 123,
     logError,
     operations,
     timers: { setInterval, clearInterval },
@@ -331,6 +332,18 @@ describe("RemoteSessionService cloud orchestration", () => {
       lastSyncedAt: 123,
       direction: "upload",
     });
+  });
+
+  it("rejects ZCode uploads before building a portable remote session", async () => {
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [localSession({ sessionKey: "zcode:session-1", rawId: "session-1", source: "zcode-cli" })],
+    });
+
+    await expect(harness.service.upload("zcode:session-1")).rejects.toThrow("ZCode sessions cannot be saved remotely yet.");
+    expect(harness.ensureSessionDetails).not.toHaveBeenCalled();
+    expect(harness.buildUpload).not.toHaveBeenCalled();
+    expect(harness.client.uploadSession).not.toHaveBeenCalled();
   });
 
   it("rejects an upload when both the bound local and cloud revisions changed", async () => {
@@ -402,6 +415,22 @@ describe("RemoteSessionService cloud orchestration", () => {
     );
   });
 
+  it("uses the attachment sync setting when comparing local and cloud revisions", async () => {
+    const settings = configuredSettings();
+    settings.syncSessionAttachments = false;
+    const harness = createHarness({ settings });
+
+    await harness.service.listSyncItems();
+
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      "local:session-1",
+      0,
+      undefined,
+      false,
+    );
+  });
+
   it("records a restore binding after the restored session appears in the local index", async () => {
     const restored = localSession({ sessionKey: "local:restored", rawId: "restored-session" });
     const harness = createHarness({
@@ -451,6 +480,60 @@ describe("RemoteSessionService cloud orchestration", () => {
 });
 
 describe("RemoteSessionService automatic queue lifecycle", () => {
+  it("keeps a fresh unmatched event for a later index retry", async () => {
+    const event = queueEvent();
+    const queuedAt = Date.parse(event.queuedAt);
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [],
+      queueEvents: [event],
+      now: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS - 1,
+    });
+
+    await harness.service.drainQueue();
+
+    expect(harness.removeQueueFiles).not.toHaveBeenCalledWith([event.filePath]);
+    expect(harness.createClient).not.toHaveBeenCalled();
+    expect(harness.ensureSessionDetails).not.toHaveBeenCalled();
+  });
+
+  it("removes an unmatched event when its grace period expires", async () => {
+    const event = queueEvent();
+    const queuedAt = Date.parse(event.queuedAt);
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [],
+      queueEvents: [event],
+      now: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS,
+    });
+
+    await harness.service.drainQueue();
+
+    expect(harness.removeQueueFiles).toHaveBeenCalledWith([event.filePath]);
+    expect(harness.createClient).not.toHaveBeenCalled();
+    expect(harness.ensureSessionDetails).not.toHaveBeenCalled();
+    expect(harness.service.getHookStatus()).toMatchObject({ lastProcessedAt: null, lastError: null });
+  });
+
+  it("processes an old event when its session can still be matched", async () => {
+    const event = queueEvent();
+    const queuedAt = Date.parse(event.queuedAt);
+    const harness = createHarness({
+      settings: configuredSettings(),
+      queueEvents: [event],
+      now: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS,
+    });
+
+    await harness.service.drainQueue();
+
+    expect(harness.client.uploadSession).toHaveBeenCalledOnce();
+    expect(harness.removeQueueFiles).toHaveBeenCalledWith([event.filePath]);
+    expect(harness.service.getHookStatus()).toMatchObject({
+      lastProcessedAt: queuedAt + STALE_SESSION_SYNC_EVENT_AGE_MS,
+      lastError: null,
+    });
+  });
+
   it("removes subagent events without uploading their conversations", async () => {
     const event = queueEvent();
     const harness = createHarness({
@@ -526,9 +609,10 @@ describe("RemoteSessionService automatic queue lifecycle", () => {
   });
 
   it("logs failures from fire-and-forget queue drains", async () => {
+    const event = queueEvent();
     const harness = createHarness({
       settings: configuredSettings(),
-      queueEvents: [queueEvent()],
+      queueEvents: [event],
     });
     harness.runIndexSync.mockRejectedValueOnce(new Error("index unavailable"));
 
@@ -538,6 +622,7 @@ describe("RemoteSessionService automatic queue lifecycle", () => {
         "Failed to drain the session sync queue: index unavailable",
       );
     });
+    expect(harness.removeQueueFiles).not.toHaveBeenCalledWith([event.filePath]);
     harness.service.stopQueue();
   });
 

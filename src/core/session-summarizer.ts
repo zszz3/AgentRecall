@@ -229,14 +229,31 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
   }
 }
 
+// Some newer models (GPT-5 / o-series and compatible providers) reject a `temperature`
+// parameter outright with an HTTP 400. Detect that specific failure so callers can retry
+// the request once without the sampling knob instead of surfacing an error to the user.
+export function isTemperatureUnsupported(status: number, detail: string): boolean {
+  return status === 400 && /temperature/i.test(detail) && /(deprecated|unsupported|not support|does not support|only the default)/i.test(detail);
+}
+
 // OpenAI-compatible /chat/completions (DeepSeek, GLM pay-as-you-go, Kimi, etc.).
 async function openaiChatCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
-  const response = await postJson(
-    `${endpoint.baseUrl}/chat/completions`,
-    { Authorization: `Bearer ${endpoint.apiKey}` },
-    { model: endpoint.model, messages, temperature: 0.2, stream: false },
-    signal,
-  );
+  const request = (includeTemperature: boolean) =>
+    postJson(
+      `${endpoint.baseUrl}/chat/completions`,
+      { Authorization: `Bearer ${endpoint.apiKey}` },
+      { model: endpoint.model, messages, ...(includeTemperature ? { temperature: 0.2 } : {}), stream: false },
+      signal,
+    );
+  let response = await request(true);
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    if (isTemperatureUnsupported(response.status, detail)) {
+      response = await request(false);
+    } else {
+      throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
+    }
+  }
   if (!response.ok) {
     const detail = await safeReadText(response);
     throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
@@ -249,12 +266,28 @@ async function openaiChatCompletion(endpoint: SummaryEndpoint, messages: ChatMes
 
 // OpenAI-compatible Responses API (/responses), used by Codex-style providers.
 async function openaiResponsesCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
-  const response = await postJson(
-    `${endpoint.baseUrl}/responses`,
-    { Authorization: `Bearer ${endpoint.apiKey}` },
-    { model: endpoint.model, instructions: responsesInstructions(messages), input: toResponsesInput(messages), temperature: 0.2, stream: false },
-    signal,
-  );
+  const request = (includeTemperature: boolean) =>
+    postJson(
+      `${endpoint.baseUrl}/responses`,
+      { Authorization: `Bearer ${endpoint.apiKey}` },
+      {
+        model: endpoint.model,
+        instructions: responsesInstructions(messages),
+        input: toResponsesInput(messages),
+        ...(includeTemperature ? { temperature: 0.2 } : {}),
+        stream: false,
+      },
+      signal,
+    );
+  let response = await request(true);
+  if (!response.ok) {
+    const detail = await safeReadText(response);
+    if (isTemperatureUnsupported(response.status, detail)) {
+      response = await request(false);
+    } else {
+      throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
+    }
+  }
   if (!response.ok) {
     const detail = await safeReadText(response);
     throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
@@ -277,23 +310,28 @@ async function openaiResponsesCompletion(endpoint: SummaryEndpoint, messages: Ch
 // Spawns a CLI binary cross-platform. On Windows the `codex` / `claude` commands
 // are usually npm `.cmd` shims, which Node's spawn cannot execute directly unless
 // it goes through a shell. We therefore set `shell: true` on win32 and quote the
-// arguments ourselves (cmd.exe needs each arg wrapped and embedded quotes/specials
-// escaped), so multi-line prompts survive. POSIX keeps the safe no-shell path.
-function spawnCli(command: string, args: string[], options: { cwd: string; signal: AbortSignal }) {
+// arguments ourselves. The prompt is sent through stdin instead of being added
+// to the command line, because Windows has a small command-line length limit.
+function spawnCli(command: string, args: string[], options: { cwd: string; signal: AbortSignal; input: string }) {
+  const stdio: ["pipe", "pipe", "pipe"] = ["pipe", "pipe", "pipe"];
   if (process.platform !== "win32") {
-    return spawn(command, args, { cwd: options.cwd, env: process.env, stdio: ["ignore", "pipe", "pipe"], signal: options.signal });
+    const proc = spawn(command, args, { cwd: options.cwd, env: process.env, stdio, signal: options.signal });
+    proc.stdin.end(options.input);
+    return proc;
   }
-  // On Windows with shell: true, we need to join command and args into a single string.
-  // Only quote the arguments, not the command itself (the shell resolves the command).
+  // On Windows with shell: true, join command and args into a single string.
+  // Only quote the arguments, not the command itself (the shell resolves it).
   const quotedArgs = args.map(quoteWindowsArg);
   const cmdString = [command, ...quotedArgs].join(" ");
-  return spawn(cmdString, [], {
+  const proc = spawn(cmdString, [], {
     cwd: options.cwd,
     env: process.env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio,
     signal: options.signal,
     shell: true,
   });
+  proc.stdin.end(options.input);
+  return proc;
 }
 
 // Quote a single argument for cmd.exe. Inside double quotes cmd does NOT interpret
@@ -316,9 +354,10 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
   const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
   return new Promise<string>((resolve, reject) => {
-    const proc = spawnCli(command, ["exec", "--ephemeral", "--json", "--skip-git-repo-check", "--sandbox", "read-only", prompt], {
+    const proc = spawnCli(command, ["exec", "--ephemeral", "--json", "--skip-git-repo-check", "--sandbox", "read-only"], {
       cwd,
       signal: mergedSignal,
+      input: prompt,
     });
     let stderr = "";
     let content = "";
@@ -363,21 +402,25 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
         }
       }
       if (code !== 0) {
-        // If codex exited with error, try falling back to claude exec
-        // This handles cases where codex command doesn't exist or fails to run
-        // We check for ENOENT-like patterns in stderr, and also fallback when
-        // exit code is 1 with minimal/no content (typical of "command not found" on Windows)
+        // A null exit code means the process was killed by a signal — this is how an
+        // aborted/timed-out run terminates. Treat it as a timeout/cancellation and stop;
+        // do NOT fall back to claude, which would silently launch a second full summary
+        // run after the caller already cancelled or the deadline already passed.
+        if (code === null) {
+          reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
+          return;
+        }
+        // Only fall back when Codex is unavailable. Runtime failures, including
+        // rejected or oversized prompts, should retain their original error.
         const hasNotFoundError = stderr.toLowerCase().includes("not found") ||
                                   stderr.toLowerCase().includes("not recognized") ||
                                   stderr.toLowerCase().includes("no such file") ||
                                   stderr.toLowerCase().includes("cannot find");
-        const isEmptyError = code === 1 && (!content.trim() || stdoutBuffer.length < 100);
-        if (hasNotFoundError || isEmptyError || code === null) {
+        if (hasNotFoundError) {
           resolve(claudeExecCompletion(endpoint, messages, signal));
           return;
         }
-        const status = code === null ? `unknown${signalName ? ` (${signalName})` : ""}` : String(code);
-        reject(new Error(`Codex summary exited with ${status}. ${stderr.trim().slice(-1000)}`.trim()));
+        reject(new Error(`Codex summary exited with ${String(code)}. ${stderr.trim().slice(-1000)}`.trim()));
         return;
       }
       if (!content.trim()) {
@@ -407,11 +450,10 @@ async function claudeExecCompletion(endpoint: SummaryEndpoint, messages: ChatMes
     "--permission-mode",
     "bypassPermissions",
     ...(endpoint.modelArg ? ["--model", endpoint.modelArg] : []),
-    prompt,
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const proc = spawnCli(command, args, { cwd, signal: mergedSignal });
+    const proc = spawnCli(command, args, { cwd, signal: mergedSignal, input: prompt });
     const sessionIds = new Set<string>();
     let stderr = "";
     let streamedContent = "";
