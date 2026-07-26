@@ -1,9 +1,14 @@
-import type { AppUpdateInstallResult, AppUpdateStatus } from "../core/app-update-types";
 import type { IndexStatus } from "../core/indexer";
 import type { ResumeRouteResult } from "../core/resume-router";
 import type { TraceEventQueryOptions } from "../core/session-store";
 import type { GlobalShortcut } from "../core/shortcuts";
 import type { TerminalChoice } from "../core/terminal-options";
+import type { NativeUpdateState } from "../distribution/native-update-types";
+import type {
+  LegacyCleanupResult,
+  LegacyIntegrationInspection,
+} from "../privacy/legacy-integrations";
+import type { PrivacyDiagnosticReport } from "../privacy/diagnostics";
 import type {
   LiveSession,
   LiveSessionSnapshot,
@@ -113,6 +118,29 @@ export type CoreSessionTraceEvent = Omit<SessionTraceEvent, "source"> & {
   source: CoreSessionFamily;
 };
 
+export interface CoreLegacyCleanupPreview {
+  planId: string;
+  createdAt: string;
+  backupLocation: string;
+  requiresConfirmation: true;
+  actions: Array<{
+    filePath: string;
+    description: string;
+    findingCount: number;
+  }>;
+  issues: LegacyIntegrationInspection["issues"];
+}
+
+export type CoreLegacyCleanupResult = Pick<
+  LegacyCleanupResult,
+  "planId" | "backupDirectory" | "changedFiles" | "removedFindingIds"
+>;
+
+export type CoreLegacyIntegrationInspection = Pick<
+  LegacyIntegrationInspection,
+  "findings" | "issues"
+>;
+
 export type CoreLiveSession = Omit<LiveSession, "family"> & {
   family: CoreSessionFamily;
 };
@@ -153,12 +181,24 @@ export interface CoreApi {
   getIndexStatus(): Promise<IndexStatus>;
   getSettings(): Promise<CoreSettings>;
   setSettings(settings: CoreSettingsUpdate): Promise<CoreSettings>;
-  getAppUpdateStatus(force?: boolean): Promise<AppUpdateStatus>;
-  installAppUpdate(): Promise<AppUpdateInstallResult>;
-  skipAppUpdate(untilNextVersion?: boolean): Promise<AppUpdateStatus>;
+  getNativeUpdateState(): Promise<NativeUpdateState>;
+  checkNativeUpdate(): Promise<NativeUpdateState>;
+  downloadNativeUpdate(): Promise<NativeUpdateState>;
+  installNativeUpdate(): Promise<NativeUpdateState>;
+  retryNativeUpdate(): Promise<NativeUpdateState>;
+  copyNativeUpdateDiagnostics(): Promise<NativeUpdateState>;
+  openNativeUpdateHelp(): Promise<NativeUpdateState>;
+  openNativeUpdateReleases(): Promise<NativeUpdateState>;
+  getPrivacyDiagnostics(): Promise<PrivacyDiagnosticReport>;
+  inspectLegacyIntegrations(): Promise<CoreLegacyIntegrationInspection>;
+  previewLegacyCleanup(): Promise<CoreLegacyCleanupPreview>;
+  applyLegacyCleanup(
+    planId: string,
+    confirmed: true,
+  ): Promise<CoreLegacyCleanupResult>;
   resumeSession(sessionKey: string): Promise<ResumeRouteResult>;
   onIndexStatus(callback: (status: IndexStatus) => void): () => void;
   onFocusSearch(callback: () => void): () => void;
   onOpenSettings(callback: () => void): () => void;
-  onAppUpdateStatus(callback: (status: AppUpdateStatus) => void): () => void;
+  onNativeUpdateState(callback: (state: NativeUpdateState) => void): () => void;
 }

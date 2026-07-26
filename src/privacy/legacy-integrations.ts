@@ -60,6 +60,7 @@ interface InspectedFile {
   candidate: ConfigCandidate;
   filePath: string;
   content: string;
+  mode: number;
   findings: LegacyIntegrationFinding[];
   cleanedContent: string;
 }
@@ -153,7 +154,12 @@ function removeOwnedHooks(
   return findings;
 }
 
-function inspectJson(candidate: ConfigCandidate, filePath: string, content: string): InspectedFile {
+function inspectJson(
+  candidate: ConfigCandidate,
+  filePath: string,
+  content: string,
+  mode: number,
+): InspectedFile {
   const parsed: unknown = JSON.parse(content);
   if (!isRecord(parsed)) throw new Error("Configuration is not a JSON object.");
 
@@ -187,14 +193,19 @@ function inspectJson(candidate: ConfigCandidate, filePath: string, content: stri
 
   findings.push(...removeOwnedHooks(candidate, filePath, parsed));
   const cleanedContent = findings.length > 0 ? `${JSON.stringify(parsed, null, 2)}\n` : content;
-  return { candidate, filePath, content, findings, cleanedContent };
+  return { candidate, filePath, content, mode, findings, cleanedContent };
 }
 
 function tomlLineChunks(content: string): string[] {
   return content.match(/[^\r\n]*(?:\r\n|\n|$)/g)?.filter(Boolean) ?? [];
 }
 
-function inspectToml(candidate: ConfigCandidate, filePath: string, content: string): InspectedFile {
+function inspectToml(
+  candidate: ConfigCandidate,
+  filePath: string,
+  content: string,
+  mode: number,
+): InspectedFile {
   const chunks = tomlLineChunks(content);
   const findings: LegacyIntegrationFinding[] = [];
   const kept: string[] = [];
@@ -223,6 +234,7 @@ function inspectToml(candidate: ConfigCandidate, filePath: string, content: stri
     candidate,
     filePath,
     content,
+    mode,
     findings,
     cleanedContent: findings.length > 0 ? kept.join("") : content,
   };
@@ -262,12 +274,47 @@ function resolveCandidate(homeDir: string, relativePath: string): string {
   return filePath;
 }
 
+async function assertRootIsNotSymlink(root: string, label: string): Promise<void> {
+  try {
+    if ((await fs.lstat(root)).isSymbolicLink()) {
+      throw new Error(`${label} cannot be a symbolic link.`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+async function assertCandidateHasNoSymlink(
+  homeDir: string,
+  filePath: string,
+): Promise<void> {
+  const relative = path.relative(homeDir, filePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("A legacy integration path escaped the supplied home directory.");
+  }
+  let current = homeDir;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    try {
+      if ((await fs.lstat(current)).isSymbolicLink()) {
+        throw new Error(
+          "Legacy integration cleanup refuses symbolic links beneath the supplied home directory.",
+        );
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
+}
+
 async function inspectFiles(homeDirInput: string): Promise<{
   homeDir: string;
   files: InspectedFile[];
   issues: LegacyIntegrationIssue[];
 }> {
   const homeDir = validateRoot(homeDirInput, "homeDir");
+  await assertRootIsNotSymlink(homeDir, "homeDir");
   const files: InspectedFile[] = [];
   const issues: LegacyIntegrationIssue[] = [];
 
@@ -275,6 +322,7 @@ async function inspectFiles(homeDirInput: string): Promise<{
     const filePath = resolveCandidate(homeDir, candidate.relativePath);
     let content: string;
     try {
+      await assertCandidateHasNoSymlink(homeDir, filePath);
       content = await fs.readFile(filePath, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
@@ -283,9 +331,10 @@ async function inspectFiles(homeDirInput: string): Promise<{
     }
 
     try {
+      const mode = (await fs.stat(filePath)).mode & 0o777;
       files.push(candidate.format === "json"
-        ? inspectJson(candidate, filePath, content)
-        : inspectToml(candidate, filePath, content));
+        ? inspectJson(candidate, filePath, content, mode)
+        : inspectToml(candidate, filePath, content, mode));
     } catch (error) {
       issues.push({ filePath, error: error instanceof Error ? error.message : String(error) });
     }
@@ -319,6 +368,7 @@ export async function previewLegacyCleanup(options: {
 }): Promise<LegacyCleanupPlan> {
   const inspected = await inspectFiles(options.homeDir);
   const backupRoot = validateRoot(options.backupRoot, "backupRoot");
+  await assertRootIsNotSymlink(backupRoot, "backupRoot");
   const planId = validatePlanId((options.idFactory ?? randomUUID)());
   const createdAt = (options.now ?? new Date()).toISOString();
   const actions = inspected.files
@@ -349,9 +399,17 @@ export async function previewLegacyCleanup(options: {
   };
 }
 
-async function writeAtomic(filePath: string, content: string): Promise<void> {
+async function writeAtomic(
+  filePath: string,
+  content: string,
+  originalMode: number,
+): Promise<void> {
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  await fs.writeFile(temporaryPath, content, "utf8");
+  const safeMode = originalMode & 0o600 || 0o600;
+  await fs.writeFile(temporaryPath, content, {
+    encoding: "utf8",
+    mode: safeMode,
+  });
   try {
     await fs.rename(temporaryPath, filePath);
   } catch (error) {
@@ -387,6 +445,8 @@ export async function applyLegacyCleanup(
 
   const homeDir = validateRoot(plan.homeDir, "homeDir");
   const backupRoot = validateRoot(plan.backupRoot, "backupRoot");
+  await assertRootIsNotSymlink(homeDir, "homeDir");
+  await assertRootIsNotSymlink(backupRoot, "backupRoot");
   const current = await inspectFiles(homeDir);
   if (current.issues.length > 0) {
     throw new Error(`Legacy cleanup stopped because ${current.issues.length} config file(s) could not be inspected.`);
@@ -423,23 +483,43 @@ export async function applyLegacyCleanup(
   if (!backupRelative || backupRelative.startsWith("..") || path.isAbsolute(backupRelative)) {
     throw new Error("Legacy cleanup backup directory escaped the supplied backup root.");
   }
-  await fs.mkdir(backupDirectory, { recursive: true });
+  await fs.mkdir(backupRoot, { recursive: true, mode: 0o700 });
+  await fs.chmod(backupRoot, 0o700);
+  await fs.mkdir(backupDirectory, { recursive: false, mode: 0o700 });
   for (const item of prepared) {
+    await assertCandidateHasNoSymlink(homeDir, item.file.filePath);
     const backupPath = path.join(backupDirectory, item.relative);
-    await fs.mkdir(path.dirname(backupPath), { recursive: true });
-    await fs.writeFile(backupPath, item.file.content, { encoding: "utf8", flag: "wx" });
+    const backupParent = path.dirname(backupPath);
+    await fs.mkdir(backupParent, { recursive: true, mode: 0o700 });
+    await fs.chmod(backupParent, 0o700);
+    await fs.writeFile(backupPath, item.file.content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
   }
 
   const changedFiles: string[] = [];
   try {
     for (const item of prepared) {
-      await writeAtomic(item.file.filePath, item.file.cleanedContent);
+      await assertCandidateHasNoSymlink(homeDir, item.file.filePath);
+      await writeAtomic(
+        item.file.filePath,
+        item.file.cleanedContent,
+        item.file.mode,
+      );
       changedFiles.push(item.file.filePath);
     }
   } catch (error) {
     for (const changedFile of changedFiles) {
       const item = prepared.find((candidate) => candidate.file.filePath === changedFile);
-      if (item) await writeAtomic(changedFile, item.file.content).catch(() => undefined);
+      if (item) {
+        await writeAtomic(
+          changedFile,
+          item.file.content,
+          item.file.mode,
+        ).catch(() => undefined);
+      }
     }
     throw error;
   }

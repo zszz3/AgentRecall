@@ -43,7 +43,9 @@ describe("app loading performance", () => {
     const loadEnd = appSource.indexOf("useEffect(() => {", loadStart);
     const loadSessionsBlock = appSource.slice(loadStart, loadEnd);
     expect(loadSessionsBlock).toContain("api.searchSessionPage(options)");
-    expect(loadSessionsBlock).toContain("page.sessions.filter(isCoreV1Session)");
+    expect(loadSessionsBlock).toContain("setResults(page.sessions)");
+    expect(loadSessionsBlock).toContain("setSessionTotalCount(page.totalCount)");
+    expect(loadSessionsBlock).not.toContain(".filter(");
     expect(loadSessionsBlock).not.toContain("api.getSettings");
     expect(loadSessionsBlock).not.toContain("api.getSession");
     expect(loadSessionsBlock).not.toContain("api.getMessages");

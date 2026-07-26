@@ -60,7 +60,7 @@ data directory. Tests must pass a temporary HOME and temporary backup root.
 - update preference/status/error state;
 - legacy integration findings and inspection issues.
 
-The parent session A integration points are a narrow main-process registration,
+The production integration uses a narrow trusted main-process registration,
 read-only IPC methods for diagnostics/inspection/preview, and a separately
-confirmed mutating IPC method for cleanup. No change to session search,
-`src/main/index.ts`, or `src/renderer/src/App.tsx` is part of this module.
+confirmed mutating IPC method for cleanup. The renderer receives only redacted
+reports, action summaries, and an opaque retained-plan ID.

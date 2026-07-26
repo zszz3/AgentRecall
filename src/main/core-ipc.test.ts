@@ -30,6 +30,27 @@ function createMainRegistrar() {
   return { ipc, handlers };
 }
 
+function auxiliaryCoreServices() {
+  return {
+    nativeUpdateService: {
+      getState: vi.fn(),
+      check: vi.fn(),
+      download: vi.fn(),
+      install: vi.fn(),
+      retry: vi.fn(),
+      copyDiagnostics: vi.fn(),
+      openHelp: vi.fn(),
+      openReleases: vi.fn(),
+    },
+    privacyService: {
+      diagnostics: vi.fn(),
+      inspectLegacy: vi.fn(),
+      previewLegacyCleanup: vi.fn(),
+      applyLegacyCleanup: vi.fn(),
+    },
+  };
+}
+
 describe("Core IPC", () => {
   it("returns only Claude and Codex live sessions", async () => {
     const { ipc, handlers } = createMainRegistrar();
@@ -46,11 +67,7 @@ describe("Core IPC", () => {
     };
     const dependencies = {
       getLiveSessions: vi.fn(async () => snapshot),
-      appUpdateService: {
-        getStatus: vi.fn(),
-        install: vi.fn(),
-        skip: vi.fn(),
-      },
+      ...auxiliaryCoreServices(),
     } as unknown as CoreIpcDependencies;
     registerCoreIpc(ipc, dependencies);
 
@@ -96,11 +113,7 @@ describe("Core IPC", () => {
     };
     const dependencies = {
       getStore: () => store,
-      appUpdateService: {
-        getStatus: vi.fn(),
-        install: vi.fn(),
-        skip: vi.fn(),
-      },
+      ...auxiliaryCoreServices(),
     } as unknown as CoreIpcDependencies;
     registerCoreIpc(ipc, dependencies);
 
@@ -137,11 +150,7 @@ describe("Core IPC", () => {
     };
     const dependencies = {
       getStore: () => store,
-      appUpdateService: {
-        getStatus: vi.fn(),
-        install: vi.fn(),
-        skip: vi.fn(),
-      },
+      ...auxiliaryCoreServices(),
     } as unknown as CoreIpcDependencies;
     registerCoreIpc(ipc, dependencies);
 

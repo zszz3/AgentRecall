@@ -11,31 +11,40 @@ if (!userData) {
 }
 
 const expectedApiKeys = [
-  "getAppUpdateStatus",
+  "applyLegacyCleanup",
+  "checkNativeUpdate",
+  "copyNativeUpdateDiagnostics",
+  "downloadNativeUpdate",
   "getIndexStatus",
   "getLiveSessions",
   "getMessages",
+  "getNativeUpdateState",
+  "getPrivacyDiagnostics",
   "getSession",
   "getSettings",
   "getTraceEvents",
-  "installAppUpdate",
+  "inspectLegacyIntegrations",
+  "installNativeUpdate",
   "listEnvironments",
   "listProjects",
   "listTags",
   "listTagsByProject",
-  "onAppUpdateStatus",
   "onFocusSearch",
   "onIndexStatus",
+  "onNativeUpdateState",
   "onOpenSettings",
+  "openNativeUpdateHelp",
+  "openNativeUpdateReleases",
   "platform",
+  "previewLegacyCleanup",
   "productProfile",
   "refreshIndex",
   "resumeSession",
+  "retryNativeUpdate",
   "searchSessionPage",
   "setCustomTitle",
   "setFavorited",
   "setSettings",
-  "skipAppUpdate",
 ].sort();
 
 app.setPath("userData", userData);
@@ -91,3 +100,4 @@ app.whenReady().then(async () => {
   process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
   app.exit(1);
 });
+  "retryNativeUpdate",

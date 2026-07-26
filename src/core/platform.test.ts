@@ -214,7 +214,7 @@ describe("resume commands", () => {
     const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
 
     expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
-      "cd 'C:\\项目 path\\''single'' \"double\" & 50% (draft)'; codex resume '会话 id ''single'' \"double\" & 50% (draft)'",
+      "Set-Location -LiteralPath 'C:\\项目 path\\''single'' \"double\" & 50% (draft)'; codex resume '会话 id ''single'' \"double\" & 50% (draft)'",
     );
   });
 
@@ -357,7 +357,7 @@ describe("resume commands", () => {
     const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
 
     const command = getResumeCommand(session, settings, { platform: "win32" });
-    expect(command).toBe("cd 'C:\\my repo'; claude --resume abc");
+    expect(command).toBe("Set-Location -LiteralPath 'C:\\my repo'; claude --resume abc");
     expect(command).not.toContain("cd /d");
     expect(command).not.toContain("&&");
   });
@@ -371,7 +371,20 @@ describe("resume commands", () => {
     const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
 
     expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
-      "cd 'C:\\o''brien repo'; claude --resume abc",
+      "Set-Location -LiteralPath 'C:\\o''brien repo'; claude --resume abc",
+    );
+  });
+
+  it("uses a literal PowerShell project path when the directory contains wildcard characters", () => {
+    const session = {
+      source: "claude-cli",
+      rawId: "abc",
+      projectPath: "C:\\work\\[draft]",
+    } as SessionSearchResult;
+    const settings = { ...defaultSettings, defaultTerminal: "PowerShell" as const };
+
+    expect(getResumeCommand(session, settings, { platform: "win32" })).toBe(
+      "Set-Location -LiteralPath 'C:\\work\\[draft]'; claude --resume abc",
     );
   });
 
@@ -1341,7 +1354,7 @@ describe("migration cli process specs", () => {
         args: ["--resume", "session-1"],
         cwd: "C:\\repo with spaces",
         displayCommand:
-          "cd 'C:\\repo with spaces'; & 'C:\\Program Files\\Claude CLI\\claude.exe' --resume session-1",
+          "Set-Location -LiteralPath 'C:\\repo with spaces'; & 'C:\\Program Files\\Claude CLI\\claude.exe' --resume session-1",
       });
     });
   });
@@ -1381,7 +1394,7 @@ describe("migration cli process specs", () => {
         platform: "win32",
       }).displayCommand,
     ).toBe(
-      "$__assHadCodexHome = Test-Path Env:CODEX_HOME; $__assCodexHome = $env:CODEX_HOME; try { $env:CODEX_HOME = 'C:\\Users\\A User\\.codex-internal'; cd 'C:\\repo & tools'; & 'C:\\Program Files\\Codex CLI\\codex.exe' resume 'id ''quoted''' } finally { if ($__assHadCodexHome) { $env:CODEX_HOME = $__assCodexHome } else { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } }",
+      "$__assHadCodexHome = Test-Path Env:CODEX_HOME; $__assCodexHome = $env:CODEX_HOME; try { $env:CODEX_HOME = 'C:\\Users\\A User\\.codex-internal'; Set-Location -LiteralPath 'C:\\repo & tools'; & 'C:\\Program Files\\Codex CLI\\codex.exe' resume 'id ''quoted''' } finally { if ($__assHadCodexHome) { $env:CODEX_HOME = $__assCodexHome } else { Remove-Item Env:CODEX_HOME -ErrorAction SilentlyContinue } }",
     );
   });
 

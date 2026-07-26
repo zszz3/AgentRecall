@@ -7,7 +7,11 @@ import {
   CORE_SESSION_SOURCES,
   isCoreSessionSource,
 } from "../../shared/product-profile";
-import { registerAppUpdateIpc, type AppUpdateIpcService } from "./app-update";
+import {
+  registerNativeUpdateIpc,
+  type NativeUpdateIpcService,
+} from "./native-update";
+import { registerPrivacyIpc, type PrivacyIpcService } from "./privacy";
 import {
   combineIpcDisposers,
   registerIpcHandler,
@@ -31,7 +35,8 @@ export interface CoreIpcDependencies {
   refreshIndex(): Promise<IndexStatus>;
   getLiveSessions(): Promise<LiveSessionSnapshot>;
   resumeSession(sessionKey: string): Promise<ResumeRouteResult>;
-  appUpdateService: AppUpdateIpcService;
+  nativeUpdateService: NativeUpdateIpcService;
+  privacyService: PrivacyIpcService;
 }
 
 export function registerCoreIpc(
@@ -106,11 +111,14 @@ export function registerCoreIpc(
       dependencies.setCoreSettings(update)),
     registerIpcHandler(ipc, CORE_IPC.resumeSession, (_event, sessionKey) => {
       if (!getCoreSession(dependencies.getStore(), sessionKey)) {
-        return { route: "resume" as const };
+        throw new Error(
+          "This session is no longer available. Refresh the session list and try again.",
+        );
       }
       return dependencies.resumeSession(sessionKey);
     }),
-    registerAppUpdateIpc(ipc, dependencies.appUpdateService),
+    registerNativeUpdateIpc(ipc, dependencies.nativeUpdateService),
+    registerPrivacyIpc(ipc, dependencies.privacyService),
   ];
   return combineIpcDisposers(disposers);
 }

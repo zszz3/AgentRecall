@@ -129,7 +129,7 @@ test("skips the same update version until a newer version is released", async ()
   assert.equal(newer.manifest.version, "0.3.0");
 });
 
-test("terminal launcher leaves automatic update prompts to the visible application", async () => {
+test("terminal launcher keeps the npm updater as an explicit fallback only", async () => {
   const launcherSource = await readFile(new URL("../bin/agent-recall.cjs", import.meta.url), "utf8");
   assert.match(launcherSource, /if \(explicitCheck\)/);
   assert.doesNotMatch(launcherSource, /readUpdatePreference/);

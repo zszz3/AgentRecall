@@ -70,8 +70,15 @@ describe("Core production bootstrap", () => {
       /function markWindowAvailable[\s\S]*firstWindowAvailable = true;[\s\S]*startCoreBackgroundAfterFirstWindow\(\)/,
     );
     expect(mainSource).toMatch(
-      /function startCoreBackgroundAfterFirstWindow[\s\S]*scheduleInitialCheck\(\)[\s\S]*setTimeout\([\s\S]*runIndexSync/,
+      /function startCoreBackgroundAfterFirstWindow[\s\S]*firstUsableWindowReady\(\)[\s\S]*setTimeout\([\s\S]*runIndexSync/,
     );
+    expect(mainSource).not.toContain("AppUpdateService");
+    expect(mainSource).not.toContain("update-client.cjs");
+    expect(mainSource).not.toContain("AGENT_RECALL_RELEASE_BUILD");
+    expect(mainSource).toMatch(
+      /app\.isPackaged[\s\S]*AGENT_RECALL_NO_UPDATE_CHECK[\s\S]*registerElectronUpdater/,
+    );
+    expect(mainSource).toContain("sanitizeNativeUpdateStateForRenderer(state)");
   });
 
   it("creates a visible window before opening the local database", () => {

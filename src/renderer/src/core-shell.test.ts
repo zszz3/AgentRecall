@@ -58,14 +58,13 @@ describe("1.0 Core shell", () => {
     }
   });
 
-  it("audits every visible result through the local first-party allowlist", () => {
-    expect(appSource).toContain('"claude-cli"');
-    expect(appSource).toContain('"claude-app"');
-    expect(appSource).toContain('"codex-cli"');
-    expect(appSource).toContain('"codex-app"');
+  it("uses the Main-owned Core page and exact total without Renderer filtering", () => {
+    expect(appSource).toContain("CoreSessionSearchResult");
     expect(appSource).toContain('environmentId: "local"');
-    expect(appSource).toContain('session.environmentKind === "local"');
-    expect(appSource).toContain("page.sessions.filter(isCoreV1Session)");
+    expect(appSource).toContain("setResults(page.sessions)");
+    expect(appSource).toContain("setSessionTotalCount(page.totalCount)");
+    expect(appSource).not.toContain("isCoreV1Session");
+    expect(appSource).not.toContain("page.sessions.filter");
   });
 
   it("keeps the detail integration boundary explicit and limited to core actions", () => {

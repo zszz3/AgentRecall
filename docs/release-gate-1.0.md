@@ -33,7 +33,7 @@ node scripts/release-gate.mjs \
   --format json
 ```
 
-建议由父级包脚本接入：
+仓库包脚本已接入：
 
 ```json
 {
@@ -43,8 +43,6 @@ node scripts/release-gate.mjs \
   }
 }
 ```
-
-本 C3 交付不直接修改 `package.json`。
 
 ## 必须覆盖的门禁
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -172,6 +172,11 @@ describe("legacy integration cleanup", () => {
       .toBe(originalClaudeSettings);
     expect(await readFile(path.join(backupDirectory, ".codex", "config.toml"), "utf8"))
       .toBe(originalCodexConfig);
+    if (process.platform !== "win32") {
+      expect((await stat(backupDirectory)).mode & 0o777).toBe(0o700);
+      expect((await stat(path.join(backupDirectory, ".claude.json"))).mode & 0o777).toBe(0o600);
+      expect((await stat(claudeConfig)).mode & 0o077).toBe(0);
+    }
   });
 
   it("refuses to overwrite a config changed after preview", async () => {
@@ -214,5 +219,67 @@ describe("legacy integration cleanup", () => {
     expect(inspection.findings).toEqual([]);
     expect(inspection.issues).toHaveLength(1);
     expect(await readFile(configPath, "utf8")).toBe("{ invalid json");
+  });
+
+  it.runIf(process.platform !== "win32")("refuses candidate directories that escape through symlinks", async () => {
+    const homeDir = await temporaryDirectory("legacy-symlink-home");
+    const outsideDir = await temporaryDirectory("legacy-symlink-outside");
+    const backupRoot = await temporaryDirectory("legacy-symlink-backup");
+    const outsideConfig = path.join(outsideDir, "settings.json");
+    const original = await writeJson(outsideConfig, {
+      hooks: {
+        Stop: [{ hooks: [{ command: "agent-recall-session-sync" }] }],
+      },
+    });
+    await symlink(outsideDir, path.join(homeDir, ".claude"), "dir");
+
+    const inspection = await inspectLegacyIntegrations({ homeDir });
+    expect(inspection.findings).toEqual([]);
+    expect(inspection.issues.some((issue) => /symbolic links/i.test(issue.error))).toBe(true);
+    const plan = await previewLegacyCleanup({ homeDir, backupRoot });
+    expect(plan.actions).toEqual([]);
+    expect(await readFile(outsideConfig, "utf8")).toBe(original);
+  });
+
+  it.runIf(process.platform !== "win32")("refuses a symlinked backup root", async () => {
+    const homeDir = await temporaryDirectory("legacy-backup-link-home");
+    const outsideDir = await temporaryDirectory("legacy-backup-link-outside");
+    const linkParent = await temporaryDirectory("legacy-backup-link-parent");
+    const backupRoot = path.join(linkParent, "backups");
+    await writeJson(path.join(homeDir, ".claude.json"), {
+      mcpServers: { "agent-recall": { command: "agent-recall-mcp" } },
+    });
+    await symlink(outsideDir, backupRoot, "dir");
+
+    await expect(previewLegacyCleanup({ homeDir, backupRoot })).rejects.toThrow(/symbolic link/i);
+    expect(await readdir(outsideDir)).toEqual([]);
+  });
+
+  it.runIf(process.platform !== "win32")("refuses a pre-created symlink at the versioned backup directory", async () => {
+    const homeDir = await temporaryDirectory("legacy-backup-dir-link-home");
+    const backupRoot = await temporaryDirectory("legacy-backup-dir-link-root");
+    const outsideDir = await temporaryDirectory("legacy-backup-dir-link-outside");
+    const configPath = path.join(homeDir, ".claude.json");
+    await writeJson(configPath, {
+      mcpServers: { "agent-recall": { command: "agent-recall-mcp" } },
+    });
+    await chmod(configPath, 0o600);
+    const plan = await previewLegacyCleanup({
+      homeDir,
+      backupRoot,
+      now: new Date("2026-07-25T01:02:03.000Z"),
+      idFactory: () => "plan-symlink",
+    });
+    const backupDirectory = path.join(
+      backupRoot,
+      "2026-07-25T01-02-03-000Z-plan-symlink",
+    );
+    await symlink(outsideDir, backupDirectory, "dir");
+
+    await expect(
+      applyLegacyCleanup(plan, plan.confirmationToken),
+    ).rejects.toThrow();
+    expect(await readdir(outsideDir)).toEqual([]);
+    expect(JSON.parse(await readFile(configPath, "utf8")).mcpServers).toHaveProperty("agent-recall");
   });
 });

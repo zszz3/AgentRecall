@@ -1,5 +1,6 @@
 import { useMemo, type ReactElement } from "react";
-import type { SessionMessage, SessionSearchResult } from "../../../../core/types";
+import type { SessionMessage } from "../../../../core/types";
+import type { CoreSessionSearchResult } from "../../../../shared/core-api";
 import { localize, type LanguageMode } from "../../language";
 import { SOURCE_LABEL, supportsResumeSource } from "../../session-ui";
 import {
@@ -24,7 +25,7 @@ export interface CoreSessionDetailAdapterProps {
   onLoadOlder: (request: LoadOlderMessagesRequest) => Promise<void> | void;
   onRename: () => void;
   onResume: () => void;
-  session: SessionSearchResult;
+  session: CoreSessionSearchResult;
 }
 
 export function CoreSessionDetailAdapter({

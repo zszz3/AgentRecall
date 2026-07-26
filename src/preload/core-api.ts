@@ -1,11 +1,15 @@
 import type { IpcRenderer, IpcRendererEvent } from "electron";
 import type { CoreApi } from "../shared/core-api";
-import { APP_UPDATE_EVENTS, APP_UPDATE_IPC } from "../shared/ipc/app-update";
 import { CORE_EVENTS, CORE_IPC } from "../shared/ipc/core";
 import {
   parseIpcRequest,
   type IpcRequestContract,
 } from "../shared/ipc/contract";
+import {
+  NATIVE_UPDATE_EVENTS,
+  NATIVE_UPDATE_IPC,
+} from "../shared/ipc/native-update";
+import { PRIVACY_IPC } from "../shared/ipc/privacy";
 import { PRODUCT_PROFILE } from "../shared/product-profile";
 
 export type CoreIpcRenderer = Pick<IpcRenderer, "invoke" | "on" | "removeListener">;
@@ -55,12 +59,30 @@ export function createCoreApi(
       invoke(CORE_IPC.getSettings),
     setSettings: (settings) =>
       invoke(CORE_IPC.setSettings, settings),
-    getAppUpdateStatus: (force = false) =>
-      invoke(APP_UPDATE_IPC.getStatus, force),
-    installAppUpdate: () =>
-      invoke(APP_UPDATE_IPC.install),
-    skipAppUpdate: (untilNextVersion = false) =>
-      invoke(APP_UPDATE_IPC.skip, untilNextVersion),
+    getNativeUpdateState: () =>
+      invoke(NATIVE_UPDATE_IPC.getState),
+    checkNativeUpdate: () =>
+      invoke(NATIVE_UPDATE_IPC.check),
+    downloadNativeUpdate: () =>
+      invoke(NATIVE_UPDATE_IPC.download),
+    installNativeUpdate: () =>
+      invoke(NATIVE_UPDATE_IPC.install),
+    retryNativeUpdate: () =>
+      invoke(NATIVE_UPDATE_IPC.retry),
+    copyNativeUpdateDiagnostics: () =>
+      invoke(NATIVE_UPDATE_IPC.copyDiagnostics),
+    openNativeUpdateHelp: () =>
+      invoke(NATIVE_UPDATE_IPC.openHelp),
+    openNativeUpdateReleases: () =>
+      invoke(NATIVE_UPDATE_IPC.openReleases),
+    getPrivacyDiagnostics: () =>
+      invoke(PRIVACY_IPC.diagnostics),
+    inspectLegacyIntegrations: () =>
+      invoke(PRIVACY_IPC.inspectLegacy),
+    previewLegacyCleanup: () =>
+      invoke(PRIVACY_IPC.previewLegacyCleanup),
+    applyLegacyCleanup: (planId, confirmed) =>
+      invoke(PRIVACY_IPC.applyLegacyCleanup, planId, confirmed),
     resumeSession: (sessionKey) =>
       invoke(CORE_IPC.resumeSession, sessionKey),
     onIndexStatus: (callback) =>
@@ -69,8 +91,8 @@ export function createCoreApi(
       subscribe(ipc, CORE_EVENTS.focusSearch, callback),
     onOpenSettings: (callback) =>
       subscribe(ipc, CORE_EVENTS.openSettings, callback),
-    onAppUpdateStatus: (callback) =>
-      subscribe(ipc, APP_UPDATE_EVENTS.status, callback),
+    onNativeUpdateState: (callback) =>
+      subscribe(ipc, NATIVE_UPDATE_EVENTS.state, callback),
   } satisfies CoreApi;
 
   return Object.freeze(api);

@@ -51,5 +51,5 @@ test("npm fallback smoke isolates HOME, prefix, and cache", async () => {
   assert.match(source, /HOME: home/);
   assert.match(source, /USERPROFILE: home/);
   assert.match(source, /npm_config_prefix: prefix/);
-  assert.match(source, /npm_config_cache: cache/);
+  assert.match(source, /npm_config_cache: npmCache/);
 });

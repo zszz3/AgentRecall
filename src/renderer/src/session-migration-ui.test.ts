@@ -79,7 +79,7 @@ describe("session migration UI wiring", () => {
   });
 
   it("keeps Node-backed platform helpers out of the renderer bundle", () => {
-    expect(appSource).toContain('import type { AppSettings } from "../../core/platform"');
+    expect(appSource).toContain("CoreSettings");
     expect(appSource).not.toContain("defaultSettings");
     expect(appSource).not.toContain("DEFAULT_MIGRATION_TARGET_SETTINGS");
     expect(appSource).toContain('import { terminalSelectOptions } from "../../core/terminal-options"');

@@ -52,6 +52,10 @@ describe("MarkdownV1", () => {
     "https://images.example/a.png",
     "//images.example/a.png",
     "ftp://images.example/a.png",
+    "file:///tmp/private.png",
+    "file://server/share/private.png",
+    "/Users/example/private.png",
+    "C:/Users/example/private.png",
   ])("blocks external image source %s by default", (source) => {
     const html = renderMarkdown(`![architecture](${source})`);
 
@@ -67,6 +71,18 @@ describe("MarkdownV1", () => {
     expect(html).toContain("<img");
     expect(html).toContain(`src="${source}"`);
     expect(html).toContain('referrerPolicy="no-referrer"');
+  });
+
+  it.each([
+    "file:///tmp/private.png",
+    "file://server/share/private.png",
+    "\\\\server\\share\\private.png",
+    "C:\\Users\\example\\private.png",
+  ])("keeps local or UNC image source %s blocked after network opt-in", (source) => {
+    const html = renderMarkdown(`![private](${source})`, true);
+
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain(source);
   });
 });
 

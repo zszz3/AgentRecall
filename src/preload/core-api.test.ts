@@ -21,14 +21,23 @@ const EXPECTED_CORE_API_KEYS = [
   "getIndexStatus",
   "getSettings",
   "setSettings",
-  "getAppUpdateStatus",
-  "installAppUpdate",
-  "skipAppUpdate",
+  "getNativeUpdateState",
+  "checkNativeUpdate",
+  "downloadNativeUpdate",
+  "installNativeUpdate",
+  "retryNativeUpdate",
+  "copyNativeUpdateDiagnostics",
+  "openNativeUpdateHelp",
+  "openNativeUpdateReleases",
+  "getPrivacyDiagnostics",
+  "inspectLegacyIntegrations",
+  "previewLegacyCleanup",
+  "applyLegacyCleanup",
   "resumeSession",
   "onIndexStatus",
   "onFocusSearch",
   "onOpenSettings",
-  "onAppUpdateStatus",
+  "onNativeUpdateState",
 ] as const;
 
 const FORBIDDEN_ADVANCED_API_KEYS = [
@@ -146,9 +155,18 @@ describe("production Core preload API", () => {
     await api.getIndexStatus();
     await api.getSettings();
     await api.setSettings({ autoCheckUpdates: false });
-    await api.getAppUpdateStatus();
-    await api.installAppUpdate();
-    await api.skipAppUpdate(true);
+    await api.getNativeUpdateState();
+    await api.checkNativeUpdate();
+    await api.downloadNativeUpdate();
+    await api.installNativeUpdate();
+    await api.retryNativeUpdate();
+    await api.copyNativeUpdateDiagnostics();
+    await api.openNativeUpdateHelp();
+    await api.openNativeUpdateReleases();
+    await api.getPrivacyDiagnostics();
+    await api.inspectLegacyIntegrations();
+    await api.previewLegacyCleanup();
+    await api.applyLegacyCleanup("plan-1", true);
     await api.resumeSession("claude:one");
 
     expect(fake.invokes).toEqual([
@@ -167,9 +185,18 @@ describe("production Core preload API", () => {
       { channel: "index:status", args: [] },
       { channel: "settings:get", args: [] },
       { channel: "settings:set", args: [{ autoCheckUpdates: false }] },
-      { channel: "app-update:get-status", args: [false] },
-      { channel: "app-update:install", args: [] },
-      { channel: "app-update:skip", args: [true] },
+      { channel: "native-update:get-state", args: [] },
+      { channel: "native-update:check", args: [] },
+      { channel: "native-update:download", args: [] },
+      { channel: "native-update:install", args: [] },
+      { channel: "native-update:retry", args: [] },
+      { channel: "native-update:copy-diagnostics", args: [] },
+      { channel: "native-update:open-help", args: [] },
+      { channel: "native-update:open-releases", args: [] },
+      { channel: "privacy:diagnostics", args: [] },
+      { channel: "privacy:legacy-inspect", args: [] },
+      { channel: "privacy:legacy-preview", args: [] },
+      { channel: "privacy:legacy-apply", args: ["plan-1", true] },
       { channel: "command:resume", args: ["claude:one"] },
     ]);
   });
@@ -179,11 +206,17 @@ describe("production Core preload API", () => {
     const api = createCoreApi(fake.ipc, "darwin");
     const unsafeSearch = api.searchSessionPage as (options: unknown) => unknown;
     const unsafeSettings = api.setSettings as (settings: unknown) => unknown;
+    const unsafeCleanup = api.applyLegacyCleanup as (
+      planId: unknown,
+      confirmed: unknown,
+    ) => unknown;
 
     expect(() => unsafeSearch({ source: "openclaw" })).toThrow(IpcInputError);
     expect(() => unsafeSearch({ environmentId: "ssh-prod" })).toThrow(IpcInputError);
     expect(() => unsafeSearch({ allowedSources: ["claude-cli"] })).toThrow(IpcInputError);
     expect(() => unsafeSettings({ remoteSyncEnabled: true })).toThrow(IpcInputError);
+    expect(() => unsafeCleanup("../outside", true)).toThrow(IpcInputError);
+    expect(() => unsafeCleanup("plan-1", false)).toThrow(IpcInputError);
     expect(fake.invokes).toEqual([]);
   });
 
@@ -195,14 +228,14 @@ describe("production Core preload API", () => {
       api.onIndexStatus((value) => values.push(value)),
       api.onFocusSearch(() => values.push("focus")),
       api.onOpenSettings(() => values.push("settings")),
-      api.onAppUpdateStatus((value) => values.push(value)),
+      api.onNativeUpdateState((value) => values.push(value)),
     ];
 
     expect(fake.on.mock.calls.map(([channel]) => channel)).toEqual([
       "index-status",
       "focus-search",
       "open-settings",
-      "app-update:status",
+      "native-update:state",
     ]);
     fake.emit("focus-search");
     fake.emit("open-settings");
@@ -213,7 +246,7 @@ describe("production Core preload API", () => {
       "index-status",
       "focus-search",
       "open-settings",
-      "app-update:status",
+      "native-update:state",
     ]);
   });
 

@@ -2,29 +2,45 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const settingsSource = readFileSync(new URL("./features/settings/settings-dialog.tsx", import.meta.url), "utf8");
-const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const apiSource = readFileSync(new URL("./core-experience-api.ts", import.meta.url), "utf8");
 
-describe("application update UI", () => {
-  it("keeps a minimal About entry without starting the legacy update UI", () => {
-    expect(appSource).toContain('setInfoSection("about")');
-    expect(appSource).toContain("<h2>AgentRecall 1.0</h2>");
+describe("native update and privacy UI", () => {
+  it("keeps native update checks and downloads user controlled", () => {
+    expect(appSource).toContain(".getNativeUpdateState()");
+    expect(appSource).toContain("api.checkNativeUpdate");
+    expect(appSource).toContain("api.downloadNativeUpdate");
+    expect(appSource).toContain("api.installNativeUpdate");
+    expect(appSource).toContain("api.retryNativeUpdate");
+    expect(appSource).toContain("api.copyNativeUpdateDiagnostics");
+    expect(appSource).toContain("api.openNativeUpdateHelp");
+    expect(appSource).toContain("api.openNativeUpdateReleases");
     expect(appSource).not.toContain("getAppUpdateStatus");
     expect(appSource).not.toContain("installAppUpdate");
-    expect(appSource).not.toContain('className="update-indicator"');
+    expect(appSource).not.toContain("setInterval");
   });
 
-  it("keeps the About page readable and scrolls long release notes", () => {
-    const card = stylesheet.match(/\.update-release-card\s*\{[^}]*\}/)?.[0] ?? "";
-    expect(card).toMatch(/max-height:\s*280px/);
-    expect(card).toMatch(/overflow-y:\s*auto/);
-    expect(settingsSource).toContain("content.scrollTop = 0");
-    expect(settingsSource).toContain("window.requestAnimationFrame");
+  it("exposes only retained-plan privacy actions to the Renderer", () => {
+    expect(appSource).toContain("api.getPrivacyDiagnostics()");
+    expect(appSource).toContain("api.previewLegacyCleanup()");
+    expect(appSource).toContain("window.confirm");
+    expect(appSource).toContain("api.applyLegacyCleanup(cleanupPreview.planId, true)");
+    expect(appSource).not.toContain("confirmationToken");
+    expect(appSource).not.toContain("backupRoot");
+    expect(apiSource).not.toContain("LegacyCleanupPlan");
+    expect(apiSource).not.toContain("applyLegacyCleanup(");
   });
 
-  it("labels development builds without presenting release actions", () => {
-    expect(settingsSource).toContain("appUpdateStatus?.developmentBuild");
-    expect(settingsSource).toContain('l("Development build", "开发版本")');
-    expect(settingsSource).toContain('l("Release updates are disabled while running from source.", "从源码运行时不检查或安装正式版本更新。")');
+  it("keeps native update and privacy methods inside the formal Core subset", () => {
+    for (const method of [
+      "getNativeUpdateState",
+      "checkNativeUpdate",
+      "downloadNativeUpdate",
+      "installNativeUpdate",
+      "getPrivacyDiagnostics",
+      "previewLegacyCleanup",
+      "applyLegacyCleanup",
+    ]) {
+      expect(apiSource).toContain(`| "${method}"`);
+    }
   });
 });

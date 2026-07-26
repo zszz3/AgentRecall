@@ -15,15 +15,18 @@ import {
   X,
 } from "lucide-react";
 import { formatRelativeTime } from "../../core/format-session";
-import type { AppSettings } from "../../core/platform";
 import type { ResumeRouteResult } from "../../core/resume-router";
 import { terminalSelectOptions } from "../../core/terminal-options";
+import type { SessionMessage } from "../../core/types";
+import type { NativeUpdateState } from "../../distribution/native-update-types";
+import type { PrivacyDiagnosticReport } from "../../privacy/diagnostics";
 import type {
-  ProjectSummary,
-  SearchOptions,
-  SessionMessage,
-  SessionSearchResult,
-} from "../../core/types";
+  CoreLegacyCleanupPreview,
+  CoreProjectSummary,
+  CoreSearchOptions,
+  CoreSessionSearchResult,
+  CoreSettings,
+} from "../../shared/core-api";
 import {
   DATE_RANGE_OPTIONS,
   dateRangeLabel,
@@ -52,28 +55,13 @@ type ActionStatus =
   | { kind: "running" | "success" | "error"; message: string }
   | null;
 
-const CORE_SOURCE_FILTERS: Array<{ value: SearchOptions["source"]; en: string; zh: string }> = [
+const CORE_SOURCE_FILTERS: Array<{ value: CoreSearchOptions["source"]; en: string; zh: string }> = [
   { value: "all", en: "All sources", zh: "全部来源" },
   { value: "claude", en: "Claude", zh: "Claude" },
   { value: "codex", en: "Codex", zh: "Codex" },
 ];
 
-const CORE_SESSION_SOURCES = new Set<SessionSearchResult["source"]>([
-  "claude-cli",
-  "claude-app",
-  "codex-cli",
-  "codex-app",
-]);
-
-export function isCoreV1Session(
-  session: Pick<SessionSearchResult, "source" | "environmentId" | "environmentKind">,
-): boolean {
-  return CORE_SESSION_SOURCES.has(session.source)
-    && session.environmentId === "local"
-    && session.environmentKind === "local";
-}
-
-function sourceLabel(source: SessionSearchResult["source"]): string {
+function sourceLabel(source: CoreSessionSearchResult["source"]): string {
   return SOURCE_LABEL[source] ?? source;
 }
 
@@ -100,7 +88,7 @@ function CoreSessionRow({
   onRename,
   onFavorite,
 }: {
-  session: SessionSearchResult;
+  session: CoreSessionSearchResult;
   selected: boolean;
   language: LanguageMode;
   onOpen: () => void;
@@ -177,7 +165,7 @@ function RenameDialog({
   onCancel,
   onSubmit,
 }: {
-  session: SessionSearchResult;
+  session: CoreSessionSearchResult;
   value: string;
   language: LanguageMode;
   onChange: (value: string) => void;
@@ -223,29 +211,61 @@ function CoreInfoDialog({
   language,
   platform,
   theme,
-  sessionCount,
-  searchError,
   defaultTerminal,
+  autoCheckUpdates,
   settingsLoading,
+  nativeUpdateState,
+  updateBusy,
+  diagnostics,
+  diagnosticsLoading,
+  cleanupPreview,
   onLanguageChange,
   onThemeChange,
   onDefaultTerminalChange,
+  onAutoCheckUpdatesChange,
+  onCheckUpdate,
+  onDownloadUpdate,
+  onInstallUpdate,
+  onRetryUpdate,
+  onCopyUpdateDiagnostics,
+  onOpenUpdateHelp,
+  onOpenReleases,
+  onRefreshDiagnostics,
+  onPreviewCleanup,
+  onApplyCleanup,
+  onSectionChange,
   onClose,
 }: {
   initialSection: CoreDialogSection;
   language: LanguageMode;
   platform: NodeJS.Platform;
   theme: ThemeMode;
-  sessionCount: number;
-  searchError: string | null;
-  defaultTerminal: AppSettings["defaultTerminal"] | null;
+  defaultTerminal: CoreSettings["defaultTerminal"] | null;
+  autoCheckUpdates: boolean | null;
   settingsLoading: boolean;
+  nativeUpdateState: NativeUpdateState | null;
+  updateBusy: boolean;
+  diagnostics: PrivacyDiagnosticReport | null;
+  diagnosticsLoading: boolean;
+  cleanupPreview: CoreLegacyCleanupPreview | null;
   onLanguageChange: (language: LanguageMode) => void;
   onThemeChange: (theme: ThemeMode) => void;
-  onDefaultTerminalChange: (terminal: AppSettings["defaultTerminal"]) => void;
+  onDefaultTerminalChange: (terminal: CoreSettings["defaultTerminal"]) => void;
+  onAutoCheckUpdatesChange: (enabled: boolean) => void;
+  onCheckUpdate: () => void;
+  onDownloadUpdate: () => void;
+  onInstallUpdate: () => void;
+  onRetryUpdate: () => void;
+  onCopyUpdateDiagnostics: () => void;
+  onOpenUpdateHelp: () => void;
+  onOpenReleases: () => void;
+  onRefreshDiagnostics: () => void;
+  onPreviewCleanup: () => void;
+  onApplyCleanup: () => void;
+  onSectionChange: (section: CoreDialogSection) => void;
   onClose: () => void;
 }): ReactElement {
-  const [section, setSection] = useState(initialSection);
+  const section = initialSection;
   const t = (en: string, zh: string) => localize(language, en, zh);
   const sections: Array<{ id: CoreDialogSection; icon: ReactElement; label: string }> = [
     { id: "settings", icon: <Settings size={15} />, label: t("Settings", "设置") },
@@ -265,7 +285,7 @@ function CoreInfoDialog({
         <div className="settings-shell">
           <nav className="settings-sidebar">
             {sections.map((item) => (
-              <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}>
+              <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => onSectionChange(item.id)}>
                 {item.icon}
                 <span>{item.label}</span>
               </button>
@@ -280,7 +300,7 @@ function CoreInfoDialog({
                   <select
                     value={defaultTerminal ?? ""}
                     disabled={settingsLoading || !defaultTerminal}
-                    onChange={(event) => onDefaultTerminalChange(event.target.value as AppSettings["defaultTerminal"])}
+                    onChange={(event) => onDefaultTerminalChange(event.target.value as CoreSettings["defaultTerminal"])}
                   >
                     {!defaultTerminal ? <option value="">{t("Loading…", "加载中…")}</option> : null}
                     {terminalSelectOptions(platform).map((option) => (
@@ -288,6 +308,62 @@ function CoreInfoDialog({
                     ))}
                   </select>
                 </label>
+                <label className="core-setting-row">
+                  <span>{t("Automatic update checks", "自动检查更新")}</span>
+                  <input
+                    type="checkbox"
+                    checked={autoCheckUpdates ?? false}
+                    disabled={settingsLoading}
+                    onChange={(event) => onAutoCheckUpdatesChange(event.target.checked)}
+                    data-setting="auto-check-updates"
+                  />
+                </label>
+                <div className="core-update-panel">
+                  <h3>{t("Native updates", "原生更新")}</h3>
+                  <p>
+                    {t("Status", "状态")}: {nativeUpdateState?.phase ?? t("Loading…", "加载中…")}
+                    {nativeUpdateState?.targetVersion ? ` · ${nativeUpdateState.targetVersion}` : ""}
+                  </p>
+                  {nativeUpdateState?.progressPercent != null ? (
+                    <p>{Math.round(nativeUpdateState.progressPercent)}%</p>
+                  ) : null}
+                  {nativeUpdateState?.failure ? (
+                    <p className="error">{nativeUpdateState.failure.message}</p>
+                  ) : null}
+                  <div className="dialog-actions">
+                    <button type="button" onClick={onCheckUpdate} disabled={updateBusy}>
+                      {t("Check", "检查")}
+                    </button>
+                    {nativeUpdateState?.phase === "available" ? (
+                      <button type="button" onClick={onDownloadUpdate} disabled={updateBusy}>
+                        {t("Download", "下载")}
+                      </button>
+                    ) : null}
+                    {nativeUpdateState?.phase === "downloaded" ? (
+                      <button type="button" onClick={onInstallUpdate} disabled={updateBusy}>
+                        {t("Install", "安装")}
+                      </button>
+                    ) : null}
+                    {nativeUpdateState?.failure?.retryable ? (
+                      <button type="button" onClick={onRetryUpdate} disabled={updateBusy}>
+                        {t("Retry", "重试")}
+                      </button>
+                    ) : null}
+                    {nativeUpdateState?.failure ? (
+                      <>
+                        <button type="button" onClick={onCopyUpdateDiagnostics}>
+                          {t("Copy diagnostics", "复制诊断")}
+                        </button>
+                        <button type="button" onClick={onOpenUpdateHelp}>
+                          {t("Report update failure", "报告更新失败")}
+                        </button>
+                      </>
+                    ) : null}
+                    <button type="button" onClick={onOpenReleases}>
+                      {t("Releases", "发布页面")}
+                    </button>
+                  </div>
+                </div>
                 <div className="core-setting-row">
                   <span>{t("Theme", "主题")}</span>
                   <div className="core-segmented-control">
@@ -314,17 +390,50 @@ function CoreInfoDialog({
             {section === "diagnostics" ? (
               <div className="settings-pane core-diagnostics">
                 <h2>{t("Core diagnostics", "核心诊断")}</h2>
-                <dl>
-                  <div><dt>{t("Platform", "平台")}</dt><dd>{platform}</dd></div>
-                  <div><dt>{t("Visible core sessions", "当前核心会话")}</dt><dd>{sessionCount}</dd></div>
-                  <div>
-                    <dt>{t("Search", "搜索")}</dt>
-                    <dd className={searchError ? "error" : "success"}>
-                      {searchError || t("Ready", "正常")}
-                    </dd>
-                  </div>
-                </dl>
-                <p>{t("No background polling is active.", "当前没有后台轮询。")}</p>
+                {diagnosticsLoading && !diagnostics ? <p>{t("Collecting local diagnostics…", "正在收集本地诊断…")}</p> : null}
+                {diagnostics ? (
+                  <>
+                    <dl>
+                      <div><dt>{t("Platform", "平台")}</dt><dd>{diagnostics.system.platform} / {diagnostics.system.arch}</dd></div>
+                      <div><dt>{t("Core sessions", "核心会话")}</dt><dd>{diagnostics.sessions.total}</dd></div>
+                      <div><dt>{t("Database", "数据库")}</dt><dd>{diagnostics.storage.database.status}</dd></div>
+                      <div><dt>{t("Updates", "更新")}</dt><dd>{diagnostics.update.status}</dd></div>
+                      <div><dt>{t("Legacy integrations", "遗留集成")}</dt><dd>{diagnostics.legacyIntegrations.findingCount}</dd></div>
+                    </dl>
+                    <div className="dialog-actions">
+                      <button type="button" onClick={onRefreshDiagnostics} disabled={diagnosticsLoading}>
+                        {t("Refresh diagnostics", "刷新诊断")}
+                      </button>
+                      <button type="button" onClick={onPreviewCleanup} disabled={diagnosticsLoading}>
+                        {t("Preview legacy cleanup", "预览遗留清理")}
+                      </button>
+                    </div>
+                    {cleanupPreview ? (
+                      <div className="core-cleanup-preview">
+                        <h3>{t("Review before cleanup", "清理前请核对")}</h3>
+                        <p>{t("Backup", "备份")}: {cleanupPreview.backupLocation}</p>
+                        {cleanupPreview.actions.length === 0 ? (
+                          <p>{t("No AgentRecall-owned legacy entries were found.", "未发现 AgentRecall 自有遗留项。")}</p>
+                        ) : (
+                          <ul>
+                            {cleanupPreview.actions.map((action) => (
+                              <li key={action.filePath}>{action.filePath}: {action.description}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {cleanupPreview.actions.length > 0 ? (
+                          <button type="button" className="danger" onClick={onApplyCleanup}>
+                            {t("Confirm cleanup…", "确认清理…")}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <button type="button" onClick={onRefreshDiagnostics} disabled={diagnosticsLoading}>
+                    {t("Collect diagnostics", "收集诊断")}
+                  </button>
+                )}
               </div>
             ) : null}
           </div>
@@ -342,28 +451,33 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [language, setLanguage] = useState<LanguageMode>(readInitialLanguage);
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<SearchOptions["source"]>("all");
-  const [project, setProject] = useState<ProjectSummary | null>(null);
+  const [source, setSource] = useState<CoreSearchOptions["source"]>("all");
+  const [project, setProject] = useState<CoreProjectSummary | null>(null);
   const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
   const [view, setView] = useState<CoreView>("all");
   const [sessionLimit, setSessionLimit] = useState(INITIAL_SESSION_LIMIT);
-  const [results, setResults] = useState<SessionSearchResult[]>([]);
+  const [results, setResults] = useState<CoreSessionSearchResult[]>([]);
   const [sessionTotalCount, setSessionTotalCount] = useState(0);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [searchLoading, setSearchLoading] = useState(true);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projects, setProjects] = useState<CoreProjectSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [detail, setDetail] = useState<SessionSearchResult | null>(null);
+  const [detail, setDetail] = useState<CoreSessionSearchResult | null>(null);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [messageOffset, setMessageOffset] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionStatus, setActionStatus] = useState<ActionStatus>(null);
-  const [renameSession, setRenameSession] = useState<SessionSearchResult | null>(null);
+  const [renameSession, setRenameSession] = useState<CoreSessionSearchResult | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [infoSection, setInfoSection] = useState<CoreDialogSection | null>(null);
-  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [appSettings, setAppSettings] = useState<CoreSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [nativeUpdateState, setNativeUpdateState] = useState<NativeUpdateState | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<PrivacyDiagnosticReport | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [cleanupPreview, setCleanupPreview] = useState<CoreLegacyCleanupPreview | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const searchRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
@@ -378,7 +492,7 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     const requestId = ++searchRequestRef.current;
     setSearchLoading(true);
     setSearchError(null);
-    const options: SearchOptions = {
+    const options: CoreSearchOptions = {
       query: query || undefined,
       source,
       projectPath: project?.path,
@@ -393,9 +507,8 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     try {
       const page = await api.searchSessionPage(options);
       if (requestId !== searchRequestRef.current) return;
-      const coreSessions = page.sessions.filter(isCoreV1Session);
-      setResults(coreSessions);
-      setSessionTotalCount(coreSessions.length);
+      setResults(page.sessions);
+      setSessionTotalCount(page.totalCount);
       setHasMoreSessions(page.hasMore);
     } catch (error) {
       if (requestId !== searchRequestRef.current) return;
@@ -430,9 +543,11 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
   useEffect(() => {
     const offFocusSearch = api.onFocusSearch(() => searchRef.current?.focus());
     const offOpenSettings = api.onOpenSettings(() => setInfoSection("settings"));
+    const offNativeUpdate = api.onNativeUpdateState(setNativeUpdateState);
     return () => {
       offFocusSearch();
       offOpenSettings();
+      offNativeUpdate();
     };
   }, [api]);
 
@@ -459,6 +574,28 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
       active = false;
     };
   }, [api, appSettings, infoSection]);
+
+  useEffect(() => {
+    if (infoSection !== "settings") return;
+    let active = true;
+    void api
+      .getNativeUpdateState()
+      .then((state) => {
+        if (active) setNativeUpdateState(state);
+      })
+      .catch((error) => {
+        if (active) setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, infoSection]);
+
+  useEffect(() => {
+    if (infoSection === "diagnostics" && !diagnostics) {
+      void refreshDiagnostics();
+    }
+  }, [diagnostics, infoSection]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -501,12 +638,12 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
-  function changeSource(next: SearchOptions["source"]): void {
+  function changeSource(next: CoreSearchOptions["source"]): void {
     setSource(next);
     setSessionLimit(INITIAL_SESSION_LIMIT);
   }
 
-  function changeProject(next: ProjectSummary | null): void {
+  function changeProject(next: CoreProjectSummary | null): void {
     setProject(next);
     setSessionLimit(INITIAL_SESSION_LIMIT);
   }
@@ -521,7 +658,7 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     setSessionLimit(INITIAL_SESSION_LIMIT);
   }
 
-  async function openDetail(session: SessionSearchResult): Promise<void> {
+  async function openDetail(session: CoreSessionSearchResult): Promise<void> {
     const requestId = ++detailRequestRef.current;
     setDetail(session);
     setMessages([]);
@@ -579,7 +716,7 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     }
   }
 
-  async function resumeSession(session: SessionSearchResult): Promise<void> {
+  async function resumeSession(session: CoreSessionSearchResult): Promise<void> {
     if (!supportsResumeSource(session.source)) return;
     setActionStatus({ kind: "running", message: t("Opening session…", "正在打开会话…") });
     try {
@@ -590,7 +727,7 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     }
   }
 
-  async function toggleFavorite(session: SessionSearchResult): Promise<void> {
+  async function toggleFavorite(session: CoreSessionSearchResult): Promise<void> {
     try {
       await api.setFavorited(session.sessionKey, !session.favorited);
       await load();
@@ -603,7 +740,7 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     }
   }
 
-  function beginRename(session: SessionSearchResult): void {
+  function beginRename(session: CoreSessionSearchResult): void {
     setRenameSession(session);
     setRenameValue(session.customTitle || session.displayTitle);
   }
@@ -634,7 +771,7 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
     setLanguage(next);
   }
 
-  async function updateDefaultTerminal(defaultTerminal: AppSettings["defaultTerminal"]): Promise<void> {
+  async function updateDefaultTerminal(defaultTerminal: CoreSettings["defaultTerminal"]): Promise<void> {
     setSettingsLoading(true);
     try {
       setAppSettings(await api.setSettings({ defaultTerminal }));
@@ -642,6 +779,79 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
       setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
       setSettingsLoading(false);
+    }
+  }
+
+  async function updateAutoCheckUpdates(autoCheckUpdates: boolean): Promise<void> {
+    setSettingsLoading(true);
+    try {
+      setAppSettings(await api.setSettings({ autoCheckUpdates }));
+      setNativeUpdateState(await api.getNativeUpdateState());
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function runNativeUpdateAction(
+    action: () => Promise<NativeUpdateState>,
+  ): Promise<void> {
+    setUpdateBusy(true);
+    try {
+      setNativeUpdateState(await action());
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function refreshDiagnostics(): Promise<void> {
+    setDiagnosticsLoading(true);
+    try {
+      setDiagnostics(await api.getPrivacyDiagnostics());
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  }
+
+  async function previewLegacyCleanup(): Promise<void> {
+    setDiagnosticsLoading(true);
+    try {
+      setCleanupPreview(await api.previewLegacyCleanup());
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  }
+
+  async function applyConfirmedLegacyCleanup(): Promise<void> {
+    if (!cleanupPreview) return;
+    const confirmed = window.confirm(t(
+      "Backups will be created before removing only the listed AgentRecall entries. Continue?",
+      "将先创建备份，再仅移除上方列出的 AgentRecall 项。是否继续？",
+    ));
+    if (!confirmed) return;
+    setDiagnosticsLoading(true);
+    try {
+      const result = await api.applyLegacyCleanup(cleanupPreview.planId, true);
+      setCleanupPreview(null);
+      setActionStatus({
+        kind: "success",
+        message: t(
+          `Cleaned ${result.changedFiles.length} legacy configuration files.`,
+          `已清理 ${result.changedFiles.length} 个遗留配置文件。`,
+        ),
+      });
+      setDiagnostics(await api.getPrivacyDiagnostics());
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setDiagnosticsLoading(false);
     }
   }
 
@@ -749,7 +959,10 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
             {searchLoading
               ? t("Searching…", "搜索中…")
               : hasMoreSessions
-                ? t(`${sessionTotalCount}+ core sessions shown`, `已显示 ${sessionTotalCount}+ 个核心会话`)
+                ? t(
+                    `${results.length} of ${sessionTotalCount} sessions`,
+                    `${results.length} / ${sessionTotalCount} 个会话`,
+                  )
                 : t(`${sessionTotalCount} sessions`, `${sessionTotalCount} 个会话`)}
           </span>
           {project ? <span className="selected-path">{project.path}</span> : null}
@@ -813,13 +1026,29 @@ export function App({ api = browserCoreExperienceApi() }: AppProps = {}): ReactE
           language={language}
           platform={api.platform}
           theme={theme}
-          sessionCount={sessionTotalCount}
-          searchError={searchError}
           defaultTerminal={appSettings?.defaultTerminal ?? null}
+          autoCheckUpdates={appSettings?.autoCheckUpdates ?? null}
           settingsLoading={settingsLoading}
+          nativeUpdateState={nativeUpdateState}
+          updateBusy={updateBusy}
+          diagnostics={diagnostics}
+          diagnosticsLoading={diagnosticsLoading}
+          cleanupPreview={cleanupPreview}
           onLanguageChange={updateLanguage}
           onThemeChange={updateTheme}
           onDefaultTerminalChange={(terminal) => void updateDefaultTerminal(terminal)}
+          onAutoCheckUpdatesChange={(enabled) => void updateAutoCheckUpdates(enabled)}
+          onCheckUpdate={() => void runNativeUpdateAction(api.checkNativeUpdate)}
+          onDownloadUpdate={() => void runNativeUpdateAction(api.downloadNativeUpdate)}
+          onInstallUpdate={() => void runNativeUpdateAction(api.installNativeUpdate)}
+          onRetryUpdate={() => void runNativeUpdateAction(api.retryNativeUpdate)}
+          onCopyUpdateDiagnostics={() => void runNativeUpdateAction(api.copyNativeUpdateDiagnostics)}
+          onOpenUpdateHelp={() => void runNativeUpdateAction(api.openNativeUpdateHelp)}
+          onOpenReleases={() => void runNativeUpdateAction(api.openNativeUpdateReleases)}
+          onRefreshDiagnostics={() => void refreshDiagnostics()}
+          onPreviewCleanup={() => void previewLegacyCleanup()}
+          onApplyCleanup={() => void applyConfirmedLegacyCleanup()}
+          onSectionChange={setInfoSection}
           onClose={() => setInfoSection(null)}
         />
       ) : null}

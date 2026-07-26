@@ -2,7 +2,6 @@ import {
   app,
   BrowserWindow,
   clipboard,
-  dialog,
   globalShortcut,
   ipcMain,
   Menu,
@@ -14,7 +13,7 @@ import {
 } from "electron";
 import Store from "electron-store";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
+import { homedir, release as osRelease } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -45,9 +44,14 @@ import {
   globalShortcutLabel,
   normalizeGlobalShortcut,
 } from "../core/shortcuts";
+import type { NativeUpdateController } from "../distribution/native-update-controller";
+import { registerElectronUpdater } from "../distribution/electron-updater-registration";
+import type { NativeUpdateState } from "../distribution/native-update-types";
+import { createVersionedDatabaseBackupLifecycle } from "../distribution/versioned-database-backup";
+import type { PrivacyIpcService } from "./ipc/privacy";
 import type { CoreSettings, CoreSettingsUpdate } from "../shared/core-api";
-import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { CORE_EVENTS } from "../shared/ipc/core";
+import { NATIVE_UPDATE_EVENTS } from "../shared/ipc/native-update";
 import { CORE_SESSION_SOURCES } from "../shared/product-profile";
 import { registerCoreIpc } from "./ipc/core";
 import {
@@ -57,19 +61,14 @@ import {
 } from "./ipc/core-sender";
 import type { IpcMainRegistrar } from "./ipc/register-ipc-handler";
 import {
-  AppUpdateService,
-  launchDetachedAppUpdateInstaller,
-  type AppUpdateClient,
-} from "./services/app-update-service";
+  createCoreNativeUpdateService,
+  sanitizeNativeUpdateStateForRenderer,
+} from "./services/core-native-update-service";
+import { createCorePrivacyService } from "./services/core-privacy-service";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const requireCjs = createRequire(import.meta.url);
 const PRODUCT_NAME = "AgentRecall";
 const TRAY_ICON_RELATIVE_PATH = path.join("assets", "tray-iconTemplate.png");
-const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
-const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
-const releaseUpdateRuntime =
-  app.isPackaged || process.env.AGENT_RECALL_RELEASE_BUILD === "1";
 
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 820;
@@ -92,6 +91,9 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let store: SessionStore | null = null;
 let disposeCoreIpc: (() => void) | null = null;
+let nativeUpdateController: NativeUpdateController | null = null;
+let disposeNativeUpdateSubscription: (() => void) | null = null;
+let privacyService: PrivacyIpcService | null = null;
 let registeredGlobalShortcut: string | null = null;
 let firstWindowAvailable = false;
 let coreBackgroundStarted = false;
@@ -130,37 +132,99 @@ function getSettings(): AppSettings {
   };
 }
 
-function loadUpdateClient(): AppUpdateClient {
-  return requireCjs(UPDATE_CLIENT_PATH) as AppUpdateClient;
-}
-
-const appUpdateService = new AppUpdateService({
-  getClient: loadUpdateClient,
-  releaseRuntime: releaseUpdateRuntime,
-  getAutoCheckEnabled: () =>
-    firstWindowAvailable && getSettings().autoCheckUpdates,
-  autoCheckDisabled: () =>
-    process.env.AGENT_RECALL_NO_UPDATE_CHECK === "1",
-  publishStatus: (status) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(APP_UPDATE_EVENTS.status, status);
-    }
-  },
-  launchInstaller: (manifest) =>
-    launchDetachedAppUpdateInstaller(manifest, {
-      applyUpdatePath: APPLY_UPDATE_PATH,
-    }),
-  requestQuit: () => app.quit(),
-  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-  showMessageBox: (options) =>
-    mainWindow && !mainWindow.isDestroyed()
-      ? dialog.showMessageBox(mainWindow, options)
-      : dialog.showMessageBox(options),
+const nativeUpdateService = createCoreNativeUpdateService({
+  currentVersion: app.getVersion(),
+  getController: () => nativeUpdateController,
   copyText: (text) => clipboard.writeText(text),
   openExternal: (url) => shell.openExternal(url),
-  processId: process.pid,
-  logError: (message) => console.error(message),
 });
+
+function databasePath(): string {
+  return path.join(app.getPath("userData"), "session-search.sqlite");
+}
+
+function currentNativeUpdateState(): NativeUpdateState {
+  return nativeUpdateController?.getState() ?? {
+    phase: "disabled",
+    currentVersion: app.getVersion(),
+    targetVersion: null,
+    progressPercent: null,
+    backupPath: null,
+    failure: null,
+  };
+}
+
+function initializeProductionServices(): void {
+  if (
+    app.isPackaged
+    && process.env.AGENT_RECALL_NO_UPDATE_CHECK !== "1"
+    && !nativeUpdateController
+  ) {
+    nativeUpdateController = registerElectronUpdater({
+      currentVersion: app.getVersion(),
+      preferences: {
+        isAutomaticCheckEnabled: () => getSettings().autoCheckUpdates,
+        setAutomaticCheckEnabled: (enabled) => {
+          settingsStore.set({
+            ...getSettings(),
+            autoCheckUpdates: enabled,
+          });
+        },
+      },
+      backupLifecycle: createVersionedDatabaseBackupLifecycle({
+        databasePath: databasePath(),
+        backupRoot: path.join(app.getPath("userData"), "update-backups"),
+        closeDatabase: closeStoreForNativeUpdate,
+        reopenDatabaseAfterFailure: reopenStoreAfterNativeUpdateFailure,
+      }),
+      schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+      copyText: (text) => clipboard.writeText(text),
+      openExternal: (url) => shell.openExternal(url),
+      platform: process.platform,
+      arch: process.arch,
+    });
+    disposeNativeUpdateSubscription = nativeUpdateController.subscribe(
+      (state) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(
+            NATIVE_UPDATE_EVENTS.state,
+            sanitizeNativeUpdateStateForRenderer(state),
+          );
+        }
+      },
+    );
+  }
+
+  privacyService = createCorePrivacyService({
+    getStore,
+    getSettings,
+    getNativeUpdateState: currentNativeUpdateState,
+    version: app.getVersion(),
+    homeDir: homedir(),
+    userDataPath: app.getPath("userData"),
+    databasePath: databasePath(),
+    backupRoot: path.join(
+      app.getPath("userData"),
+      "legacy-integration-backups",
+    ),
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: osRelease(),
+  });
+}
+
+async function closeStoreForNativeUpdate(): Promise<void> {
+  stopCoreBackground();
+  coreBackgroundStarted = false;
+  await activeIndexRun;
+  store?.close();
+  store = null;
+}
+
+function reopenStoreAfterNativeUpdateFailure(): void {
+  if (!store) store = new SessionStore(databasePath());
+  if (firstWindowAvailable) startCoreBackgroundAfterFirstWindow();
+}
 
 function coreRendererLocation(): CoreRendererLocation {
   return {
@@ -195,6 +259,9 @@ function createTrustedCoreIpcRegistrar(): IpcMainRegistrar {
 }
 
 function registerProductionCoreIpc(): void {
+  if (!privacyService) {
+    throw new Error("Core privacy service is not ready.");
+  }
   disposeCoreIpc = registerCoreIpc(createTrustedCoreIpcRegistrar(), {
     getStore,
     getAppSettings: getSettings,
@@ -205,7 +272,8 @@ function registerProductionCoreIpc(): void {
     getLiveSessions: () =>
       loadCachedLiveSessionSnapshot({ includeTrae: false }),
     resumeSession,
-    appUpdateService,
+    nativeUpdateService,
+    privacyService,
   });
 }
 
@@ -227,14 +295,20 @@ async function setCoreSettings(
   }
   settingsStore.set(next);
   if ("autoCheckUpdates" in update) {
-    await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
+    await nativeUpdateController?.setAutomaticChecksEnabled(
+      next.autoCheckUpdates,
+    );
   }
   return coreSettingsFromAppSettings(next);
 }
 
 async function resumeSession(sessionKey: string): Promise<ResumeRouteResult> {
   const session = getStore().getSession(sessionKey);
-  if (!session) return { route: "resume" };
+  if (!session) {
+    throw new Error(
+      "This session is no longer available. Refresh the session list and try again.",
+    );
+  }
 
   const snapshot = await loadCachedLiveSessionSnapshot({ includeTrae: false });
   const route = routeResumeSession(
@@ -317,9 +391,7 @@ function publishIndexStatus(): void {
 function startCoreBackgroundAfterFirstWindow(): void {
   if (coreBackgroundStarted) return;
   coreBackgroundStarted = true;
-  void appUpdateService.registerRunningProcess();
-  void appUpdateService.showPreviousUpdateResult();
-  appUpdateService.scheduleInitialCheck();
+  nativeUpdateController?.firstUsableWindowReady();
   initialIndexTimer = setTimeout(() => {
     initialIndexTimer = null;
     void runIndexSync();
@@ -654,9 +726,8 @@ if (!hasSingleInstanceLock) {
 
   void app.whenReady().then(() => {
     createWindow();
-    store = new SessionStore(
-      path.join(app.getPath("userData"), "session-search.sqlite"),
-    );
+    store = new SessionStore(databasePath());
+    initializeProductionServices();
     registerProductionCoreIpc();
     createApplicationMenu();
     createTray();
@@ -679,7 +750,8 @@ app.on("before-quit", () => {
   stopCoreBackground();
   disposeCoreIpc?.();
   disposeCoreIpc = null;
-  void appUpdateService.clearRunningProcess();
+  disposeNativeUpdateSubscription?.();
+  disposeNativeUpdateSubscription = null;
   globalShortcut.unregisterAll();
   store?.close();
   store = null;

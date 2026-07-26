@@ -2,48 +2,43 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-const settingsSource = readFileSync(
-  new URL("./features/settings/settings-dialog.tsx", import.meta.url),
+const apiSource = readFileSync(
+  new URL("./core-experience-api.ts", import.meta.url),
   "utf8",
 );
-const detailSource = readFileSync(
-  new URL("./features/session-detail/detail-panel.tsx", import.meta.url),
+const detailAdapterSource = readFileSync(
+  new URL("./features/session-detail/core-session-detail-adapter.tsx", import.meta.url),
   "utf8",
 );
 
 describe("core-v1 renderer boundary", () => {
-  it("uses the production Product Profile to disable advanced startup work", () => {
-    expect(appSource).toContain(
-      'const CORE_RUNTIME = window.sessionSearch.productProfile.id === "core-v1"',
-    );
-    expect(appSource).toContain(
-      "if (CORE_RUNTIME) return;\n    void loadStats();",
-    );
-    expect(appSource).toContain(
-      "if (CORE_RUNTIME) return;\n    void loadQuotas();",
-    );
-    expect(appSource).toContain(
-      "if (CORE_RUNTIME) return;\n    void loadRemoteSessionsCache();",
-    );
-    expect(appSource).toContain(
-      "if (CORE_RUNTIME) return;\n    if (skillsOpen) void loadSkills",
-    );
-    expect(appSource).toContain(
-      "if (CORE_RUNTIME) return;\n    return window.sessionSearch.onMigrationProgress",
-    );
-    expect(appSource.match(/CORE_RUNTIME \? Promise\.resolve\(\) : loadStats\(\)/g))
-      .toHaveLength(2);
+  it("mounts the pure Core shell without runtime-gated advanced startup work", () => {
+    expect(appSource).not.toContain("CORE_RUNTIME");
+    expect(appSource).not.toContain("setInterval");
+    for (const advanced of [
+      "loadStats",
+      "loadQuotas",
+      "loadRemoteSessionsCache",
+      "loadSkills",
+      "onMigrationProgress",
+      "AiAssistantDialog",
+      "RemoteSessionsDialog",
+      "SkillsDialog",
+    ]) {
+      expect(appSource).not.toContain(advanced);
+    }
+    expect(apiSource).toContain("CoreExperienceApi");
+    expect(apiSource).toContain("CoreApi");
   });
 
-  it("hides advanced navigation and actions while retaining core settings and detail controls", () => {
-    expect(appSource).toContain("!CORE_RUNTIME ? (");
-    expect(appSource).toContain("coreMode={CORE_RUNTIME}");
-    expect(settingsSource).toContain("if (coreMode) return");
-    expect(settingsSource).toContain("!coreMode ? (");
-    expect(detailSource).toContain("coreMode = false");
-    expect(detailSource).toContain("!coreMode ? (");
-    expect(detailSource).toContain("onClick={onResume}");
-    expect(detailSource).toContain("onClick={onRename}");
-    expect(detailSource).toContain("onClick={onFavorite}");
+  it("retains only Core settings, diagnostics, update, and detail actions", () => {
+    expect(appSource).toContain("Core settings");
+    expect(appSource).toContain("Core diagnostics");
+    expect(appSource).toContain("Native updates");
+    expect(appSource).toContain("Preview legacy cleanup");
+    expect(detailAdapterSource).toContain("onResume: () => void");
+    expect(detailAdapterSource).toContain("onRename: () => void");
+    expect(detailAdapterSource).toContain("onFavorite: () => void");
+    expect(detailAdapterSource).not.toMatch(/on(?:Delete|Migrate|Summarize|Upload)/);
   });
 });

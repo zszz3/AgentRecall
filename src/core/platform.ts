@@ -434,7 +434,9 @@ function shellTokenQuote(s: string, shell: ShellKind): string {
 function buildCdPrefix(projectPath: string, shell: ShellKind): string {
   // PowerShell has no `cd /d` and chains statements with `;`; cmd uses `&&`.
   if (shell === "cmd") return `cd /d ${winQuote(projectPath)} && `;
-  if (shell === "powershell") return `cd ${powershellQuote(projectPath)}; `;
+  if (shell === "powershell") {
+    return `Set-Location -LiteralPath ${powershellQuote(projectPath)}; `;
+  }
   return `cd ${shellQuote(projectPath)} && `;
 }
 

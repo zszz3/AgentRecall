@@ -28,7 +28,7 @@ test("global command marks npm-installed launches as release builds", () => {
   assert.match(commandSource, /environment\.AGENT_RECALL_SOURCE_BUILD !== "1"/);
 });
 
-test("normal launch defers automatic update checks to the visible application", () => {
+test("normal npm launch performs update work only for explicit fallback commands", () => {
   assert.match(commandSource, /if \(explicitCheck\)/);
   assert.doesNotMatch(commandSource, /readUpdatePreference/);
   assert.doesNotMatch(commandSource, /readline/);

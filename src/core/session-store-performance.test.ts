@@ -16,7 +16,7 @@ const TARGET_INDEX = SESSION_COUNT - 1;
 const CORE_SESSION_COUNT = 8_000;
 const PAGE_LIMIT = 20;
 const QUERY_BUDGET_MS = 2_000;
-const HIGH_CARDINALITY_QUERY_BUDGET_MS = 3_000;
+const HIGH_CARDINALITY_QUERY_BUDGET_MS = 200;
 
 function sourceBlock(startNeedle: string, endNeedle: string): string {
   const start = storeSource.indexOf(startNeedle);

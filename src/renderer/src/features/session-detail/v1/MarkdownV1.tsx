@@ -148,11 +148,23 @@ function MarkdownPreV1({ children }: ComponentPropsWithoutRef<"pre">): ReactElem
   );
 }
 
-function isExternalImageSource(src: string): boolean {
+function isAllowedImageSource(src: string, allowExternalImages: boolean): boolean {
   const candidate = src.trim();
-  if (candidate.startsWith("//")) return true;
+  if (!candidate) return false;
+  if (
+    candidate.startsWith("//")
+    || candidate.startsWith("\\\\")
+    || candidate.startsWith("/")
+    || candidate.startsWith("./")
+    || candidate.startsWith("../")
+    || /^[a-z]:[/\\]/i.test(candidate)
+  ) {
+    return false;
+  }
   const scheme = candidate.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLocaleLowerCase();
-  return Boolean(scheme && scheme !== "blob" && scheme !== "data" && scheme !== "file");
+  if (scheme === "blob" || scheme === "data") return true;
+  if (scheme === "file") return false;
+  return allowExternalImages && (scheme === "http" || scheme === "https");
 }
 
 function MarkdownImageV1({
@@ -162,7 +174,7 @@ function MarkdownImageV1({
   ...props
 }: ComponentPropsWithoutRef<"img"> & { allowExternalImages: boolean }): ReactElement {
   const source = typeof src === "string" ? src : "";
-  if (!source || (isExternalImageSource(source) && !allowExternalImages)) {
+  if (!isAllowedImageSource(source, allowExternalImages)) {
     return (
       <span
         aria-label={alt ? `External image blocked: ${alt}` : "External image blocked"}
@@ -194,8 +206,8 @@ export interface MarkdownV1Props {
   children?: string;
   className?: string;
   /**
-   * Network-scheme and protocol-relative images are replaced with a text
-   * placeholder unless the host explicitly opts in.
+   * HTTP(S) images are replaced with a text placeholder unless the host
+   * explicitly opts in. Local paths, file URLs, and UNC resources stay blocked.
    */
   allowExternalImages?: boolean;
 }
