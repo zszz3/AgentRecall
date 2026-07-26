@@ -1,0 +1,37 @@
+bin/update-client.cjs
+  s_a2f2c976d4bbff::t_306cbf7aecd41c 341-361,370,466,595,664-688,693-696,699-709,711-712,786
+start.sh
+  s_a2f2c976d4bbff::t_8b0d0164c51ec7 204
+src/main/app-update-ipc.test.ts
+  s_a2f2c976d4bbff::t_f7622ccb3317bd 47-48,50
+src/main/index.ts
+  s_a2f2c976d4bbff::t_0cbfddfaf6c8d2 163,222,854,875,883,944,2281,2481,2504,2515,2527
+.release-notes/fix-v080-release-updates.md
+  s_a2f2c976d4bbff::t_e15188e4be2b00 1-16
+bin/agent-session-search.cjs
+  s_a2f2c976d4bbff::t_b61721f52e3f01 53-57
+scripts/start-launcher.test.mjs
+  s_a2f2c976d4bbff::t_2d435b43ced012 6,23-28
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_7ece45ee93c75b 2,32,42,53,231-237,306-331
+  s_a2f2c976d4bbff::t_29614b98a4b95b 304-305
+  s_a2f2c976d4bbff::t_740a38d7074dc5 302-303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "d96cc3181e3853de16f6d9aa2de1e14c745c94fd",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

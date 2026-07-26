@@ -1,0 +1,23 @@
+docs/superpowers/plans/2026-07-16-session-sync-hooks.md
+  s_a2f2c976d4bbff::t_0ba289984d5486 1-83
+docs/superpowers/specs/2026-07-16-session-sync-hooks-design.md
+  s_a2f2c976d4bbff::t_1a93b8dea57698 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "044f93c337f2e830a8967f76d17cc2e992dbad58",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,21 @@
+docs/superpowers/specs/2026-07-15-sync-setup-guidance-design.md
+  s_a2f2c976d4bbff::t_7c4f82614e98b9 1-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "27a236258a38e6a39eb3cdfdd9ea3c0a09677d2d",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

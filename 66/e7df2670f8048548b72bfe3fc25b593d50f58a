@@ -1,0 +1,65 @@
+.github/pull_request_template.md
+  s_a2f2c976d4bbff::t_fde4a6c6d96e66 1-15
+.github/workflows/release-note-check.yml
+  s_a2f2c976d4bbff::t_8ed07576c56a60 1-27
+.release-notes/README.md
+  s_a2f2c976d4bbff::t_fff13b6cf74d99 1-17
+.release-notes/auto-update.md
+  s_a2f2c976d4bbff::t_f173964aa85332 1-7
+AGENTS.md
+  s_a2f2c976d4bbff::t_d78b876cd385de 1-21
+Install.md
+  s_a2f2c976d4bbff::t_bc3ad18f65726f 88-103
+README.md
+  s_a2f2c976d4bbff::t_aee3380f4ee88a 200-201
+bin/agent-session-search-mcp.mjs
+  s_a2f2c976d4bbff::t_e24535fbcb83f4 17-25,371
+bin/agent-session-search.cjs
+  s_a2f2c976d4bbff::t_d626ff48aea8fd 8-9,11,13-19,21-94
+bin/apply-update.cjs
+  s_a2f2c976d4bbff::t_67bc47b5d7f9b9 1-39
+bin/update-client.cjs
+  s_a2f2c976d4bbff::t_0601960b611666 1-357
+docs/README.en.md
+  s_a2f2c976d4bbff::t_2374ae57f2a262 194-195
+package.json
+  s_a2f2c976d4bbff::t_11b989980399cb 31-32,34,61
+scripts/create-release-assets.mjs
+  s_a2f2c976d4bbff::t_2d41aef4ca12c4 1-78
+scripts/create-release-assets.test.mjs
+  s_a2f2c976d4bbff::t_f99b4707d8adc4 1-32
+scripts/release-notes.mjs
+  s_a2f2c976d4bbff::t_80b38361d5c0ad 1-146
+scripts/release-notes.test.mjs
+  s_a2f2c976d4bbff::t_7260a3c0d39b15 1-54
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_5147b55507f857 1-104
+src/core/app-update-types.ts
+  s_a2f2c976d4bbff::t_c25d7096e545ec 1-32
+src/core/platform.test.ts
+  s_a2f2c976d4bbff::t_e07ad85c3578ea 83-88,90
+src/core/platform.ts
+  s_a2f2c976d4bbff::t_3ad0ec52e0c659 81,127,152
+src/main/app-update-ipc.test.ts
+  s_a2f2c976d4bbff::t_141ac05c3abaeb 1-22
+src/preload/index.ts
+  s_a2f2c976d4bbff::t_1c2d4fb9c680e4 8,94-95,143-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "66e7df2670f8048548b72bfe3fc25b593d50f58a",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

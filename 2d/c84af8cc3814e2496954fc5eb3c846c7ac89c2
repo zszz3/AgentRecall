@@ -1,0 +1,21 @@
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_80ed6968f9871f 392-395,417-420,427-430,512-514,523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "2dc84af8cc3814e2496954fc5eb3c846c7ac89c2",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

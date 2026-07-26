@@ -1,0 +1,25 @@
+.github/workflows/release.yml
+  s_a2f2c976d4bbff::t_4e27d0e062fa25 116-117
+.release-notes/fix-release-tag-identity.md
+  s_a2f2c976d4bbff::t_8cf1440f41d40c 1-5
+scripts/release-notes.test.mjs
+  s_a2f2c976d4bbff::t_1175184ce49ca4 54-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "8162d4d0fb8d9480841385a7ea866043304f10df",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

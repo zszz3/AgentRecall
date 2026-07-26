@@ -1,0 +1,35 @@
+src/core/remote-session-sync.test.ts
+  s_a2f2c976d4bbff::t_cb58f69ea94ba8 85-140
+src/core/remote-session-sync.ts
+  s_a2f2c976d4bbff::t_198e2a15d007c6 49,51-53,547,553,562,567,569,736,746-752
+src/core/skill-sync.test.ts
+  s_a2f2c976d4bbff::t_88ae2ce580ffa9 151,155-190
+src/core/skill-sync.ts
+  s_a2f2c976d4bbff::t_54f8c22cc911a3 87,89-91,385,394,398-406,839-849
+src/main/index.ts
+  s_a2f2c976d4bbff::t_d54503f6ea8a41 293,532
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_597782cb10bb64 254
+src/renderer/src/skills-load.test.ts
+  s_a2f2c976d4bbff::t_8fc1fe5316833b 31,54
+src/renderer/src/skills-load.ts
+  s_a2f2c976d4bbff::t_66fbcdebe16bba 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "73e06f4a69939b13fd9ba822e926b7f6a9299cd4",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

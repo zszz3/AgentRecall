@@ -1,0 +1,25 @@
+src/main/index.ts
+  s_9162a3c246fe22::t_4f02c540315fb1 359
+src/renderer/src/components/skills-dialog.tsx
+  s_9162a3c246fe22::t_8b3733999807dc 644
+src/renderer/src/styles.css
+  s_9162a3c246fe22::t_93308f5ccbe768 4562,4565,4576-4584,4605-4624
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "85e99b3183cba7ddc3045583a29c6ec8dac91cb6",
+  "prompts": {},
+  "sessions": {
+    "s_9162a3c246fe22": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1328-5d10-7f12-8516-f8a251b4c6f8",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

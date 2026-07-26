@@ -1,0 +1,25 @@
+.release-notes/fix-release-tag-identity.md
+  s_a2f2c976d4bbff::t_802c8f4c39640e 6
+bin/update-client.cjs
+  s_a2f2c976d4bbff::t_15967d5d13694f 17,193-197,200-202
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_81848306fd810d 10,19-22,110-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "fb660343747c35b0731fce3335274dbfed38e4ad",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

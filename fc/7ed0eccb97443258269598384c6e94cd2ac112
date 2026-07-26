@@ -1,0 +1,286 @@
+docs/superpowers/specs/2026-07-15-sync-setup-guidance-design.md
+  s_a2f2c976d4bbff::t_7c4f82614e98b9 1-73
+src/renderer/src/components/detail-panel.tsx
+  s_a2f2c976d4bbff::t_3ee06728953cbc 142,180,362
+scripts/create-release-assets.test.mjs
+  s_a2f2c976d4bbff::t_9641400c305130 5,10-14,18
+docs/superpowers/plans/2026-07-15-compact-skill-cards-and-sync-errors.md
+  s_a2f2c976d4bbff::t_e2be9b71c7115d 1-181
+docs/superpowers/plans/2026-07-15-sync-setup-guidance.md
+  s_a2f2c976d4bbff::t_c6fc864d821d29 1-245
+src/renderer/src/skills-load.ts
+  s_a2f2c976d4bbff::t_66fbcdebe16bba 39
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_426026e3f7f755 88-90,425,454,868-869,874-875
+  s_a2f2c976d4bbff::t_ef3afeb5f67101 13,29,48,709,711-712,716,718-719,730-733,737-738,740-743
+  s_a2f2c976d4bbff::t_ad39dbe05a14b9 734-736,739
+  s_a2f2c976d4bbff::t_e9432b936e7b0f 5,9-10,56,59-63,68-70,75-76,78-80,86-87,91-92,98-99,102-103,107,110-112,115,130-131,148-172,185,187,189-190,214-215,217-218,224,226-227,229,240-283,306-307,320-324,326,332-345,350,357,360,363-399,403-409,411,413-424,427-453,455-464,503-518,524-605,661,674
+  s_a2f2c976d4bbff::t_2e7c806ba2df62 237
+  s_a2f2c976d4bbff::t_9af3a576e20db6 236
+  s_a2f2c976d4bbff::t_dac17c2a06ffc0 238-239
+  s_a2f2c976d4bbff::t_584ef7a66ee44d 658-660
+  s_a2f2c976d4bbff::t_b0bf5de2d7c0e1 662-664,671-673
+  s_a2f2c976d4bbff::t_a5af1177f514ae 675
+scripts/package-smoke.mjs
+  s_633deae4663eb6::t_d4587a3256812a 1-60
+src/renderer/src/skill-sync-view-model.test.ts
+  s_a2f2c976d4bbff::t_04ff1845e2fae2 1-123
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_24cd70345c4317 2997,3053-3055,3061-3080,3221,3228-3331,3334,3344,3349,3355,3357,3363,3460,3467,3475,5995-6000,6005,6007-6009,6024,6029,6034,6038,6084,6128-6129,6159,6165,6183,6195-6198,6591-6602,6604-6616
+  s_a2f2c976d4bbff::t_35841e63ed1585 2203-2206
+  s_a2f2c976d4bbff::t_a5216b109c59b6 3477-3495
+  s_a2f2c976d4bbff::t_2001d59970925c 3335,3339-3341,3343,3457,3459,3464,3470-3472,6204,6249-6330,6346-6387,6442-6443,6448-6467
+  s_a2f2c976d4bbff::t_0b4671c2e8188d 3333,3342,3347-3348,3356,3361-3362,3458,3474,3496-3505,3507-3520,3538,3641-3818
+  s_a2f2c976d4bbff::t_82d0fe2004ae50 3332
+  s_a2f2c976d4bbff::t_647a4b6268aa86 3336-3338
+  s_a2f2c976d4bbff::t_dd902c3b0dc0ac 3345-3346
+  s_a2f2c976d4bbff::t_fefb65a100d73c 3350-3354
+  s_a2f2c976d4bbff::t_74af5edc83777f 3358-3360
+  s_a2f2c976d4bbff::t_e7c70a81a4b864 3364
+  s_a2f2c976d4bbff::t_8a5ac7aca60fd5 3461-3462
+  s_a2f2c976d4bbff::t_09fdc4fd594317 3468-3469
+  s_a2f2c976d4bbff::t_a208fb9893e1b6 3473
+  s_a2f2c976d4bbff::t_229e54048ef9dc 3476
+src/main/app-update-ipc.test.ts
+  s_a2f2c976d4bbff::t_bbe7e1cc50bfc9 44-50
+src/renderer/src/components/supabase-setup-guide.tsx
+  s_a2f2c976d4bbff::t_7ff2fcde53079f 1-12,14-23,25-55,59-67,80-89
+  s_a2f2c976d4bbff::t_cfae2d7be620bf 13,24,56-58,68-79
+bin/uninstall.cjs
+  s_a2f2c976d4bbff::t_72e1a59bb2f1fd 1-65
+src/renderer/src/skills-dialog-actions.test.ts
+  s_a2f2c976d4bbff::t_eab2c946c3e969 53-55
+  s_a2f2c976d4bbff::t_4c983c3561ffdc 8,57
+  s_a2f2c976d4bbff::t_652cdf40a703c6 33,41-46,48,58,60-61,64,66-69,71
+  s_a2f2c976d4bbff::t_deec224eb8bf91 59,62-63,65,70
+  s_a2f2c976d4bbff::t_70aa9abfe9c560 56
+src/renderer/src/remote-session-card.test.ts
+  s_a2f2c976d4bbff::t_8049c73bcfa46e 1-4,6-95,103-111
+  s_a2f2c976d4bbff::t_0002e0da609702 5,96-102
+scripts/uninstall.test.mjs
+  s_a2f2c976d4bbff::t_fa4b1e0dde22a8 3,7,11-15,19
+  s_a2f2c976d4bbff::t_5258e2eadfb958 1-2,4-6,8-10,16-18,20-55
+src/core/remote-session-sync.ts
+  s_a2f2c976d4bbff::t_198e2a15d007c6 49,51-70,109,136,167,184,191-192,200,222-230,268-294,306,311-314,332,352,360,364-468,501,507,546-556,562,567,569,588-615,617-623,649,653-655,661-670,673,675,679,681-683,695-697,736,746-752
+src/core/skill-diff.ts
+  s_a2f2c976d4bbff::t_9c283f93e5806d 1-31,37-44,46-49,51-140
+  s_a2f2c976d4bbff::t_8cf9fe41200dee 32-36,45,50
+.github/workflows/quality-check.yml
+  s_845ed15fd6b477::t_62e7e033849e3f 1-44
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_45471526cb8624 367,372-375,377
+  s_a2f2c976d4bbff::t_06fd60fba89182 3,18-43,51,61,63,90-91,318,388-397,399,402-418,420,425-453,455,458,472-485,488,502-565
+  s_a2f2c976d4bbff::t_cd8c6218a4f554 44-48,95,99-101,103,108-112,118-120,158,204,207-209,212,215,219-223,264,267-268,276-278,289,292-293,297,317,322
+  s_a2f2c976d4bbff::t_46b1b790014f26 11,145,148,157,348-352,354-358,360-363,368-371,376,378-383
+  s_a2f2c976d4bbff::t_1bad6774405272 4
+  s_a2f2c976d4bbff::t_2e78309a0e37c0 49-50
+  s_a2f2c976d4bbff::t_eb474a3d9f0ebf 52-54,58-60
+  s_a2f2c976d4bbff::t_fbffdc0792a898 62
+  s_a2f2c976d4bbff::t_e2321dd1a0aabc 64
+  s_a2f2c976d4bbff::t_87da1af2a4db89 89
+  s_a2f2c976d4bbff::t_9c74a3644bf67d 144
+  s_a2f2c976d4bbff::t_12871bc3289212 159-161
+  s_a2f2c976d4bbff::t_5130f99f862a16 320-321
+  s_a2f2c976d4bbff::t_111f139011904a 387
+src/core/supabase-setup.test.ts
+  s_a2f2c976d4bbff::t_6438408b7f7225 1-26
+src/renderer/src/supabase-setup-guide.test.ts
+  s_a2f2c976d4bbff::t_5fc2300920f351 1-22,35
+  s_a2f2c976d4bbff::t_744f8e5d5f0b36 23-34
+src/main/index.ts
+  s_a2f2c976d4bbff::t_d54503f6ea8a41 297,567
+  s_a2f2c976d4bbff::t_cd7cb020ff8026 107,437-456,458-463,2175,2178,2180-2185
+  s_a2f2c976d4bbff::t_9270f41cee06d9 106,110,114-115,119,387-389,393,397-398,402-403,406,411,457,502-511,516
+  s_a2f2c976d4bbff::t_f208c32c3060fa 120,329,363,375,377,421,495,497,520,522,531,533,589,598,621,623,629,725,743,803,816-822,824,830,832-833,845,853,2158,2189-2196,2201,2203,2212-2215,2217,2340-2343,2363,2373,2385
+  s_a2f2c976d4bbff::t_a3ee9e6336fa95 108
+  s_a2f2c976d4bbff::t_3d774d6c041e6e 326-328
+  s_a2f2c976d4bbff::t_b92262c632b480 330-332,360-362
+  s_a2f2c976d4bbff::t_dd5bbb2c6cfd30 364-366,372-374
+  s_a2f2c976d4bbff::t_f3ca6df624f420 376
+  s_a2f2c976d4bbff::t_fa3e09a17345eb 378
+  s_a2f2c976d4bbff::t_b733d78c7ed415 412-413
+  s_a2f2c976d4bbff::t_79debba04ddfeb 419-420
+  s_a2f2c976d4bbff::t_1984454f061e1f 464-466,492-494
+  s_a2f2c976d4bbff::t_06c369e2daf6cf 496
+  s_a2f2c976d4bbff::t_2c7e508b3d3f39 498-501
+  s_a2f2c976d4bbff::t_a4487a23d5d2c6 512-515
+  s_a2f2c976d4bbff::t_b72d206273d8c0 517-519
+  s_a2f2c976d4bbff::t_ea32b1319b2768 521
+  s_a2f2c976d4bbff::t_05e5dbfd7a81dd 523-525,528-530
+  s_a2f2c976d4bbff::t_a5da8f5cc9ba62 532
+  s_a2f2c976d4bbff::t_ac3e1b75b1d814 534
+  s_a2f2c976d4bbff::t_ca61ec64e95999 586-588
+  s_a2f2c976d4bbff::t_b1f37e612c42bf 590-592,595-597
+  s_a2f2c976d4bbff::t_08645fc51150cd 599
+  s_a2f2c976d4bbff::t_b68f6b6c229e88 618-620
+  s_a2f2c976d4bbff::t_82329d363e6129 622
+  s_a2f2c976d4bbff::t_9badeb7f7eb8a4 624-628
+  s_a2f2c976d4bbff::t_9e32be5f0fba0a 630
+  s_a2f2c976d4bbff::t_5391d7afb2d900 723-724
+  s_a2f2c976d4bbff::t_68a7b4c76f5309 726-728,740-742
+  s_a2f2c976d4bbff::t_1746f5b08eb980 2173-2174
+  s_a2f2c976d4bbff::t_818abd5575ef23 2176-2177
+src/renderer/src/app-update-ui.test.ts
+  s_a2f2c976d4bbff::t_41e5e27ae271dd 36-41
+src/renderer/src/skill-sync-view-model.ts
+  s_a2f2c976d4bbff::t_74aba8b1323322 2-37,40-81
+  s_a2f2c976d4bbff::t_b801287a8aed95 1,38-39
+src/renderer/src/sync-navigation-ui.test.ts
+  s_a2f2c976d4bbff::t_ff752004f5521a 35-42
+  s_a2f2c976d4bbff::t_b6f6a403dc285b 1-34,43-52
+src/core/skill-diff.test.ts
+  s_a2f2c976d4bbff::t_50aa386262ebda 2,51-59,68-74
+  s_a2f2c976d4bbff::t_a293d662031e04 1,3-50,60-67,75
+docs/superpowers/specs/2026-07-15-compact-skill-cards-and-sync-errors-design.md
+  s_a2f2c976d4bbff::t_9f9fbdb9461b2d 1-29
+README.md
+  s_a2f2c976d4bbff::t_942360403a296b 129-131,133,145,191-192
+  s_a2f2c976d4bbff::t_248c58472da37f 193-194
+src/preload/index.ts
+  s_a2f2c976d4bbff::t_61bcdee5e63459 121-122
+  s_a2f2c976d4bbff::t_55b56c7390931d 23,115-116,118-119
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_29614b98a4b95b 8-29,40,52,85,137,142,164,191,262,278,287-291,293,304,306-307,313,318-319,322,336-362,364,375,387,395-396,419,422,431,436-440,469,487-490,497-500,504-523,525
+  s_a2f2c976d4bbff::t_81f3e87a5c351d 2,4
+src/core/skill-sync.ts
+  s_a2f2c976d4bbff::t_54f8c22cc911a3 89,91-93,113,118,126,274,404,406-410,416,420-428,644,747,753,761,820,824,879-889
+  s_a2f2c976d4bbff::t_0ff548d0b58eaf 61-62,65,276-277,289-301,303-305,311-312,325-328,339-343,345,348-349,351-356,359,364-366,374-378,464,466-469,471-488,501-502,506,510,645
+  s_a2f2c976d4bbff::t_83b73ab75dc83b 110-112
+  s_a2f2c976d4bbff::t_b1e28637080e0f 114-117
+  s_a2f2c976d4bbff::t_d89016bed63a52 119-121,123-125
+  s_a2f2c976d4bbff::t_832ed611220a60 127
+  s_a2f2c976d4bbff::t_1ec978b07a28ad 271-273
+  s_a2f2c976d4bbff::t_d2238579471998 275
+  s_a2f2c976d4bbff::t_7a62ecf535df50 401-403
+  s_a2f2c976d4bbff::t_726aeccd1cdf8c 405
+  s_a2f2c976d4bbff::t_99f9af221e8e7c 463
+  s_a2f2c976d4bbff::t_109636916d9d76 465
+  s_a2f2c976d4bbff::t_85944e91c5e624 470
+  s_a2f2c976d4bbff::t_9752c914ec8aa8 489-491,498-500
+  s_a2f2c976d4bbff::t_9a513e80faa608 503-505
+  s_a2f2c976d4bbff::t_31e18ceb7a53ff 507-509
+  s_a2f2c976d4bbff::t_967578dfe643a3 511
+  s_a2f2c976d4bbff::t_c48bc0db39b9c6 641-643
+  s_a2f2c976d4bbff::t_1e4f56389cb4a2 646
+  s_a2f2c976d4bbff::t_1fb790bdf98d32 745-746
+  s_a2f2c976d4bbff::t_eafba06eb25ae3 748-752
+  s_a2f2c976d4bbff::t_6c61ddb21fa317 754-756,758-760
+  s_a2f2c976d4bbff::t_a48662191bdaec 762
+  s_a2f2c976d4bbff::t_8eabc988caa1ab 817-819
+  s_a2f2c976d4bbff::t_3c0cc2b088728f 821-823
+  s_a2f2c976d4bbff::t_62b8b895154355 825
+src/renderer/src/detail-panel-actions.test.ts
+  s_a2f2c976d4bbff::t_dcc5cc5d8aaabe 281-282
+src/renderer/src/skills-load.test.ts
+  s_a2f2c976d4bbff::t_8fc1fe5316833b 31,54
+docs/README.en.md
+  s_a2f2c976d4bbff::t_460c0465d1011a 81-83,85,124-125
+src/core/supabase-setup.ts
+  s_a2f2c976d4bbff::t_ee93acc8bb4fe0 1-24
+src/core/skill-sync.test.ts
+  s_a2f2c976d4bbff::t_88ae2ce580ffa9 175,179-214
+  s_a2f2c976d4bbff::t_4318525c5b8298 14,17,49-51,69-72,93-94,98-99,102-110,120-132,140,143-146,151-164,335-339,353-354,358,360,362-379
+  s_a2f2c976d4bbff::t_a2ef1a544b3cb2 334
+  s_a2f2c976d4bbff::t_7b5286306f96f8 340-342,350-352
+  s_a2f2c976d4bbff::t_061dfa689afcd9 355-357
+  s_a2f2c976d4bbff::t_b0237ddb6c3488 359
+  s_a2f2c976d4bbff::t_5fe43b1b16b363 361
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_981bc76c21cbad 1108,1361-1364,2320-2321
+  s_a2f2c976d4bbff::t_cc4ec701016ca1 122,2532,3679-3704,3766-3791,3839-3843,3846-3856,3929,3937-3951
+  s_a2f2c976d4bbff::t_597782cb10bb64 254
+scripts/generate-star-history.test.mjs
+  s_a2f2c976d4bbff::t_8bd3f8442d669d 2,5,15-20,95,119
+src/core/remote-session-sync.test.ts
+  s_a2f2c976d4bbff::t_cb58f69ea94ba8 83,85-138,213,223,233-234,254,356-357,362-363,367
+  s_a2f2c976d4bbff::t_416bb5c53ce58d 81-82
+  s_a2f2c976d4bbff::t_aa28dc0db84648 84
+  s_a2f2c976d4bbff::t_82dc02a36b3ec7 210-212
+  s_a2f2c976d4bbff::t_551ec17efc85ec 214-216,220-222
+  s_a2f2c976d4bbff::t_31f14aafd134b5 224-226,230-232
+  s_a2f2c976d4bbff::t_991f0b34a5e067 235-237,251-253
+  s_a2f2c976d4bbff::t_e3dad8aa465a72 255
+  s_a2f2c976d4bbff::t_20085423fd773e 353-355
+  s_a2f2c976d4bbff::t_f997d972bba65d 358-361
+  s_a2f2c976d4bbff::t_44cd8427f98148 364-366
+  s_a2f2c976d4bbff::t_481e5cb9380cbc 368
+docs/superpowers/specs/2026-07-15-unified-session-and-skill-sync-ux-design.md
+  s_a2f2c976d4bbff::t_3280bc2bdffe02 1-117
+src/main/skill-sync-ipc.test.ts
+  s_a2f2c976d4bbff::t_826e612d38e52c 20,35-42
+  s_a2f2c976d4bbff::t_1ce24cbfe5f373 13,21-24,26-28
+  s_a2f2c976d4bbff::t_2d59c462544144 25,29-34
+src/renderer/src/style-contract.test.ts
+  s_a2f2c976d4bbff::t_8c352ef57204a8 6,244-271
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_38be52f9264ce2 14
+  s_a2f2c976d4bbff::t_5746864ee3e7d5 1-4,7,9-13
+  s_a2f2c976d4bbff::t_0a2102550e3d57 5-6,15
+  s_a2f2c976d4bbff::t_02656fbec62707 8
+src/core/app-update-types.ts
+  s_a2f2c976d4bbff::t_53d4654167e4a4 22
+docs/superpowers/plans/2026-07-15-unified-session-and-skill-sync-ux.md
+  s_a2f2c976d4bbff::t_2663c2fcf7ebac 1-266
+AGENTS.md
+  s_a2f2c976d4bbff::t_ed293e9c836190 26-33
+Install.md
+  s_a2f2c976d4bbff::t_daff75db9b541b 107-114,123,126-127,131,135-136,247,250
+bin/agent-session-search.cjs
+  s_a2f2c976d4bbff::t_96ff1042ab7a6b 30-33,52,69-76,131
+bin/apply-update.cjs
+  s_a2f2c976d4bbff::t_edfcc676085bdf 57-59
+bin/install-claude-statusline.cjs
+  s_a2f2c976d4bbff::t_9971ef9f58b9e4 90-112,148
+bin/setup-mcp.cjs
+  s_a2f2c976d4bbff::t_554de649599623 146-147,153-157,160,172
+bin/update-client.cjs
+  s_a2f2c976d4bbff::t_32371b11257218 5,57,94,96-98,107,398-399,401-402,416-420,425,450-451,463-471,476,478,516-543,549,552-558,567-568,570-573,624
+package.json
+  s_a2f2c976d4bbff::t_a3a86d28abf075 34
+src/core/mcp-migration.test.ts
+  s_a2f2c976d4bbff::t_b696ac9f3b18b1 4,23-24,26-28,31-34
+src/core/session-store.test.ts
+  s_a2f2c976d4bbff::t_fcdee8bb69e29c 732,736,754,758,795,799,811-837
+src/core/session-store.ts
+  s_a2f2c976d4bbff::t_6aa5a41508f3a9 141,145,150-160,169,173,178-186,1218,1228-1232,1236-1237,1239,1243,1250,1254,1265,1274-1284,1289,1302,1311-1380,1730,1734-1743,1798-1799,1825-1831,2622,2626-2637
+src/core/session-summarizer.test.ts
+  s_a2f2c976d4bbff::t_800767cddbb15e 1,4,29-33,37,66
+src/core/skill-manager.test.ts
+  s_a2f2c976d4bbff::t_03ed7cf9627d98 78-90,314-317,349-352,384-387,405-454
+src/core/skill-manager.ts
+  s_a2f2c976d4bbff::t_98c6ebf1643d32 4,8,85-90,154-172,213-218,224,226-248,253-276,370-386,390-405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "fc7ed0eccb97443258269598384c6e94cd2ac112",
+  "prompts": {},
+  "sessions": {
+    "s_633deae4663eb6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6099-c72e-7e42-8302-85eb79423315",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    },
+    "s_845ed15fd6b477": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6099-8c79-79d1-9845-6296857f1d53",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    },
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

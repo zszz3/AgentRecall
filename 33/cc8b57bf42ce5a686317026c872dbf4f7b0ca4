@@ -1,0 +1,37 @@
+.github/pull_request_template.md
+  s_a2f2c976d4bbff::t_7de3686c4bdaed 9
+.release-notes/README.md
+  s_a2f2c976d4bbff::t_03f2c336c83b81 6,10,14,18-19
+.release-notes/auto-update.md
+  s_a2f2c976d4bbff::t_b98e4f9b55ee68 1,5-6
+.release-notes/fix-release-tag-identity.md
+  s_a2f2c976d4bbff::t_869c64d4dd00ca 1,5-7
+AGENTS.md
+  s_a2f2c976d4bbff::t_823dda934f1073 12-16
+scripts/release-notes.test.mjs
+  s_a2f2c976d4bbff::t_818b233451b1d4 28-36
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_d365824ea5e791 46,2949-2971,3087-3097,3152,3756-3769,3772-3773,3775-3795,3818-3825,3829
+src/renderer/src/app-update-ui.test.ts
+  s_a2f2c976d4bbff::t_a86f4d589fc0ad 15-16,19,24,26-27
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_39a3839a3446a5 3430-3434,3436-3463,3465,3468,3470-3495,3500-3501,3503-3505,3511-3513,3516-3519,3521,3524-3531,3534-3603,3605-3619,3621,3625-3634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "33cc8b57bf42ce5a686317026c872dbf4f7b0ca4",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

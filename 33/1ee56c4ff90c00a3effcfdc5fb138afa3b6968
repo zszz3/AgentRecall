@@ -1,0 +1,55 @@
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_abebb7fc03f8a6 10
+README.md
+  s_a2f2c976d4bbff::t_32391b4c32cbcf 65,80,115,118-119,130,132-133
+bin/session-sync-record.cjs
+  s_a2f2c976d4bbff::t_2cc1e354e394b8 1-76
+bin/setup-session-sync-hook.cjs
+  s_a2f2c976d4bbff::t_b5868adafb2a43 1-196
+bin/uninstall.cjs
+  s_a2f2c976d4bbff::t_38aa1dd9ba8312 9,32-35,51-55
+package.json
+  s_a2f2c976d4bbff::t_b4b32c42e26cae 16-17
+scripts/uninstall.test.mjs
+  s_a2f2c976d4bbff::t_3ce033d5e360ca 25-34,39-42,47-48,57-58,65-67,69
+src/core/refresh-policy.ts
+  s_a2f2c976d4bbff::t_35958571239f9b 5
+src/core/session-sync-queue.test.ts
+  s_a2f2c976d4bbff::t_2a8b9407f5bb32 1-67
+src/core/session-sync-queue.ts
+  s_a2f2c976d4bbff::t_c0ed8480026ca8 1-97
+src/core/session-sync-record.test.ts
+  s_a2f2c976d4bbff::t_8957f239cdbbe0 1-64
+src/core/setup-session-sync-hook.test.ts
+  s_a2f2c976d4bbff::t_e661203a271a2b 1-75
+src/main/index.ts
+  s_a2f2c976d4bbff::t_2fdd7e8df17ab7 119-125,135,193-202,787-790,1639-1715,2260-2265,2311-2328,2501,2517
+src/main/session-sync-hook-wiring.test.ts
+  s_a2f2c976d4bbff::t_317ec8acfe12a0 1-35
+src/preload/index.ts
+  s_a2f2c976d4bbff::t_312a3c9273e834 20,126-128
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_fd585737f04a21 58,539-540,917,938-960,1694-1696,2521-2523,3076-3078,3109-3111,3177-3189,3699-3703,3705,3709-3712,3723-3783
+src/renderer/src/session-sync-settings.test.ts
+  s_a2f2c976d4bbff::t_ecd4bc5c7be5c9 1-35
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_c139f5d64e2c47 4669-4686
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "331ee56c4ff90c00a3effcfdc5fb138afa3b6968",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

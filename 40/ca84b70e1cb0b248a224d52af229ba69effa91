@@ -1,0 +1,21 @@
+docs/superpowers/specs/2026-07-15-unified-session-and-skill-sync-ux-design.md
+  s_a2f2c976d4bbff::t_3280bc2bdffe02 1-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "40ca84b70e1cb0b248a224d52af229ba69effa91",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

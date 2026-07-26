@@ -1,0 +1,25 @@
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_06fd60fba89182 3,18-43,85-86,300,370-378,384-398,407-435,440,454-467,484-547
+src/renderer/src/remote-session-card.test.ts
+  s_a2f2c976d4bbff::t_8049c73bcfa46e 1-104
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_2001d59970925c 5654,5707,5711-5771,5796-5837,5892-5893,5898-5917
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "61e124751dd1f2a437cbe77f055be581668090a9",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

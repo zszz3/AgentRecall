@@ -1,0 +1,25 @@
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_e20154ab7c1d01 20
+src/renderer/src/style-contract.test.ts
+  s_a2f2c976d4bbff::t_a96c41e65b2da1 272-277
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_0beb28d1b32a1c 4629-4632
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "0ac8d4d7dfee17783c86685f1e6e151a1b1d4547",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

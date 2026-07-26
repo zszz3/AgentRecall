@@ -1,0 +1,27 @@
+scripts/create-release-assets.test.mjs
+  s_a2f2c976d4bbff::t_9641400c305130 2,5,8-12,16
+scripts/generate-star-history.test.mjs
+  s_a2f2c976d4bbff::t_8bd3f8442d669d 2,5,15-20,89,113
+scripts/uninstall.test.mjs
+  s_a2f2c976d4bbff::t_fa4b1e0dde22a8 3,7,11-15,19
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_29614b98a4b95b 8,12-22,84,103,123,150,221,237,252,263,299,323,360,380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "b78ca20d400b20cd80bc10b7ba8e8cb37e465c71",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

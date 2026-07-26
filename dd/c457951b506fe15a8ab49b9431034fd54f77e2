@@ -1,0 +1,40 @@
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_4ca0b80137960e 288-289,293
+src/renderer/src/remote-session-card.test.ts
+  s_a2f2c976d4bbff::t_f734b2d436fbc9 5
+src/main/skill-sync-ipc.test.ts
+  s_a2f2c976d4bbff::t_786df31882cc37 25,32
+src/core/skill-diff.test.ts
+  s_a2f2c976d4bbff::t_ccc5ec6a18c206 2
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_50d09f2d49a81b 76-97,574-582
+  s_a2f2c976d4bbff::t_426026e3f7f755 446-450
+AGENTS.md
+  s_a2f2c976d4bbff::t_4b2297baa4a241 7-12
+src/main/index.ts
+  s_a2f2c976d4bbff::t_af060a4cb13115 117,396,409-412,456,459-461
+src/core/skill-sync.test.ts
+  s_a2f2c976d4bbff::t_55e53a6fac6dba 154
+scripts/create-release-assets.test.mjs
+  s_a2f2c976d4bbff::t_d24eef8d7a0055 46
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_f9a12cfcca11a0 103,401,451
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "ddc457951b506fe15a8ab49b9431034fd54f77e2",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

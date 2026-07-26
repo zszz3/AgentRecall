@@ -1,0 +1,59 @@
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_02656fbec62707 8
+README.md
+  s_a2f2c976d4bbff::t_942360403a296b 128-130,132,190-191
+docs/README.en.md
+  s_a2f2c976d4bbff::t_460c0465d1011a 81-83,85,124-125
+docs/superpowers/plans/2026-07-15-sync-setup-guidance.md
+  s_a2f2c976d4bbff::t_c6fc864d821d29 1-245
+src/core/app-update-types.ts
+  s_a2f2c976d4bbff::t_53d4654167e4a4 22
+src/core/supabase-setup.test.ts
+  s_a2f2c976d4bbff::t_6438408b7f7225 1-26
+src/core/supabase-setup.ts
+  s_a2f2c976d4bbff::t_ee93acc8bb4fe0 1-24
+src/main/app-update-ipc.test.ts
+  s_a2f2c976d4bbff::t_bbe7e1cc50bfc9 34-40
+src/main/index.ts
+  s_a2f2c976d4bbff::t_f208c32c3060fa 116,761,770-776,778,784,786-787,799,806,2060,2085-2092,2236-2239,2259,2269,2281
+src/main/skill-sync-ipc.test.ts
+  s_a2f2c976d4bbff::t_826e612d38e52c 19-27
+src/preload/index.ts
+  s_a2f2c976d4bbff::t_61bcdee5e63459 115-116
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_cc4ec701016ca1 122,2467,3595-3620,3682-3707,3755-3759,3762-3772,3835,3843-3857
+src/renderer/src/app-update-ui.test.ts
+  s_a2f2c976d4bbff::t_41e5e27ae271dd 29-34
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_46b1b790014f26 3,11,108,120,302-306,316-318,321-334
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_ef3afeb5f67101 11,27,46,406-424,789,791-792,796,798-799,810-820
+src/renderer/src/components/supabase-setup-guide.tsx
+  s_a2f2c976d4bbff::t_7ff2fcde53079f 1-81
+src/renderer/src/detail-panel-actions.test.ts
+  s_a2f2c976d4bbff::t_dcc5cc5d8aaabe 275-276
+src/renderer/src/style-contract.test.ts
+  s_a2f2c976d4bbff::t_8c352ef57204a8 5,151-178
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_24cd70345c4317 2805,2862,2870-2882,3036-3139,5408-5413,5418,5420-5422,5437,5442,5447,5451,5497,5541-5542,5572,5578,5596,5608-5611,5878-5889,5891-5903
+src/renderer/src/supabase-setup-guide.test.ts
+  s_a2f2c976d4bbff::t_5fc2300920f351 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "3026cf471f6e1befee2ee55279a0a2240ab7e354",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

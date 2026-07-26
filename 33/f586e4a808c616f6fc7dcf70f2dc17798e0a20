@@ -1,0 +1,72 @@
+src/main/subagent-visibility-ipc.test.ts
+  s_a2f2c976d4bbff::t_ecea18b6023abc 20-24
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_8047e86320048a 16-17
+src/renderer/src/remote-session-card.test.ts
+  s_a2f2c976d4bbff::t_a9f523b8e350f7 96,100-106,110-112
+  s_a2f2c976d4bbff::t_fd36f08621722b 113
+  s_a2f2c976d4bbff::t_3e941dae6e85b6 114
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_2834c45a3d65fb 3628-3629
+  s_a2f2c976d4bbff::t_cad5ddd4bea0a4 3612-3614
+  s_a2f2c976d4bbff::t_2f00675f88892b 6280
+  s_a2f2c976d4bbff::t_3b9821a46a2f4c 6282-6283
+  s_a2f2c976d4bbff::t_398cd060f2cfe4 6193-6194
+  s_a2f2c976d4bbff::t_74eb26a993ba19 3749-3751
+  s_a2f2c976d4bbff::t_dcc6b65f276bc9 3746-3748
+  s_a2f2c976d4bbff::t_37ed8c3c485c35 3599-3601
+  s_a2f2c976d4bbff::t_ffd9ccc82b0503 3602-3604,6195-6196
+  s_a2f2c976d4bbff::t_2001d59970925c 3605,3611,3617,3624,3752,6197,6303,6332,6341,6353-6356,6361
+  s_a2f2c976d4bbff::t_5c993f1a0115b0 6348-6351
+  s_a2f2c976d4bbff::t_4789b53624f88b 6362
+  s_a2f2c976d4bbff::t_02dc063591a395 6300-6302
+  s_a2f2c976d4bbff::t_08dcac60be2133 3616
+  s_a2f2c976d4bbff::t_36dca659d798de 6202,6391,6396-6397
+  s_a2f2c976d4bbff::t_9c0ff36515e110 6198
+  s_a2f2c976d4bbff::t_7d5cf1a6fbc88a 6329-6331
+  s_a2f2c976d4bbff::t_fde7c110c4f110 3622-3623
+  s_a2f2c976d4bbff::t_2b809d4e133874 6357
+  s_a2f2c976d4bbff::t_e7549e3a6d8a84 3561,3709,3736,3741-3742,3795-3796,6274,6294,6306,6309,6321,6381,6383,6467-6469,6610,6678
+  s_a2f2c976d4bbff::t_e60a88244965a6 3597,6278,6287,6333-6340,6347
+  s_a2f2c976d4bbff::t_83e4e487738210 3753
+  s_a2f2c976d4bbff::t_2381980b3688a6 3596
+  s_a2f2c976d4bbff::t_481b3fb26c40e8 3606-3610,6281
+  s_a2f2c976d4bbff::t_3805d6442a2402 6304
+  s_a2f2c976d4bbff::t_f62831133b09d4 3625-3627
+  s_a2f2c976d4bbff::t_d9f965376d58f6 3598,6192,6292,6342-6344
+  s_a2f2c976d4bbff::t_656d21157b4e49 6345-6346
+  s_a2f2c976d4bbff::t_135586520a615a 3618-3620
+  s_a2f2c976d4bbff::t_19f6965df8055f 6296,6324,6352
+  s_a2f2c976d4bbff::t_73a9493e06dfc0 6191
+  s_a2f2c976d4bbff::t_61658888586c40 6358-6360
+  s_a2f2c976d4bbff::t_6ae6b1a84737d3 6389-6390
+  s_a2f2c976d4bbff::t_4fcd5cb3c2f4b6 6392-6395
+src/main/index.ts
+  s_a2f2c976d4bbff::t_a6fc9a510954b9 612-613,615
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_33342f73cc734c 380
+  s_a2f2c976d4bbff::t_06fd60fba89182 426,431,435-438
+  s_a2f2c976d4bbff::t_80ed6968f9871f 392-395,417-420,427,512-514,523
+src/renderer/src/skills-dialog-actions.test.ts
+  s_a2f2c976d4bbff::t_e17d1012a5d89c 69,73-82
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_093fcc9a22abd7 102,141-143,151,390-392,424-426,428-429,435-438,440,442-448,562,570,575,579,583-585
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "33f586e4a808c616f6fc7dcf70f2dc17798e0a20",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

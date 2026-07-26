@@ -1,0 +1,27 @@
+.github/workflows/quality-check.yml
+  s_a2f2c976d4bbff::t_d89e94c1cfba5e 17,37-49
+.release-notes/fix-cross-platform-release-ci.md
+  s_a2f2c976d4bbff::t_96ac72ae121361 1-5
+scripts/release-notes.test.mjs
+  s_a2f2c976d4bbff::t_7797a17627e15a 54,58-62
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_0cde62136f18c0 488,499
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "4411f177056b8df2ea6902b4f8594056d9544db0",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

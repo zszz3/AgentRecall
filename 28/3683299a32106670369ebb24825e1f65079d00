@@ -1,0 +1,23 @@
+docs/superpowers/specs/2026-07-16-codex-app-session-deeplink-design.md
+  s_e0df98c08be7e7::t_15010e3316bd09 1-35
+docs/superpowers/specs/2026-07-16-stable-node-auto-update-design.md
+  s_e0df98c08be7e7::t_492fae50bdf5cc 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "283683299a32106670369ebb24825e1f65079d00",
+  "prompts": {},
+  "sessions": {
+    "s_e0df98c08be7e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6ad1-f02f-7132-bc0a-a5d07e92a9d4",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

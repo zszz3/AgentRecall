@@ -1,0 +1,29 @@
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_981bc76c21cbad 1102,1327-1330,2261-2262
+src/renderer/src/components/detail-panel.tsx
+  s_a2f2c976d4bbff::t_3ee06728953cbc 140,178,344
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_2e7c806ba2df62 239
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_35841e63ed1585 2026-2029
+src/renderer/src/sync-navigation-ui.test.ts
+  s_a2f2c976d4bbff::t_b6f6a403dc285b 1-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "37da1488467772ce91799496f542288ebbf0f4bb",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

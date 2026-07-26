@@ -1,0 +1,51 @@
+.release-notes/fix-update-and-codex-app-open.md
+  s_e0df98c08be7e7::t_bf69c8477b8f19 1-6
+docs/superpowers/plans/2026-07-17-codex-app-session-deeplink.md
+  s_e0df98c08be7e7::t_5e7ce3169edd15 1-54
+docs/superpowers/plans/2026-07-17-stable-node-auto-update.md
+  s_e0df98c08be7e7::t_83f229f2415d08 1-38
+docs/superpowers/specs/2026-07-16-stable-node-auto-update-design.md
+  s_e0df98c08be7e7::t_eb5ef34d26b36a 17
+src/core/platform.test.ts
+  s_e0df98c08be7e7::t_e8f24eeda3bdd4 28,145-175
+src/core/platform.ts
+  s_e0df98c08be7e7::t_258fd34572ed68 1086-1107,1109,1112-1113
+src/core/resume-router.test.ts
+  s_e0df98c08be7e7::t_1179b1cc7a56e0 57-73
+src/core/resume-router.ts
+  s_e0df98c08be7e7::t_4ab4727ac50e9a 2,5,14-16
+src/main/index.ts
+  s_e0df98c08be7e7::t_40e4997f211939 1366-1371,1406
+src/main/services/app-update-service.test.ts
+  s_e0df98c08be7e7::t_98c2c9b392e7a2 232,245-249,253,264-267,269,276-287
+src/main/services/app-update-service.ts
+  s_e0df98c08be7e7::t_4b9e2e264a01b6 199-204,212,223
+src/renderer/src/App.tsx
+  s_e0df98c08be7e7::t_03e4105bb3203e 135,1029,2166,2185,2282,2288-2292,2724,2727
+src/renderer/src/detail-panel-actions.test.ts
+  s_e0df98c08be7e7::t_d4a9cc517e92a3 224-232
+src/renderer/src/features/session-detail/detail-panel.tsx
+  s_e0df98c08be7e7::t_ae09b0272bb29f 416
+src/renderer/src/session-ui.test.ts
+  s_e0df98c08be7e7::t_3f8780a6a3dfb9 8-9,19,22-37
+src/renderer/src/session-ui.ts
+  s_e0df98c08be7e7::t_77d8a32b9442d0 177,183-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "2bd134c66100fd0ac8613ecaf8e0928b34ddb504",
+  "prompts": {},
+  "sessions": {
+    "s_e0df98c08be7e7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6ad1-f02f-7132-bc0a-a5d07e92a9d4",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

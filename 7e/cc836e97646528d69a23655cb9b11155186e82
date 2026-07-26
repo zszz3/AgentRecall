@@ -1,0 +1,27 @@
+src/core/remote-session-sync.test.ts
+  s_9162a3c246fe22::t_6f3b3d9d12d97d 12,177-196
+src/core/remote-session-sync.ts
+  s_9162a3c246fe22::t_58f9e95a9ba2f2 341,351-353,363-366,376-379,398-401,437-438,693-714
+src/core/skill-sync.test.ts
+  s_9162a3c246fe22::t_25998ac85909ae 80-81,190-220
+src/core/skill-sync.ts
+  s_9162a3c246fe22::t_72d77a0f9c575e 8,11,62-66,156-160,191-198,329,333,337,369-370,389-476,591-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "7ecc836e97646528d69a23655cb9b11155186e82",
+  "prompts": {},
+  "sessions": {
+    "s_9162a3c246fe22": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1328-5d10-7f12-8516-f8a251b4c6f8",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

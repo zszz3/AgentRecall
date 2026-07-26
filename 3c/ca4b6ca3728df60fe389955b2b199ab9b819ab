@@ -1,0 +1,27 @@
+.release-notes/stabilize-sync-experience.md
+  s_a2f2c976d4bbff::t_d957468bdd8826 6
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_c0eb702550c714 9,472,492
+src/renderer/src/skills-dialog-actions.test.ts
+  s_a2f2c976d4bbff::t_99e46491f4ba67 83-89
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_39240ac3c44913 3851-3856
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "3cca4b6ca3728df60fe389955b2b199ab9b819ab",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

@@ -1,0 +1,33 @@
+.release-notes/fix-release-tag-identity.md
+  s_a2f2c976d4bbff::t_78e9d58a3dfd47 8
+bin/agent-session-search.cjs
+  s_a2f2c976d4bbff::t_34834ae3330d59 25,27-38,45-47
+bin/apply-update.cjs
+  s_a2f2c976d4bbff::t_d936e8dc1f883c 7,23,25,34,41-43
+bin/update-client.cjs
+  s_a2f2c976d4bbff::t_992e0fc9694b6c 18,48-51,56-89,264-270,279-305,313,376-378,383,386,407,412,416,431
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_ef9efdde884990 2-3,11,13,18,130-186
+src/main/app-update-ipc.test.ts
+  s_a2f2c976d4bbff::t_85dbf344c0c0b8 22-29
+src/main/index.ts
+  s_a2f2c976d4bbff::t_bba5a52cc31929 187,511,601-627,1992
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "05947c4d0d3f1e8112db20657565d7884cac4536",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

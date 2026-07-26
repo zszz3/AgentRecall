@@ -1,0 +1,71 @@
+bin/agent-session-search.cjs
+  s_a2f2c976d4bbff::t_f90459d9370e18 16,20,104-114
+bin/apply-update.cjs
+  s_a2f2c976d4bbff::t_d936e8dc1f883c 48
+  s_a2f2c976d4bbff::t_67bc47b5d7f9b9 42
+  s_a2f2c976d4bbff::t_2d88a44ca73a33 43-47
+  s_a2f2c976d4bbff::t_ad0c040d7bd5a8 49-50
+  s_a2f2c976d4bbff::t_0980ed532f587e 8-9,12
+package.json
+  s_a2f2c976d4bbff::t_a70f1f9199d427 43
+scripts/create-release-assets.mjs
+  s_a2f2c976d4bbff::t_68f2085be5d762 8-9,29,51-52
+src/core/skill-sync.test.ts
+  s_a2f2c976d4bbff::t_88a58c5542d220 6,199,204-209,212,214-215,224,228-249
+src/core/skill-sync.ts
+  s_a2f2c976d4bbff::t_2565a3647ade94 4,13-14,108,279,286-287,348,373,375,390,404-406,414,417,426-431,446,450,460,462-464,475-494
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_315903a2588c76 1,13,39,42,44-46,59-62,68-79,111,137-139,143-155,157-164,172-189,192-195,197-216,219-220,227,229,234,236,238-245,247-248,250,252,255-275,278,296-299,321,325,327,330,334,341-367,372-477
+src/core/remote-session-sync.ts
+  s_a2f2c976d4bbff::t_d1fbe31ff7dfa2 58-69,445-454,462-485
+src/preload/index.ts
+  s_a2f2c976d4bbff::t_2c0e8405d70012 13,123
+src/core/remote-session-sync.test.ts
+  s_a2f2c976d4bbff::t_7d9320af452544 191-238
+src/renderer/src/styles.css
+  s_a2f2c976d4bbff::t_36dca659d798de 5251-5265,5268,5275,5357-5449,5454-5455,5460-5468,5471-5486,5514-5520,5532-5535,5537-5547,5556,5562-5563,5571-5668
+src/renderer/src/detail-panel-actions.test.ts
+  s_a2f2c976d4bbff::t_0250e0b3b13ec1 268-272,277,279
+package-lock.json
+  s_a2f2c976d4bbff::t_beff5497b90363 16
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_20ad19d850e210 39,217-221,294
+src/renderer/src/App.tsx
+  s_a2f2c976d4bbff::t_006ab9d51b86cf 776,780,789-790,797-802,804-805,809,813-818,822
+scripts/create-release-assets.test.mjs
+  s_a2f2c976d4bbff::t_2924363b3969cf 7,31-32
+.release-notes/fix-skill-upload-remote-session-bulk-actions.md
+  s_a2f2c976d4bbff::t_80e039bb2b51f1 1-11
+Install.md
+  s_a2f2c976d4bbff::t_9af67403263e01 5,8-9,12,47,51,54-55,68,97-105
+README.md
+  s_a2f2c976d4bbff::t_2539da27b23ae1 22-58,193,195,198-201,204,206,208-214,216,220-221,224-225
+bin/update-client.cjs
+  s_a2f2c976d4bbff::t_749c469ba04dcb 15-16,55-80,309-372,419-423,444-549,635-636,647-650,652,656,658,663,668
+docs/README.en.md
+  s_a2f2c976d4bbff::t_b76c6689c3e5f9 137,139,142-143,146,173,175,187,190-192,196,199-200,202
+scripts/update-client.test.mjs
+  s_a2f2c976d4bbff::t_724d15a8c58f0f 3,16-18,21,23,25,27,150-194,221-228,236,244-247,251,260-313,334-340
+src/main/app-update-ipc.test.ts
+  s_a2f2c976d4bbff::t_ee037be4facc99 29-32
+src/main/index.ts
+  s_a2f2c976d4bbff::t_46ec26230fc451 11,186,191,613-639,1867-1871
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "5548fa81c4068da8cbbc67a2673faa2c447b7e54",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

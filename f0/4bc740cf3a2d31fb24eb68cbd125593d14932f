@@ -1,0 +1,25 @@
+src/main/index.ts
+  s_a2f2c976d4bbff::t_cd7cb020ff8026 106,117,437-463,2174-2179
+src/main/skill-sync-ipc.test.ts
+  s_a2f2c976d4bbff::t_1ce24cbfe5f373 13,21-27
+src/preload/index.ts
+  s_a2f2c976d4bbff::t_55b56c7390931d 23,118-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "f04bc740cf3a2d31fb24eb68cbd125593d14932f",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}

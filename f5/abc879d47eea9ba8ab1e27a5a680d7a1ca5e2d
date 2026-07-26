@@ -1,0 +1,41 @@
+src/core/skill-diff.test.ts
+  s_a2f2c976d4bbff::t_50aa386262ebda 2,51-59,68-74
+src/core/skill-diff.ts
+  s_a2f2c976d4bbff::t_8cf9fe41200dee 32-36,45,50
+src/core/skill-sync.test.ts
+  s_a2f2c976d4bbff::t_4318525c5b8298 14,17,107-112,140,143-146,151-164,362-379
+src/core/skill-sync.ts
+  s_a2f2c976d4bbff::t_0ff548d0b58eaf 61-62,65,276-279,339-343,345,348-349,351-356,359,374-378,471-488
+src/main/index.ts
+  s_a2f2c976d4bbff::t_9270f41cee06d9 106,110,119,384-386,395-405,408,454,499,503-508
+src/main/skill-sync-ipc.test.ts
+  s_a2f2c976d4bbff::t_2d59c462544144 25,29-34
+src/renderer/src/components/remote-sessions-dialog.tsx
+  s_a2f2c976d4bbff::t_cd8c6218a4f554 44-48,95,118-120,204,207-209,212,215,219-223,293,317,322
+src/renderer/src/components/skills-dialog.tsx
+  s_a2f2c976d4bbff::t_426026e3f7f755 88-90,425,454,868-869,874-875
+src/renderer/src/remote-session-card.test.ts
+  s_a2f2c976d4bbff::t_0002e0da609702 5,96-102
+src/renderer/src/skills-dialog-actions.test.ts
+  s_a2f2c976d4bbff::t_eab2c946c3e969 53-55
+src/renderer/src/sync-navigation-ui.test.ts
+  s_a2f2c976d4bbff::t_ff752004f5521a 35-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "f5abc879d47eea9ba8ab1e27a5a680d7a1ca5e2d",
+  "prompts": {},
+  "sessions": {
+    "s_a2f2c976d4bbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f5abf-9b5a-7fd0-9360-6c3be91ba669",
+        "model": "unknown"
+      },
+      "human_author": "xuguowei.x <xuguowei.x@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
