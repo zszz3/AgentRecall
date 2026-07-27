@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppUpdateManifest, AppUpdateProgress, AppUpdateStatus } from "../../core/app-update-types";
 import {
   AppUpdateService,
+  InstalledRuntimeMonitor,
   launchDetachedAppUpdateInstaller,
+  launchInstalledRuntimeReplacement,
   type AppUpdateClient,
   type AppUpdateServiceDependencies,
   type StagedAppUpdate,
@@ -426,5 +428,87 @@ describe("detached update installer", () => {
     })).rejects.toThrow("stable Node executable");
 
     expect(spawnProcess).not.toHaveBeenCalled();
+  });
+});
+
+describe("installed runtime replacement", () => {
+  it("launches the npm entry through stable Node and waits for the old app process", async () => {
+    const child = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
+    child.unref = vi.fn();
+    let invocation: { command: string; args: string[]; options: SpawnOptions } | undefined;
+    const spawnProcess = vi.fn((command: string, args: string[], options: SpawnOptions) => {
+      invocation = { command, args, options };
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    });
+
+    await launchInstalledRuntimeReplacement({
+      nodePath: "/usr/local/bin/node",
+      launcherPath: "/prefix/lib/node_modules/agent-recall/bin/agent-recall.cjs",
+      processId: 789,
+      spawnProcess: spawnProcess as never,
+    });
+
+    expect(invocation).toMatchObject({
+      command: "/usr/local/bin/node",
+      args: [
+        "/prefix/lib/node_modules/agent-recall/bin/agent-recall.cjs",
+        "--no-update-check",
+        "--wait-pid",
+        "789",
+      ],
+      options: {
+        detached: true,
+        stdio: "ignore",
+      },
+    });
+    expect(invocation?.options.env).not.toHaveProperty("ELECTRON_RUN_AS_NODE");
+    expect(child.unref).toHaveBeenCalledOnce();
+  });
+
+  it("restarts through the repair-capable launcher after an external package replacement settles", async () => {
+    const original = { device: 1, inode: 10, size: 100, modifiedAt: 1 };
+    const replacement = { device: 1, inode: 20, size: 100, modifiedAt: 2 };
+    const launcher = { device: 1, inode: 30, size: 50, modifiedAt: 2 };
+    const files = new Map<string, typeof original | null>([
+      ["/app/index.js", original],
+      ["/app/Electron", original],
+      ["/app/agent-recall.cjs", launcher],
+    ]);
+    const launchReplacement = vi.fn(async () => undefined);
+    const requestQuit = vi.fn();
+    const clearTimer = vi.fn();
+    const monitor = new InstalledRuntimeMonitor({
+      appEntryPath: "/app/index.js",
+      electronPath: "/app/Electron",
+      launcherPath: "/app/agent-recall.cjs",
+      nodePath: "/usr/local/bin/node",
+      processId: 789,
+      statFile: vi.fn(async (filePath) => files.get(filePath) ?? null),
+      launchReplacement,
+      requestQuit,
+      logError: vi.fn(),
+      setInterval: vi.fn(() => 1 as unknown as ReturnType<typeof setInterval>),
+      clearInterval: clearTimer,
+    });
+    await monitor.start();
+
+    files.set("/app/index.js", null);
+    files.set("/app/Electron", null);
+    await monitor.checkNow();
+    expect(launchReplacement).not.toHaveBeenCalled();
+
+    files.set("/app/index.js", replacement);
+    await monitor.checkNow();
+    expect(launchReplacement).not.toHaveBeenCalled();
+    await monitor.checkNow();
+
+    expect(launchReplacement).toHaveBeenCalledWith({
+      nodePath: "/usr/local/bin/node",
+      launcherPath: "/app/agent-recall.cjs",
+      processId: 789,
+    });
+    expect(clearTimer).toHaveBeenCalledOnce();
+    expect(requestQuit).toHaveBeenCalledOnce();
   });
 });

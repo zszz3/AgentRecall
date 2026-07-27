@@ -204,8 +204,12 @@ export function RemoteSessionsDialog({
   }
 
   async function chooseProject(): Promise<void> {
-    const selected = await window.sessionSearch.chooseRemoteRestoreProject();
-    if (selected) setLocalProjectPath(selected);
+    try {
+      const selected = await window.sessionSearch.chooseRemoteRestoreProject();
+      if (selected) setLocalProjectPath(selected);
+    } catch (error) {
+      setFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   async function confirmRestore(): Promise<void> {

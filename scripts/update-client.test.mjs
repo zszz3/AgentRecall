@@ -1502,6 +1502,7 @@ test("keeps the terminal attached until the updater reports an exit status", asy
   assert.doesNotMatch(launcher, /"--wait-pid",\s*String\(process\.pid\)/);
   assert.match(launcher, /delete environment\.ELECTRON_RUN_AS_NODE/);
   assert.match(launcher, /waitForUpdateCompletion/);
+  assert.match(launcher, /waitForProcessExit\(waitPid, 30_000\)/);
   assert.match(launcher, /ensureElectronRuntimeForLaunch/);
 });
 

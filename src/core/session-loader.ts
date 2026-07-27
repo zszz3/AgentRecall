@@ -2186,7 +2186,16 @@ interface CursorComposerMetadata {
   isSubagent: boolean;
   parentSessionId: string | null;
   messages: SessionMessage[];
+  hasVisibleConversation: boolean;
   executionEnvironmentHint?: LoadedSession["executionEnvironmentHint"];
+}
+
+interface CursorBubbleDraft {
+  bubbleId: string;
+  key: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
 }
 
 function cursorSshEnvironmentHint(
@@ -2211,11 +2220,27 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
   try {
     if (!sqliteHasColumns(db, "composerHeaders", ["composerId", "createdAt", "isSubagent", "value"])) return metadata;
 
-    const messageDrafts = new Map<
-      string,
-      Array<{ key: string; role: "user" | "assistant"; content: string; timestamp: string }>
-    >();
+    const messageDrafts = new Map<string, Map<string, CursorBubbleDraft>>();
+    const visibleBubbleIds = new Map<string, string[]>();
     if (sqliteHasColumns(db, "cursorDiskKV", ["key", "value"])) {
+      const composerRows = db
+        .prepare("SELECT key, CAST(value AS TEXT) AS value FROM cursorDiskKV WHERE key LIKE 'composerData:%'")
+        .all() as Array<{ key?: string; value?: string }>;
+      for (const row of composerRows) {
+        const key = row.key || "";
+        const composerId = key.slice("composerData:".length);
+        const composerData = parseJsonText(row.value);
+        if (!composerId || !isRecord(composerData)) continue;
+        const headers = unknownField(composerData, "fullConversationHeadersOnly");
+        if (!Array.isArray(headers)) continue;
+        visibleBubbleIds.set(
+          composerId,
+          headers
+            .map((header) => stringField(header, "bubbleId"))
+            .filter((bubbleId): bubbleId is string => Boolean(bubbleId)),
+        );
+      }
+
       const bubbleRows = db
         .prepare("SELECT key, CAST(value AS TEXT) AS value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'")
         .all() as Array<{ key?: string; value?: string }>;
@@ -2226,14 +2251,17 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
         const composerId = key.slice("bubbleId:".length, separator);
         const bubble = parseJsonText(row.value);
         if (!composerId || !isRecord(bubble)) continue;
+        const bubbleId = stringField(bubble, "bubbleId") || key.slice(separator + 1);
+        if (!bubbleId) continue;
         const type = numberField(bubble, "type");
         const role = type === 1 ? "user" : type === 2 ? "assistant" : null;
         if (!role) continue;
         const plainText = stringField(bubble, "text").trim();
         const content = plainText || extractText(parseJsonText(stringField(bubble, "richText"))).trim();
         if (!content || (role === "user" && !isMeaningfulUserMessage(content))) continue;
-        const drafts = messageDrafts.get(composerId) ?? [];
-        drafts.push({
+        const drafts = messageDrafts.get(composerId) ?? new Map<string, CursorBubbleDraft>();
+        drafts.set(bubbleId, {
+          bubbleId,
           key,
           role,
           content,
@@ -2260,11 +2288,17 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
       const draftEnvironment = objectField(draftTarget, "environment");
       const draftUri = objectField(draftEnvironment, "uri");
       const subagentInfo = objectField(header, "subagentInfo");
-      const drafts = messageDrafts.get(composerId) ?? [];
-      drafts.sort((left, right) => {
-        const timestampDelta = timestampMs(left.timestamp) - timestampMs(right.timestamp);
-        return timestampDelta || left.key.localeCompare(right.key);
-      });
+      const draftsById = messageDrafts.get(composerId) ?? new Map<string, CursorBubbleDraft>();
+      const visibleIds = visibleBubbleIds.get(composerId);
+      const drafts = visibleIds !== undefined
+        ? visibleIds.flatMap((bubbleId) => {
+            const draft = draftsById.get(bubbleId);
+            return draft ? [draft] : [];
+          })
+        : [...draftsById.values()].sort((left, right) => {
+            const timestampDelta = timestampMs(left.timestamp) - timestampMs(right.timestamp);
+            return timestampDelta || left.key.localeCompare(right.key);
+          });
 
       metadata.set(composerId, {
         composerId,
@@ -2278,6 +2312,7 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
         isSubagent: numberField(row, "isSubagent") === 1 || Boolean(subagentInfo),
         parentSessionId: stringField(subagentInfo, "parentComposerId") || null,
         messages: drafts.map((draft, index) => messageFromParts(draft.role, draft.content, draft.timestamp, index)),
+        hasVisibleConversation: visibleIds !== undefined,
         executionEnvironmentHint: cursorSshEnvironmentHint(workspaceUri, agentUri, draftUri),
       });
     }
@@ -2290,18 +2325,66 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
   return metadata;
 }
 
+function cursorTranscriptRowsForVisibleBranch(
+  rows: unknown[],
+  visibleMessages: SessionMessage[],
+): unknown[] | null {
+  const visiblePrompts = visibleMessages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content.trim());
+  if (visiblePrompts.length === 0) return [];
+
+  const turns: Array<{ rowIndex: number; prompt: string }> = [];
+  for (const [rowIndex, row] of rows.entries()) {
+    const prompt = sourceMessages([row], "cursor")
+      .find((message) => message.role === "user")
+      ?.content.trim();
+    if (prompt) turns.push({ rowIndex, prompt });
+  }
+
+  // Cursor appends replacement turns after discarded ones. Match backwards so
+  // repeated prompts resolve to the latest branch without an O(n*m) LCS table.
+  const visibleTurnRows = new Set<number>();
+  let turnIndex = turns.length - 1;
+  for (let visibleIndex = visiblePrompts.length - 1; visibleIndex >= 0; visibleIndex -= 1) {
+    while (turnIndex >= 0 && turns[turnIndex].prompt !== visiblePrompts[visibleIndex]) {
+      turnIndex -= 1;
+    }
+    if (turnIndex < 0) return null;
+    visibleTurnRows.add(turns[turnIndex].rowIndex);
+    turnIndex -= 1;
+  }
+
+  const filtered: unknown[] = [];
+  const turnRows = new Set(turns.map((turn) => turn.rowIndex));
+  let includeTurn = false;
+  for (const [rowIndex, row] of rows.entries()) {
+    if (turnRows.has(rowIndex)) {
+      includeTurn = visibleTurnRows.has(rowIndex);
+    }
+    if (includeTurn) filtered.push(row);
+  }
+  return filtered;
+}
+
 export function loadCursorTranscriptFile(
   filePath: string,
   stat = safeStat(filePath),
   workspacePathMap?: ReadonlyMap<string, string>,
+  visibleMessages?: SessionMessage[],
 ): LoadedSession | null {
   const rows = readJsonl(filePath);
   if (rows.length === 0) return null;
 
   const { workspaceSlug, sessionId, isSubagent, parentSessionId } = parseCursorTranscriptPath(filePath);
   const rawId = sessionId;
-  const messages = sourceMessages(rows, "cursor");
-  const traceEvents = traceEventsFromCursorRows(rows);
+  const visibleRows = visibleMessages === undefined
+    ? rows
+    : cursorTranscriptRowsForVisibleBranch(rows, visibleMessages);
+  const messages = visibleRows === null
+    ? (visibleMessages ?? sourceMessages(rows, "cursor"))
+    : sourceMessages(visibleRows, "cursor");
+  const traceEvents = visibleRows === null ? [] : traceEventsFromCursorRows(visibleRows);
   const question = firstQuestion(messages);
   const projectPath =
     rows.map((row) => (isRecord(row) ? firstStringField(row, ["cwd", "projectPath", "project_path", "workspacePath", "workspace_path"]) : "")).find(Boolean) ||
@@ -2352,10 +2435,15 @@ export function* loadCursorAgentSessionsIterator(cursorDir = path.join(os.homedi
         transcriptSessionIds.add(transcriptPath.sessionId);
         continue;
       }
-      const loaded = loadCursorTranscriptFile(filePath, stat, workspacePathMap);
+      const header = composerMetadata.get(transcriptPath.sessionId);
+      const loaded = loadCursorTranscriptFile(
+        filePath,
+        stat,
+        workspacePathMap,
+        header?.hasVisibleConversation ? header.messages : undefined,
+      );
       if (!loaded) continue;
       transcriptSessionIds.add(transcriptPath.sessionId);
-      const header = composerMetadata.get(transcriptPath.sessionId);
       if (header) {
         loaded.session = {
           ...loaded.session,

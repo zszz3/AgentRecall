@@ -20,6 +20,7 @@ const {
   skipUpdateVersion,
   snoozeUpdatePrompt,
   waitForUpdateCompletion,
+  waitForProcessExit,
 } = require("./update-client.cjs");
 
 async function scheduleUpdate(manifest, { stopApp }) {
@@ -67,6 +68,8 @@ function launchApp() {
 
 async function main() {
   const args = new Set(process.argv.slice(2));
+  const waitPidIndex = process.argv.indexOf("--wait-pid");
+  const waitPid = Number(waitPidIndex >= 0 ? process.argv[waitPidIndex + 1] : undefined);
   const version = currentVersion();
   if (args.has("--version") || args.has("-v")) {
     process.stdout.write(`${version}\n`);
@@ -127,6 +130,9 @@ async function main() {
     }
   }
 
+  if (Number.isInteger(waitPid) && waitPid > 0 && waitPid !== process.pid) {
+    await waitForProcessExit(waitPid, 30_000);
+  }
   await waitForUpdateCompletion({
     onWait: () => {
       if (process.stdout.isTTY) process.stdout.write("正在等待自动更新完成...\n");

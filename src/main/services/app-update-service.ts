@@ -320,3 +320,168 @@ export async function launchDetachedAppUpdateInstaller(
   }
   child.unref();
 }
+
+interface RuntimeFileFingerprint {
+  device: number;
+  inode: number;
+  size: number;
+  modifiedAt: number;
+}
+
+export interface InstalledRuntimeMonitorOptions {
+  appEntryPath: string;
+  electronPath: string;
+  launcherPath: string;
+  nodePath: string;
+  processId?: number;
+  intervalMs?: number;
+  statFile?: (filePath: string) => Promise<RuntimeFileFingerprint | null>;
+  launchReplacement?: (options: {
+    nodePath: string;
+    launcherPath: string;
+    processId: number;
+  }) => Promise<void>;
+  requestQuit(): void;
+  logError(message: string): void;
+  setInterval?: (callback: () => void, delayMs: number) => ReturnType<typeof setInterval>;
+  clearInterval?: (timer: ReturnType<typeof setInterval>) => void;
+}
+
+async function runtimeFileFingerprint(filePath: string): Promise<RuntimeFileFingerprint | null> {
+  try {
+    const stat = await fs.stat(filePath);
+    return {
+      device: stat.dev,
+      inode: stat.ino,
+      size: stat.size,
+      modifiedAt: stat.mtimeMs,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sameRuntimeFile(
+  left: RuntimeFileFingerprint | null,
+  right: RuntimeFileFingerprint | null,
+): boolean {
+  return Boolean(
+    left &&
+    right &&
+    left.device === right.device &&
+    left.inode === right.inode &&
+    left.size === right.size &&
+    left.modifiedAt === right.modifiedAt,
+  );
+}
+
+export async function launchInstalledRuntimeReplacement(
+  options: {
+    nodePath: string;
+    launcherPath: string;
+    processId: number;
+    spawnProcess?: typeof spawn;
+  },
+): Promise<void> {
+  const environment: NodeJS.ProcessEnv = { ...process.env, AGENT_RECALL_NO_UPDATE_CHECK: "1" };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  const child = (options.spawnProcess ?? spawn)(
+    options.nodePath,
+    [
+      options.launcherPath,
+      "--no-update-check",
+      "--wait-pid",
+      String(options.processId),
+    ],
+    {
+      detached: true,
+      stdio: "ignore",
+      env: environment,
+    },
+  );
+  await new Promise<void>((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+  child.unref();
+}
+
+export class InstalledRuntimeMonitor {
+  private baselineEntry: RuntimeFileFingerprint | null = null;
+  private baselineElectron: RuntimeFileFingerprint | null = null;
+  private staleRuntimeDetected = false;
+  private checking = false;
+  private restarting = false;
+  private readyReplacementEntry: RuntimeFileFingerprint | null = null;
+  private readyReplacementLauncher: RuntimeFileFingerprint | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private readonly options: InstalledRuntimeMonitorOptions) {}
+
+  async start(): Promise<void> {
+    if (this.timer) return;
+    const statFile = this.options.statFile ?? runtimeFileFingerprint;
+    [this.baselineEntry, this.baselineElectron] = await Promise.all([
+      statFile(this.options.appEntryPath),
+      statFile(this.options.electronPath),
+    ]);
+    if (!this.baselineEntry || !this.baselineElectron) {
+      this.staleRuntimeDetected = true;
+    }
+    const schedule = this.options.setInterval ?? setInterval;
+    this.timer = schedule(() => void this.checkNow(), this.options.intervalMs ?? 2_000);
+  }
+
+  stop(): void {
+    if (!this.timer) return;
+    (this.options.clearInterval ?? clearInterval)(this.timer);
+    this.timer = null;
+  }
+
+  async checkNow(): Promise<void> {
+    if (this.checking || this.restarting) return;
+    this.checking = true;
+    try {
+      const statFile = this.options.statFile ?? runtimeFileFingerprint;
+      const [entry, electron, launcher] = await Promise.all([
+        statFile(this.options.appEntryPath),
+        statFile(this.options.electronPath),
+        statFile(this.options.launcherPath),
+      ]);
+      if (
+        !sameRuntimeFile(this.baselineEntry, entry) ||
+        !sameRuntimeFile(this.baselineElectron, electron)
+      ) {
+        this.staleRuntimeDetected = true;
+      }
+      if (!this.staleRuntimeDetected || !entry || !launcher) return;
+      if (
+        !sameRuntimeFile(this.readyReplacementEntry, entry) ||
+        !sameRuntimeFile(this.readyReplacementLauncher, launcher)
+      ) {
+        this.readyReplacementEntry = entry;
+        this.readyReplacementLauncher = launcher;
+        return;
+      }
+
+      this.restarting = true;
+      const launchReplacement = this.options.launchReplacement ?? launchInstalledRuntimeReplacement;
+      await launchReplacement({
+        nodePath: this.options.nodePath,
+        launcherPath: this.options.launcherPath,
+        processId: this.options.processId ?? process.pid,
+      });
+      this.stop();
+      this.options.requestQuit();
+    } catch (error) {
+      this.restarting = false;
+      this.options.logError(
+        `Failed to restart AgentRecall after its installed runtime changed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      this.checking = false;
+    }
+  }
+}

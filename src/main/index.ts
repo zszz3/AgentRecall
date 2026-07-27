@@ -105,6 +105,7 @@ import { registerRulesIpc, type RulesIpcService } from "./ipc/rules";
 import { registerSkillsIpc } from "./ipc/skills";
 import {
   AppUpdateService,
+  InstalledRuntimeMonitor,
   launchDetachedAppUpdateInstaller,
   type AppUpdateClient,
 } from "./services/app-update-service";
@@ -174,6 +175,8 @@ function loadMcpSetup(): McpSetup {
 
 const UPDATE_CLIENT_PATH = path.join(__dirname, "../../bin/update-client.cjs");
 const APPLY_UPDATE_PATH = path.join(__dirname, "../../bin/apply-update.cjs");
+const APP_ENTRY_PATH = fileURLToPath(import.meta.url);
+const NPM_LAUNCHER_PATH = path.join(__dirname, "../../bin/agent-recall.cjs");
 function loadUpdateClient(): AppUpdateClient {
   return requireCjs(UPDATE_CLIENT_PATH) as AppUpdateClient;
 }
@@ -298,6 +301,16 @@ const appUpdateService = new AppUpdateService({
   processId: process.pid,
   logError: (message) => console.error(message),
 });
+const installedRuntimeMonitor = releaseUpdateRuntime && process.env.AGENT_RECALL_NODE_PATH
+  ? new InstalledRuntimeMonitor({
+      appEntryPath: APP_ENTRY_PATH,
+      electronPath: process.execPath,
+      launcherPath: NPM_LAUNCHER_PATH,
+      nodePath: process.env.AGENT_RECALL_NODE_PATH,
+      requestQuit: () => app.quit(),
+      logError: (message) => console.error(message),
+    })
+  : null;
 
 const providerService = new ProviderService({
   getSettings,
@@ -2086,6 +2099,7 @@ if (!app.requestSingleInstanceLock()) {
 
 app.whenReady().then(() => {
   void appUpdateService.registerRunningProcess();
+  void installedRuntimeMonitor?.start();
   const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
   store = new SessionStore(dbPath);
   quotaService = createQuotaService();
@@ -2131,6 +2145,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  installedRuntimeMonitor?.stop();
   void appUpdateService.clearRunningProcess();
   stopAutoIndexRefresh();
   skillService.stopUsageRefresh();
