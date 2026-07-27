@@ -238,6 +238,64 @@ describe("remote session sync model", () => {
     }
   });
 
+  it("uploads complete source artifacts separately while keeping the visible snapshot filtered", () => {
+    const discardedBranch = "discarded branch that is not visible in the indexed conversation";
+    const rawTranscript = Buffer.from([
+      JSON.stringify({ role: "user", content: "Login is broken" }),
+      JSON.stringify({ role: "assistant", content: "Update auth state handling" }),
+      JSON.stringify({ role: "user", content: discardedBranch }),
+    ].join("\n"));
+    const store = {
+      getSession: () => SESSION,
+      getAllMessages: () => MESSAGES,
+      getTraceEvents: () => [],
+      getSessionSourceArtifacts: () => [{
+        kind: "session-file" as const,
+        fileName: "abc.jsonl",
+        bytes: rawTranscript,
+        mimeType: "application/x-ndjson",
+      }],
+    };
+
+    const built = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
+
+    expect(built.detail.schemaVersion).toBe(3);
+    expect(built.detail.messages.map((message) => message.content)).not.toContain(discardedBranch);
+    expect(built.payload.search_text).not.toContain(discardedBranch);
+    expect(built.sourceObjects).toHaveLength(1);
+    expect(Buffer.from(built.sourceObjects[0].bytes).toString("utf8")).toContain(discardedBranch);
+    expect(built.detail.sourceArchive?.entries).toEqual([
+      expect.objectContaining({
+        sessionKey: SESSION.sessionKey,
+        sourceSessionId: SESSION.rawId,
+        artifactKind: "session-file",
+        fileName: "abc.jsonl",
+        sizeBytes: rawTranscript.byteLength,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        objectKey: expect.stringMatching(/^sessions\/[a-f0-9]{32}\/[0-9a-f-]+\/source\/0000-[a-f0-9]{64}-abc\.jsonl$/),
+      }),
+    ]);
+    expect(built.payload.revision_version).toBe(3);
+    expect(parseDetailSnapshot(JSON.parse(built.detailJson)).sourceArchive?.entries).toHaveLength(1);
+  });
+
+  it("changes the remote revision when only hidden raw source data changes", () => {
+    const build = (raw: string) => buildRemoteSessionUploadFromStore({
+      getSession: () => SESSION,
+      getAllMessages: () => MESSAGES,
+      getTraceEvents: () => [],
+      getSessionSourceArtifacts: () => [{
+        kind: "session-file" as const,
+        fileName: "abc.jsonl",
+        bytes: Buffer.from(raw),
+        mimeType: "application/x-ndjson",
+      }],
+    }, SESSION.sessionKey, 12_000);
+
+    expect(build("visible\nhidden-a").payload.content_hash)
+      .not.toBe(build("visible\nhidden-b").payload.content_hash);
+  });
+
   it("rounds timestamp fields for Supabase bigint columns", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000.9);
     const { payload } = buildRemoteSessionPayload({
@@ -355,10 +413,16 @@ describe("remote session sync model", () => {
         ? MESSAGES
         : [{ role: "assistant" as const, content: sessionKey, timestamp: "2026-07-03T10:02:00.000Z", index: 0 }],
       getTraceEvents: () => [],
+      getSessionSourceArtifacts: (sessionKey: string) => [{
+        kind: "session-file" as const,
+        fileName: `${sessionKey.replace(":", "-")}.jsonl`,
+        bytes: Buffer.from(`raw:${sessionKey}`),
+        mimeType: "application/x-ndjson",
+      }],
       searchSessions: () => [...sessions.values()],
     };
 
-    const { portable } = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
+    const { portable, detail, sourceObjects } = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
 
     expect(portable.sourceSessionId).toBe("abc");
     expect(portable.subagents).toHaveLength(2);
@@ -367,6 +431,43 @@ describe("remote session sync model", () => {
       expect.objectContaining({ sourceSessionId: "grandchild", parentSessionId: "child", isSubagent: true }),
     ]);
     expect(parsePortableSession(JSON.parse(JSON.stringify(portable))).subagents).toHaveLength(2);
+    expect(sourceObjects.map((object) => Buffer.from(object.bytes).toString("utf8"))).toEqual([
+      `raw:${SESSION.sessionKey}`,
+      "raw:codex:child",
+      "raw:codex:grandchild",
+    ]);
+    expect(detail.sourceArchive?.entries.map((entry) => entry.sourceSessionId)).toEqual(["abc", "child", "grandchild"]);
+  });
+
+  it("does not silently truncate source data after 200 descendant agents", () => {
+    const children = Array.from({ length: 205 }, (_, index): SessionSearchResult => ({
+      ...SESSION,
+      sessionKey: `codex:child-${index}`,
+      rawId: `child-${index}`,
+      displayTitle: `Child ${index}`,
+      isSubagent: true,
+      parentSessionId: SESSION.rawId,
+      timestamp: SESSION.timestamp + index + 1,
+    }));
+    const sessions = [SESSION, ...children];
+    const store = {
+      getSession: (sessionKey: string) => sessions.find((item) => item.sessionKey === sessionKey) ?? null,
+      getAllMessages: () => MESSAGES,
+      getTraceEvents: () => [],
+      getSessionSourceArtifacts: (sessionKey: string) => [{
+        kind: "session-file" as const,
+        fileName: `${sessionKey}.jsonl`,
+        bytes: Buffer.from(sessionKey),
+        mimeType: "application/x-ndjson",
+      }],
+      searchSessions: () => sessions,
+    };
+
+    const built = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
+
+    expect(built.portable.subagents).toHaveLength(205);
+    expect(built.sourceObjects).toHaveLength(206);
+    expect(parsePortableSession(JSON.parse(built.portableJson)).subagents).toHaveLength(205);
   });
 
   it("filters remote sessions by title, summary, tags, and search text", () => {
@@ -402,8 +503,25 @@ describe("remote session sync model", () => {
   });
 
   it("deletes storage objects before removing the remote database row", async () => {
-    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
-    const { payload } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
+    const sourceKey = `sessions/${remoteSessionId(SESSION.sessionKey)}/archive/source.jsonl`;
+    const detail = {
+      ...buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000),
+      schemaVersion: 3 as const,
+      sourceArchive: {
+        schemaVersion: 1 as const,
+        entries: [{
+          sessionKey: SESSION.sessionKey,
+          sourceSessionId: SESSION.rawId,
+          parentSessionId: null,
+          artifactKind: "session-file" as const,
+          fileName: "abc.jsonl",
+          objectKey: sourceKey,
+          sha256: "a".repeat(64),
+          sizeBytes: 12,
+        }],
+      },
+    };
+    const { payload, detailJson } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
     const calls: string[] = [];
     const client = new SupabaseRemoteSessionClient({
       url: "https://example.supabase.co",
@@ -412,7 +530,7 @@ describe("remote session sync model", () => {
         const method = init?.method ?? "GET";
         if (String(url).includes("/storage/v1/object/")) {
           calls.push(`storage-${method}`);
-          return new Response(method === "GET" ? JSON.stringify(detail) : "{}", { status: 200 });
+          return new Response(method === "GET" ? detailJson : "{}", { status: 200 });
         }
         if (method === "DELETE") {
           calls.push("row-DELETE");
@@ -431,8 +549,8 @@ describe("remote session sync model", () => {
     });
     expect(calls[0]).toBe("row-GET");
     expect(calls[1]).toBe("storage-GET");
-    expect(calls.slice(2, 4).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
-    expect(calls[4]).toBe("row-DELETE");
+    expect(calls.slice(2, 5).sort()).toEqual(["storage-DELETE", "storage-DELETE", "storage-DELETE"]);
+    expect(calls[5]).toBe("row-DELETE");
   });
 
   it("keeps a selected session as failed when its delete preflight cannot reach Supabase", async () => {

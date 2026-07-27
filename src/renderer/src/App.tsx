@@ -2339,7 +2339,26 @@ export function App(): ReactElement {
           onRemoteSessionUploaded={cacheRemoteSessionUpload}
           onRemoteSessionsDeleted={cacheRemoteSessionDeletion}
           onRestored={(result) => {
-            if (!result.launched) setActionStatus({ kind: "error", message: result.warning || result.resumeCommand });
+            const message = result.launched
+              ? t(
+                  `Restored and opened in ${migrationAgentLabel(result.target)}.`,
+                  `已恢复并在 ${migrationAgentLabel(result.target)} 中打开。`,
+                )
+              : result.warning || result.resumeCommand;
+            // Migration progress is delivered over a separate IPC channel and
+            // its final "launching" event can arrive just after the restore
+            // invoke resolves. Finish on the next task so that stale progress
+            // cannot overwrite the terminal status.
+            window.setTimeout(() => {
+              setMigrationProgress(null);
+              setActionStatus({ kind: result.launched ? "success" : "error", message });
+              if (result.launched) {
+                window.setTimeout(() => {
+                  setActionStatus((current) =>
+                    current?.kind === "success" && current.message === message ? null : current);
+                }, 1800);
+              }
+            }, 0);
             void Promise.all([load(), loadSidebarMetadata()]);
           }}
           onOpenDetail={openRemoteDetail}

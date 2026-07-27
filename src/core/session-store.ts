@@ -28,6 +28,11 @@ import {
   findSessionFamily,
   type SessionFamily,
 } from "./session-family";
+import { isLocalSessionStorage } from "./session-environment";
+import {
+  readSessionSourceArtifacts,
+  type SessionSourceArtifact,
+} from "./session-source-archive";
 import type {
   EnvironmentSyncState,
   EnvironmentUpsertInput,
@@ -214,6 +219,12 @@ export class SessionStore {
 
   getSession(sessionKey: string): SessionSearchResult | null {
     return this.sessions.getSession(sessionKey);
+  }
+
+  getSessionSourceArtifacts(sessionKey: string): SessionSourceArtifact[] {
+    const session = this.getSession(sessionKey);
+    if (!session || !isLocalSessionStorage(session)) return [];
+    return readSessionSourceArtifacts(session);
   }
 
   findByRawId(rawId: string): SessionSearchResult | null {

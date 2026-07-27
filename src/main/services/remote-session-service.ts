@@ -43,6 +43,7 @@ export type RemoteSessionStorePort = Pick<
   | "getAllMessages"
   | "getTraceEvents"
   | "getAttachmentFile"
+  | "getSessionSourceArtifacts"
   | "searchSessions"
   | "getEnvironment"
   | "getSessionSyncBindingForLocalKey"
@@ -212,7 +213,7 @@ export class RemoteSessionService {
       await this.dependencies.ensureSessionDetails(descendant.sessionKey);
     });
     const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
-    const { payload, detailJson, portableJson, attachmentObjects } = this.operations.buildUpload(
+    const { payload, detailJson, portableJson, attachmentObjects, sourceObjects } = this.operations.buildUpload(
       store,
       sessionKey,
       this.dependencies.now(),
@@ -232,7 +233,7 @@ export class RemoteSessionService {
         }
       }
     }
-    const result = await client.uploadSession(payload, detailJson, portableJson, attachmentObjects);
+    const result = await client.uploadSession(payload, detailJson, portableJson, [...sourceObjects, ...attachmentObjects]);
     store.upsertSessionSyncBinding({
       localSessionKey: sessionKey,
       remoteSessionId: result.remoteSession.id,
@@ -490,9 +491,9 @@ function descendantSessions(root: SessionSearchResult, sessions: SessionSearchRe
   const descendants: SessionSearchResult[] = [];
   const pending = [root.rawId];
   const visited = new Set<string>();
-  while (pending.length > 0 && descendants.length < 200) {
+  while (pending.length > 0) {
     for (const child of childrenByParentId.get(pending.shift()!) ?? []) {
-      if (visited.has(child.sessionKey) || descendants.length >= 200) continue;
+      if (visited.has(child.sessionKey)) continue;
       visited.add(child.sessionKey);
       descendants.push(child);
       pending.push(child.rawId);

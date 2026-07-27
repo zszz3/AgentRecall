@@ -188,6 +188,7 @@ function createHarness(options: {
     getSession,
     getAllMessages: vi.fn(() => []),
     getTraceEvents: vi.fn(() => []),
+    getSessionSourceArtifacts: vi.fn(() => []),
     searchSessions: vi.fn((searchOptions?: { excludeSubagents?: boolean }) =>
       searchOptions?.excludeSubagents
         ? sessions.filter((session) => session.isSubagent !== true)
@@ -219,6 +220,8 @@ function createHarness(options: {
     payload: { content_hash: localRevision },
     detailJson: "{}",
     portableJson: "{}",
+    attachmentObjects: [],
+    sourceObjects: [],
   } as unknown as ReturnType<RemoteSessionServiceOperations["buildUpload"]>));
   const removeQueueFiles = vi.fn();
   const clearQueue = vi.fn();
@@ -332,6 +335,36 @@ describe("RemoteSessionService cloud orchestration", () => {
       lastSyncedAt: 123,
       direction: "upload",
     });
+  });
+
+  it("uploads raw source artifacts together with optional attachments", async () => {
+    const harness = createHarness({ settings: configuredSettings() });
+    const sourceObject = {
+      objectKey: "sessions/remote/upload/source/session.jsonl",
+      bytes: Buffer.from("raw"),
+      mimeType: "application/x-ndjson",
+    };
+    const attachmentObject = {
+      objectKey: "sessions/remote/attachments/image.png",
+      bytes: Buffer.from("image"),
+      mimeType: "image/png",
+    };
+    harness.buildUpload.mockReturnValue({
+      payload: { content_hash: "local-revision" },
+      detailJson: "{\"schemaVersion\":3}",
+      portableJson: "{}",
+      sourceObjects: [sourceObject],
+      attachmentObjects: [attachmentObject],
+    } as unknown as ReturnType<RemoteSessionServiceOperations["buildUpload"]>);
+
+    await harness.service.upload("local:session-1");
+
+    expect(harness.client.uploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({ content_hash: "local-revision" }),
+      "{\"schemaVersion\":3}",
+      "{}",
+      [sourceObject, attachmentObject],
+    );
   });
 
   it("rejects ZCode uploads before building a portable remote session", async () => {
