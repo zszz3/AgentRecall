@@ -818,7 +818,7 @@ describe("extra session sources", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("omits untitled zero-message Cursor composer shells that only have a project path", () => {
+  it("omits Cursor composer headers that have no readable messages", () => {
     const root = tmpDir("cursor-empty-project-shell");
     const stateDbPath = path.join(root, "cursor-state.vscdb");
     writeCursorStateDb(stateDbPath, [
@@ -850,8 +850,7 @@ describe("extra session sources", () => {
 
     const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
 
-    expect(loaded.map((item) => item.session.rawId).sort()).toEqual(["named-empty-draft", "with-messages"]);
-    expect(loaded.find((item) => item.session.rawId === "named-empty-draft")?.session.originalTitle).toBe("Saved empty draft");
+    expect(loaded.map((item) => item.session.rawId)).toEqual(["with-messages"]);
     expect(loaded.find((item) => item.session.rawId === "with-messages")?.session.firstQuestion).toBe("Explain the takeout order flow");
 
     fs.rmSync(root, { recursive: true, force: true });
@@ -860,20 +859,39 @@ describe("extra session sources", () => {
   it("describes Cursor Remote SSH execution separately from local storage", () => {
     const root = tmpDir("cursor-remote-ssh");
     const stateDbPath = path.join(root, "cursor-state.vscdb");
-    writeCursorStateDb(stateDbPath, [
-      {
-        composerId: "cursor-remote-1",
-        name: "Remote Cursor session",
-        projectPath: "/home/me/project",
-        uriScheme: "vscode-remote",
-        uriAuthority: "ssh-remote+dev",
-      },
-      {
-        composerId: "cursor-local-1",
-        name: "Local Cursor session",
-        projectPath: "/Users/me/project",
-      },
-    ]);
+    writeCursorStateDb(
+      stateDbPath,
+      [
+        {
+          composerId: "cursor-remote-1",
+          name: "Remote Cursor session",
+          projectPath: "/home/me/project",
+          uriScheme: "vscode-remote",
+          uriAuthority: "ssh-remote+dev",
+        },
+        {
+          composerId: "cursor-local-1",
+          name: "Local Cursor session",
+          projectPath: "/Users/me/project",
+        },
+      ],
+      [
+        {
+          composerId: "cursor-remote-1",
+          bubbleId: "remote-user",
+          type: 1,
+          text: "Inspect the remote project",
+          createdAt: "2026-07-22T10:01:00Z",
+        },
+        {
+          composerId: "cursor-local-1",
+          bubbleId: "local-user",
+          type: 1,
+          text: "Inspect the local project",
+          createdAt: "2026-07-22T10:02:00Z",
+        },
+      ],
+    );
 
     const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
     const remote = loaded.find((item) => item.session.rawId === "cursor-remote-1");

@@ -729,9 +729,17 @@ export class SessionsStore {
 
   listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
     const rows = this.db
-      .prepare("SELECT session_key, file_path FROM sessions WHERE storage_environment_id = ? AND file_path != ''")
-      .all(environmentId) as Array<{ session_key: string; file_path: string }>;
-    return rows.filter((row) => !filePaths.has(row.file_path)).map((row) => row.session_key);
+      .prepare(
+        `SELECT session_key, source, file_path, message_count
+         FROM sessions
+         WHERE storage_environment_id = ? AND file_path != ''`,
+      )
+      .all(environmentId) as Array<{ session_key: string; source: string; file_path: string; message_count: number }>;
+    return rows
+      .filter((row) =>
+        !filePaths.has(row.file_path)
+        || (row.source === "cursor-agent" && /(^|[\\/])state\.vscdb$/i.test(row.file_path) && row.message_count === 0))
+      .map((row) => row.session_key);
   }
 
   markOpened(sessionKey: string): void {

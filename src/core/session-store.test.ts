@@ -724,6 +724,24 @@ describe("SessionStore", () => {
     expect(store.listSessionKeysByFilePath("local", new Set())).toEqual(["cursor:workspace:remote"]);
   });
 
+  it("prunes zero-message Cursor headers even while the shared state database exists", () => {
+    const store = createInMemoryStore();
+    const stateDbPath = "/tmp/Cursor/User/globalStorage/state.vscdb";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "cursor:workspace:stale",
+        rawId: "stale",
+        source: "cursor-agent",
+        filePath: stateDbPath,
+      }),
+      [],
+    );
+
+    expect(store.listSessionKeysByFilePath("local", new Set([stateDbPath]))).toEqual([
+      "cursor:workspace:stale",
+    ]);
+  });
+
   it("uses the indexed title for display when first question is a long remote summary prompt", () => {
     const store = createInMemoryStore();
     const longFirstQuestion = [

@@ -521,9 +521,6 @@ export function remotePortableSessionFrom(session: SessionSearchResult, messages
   if (!sourceAgent) {
     throw new Error(`Session source ${session.source} cannot be saved remotely.`);
   }
-  if (!session.projectPath.trim()) {
-    throw new Error("Session has no project path.");
-  }
 
   const portableMessages = messages
     .filter((message) => message.role === "user" || message.role === "assistant")

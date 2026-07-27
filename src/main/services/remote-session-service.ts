@@ -252,7 +252,7 @@ export class RemoteSessionService {
     const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
     await this.runBounded(store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
       if (session.environmentKind === "wsl") return;
-      if (!migrationAgentForSource(session.source) || !session.projectPath.trim()) return;
+      if (!migrationAgentForSource(session.source)) return;
       try {
         await this.dependencies.ensureSessionDetails(session.sessionKey);
         const hydrated = store.getSession(session.sessionKey);

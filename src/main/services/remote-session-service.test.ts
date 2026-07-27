@@ -431,6 +431,20 @@ describe("RemoteSessionService cloud orchestration", () => {
     );
   });
 
+  it("includes sessions without project paths in the sync comparison", async () => {
+    const session = localSession({ projectPath: "" });
+    const harness = createHarness({ settings: configuredSettings(), sessions: [session] });
+
+    await harness.service.listSyncItems();
+
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(session.sessionKey);
+    expect(harness.buildSyncItems).toHaveBeenCalledWith(
+      [{ session, revision: "local-revision" }],
+      expect.any(Array),
+      [],
+    );
+  });
+
   it("records a restore binding after the restored session appears in the local index", async () => {
     const restored = localSession({ sessionKey: "local:restored", rawId: "restored-session" });
     const harness = createHarness({
