@@ -296,6 +296,43 @@ describe("remote session sync model", () => {
       .not.toBe(build("visible\nhidden-b").payload.content_hash);
   });
 
+  it("uploads cached messages without new source objects and keeps a previous source archive", () => {
+    const sourceArchive = {
+      schemaVersion: 1 as const,
+      entries: [{
+        sessionKey: SESSION.sessionKey,
+        sourceSessionId: SESSION.rawId,
+        parentSessionId: null,
+        artifactKind: "session-file" as const,
+        fileName: "abc.jsonl",
+        objectKey: `sessions/${remoteSessionId(SESSION.sessionKey)}/previous/source/abc.jsonl`,
+        sha256: "a".repeat(64),
+        sizeBytes: 123,
+      }],
+    };
+    const store = {
+      getSession: () => ({ ...SESSION, source: "cursor-agent" as const, sourceAvailable: false }),
+      getAllMessages: () => MESSAGES,
+      getTraceEvents: () => [],
+      getSessionSourceArtifacts: () => [],
+    };
+
+    const built = buildRemoteSessionUploadFromStore(
+      store,
+      SESSION.sessionKey,
+      12_000,
+      undefined,
+      true,
+      sourceArchive,
+    );
+
+    expect(built.sourceObjects).toEqual([]);
+    expect(built.detail.schemaVersion).toBe(3);
+    expect(built.detail.sourceArchive).toEqual(sourceArchive);
+    expect(built.detail.messages).toEqual(MESSAGES);
+    expect(built.detail.session.sourceAvailable).toBeUndefined();
+  });
+
   it("rounds timestamp fields for Supabase bigint columns", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000.9);
     const { payload } = buildRemoteSessionPayload({
@@ -643,6 +680,82 @@ describe("remote session sync model", () => {
     expect(deletedKeys).not.toContain(attachmentKey);
     expect(deletedKeys).toContain(payload.detail_object_key);
     expect(deletedKeys).toContain(payload.portable_object_key);
+  });
+
+  it("keeps an existing source archive when a cached update references it without re-uploading it", async () => {
+    const sourceKey = `sessions/${remoteSessionId(SESSION.sessionKey)}/previous/source/abc.jsonl`;
+    const sourceArchive = {
+      schemaVersion: 1 as const,
+      entries: [{
+        sessionKey: SESSION.sessionKey,
+        sourceSessionId: SESSION.rawId,
+        parentSessionId: null,
+        artifactKind: "session-file" as const,
+        fileName: "abc.jsonl",
+        objectKey: sourceKey,
+        sha256: "a".repeat(64),
+        sizeBytes: 123,
+      }],
+    };
+    const previousDetail = {
+      ...buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000),
+      schemaVersion: 3 as const,
+      sourceArchive,
+    };
+    const previous = buildRemoteSessionPayload({
+      session: SESSION,
+      detail: previousDetail,
+      portable: PORTABLE,
+      now: 11_000,
+      uploadId: "previous",
+    });
+    const nextDetail = {
+      ...buildRemoteSessionSnapshot(SESSION, [...MESSAGES, {
+        role: "assistant" as const,
+        content: "Cached follow-up",
+        timestamp: "2026-07-03T10:02:00.000Z",
+        index: 2,
+      }], [], 12_000),
+      schemaVersion: 3 as const,
+      sourceArchive,
+    };
+    const next = buildRemoteSessionPayload({
+      session: SESSION,
+      detail: nextDetail,
+      portable: {
+        ...PORTABLE,
+        messages: nextDetail.messages,
+      },
+      now: 13_000,
+      uploadId: "next",
+    });
+    const deletedKeys: string[] = [];
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url, init) => {
+        const requestUrl = String(url);
+        const method = init?.method ?? "GET";
+        if (requestUrl.includes("/rest/v1/")) {
+          return new Response(
+            JSON.stringify(method === "POST" ? [next.payload] : [previous.payload]),
+            { status: 200 },
+          );
+        }
+        const objectKey = decodeURIComponent(requestUrl.split("/agent-session-remote/")[1] ?? "");
+        if (method === "GET") return new Response(previous.detailJson, { status: 200 });
+        if (method === "DELETE") deletedKeys.push(objectKey);
+        return new Response("{}", { status: 200 });
+      },
+    });
+
+    await expect(
+      client.uploadSession(next.payload, next.detailJson, next.portableJson),
+    ).resolves.toMatchObject({ status: "updated" });
+
+    expect(deletedKeys).not.toContain(sourceKey);
+    expect(deletedKeys).toContain(previous.payload.detail_object_key);
+    expect(deletedKeys).toContain(previous.payload.portable_object_key);
   });
 
   it("falls back to legacy remote session rows when source environment columns are missing", async () => {

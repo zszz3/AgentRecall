@@ -155,6 +155,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   const shouldSkipFile = loadOptions.shouldSkipFile;
   const onSkippedFile = loadOptions.onSkippedFile;
   const scannedFilePaths = new Set<string>();
+  const scannedSessionKeys = new Set<string>();
   const rawLoaded = loadDefaultSessionsIterator({
     ...loadOptions,
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0) => {
@@ -175,6 +176,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   const loaded = (function* () {
     for (const item of rawLoaded) {
       if (item.session.filePath) scannedFilePaths.add(item.session.filePath);
+      scannedSessionKeys.add(item.session.sessionKey);
       yield item;
     }
   })();
@@ -184,11 +186,20 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
       dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   }).then((status) => {
-    // Prune sessions whose source files no longer exist in local storage. Sessions
-    // stored remotely are synced independently and their paths are not local
-    // filesystem paths. scannedFilePaths covers file-based and DB-backed sources.
-    for (const staleKey of store.listSessionKeysByFilePath("local", scannedFilePaths)) {
-      store.deleteSessionRecord(staleKey);
+    // Prune sessions whose source files no longer exist in local storage. Cursor
+    // is the exception: its shared database can forget one conversation while our
+    // parsed message cache remains the only readable copy.
+    for (const staleKey of store.listSessionKeysByFilePath("local", scannedFilePaths, scannedSessionKeys)) {
+      const staleSession = store.getSession(staleKey);
+      if (
+        loadOptions.includeCursorAgent
+        && staleSession?.source === "cursor-agent"
+        && staleSession.messageCount > 0
+      ) {
+        store.setSessionSourceAvailable(staleKey, false);
+      } else {
+        store.deleteSessionRecord(staleKey);
+      }
     }
     return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
   });

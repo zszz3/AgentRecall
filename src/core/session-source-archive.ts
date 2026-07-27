@@ -14,6 +14,10 @@ export interface SessionSourceArtifact {
   mimeType: string;
 }
 
+export class SessionSourceUnavailableError extends Error {
+  override readonly name = "SessionSourceUnavailableError";
+}
+
 interface EncodedDatabaseValue {
   type: "null" | "number" | "bigint" | "text" | "blob";
   value?: number | string;
@@ -66,14 +70,14 @@ function readCursorSourceArtifacts(session: SessionSearchResult): SessionSourceA
   }
 
   if (artifacts.length === 0) {
-    throw new Error(`The original Cursor session data is unavailable for ${session.rawId}.`);
+    throw new SessionSourceUnavailableError(`The original Cursor session data is unavailable for ${session.rawId}.`);
   }
   return artifacts;
 }
 
 function readCodewizSourceArtifacts(session: SessionSearchResult): SessionSourceArtifact[] {
   const db = openReadOnlyDatabase(session.filePath);
-  if (!db) throw new Error(`The original CodeWiz session data is unavailable for ${session.rawId}.`);
+  if (!db) throw new SessionSourceUnavailableError(`The original CodeWiz session data is unavailable for ${session.rawId}.`);
   try {
     const tables: SessionDatabaseSlice["tables"] = {};
     if (tableHasColumns(db, "session", ["id"])) {
@@ -98,7 +102,7 @@ function readCodewizSourceArtifacts(session: SessionSearchResult): SessionSource
       );
     }
     if ((tables.session?.length ?? 0) === 0 && (tables.message?.length ?? 0) === 0) {
-      throw new Error(`The original CodeWiz session data is unavailable for ${session.rawId}.`);
+      throw new SessionSourceUnavailableError(`The original CodeWiz session data is unavailable for ${session.rawId}.`);
     }
     const slice: SessionDatabaseSlice = {
       schemaVersion: 1,
@@ -224,7 +228,7 @@ function readRequiredFile(filePath: string): Uint8Array {
     if (!stat.isFile()) throw new Error("not a file");
     return fs.readFileSync(filePath);
   } catch {
-    throw new Error(`The original session file is unavailable: ${filePath || "(empty path)"}`);
+    throw new SessionSourceUnavailableError(`The original session file is unavailable: ${filePath || "(empty path)"}`);
   }
 }
 

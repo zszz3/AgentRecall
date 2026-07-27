@@ -5,6 +5,7 @@ import type { RemoteSessionRestoreDependencies } from "../../core/remote-session
 import type {
   RemoteSessionDetailSnapshot,
   RemoteSessionListItem,
+  RemoteSessionSourceArchive,
 } from "../../core/remote-session-sync";
 import type { SessionSyncBinding } from "../../core/session-store";
 import type { SessionSyncQueueEvent } from "../../core/session-sync-queue";
@@ -367,6 +368,53 @@ describe("RemoteSessionService cloud orchestration", () => {
     );
   });
 
+  it("uploads a cached Cursor conversation while preserving an existing cloud source archive", async () => {
+    const cached = localSession({
+      source: "cursor-agent",
+      sourceAvailable: false,
+    });
+    const binding: SessionSyncBinding = {
+      localSessionKey: cached.sessionKey,
+      remoteSessionId: "remote-1",
+      lastLocalRevision: "local-revision",
+      lastRemoteRevision: "remote-revision",
+      lastSyncedAt: 1,
+      direction: "upload",
+    };
+    const archive: RemoteSessionSourceArchive = {
+      schemaVersion: 1,
+      entries: [{
+        sessionKey: cached.sessionKey,
+        sourceSessionId: cached.rawId,
+        parentSessionId: null,
+        artifactKind: "cursor-state",
+        fileName: "session.cursor-state.json",
+        objectKey: "sessions/remote-1/previous/source/session.cursor-state.json",
+        sha256: "a".repeat(64),
+        sizeBytes: 100,
+      }],
+    };
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [cached],
+      bindings: [binding],
+    });
+    vi.mocked(harness.client.getDetailSnapshot).mockResolvedValue({
+      sourceArchive: archive,
+    } as RemoteSessionDetailSnapshot);
+
+    await expect(harness.service.upload(cached.sessionKey)).resolves.toMatchObject({ status: "uploaded" });
+
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      cached.sessionKey,
+      123,
+      "remote-1",
+      true,
+      archive,
+    );
+  });
+
   it("rejects ZCode uploads before building a portable remote session", async () => {
     const harness = createHarness({
       settings: configuredSettings(),
@@ -461,6 +509,41 @@ describe("RemoteSessionService cloud orchestration", () => {
       0,
       undefined,
       false,
+      undefined,
+    );
+  });
+
+  it("compares a cached Cursor conversation without failing the cloud session list", async () => {
+    const cached = localSession({
+      source: "cursor-agent",
+      sourceAvailable: false,
+    });
+    const archive: RemoteSessionSourceArchive = {
+      schemaVersion: 1,
+      entries: [],
+    };
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [cached],
+    });
+    vi.mocked(harness.client.getDetailSnapshot).mockResolvedValue({
+      sourceArchive: archive,
+    } as RemoteSessionDetailSnapshot);
+
+    await expect(harness.service.listSyncItems()).resolves.toEqual([]);
+
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      cached.sessionKey,
+      0,
+      undefined,
+      true,
+      archive,
+    );
+    expect(harness.buildSyncItems).toHaveBeenCalledWith(
+      [{ session: cached, revision: "local-revision" }],
+      [expect.objectContaining({ id: "remote-1" })],
+      [],
     );
   });
 

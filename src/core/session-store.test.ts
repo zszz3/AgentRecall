@@ -736,7 +736,7 @@ describe("SessionStore", () => {
     expect(store.listIndexedSessionFiles()).toEqual([
       expect.objectContaining({ filePath: "/tmp/rollout.jsonl", fileMtimeMs: 10, fileSize: 100 }),
     ]);
-    expect(store.listSessionKeysByFilePath("local", new Set())).toEqual(["cursor:workspace:remote"]);
+    expect(store.listSessionKeysByFilePath("local", new Set(), new Set())).toEqual(["cursor:workspace:remote"]);
   });
 
   it("prunes zero-message Cursor headers even while the shared state database exists", () => {
@@ -752,9 +752,34 @@ describe("SessionStore", () => {
       [],
     );
 
-    expect(store.listSessionKeysByFilePath("local", new Set([stateDbPath]))).toEqual([
+    expect(store.listSessionKeysByFilePath("local", new Set([stateDbPath]), new Set())).toEqual([
       "cursor:workspace:stale",
     ]);
+  });
+
+  it("keeps cached Cursor messages deletable without touching the shared source database", () => {
+    const store = createInMemoryStore();
+    const sessionKey = "cursor:workspace:cached";
+    const stateDbPath = "/tmp/Cursor/User/globalStorage/state.vscdb";
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey,
+        rawId: "cached",
+        source: "cursor-agent",
+        filePath: stateDbPath,
+      }),
+      messages,
+    );
+
+    store.setSessionSourceAvailable(sessionKey, false);
+
+    expect(store.getSession(sessionKey)).toMatchObject({
+      sourceAvailable: false,
+      messageCount: messages.length,
+    });
+    expect(store.getSessionSourceArtifacts(sessionKey)).toEqual([]);
+    expect(store.deleteSession(sessionKey)).toBe(true);
+    expect(store.getSession(sessionKey)).toBeNull();
   });
 
   it("uses the indexed title for display when first question is a long remote summary prompt", () => {

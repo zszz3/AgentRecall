@@ -7,6 +7,7 @@ import {
   buildRemoteSessionSetupSql,
   buildRemoteSessionUploadFromStore,
   buildSessionSyncItems,
+  remoteSessionId,
   SupabaseRemoteSessionClient,
   type RemoteSessionDeleteResult,
   type RemoteSessionDetailSnapshot,
@@ -29,6 +30,7 @@ import {
   STALE_SESSION_SYNC_EVENT_AGE_MS,
 } from "../../core/refresh-policy";
 import { isLocalSessionEnvironment } from "../../core/session-environment";
+import { SessionSourceUnavailableError } from "../../core/session-source-archive";
 import type {
   MigrationAgent,
   SessionEnvironment,
@@ -213,18 +215,29 @@ export class RemoteSessionService {
       await this.dependencies.ensureSessionDetails(descendant.sessionKey);
     });
     const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
+    const targetRemoteId = binding?.remoteSessionId ?? remoteSessionId(sessionKey);
+    const existingRemote = session.sourceAvailable === false
+      ? await client.getRemoteSession(targetRemoteId).catch((error) => {
+          if (error instanceof Error && error.message === "Remote session was not found.") return null;
+          throw error;
+        })
+      : null;
+    const preservedSourceArchive = existingRemote
+      ? (await client.getDetailSnapshot(existingRemote.id)).sourceArchive
+      : undefined;
     const { payload, detailJson, portableJson, attachmentObjects, sourceObjects } = this.operations.buildUpload(
       store,
       sessionKey,
       this.dependencies.now(),
       binding?.remoteSessionId,
       this.dependencies.getSettings().syncSessionAttachments,
+      preservedSourceArchive,
     );
     if (binding && !force) {
-      const remote = await client.getRemoteSession(binding.remoteSessionId).catch((error) => {
-        if (error instanceof Error && error.message === "Remote session was not found.") return null;
-        throw error;
-      });
+      const remote = existingRemote ?? await client.getRemoteSession(binding.remoteSessionId).catch((error) => {
+          if (error instanceof Error && error.message === "Remote session was not found.") return null;
+          throw error;
+        });
       if (remote) {
         const localChanged = payload.content_hash !== binding.lastLocalRevision;
         const remoteChanged = remote.contentHash !== binding.lastRemoteRevision;
@@ -252,7 +265,8 @@ export class RemoteSessionService {
   async listSyncItems(): Promise<SessionSyncItem[]> {
     const store = this.dependencies.getStore();
     const includeAttachments = this.dependencies.getSettings().syncSessionAttachments;
-    const remotes = (await this.createClient().listRemoteSessions())
+    const client = this.createClient();
+    const remotes = (await client.listRemoteSessions())
       .filter((remote) => store.getSession(remote.sourceSessionKey)?.isSubagent !== true);
     const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
     await this.runBounded(store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
@@ -262,15 +276,30 @@ export class RemoteSessionService {
         await this.dependencies.ensureSessionDetails(session.sessionKey);
         const hydrated = store.getSession(session.sessionKey);
         if (!hydrated) return;
+        const binding = store.getSessionSyncBindingForLocalKey(session.sessionKey);
+        const matchingRemote = hydrated.sourceAvailable === false
+          ? remotes.find((remote) =>
+              remote.id === binding?.remoteSessionId || remote.sourceSessionKey === hydrated.sessionKey)
+          : undefined;
+        const preservedSourceArchive = matchingRemote
+          ? (await client.getDetailSnapshot(matchingRemote.id)).sourceArchive
+          : undefined;
         const built = this.operations.buildUpload(
           store,
           session.sessionKey,
           0,
-          store.getSessionSyncBindingForLocalKey(session.sessionKey)?.remoteSessionId,
+          binding?.remoteSessionId,
           includeAttachments,
+          preservedSourceArchive,
         );
         locals.push({ session: hydrated, revision: built.payload.content_hash });
       } catch (error) {
+        if (error instanceof SessionSourceUnavailableError) {
+          this.dependencies.logError(
+            `Skipping unavailable local session ${session.sessionKey} during cloud comparison: ${error.message}`,
+          );
+          return;
+        }
         throw new Error(`Could not load ${session.displayTitle || session.sessionKey} before comparing it with the cloud copy: ${error instanceof Error ? error.message : String(error)}`);
       }
     });

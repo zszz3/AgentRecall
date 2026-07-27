@@ -157,12 +157,20 @@ export class SessionStore {
     return this.sessions.deleteSessionRecord(sessionKey);
   }
 
+  setSessionSourceAvailable(sessionKey: string, available: boolean): void {
+    this.sessions.setSessionSourceAvailable(sessionKey, available);
+  }
+
   migrateSessionKeyPreservingUserState(legacyKey: string, targetKey: string): boolean {
     return this.sessions.migrateSessionKeyPreservingUserState(legacyKey, targetKey);
   }
 
-  listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
-    return this.sessions.listSessionKeysByFilePath(environmentId, filePaths);
+  listSessionKeysByFilePath(
+    environmentId: string,
+    filePaths: ReadonlySet<string>,
+    sessionKeys: ReadonlySet<string>,
+  ): string[] {
+    return this.sessions.listSessionKeysByFilePath(environmentId, filePaths, sessionKeys);
   }
 
   markOpened(sessionKey: string): void {
@@ -224,6 +232,7 @@ export class SessionStore {
   getSessionSourceArtifacts(sessionKey: string): SessionSourceArtifact[] {
     const session = this.getSession(sessionKey);
     if (!session || !isLocalSessionStorage(session)) return [];
+    if (session.source === "cursor-agent" && session.sourceAvailable === false) return [];
     return readSessionSourceArtifacts(session);
   }
 

@@ -1393,7 +1393,9 @@ export function App(): ReactElement {
         if (detail?.sessionKey === session.sessionKey) closeDetail();
         setSelectedKey((current) => (current === session.sessionKey ? null : current));
         await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
-        const message = session.source === "zcode-cli"
+        const message = session.sourceAvailable === false
+          ? t("Cached session deleted.", "会话缓存已删除。")
+          : session.source === "zcode-cli"
           ? t("ZCode session deleted from the local database.", "ZCode 会话已从本地数据库删除。")
           : t("Session file deleted.", "会话文件已删除。");
         setActionStatus({ kind: "success", message });
@@ -2505,7 +2507,7 @@ function ContextMenu({
       {canDelete ? <>
         <hr />
         <button className="danger" onClick={onDelete}>
-          <Trash2 size={14} /> {l("Delete Session", "删除会话")}
+          <Trash2 size={14} /> {state.session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete Session", "删除会话")}
         </button>
       </> : null}
     </div>

@@ -62,17 +62,22 @@ export function DeleteSessionDialog({
     <div className="dialog-backdrop" onMouseDown={onCancel}>
       <div className="command-dialog delete-session-dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="dialog-title">
-          <span>{l("Delete Session", "删除会话")}</span>
+          <span>{session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete Session", "删除会话")}</span>
           <button type="button" className="icon-button" onClick={onCancel} disabled={deleting} aria-label={l("Close", "关闭")}>
             <X size={16} />
           </button>
         </div>
         <p className="dialog-copy">
-          {l("Delete", "删除")} <strong>{session.displayTitle}</strong>
+          {session.sourceAvailable === false ? l("Delete cached copy of", "删除缓存") : l("Delete", "删除")} <strong>{session.displayTitle}</strong>
           {l(" permanently?", "？")}
         </p>
         <p className="dialog-copy danger-copy">
-          {session.source === "zcode-cli"
+          {session.sourceAvailable === false
+            ? l(
+                "This only deletes the messages cached by AgentRecall. It does not change Cursor or any cloud copy.",
+                "这只会删除 AgentRecall 缓存的消息，不会修改 Cursor 或任何云端副本。",
+              )
+            : session.source === "zcode-cli"
             ? l(
                 "This permanently deletes this ZCode session, its messages, tool calls, and usage records from the local ZCode database. This cannot be undone.",
                 "这会从本地 ZCode 数据库永久删除该会话及其消息、工具调用和用量记录，无法撤销。",
@@ -82,15 +87,21 @@ export function DeleteSessionDialog({
                 "这会删除 Codex 或 Claude Code 的原始会话文件，并从本应用移除，无法撤销。",
               )}
         </p>
-        <div className="delete-session-path" title={session.filePath}>
-          {session.filePath}
-        </div>
+        {session.sourceAvailable === false ? null : (
+          <div className="delete-session-path" title={session.filePath}>
+            {session.filePath}
+          </div>
+        )}
         <div className="dialog-actions">
           <button type="button" onClick={onCancel} disabled={deleting}>
             {l("Cancel", "取消")}
           </button>
           <button type="button" className="danger-action" onClick={onConfirm} disabled={deleting}>
-            {deleting ? l("Deleting...", "正在删除...") : l("Delete Permanently", "永久删除")}
+            {deleting
+              ? l("Deleting...", "正在删除...")
+              : session.sourceAvailable === false
+                ? l("Delete Cache", "删除缓存")
+                : l("Delete Permanently", "永久删除")}
           </button>
         </div>
       </div>

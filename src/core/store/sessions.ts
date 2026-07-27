@@ -88,6 +88,7 @@ interface SessionRow {
   favorited: 0 | 1;
   pinned: 0 | 1;
   hidden: 0 | 1;
+  source_available: 0 | 1;
   last_opened_at: number | null;
   last_resumed_at: number | null;
   last_activity_at: number;
@@ -210,7 +211,8 @@ export class SessionsStore {
             content_indexed_mtime_ms = excluded.content_indexed_mtime_ms,
             content_indexed_size = excluded.content_indexed_size,
             is_subagent = excluded.is_subagent,
-            parent_session_id = excluded.parent_session_id
+            parent_session_id = excluded.parent_session_id,
+            source_available = 1
         `,
         )
         .run(
@@ -412,7 +414,16 @@ export class SessionsStore {
   }
 
   touchIndexedAtIfMissing(sessionKey: string): void {
-    this.db.prepare("UPDATE sessions SET indexed_at = ? WHERE session_key = ? AND indexed_at <= 0").run(Date.now(), sessionKey);
+    this.db.prepare(`
+      UPDATE sessions
+      SET indexed_at = CASE WHEN indexed_at <= 0 THEN ? ELSE indexed_at END,
+          source_available = 1
+      WHERE session_key = ?
+    `).run(Date.now(), sessionKey);
+  }
+
+  setSessionSourceAvailable(sessionKey: string, available: boolean): void {
+    this.db.prepare("UPDATE sessions SET source_available = ? WHERE session_key = ?").run(available ? 1 : 0, sessionKey);
   }
 
   listIndexedSessionFiles(environmentId = "local"): Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
@@ -559,8 +570,8 @@ export class SessionsStore {
   }
 
   deleteSession(sessionKey: string): boolean {
-    const row = this.db.prepare("SELECT source, raw_id, file_path FROM sessions WHERE session_key = ?").get(sessionKey) as
-      | { source: SessionSource; raw_id: string; file_path: string }
+    const row = this.db.prepare("SELECT source, raw_id, file_path, source_available FROM sessions WHERE session_key = ?").get(sessionKey) as
+      | { source: SessionSource; raw_id: string; file_path: string; source_available: 0 | 1 }
       | undefined;
     if (!row) return false;
     if (row.source === "zcode-cli") {
@@ -569,6 +580,7 @@ export class SessionsStore {
       return sourceDeleted || indexDeleted;
     }
     if (row.source === "cursor-agent" && /(^|[\\/])state\.vscdb$/i.test(row.file_path)) {
+      if (row.source_available === 0) return this.deleteSessionRecord(sessionKey);
       throw new Error("Cannot delete shared Cursor source database.");
     }
 
@@ -743,7 +755,11 @@ export class SessionsStore {
     return migrated;
   }
 
-  listSessionKeysByFilePath(environmentId: string, filePaths: ReadonlySet<string>): string[] {
+  listSessionKeysByFilePath(
+    environmentId: string,
+    filePaths: ReadonlySet<string>,
+    sessionKeys: ReadonlySet<string>,
+  ): string[] {
     const rows = this.db
       .prepare(
         `SELECT session_key, source, file_path, message_count
@@ -754,7 +770,11 @@ export class SessionsStore {
     return rows
       .filter((row) =>
         !filePaths.has(row.file_path)
-        || (row.source === "cursor-agent" && /(^|[\\/])state\.vscdb$/i.test(row.file_path) && row.message_count === 0))
+        || (
+          row.source === "cursor-agent"
+          && /(^|[\\/])state\.vscdb$/i.test(row.file_path)
+          && (row.message_count === 0 || !sessionKeys.has(row.session_key))
+        ))
       .map((row) => row.session_key);
   }
 
@@ -1953,6 +1973,7 @@ export class SessionsStore {
       displayTitle,
       favorited: row.favorited === 1,
       hidden: row.hidden === 1,
+      sourceAvailable: row.source_available === 1,
       tags,
       matchSnippet: snippet,
       lastOpenedAt: row.last_opened_at,

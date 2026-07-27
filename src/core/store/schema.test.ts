@@ -35,6 +35,9 @@ describe("session store schema", () => {
         label: "Local",
         enabled: 1,
       });
+      expect(
+        db.prepare("SELECT dflt_value FROM pragma_table_info('sessions') WHERE name = 'source_available'").get(),
+      ).toEqual({ dflt_value: "1" });
     } finally {
       db.close();
     }

@@ -29,6 +29,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       favorited INTEGER NOT NULL DEFAULT 0,
       pinned INTEGER NOT NULL DEFAULT 0,
       hidden INTEGER NOT NULL DEFAULT 0,
+      source_available INTEGER NOT NULL DEFAULT 1,
       last_opened_at INTEGER,
       last_resumed_at INTEGER,
       message_count INTEGER NOT NULL DEFAULT 0,
@@ -261,6 +262,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       ON session_migrations(source_session_key, created_at DESC, id DESC);
   `);
   addColumnIfMissing(db, "sessions", "favorited", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "sessions", "source_available", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "sessions", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0");

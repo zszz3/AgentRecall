@@ -261,10 +261,11 @@ export function buildRemoteSessionSnapshot(
   traceEvents: SessionTraceEvent[],
   now = Date.now(),
 ): RemoteSessionDetailSnapshot {
+  const { sourceAvailable: _sourceAvailable, ...snapshotSession } = session;
   return {
     schemaVersion: 1,
     exportedAt: now,
-    session,
+    session: snapshotSession,
     messages,
     traceEvents,
   };
@@ -390,6 +391,7 @@ export function buildRemoteSessionUploadFromStore(
   now = Date.now(),
   remoteId?: string,
   includeAttachments = true,
+  preservedSourceArchive?: RemoteSessionSourceArchive,
 ): {
   session: SessionSearchResult;
   detail: RemoteSessionDetailSnapshot;
@@ -478,12 +480,13 @@ export function buildRemoteSessionUploadFromStore(
       return { ...metadata, remoteObjectKey: objectKey, sha256: digest };
     }),
   }));
+  const sourceArchive = sourceArchiveEntries.length > 0
+    ? { schemaVersion: 1 as const, entries: sourceArchiveEntries }
+    : preservedSourceArchive;
   const detail: RemoteSessionDetailSnapshot = {
     ...buildRemoteSessionSnapshot(session, remoteMessages, traceEvents, now),
-    schemaVersion: sourceArchiveEntries.length > 0 ? 3 : 2,
-    ...(sourceArchiveEntries.length > 0
-      ? { sourceArchive: { schemaVersion: 1, entries: sourceArchiveEntries } }
-      : {}),
+    schemaVersion: sourceArchive ? 3 : 2,
+    ...(sourceArchive ? { sourceArchive } : {}),
   };
   const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
     session,
@@ -725,6 +728,9 @@ export class SupabaseRemoteSessionClient {
     const previousManagedObjectKeys = existing
       ? await this.getDetailSnapshot(existing).then((snapshot) => remoteManagedObjectKeys(snapshot, existing.id)).catch(() => [])
       : [];
+    const nextManagedObjectKeys = new Set(
+      remoteManagedObjectKeys(parseDetailSnapshot(JSON.parse(detailJson) as unknown), payload.id),
+    );
 
     try {
       for (const object of storageObjects) {
@@ -757,7 +763,7 @@ export class SupabaseRemoteSessionClient {
             ? undefined
             : this.deleteStorageObject(existing.portableObjectKey).catch(() => undefined),
           ...previousManagedObjectKeys
-            .filter((key) => !storageObjects.some((object) => object.objectKey === key))
+            .filter((key) => !nextManagedObjectKeys.has(key))
             .map((key) => this.deleteStorageObject(key).catch(() => undefined)),
         ]);
       }
