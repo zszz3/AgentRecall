@@ -46,6 +46,7 @@ export interface BatchIndexOptions {
   batchSize?: number;
   timeBudgetMs?: number;
   loadOptions?: SessionLoadOptions;
+  forceReindex?: (item: LoadedSession) => boolean;
   onProgress?: (status: IndexStatus) => void;
   onEnvironmentsChanged?: () => void;
   yieldToEventLoop?: () => Promise<void>;
@@ -80,7 +81,7 @@ export async function syncLoadedSessionsInBatches(
       sshEnvironmentByHostAlias,
       options.onEnvironmentsChanged,
     );
-    if (store.isIndexedSessionFresh(item.session)) {
+    if (!options.forceReindex?.(item) && store.isIndexedSessionFresh(item.session)) {
       store.touchIndexedAtIfMissing(item.session.sessionKey);
       skipped++;
     } else {
@@ -148,6 +149,7 @@ function resolveExecutionEnvironment(
 
 export function syncDefaultSessionsInBatches(store: SessionStore, options: BatchIndexOptions = {}): Promise<IndexStatus> {
   const indexedFiles = sessionFileSnapshots(store.listIndexedSessionFiles());
+  const dependencyChangedFiles = new Set<string>();
   let fileSkipped = 0;
   const loadOptions = options.loadOptions ?? {};
   const shouldSkipFile = loadOptions.shouldSkipFile;
@@ -160,6 +162,9 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
       const customDecision = shouldSkipFile?.(filePath, stat, dependencyMtimeMs);
       if (customDecision !== undefined) return customDecision;
       const snapshot = findSessionFileSnapshot(indexedFiles, filePath, stat);
+      if (snapshot !== undefined && dependencyMtimeMs > snapshot.indexedAt) {
+        dependencyChangedFiles.add(filePath);
+      }
       return snapshot !== undefined && snapshot.indexedAt > 0 && dependencyMtimeMs <= snapshot.indexedAt;
     },
     onSkippedFile: (filePath, stat) => {
@@ -175,6 +180,8 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   })();
   return syncLoadedSessionsInBatches(store, loaded, {
     ...options,
+    forceReindex: (item) =>
+      dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   }).then((status) => {
     // Prune sessions whose source files no longer exist in local storage. Sessions

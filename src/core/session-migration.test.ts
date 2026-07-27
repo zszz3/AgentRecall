@@ -255,6 +255,7 @@ describe("session migration model", () => {
 
     expect(portableSessionFrom(session("claude-cli"), input)).toEqual({
       sourceSessionKey: "claude-cli:1",
+      sourceSessionId: "1",
       sourceAgent: "claude",
       title: "Display",
       projectPath: "/repo",
@@ -263,6 +264,8 @@ describe("session migration model", () => {
         { role: "user", content: "你好", timestamp: "2026-06-23T00:00:00Z", index: 0 },
         { role: "assistant", content: "hello", timestamp: "2026-06-23T00:00:01Z", index: 1 },
       ],
+      isSubagent: false,
+      parentSessionId: null,
     });
   });
 

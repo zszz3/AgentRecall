@@ -326,6 +326,49 @@ describe("remote session sync model", () => {
     expect(parsePortableSession(PORTABLE)).toMatchObject({ isSubagent: false, parentSessionId: null });
   });
 
+  it("bundles indexed descendant agents into a parent remote upload", () => {
+    const child: SessionSearchResult = {
+      ...SESSION,
+      sessionKey: "codex:child",
+      rawId: "child",
+      displayTitle: "Child agent",
+      isSubagent: true,
+      parentSessionId: "abc",
+      timestamp: 2_000,
+    };
+    const grandchild: SessionSearchResult = {
+      ...child,
+      sessionKey: "codex:grandchild",
+      rawId: "grandchild",
+      displayTitle: "Grandchild agent",
+      parentSessionId: "child",
+      timestamp: 3_000,
+    };
+    const sessions = new Map([
+      [SESSION.sessionKey, SESSION],
+      [child.sessionKey, child],
+      [grandchild.sessionKey, grandchild],
+    ]);
+    const store = {
+      getSession: (sessionKey: string) => sessions.get(sessionKey) ?? null,
+      getAllMessages: (sessionKey: string) => sessionKey === SESSION.sessionKey
+        ? MESSAGES
+        : [{ role: "assistant" as const, content: sessionKey, timestamp: "2026-07-03T10:02:00.000Z", index: 0 }],
+      getTraceEvents: () => [],
+      searchSessions: () => [...sessions.values()],
+    };
+
+    const { portable } = buildRemoteSessionUploadFromStore(store, SESSION.sessionKey, 12_000);
+
+    expect(portable.sourceSessionId).toBe("abc");
+    expect(portable.subagents).toHaveLength(2);
+    expect(portable.subagents).toEqual([
+      expect.objectContaining({ sourceSessionId: "child", parentSessionId: "abc", isSubagent: true }),
+      expect.objectContaining({ sourceSessionId: "grandchild", parentSessionId: "child", isSubagent: true }),
+    ]);
+    expect(parsePortableSession(JSON.parse(JSON.stringify(portable))).subagents).toHaveLength(2);
+  });
+
   it("filters remote sessions by title, summary, tags, and search text", () => {
     const sessions = [
       {

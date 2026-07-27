@@ -548,19 +548,37 @@ describe("RemoteSessionService automatic queue lifecycle", () => {
     });
   });
 
-  it("removes subagent events without uploading their conversations", async () => {
-    const event = queueEvent();
+  it("uploads the parent bundle when a subagent event changes", async () => {
+    const event = queueEvent({
+      sessionId: "child",
+      transcriptPath: "/tmp/child.jsonl",
+    });
+    const parent = localSession();
+    const child = localSession({
+      sessionKey: "local:child",
+      rawId: "child",
+      filePath: "/tmp/child.jsonl",
+      isSubagent: true,
+      parentSessionId: parent.rawId,
+    });
     const harness = createHarness({
       settings: configuredSettings(),
-      sessions: [localSession({ isSubagent: true })],
+      sessions: [parent, child],
       queueEvents: [event],
     });
 
     await harness.service.drainQueue();
 
     expect(harness.removeQueueFiles).toHaveBeenCalledWith([event.filePath]);
-    expect(harness.ensureSessionDetails).not.toHaveBeenCalled();
-    expect(harness.client.uploadSession).not.toHaveBeenCalled();
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(parent.sessionKey);
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(child.sessionKey);
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      parent.sessionKey,
+      0,
+      undefined,
+    );
+    expect(harness.client.uploadSession).toHaveBeenCalledOnce();
   });
 
   it("removes an unchanged revision without creating a cloud client", async () => {

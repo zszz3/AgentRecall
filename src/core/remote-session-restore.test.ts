@@ -89,4 +89,73 @@ describe("restoreRemotePortableSession", () => {
     ).rejects.toThrow("does not exist");
     expect(write).not.toHaveBeenCalled();
   });
+
+  it("restores bundled subagents with remapped native parent ids", async () => {
+    const writes = [
+      { sessionId: "target-parent", filePath: "/target/parent.jsonl" },
+      { sessionId: "target-child", filePath: "/target/child.jsonl" },
+      { sessionId: "target-grandchild", filePath: "/target/grandchild.jsonl" },
+    ];
+    const write = vi.fn(async () => writes.shift()!);
+    const portable: PortableSession = {
+      ...PORTABLE,
+      sourceSessionId: "source-parent",
+      subagents: [
+        {
+          ...PORTABLE,
+          sourceSessionKey: "cursor:child",
+          sourceSessionId: "source-child",
+          title: "Child",
+          isSubagent: true,
+          parentSessionId: "source-parent",
+          subagents: [],
+        },
+        {
+          ...PORTABLE,
+          sourceSessionKey: "cursor:grandchild",
+          sourceSessionId: "source-grandchild",
+          title: "Grandchild",
+          isSubagent: true,
+          parentSessionId: "source-child",
+          subagents: [],
+        },
+      ],
+    };
+    const refreshIndex = vi.fn();
+
+    const result = await restoreRemotePortableSession({
+      remoteId: "remote-family",
+      portable,
+      target: "codex",
+      localProjectPath: "/device-b/repo",
+      deps: {
+        inspectCli: vi.fn(),
+        prepare: async (session) => ({ session, strategy: "complete" }),
+        write,
+        record: vi.fn(),
+        refreshIndex,
+        launch: vi.fn(),
+        resumeCommand: () => "codex resume target-parent",
+        fallbackResumeCommand: () => "codex resume target-parent",
+        idFactory: vi.fn()
+          .mockReturnValueOnce("migration-parent")
+          .mockReturnValueOnce("migration-child")
+          .mockReturnValueOnce("migration-grandchild"),
+        now: () => 123,
+        projectPathExists: async () => true,
+        projectPathIsDirectory: async () => true,
+      },
+    });
+
+    expect(write).toHaveBeenNthCalledWith(2, "codex", expect.objectContaining({
+      sourceSessionId: "source-child",
+      parentSessionId: "target-parent",
+    }));
+    expect(write).toHaveBeenNthCalledWith(3, "codex", expect.objectContaining({
+      sourceSessionId: "source-grandchild",
+      parentSessionId: "target-child",
+    }));
+    expect(refreshIndex).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ targetSessionId: "target-parent", restoredSubagentCount: 2, indexed: true });
+  });
 });

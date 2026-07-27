@@ -291,12 +291,14 @@ export function remoteSessionContentHash(detail: RemoteSessionDetailSnapshot, po
     messages: detail.messages,
     traceEvents: detail.traceEvents,
     portable: {
+      sourceSessionId: portable.sourceSessionId ?? null,
       sourceAgent: portable.sourceAgent,
       title: portable.title,
       startedAt: portable.startedAt,
       messages: portable.messages,
       isSubagent: portable.isSubagent === true,
       parentSessionId: portable.parentSessionId ?? null,
+      subagents: portable.subagents ?? [],
     },
   }));
 }
@@ -355,6 +357,7 @@ export function buildRemoteSessionPayload(options: {
 
 export function buildRemoteSessionUploadFromStore(
   store: Pick<SessionStore, "getSession" | "getAllMessages" | "getTraceEvents">
+    & Partial<Pick<SessionStore, "searchSessions">>
     & Partial<Pick<SessionStore, "getAttachmentFile">>,
   sessionKey: string,
   now = Date.now(),
@@ -374,6 +377,34 @@ export function buildRemoteSessionUploadFromStore(
   const messages = store.getAllMessages(sessionKey);
   const traceEvents = store.getTraceEvents(sessionKey);
   const portable = remotePortableSessionFrom(session, messages);
+  const relatedSessions = store.searchSessions?.({ limit: 100_000, excludeSubagents: false }) ?? [];
+  const childrenByParentId = new Map<string, SessionSearchResult[]>();
+  for (const candidate of relatedSessions) {
+    if (
+      candidate.isSubagent !== true
+      || candidate.source !== session.source
+      || candidate.environmentId !== session.environmentId
+      || !candidate.parentSessionId
+    ) continue;
+    const children = childrenByParentId.get(candidate.parentSessionId) ?? [];
+    children.push(candidate);
+    childrenByParentId.set(candidate.parentSessionId, children);
+  }
+  const subagents: PortableSession[] = [];
+  const pendingParentIds = [session.rawId];
+  const visitedSessionKeys = new Set<string>();
+  while (pendingParentIds.length > 0 && subagents.length < 200) {
+    const parentId = pendingParentIds.shift()!;
+    const children = (childrenByParentId.get(parentId) ?? [])
+      .sort((left, right) => left.timestamp - right.timestamp || left.sessionKey.localeCompare(right.sessionKey));
+    for (const child of children) {
+      if (visitedSessionKeys.has(child.sessionKey) || subagents.length >= 200) continue;
+      visitedSessionKeys.add(child.sessionKey);
+      subagents.push(remotePortableSessionFrom(child, store.getAllMessages(child.sessionKey)));
+      pendingParentIds.push(child.rawId);
+    }
+  }
+  if (subagents.length > 0) portable.subagents = subagents;
   const resolvedRemoteId = remoteId || remoteSessionId(session.sessionKey);
   const uploadId = randomUUID();
   const attachmentObjects: RemoteSessionAttachmentUpload[] = [];
@@ -533,6 +564,7 @@ export function remotePortableSessionFrom(session: SessionSearchResult, messages
 
   return {
     sourceSessionKey: session.sessionKey,
+    sourceSessionId: session.rawId,
     sourceAgent,
     title: session.displayTitle,
     projectPath: session.projectPath,
@@ -962,6 +994,12 @@ export function parseDetailSnapshot(value: unknown): RemoteSessionDetailSnapshot
 }
 
 export function parsePortableSession(value: unknown): PortableSession {
+  return parsePortableSessionValue(value, 0, { count: 0 });
+}
+
+function parsePortableSessionValue(value: unknown, depth: number, state: { count: number }): PortableSession {
+  if (depth > 12 || state.count >= 201) throw new Error("Remote portable session has too many nested subagents.");
+  state.count += 1;
   if (!value || typeof value !== "object") throw new Error("Remote portable session was not an object.");
   const session = value as Partial<PortableSession>;
   if (typeof session.sourceSessionKey !== "string") throw new Error("Remote portable session has no source key.");
@@ -972,6 +1010,7 @@ export function parsePortableSession(value: unknown): PortableSession {
   if (!Array.isArray(session.messages)) throw new Error("Remote portable session has no messages.");
   return {
     sourceSessionKey: session.sourceSessionKey,
+    sourceSessionId: typeof session.sourceSessionId === "string" ? session.sourceSessionId : undefined,
     sourceAgent: session.sourceAgent,
     title: session.title,
     projectPath: session.projectPath,
@@ -979,6 +1018,9 @@ export function parsePortableSession(value: unknown): PortableSession {
     messages: session.messages.filter(isSessionMessage),
     isSubagent: session.isSubagent === true,
     parentSessionId: typeof session.parentSessionId === "string" ? session.parentSessionId : null,
+    subagents: Array.isArray(session.subagents)
+      ? session.subagents.map((subagent) => parsePortableSessionValue(subagent, depth + 1, state))
+      : [],
   };
 }
 

@@ -94,6 +94,11 @@ export async function restoreRemotePortableSession({
   const written = await deps.write(target, prepared.session);
 
   const warnings: string[] = [];
+  let indexed = true;
+  let restoredSubagentCount = 0;
+  const targetIdsBySourceId = new Map<string, string>();
+  targetIdsBySourceId.set(portableSourceId(localPortable), written.sessionId);
+
   await collectWarning(warnings, async () => {
     await deps.record({
       id: deps.idFactory(),
@@ -107,6 +112,47 @@ export async function restoreRemotePortableSession({
     });
   }, "Failed to record remote restore metadata");
 
+  for (const subagent of flattenPortableSubagents(localPortable.subagents ?? [])) {
+    const sourceParentId = subagent.parentSessionId?.trim();
+    const targetParentId = sourceParentId ? targetIdsBySourceId.get(sourceParentId) : written.sessionId;
+    if (!targetParentId) {
+      warnings.push(`Skipped subagent ${subagent.title || portableSourceId(subagent)} because its restored parent was unavailable.`);
+      continue;
+    }
+    try {
+      const preparedSubagent = await deps.prepare({
+        ...subagent,
+        projectPath: localProjectPath,
+        isSubagent: true,
+        parentSessionId: targetParentId,
+        subagents: [],
+      });
+      const writtenSubagent = await deps.write(target, preparedSubagent.session);
+      targetIdsBySourceId.set(portableSourceId(subagent), writtenSubagent.sessionId);
+      restoredSubagentCount += 1;
+      await collectWarning(warnings, async () => {
+        await deps.record({
+          id: deps.idFactory(),
+          sourceSessionKey: `remote:${remoteId}:subagent:${subagent.sourceSessionKey}`,
+          sourceAgent: subagent.sourceAgent,
+          targetAgent: target,
+          targetSessionId: writtenSubagent.sessionId,
+          targetFilePath: writtenSubagent.filePath,
+          strategy: preparedSubagent.strategy,
+          createdAt: deps.now(),
+        });
+      }, `Failed to record restored subagent ${subagent.title || portableSourceId(subagent)}`);
+      try {
+        await deps.refreshIndex(target, writtenSubagent.filePath, writtenSubagent.sessionId);
+      } catch (error) {
+        indexed = false;
+        warnings.push(formatWarning(`Failed to refresh restored subagent ${subagent.title || portableSourceId(subagent)}`, error));
+      }
+    } catch (error) {
+      warnings.push(formatWarning(`Failed to restore subagent ${subagent.title || portableSourceId(subagent)}`, error));
+    }
+  }
+
   const resumeCommand = safeResumeCommand(deps, warnings, target, written.sessionId, prepared.session.projectPath);
 
   notifyProgress(deps.onProgress, {
@@ -114,7 +160,6 @@ export async function restoreRemotePortableSession({
     target,
     stage: "indexing",
   });
-  let indexed = true;
   try {
     await deps.refreshIndex(target, written.filePath, written.sessionId);
   } catch (error) {
@@ -143,8 +188,24 @@ export async function restoreRemotePortableSession({
     resumeCommand,
     indexed,
     launched,
+    ...(restoredSubagentCount > 0 ? { restoredSubagentCount } : {}),
     ...(warnings.length > 0 ? { warning: warnings.join("\n") } : {}),
   };
+}
+
+function portableSourceId(session: PortableSession): string {
+  return session.sourceSessionId || session.sourceSessionKey.split(":").at(-1) || session.sourceSessionKey;
+}
+
+function flattenPortableSubagents(subagents: PortableSession[]): PortableSession[] {
+  const flattened: PortableSession[] = [];
+  const pending = [...subagents];
+  while (pending.length > 0 && flattened.length < 200) {
+    const subagent = pending.shift()!;
+    flattened.push(subagent);
+    pending.push(...(subagent.subagents ?? []));
+  }
+  return flattened;
 }
 
 async function validateRestoreRequest(

@@ -108,6 +108,7 @@ export interface MigrationCompressionEvent {
 
 export interface PortableSession {
   sourceSessionKey: string;
+  sourceSessionId?: string;
   sourceAgent: MigrationAgent;
   title: string;
   projectPath: string;
@@ -115,6 +116,7 @@ export interface PortableSession {
   messages: SessionMessage[];
   isSubagent?: boolean;
   parentSessionId?: string | null;
+  subagents?: PortableSession[];
 }
 
 export interface SessionMigrationProgress {
@@ -136,6 +138,7 @@ export interface SessionMigrationResult {
   resumeCommand: string;
   indexed: boolean;
   launched: boolean;
+  restoredSubagentCount?: number;
   warning?: string;
 }
 

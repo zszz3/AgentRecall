@@ -22,6 +22,7 @@ const { DatabaseSync } = require("node:sqlite") as {
 };
 
 const SESSION_ID = "10000000-0000-4000-8000-000000000001";
+const CHILD_SESSION_ID = "10000000-0000-4000-8000-000000000002";
 const MESSAGE_IDS = [
   "20000000-0000-4000-8000-000000000001",
   "20000000-0000-4000-8000-000000000002",
@@ -203,7 +204,7 @@ describe("writeMigratedSession", () => {
 
   it("writes a native Codex rollout and round-trips it through the existing loader", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-codex-"));
-    const includesVsCodeEvents = process.platform === "win32";
+    const includesVsCodeEvents = true;
 
     const pending = writeMigratedSession({
       target: "codex",
@@ -334,7 +335,7 @@ describe("writeMigratedSession", () => {
     }
   });
 
-  it.skipIf(process.platform !== "win32")("registers a Codex migration in the VS Code app-server state database", async () => {
+  it("registers a Codex migration in the VS Code app-server state database", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-vscode-state-"));
     const statePath = path.join(homeDir, ".codex", "state_1.sqlite");
     try {
@@ -394,6 +395,53 @@ describe("writeMigratedSession", () => {
         has_user_event: 1,
         cli_version: "migration",
       });
+
+      const childSession = {
+        ...portable(),
+        sourceSessionKey: "cursor:source-child",
+        sourceSessionId: "source-child",
+        title: "Child agent",
+        isSubagent: true,
+        parentSessionId: SESSION_ID,
+      };
+      const childResult = await writeMigratedSession({
+        target: "codex",
+        session: childSession,
+        homeDir,
+        now: NOW,
+        idFactory: idFactory([CHILD_SESSION_ID]),
+      });
+      const childRows = readRows(childResult.filePath);
+      expect(childRows[0]).toMatchObject({
+        type: "session_meta",
+        payload: {
+          id: CHILD_SESSION_ID,
+          session_id: SESSION_ID,
+          parent_thread_id: SESSION_ID,
+          thread_source: "subagent",
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: SESSION_ID,
+                depth: 1,
+              },
+            },
+          },
+        },
+      });
+      const childStateDb = new DatabaseSync(statePath);
+      const childRow = childStateDb.prepare("SELECT * FROM threads WHERE id = ?").get(CHILD_SESSION_ID) as Record<string, unknown>;
+      childStateDb.close();
+      expect(childRow).toMatchObject({
+        thread_source: "subagent",
+        agent_path: "/root/migrated_source-child",
+      });
+      expect(JSON.parse(String(childRow.source))).toMatchObject({
+        subagent: { thread_spawn: { parent_thread_id: SESSION_ID } },
+      });
+      expect(readRows(path.join(homeDir, ".codex", "session_index.jsonl"))).toEqual([
+        { id: SESSION_ID, thread_name: portable().title, updated_at: NOW.toISOString() },
+      ]);
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }

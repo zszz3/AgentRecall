@@ -207,6 +207,10 @@ export class RemoteSessionService {
     if (session.source === "zcode-cli") throw new Error("ZCode sessions cannot be saved remotely yet.");
     if (session.environmentKind === "wsl") throw new Error("WSL sessions cannot be saved to cloud yet.");
     await this.dependencies.ensureSessionDetails(sessionKey);
+    const descendants = descendantSessions(session, store.searchSessions({ limit: 100_000, excludeSubagents: false }));
+    await this.runBounded(descendants, 4, async (descendant) => {
+      await this.dependencies.ensureSessionDetails(descendant.sessionKey);
+    });
     const binding = store.getSessionSyncBindingForLocalKey(sessionKey);
     const { payload, detailJson, portableJson, attachmentObjects } = this.operations.buildUpload(
       store,
@@ -403,16 +407,13 @@ export class RemoteSessionService {
       }
       return;
     }
-    if (session.isSubagent) {
-      this.operations.removeQueueFiles([event.filePath]);
-      return;
-    }
+    const syncSession = rootSessionFor(session, localSessions);
     try {
-      await this.dependencies.ensureSessionDetails(session.sessionKey);
-      const binding = store.getSessionSyncBindingForLocalKey(session.sessionKey);
-      const built = this.operations.buildUpload(store, session.sessionKey, 0, binding?.remoteSessionId);
+      await this.dependencies.ensureSessionDetails(syncSession.sessionKey);
+      const binding = store.getSessionSyncBindingForLocalKey(syncSession.sessionKey);
+      const built = this.operations.buildUpload(store, syncSession.sessionKey, 0, binding?.remoteSessionId);
       if (!binding || binding.lastLocalRevision !== built.payload.content_hash) {
-        await this.upload(session.sessionKey);
+        await this.upload(syncSession.sessionKey);
       }
       this.operations.removeQueueFiles([event.filePath]);
       this.hookLastProcessedAt = this.dependencies.now();
@@ -471,4 +472,49 @@ export class RemoteSessionService {
     });
     await Promise.all(workers);
   }
+}
+
+function descendantSessions(root: SessionSearchResult, sessions: SessionSearchResult[]): SessionSearchResult[] {
+  const childrenByParentId = new Map<string, SessionSearchResult[]>();
+  for (const candidate of sessions) {
+    if (
+      candidate.isSubagent !== true
+      || candidate.source !== root.source
+      || candidate.environmentId !== root.environmentId
+      || !candidate.parentSessionId
+    ) continue;
+    const children = childrenByParentId.get(candidate.parentSessionId) ?? [];
+    children.push(candidate);
+    childrenByParentId.set(candidate.parentSessionId, children);
+  }
+  const descendants: SessionSearchResult[] = [];
+  const pending = [root.rawId];
+  const visited = new Set<string>();
+  while (pending.length > 0 && descendants.length < 200) {
+    for (const child of childrenByParentId.get(pending.shift()!) ?? []) {
+      if (visited.has(child.sessionKey) || descendants.length >= 200) continue;
+      visited.add(child.sessionKey);
+      descendants.push(child);
+      pending.push(child.rawId);
+    }
+  }
+  return descendants;
+}
+
+function rootSessionFor(session: SessionSearchResult, sessions: SessionSearchResult[]): SessionSearchResult {
+  const byRawId = new Map(
+    sessions
+      .filter((candidate) =>
+        candidate.source === session.source && candidate.environmentId === session.environmentId)
+      .map((candidate) => [candidate.rawId, candidate]),
+  );
+  let current = session;
+  const visited = new Set([current.rawId]);
+  while (current.isSubagent && current.parentSessionId) {
+    const parent = byRawId.get(current.parentSessionId);
+    if (!parent || visited.has(parent.rawId)) break;
+    visited.add(parent.rawId);
+    current = parent;
+  }
+  return current;
 }
