@@ -261,6 +261,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_session_migrations_source_session_key_created_at_id
       ON session_migrations(source_session_key, created_at DESC, id DESC);
   `);
+  normalizeDataMigrationsSchema(db);
   addColumnIfMissing(db, "sessions", "favorited", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "source_available", "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "sessions", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
@@ -323,6 +324,31 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   `);
   upgradeFtsTokenizer(db);
   ensureLocalEnvironment(db);
+}
+
+function normalizeDataMigrationsSchema(db: SessionStoreDatabase): void {
+  const columns = db.prepare("PRAGMA table_info(data_migrations)").all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (columnNames.has("id") && columnNames.has("applied_at")) return;
+  if (!columnNames.has("key") || !columnNames.has("completed_at")) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`
+      ALTER TABLE data_migrations RENAME TO data_migrations_legacy_schema;
+      CREATE TABLE data_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO data_migrations (id, applied_at)
+      SELECT "key", completed_at FROM data_migrations_legacy_schema;
+      DROP TABLE data_migrations_legacy_schema;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function runSessionStorageEnvironmentMigration(db: SessionStoreDatabase): void {

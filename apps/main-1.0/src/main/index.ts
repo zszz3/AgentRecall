@@ -2116,62 +2116,64 @@ function registerIpc(): void {
   });
 }
 
-if (!app.requestSingleInstanceLock()) {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const applicationReady = hasSingleInstanceLock
+  ? app.whenReady().then(() => {
+      void appUpdateService.registerRunningProcess();
+      void installedRuntimeMonitor?.start();
+      const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
+      store = new SessionStore(dbPath);
+      quotaService = createQuotaService();
+      // Publish the live database path so the standalone MCP server can find it.
+      try {
+        writeDbPointer(dbPath);
+      } catch {
+        // Non-fatal: the MCP server can still be pointed at the DB via env var.
+      }
+      try {
+        ensureAgentRecallMcpPreference();
+      } catch (error) {
+        console.error(`Failed to configure session search MCP: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      providerService.migrateLegacyKeys();
+      pruneDisabledOptionalSources(getSettings());
+      registerIpc();
+      quotaService.start();
+      createApplicationMenu();
+      createWindow();
+      createTray();
+      applyDockVisibility(getSettings().showInDock);
+      if (process.platform === "darwin" && app.dock) {
+        // Unpackaged Electron shows the default Electron Dock icon; replace it with the brand mark.
+        const dockIconPath = resolveAssetPath(APP_ICON_RELATIVE_PATH);
+        if (dockIconPath) {
+          const dockIcon = nativeImage.createFromPath(dockIconPath);
+          if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+        }
+      }
+      void appUpdateService.showPreviousUpdateResult();
+      const shortcut = getSettings().globalShortcut;
+      if (!registerAppGlobalShortcut(shortcut)) {
+        console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
+      }
+      ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
+      void providerService.restoreCodexChatProxy();
+      setTimeout(() => void runIndexSync(), INITIAL_INDEX_DELAY_MS);
+      startAutoIndexRefresh();
+      skillService.startUsageRefresh();
+      remoteSessionService.startQueue();
+      appUpdateService.scheduleInitialCheck();
+    })
+  : Promise.resolve();
+
+if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    // second-instance can fire before whenReady resolves; defer to avoid
-    // creating a BrowserWindow before Electron is fully initialized.
-    app.whenReady().then(() => showWindow());
+    // Wait for database migration and IPC registration before showing the window.
+    void applicationReady.then(() => showWindow());
   });
 }
-
-app.whenReady().then(() => {
-  void appUpdateService.registerRunningProcess();
-  void installedRuntimeMonitor?.start();
-  const dbPath = path.join(app.getPath("userData"), "session-search.sqlite");
-  store = new SessionStore(dbPath);
-  quotaService = createQuotaService();
-  // Publish the live database path so the standalone MCP server can find it.
-  try {
-    writeDbPointer(dbPath);
-  } catch {
-    // Non-fatal: the MCP server can still be pointed at the DB via env var.
-  }
-  try {
-    ensureAgentRecallMcpPreference();
-  } catch (error) {
-    console.error(`Failed to configure session search MCP: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  providerService.migrateLegacyKeys();
-  pruneDisabledOptionalSources(getSettings());
-  registerIpc();
-  quotaService.start();
-  createApplicationMenu();
-  createWindow();
-  createTray();
-  applyDockVisibility(getSettings().showInDock);
-  if (process.platform === "darwin" && app.dock) {
-    // Unpackaged Electron shows the default Electron Dock icon; replace it with the brand mark.
-    const dockIconPath = resolveAssetPath(APP_ICON_RELATIVE_PATH);
-    if (dockIconPath) {
-      const dockIcon = nativeImage.createFromPath(dockIconPath);
-      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
-    }
-  }
-  void appUpdateService.showPreviousUpdateResult();
-  const shortcut = getSettings().globalShortcut;
-  if (!registerAppGlobalShortcut(shortcut)) {
-    console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
-  }
-  ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
-  void providerService.restoreCodexChatProxy();
-  setTimeout(() => void runIndexSync(), INITIAL_INDEX_DELAY_MS);
-  startAutoIndexRefresh();
-  skillService.startUsageRefresh();
-  remoteSessionService.startQueue();
-  appUpdateService.scheduleInitialCheck();
-});
 
 app.on("window-all-closed", () => {
   // Keep the menu bar app alive; users can quit from the tray/menu.

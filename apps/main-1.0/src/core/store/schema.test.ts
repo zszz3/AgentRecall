@@ -43,6 +43,35 @@ describe("session store schema", () => {
     }
   });
 
+  it("upgrades the legacy data migration marker schema without losing completed markers", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE data_migrations (
+          key TEXT PRIMARY KEY,
+          completed_at INTEGER NOT NULL
+        );
+        INSERT INTO data_migrations (key, completed_at)
+        VALUES ('agent-recall-legacy-user-state-v1', 123);
+      `);
+
+      migrateSessionStore(db);
+
+      expect(db.prepare("PRAGMA table_info(data_migrations)").all()).toEqual([
+        expect.objectContaining({ name: "id", pk: 1 }),
+        expect.objectContaining({ name: "applied_at", notnull: 1 }),
+      ]);
+      expect(
+        db.prepare("SELECT id, applied_at FROM data_migrations WHERE id = ?").get("agent-recall-legacy-user-state-v1"),
+      ).toEqual({
+        id: "agent-recall-legacy-user-state-v1",
+        applied_at: 123,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("repairs local environment identity without discarding its runtime sync state", () => {
     const db = new DatabaseSync(":memory:");
     try {
