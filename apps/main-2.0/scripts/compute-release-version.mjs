@@ -15,7 +15,7 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
     "--points-at",
     mergedSha,
     "--list",
-    "v[0-9]*",
+    "v2-[0-9]*",
     "--sort=-v:refname",
   ]).split(/\r?\n/, 1)[0].trim();
 
@@ -27,19 +27,19 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
       // A tag without a release is a recoverable partial publication.
     }
     return {
-      version: existingTag.slice(1),
+      version: existingTag.slice(3),
       tag: existingTag,
       releaseRequired: releaseDraft?.trim() !== "false",
     };
   }
 
-  const latestTag = runCommand("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"])
+  const latestTag = runCommand("git", ["tag", "--list", "v2-[0-9]*", "--sort=-v:refname"])
     .split(/\r?\n/, 1)[0]
     .trim();
-  const currentVersion = latestTag ? latestTag.slice(1) : JSON.parse(readNote("package.json", "utf8")).version;
+  const currentVersion = latestTag ? latestTag.slice(3) : JSON.parse(readNote("package.json", "utf8")).version;
   const note = parseReleaseNote(readNote(noteFile, "utf8"), noteFile);
   const version = bumpVersion(currentVersion, note);
-  return { version, tag: `v${version}`, releaseRequired: true };
+  return { version, tag: `v2-${version}`, releaseRequired: true };
 }
 
 function requiredEnv(name) {

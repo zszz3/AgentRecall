@@ -27,9 +27,10 @@ export interface AppUpdateClient {
   clearInstallStatus(): Promise<void>;
   currentVersion(): string;
   formatUpdateError(error: unknown): string;
-  manualInstallCommand(): string;
+  manualInstallCommand(version: string): string;
   parseUpdateManifest(value: unknown): AppUpdateManifest;
   readInstallStatus(): Promise<{ status?: string; version?: string; error?: string | null } | null>;
+  releaseUrl(version: string): string;
   skipUpdateVersion(version: string): Promise<void>;
   snoozeUpdatePrompt(version: string): Promise<void>;
   writeAppProcess(pid?: number): Promise<string>;
@@ -195,7 +196,7 @@ export class AppUpdateService {
     const status = await client.readInstallStatus().catch(() => null);
     const currentVersion = client.currentVersion();
     const installed = status?.status === "installed" && status.version === currentVersion;
-    const failed = status?.status === "error" && Boolean(status.error);
+    const failed = status?.status === "error" && Boolean(status.error) && Boolean(status.version);
     if (!installed && !failed) return;
     this.previousResultShown = true;
 
@@ -207,7 +208,7 @@ export class AppUpdateService {
         detail: "应用已经使用新版本重新启动。",
       });
     } else {
-      const command = client.manualInstallCommand();
+      const command = client.manualInstallCommand(status!.version!);
       const result = await this.dependencies.showMessageBox({
         type: "error",
         title: "更新失败",
@@ -219,7 +220,7 @@ export class AppUpdateService {
         noLink: true,
       });
       if (result.response === 0) this.dependencies.copyText(command);
-      if (result.response === 1) await this.dependencies.openExternal(client.LATEST_RELEASE_URL);
+      if (result.response === 1) await this.dependencies.openExternal(client.releaseUrl(status!.version!));
     }
     await client.clearInstallStatus().catch(() => undefined);
   }

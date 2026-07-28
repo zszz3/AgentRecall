@@ -29,10 +29,10 @@ describe("OpenViking artifact resolver", () => {
       sha256: "a".repeat(64),
       archiveType: "tar.gz",
       executablePath: "bin/openviking-server",
-      url: `https://github.com/zszz3/AgentRecall/releases/download/v0.8.0/openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-darwin-arm64.tar.gz`,
+      url: `https://github.com/zszz3/AgentRecall/releases/download/v2-0.8.0/openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-darwin-arm64.tar.gz`,
     });
     expect(fetchImpl).toHaveBeenCalledWith(
-      `https://github.com/zszz3/AgentRecall/releases/download/v0.8.0/openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-darwin-arm64.tar.gz.json`,
+      `https://github.com/zszz3/AgentRecall/releases/download/v2-0.8.0/openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-darwin-arm64.tar.gz.json`,
       expect.objectContaining({ redirect: "follow" }),
     );
   });

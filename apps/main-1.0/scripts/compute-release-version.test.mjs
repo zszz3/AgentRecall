@@ -33,6 +33,22 @@ test("same commit with a published release is an idempotent no-op", () => {
   assert.deepEqual(decision, { version: "0.6.0", tag: "v0.6.0", releaseRequired: false });
 });
 
+test("V1 versioning ignores V2 tags on the same commit", () => {
+  const commands = runner({
+    existingTag: "v2-0.2.0\nv0.6.0",
+    latestTag: "v2-0.2.0\nv0.6.0",
+    releaseDraft: "false",
+  });
+  const decision = computeReleaseDecision({
+    mergedSha: "merge-sha",
+    noteFile: "note.md",
+    readNote: () => fixNote,
+    runCommand: commands.run,
+  });
+
+  assert.deepEqual(decision, { version: "0.6.0", tag: "v0.6.0", releaseRequired: false });
+});
+
 test("same commit with a draft release resumes publication", () => {
   const commands = runner({ releaseDraft: "true" });
   const decision = computeReleaseDecision({

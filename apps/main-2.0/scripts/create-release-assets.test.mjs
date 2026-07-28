@@ -38,7 +38,8 @@ test("creates a structured update manifest, checksum, and release notes from one
 
   assert.equal(manifest.version, "0.2.0");
   assert.deepEqual(manifest.notes.features, ["终端显示更新。"]);
-  assert.match(manifest.package.url, /releases\/download\/v0\.2\.0\/agent-recall-v2-0\.2\.0\.tgz$/);
+  assert.equal(manifest.tag, "v2-0.2.0");
+  assert.match(manifest.package.url, /releases\/download\/v2-0\.2\.0\/agent-recall-v2-0\.2\.0\.tgz$/);
   assert.equal(JSON.parse(await readFile(path.join(outputDirectory, UPDATE_MANIFEST_NAME), "utf8")).package.sha256, manifest.package.sha256);
   assert.match(await readFile(path.join(outputDirectory, `${manifest.package.name}.sha256`), "utf8"), new RegExp(`^${manifest.package.sha256}`));
   assert.equal(await readFile(path.join(outputDirectory, LATEST_PACKAGE_NAME), "utf8"), "package bytes");
@@ -64,8 +65,8 @@ test("keeps update manifest URLs compatible after the repository rename", async 
     publishedAt: "2026-07-15T00:00:00.000Z",
   });
 
-  assert.equal(manifest.releaseUrl, "https://github.com/zszz3/AgentRecall/releases/tag/v0.5.0");
-  assert.equal(manifest.package.url, "https://github.com/zszz3/AgentRecall/releases/download/v0.5.0/agent-recall-v2-0.5.0.tgz");
+  assert.equal(manifest.releaseUrl, "https://github.com/zszz3/AgentRecall/releases/tag/v2-0.5.0");
+  assert.equal(manifest.package.url, "https://github.com/zszz3/AgentRecall/releases/download/v2-0.5.0/agent-recall-v2-0.5.0.tgz");
 });
 
 test("rejects a package filename that does not match the release version", async () => {

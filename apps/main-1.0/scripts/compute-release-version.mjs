@@ -8,16 +8,20 @@ function defaultRunCommand(command, args) {
   return execFileSync(command, args, { encoding: "utf8" }).trim();
 }
 
+function firstStableV1Tag(output) {
+  return String(output).split(/\r?\n/).find((tag) => /^v\d+\.\d+\.\d+$/.test(tag.trim()))?.trim() ?? "";
+}
+
 export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defaultRunCommand, readNote = readFileSync }) {
   runCommand("git", ["fetch", "--tags", "--force"]);
-  const existingTag = runCommand("git", [
+  const existingTag = firstStableV1Tag(runCommand("git", [
     "tag",
     "--points-at",
     mergedSha,
     "--list",
     "v[0-9]*",
     "--sort=-v:refname",
-  ]).split(/\r?\n/, 1)[0].trim();
+  ]));
 
   if (existingTag) {
     let releaseDraft = null;
@@ -33,9 +37,7 @@ export function computeReleaseDecision({ mergedSha, noteFile, runCommand = defau
     };
   }
 
-  const latestTag = runCommand("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"])
-    .split(/\r?\n/, 1)[0]
-    .trim();
+  const latestTag = firstStableV1Tag(runCommand("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"]));
   const currentVersion = latestTag ? latestTag.slice(1) : JSON.parse(readNote("package.json", "utf8")).version;
   const note = parseReleaseNote(readNote(noteFile, "utf8"), noteFile);
   const version = bumpVersion(currentVersion, note);

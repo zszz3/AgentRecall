@@ -18,14 +18,14 @@ function manifest(version = "0.2.0"): AppUpdateManifest {
   return {
     schemaVersion: 1,
     version,
-    tag: `v${version}`,
+    tag: `v2-${version}`,
     title: "自动更新",
     publishedAt: "2026-07-16T00:00:00.000Z",
-    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v${version}`,
+    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v2-${version}`,
     notes: { features: [], fixes: ["修复更新检查。"] },
     package: {
       name: `agent-recall-v2-${version}.tgz`,
-      url: `https://github.com/zszz3/AgentRecall/releases/download/v${version}/agent-recall-v2-${version}.tgz`,
+      url: `https://github.com/zszz3/AgentRecall/releases/download/v2-${version}/agent-recall-v2-${version}.tgz`,
       sha256: "a".repeat(64),
       checksumUrl: "",
     },
@@ -47,18 +47,19 @@ function updateStatus(overrides: Partial<AppUpdateStatus> = {}): AppUpdateStatus
 
 function createClient(overrides: Partial<AppUpdateClient> = {}): AppUpdateClient {
   return {
-    LATEST_RELEASE_URL: "https://github.com/zszz3/AgentRecall/releases/latest",
+    LATEST_RELEASE_URL: "https://github.com/zszz3/AgentRecall/releases",
     checkForUpdate: vi.fn(async () => updateStatus()),
     clearAppProcess: vi.fn(async () => undefined),
     clearInstallStatus: vi.fn(async () => undefined),
     currentVersion: vi.fn(() => "0.1.0"),
     formatUpdateError: vi.fn((error) => String(error ?? "unknown error")),
-    manualInstallCommand: vi.fn(() => "npm install -g agent-recall.tgz"),
+    manualInstallCommand: vi.fn((version) => `npm install -g agent-recall-v2-${version}.tgz`),
     parseUpdateManifest: vi.fn((value) => {
       if (!value || typeof value !== "object") throw new Error("Update manifest is missing.");
       return value as AppUpdateManifest;
     }),
     readInstallStatus: vi.fn(async () => null),
+    releaseUrl: vi.fn((version) => `https://github.com/zszz3/AgentRecall/releases/tag/v2-${version}`),
     skipUpdateVersion: vi.fn(async () => undefined),
     snoozeUpdatePrompt: vi.fn(async () => undefined),
     stageUpdate: vi.fn(async () => ({
@@ -340,7 +341,7 @@ describe("AppUpdateService", () => {
       title: "更新失败",
       message: expect.stringContaining("手动安装"),
     }));
-    expect(harness.copyText).toHaveBeenCalledWith("npm install -g agent-recall.tgz");
+    expect(harness.copyText).toHaveBeenCalledWith("npm install -g agent-recall-v2-0.2.0.tgz");
     expect(client.clearInstallStatus).toHaveBeenCalledOnce();
   });
 

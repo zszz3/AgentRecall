@@ -163,7 +163,7 @@ test("currentVersion prefers the git tag in a checkout", async () => {
     },
   });
   assert.equal(result, "0.20.2");
-  assert.deepEqual(calls, [["git", "describe", "--tags", "--abbrev=0"]]);
+  assert.deepEqual(calls, [["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--exclude", "v2-*"]]);
 });
 
 test("currentVersion falls back to package.json when there is no .git", async () => {

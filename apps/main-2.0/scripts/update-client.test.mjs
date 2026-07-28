@@ -140,11 +140,11 @@ test("currentVersion prefers the git tag in a checkout", async () => {
     packageRoot: directory,
     execFileSyncImpl: (command, args) => {
       calls.push([command, ...args]);
-      return "v0.20.2\n";
+      return "v2-0.20.2\n";
     },
   });
   assert.equal(result, "0.20.2");
-  assert.deepEqual(calls, [["git", "describe", "--tags", "--abbrev=0"]]);
+  assert.deepEqual(calls, [["git", "describe", "--tags", "--abbrev=0", "--match", "v2-[0-9]*"]]);
 });
 
 test("currentVersion falls back to package.json when there is no .git", async () => {
@@ -188,7 +188,7 @@ test("currentVersion reads the tag when .git is a worktree file", async () => {
   const directory = await versionFixture("agent-recall-version-worktree-", { gitType: "file" });
   const result = currentVersion({
     packageRoot: directory,
-    execFileSyncImpl: () => "v0.20.2\n",
+    execFileSyncImpl: () => "v2-0.20.2\n",
   });
   assert.equal(result, "0.20.2");
 });
@@ -198,14 +198,14 @@ function manifest(version = "0.2.0") {
   return {
     schemaVersion: 1,
     version,
-    tag: `v${version}`,
+    tag: `v2-${version}`,
     title: "自动更新",
     publishedAt: "2026-07-14T00:00:00.000Z",
-    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v${version}`,
+    releaseUrl: `https://github.com/zszz3/AgentRecall/releases/tag/v2-${version}`,
     notes: { features: ["终端显示更新。"], fixes: ["修复重启失败。"] },
     package: {
       name: `agent-recall-v2-${version}.tgz`,
-      url: `https://github.com/zszz3/AgentRecall/releases/download/v${version}/agent-recall-v2-${version}.tgz`,
+      url: `https://github.com/zszz3/AgentRecall/releases/download/v2-${version}/agent-recall-v2-${version}.tgz`,
       sha256: "a".repeat(64),
       checksumUrl: "",
     },
@@ -227,7 +227,7 @@ test("snoozes the terminal prompt for the same cached version", async () => {
   const fetchImpl = async () => {
     request += 1;
     return request === 1
-      ? new Response(JSON.stringify({ tag_name: "v0.2.0", assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }), { status: 200 })
+      ? new Response(JSON.stringify([{ tag_name: "v2-0.2.0", draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }]), { status: 200 })
       : new Response(JSON.stringify(value), { status: 200 });
   };
   await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now });
@@ -244,7 +244,7 @@ test("skips the same update version until a newer version is released", async ()
   const nextManifest = manifest("0.3.0");
   let value = firstManifest;
   const fetchImpl = async (url) => String(url).includes("api.github.com")
-    ? new Response(JSON.stringify({ tag_name: `v${value.version}`, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }), { status: 200 })
+    ? new Response(JSON.stringify([{ tag_name: `v2-${value.version}`, draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }]), { status: 200 })
     : new Response(JSON.stringify(value), { status: 200 });
 
   await checkForUpdate({ currentVersion: "0.1.0", cachePath, fetchImpl, force: true, now: 1 });
@@ -302,19 +302,22 @@ test("rejects untrusted release package URLs", () => {
 
 test("accepts release package URLs from the renamed GitHub repository", () => {
   const value = manifest("0.5.0");
-  value.releaseUrl = "https://github.com/zszz3/AgentRecall/releases/tag/v0.5.0";
-  value.package.url = "https://github.com/zszz3/AgentRecall/releases/download/v0.5.0/agent-recall-v2-0.5.0.tgz";
+  value.releaseUrl = "https://github.com/zszz3/AgentRecall/releases/tag/v2-0.5.0";
+  value.package.url = "https://github.com/zszz3/AgentRecall/releases/download/v2-0.5.0/agent-recall-v2-0.5.0.tgz";
   assert.equal(parseUpdateManifest(value).package.url, value.package.url);
 });
 
-test("checks GitHub latest release and formats the same notes for terminal output", async () => {
+test("checks the newest V2 release without selecting a newer V1 release", async () => {
   const value = manifest();
   const requests = [];
   const cacheDirectory = await temporaryDirectory("agent-session-update-cache-");
   const fetchImpl = async (url) => {
     requests.push(String(url));
     if (requests.length === 1) {
-      return new Response(JSON.stringify({ tag_name: "v0.2.0", assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] }), {
+      return new Response(JSON.stringify([
+        { tag_name: "v0.40.0", draft: false, prerelease: false, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] },
+        { tag_name: "v2-0.2.0", draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] },
+      ]), {
         status: 200,
         headers: { etag: '"release-etag"' },
       });
@@ -332,18 +335,33 @@ test("checks GitHub latest release and formats the same notes for terminal outpu
   assert.equal(result.manifest.version, "0.2.0");
   assert.match(formatUpdateNotice(result), /新增功能：[\s\S]*Bug 修复：/);
   assert.equal(requests.length, 2);
+  assert.equal(requests[0], "https://api.github.com/repos/zszz3/AgentRecall/releases?per_page=100");
 });
 
-test("falls back to the direct latest manifest when the GitHub release API fails", async () => {
+test("follows GitHub pagination until it finds the newest V2 release", async () => {
   const value = manifest();
   const requests = [];
-  const cacheDirectory = await temporaryDirectory("agent-session-update-fallback-");
+  const cacheDirectory = await temporaryDirectory("agent-session-update-pagination-");
+  const secondPage = "https://api.github.com/repositories/123/releases?per_page=100&page=2";
   const fetchImpl = async (url) => {
     requests.push(String(url));
     if (requests.length === 1) {
-      return new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 });
+      return new Response(JSON.stringify([
+        { tag_name: "v0.40.0", draft: false, prerelease: false, assets: [{ name: "update.json", browser_download_url: "https://download.example/update.json" }] },
+      ]), {
+        status: 200,
+        headers: {
+          etag: '"release-etag"',
+          link: `<${secondPage}>; rel="next", <${secondPage}>; rel="last"`,
+        },
+      });
     }
-    return new Response(JSON.stringify(value), { status: 200, headers: { etag: '"manifest-etag"' } });
+    if (requests.length === 2) {
+      return new Response(JSON.stringify([
+        { tag_name: "v2-0.2.0", draft: false, prerelease: false, assets: [{ name: "update-v2.json", browser_download_url: "https://download.example/update-v2.json" }] },
+      ]), { status: 200 });
+    }
+    return new Response(JSON.stringify(value), { status: 200 });
   };
 
   const result = await checkForUpdate({
@@ -355,23 +373,42 @@ test("falls back to the direct latest manifest when the GitHub release API fails
   });
 
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.error, null);
   assert.deepEqual(requests, [
-    "https://api.github.com/repos/zszz3/AgentRecall/releases/latest",
-    "https://github.com/zszz3/AgentRecall/releases/latest/download/update-v2.json",
+    "https://api.github.com/repos/zszz3/AgentRecall/releases?per_page=100",
+    secondPage,
+    "https://download.example/update-v2.json",
   ]);
 });
 
+test("keeps a cached V2 manifest when the release API is unavailable", async () => {
+  const value = manifest("0.2.0");
+  const cacheDirectory = await temporaryDirectory("agent-session-update-fallback-");
+  const cachePath = path.join(cacheDirectory, "update-check.json");
+  await writeFile(cachePath, JSON.stringify({ checkedAt: 100, etag: '"old"', manifest: value }), "utf8");
+
+  const result = await checkForUpdate({
+    currentVersion: "0.1.0",
+    cachePath,
+    fetchImpl: async () => new Response(JSON.stringify({ message: "API rate limit exceeded" }), { status: 403 }),
+    force: true,
+    now: 123,
+  });
+
+  assert.equal(result.updateAvailable, true);
+  assert.match(result.error, /GitHub release check failed \(403\)/);
+  assert.equal(result.manifest.version, "0.2.0");
+});
+
 test("provides an actionable manual fallback when automatic installation fails", () => {
-  const command = manualInstallCommand();
+  const command = manualInstallCommand("0.2.0");
   assert.equal(
     command,
-    "npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall-v2.tgz",
+    "npm install -g https://github.com/zszz3/AgentRecall/releases/download/v2-0.2.0/agent-recall-v2.tgz",
   );
-  const message = formatManualUpdateFallback();
+  const message = formatManualUpdateFallback("0.2.0");
   assert.match(message, /自动更新未完成/);
-  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/latest\/download\/agent-recall-v2\.tgz/);
-  assert.match(message, /https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/latest/);
+  assert.match(message, /npm install -g https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/download\/v2-0\.2\.0\/agent-recall-v2\.tgz/);
+  assert.match(message, /https:\/\/github\.com\/zszz3\/AgentRecall\/releases\/tag\/v2-0\.2\.0/);
 });
 
 test("converts subprocess update failures into readable text", () => {
@@ -384,6 +421,7 @@ test("converts subprocess update failures into readable text", () => {
 test("shows a macOS-native fallback without requiring Electron", () => {
   const calls = [];
   const shown = showNativeUpdateFailure("Electron download failed", {
+    version: "0.2.0",
     platform: "darwin",
     execFileSyncImpl: (command, args, options) => {
       calls.push({ command, args, options });
@@ -400,6 +438,7 @@ test("shows a macOS-native fallback without requiring Electron", () => {
 test("shows a Windows-native fallback without requiring Electron", () => {
   let invocation = null;
   const shown = showNativeUpdateFailure("npm install failed", {
+    version: "0.2.0",
     platform: "win32",
     execFileSyncImpl: (command, args, options) => {
       invocation = { command, args, options };

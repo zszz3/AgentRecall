@@ -43,6 +43,8 @@ function argumentValue(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+let attemptedVersion = null;
+
 async function applyStagedUpdate(staged) {
   let backedUp = false;
   await fs.rm(staged.backupPath, { recursive: true, force: true });
@@ -94,11 +96,13 @@ async function main() {
     if (stagedPath) {
       const staged = JSON.parse(await fs.readFile(stagedPath, "utf8"));
       version = staged.version;
+      attemptedVersion = version;
       process.stdout.write(`正在应用 AgentRecall v${version}...\n`);
       await applyStagedUpdate(staged);
     } else {
       const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
       version = manifest.version;
+      attemptedVersion = version;
       process.stdout.write(`正在安装 AgentRecall v${version}...\n`);
       await installUpdate(manifest, {
         nodePath: process.env.AGENT_RECALL_NODE_PATH,
@@ -118,10 +122,10 @@ if (require.main === module) main().catch(async (error) => {
   const message = error instanceof Error ? error.message : String(error);
   const updateInProgress = error?.code === "UPDATE_IN_PROGRESS";
   process.stderr.write(
-    `AgentRecall 更新失败：${message}${updateInProgress ? "" : `\n\n${formatManualUpdateFallback()}`}\n`,
+    `AgentRecall 更新失败：${message}${updateInProgress ? "" : `\n\n${formatManualUpdateFallback(attemptedVersion)}`}\n`,
   );
   if (!updateInProgress) {
-    const fallbackShown = showNativeUpdateFailure(message);
+    const fallbackShown = showNativeUpdateFailure(message, { version: attemptedVersion });
     if (fallbackShown) await clearInstallStatus().catch(() => undefined);
     try { launchInstalledApp(); } catch { /* Keep the recorded error for the next manual launch. */ }
   }

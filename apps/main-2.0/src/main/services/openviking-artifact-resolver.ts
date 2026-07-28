@@ -31,7 +31,7 @@ export async function resolveOpenVikingRuntimeManifest(
   assertToken(arch, "architecture");
   const artifactName = `openviking-runtime-${OPENVIKING_RUNTIME_VERSION}-${platform}-${arch}.tar.gz`;
   const releaseBase = options.releaseBaseUrl
-    ?? `https://github.com/zszz3/AgentRecall/releases/download/v${options.appVersion}`;
+    ?? `https://github.com/zszz3/AgentRecall/releases/download/v2-${options.appVersion}`;
   if (!releaseBase.startsWith("https://")) {
     throw new Error("OpenViking release base URL must use HTTPS.");
   }

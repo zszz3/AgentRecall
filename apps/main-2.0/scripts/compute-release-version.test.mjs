@@ -5,7 +5,7 @@ import { computeReleaseDecision } from "./compute-release-version.mjs";
 
 const fixNote = "# 修复重复发布\n\n## Bug 修复\n\n- 修复重复发布失败。\n";
 
-function runner({ existingTag = "v0.6.0", releaseDraft = "false", latestTag = "v0.6.0" } = {}) {
+function runner({ existingTag = "v2-0.6.0", releaseDraft = "false", latestTag = "v2-0.6.0" } = {}) {
   const calls = [];
   return {
     calls,
@@ -30,7 +30,7 @@ test("same commit with a published release is an idempotent no-op", () => {
     runCommand: commands.run,
   });
 
-  assert.deepEqual(decision, { version: "0.6.0", tag: "v0.6.0", releaseRequired: false });
+  assert.deepEqual(decision, { version: "0.6.0", tag: "v2-0.6.0", releaseRequired: false });
 });
 
 test("same commit with a draft release resumes publication", () => {
@@ -42,7 +42,7 @@ test("same commit with a draft release resumes publication", () => {
     runCommand: commands.run,
   });
 
-  assert.deepEqual(decision, { version: "0.6.0", tag: "v0.6.0", releaseRequired: true });
+  assert.deepEqual(decision, { version: "0.6.0", tag: "v2-0.6.0", releaseRequired: true });
 });
 
 test("same commit with a tag but no release resumes publication", () => {
@@ -54,11 +54,11 @@ test("same commit with a tag but no release resumes publication", () => {
     runCommand: commands.run,
   });
 
-  assert.deepEqual(decision, { version: "0.6.0", tag: "v0.6.0", releaseRequired: true });
+  assert.deepEqual(decision, { version: "0.6.0", tag: "v2-0.6.0", releaseRequired: true });
 });
 
 test("a different merged PR commit computes and publishes a new version", () => {
-  const commands = runner({ existingTag: "", latestTag: "v0.6.0" });
+  const commands = runner({ existingTag: "", latestTag: "v2-0.6.0" });
   const decision = computeReleaseDecision({
     mergedSha: "new-merge-sha",
     noteFile: "note.md",
@@ -66,7 +66,7 @@ test("a different merged PR commit computes and publishes a new version", () => 
     runCommand: commands.run,
   });
 
-  assert.deepEqual(decision, { version: "0.6.1", tag: "v0.6.1", releaseRequired: true });
+  assert.deepEqual(decision, { version: "0.6.1", tag: "v2-0.6.1", releaseRequired: true });
 });
 
 test("a repository without tags bumps from package.json", () => {
@@ -78,5 +78,5 @@ test("a repository without tags bumps from package.json", () => {
     runCommand: commands.run,
   });
 
-  assert.deepEqual(decision, { version: "1.2.4", tag: "v1.2.4", releaseRequired: true });
+  assert.deepEqual(decision, { version: "1.2.4", tag: "v2-1.2.4", releaseRequired: true });
 });

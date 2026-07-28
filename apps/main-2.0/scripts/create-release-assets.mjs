@@ -37,7 +37,7 @@ export async function createReleaseAssets({
   }
   const packageBytes = await readFile(packagePath);
   const sha256 = createHash("sha256").update(packageBytes).digest("hex");
-  const tag = `v${version}`;
+  const tag = `v2-${version}`;
   const manifestRepository = manifestRepositoryFor(repository);
   const releaseBaseUrl = `https://github.com/${manifestRepository}/releases`;
   const assetBaseUrl = `${releaseBaseUrl}/download/${tag}`;
@@ -98,7 +98,7 @@ export async function validateReleaseAssets({ outputDirectory, version, reposito
   const packageName = releasePackageName(version);
   const checksumName = `${packageName}.sha256`;
   const latestChecksumName = `${LATEST_PACKAGE_NAME}.sha256`;
-  const tag = `v${version}`;
+  const tag = `v2-${version}`;
   const releaseBaseUrl = `https://github.com/${manifestRepository}/releases`;
   const assetBaseUrl = `${releaseBaseUrl}/download/${tag}`;
   const assets = new Map();

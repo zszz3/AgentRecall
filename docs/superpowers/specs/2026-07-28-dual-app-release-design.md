@@ -1,39 +1,41 @@
-# AgentRecall 双应用 Release 设计
+# AgentRecall 双应用独立 Release 设计
 
 ## 目标
 
-同一次 GitHub Release 同时展示并提供 AgentRecall 1.0 与 `agent-recall-v2`，让用户能明确区分两套应用并分别下载安装。
+AgentRecall V1 与 `agent-recall-v2` 在 GitHub Releases 中分别展示、分别编号、分别提供更新说明和安装包，不再合并到同一条 Release。
 
 ## 发布模型
 
-- V1 与 V2 共用一个语义化版本号、Git tag 和 GitHub Release。
-- Release 正文固定包含 “AgentRecall 1.0” 与 “agent-recall-v2” 两个区块。
-- Release note 继续通过 `release-target: v1|v2|both` 路由；某一应用没有单独变化时显示同步发布说明，不挪用另一应用的更新内容。
-- 任一应用存在待发布的用户可见变化时，都重新构建和发布两套应用，保证 “latest” Release 始终包含两套可安装资产。
+- V1 延续现有 `v<version>` tag，例如 `v0.34.3`，并作为仓库的 Latest Release。
+- V2 使用独立 `v2-<version>` tag，例如 `v2-0.1.1`，版本从 `apps/main-2.0` 自己的版本继续递增。
+- Release note 通过 `release-target: v1|v2|both` 路由。只有收到相关 note 的应用才发布；`both` 会分别进入两条 Release。
+- V1 与 V2 各自以上一次产品 tag 为增量边界。V2 第一次发布以 `v0.34.2` 作为一次性的历史边界，避免收集 monorepo 之前的 V1 note。
 
 ## 资产隔离
 
-V1 保持现有兼容名称：
+V1 Release 只包含：
 
 - `agent-recall-<version>.tgz`
 - `agent-recall.tgz`
 - `update.json`
 
-V2 使用独立名称：
+V2 Release 只包含：
 
 - `agent-recall-v2-<version>.tgz`
 - `agent-recall-v2.tgz`
 - `update-v2.json`
 
-两套安装包分别生成校验和。V2 更新客户端只读取 `update-v2.json` 并下载 `agent-recall-v2.tgz`，避免误装 V1。
+两套安装包分别生成校验和并在发布前从对应 draft Release 下载复验。
 
-## 工作流
+## 更新发现
 
-发布工作流收集自上个稳定 tag 以来的全部 release notes，生成 V1 note、V2 note 和双应用展示正文。随后统一计算版本、安装并测试两个应用、构建和验证两组资产，最后创建 draft Release。只有两组远端资产下载复验都通过后，Release 才转为正式发布。
+- V1 保持使用仓库 Latest Release。
+- V2 从 GitHub Release 列表中只选择 `v2-*` tag 和 `update-v2.json`，不会把更新检查或手动安装地址指向 V1。
+- V2 的 OpenViking 运行时也从对应的 `v2-*` Release 下载。
 
 ## 验证
 
-- release-note 单元测试覆盖按目标分组、空目标同步说明和双区块渲染。
-- V2 发布资产测试覆盖独立文件名、URL、校验和与清单。
-- V2 更新测试覆盖 `update-v2.json` 查找和 V2 手动安装地址。
-- 工作流测试确认两个应用都参与构建、上传和远端复验。
+- 版本计算测试覆盖 V1 忽略 V2 tag、V2 独立递增。
+- 发布资产测试覆盖两套 tag、URL、文件名和校验和。
+- 更新测试覆盖 V2 跳过更晚发布的 V1 Release。
+- 工作流测试确认两条 Release 分别创建、上传和远端复验。

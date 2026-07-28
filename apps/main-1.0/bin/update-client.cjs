@@ -51,7 +51,7 @@ function currentVersion(options = {}) {
 
   try {
     const runGit = options.execFileSyncImpl || execFileSync;
-    const described = runGit("git", ["describe", "--tags", "--abbrev=0"], {
+    const described = runGit("git", ["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--exclude", "v2-*"], {
       cwd: root,
       encoding: "utf8",
       timeout: 2_000,
