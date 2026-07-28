@@ -57,14 +57,13 @@ jobs:
             gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
               --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
           )"
-          mapfile -t published_tags <<< "$published_tags_output"
           latest_v2_tag=""
-          for tag in "${published_tags[@]}"; do
+          while IFS= read -r tag; do
             if [[ "$tag" =~ ^v2-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               latest_v2_tag="$tag"
               break
             fi
-          done
+          done < <(printf '%s\n' "$published_tags_output")
           if [ -z "$latest_v2_tag" ]; then
             latest_v2_tag="$V2_BOOTSTRAP_TAG"
           fi

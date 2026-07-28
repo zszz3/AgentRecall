@@ -171,8 +171,13 @@ test("workflows require branch notes and publish accumulated changes every day o
 
 test("V2 releases publish the complete OpenViking runtime set", async () => {
   const releaseWorkflow = await readFile(".github/workflows/release.yml", "utf8");
+  const runtimeJob = releaseWorkflow.slice(
+    releaseWorkflow.indexOf("  openviking-runtime:"),
+    releaseWorkflow.indexOf("  release:"),
+  );
 
   assert.match(releaseWorkflow, /^\s{2}openviking-runtime:\s*$/m);
+  assert.doesNotMatch(runtimeJob, /\bmapfile\b/);
   assert.match(releaseWorkflow, /runner:\s*macos-15[\s\S]*platform:\s*darwin[\s\S]*arch:\s*arm64/);
   assert.match(releaseWorkflow, /runner:\s*macos-15-intel[\s\S]*platform:\s*darwin[\s\S]*arch:\s*x64/);
   assert.match(releaseWorkflow, /runner:\s*windows-2025[\s\S]*platform:\s*win32[\s\S]*arch:\s*x64/);
