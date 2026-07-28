@@ -143,8 +143,8 @@ describe("WorkbenchPage cards", () => {
     expect(html).toContain('style="-webkit-app-region:no-drag"');
   });
 
-  it("keeps the Session preview to three rows", () => {
-    const sessions: SessionSearchResult[] = Array.from({ length: 5 }, (_, index) => ({
+  it("shows the first thirty sessions in the Workbench preview", () => {
+    const sessions: SessionSearchResult[] = Array.from({ length: 35 }, (_, index) => ({
       sessionKey: `codex:session-${index}`,
       rawId: `session-${index}`,
       source: "codex-cli",
@@ -182,9 +182,9 @@ describe("WorkbenchPage cards", () => {
     }));
     const html = renderToStaticMarkup(createElement(WorkbenchPage, props({ sessions })));
 
-    expect(html).toContain("3 条最近会话");
-    expect(html).toContain("Session 3");
-    expect(html).not.toContain("Session 4");
+    expect(html).toContain("30 条最近会话");
+    expect(html).toContain("Session 30");
+    expect(html).not.toContain("Session 31");
   });
 
   it("shows existing chat groups instead of configured employees", () => {

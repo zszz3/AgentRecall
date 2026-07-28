@@ -103,7 +103,7 @@ export function usageCacheRate(value: Pick<SessionStatsSummary, "inputTokens" | 
   return Math.round((cachedInputTokens / totalInputTokens) * 1_000) / 10;
 }
 
-export const WORKBENCH_SESSION_LIMIT = 3;
+export const WORKBENCH_SESSION_LIMIT = 30;
 
 export function selectWorkbenchSessions<
   T extends Pick<SessionSearchResult, "sessionKey" | "source" | "rawId" | "lastActivityAt">,
