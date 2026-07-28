@@ -1185,8 +1185,12 @@
 
 .workbench-session-list {
   min-height: 0;
+  max-height: 160px;
   flex: 0 0 auto;
   margin-top: 7px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .workbench-session-row {

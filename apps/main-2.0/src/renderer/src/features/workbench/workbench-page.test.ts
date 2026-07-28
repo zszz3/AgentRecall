@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -12,6 +13,8 @@ import {
   reorderWorkbenchCard,
   type WorkbenchPageProps,
 } from "./workbench-page";
+
+const workbenchStyles = readFileSync(new URL("../../styles/workbench.css", import.meta.url), "utf8");
 
 const EMPTY_STATS: SessionStats = {
   total: {
@@ -185,6 +188,12 @@ describe("WorkbenchPage cards", () => {
     expect(html).toContain("30 条最近会话");
     expect(html).toContain("Session 30");
     expect(html).not.toContain("Session 31");
+  });
+
+  it("keeps the thirty-session preview inside a scrollable card", () => {
+    expect(workbenchStyles).toMatch(
+      /\.workbench-session-list\s*\{[^}]*max-height:\s*160px;[^}]*overflow-y:\s*auto;/s,
+    );
   });
 
   it("shows existing chat groups instead of configured employees", () => {
