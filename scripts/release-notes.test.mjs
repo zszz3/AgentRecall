@@ -118,7 +118,10 @@ test("workflows require branch notes and publish accumulated changes every day o
   assert.doesNotMatch(releaseWorkflow, /^\s{2}push:/m);
   assert.match(releaseWorkflow, /gh api --paginate "repos\/\$\{GITHUB_REPOSITORY\}\/releases\?per_page=100"/);
   assert.match(releaseWorkflow, /published_tags_output="\$\([\s\S]*gh api --paginate/);
-  assert.match(releaseWorkflow, /\n\s*\)"\n\s*mapfile -t published_tags <<< "\$published_tags_output"/);
+  const capturedTagsAssignment = /\r?\n\s*\)"\r?\n\s*mapfile -t published_tags <<< "\$published_tags_output"/;
+  assert.match(releaseWorkflow, capturedTagsAssignment);
+  const windowsReleaseWorkflow = releaseWorkflow.replaceAll("\n", "\r\n");
+  assert.match(windowsReleaseWorkflow, capturedTagsAssignment);
   assert.match(releaseWorkflow, /mapfile -t published_tags <<< "\$published_tags_output"/);
   assert.doesNotMatch(releaseWorkflow, /mapfile -t published_tags < <\(/);
   assert.match(releaseWorkflow, /select\(\.draft == false and \.prerelease == false\)/);
