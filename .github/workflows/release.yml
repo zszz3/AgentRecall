@@ -86,12 +86,22 @@ jobs:
         if: steps.pending.outputs.publish == 'true'
         run: npm run setup:v2
 
+      - name: Prepare isolated Rust toolchain
+        if: steps.pending.outputs.publish == 'true'
+        shell: bash
+        env:
+          RUSTUP_HOME: ${{ runner.temp }}/openviking-rustup
+          CARGO_HOME: ${{ runner.temp }}/openviking-cargo
+        run: rustup default stable
+
       - name: Build isolated OpenViking runtime
         if: steps.pending.outputs.publish == 'true'
         shell: bash
         env:
           BUILD_HOME: ${{ runner.temp }}/openviking-build-home
           OUTPUT_DIR: ${{ runner.temp }}/openviking-release
+          RUSTUP_HOME: ${{ runner.temp }}/openviking-rustup
+          CARGO_HOME: ${{ runner.temp }}/openviking-cargo
           PYTHON_URL: ${{ matrix.python_url }}
           PYTHON_SHA256: ${{ matrix.python_sha256 }}
         run: |

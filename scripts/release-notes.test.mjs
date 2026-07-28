@@ -182,6 +182,9 @@ test("V2 releases publish the complete OpenViking runtime set", async () => {
   assert.match(releaseWorkflow, /runner:\s*macos-15-intel[\s\S]*platform:\s*darwin[\s\S]*arch:\s*x64/);
   assert.match(releaseWorkflow, /runner:\s*windows-2025[\s\S]*platform:\s*win32[\s\S]*arch:\s*x64/);
   assert.match(releaseWorkflow, /apps\/main-2\.0\/scripts\/build-openviking-runtime\.mjs/);
+  assert.match(runtimeJob, /name:\s*Prepare isolated Rust toolchain[\s\S]*rustup default stable/);
+  assert.match(runtimeJob, /RUSTUP_HOME:\s*\$\{\{ runner\.temp \}\}\/openviking-rustup/);
+  assert.match(runtimeJob, /CARGO_HOME:\s*\$\{\{ runner\.temp \}\}\/openviking-cargo/);
   assert.match(releaseWorkflow, /pattern:\s*openviking-runtime-\*/);
   assert.match(releaseWorkflow, /apps\/main-2\.0\/scripts\/verify-openviking-runtime-assets\.mjs/);
   assert.match(
