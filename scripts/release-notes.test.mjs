@@ -120,7 +120,7 @@ test("workflows require branch notes and publish accumulated changes every day o
   assert.match(releaseWorkflow, /published_tags_output="\$\([\s\S]*gh api --paginate/);
   const capturedTagsAssignment = /\r?\n\s*\)"\r?\n\s*mapfile -t published_tags <<< "\$published_tags_output"/;
   assert.match(releaseWorkflow, capturedTagsAssignment);
-  const windowsReleaseWorkflow = releaseWorkflow.replaceAll("\n", "\r\n");
+  const windowsReleaseWorkflow = releaseWorkflow.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n");
   assert.match(windowsReleaseWorkflow, capturedTagsAssignment);
   assert.match(releaseWorkflow, /mapfile -t published_tags <<< "\$published_tags_output"/);
   assert.doesNotMatch(releaseWorkflow, /mapfile -t published_tags < <\(/);
