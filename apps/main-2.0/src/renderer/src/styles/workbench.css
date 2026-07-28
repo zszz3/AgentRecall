@@ -1185,7 +1185,7 @@
 
 .workbench-session-list {
   min-height: 0;
-  max-height: 160px;
+  max-height: 250px;
   flex: 0 0 auto;
   margin-top: 7px;
   overflow-y: auto;

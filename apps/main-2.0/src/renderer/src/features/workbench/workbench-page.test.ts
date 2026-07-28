@@ -190,9 +190,9 @@ describe("WorkbenchPage cards", () => {
     expect(html).not.toContain("Session 31");
   });
 
-  it("keeps the thirty-session preview inside a scrollable card", () => {
+  it("keeps the thirty-session preview inside a scrollable five-row card", () => {
     expect(workbenchStyles).toMatch(
-      /\.workbench-session-list\s*\{[^}]*max-height:\s*160px;[^}]*overflow-y:\s*auto;/s,
+      /\.workbench-session-list\s*\{[^}]*max-height:\s*250px;[^}]*overflow-y:\s*auto;/s,
     );
   });
 
