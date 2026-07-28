@@ -36,7 +36,7 @@ jobs:
           published_tags_output="$(
             gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
               --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
-          )
+          )"
           mapfile -t published_tags <<< "$published_tags_output"
           latest_v1_tag=""
           latest_v2_tag=""
