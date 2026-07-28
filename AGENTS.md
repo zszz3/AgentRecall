@@ -10,6 +10,13 @@
 - Create a helper only when it is reused across independent call sites or isolates a meaningful domain, lifecycle, safety, concurrency, or resource-management boundary.
 - Do not add trivial pass-through wrappers, single-use aliases, or functions exported only to make an implementation detail directly testable. Test observable behavior through the owning function or component instead.
 
+## Dual-app session development
+
+- `apps/main-1.0` is the stable session application and `apps/main-2.0` includes the upgraded session experience. For every session-related bug fix or feature, inspect the relevant behavior in both applications before changing code.
+- When the behavior applies to both applications, implement and test it in both directories. Do not mechanically copy implementations: V1 uses SQLite and mostly synchronous store APIs, while V2 uses PostgreSQL and asynchronous store APIs.
+- If a session behavior intentionally differs between V1 and V2, document the reason in the change and cover the intended divergence with tests.
+- Changes unrelated to sessions may target only the affected application.
+
 ## Development branches and release notes
 
 - Every independent development branch must add exactly one user-facing release note before opening an MR.
