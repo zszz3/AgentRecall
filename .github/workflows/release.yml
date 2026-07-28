@@ -13,7 +13,108 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  openviking-runtime:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+            python_url: https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only_stripped.tar.gz
+            python_sha256: 55bc1a5edbc8ac4da0081f4f5731ed2d1ed10c57cb37a820b2a0dbc7cad742e9
+          - runner: macos-15-intel
+            platform: darwin
+            arch: x64
+            python_url: https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-apple-darwin-install_only_stripped.tar.gz
+            python_sha256: 6bab7fa97d4f2ddba86da0e05acff66c53b5edaca1df8edcf00ddca785a9c59b
+          - runner: windows-2025
+            platform: win32
+            arch: x64
+            python_url: https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-x86_64-pc-windows-msvc-install_only_stripped.tar.gz
+            python_sha256: 24168aff2e7d93784c6a436124c4ebb79b076a4e289bde4902c08333507b71d0
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Detect pending V2 release
+        id: pending
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+          V2_BOOTSTRAP_TAG: v0.34.2
+        run: |
+          published_tags_output="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
+          )"
+          mapfile -t published_tags <<< "$published_tags_output"
+          latest_v2_tag=""
+          for tag in "${published_tags[@]}"; do
+            if [[ "$tag" =~ ^v2-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              latest_v2_tag="$tag"
+              break
+            fi
+          done
+          if [ -z "$latest_v2_tag" ]; then
+            latest_v2_tag="$V2_BOOTSTRAP_TAG"
+          fi
+          git rev-parse "$latest_v2_tag" >/dev/null 2>&1 || {
+            echo "Published V2 release tag $latest_v2_tag does not exist in the checkout." >&2
+            exit 1
+          }
+          v2_publish=false
+          while IFS= read -r note; do
+            [ -n "$note" ] || continue
+            target="$(node scripts/release-notes.mjs target "$note")"
+            if [ "$target" = "v2" ] || [ "$target" = "both" ]; then
+              v2_publish=true
+              break
+            fi
+          done < <(git diff --name-only --diff-filter=A "$latest_v2_tag" "$RELEASE_SHA" -- .release-notes | grep -Ev '/README\.md$' || true)
+          echo "publish=$v2_publish" >> "$GITHUB_OUTPUT"
+
+      - name: Install runtime build dependencies
+        if: steps.pending.outputs.publish == 'true'
+        run: npm run setup:v2
+
+      - name: Build isolated OpenViking runtime
+        if: steps.pending.outputs.publish == 'true'
+        shell: bash
+        env:
+          BUILD_HOME: ${{ runner.temp }}/openviking-build-home
+          OUTPUT_DIR: ${{ runner.temp }}/openviking-release
+          PYTHON_URL: ${{ matrix.python_url }}
+          PYTHON_SHA256: ${{ matrix.python_sha256 }}
+        run: |
+          node apps/main-2.0/scripts/build-openviking-runtime.mjs \
+            --version 0.4.11 \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --build-home "$BUILD_HOME" \
+            --output-dir "$OUTPUT_DIR" \
+            --python-url "$PYTHON_URL" \
+            --python-sha256 "$PYTHON_SHA256"
+
+      - name: Upload OpenViking runtime artifact
+        if: steps.pending.outputs.publish == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openviking-runtime-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/openviking-release/openviking-runtime-*
+          if-no-files-found: error
+
   release:
+    needs: openviking-runtime
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -197,6 +298,18 @@ jobs:
               --output "$GITHUB_WORKSPACE/release/v2"
           fi
 
+      - name: Download OpenViking runtime artifacts
+        if: steps.pending.outputs.v2_publish == 'true' && steps.v2_version.outputs.release_required == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: openviking-runtime-*
+          path: release/v2
+          merge-multiple: true
+
+      - name: Verify OpenViking runtime artifacts
+        if: steps.pending.outputs.v2_publish == 'true' && steps.v2_version.outputs.release_required == 'true'
+        run: node apps/main-2.0/scripts/verify-openviking-runtime-assets.mjs release/v2 0.4.11
+
       - name: Publish V1 GitHub Release
         if: steps.pending.outputs.v1_publish == 'true' && steps.v1_version.outputs.release_required == 'true'
         env:
@@ -260,7 +373,7 @@ jobs:
           else
             gh release create "$V2_TAG" --draft --verify-tag --title "agent-recall-v2 v${V2_VERSION}" --notes-file release/v2/release-notes-v2.md --latest=false
           fi
-          gh release upload "$V2_TAG" release/v2/*.tgz release/v2/*.sha256 release/v2/update-v2.json --clobber
+          gh release upload "$V2_TAG" release/v2/*.tgz release/v2/*.sha256 release/v2/update-v2.json release/v2/openviking-runtime-*.tar.gz release/v2/openviking-runtime-*.tar.gz.json --clobber
           verify_directory="$(mktemp -d)"
           trap 'rm -rf "$verify_directory"' EXIT
           gh release download "$V2_TAG" \
@@ -269,10 +382,12 @@ jobs:
             --pattern "agent-recall-v2.tgz" \
             --pattern "agent-recall-v2.tgz.sha256" \
             --pattern "update-v2.json" \
+            --pattern "openviking-runtime-*" \
             --dir "$verify_directory"
           node apps/main-2.0/scripts/create-release-assets.mjs \
             --validate \
             --version "$V2_VERSION" \
             --repository "$GITHUB_REPOSITORY" \
             --output "$verify_directory"
+          node apps/main-2.0/scripts/verify-openviking-runtime-assets.mjs "$verify_directory" 0.4.11
           gh release edit "$V2_TAG" --draft=false --latest=false

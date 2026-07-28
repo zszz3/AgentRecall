@@ -168,3 +168,23 @@ test("workflows require branch notes and publish accumulated changes every day o
   assert.ok(tagIdentityEmail > tagIdentityName, "release workflow must configure the tag creator email after its name");
   assert.ok(annotatedTag > tagIdentityEmail, "release workflow must configure an identity before creating an annotated tag");
 });
+
+test("V2 releases publish the complete OpenViking runtime set", async () => {
+  const releaseWorkflow = await readFile(".github/workflows/release.yml", "utf8");
+
+  assert.match(releaseWorkflow, /^\s{2}openviking-runtime:\s*$/m);
+  assert.match(releaseWorkflow, /runner:\s*macos-15[\s\S]*platform:\s*darwin[\s\S]*arch:\s*arm64/);
+  assert.match(releaseWorkflow, /runner:\s*macos-15-intel[\s\S]*platform:\s*darwin[\s\S]*arch:\s*x64/);
+  assert.match(releaseWorkflow, /runner:\s*windows-2025[\s\S]*platform:\s*win32[\s\S]*arch:\s*x64/);
+  assert.match(releaseWorkflow, /apps\/main-2\.0\/scripts\/build-openviking-runtime\.mjs/);
+  assert.match(releaseWorkflow, /pattern:\s*openviking-runtime-\*/);
+  assert.match(releaseWorkflow, /apps\/main-2\.0\/scripts\/verify-openviking-runtime-assets\.mjs/);
+  assert.match(
+    releaseWorkflow,
+    /gh release upload "\$V2_TAG"[\s\S]*release\/v2\/openviking-runtime-\*\.tar\.gz/,
+  );
+  assert.match(
+    releaseWorkflow,
+    /gh release download "\$V2_TAG"[\s\S]*--pattern "openviking-runtime-\*"/,
+  );
+});
