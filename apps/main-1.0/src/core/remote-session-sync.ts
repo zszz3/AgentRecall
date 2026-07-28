@@ -7,6 +7,7 @@ import type { MigrationAgent, PortableSession, SessionMessage, SessionSearchResu
 export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
 const REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES = 5 * 1024 * 1024;
+const REMOTE_SESSION_STORAGE_UPLOAD_CONCURRENCY = 4;
 const REMOTE_SESSION_COLUMNS =
   "id,source_session_key,source_agent,source_source,source_environment_id,source_environment_kind,source_environment_label,title,project_path,started_at,updated_at,content_hash,revision_version,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 const REMOTE_SESSION_LEGACY_COLUMNS =
@@ -762,11 +763,11 @@ export class SupabaseRemoteSessionClient {
     );
 
     try {
-      for (const object of storageObjects) {
-        await this.uploadStorageObject(object.objectKey, object.bytes, object.mimeType);
-      }
-      await this.uploadStorageObject(payload.detail_object_key, detailJson);
-      await this.uploadStorageObject(payload.portable_object_key, portableJson);
+      await this.uploadStorageObjects(storageObjects);
+      await Promise.all([
+        this.uploadStorageObject(payload.detail_object_key, detailJson),
+        this.uploadStorageObject(payload.portable_object_key, portableJson),
+      ]);
 
       const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?on_conflict=id`, {
         method: "POST",
@@ -974,6 +975,28 @@ export class SupabaseRemoteSessionClient {
     });
     const responseBody = await readResponseBody(response);
     if (!response.ok) throw new Error(supabaseErrorMessage(response.status, responseBody));
+  }
+
+  private async uploadStorageObjects(objects: RemoteSessionStorageObjectUpload[]): Promise<void> {
+    let cursor = 0;
+    let failed = false;
+    let firstError: unknown;
+    const workers = Array.from(
+      { length: Math.min(REMOTE_SESSION_STORAGE_UPLOAD_CONCURRENCY, objects.length) },
+      async () => {
+        while (cursor < objects.length && !failed) {
+          const object = objects[cursor++];
+          try {
+            await this.uploadStorageObject(object.objectKey, object.bytes, object.mimeType);
+          } catch (error) {
+            if (!failed) firstError = error;
+            failed = true;
+          }
+        }
+      },
+    );
+    await Promise.all(workers);
+    if (failed) throw firstError;
   }
 
   private async downloadStorageObject(key: string): Promise<string> {

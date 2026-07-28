@@ -169,6 +169,31 @@ describe("SessionStore PostgreSQL facade", () => {
     ).resolves.toContain(shell.sessionKey);
   });
 
+  it("keeps cached Cursor messages deletable without touching the shared source database", async () => {
+    const store = createStore();
+    const sessionKey = "cursor:workspace:cached";
+    const stateDbPath = "/synthetic/Cursor/User/globalStorage/state.vscdb";
+    await store.upsertIndexedSession(
+      indexedSession({
+        sessionKey,
+        rawId: "cached",
+        source: "cursor-agent",
+        filePath: stateDbPath,
+      }),
+      messages,
+    );
+
+    await store.setSessionSourceAvailable(sessionKey, false);
+
+    await expect(store.getSession(sessionKey)).resolves.toMatchObject({
+      sourceAvailable: false,
+      messageCount: messages.length,
+    });
+    await expect(store.getSessionSourceArtifacts(sessionKey)).resolves.toEqual([]);
+    await expect(store.deleteSession(sessionKey)).resolves.toBe(true);
+    await expect(store.getSession(sessionKey)).resolves.toBeNull();
+  });
+
   it("keeps Session search results paged while filtering subagents in SQL", async () => {
     const store = createStore();
     await store.upsertIndexedSession(indexedSession(), messages);

@@ -517,7 +517,8 @@ export class PostgresSessionRepository {
             content_indexed_mtime_ms = excluded.content_indexed_mtime_ms,
             content_indexed_size = excluded.content_indexed_size,
             is_subagent = excluded.is_subagent,
-            parent_session_id = excluded.parent_session_id
+            parent_session_id = excluded.parent_session_id,
+            source_available = true
         `,
         [
           session.sessionKey,
@@ -716,7 +717,8 @@ export class PostgresSessionRepository {
             total_tokens = excluded.total_tokens,
             indexed_at = excluded.indexed_at,
             is_subagent = excluded.is_subagent,
-            parent_session_id = excluded.parent_session_id
+            parent_session_id = excluded.parent_session_id,
+            source_available = true
         `,
         [
           session.sessionKey,
@@ -867,10 +869,21 @@ export class PostgresSessionRepository {
     await this.database.query(
       `
         update agent_recall.sessions
-        set indexed_at = now()
-        where session_key = $1 and indexed_at <= to_timestamp(0)
+        set indexed_at = case
+              when indexed_at <= to_timestamp(0) then now()
+              else indexed_at
+            end,
+            source_available = true
+        where session_key = $1
       `,
       [sessionKey],
+    );
+  }
+
+  async setSessionSourceAvailable(sessionKey: string, available: boolean): Promise<void> {
+    await this.database.query(
+      "update agent_recall.sessions set source_available = $2 where session_key = $1",
+      [sessionKey, available],
     );
   }
 
@@ -1306,6 +1319,7 @@ export class PostgresSessionRepository {
   async listSessionKeysByFilePath(
     environmentId: string,
     filePaths: ReadonlySet<string>,
+    sessionKeys: ReadonlySet<string> = new Set(),
   ): Promise<string[]> {
     const result = await this.database.query<{
       session_key: string;
@@ -1326,7 +1340,7 @@ export class PostgresSessionRepository {
         || (
           row.source === "cursor-agent"
           && /(^|[\\/])state\.vscdb$/iu.test(row.file_path)
-          && numberValue(row.message_count) === 0
+          && (numberValue(row.message_count) === 0 || !sessionKeys.has(row.session_key))
         ))
       .map((row) => row.session_key);
   }
@@ -1446,13 +1460,17 @@ export class PostgresSessionRepository {
 
   async getSessionDeletionTarget(
     sessionKey: string,
-  ): Promise<{ source: SessionSource; filePath: string } | null> {
-    const result = await this.database.query<{ source: SessionSource; file_path: string }>(
-      "select source, file_path from agent_recall.sessions where session_key = $1",
+  ): Promise<{ source: SessionSource; filePath: string; sourceAvailable: boolean } | null> {
+    const result = await this.database.query<{ source: SessionSource; file_path: string; source_available: boolean }>(
+      "select source, file_path, source_available from agent_recall.sessions where session_key = $1",
       [sessionKey],
     );
     return result.rows[0]
-      ? { source: result.rows[0].source, filePath: result.rows[0].file_path }
+      ? {
+          source: result.rows[0].source,
+          filePath: result.rows[0].file_path,
+          sourceAvailable: result.rows[0].source_available,
+        }
       : null;
   }
 

@@ -117,6 +117,14 @@ export const SessionRow = memo(function SessionRow({
             {sourceUiFamily(session.source) === "claude" ? <Code2 size={13} /> : <TerminalIcon size={13} />}
             {SOURCE_LABEL[session.source]}
           </span>
+          {session.sourceAvailable === false ? (
+            <span
+              className="source-cache-badge"
+              title={l("The original Cursor session is unavailable. AgentRecall is showing its cached messages.", "原始 Cursor 会话已不可用，当前展示的是 AgentRecall 缓存消息。")}
+            >
+              {l("Cache", "缓存")}
+            </span>
+          ) : null}
           <span className={`environment-badge ${session.environmentKind}`} title={environmentBadgeTitle(session, language)}>
               {session.environmentKind === "wsl" ? <Container size={13} /> : isRemoteSession(session) ? <Server size={13} /> : <Laptop size={13} />}
             {environmentBadgeLabel(session, language)}

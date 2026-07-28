@@ -293,6 +293,20 @@ describe("PostgresSessionRepository", () => {
     }]);
   });
 
+  it("marks cached source data available again when the original Session reappears", async () => {
+    await repository.upsertIndexedSession(session(), messages, tokens, traces);
+    await repository.setSessionSourceAvailable("codex:session-a", false);
+    await expect(repository.getSession("codex:session-a")).resolves.toMatchObject({
+      sourceAvailable: false,
+    });
+
+    await repository.touchIndexedAtIfMissing("codex:session-a");
+
+    await expect(repository.getSession("codex:session-a")).resolves.toMatchObject({
+      sourceAvailable: true,
+    });
+  });
+
   it("counts remote summary messages and deduplicates synchronized Token events", async () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
     const remote = session({

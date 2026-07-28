@@ -678,6 +678,47 @@ describe("remote session sync model", () => {
     expect(storageWrites).toBe(0);
   });
 
+  it("uploads source chunks with bounded concurrency", async () => {
+    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
+    const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
+      session: SESSION,
+      detail,
+      portable: PORTABLE,
+      now: 11_000,
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let storageWrites = 0;
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url, init) => {
+        if (String(url).includes("/rest/v1/")) {
+          return init?.method === "POST"
+            ? new Response(JSON.stringify([payload]), { status: 200 })
+            : new Response("[]", { status: 200 });
+        }
+        storageWrites += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return new Response("{}", { status: 200 });
+      },
+    });
+    const sourceObjects = Array.from({ length: 8 }, (_, index) => ({
+      objectKey: `sessions/${payload.id}/upload/source/chunk-${index}`,
+      bytes: Buffer.from(`chunk-${index}`),
+      mimeType: "application/octet-stream",
+    }));
+
+    await expect(client.uploadSession(payload, detailJson, portableJson, sourceObjects)).resolves.toMatchObject({
+      status: "uploaded",
+    });
+    expect(storageWrites).toBe(10);
+    expect(maxInFlight).toBe(4);
+  });
+
   it("does not delete an existing attachment when a remote update fails", async () => {
     const attachmentKey = `sessions/${remoteSessionId(SESSION.sessionKey)}/attachments/abc-shot.png`;
     const previousDetail = {

@@ -1,11 +1,16 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createRequire } from "node:module";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, syncLoadedSessionsInBatches } from "./indexer";
 import { createInMemoryStore } from "./postgres/test-session-store";
 import { writeMigratedSession } from "./session-migration-writers";
 import type { IndexedSession, LoadedSession, MigrationTarget, PortableSession, SessionSource } from "./types";
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
 
 function session(index: number): LoadedSession {
   const id = `session-${index}`;
@@ -200,6 +205,83 @@ describe("indexer", () => {
       expect(warm).toMatchObject({ indexed: 0, skipped: 1, total: 1 });
       expect(await store.searchSessions({ query: "original question", limit: 10 })).toHaveLength(1);
     } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a Cursor conversation as cache when its row disappears from the shared database", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-cursor-cache-"));
+    const stateDbPath = path.join(homeDir, "Cursor", "User", "globalStorage", "state.vscdb");
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    const db = new DatabaseSync(stateDbPath);
+    db.exec(`
+      CREATE TABLE composerHeaders (
+        composerId TEXT PRIMARY KEY,
+        createdAt INTEGER,
+        isSubagent INTEGER,
+        value TEXT
+      );
+      CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);
+    `);
+    db.prepare("INSERT INTO composerHeaders (composerId, createdAt, isSubagent, value) VALUES (?, ?, 0, ?)").run(
+      "live",
+      Date.parse("2026-07-27T10:00:00Z"),
+      JSON.stringify({
+        name: "Live Cursor session",
+        workspaceIdentifier: { uri: { scheme: "file", fsPath: "/repo/live" } },
+      }),
+    );
+    db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      "bubbleId:live:user-1",
+      JSON.stringify({
+        bubbleId: "user-1",
+        type: 1,
+        text: "Live prompt",
+        createdAt: "2026-07-27T10:00:00Z",
+      }),
+    );
+    db.close();
+    const stat = fs.statSync(stateDbPath);
+    const cached = session(99);
+    cached.session = {
+      ...cached.session,
+      sessionKey: "cursor:repo-stale:stale",
+      rawId: "stale",
+      source: "cursor-agent",
+      filePath: stateDbPath,
+      fileMtimeMs: stat.mtimeMs,
+      fileSize: stat.size,
+    };
+    cached.messages = [{
+      role: "user",
+      content: "Only cached prompt",
+      timestamp: "2026-07-26T10:00:00Z",
+      index: 0,
+    }];
+    await store.upsertIndexedSession(cached.session, cached.messages);
+
+    try {
+      await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions: {
+          homeDir,
+          includeCursorAgent: true,
+          cursorStateDbPath: stateDbPath,
+        },
+      });
+
+      await expect(store.getSession("cursor:repo-stale:stale")).resolves.toMatchObject({
+        sourceAvailable: false,
+        messageCount: 1,
+      });
+      await expect(store.findByRawId("live")).resolves.toMatchObject({
+        sourceAvailable: true,
+        messageCount: 1,
+      });
+      await expect(store.searchSessions({ query: "Only cached prompt", limit: 10 })).resolves.toHaveLength(1);
+    } finally {
+      await store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });
     }
   });

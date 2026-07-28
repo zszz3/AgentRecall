@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -248,6 +249,99 @@ describe("remote session sync model", () => {
     }
   });
 
+  it("archives the complete source separately from visible messages", async () => {
+    const rawTranscript = Buffer.from('{"visible":true}\n{"hiddenBranch":true}');
+    const built = await buildRemoteSessionUploadFromStore({
+      getSession: async () => ({ ...SESSION, sourceAvailable: false }),
+      getAllMessages: async () => MESSAGES,
+      getTraceEvents: async () => [],
+      getSessionSourceArtifacts: async () => [{
+        kind: "session-file" as const,
+        fileName: "abc.jsonl",
+        bytes: rawTranscript,
+        mimeType: "application/x-ndjson",
+      }],
+    }, SESSION.sessionKey, 12_000);
+
+    expect(built.detail.schemaVersion).toBe(3);
+    expect(built.detail.session.sourceAvailable).toBeUndefined();
+    expect(built.sourceObjects).toHaveLength(1);
+    expect(Buffer.from(built.sourceObjects[0].bytes)).toEqual(rawTranscript);
+    expect(built.detail.sourceArchive?.entries).toEqual([
+      expect.objectContaining({
+        sessionKey: SESSION.sessionKey,
+        sourceSessionId: SESSION.rawId,
+        artifactKind: "session-file",
+        fileName: "abc.jsonl",
+        sizeBytes: rawTranscript.byteLength,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        objectKey: expect.stringMatching(/^sessions\/[a-f0-9]{32}\/[0-9a-f-]+\/source\/0000-[a-f0-9]{64}-abc\.jsonl$/),
+      }),
+    ]);
+    expect(built.payload.revision_version).toBe(3);
+    expect(parseDetailSnapshot(JSON.parse(built.detailJson)).sourceArchive?.entries).toHaveLength(1);
+  });
+
+  it("splits large source artifacts into independently verified objects without changing their content revision", async () => {
+    const rawTranscript = Buffer.alloc(5 * 1024 * 1024 + 137, "complete-source-archive");
+    const built = await buildRemoteSessionUploadFromStore({
+      getSession: async () => SESSION,
+      getAllMessages: async () => MESSAGES,
+      getTraceEvents: async () => [],
+      getSessionSourceArtifacts: async () => [{
+        kind: "session-file" as const,
+        fileName: "large.jsonl",
+        bytes: rawTranscript,
+        mimeType: "application/x-ndjson",
+      }],
+    }, SESSION.sessionKey, 12_000);
+
+    expect(built.sourceObjects).toHaveLength(2);
+    expect(built.sourceObjects.every((object) => object.bytes.byteLength <= 5 * 1024 * 1024)).toBe(true);
+    expect(Buffer.compare(
+      Buffer.concat(built.sourceObjects.map((object) => Buffer.from(object.bytes))),
+      rawTranscript,
+    )).toBe(0);
+    const [entry] = built.detail.sourceArchive?.entries ?? [];
+    expect(entry.objectKey).toBeUndefined();
+    expect(entry.chunks).toEqual(built.sourceObjects.map((object) => ({
+      objectKey: object.objectKey,
+      sha256: createHash("sha256").update(object.bytes).digest("hex"),
+      sizeBytes: object.bytes.byteLength,
+    })));
+    expect(parseDetailSnapshot(JSON.parse(built.detailJson)).sourceArchive?.entries[0]).toEqual(entry);
+
+    const legacyLocationDetail = {
+      ...built.detail,
+      sourceArchive: {
+        schemaVersion: 1 as const,
+        entries: [{
+          ...entry,
+          objectKey: `sessions/${built.payload.id}/legacy/source/large.jsonl`,
+          chunks: undefined,
+        }],
+      },
+    };
+    expect(remoteSessionContentHash(legacyLocationDetail, built.portable)).toBe(built.payload.content_hash);
+  });
+
+  it("changes the remote revision when only hidden source data changes", async () => {
+    const build = (raw: string) => buildRemoteSessionUploadFromStore({
+      getSession: async () => SESSION,
+      getAllMessages: async () => MESSAGES,
+      getTraceEvents: async () => [],
+      getSessionSourceArtifacts: async () => [{
+        kind: "session-file" as const,
+        fileName: "abc.jsonl",
+        bytes: Buffer.from(raw),
+        mimeType: "application/x-ndjson",
+      }],
+    }, SESSION.sessionKey, 12_000);
+
+    expect((await build("visible\nhidden-a")).payload.content_hash)
+      .not.toBe((await build("visible\nhidden-b")).payload.content_hash);
+  });
+
   it("rounds timestamp fields for Supabase bigint columns", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000.9);
     const { payload } = buildRemoteSessionPayload({
@@ -412,8 +506,32 @@ describe("remote session sync model", () => {
   });
 
   it("deletes storage objects before removing the remote database row", async () => {
-    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
-    const { payload } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
+    const sourceKeys = [
+      `sessions/${remoteSessionId(SESSION.sessionKey)}/archive/source.jsonl.part-0`,
+      `sessions/${remoteSessionId(SESSION.sessionKey)}/archive/source.jsonl.part-1`,
+    ];
+    const detail = {
+      ...buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000),
+      schemaVersion: 3 as const,
+      sourceArchive: {
+        schemaVersion: 1 as const,
+        entries: [{
+          sessionKey: SESSION.sessionKey,
+          sourceSessionId: SESSION.rawId,
+          parentSessionId: null,
+          artifactKind: "session-file" as const,
+          fileName: "abc.jsonl",
+          chunks: sourceKeys.map((objectKey) => ({
+            objectKey,
+            sha256: "b".repeat(64),
+            sizeBytes: 6,
+          })),
+          sha256: "a".repeat(64),
+          sizeBytes: 12,
+        }],
+      },
+    };
+    const { payload, detailJson } = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
     const calls: string[] = [];
     const client = new SupabaseRemoteSessionClient({
       url: "https://example.supabase.co",
@@ -422,7 +540,7 @@ describe("remote session sync model", () => {
         const method = init?.method ?? "GET";
         if (String(url).includes("/storage/v1/object/")) {
           calls.push(`storage-${method}`);
-          return new Response(method === "GET" ? JSON.stringify(detail) : "{}", { status: 200 });
+          return new Response(method === "GET" ? detailJson : "{}", { status: 200 });
         }
         if (method === "DELETE") {
           calls.push("row-DELETE");
@@ -441,8 +559,13 @@ describe("remote session sync model", () => {
     });
     expect(calls[0]).toBe("row-GET");
     expect(calls[1]).toBe("storage-GET");
-    expect(calls.slice(2, 4).sort()).toEqual(["storage-DELETE", "storage-DELETE"]);
-    expect(calls[4]).toBe("row-DELETE");
+    expect(calls.slice(2, 6).sort()).toEqual([
+      "storage-DELETE",
+      "storage-DELETE",
+      "storage-DELETE",
+      "storage-DELETE",
+    ]);
+    expect(calls[6]).toBe("row-DELETE");
   });
 
   it("keeps a selected session as failed when its delete preflight cannot reach Supabase", async () => {
@@ -475,6 +598,47 @@ describe("remote session sync model", () => {
 
     await expect(client.uploadSession(payload, detailJson, portableJson)).rejects.toThrow("temporary gateway failure");
     expect(storageWrites).toBe(0);
+  });
+
+  it("uploads source chunks with bounded concurrency", async () => {
+    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
+    const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
+      session: SESSION,
+      detail,
+      portable: PORTABLE,
+      now: 11_000,
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let storageWrites = 0;
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://example.supabase.co",
+      anonKey: "anon",
+      fetchImpl: async (url, init) => {
+        if (String(url).includes("/rest/v1/")) {
+          return init?.method === "POST"
+            ? new Response(JSON.stringify([payload]), { status: 200 })
+            : new Response("[]", { status: 200 });
+        }
+        storageWrites += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        inFlight -= 1;
+        return new Response("{}", { status: 200 });
+      },
+    });
+    const sourceObjects = Array.from({ length: 8 }, (_, index) => ({
+      objectKey: `sessions/${payload.id}/upload/source/chunk-${index}`,
+      bytes: Buffer.from(`chunk-${index}`),
+      mimeType: "application/octet-stream",
+    }));
+
+    await expect(client.uploadSession(payload, detailJson, portableJson, sourceObjects)).resolves.toMatchObject({
+      status: "uploaded",
+    });
+    expect(storageWrites).toBe(10);
+    expect(maxInFlight).toBe(4);
   });
 
   it("does not delete an existing attachment when a remote update fails", async () => {

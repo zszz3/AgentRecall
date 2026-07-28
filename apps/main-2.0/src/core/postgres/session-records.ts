@@ -30,6 +30,7 @@ export interface SessionRow extends Record<string, unknown> {
   favorited: boolean;
   pinned: boolean;
   hidden: boolean;
+  source_available: boolean;
   last_opened_at: Date | string | null;
   last_resumed_at: Date | string | null;
   last_activity_at: Date | string;
@@ -339,6 +340,7 @@ export function hydrateSession(
     displayTitle,
     favorited: Boolean(row.favorited),
     hidden: Boolean(row.hidden),
+    sourceAvailable: Boolean(row.source_available),
     tags: row.tag_names ?? [],
     matchSnippet: bestTurn?.snippet ?? null,
     lastOpenedAt: row.last_opened_at ? timeValue(row.last_opened_at) : null,

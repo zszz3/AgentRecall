@@ -5,6 +5,7 @@ import type { RemoteSessionRestoreDependencies } from "../../core/remote-session
 import type {
   RemoteSessionDetailSnapshot,
   RemoteSessionListItem,
+  RemoteSessionSourceArchive,
 } from "../../core/remote-session-sync";
 import type { SessionSyncBinding } from "../../core/session-store";
 import type { SessionSyncQueueEvent } from "../../core/session-sync-queue";
@@ -215,11 +216,13 @@ function createHarness(options: {
     })),
   };
   const createClient = vi.fn(() => client);
-  const buildUpload = vi.fn(() => ({
+  const buildUpload = vi.fn(async () => ({
     payload: { content_hash: localRevision },
     detailJson: "{}",
     portableJson: "{}",
-  } as unknown as ReturnType<RemoteSessionServiceOperations["buildUpload"]>));
+    attachmentObjects: [],
+    sourceObjects: [],
+  } as unknown as Awaited<ReturnType<RemoteSessionServiceOperations["buildUpload"]>>));
   const removeQueueFiles = vi.fn();
   const clearQueue = vi.fn();
   const restorePortable = vi.fn(async () => migrationResult());
@@ -334,6 +337,83 @@ describe("RemoteSessionService cloud orchestration", () => {
     });
   });
 
+  it("uploads raw source artifacts together with optional attachments", async () => {
+    const harness = createHarness({ settings: configuredSettings() });
+    const sourceObject = {
+      objectKey: "sessions/remote/upload/source/session.jsonl",
+      bytes: Buffer.from("raw"),
+      mimeType: "application/x-ndjson",
+    };
+    const attachmentObject = {
+      objectKey: "sessions/remote/attachments/image.png",
+      bytes: Buffer.from("image"),
+      mimeType: "image/png",
+    };
+    harness.buildUpload.mockResolvedValue({
+      payload: { content_hash: "local-revision" },
+      detailJson: "{\"schemaVersion\":3}",
+      portableJson: "{}",
+      sourceObjects: [sourceObject],
+      attachmentObjects: [attachmentObject],
+    } as unknown as Awaited<ReturnType<RemoteSessionServiceOperations["buildUpload"]>>);
+
+    await harness.service.upload("local:session-1");
+
+    expect(harness.client.uploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({ content_hash: "local-revision" }),
+      "{\"schemaVersion\":3}",
+      "{}",
+      [sourceObject, attachmentObject],
+    );
+  });
+
+  it("uploads a cached Cursor conversation while preserving an existing cloud source archive", async () => {
+    const cached = localSession({
+      source: "cursor-agent",
+      sourceAvailable: false,
+    });
+    const binding: SessionSyncBinding = {
+      localSessionKey: cached.sessionKey,
+      remoteSessionId: "remote-1",
+      lastLocalRevision: "local-revision",
+      lastRemoteRevision: "remote-revision",
+      lastSyncedAt: 1,
+      direction: "upload",
+    };
+    const archive: RemoteSessionSourceArchive = {
+      schemaVersion: 1,
+      entries: [{
+        sessionKey: cached.sessionKey,
+        sourceSessionId: cached.rawId,
+        parentSessionId: null,
+        artifactKind: "cursor-state",
+        fileName: "session.cursor-state.json",
+        objectKey: "sessions/remote-1/previous/source/session.cursor-state.json",
+        sha256: "a".repeat(64),
+        sizeBytes: 100,
+      }],
+    };
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [cached],
+      bindings: [binding],
+    });
+    vi.mocked(harness.client.getDetailSnapshot).mockResolvedValue({
+      sourceArchive: archive,
+    } as RemoteSessionDetailSnapshot);
+
+    await expect(harness.service.upload(cached.sessionKey)).resolves.toMatchObject({ status: "uploaded" });
+
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      cached.sessionKey,
+      123,
+      "remote-1",
+      true,
+      archive,
+    );
+  });
+
   it("rejects ZCode uploads before building a portable remote session", async () => {
     const harness = createHarness({
       settings: configuredSettings(),
@@ -386,7 +466,7 @@ describe("RemoteSessionService cloud orchestration", () => {
     expect(harness.store.deleteSessionSyncBindingForRemoteId).toHaveBeenNthCalledWith(2, "remote-2");
   });
 
-  it("excludes local and cloud subagent conversations from the sync comparison", async () => {
+  it("hydrates subagent bundles before excluding them from the top-level sync comparison", async () => {
     const regular = localSession();
     const subagent = localSession({
       sessionKey: "local:subagent",
@@ -404,10 +484,14 @@ describe("RemoteSessionService cloud orchestration", () => {
 
     expect(harness.store.searchSessions).toHaveBeenCalledWith({
       limit: 100_000,
-      excludeSubagents: true,
+      excludeSubagents: false,
     });
-    expect(harness.ensureSessionDetails).toHaveBeenCalledOnce();
+    expect(harness.ensureSessionDetails).toHaveBeenCalledTimes(2);
     expect(harness.ensureSessionDetails).toHaveBeenCalledWith(regular.sessionKey);
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(subagent.sessionKey);
+    expect(Math.max(...harness.ensureSessionDetails.mock.invocationCallOrder)).toBeLessThan(
+      harness.buildUpload.mock.invocationCallOrder[0],
+    );
     expect(harness.buildSyncItems).toHaveBeenCalledWith(
       [{ session: regular, revision: "local-revision" }],
       [],
@@ -428,6 +512,41 @@ describe("RemoteSessionService cloud orchestration", () => {
       0,
       undefined,
       false,
+      undefined,
+    );
+  });
+
+  it("compares a cached Cursor conversation without failing the cloud session list", async () => {
+    const cached = localSession({
+      source: "cursor-agent",
+      sourceAvailable: false,
+    });
+    const archive: RemoteSessionSourceArchive = {
+      schemaVersion: 1,
+      entries: [],
+    };
+    const harness = createHarness({
+      settings: configuredSettings(),
+      sessions: [cached],
+    });
+    vi.mocked(harness.client.getDetailSnapshot).mockResolvedValue({
+      sourceArchive: archive,
+    } as RemoteSessionDetailSnapshot);
+
+    await expect(harness.service.listSyncItems()).resolves.toEqual([]);
+
+    expect(harness.buildUpload).toHaveBeenCalledWith(
+      harness.store,
+      cached.sessionKey,
+      0,
+      undefined,
+      true,
+      archive,
+    );
+    expect(harness.buildSyncItems).toHaveBeenCalledWith(
+      [{ session: cached, revision: "local-revision" }],
+      [expect.objectContaining({ id: "remote-1" })],
+      [],
     );
   });
 

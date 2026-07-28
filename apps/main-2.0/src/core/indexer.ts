@@ -186,6 +186,7 @@ export async function syncDefaultSessionsInBatches(
   const shouldSkipFile = loadOptions.shouldSkipFile;
   const onSkippedFile = loadOptions.onSkippedFile;
   const scannedFilePaths = new Set<string>();
+  const scannedSessionKeys = new Set<string>();
   const rawLoaded = loadDefaultSessionsIterator({
     ...loadOptions,
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0) => {
@@ -206,6 +207,7 @@ export async function syncDefaultSessionsInBatches(
   const loaded = (function* () {
     for (const item of rawLoaded) {
       if (item.session.filePath) scannedFilePaths.add(item.session.filePath);
+      scannedSessionKeys.add(item.session.sessionKey);
       yield item;
     }
   })();
@@ -215,13 +217,20 @@ export async function syncDefaultSessionsInBatches(
       dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   });
-  // Prune sessions whose source files no longer exist on disk. Only applies to
-  // the local environment — remote sessions are synced independently and their
-  // file paths are not local filesystem paths. scannedFilePaths is collected
-  // from shouldSkipFile (file-based sources) and from yielded LoadedSessions
-  // (DB-backed sources like Hermes/OpenCode whose file_path is the DB path).
-  for (const staleKey of await store.listSessionKeysByFilePath("local", scannedFilePaths)) {
-    await store.deleteSessionRecord(staleKey);
+  // Prune sessions whose source files no longer exist in local storage. Cursor
+  // is the exception: its shared database can forget one conversation while our
+  // parsed message cache remains the only readable copy.
+  for (const staleKey of await store.listSessionKeysByFilePath("local", scannedFilePaths, scannedSessionKeys)) {
+    const staleSession = await store.getSession(staleKey);
+    if (
+      loadOptions.includeCursorAgent
+      && staleSession?.source === "cursor-agent"
+      && staleSession.messageCount > 0
+    ) {
+      await store.setSessionSourceAvailable(staleKey, false);
+    } else {
+      await store.deleteSessionRecord(staleKey);
+    }
   }
   return { ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped };
 }

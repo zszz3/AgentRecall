@@ -667,6 +667,18 @@
   font-weight: 600;
 }
 
+.source-cache-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--warning-text, #9a6700) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--warning-text, #9a6700);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .environment-badge.local {
   background: var(--panel-subtle);
   color: var(--text-muted);

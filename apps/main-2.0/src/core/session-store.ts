@@ -1,5 +1,10 @@
 import * as fs from "node:fs";
 
+import { isLocalSessionStorage } from "./session-environment";
+import {
+  readSessionSourceArtifacts,
+  type SessionSourceArtifact,
+} from "./session-source-archive";
 import type {
   SkillUsageEvent,
   SkillUsageSnapshot,
@@ -148,6 +153,11 @@ export class SessionStore {
     await this.sessions.touchIndexedAtIfMissing(sessionKey);
   }
 
+  async setSessionSourceAvailable(sessionKey: string, available: boolean): Promise<void> {
+    await this.ready;
+    await this.sessions.setSessionSourceAvailable(sessionKey, available);
+  }
+
   async listIndexedSessionFiles(
     environmentId = "local",
   ): Promise<Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>> {
@@ -186,6 +196,10 @@ export class SessionStore {
     if (!target) return false;
     if (target.source === "hermes") throw new Error("Cannot delete shared Hermes source database.");
     if (target.source === "opencode-cli") throw new Error("Cannot delete shared OpenCode source database.");
+    if (target.source === "cursor-agent" && /(^|[\\/])state\.vscdb$/iu.test(target.filePath)) {
+      if (!target.sourceAvailable) return this.sessions.deleteSessionRecord(sessionKey);
+      throw new Error("Cannot delete shared Cursor source database.");
+    }
     deleteSessionSourceFile(target.filePath);
     return this.sessions.deleteSessionRecord(sessionKey);
   }
@@ -206,9 +220,10 @@ export class SessionStore {
   async listSessionKeysByFilePath(
     environmentId: string,
     filePaths: ReadonlySet<string>,
+    sessionKeys: ReadonlySet<string> = new Set(),
   ): Promise<string[]> {
     await this.ready;
-    return this.sessions.listSessionKeysByFilePath(environmentId, filePaths);
+    return this.sessions.listSessionKeysByFilePath(environmentId, filePaths, sessionKeys);
   }
 
   async markOpened(sessionKey: string): Promise<void> {
@@ -368,6 +383,13 @@ export class SessionStore {
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
     await this.ready;
     return this.sessions.getSession(sessionKey);
+  }
+
+  async getSessionSourceArtifacts(sessionKey: string): Promise<SessionSourceArtifact[]> {
+    const session = await this.getSession(sessionKey);
+    if (!session || !isLocalSessionStorage(session)) return [];
+    if (session.source === "cursor-agent" && session.sourceAvailable === false) return [];
+    return readSessionSourceArtifacts(session);
   }
 
   async findByRawId(rawId: string): Promise<SessionSearchResult | null> {

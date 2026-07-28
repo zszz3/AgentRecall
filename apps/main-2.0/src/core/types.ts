@@ -333,6 +333,7 @@ export interface SessionSearchResult extends IndexedSession {
   displayTitle: string;
   favorited: boolean;
   hidden: boolean;
+  sourceAvailable?: boolean;
   tags: string[];
   matchSnippet: string | null;
   lastOpenedAt: number | null;

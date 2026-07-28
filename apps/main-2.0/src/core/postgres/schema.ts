@@ -1076,4 +1076,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ON agent_recall.chat_attempt_events (attempt_id, sequence);
     `,
   ],
+}, {
+  version: 11,
+  name: "retain unavailable Cursor Session caches",
+  statements: [
+    `
+      ALTER TABLE agent_recall.sessions
+        ADD COLUMN IF NOT EXISTS source_available boolean NOT NULL DEFAULT true;
+    `,
+  ],
 }];

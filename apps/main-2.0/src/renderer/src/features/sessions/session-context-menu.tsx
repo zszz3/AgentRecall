@@ -24,6 +24,7 @@ import {
   remoteRevealTitle,
   unsupportedMigrationTitle,
 } from "../../session-ui";
+import { canDeleteSessionLocally } from "../../../../core/session-environment";
 
 export function SessionContextMenu({
   state,
@@ -71,6 +72,7 @@ export function SessionContextMenu({
   const l = (en: string, zh: string): string => localize(language, en, zh);
   const menu = useClampedContextMenuStyle(state);
   const localOnlyDisabled = isRemoteSession(state.session);
+  const canDelete = canDeleteSessionLocally(state.session);
   const revealTitle = localOnlyDisabled
     ? remoteRevealTitle(language)
     : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
@@ -144,10 +146,12 @@ export function SessionContextMenu({
       <button onClick={onReveal} disabled={localOnlyDisabled} title={revealTitle}>
         <FolderOpen size={14} /> Show in {revealLabel}
       </button>
-      <hr />
-      <button className="danger" onClick={onDelete}>
-        <Trash2 size={14} /> {l("Delete Session", "删除会话")}
-      </button>
+      {canDelete ? <>
+        <hr />
+        <button className="danger" onClick={onDelete}>
+          <Trash2 size={14} /> {state.session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete Session", "删除会话")}
+        </button>
+      </> : null}
     </div>
   );
 }

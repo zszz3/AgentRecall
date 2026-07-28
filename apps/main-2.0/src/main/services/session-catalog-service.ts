@@ -1,5 +1,5 @@
 import type { IndexStatus } from "../../core/indexer";
-import { isLocalSessionEnvironment } from "../../core/session-environment";
+import { canDeleteSessionLocally, isLocalSessionEnvironment } from "../../core/session-environment";
 import type { SessionStore, TraceEventQueryOptions } from "../../core/session-store";
 import type {
   LiveSessionSnapshot,
@@ -172,6 +172,12 @@ export class SessionCatalogService {
 
   async delete(sessionKey: string): Promise<boolean> {
     const session = await this.dependencies.store.getSession(sessionKey);
+    if (session && !canDeleteSessionLocally(session)) {
+      throw new Error("Cannot delete sessions stored on SSH remote environments.");
+    }
+    if (session?.environmentKind === "ssh") {
+      return this.dependencies.store.deleteSessionRecord(sessionKey);
+    }
     if (!session || session.environmentKind !== "wsl") {
       return this.dependencies.store.deleteSession(sessionKey);
     }

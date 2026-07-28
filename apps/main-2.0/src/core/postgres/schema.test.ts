@@ -57,6 +57,22 @@ describe("AgentRecall PostgreSQL schema", () => {
       "openviking_imported_turns",
     ]));
     expect(names).toHaveLength(59);
+    const sessionColumns = await database.query<{
+      column_name: string;
+      is_nullable: string;
+      column_default: string | null;
+    }>(`
+      select column_name, is_nullable, column_default
+      from information_schema.columns
+      where table_schema = 'agent_recall'
+        and table_name = 'sessions'
+        and column_name = 'source_available'
+    `);
+    expect(sessionColumns.rows).toEqual([{
+      column_name: "source_available",
+      is_nullable: "NO",
+      column_default: "true",
+    }]);
     await database.close();
   });
 

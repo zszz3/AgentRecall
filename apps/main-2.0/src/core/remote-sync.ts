@@ -163,6 +163,53 @@ def parse_message(row, kind):
     return None
   return {"role": row.get("type"), "content": text, "timestamp": row.get("timestamp") if isinstance(row.get("timestamp"), str) else ""}`;
 
+const REMOTE_VISIBLE_ROWS_PY = String.raw`def visible_codex_rows(rows):
+  preamble = []
+  turns = []
+  current = None
+  for row in rows:
+    payload = row.get("payload")
+    if row.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "thread_rolled_back":
+      count = payload.get("num_turns")
+      if not isinstance(count, int) or isinstance(count, bool) or count <= 0 or count > len(turns):
+        return rows
+      del turns[-count:]
+      current = turns[-1] if turns else None
+      continue
+    parsed = parse_message(row, "codex")
+    if parsed and parsed["role"] == "user":
+      current = [row]
+      turns.append(current)
+    elif current is not None:
+      current.append(row)
+    else:
+      preamble.append(row)
+  return preamble + [row for turn in turns for row in turn]
+
+def visible_claude_rows(rows):
+  nodes = {}
+  for row in rows:
+    uuid = row.get("uuid")
+    if not isinstance(uuid, str) or not uuid or uuid in nodes:
+      return rows
+    nodes[uuid] = row
+  if not rows:
+    return rows
+  visible = set()
+  current = rows[-1]
+  while current is not None:
+    uuid = current.get("uuid")
+    if not isinstance(uuid, str) or not uuid or uuid in visible:
+      return rows
+    visible.add(uuid)
+    parent_uuid = current.get("parentUuid")
+    if parent_uuid is None or parent_uuid == "":
+      break
+    if not isinstance(parent_uuid, str) or parent_uuid not in nodes:
+      return rows
+    current = nodes[parent_uuid]
+  return [row for row in rows if row.get("uuid") in visible]`;
+
 // Token usage accounting for the summary collector. Mirrors session-loader.ts
 // (extractCodexTokenEvents / extractClaudeTokenEvents) so the lightweight summary total matches
 // the value computed when the session is fully hydrated on demand.
@@ -707,14 +754,23 @@ if kind == "codewiz":
   finally:
     db.close()
 else:
-  with path.open("r", encoding="utf-8", errors="replace") as handle:
-    for line in handle:
+  if kind in {"codex", "claude"}:
+    rows = []
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+      for line in handle:
+        try:
+          row = json.loads(line)
+        except Exception:
+          continue
+        if isinstance(row, dict):
+          rows.append(row)
+    if kind == "codex":
+      rows = visible_codex_rows(rows)
+    else:
+      rows = visible_claude_rows([row for row in rows if row.get("type") in {"user", "assistant"}])
+    for row in rows:
       if limit <= 0:
         break
-      try:
-        row = json.loads(line)
-      except Exception:
-        continue
       parsed = parse_message(row, kind)
       if not parsed:
         continue
@@ -728,9 +784,31 @@ else:
       message_index += 1
       if message_index >= end:
         break
+  else:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+      for line in handle:
+        if limit <= 0:
+          break
+        try:
+          row = json.loads(line)
+        except Exception:
+          continue
+        parsed = parse_message(row, kind)
+        if not parsed:
+          continue
+        if message_index >= offset and message_index < end:
+          messages.append({
+            "index": message_index,
+            "role": parsed["role"],
+            "content": parsed["content"],
+            "timestamp": parsed["timestamp"],
+          })
+        message_index += 1
+        if message_index >= end:
+          break
 
 print(json.dumps({"messages": messages}, ensure_ascii=False))`.replace("__REQUEST_JSON__", () => JSON.stringify(request));
-  const script = `import json\nfrom pathlib import Path\n${REMOTE_MESSAGE_PARSER_PY}\n${body}`;
+  const script = `import json\nfrom pathlib import Path\n${REMOTE_MESSAGE_PARSER_PY}\n${REMOTE_VISIBLE_ROWS_PY}\n${body}`;
   return buildPythonBase64Command(script);
 }
 
@@ -1009,6 +1087,8 @@ home = Path.home()
 
 ${REMOTE_MESSAGE_PARSER_PY}
 
+${REMOTE_VISIBLE_ROWS_PY}
+
 ${REMOTE_TOKEN_USAGE_PY}
 
 def title_from(text):
@@ -1070,6 +1150,7 @@ def emit_codex_summary(path, stat, titles, source):
   is_subagent = False
   parent_session_id = None
   token_state = new_codex_token_state()
+  rows = []
   try:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
       for line in handle:
@@ -1079,6 +1160,7 @@ def emit_codex_summary(path, stat, titles, source):
           continue
         if not isinstance(row, dict):
           continue
+        rows.append(row)
         if row.get("type") == "session_meta":
           payload = row.get("payload")
           if isinstance(payload, dict):
@@ -1113,14 +1195,15 @@ def emit_codex_summary(path, stat, titles, source):
             timestamp = parsed_timestamp
           continue
         accumulate_codex_tokens(token_state, row)
-        parsed = parse_message(row, "codex")
-        if parsed:
-          message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
-          message_count += 1
-          if parsed["role"] == "user" and not first_question:
-            first_question = parsed["content"]
   except Exception:
     return
+  for row in visible_codex_rows(rows):
+    parsed = parse_message(row, "codex")
+    if parsed:
+      message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
+      message_count += 1
+      if parsed["role"] == "user" and not first_question:
+        first_question = parsed["content"]
   indexed_title, indexed_updated_at = titles.get(raw_id, ("", ""))
   indexed_timestamp = _iso_timestamp_ms(indexed_updated_at)
   if indexed_timestamp is not None:
@@ -1159,6 +1242,7 @@ def emit_claude_summary(path, stat, index, source):
   message_events = []
   git_branch = ""
   token_state = new_claude_token_state()
+  rows = []
   try:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
       for line in handle:
@@ -1168,6 +1252,7 @@ def emit_claude_summary(path, stat, index, source):
           continue
         if not isinstance(row, dict) or row.get("type") not in {"user", "assistant"}:
           continue
+        rows.append(row)
         if not project_path and isinstance(row.get("cwd"), str):
           project_path = row.get("cwd")
         if is_subagent:
@@ -1176,14 +1261,15 @@ def emit_claude_summary(path, stat, index, source):
         if not git_branch and isinstance(row.get("gitBranch"), str):
           git_branch = row.get("gitBranch")
         accumulate_claude_tokens(token_state, row)
-        parsed = parse_message(row, "claude")
-        if parsed:
-          message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
-          message_count += 1
-          if parsed["role"] == "user" and not first_question:
-            first_question = parsed["content"]
   except Exception:
     return
+  for row in visible_claude_rows(rows):
+    parsed = parse_message(row, "claude")
+    if parsed:
+      message_events.append({"index": message_count, "timestamp": _tok_timestamp(parsed["timestamp"])})
+      message_count += 1
+      if parsed["role"] == "user" and not first_question:
+        first_question = parsed["content"]
   emit({
     "kind": "claude-project",
     "source": source,

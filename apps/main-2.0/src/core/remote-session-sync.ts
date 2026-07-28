@@ -6,20 +6,46 @@ import type { MigrationAgent, PortableSession, SessionMessage, SessionSearchResu
 
 export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
+const REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES = 5 * 1024 * 1024;
+const REMOTE_SESSION_STORAGE_UPLOAD_CONCURRENCY = 4;
 const REMOTE_SESSION_COLUMNS =
   "id,source_session_key,source_agent,source_source,source_environment_id,source_environment_kind,source_environment_label,title,project_path,started_at,updated_at,content_hash,revision_version,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 const REMOTE_SESSION_LEGACY_COLUMNS =
   "id,source_session_key,source_agent,source_source,title,project_path,started_at,updated_at,content_hash,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 
 export interface RemoteSessionDetailSnapshot {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   exportedAt: number;
   session: SessionSearchResult;
   messages: SessionMessage[];
   traceEvents: SessionTraceEvent[];
+  sourceArchive?: RemoteSessionSourceArchive;
 }
 
-export interface RemoteSessionAttachmentUpload {
+export interface RemoteSessionSourceArchive {
+  schemaVersion: 1;
+  entries: RemoteSessionSourceArchiveEntry[];
+}
+
+export interface RemoteSessionSourceArchiveEntry {
+  sessionKey: string;
+  sourceSessionId: string;
+  parentSessionId: string | null;
+  artifactKind: "session-file" | "cursor-state" | "codewiz-state";
+  fileName: string;
+  objectKey?: string;
+  chunks?: RemoteSessionSourceArchiveChunk[];
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface RemoteSessionSourceArchiveChunk {
+  objectKey: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface RemoteSessionStorageObjectUpload {
   objectKey: string;
   bytes: Uint8Array;
   mimeType: string;
@@ -244,10 +270,11 @@ export function buildRemoteSessionSnapshot(
   traceEvents: SessionTraceEvent[],
   now = Date.now(),
 ): RemoteSessionDetailSnapshot {
+  const { sourceAvailable: _sourceAvailable, ...snapshotSession } = session;
   return {
     schemaVersion: 1,
     exportedAt: now,
-    session,
+    session: snapshotSession,
     messages,
     traceEvents,
   };
@@ -290,6 +317,17 @@ export function remoteSessionContentHash(detail: RemoteSessionDetailSnapshot, po
     },
     messages: detail.messages,
     traceEvents: detail.traceEvents,
+    sourceArchive: detail.sourceArchive
+      ? {
+          schemaVersion: detail.sourceArchive.schemaVersion,
+          entries: detail.sourceArchive.entries.map(({
+            objectKey: _objectKey,
+            chunks: _chunks,
+            sessionKey: _sessionKey,
+            ...entry
+          }) => entry),
+        }
+      : null,
     portable: {
       sourceSessionId: portable.sourceSessionId ?? null,
       sourceAgent: portable.sourceAgent,
@@ -339,7 +377,7 @@ export function buildRemoteSessionPayload(options: {
       started_at: options.portable.startedAt,
       updated_at: integerTimestamp(options.session.lastActivityAt || options.session.fileMtimeMs || options.session.timestamp),
       content_hash: contentHash,
-      revision_version: 2,
+      revision_version: options.detail.schemaVersion >= 3 ? 3 : 2,
       message_count: options.detail.messages.length,
       trace_event_count: options.detail.traceEvents.length,
       ai_summary: options.session.aiSummary,
@@ -358,11 +396,12 @@ export function buildRemoteSessionPayload(options: {
 export async function buildRemoteSessionUploadFromStore(
   store: Pick<SessionStore, "getSession" | "getAllMessages" | "getTraceEvents">
     & Partial<Pick<SessionStore, "searchSessions">>
-    & Partial<Pick<SessionStore, "getAttachmentFile">>,
+    & Partial<Pick<SessionStore, "getAttachmentFile" | "getSessionSourceArtifacts">>,
   sessionKey: string,
   now = Date.now(),
   remoteId?: string,
   includeAttachments = true,
+  preservedSourceArchive?: RemoteSessionSourceArchive,
 ): Promise<{
   session: SessionSearchResult;
   detail: RemoteSessionDetailSnapshot;
@@ -370,7 +409,8 @@ export async function buildRemoteSessionUploadFromStore(
   payload: RemoteSessionUploadPayload;
   detailJson: string;
   portableJson: string;
-  attachmentObjects: RemoteSessionAttachmentUpload[];
+  attachmentObjects: RemoteSessionStorageObjectUpload[];
+  sourceObjects: RemoteSessionStorageObjectUpload[];
 }> {
   const [session, messages, traceEvents] = await Promise.all([
     store.getSession(sessionKey),
@@ -395,13 +435,15 @@ export async function buildRemoteSessionUploadFromStore(
   const subagents: PortableSession[] = [];
   const pendingParentIds = [session.rawId];
   const visitedSessionKeys = new Set<string>();
-  while (pendingParentIds.length > 0 && subagents.length < 200) {
+  const descendantSessions: SessionSearchResult[] = [];
+  while (pendingParentIds.length > 0) {
     const parentId = pendingParentIds.shift()!;
     const children = (childrenByParentId.get(parentId) ?? [])
       .sort((left, right) => left.timestamp - right.timestamp || left.sessionKey.localeCompare(right.sessionKey));
     for (const child of children) {
-      if (visitedSessionKeys.has(child.sessionKey) || subagents.length >= 200) continue;
+      if (visitedSessionKeys.has(child.sessionKey)) continue;
       visitedSessionKeys.add(child.sessionKey);
+      descendantSessions.push(child);
       subagents.push(remotePortableSessionFrom(child, await store.getAllMessages(child.sessionKey)));
       pendingParentIds.push(child.rawId);
     }
@@ -409,7 +451,49 @@ export async function buildRemoteSessionUploadFromStore(
   if (subagents.length > 0) portable.subagents = subagents;
   const resolvedRemoteId = remoteId || remoteSessionId(session.sessionKey);
   const uploadId = randomUUID();
-  const attachmentObjects: RemoteSessionAttachmentUpload[] = [];
+  const attachmentObjects: RemoteSessionStorageObjectUpload[] = [];
+  const sourceObjects: RemoteSessionStorageObjectUpload[] = [];
+  const sourceArchiveEntries: RemoteSessionSourceArchiveEntry[] = [];
+  for (const sourceSession of [session, ...descendantSessions]) {
+    const artifacts = await store.getSessionSourceArtifacts?.(sourceSession.sessionKey) ?? [];
+    for (const artifact of artifacts) {
+      const digest = createHash("sha256").update(artifact.bytes).digest("hex");
+      const safeName = artifact.fileName.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-160) || "session";
+      const sequence = String(sourceArchiveEntries.length).padStart(4, "0");
+      const objectKeyPrefix = `sessions/${resolvedRemoteId}/${uploadId}/source/${sequence}-${digest}-${safeName}`;
+      let storageLocation: Pick<RemoteSessionSourceArchiveEntry, "objectKey" | "chunks">;
+      if (artifact.bytes.byteLength <= REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES) {
+        sourceObjects.push({ objectKey: objectKeyPrefix, bytes: artifact.bytes, mimeType: artifact.mimeType });
+        storageLocation = { objectKey: objectKeyPrefix };
+      } else {
+        const chunkCount = Math.ceil(artifact.bytes.byteLength / REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES);
+        const chunkDigits = String(chunkCount - 1).length;
+        const chunks: RemoteSessionSourceArchiveChunk[] = [];
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          const start = chunkIndex * REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES;
+          const bytes = artifact.bytes.subarray(
+            start,
+            Math.min(start + REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES, artifact.bytes.byteLength),
+          );
+          const chunkKey = `${objectKeyPrefix}.part-${String(chunkIndex).padStart(chunkDigits, "0")}`;
+          const chunkDigest = createHash("sha256").update(bytes).digest("hex");
+          sourceObjects.push({ objectKey: chunkKey, bytes, mimeType: artifact.mimeType });
+          chunks.push({ objectKey: chunkKey, sha256: chunkDigest, sizeBytes: bytes.byteLength });
+        }
+        storageLocation = { chunks };
+      }
+      sourceArchiveEntries.push({
+        sessionKey: sourceSession.sessionKey,
+        sourceSessionId: sourceSession.rawId,
+        parentSessionId: sourceSession.parentSessionId ?? null,
+        artifactKind: artifact.kind,
+        fileName: artifact.fileName,
+        ...storageLocation,
+        sha256: digest,
+        sizeBytes: artifact.bytes.byteLength,
+      });
+    }
+  }
   const remoteMessages = await Promise.all(messages.map(async (message) => ({
     ...message,
     attachments: message.attachments
@@ -431,9 +515,13 @@ export async function buildRemoteSessionUploadFromStore(
       }))
       : undefined,
   })));
+  const sourceArchive = sourceArchiveEntries.length > 0
+    ? { schemaVersion: 1 as const, entries: sourceArchiveEntries }
+    : preservedSourceArchive;
   const detail: RemoteSessionDetailSnapshot = {
     ...buildRemoteSessionSnapshot(session, remoteMessages, traceEvents, now),
-    schemaVersion: 2,
+    schemaVersion: sourceArchive ? 3 : 2,
+    ...(sourceArchive ? { sourceArchive } : {}),
   };
   const { payload, detailJson, portableJson } = buildRemoteSessionPayload({
     session,
@@ -443,7 +531,7 @@ export async function buildRemoteSessionUploadFromStore(
     remoteId: resolvedRemoteId,
     uploadId,
   });
-  return { session, detail, portable, payload, detailJson, portableJson, attachmentObjects };
+  return { session, detail, portable, payload, detailJson, portableJson, attachmentObjects, sourceObjects };
 }
 
 export function buildSessionSyncItems(
@@ -668,20 +756,23 @@ export class SupabaseRemoteSessionClient {
     payload: RemoteSessionUploadPayload,
     detailJson: string,
     portableJson: string,
-    attachmentObjects: RemoteSessionAttachmentUpload[] = [],
+    storageObjects: RemoteSessionStorageObjectUpload[] = [],
   ): Promise<RemoteSessionUploadResult> {
     const existing = await this.getRemoteSessionOrNull(payload.id);
     if (existing?.contentHash === payload.content_hash) return { status: "skipped", remoteSession: existing };
-    const previousAttachmentKeys = existing
-      ? await this.getDetailSnapshot(existing).then(remoteAttachmentObjectKeys).catch(() => [])
+    const previousManagedObjectKeys = existing
+      ? await this.getDetailSnapshot(existing).then((snapshot) => remoteManagedObjectKeys(snapshot, existing.id)).catch(() => [])
       : [];
+    const nextManagedObjectKeys = new Set(
+      remoteManagedObjectKeys(parseDetailSnapshot(JSON.parse(detailJson) as unknown), payload.id),
+    );
 
     try {
-      for (const attachment of attachmentObjects) {
-        await this.uploadStorageObject(attachment.objectKey, attachment.bytes, attachment.mimeType);
-      }
-      await this.uploadStorageObject(payload.detail_object_key, detailJson);
-      await this.uploadStorageObject(payload.portable_object_key, portableJson);
+      await this.uploadStorageObjects(storageObjects);
+      await Promise.all([
+        this.uploadStorageObject(payload.detail_object_key, detailJson),
+        this.uploadStorageObject(payload.portable_object_key, portableJson),
+      ]);
 
       const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?on_conflict=id`, {
         method: "POST",
@@ -706,8 +797,8 @@ export class SupabaseRemoteSessionClient {
           existing.portableObjectKey === payload.portable_object_key
             ? undefined
             : this.deleteStorageObject(existing.portableObjectKey).catch(() => undefined),
-          ...previousAttachmentKeys
-            .filter((key) => !attachmentObjects.some((attachment) => attachment.objectKey === key))
+          ...previousManagedObjectKeys
+            .filter((key) => !nextManagedObjectKeys.has(key))
             .map((key) => this.deleteStorageObject(key).catch(() => undefined)),
         ]);
       }
@@ -716,6 +807,9 @@ export class SupabaseRemoteSessionClient {
       await Promise.all([
         this.deleteStorageObject(payload.detail_object_key).catch(() => undefined),
         this.deleteStorageObject(payload.portable_object_key).catch(() => undefined),
+        ...storageObjects
+          .filter((object) => object.objectKey.includes("/source/") && !previousManagedObjectKeys.includes(object.objectKey))
+          .map((object) => this.deleteStorageObject(object.objectKey).catch(() => undefined)),
       ]);
       throw error;
     }
@@ -753,11 +847,13 @@ export class SupabaseRemoteSessionClient {
       if (error instanceof Error && error.message === "Remote session was not found.") return false;
       throw error;
     }
-    const attachmentKeys = await this.getDetailSnapshot(remote).then(remoteAttachmentObjectKeys).catch(() => []);
+    const managedObjectKeys = await this.getDetailSnapshot(remote)
+      .then((snapshot) => remoteManagedObjectKeys(snapshot, remote.id))
+      .catch(() => []);
     await Promise.all([
       this.deleteStorageObject(remote.detailObjectKey),
       this.deleteStorageObject(remote.portableObjectKey),
-      ...attachmentKeys.map((key) => this.deleteStorageObject(key)),
+      ...managedObjectKeys.map((key) => this.deleteStorageObject(key)),
     ]);
     const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?id=eq.${encodeURIComponent(remoteId)}`, { method: "DELETE" });
     const body = await readResponseBody(response);
@@ -886,6 +982,28 @@ export class SupabaseRemoteSessionClient {
     if (!response.ok) throw new Error(supabaseErrorMessage(response.status, responseBody));
   }
 
+  private async uploadStorageObjects(objects: RemoteSessionStorageObjectUpload[]): Promise<void> {
+    let cursor = 0;
+    let failed = false;
+    let firstError: unknown;
+    const workers = Array.from(
+      { length: Math.min(REMOTE_SESSION_STORAGE_UPLOAD_CONCURRENCY, objects.length) },
+      async () => {
+        while (cursor < objects.length && !failed) {
+          const object = objects[cursor++];
+          try {
+            await this.uploadStorageObject(object.objectKey, object.bytes, object.mimeType);
+          } catch (error) {
+            if (!failed) firstError = error;
+            failed = true;
+          }
+        }
+      },
+    );
+    await Promise.all(workers);
+    if (failed) throw firstError;
+  }
+
   private async downloadStorageObject(key: string): Promise<string> {
     const response = await this.storageRequest(key, { method: "GET" });
     const text = await response.text();
@@ -916,10 +1034,17 @@ export class SupabaseRemoteSessionClient {
   }
 }
 
-function remoteAttachmentObjectKeys(snapshot: RemoteSessionDetailSnapshot): string[] {
-  return [...new Set(snapshot.messages.flatMap((message) =>
-    (message.attachments ?? []).flatMap((attachment) =>
-      attachment.remoteObjectKey ? [attachment.remoteObjectKey] : [])))];
+function remoteManagedObjectKeys(snapshot: RemoteSessionDetailSnapshot, remoteId: string): string[] {
+  const prefix = `sessions/${remoteId}/`;
+  return [...new Set([
+    ...snapshot.messages.flatMap((message) =>
+      (message.attachments ?? []).flatMap((attachment) =>
+        attachment.remoteObjectKey ? [attachment.remoteObjectKey] : [])),
+    ...(snapshot.sourceArchive?.entries.flatMap((entry) => [
+      ...(entry.objectKey ? [entry.objectKey] : []),
+      ...(entry.chunks?.map((chunk) => chunk.objectKey) ?? []),
+    ]) ?? []),
+  ])].filter((key) => key.startsWith(prefix));
 }
 
 function parseRows(body: unknown): RemoteSessionListItem[] {
@@ -982,7 +1107,7 @@ function fromRow(row: RemoteSessionRow): RemoteSessionListItem {
 export function parseDetailSnapshot(value: unknown): RemoteSessionDetailSnapshot {
   if (!value || typeof value !== "object") throw new Error("Remote detail snapshot was not an object.");
   const snapshot = value as Partial<RemoteSessionDetailSnapshot>;
-  if (snapshot.schemaVersion !== 1 && snapshot.schemaVersion !== 2) {
+  if (snapshot.schemaVersion !== 1 && snapshot.schemaVersion !== 2 && snapshot.schemaVersion !== 3) {
     throw new Error("Remote detail snapshot schema version is unsupported.");
   }
   if (!snapshot.session || typeof snapshot.session !== "object") throw new Error("Remote detail snapshot has no session.");
@@ -994,7 +1119,62 @@ export function parseDetailSnapshot(value: unknown): RemoteSessionDetailSnapshot
     session: snapshot.session as SessionSearchResult,
     messages: snapshot.messages.filter(isSessionMessage),
     traceEvents: snapshot.traceEvents.filter(isTraceEvent),
+    ...(snapshot.schemaVersion === 3
+      ? { sourceArchive: parseRemoteSessionSourceArchive(snapshot.sourceArchive) }
+      : {}),
   };
+}
+
+function parseRemoteSessionSourceArchive(value: unknown): RemoteSessionSourceArchive {
+  if (!value || typeof value !== "object") throw new Error("Remote detail snapshot has no source archive.");
+  const archive = value as Partial<RemoteSessionSourceArchive>;
+  if (archive.schemaVersion !== 1 || !Array.isArray(archive.entries)) {
+    throw new Error("Remote source archive is unsupported.");
+  }
+  const entries = archive.entries.map((value) => {
+    if (!value || typeof value !== "object") throw new Error("Remote source archive entry was invalid.");
+    const entry = value as Partial<RemoteSessionSourceArchiveEntry>;
+    const chunks = Array.isArray(entry.chunks)
+      ? entry.chunks.map((value) => {
+          if (!value || typeof value !== "object") throw new Error("Remote source archive chunk was invalid.");
+          const chunk = value as Partial<RemoteSessionSourceArchiveChunk>;
+          if (
+            typeof chunk.objectKey !== "string"
+            || typeof chunk.sha256 !== "string"
+            || typeof chunk.sizeBytes !== "number"
+          ) {
+            throw new Error("Remote source archive chunk was invalid.");
+          }
+          return chunk as RemoteSessionSourceArchiveChunk;
+        })
+      : null;
+    const hasObjectKey = typeof entry.objectKey === "string";
+    const hasChunks = chunks !== null && chunks.length > 0;
+    if (
+      typeof entry.sessionKey !== "string"
+      || typeof entry.sourceSessionId !== "string"
+      || (entry.parentSessionId !== null && typeof entry.parentSessionId !== "string")
+      || (entry.artifactKind !== "session-file" && entry.artifactKind !== "cursor-state" && entry.artifactKind !== "codewiz-state")
+      || typeof entry.fileName !== "string"
+      || hasObjectKey === hasChunks
+      || typeof entry.sha256 !== "string"
+      || typeof entry.sizeBytes !== "number"
+      || (chunks !== null && chunks.reduce((total, chunk) => total + chunk.sizeBytes, 0) !== entry.sizeBytes)
+    ) {
+      throw new Error("Remote source archive entry was invalid.");
+    }
+    return {
+      sessionKey: entry.sessionKey,
+      sourceSessionId: entry.sourceSessionId,
+      parentSessionId: entry.parentSessionId,
+      artifactKind: entry.artifactKind,
+      fileName: entry.fileName,
+      ...(hasObjectKey ? { objectKey: entry.objectKey } : { chunks: chunks! }),
+      sha256: entry.sha256,
+      sizeBytes: entry.sizeBytes,
+    } as RemoteSessionSourceArchiveEntry;
+  });
+  return { schemaVersion: 1, entries };
 }
 
 export function parsePortableSession(value: unknown): PortableSession {
@@ -1002,7 +1182,7 @@ export function parsePortableSession(value: unknown): PortableSession {
 }
 
 function parsePortableSessionValue(value: unknown, depth: number, state: { count: number }): PortableSession {
-  if (depth > 12 || state.count >= 201) throw new Error("Remote portable session has too many nested subagents.");
+  if (depth > 12 || state.count >= 100_001) throw new Error("Remote portable session has too many nested subagents.");
   state.count += 1;
   if (!value || typeof value !== "object") throw new Error("Remote portable session was not an object.");
   const session = value as Partial<PortableSession>;

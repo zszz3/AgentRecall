@@ -30,6 +30,7 @@ import {
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
 import { TurnAccordion } from "./turn-accordion";
 import type { SessionFamily } from "../../../../core/session-family";
+import { canDeleteSessionLocally } from "../../../../core/session-environment";
 import { SubagentSessionTree } from "./subagent-session-tree";
 
 export type ConversationTimelineItem =
@@ -234,7 +235,7 @@ export function DetailPanel({
     && roleFilter !== "all"
     && !messages.some((message) => message.role === roleFilter);
   const localOnlyDisabled = isRemoteSession(session);
-  const canDelete = session.environmentKind !== "ssh";
+  const canDelete = canDeleteSessionLocally(session);
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
 
   const toggleTools = () => {
@@ -425,6 +426,14 @@ export function DetailPanel({
               <div className={`source-badge ${sourceUiFamily(session.source)}`}>
                 {SOURCE_LABEL[session.source]}
               </div>
+              {session.sourceAvailable === false ? (
+                <span
+                  className="source-cache-badge"
+                  title={l("The original Cursor session is unavailable. AgentRecall is showing its cached messages.", "原始 Cursor 会话已不可用，当前展示的是 AgentRecall 缓存消息。")}
+                >
+                  {l("Cache", "缓存")}
+                </span>
+              ) : null}
               <span className={`live-status ${liveState}`}>
                 <span className="live-status-dot" />
                 {localizedLiveStateLabel(liveState, language)}
@@ -519,7 +528,7 @@ export function DetailPanel({
           {canDelete ? (
             <div className="detail-action-group">
               <button className="danger" onClick={onDelete} disabled={actionRunning}>
-                <Trash2 size={15} /> {l("Delete", "删除")}
+                <Trash2 size={15} /> {session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete", "删除")}
               </button>
             </div>
           ) : null}
