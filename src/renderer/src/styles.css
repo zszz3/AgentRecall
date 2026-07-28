@@ -4716,6 +4716,7 @@ select:focus-visible {
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .update-current-state {

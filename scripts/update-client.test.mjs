@@ -66,7 +66,14 @@ test("streams package bytes and reports monotonic download progress while stagin
   const directory = await temporaryDirectory("agent-recall-update-stage-");
   const stageRoot = path.join(directory, "stage");
   const packagePath = path.join(directory, "live", "agent-recall");
+  const binDirectory = path.join(directory, "runtime", "bin");
+  const nodePath = path.join(binDirectory, process.platform === "win32" ? "node.exe" : "node");
+  const npmPath = path.join(binDirectory, process.platform === "win32" ? "npm.cmd" : "npm");
+  await mkdir(binDirectory, { recursive: true });
+  await writeFile(nodePath, "", "utf8");
+  await writeFile(npmPath, "", "utf8");
   const progress = [];
+  let npmInvocation = null;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(bytes.subarray(0, 5));
@@ -82,8 +89,10 @@ test("streams package bytes and reports monotonic download progress while stagin
     }),
     stageRoot,
     packagePath,
+    nodePath,
     statusPath: path.join(directory, "status.json"),
-    execFileImpl: async (_command, _args, options) => {
+    execFileImpl: async (command, args, options) => {
+      npmInvocation = { command, args, options };
       const installed = path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "agent-recall");
       await mkdir(path.join(installed, "out", "main"), { recursive: true });
       await mkdir(path.join(installed, "bin"), { recursive: true });
@@ -109,6 +118,9 @@ test("streams package bytes and reports monotonic download progress while stagin
   });
 
   assert.equal(staged.stagedPackagePath, path.join(stageRoot, "node_modules", "agent-recall"));
+  assert.equal(npmInvocation.command, npmPath);
+  const npmPathKey = Object.keys(npmInvocation.options.env).find((key) => key.toLowerCase() === "path");
+  assert.equal(npmInvocation.options.env[npmPathKey].split(path.delimiter)[0], binDirectory);
   assert.deepEqual(
     progress.filter((event) => event.phase === "downloading").map((event) => event.percent),
     [50, 100],
@@ -116,6 +128,13 @@ test("streams package bytes and reports monotonic download progress while stagin
   assert.deepEqual(
     progress.map((event) => event.phase),
     ["downloading", "downloading", "verifying", "staging", "validating"],
+  );
+});
+
+test("formats a missing npm executable as an actionable update error", () => {
+  assert.equal(
+    formatUpdateError(Object.assign(new Error("spawn npm ENOENT"), { code: "ENOENT", path: "npm" })),
+    "应用进程找不到 npm。请在终端中手动运行更新命令。",
   );
 });
 

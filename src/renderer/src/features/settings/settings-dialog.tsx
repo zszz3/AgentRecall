@@ -176,6 +176,8 @@ export function SettingsDialog({
   const defaultTerminal = settings?.defaultTerminal ?? (platform === "win32" ? "WindowsTerminal" : "Terminal");
   const globalShortcut = settings?.globalShortcut ?? (platform === "win32" ? "Ctrl+Alt+Space" : "Alt+Space");
   const saving = feedback?.kind === "running";
+  const appUpdateFailed = appUpdateProgress?.phase === "error";
+  const appUpdateProgressStopped = appUpdateFailed || appUpdateProgress?.phase === "completed";
   const [summaryBatch, setSummaryBatch] = useState<{ running: boolean; message: string | null }>({ running: false, message: null });
   const [mcpEnabled, setMcpEnabled] = useState<boolean | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
@@ -1133,19 +1135,34 @@ export function SettingsDialog({
                       <UpdateReleaseSection kind="fixes" title={l("Fixes", "问题修复")} items={appUpdateStatus.manifest.notes.fixes} />
                     </div>
                     {appUpdateProgress ? (
-                      <div className="update-progress-panel" role="status" aria-live="polite">
+                      <div
+                        className={`update-progress-panel ${appUpdateFailed ? "error" : ""}`}
+                        role={appUpdateFailed ? "alert" : "status"}
+                        aria-live="polite"
+                      >
                         <div className="update-progress-copy">
                           <strong>{updateProgressLabel(appUpdateProgress, language)}</strong>
                           {typeof appUpdateProgress.percent === "number" ? <span>{appUpdateProgress.percent}%</span> : null}
                         </div>
-                        <div className={`update-progress-track ${typeof appUpdateProgress.percent === "number" ? "" : "indeterminate"}`}>
-                          <span style={typeof appUpdateProgress.percent === "number" ? { width: `${appUpdateProgress.percent}%` } : undefined} />
-                        </div>
-                        {appUpdateProgress.message ? <small>{appUpdateProgress.message}</small> : null}
+                        {!appUpdateProgressStopped ? (
+                          <div className={`update-progress-track ${typeof appUpdateProgress.percent === "number" ? "" : "indeterminate"}`}>
+                            <span style={typeof appUpdateProgress.percent === "number" ? { width: `${appUpdateProgress.percent}%` } : undefined} />
+                          </div>
+                        ) : null}
+                        {appUpdateFailed ? (
+                          <small>
+                            {l("Automatic update stopped. Open a terminal and run:", "自动更新已停止。请打开终端运行：")}{" "}
+                            <code>agent-recall --update</code>
+                          </small>
+                        ) : appUpdateProgress.message ? <small>{appUpdateProgress.message}</small> : null}
                       </div>
                     ) : null}
                     <div className="update-card-footer">
-                      <span>{l("The App will reopen automatically after updating.", "更新完成后会自动重新打开应用。")}</span>
+                      <span>
+                        {appUpdateFailed
+                          ? l("The failed update will not continue in the background.", "失败的更新不会在后台继续运行。")
+                          : l("The App will reopen automatically after updating.", "更新完成后会自动重新打开应用。")}
+                      </span>
                       <div className="update-card-actions">
                         <button
                           type="button"

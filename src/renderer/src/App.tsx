@@ -1578,6 +1578,7 @@ export function App(): ReactElement {
   async function checkAppUpdate(): Promise<void> {
     setAppUpdateBusy(true);
     setAppUpdateError(null);
+    setAppUpdateProgress(null);
     try {
       setAppUpdateStatus(await window.sessionSearch.getAppUpdateStatus(true));
     } catch (error) {

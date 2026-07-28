@@ -297,8 +297,10 @@ describe("AppUpdateService", () => {
     await vi.waitFor(() => expect(harness.publishedProgress.at(-1)).toMatchObject({
       phase: "error",
       version: "0.2.0",
+      message: "自动更新已停止，请使用命令行手动更新。",
       error: expect.stringContaining("download failed"),
     }));
+    expect(harness.publishedProgress.at(-1)?.error).toContain("npm install -g agent-recall.tgz");
     expect(harness.logError).toHaveBeenCalledWith(expect.stringContaining("download failed"));
   });
 

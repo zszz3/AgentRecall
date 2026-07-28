@@ -120,8 +120,11 @@ export class AppUpdateService {
 
   private reportInstallFailure(version: string, error: unknown): void {
     let formatted = "Unknown update error";
+    let manualCommand = "npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz";
     try {
-      formatted = this.dependencies.getClient().formatUpdateError(error);
+      const client = this.dependencies.getClient();
+      formatted = client.formatUpdateError(error);
+      manualCommand = client.manualInstallCommand();
     } catch {
       try {
         formatted = error instanceof Error ? error.message : String(error);
@@ -129,11 +132,13 @@ export class AppUpdateService {
         // Keep the generic fallback when even converting an unusual thrown value fails.
       }
     }
+    const userFacingError = `${formatted}\n\n自动更新已停止。请在终端运行以下命令手动更新：\n${manualCommand}`;
     try {
       this.dependencies.publishProgress({
         phase: "error",
         version,
-        error: formatted,
+        message: "自动更新已停止，请使用命令行手动更新。",
+        error: userFacingError,
       });
     } catch (publishError) {
       try {
