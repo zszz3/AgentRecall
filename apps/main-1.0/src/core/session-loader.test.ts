@@ -107,6 +107,57 @@ describe("Codex session loading", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("shows only the effective Codex turns after multiple rollbacks while retaining all token usage", () => {
+    const message = (role: "user" | "assistant", text: string) => ({
+      type: "response_item",
+      timestamp: "2026-07-28T10:00:00Z",
+      payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] },
+    });
+    const token = (timestamp: string, inputTokens: number) => ({
+      type: "event_msg",
+      timestamp,
+      payload: {
+        type: "token_count",
+        info: { last_token_usage: { input_tokens: inputTokens, output_tokens: 1 } },
+      },
+    });
+    const rows = [
+      { type: "session_meta", timestamp: "2026-07-28T09:00:00Z", payload: { id: "codex-rollback", cwd: "/repo" } },
+      message("user", "保留第一问"),
+      message("assistant", "第一答"),
+      token("2026-07-28T10:01:00Z", 10),
+      message("user", "撤销的问题"),
+      message("assistant", "撤销的回答"),
+      token("2026-07-28T10:02:00Z", 20),
+      { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } },
+      message("user", "替代问题"),
+      message("assistant", "替代回答"),
+      token("2026-07-28T10:03:00Z", 30),
+      { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } },
+      message("user", "最终问题"),
+      message("assistant", "最终回答"),
+    ];
+
+    const loaded = loadCodexSessionRows("/tmp/codex-rollback.jsonl", rows);
+
+    expect(loaded?.messages.map((entry) => entry.content)).toEqual(["保留第一问", "第一答", "最终问题", "最终回答"]);
+    expect(loaded?.session.tokenUsage?.inputTokens).toBe(60);
+  });
+
+  it("falls back to the complete Codex message sequence for an invalid rollback marker", () => {
+    const rows = [
+      { type: "session_meta", payload: { id: "codex-invalid-rollback", cwd: "/repo" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "旧问题" }] } },
+      { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: "one" } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "新问题" }] } },
+    ];
+
+    expect(loadCodexSessionRows("/tmp/codex-invalid-rollback.jsonl", rows)?.messages.map((entry) => entry.content)).toEqual([
+      "旧问题",
+      "新问题",
+    ]);
+  });
+
   it("recognizes the current Codex desktop originator", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-app-originator-"));
     const filePath = path.join(dir, "rollout.jsonl");
@@ -681,6 +732,67 @@ describe("Codex session loading", () => {
 });
 
 describe("Claude session loading", () => {
+  it("shows only the current Claude parent chain and its tool trace", () => {
+    const rows = [
+      {
+        type: "user",
+        uuid: "root",
+        parentUuid: null,
+        cwd: "/repo",
+        message: { role: "user", content: "根问题" },
+      },
+      {
+        type: "assistant",
+        uuid: "old-answer",
+        parentUuid: "root",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "旧回答" }, { type: "tool_use", id: "old-tool", name: "OldTool", input: { query: "old" } }],
+        },
+      },
+      {
+        type: "user",
+        uuid: "replacement",
+        parentUuid: "root",
+        message: { role: "user", content: "替代问题" },
+      },
+      {
+        type: "assistant",
+        uuid: "current-answer",
+        parentUuid: "replacement",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "当前回答" }, { type: "tool_use", id: "new-tool", name: "NewTool", input: { query: "new" } }],
+        },
+      },
+    ];
+
+    const loaded = loadClaudeCliSessionRows("/tmp/claude-branch.jsonl", rows, { rawId: "claude-branch" });
+
+    expect(loaded?.messages.map((entry) => entry.content)).toEqual(["根问题", "替代问题", "当前回答"]);
+    expect(loaded?.traceEvents?.map((entry) => entry.title)).toEqual(["NewTool · new"]);
+  });
+
+  it("falls back to the complete Claude sequence when the parent graph is incomplete or cyclic", () => {
+    const incomplete = [
+      { type: "user", uuid: "root", parentUuid: null, message: { role: "user", content: "根问题" } },
+      { type: "assistant", uuid: "orphan", parentUuid: "missing", message: { role: "assistant", content: "孤立回答" } },
+    ];
+    const cyclic = [
+      { type: "user", uuid: "a", parentUuid: "b", message: { role: "user", content: "问题 A" } },
+      { type: "assistant", uuid: "b", parentUuid: "a", message: { role: "assistant", content: "回答 B" } },
+    ];
+
+    expect(loadClaudeCliSessionRows("/tmp/claude-incomplete.jsonl", incomplete)?.messages.map((entry) => entry.content)).toEqual([
+      "根问题",
+      "孤立回答",
+    ]);
+    expect(loadClaudeCliSessionRows("/tmp/claude-cycle.jsonl", cyclic)?.messages.map((entry) => entry.content)).toEqual([
+      "问题 A",
+      "回答 B",
+    ]);
+  });
+
   it("discovers Claude subagent files and links them to the parent session", () => {
     const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-claude-subagent-"));
     const projectDir = path.join(claudeDir, "projects", "-repo");

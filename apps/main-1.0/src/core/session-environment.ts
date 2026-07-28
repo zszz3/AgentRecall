@@ -3,6 +3,7 @@ import type { EnvironmentKind, SessionEnvironment, SessionSource } from "./types
 export interface SessionEnvironmentIdentity {
   environmentKind: EnvironmentKind;
   environmentId: string;
+  sourceAvailable?: boolean;
 }
 
 export interface SessionStorageIdentity {
@@ -16,6 +17,10 @@ export function isLocalSessionEnvironment(session: SessionEnvironmentIdentity): 
 
 export function isLocalSessionStorage(session: SessionStorageIdentity): boolean {
   return (session.storageEnvironmentId ?? session.environmentId) === "local";
+}
+
+export function canDeleteSessionLocally(session: SessionEnvironmentIdentity): boolean {
+  return session.environmentKind !== "ssh" || session.sourceAvailable === false;
 }
 
 export function remoteSessionKey(environment: SessionEnvironment, source: SessionSource | "codewiz", rawId: string): string {

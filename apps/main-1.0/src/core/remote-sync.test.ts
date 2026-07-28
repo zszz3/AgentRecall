@@ -191,6 +191,68 @@ describe("remote sync", () => {
     }
   });
 
+  it("indexes only the effective Codex and Claude branches from SSH summaries", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertSshEnvironment(store);
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-remote-visible-"));
+    const writeJsonl = (filePath: string, rows: unknown[]) => {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, rows.map((row) => JSON.stringify(row)).join("\n"), "utf8");
+    };
+    const codexMessage = (role: "user" | "assistant", text: string) => ({
+      type: "response_item",
+      payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] },
+    });
+    try {
+      writeJsonl(path.join(tempHome, ".codex", "sessions", "2026", "07", "28", "visible.jsonl"), [
+        { type: "session_meta", payload: { id: "codex-visible", cwd: "/repo" } },
+        codexMessage("user", "Codex 根问题"),
+        codexMessage("assistant", "旧回答"),
+        { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } },
+        codexMessage("user", "Codex 当前问题"),
+        codexMessage("assistant", "当前回答"),
+      ]);
+      writeJsonl(path.join(tempHome, ".claude", "projects", "repo", "claude-visible.jsonl"), [
+        { type: "user", uuid: "root", parentUuid: null, cwd: "/repo", message: { role: "user", content: "Claude 根问题" } },
+        { type: "assistant", uuid: "old", parentUuid: "root", message: { role: "assistant", content: "旧回答" } },
+        { type: "user", uuid: "current-question", parentUuid: "root", message: { role: "user", content: "Claude 当前问题" } },
+        { type: "assistant", uuid: "current-answer", parentUuid: "current-question", message: { role: "assistant", content: "当前回答" } },
+      ]);
+
+      await syncRemoteEnvironment(store, environment, {
+        runSsh: async (_remoteEnvironment, remoteCommand) => execFileSync(
+          "python3",
+          ["-c", decodeCollectorScript(remoteCommand)],
+          { encoding: "utf8", env: { ...process.env, HOME: tempHome } },
+        ),
+      });
+
+      const codexSession = store.getSession("ssh:ssh-devbox:codex-cli:codex-visible");
+      const claudeSession = store.getSession("ssh:ssh-devbox:claude-cli:claude-visible");
+      expect(codexSession).toMatchObject({
+        firstQuestion: "Codex 当前问题",
+        messageCount: 2,
+      });
+      expect(claudeSession).toMatchObject({
+        firstQuestion: "Claude 根问题",
+        messageCount: 3,
+      });
+      expect(
+        (await fetchRemoteSessionMessagePage(environment, codexSession as SessionSearchResult, 0, 10, {
+          runSsh: executeDecodedPython,
+        })).map((message) => message.content),
+      ).toEqual(["Codex 当前问题", "当前回答"]);
+      expect(
+        (await fetchRemoteSessionMessagePage(environment, claudeSession as SessionSearchResult, 0, 10, {
+          runSsh: executeDecodedPython,
+        })).map((message) => message.content),
+      ).toEqual(["Claude 根问题", "Claude 当前问题", "当前回答"]);
+    } finally {
+      store.close();
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it("collects summaries from all five CLI sources and keeps same raw IDs isolated by source", async () => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);

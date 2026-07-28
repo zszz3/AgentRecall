@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { loadCodexSessionRows } from "./session-loader";
 import { readSessionSourceArtifacts } from "./session-source-archive";
 import type { SessionSearchResult } from "./types";
 
@@ -107,6 +108,34 @@ describe("session source archive", () => {
       expect(artifact.kind).toBe("session-file");
       expect(artifact.fileName).toBe("rollout.jsonl");
       expect(Buffer.from(artifact.bytes)).toEqual(content);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps rolled-back Codex rows in the source archive while hiding them from visible messages", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-rollback-source-"));
+    try {
+      const filePath = path.join(directory, "rollout.jsonl");
+      const rows = [
+        { type: "session_meta", payload: { id: "codex-rollback", cwd: "/repo" } },
+        { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "discarded question" }] } },
+        { type: "event_msg", payload: { type: "thread_rolled_back", num_turns: 1 } },
+        { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "visible question" }] } },
+      ];
+      const content = rows.map((row) => JSON.stringify(row)).join("\n");
+      fs.writeFileSync(filePath, content);
+
+      const loaded = loadCodexSessionRows(filePath, rows);
+      const [artifact] = readSessionSourceArtifacts(session({
+        sessionKey: "codex:codex-rollback",
+        rawId: "codex-rollback",
+        filePath,
+      }));
+
+      expect(loaded?.messages.map((message) => message.content)).toEqual(["visible question"]);
+      expect(Buffer.from(artifact.bytes).toString("utf8")).toBe(content);
+      expect(Buffer.from(artifact.bytes).toString("utf8")).toContain("discarded question");
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

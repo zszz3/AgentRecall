@@ -185,6 +185,68 @@ function extractMessages(rows: unknown[], format: SessionFormat): SessionMessage
   return messages;
 }
 
+function codexVisibleConversationRows(rows: unknown[]): unknown[] {
+  const adapter = getAdapter("codex");
+  const preamble: unknown[] = [];
+  const turns: unknown[][] = [];
+  let currentTurn: unknown[] | null = null;
+
+  for (const row of rows) {
+    const payload = objectField(row, "payload");
+    if (isRecord(row) && row.type === "event_msg" && payload?.type === "thread_rolled_back") {
+      const numTurns = payload.num_turns;
+      if (!Number.isSafeInteger(numTurns) || (numTurns as number) <= 0 || (numTurns as number) > turns.length) return rows;
+      turns.splice(turns.length - (numTurns as number), numTurns as number);
+      currentTurn = turns.at(-1) ?? null;
+      continue;
+    }
+
+    const parsed = adapter.parseLine(row);
+    if (parsed?.role === "user" && isMeaningfulUserMessage(parsed.content)) {
+      currentTurn = [row];
+      turns.push(currentTurn);
+    } else if (currentTurn) {
+      currentTurn.push(row);
+    } else {
+      preamble.push(row);
+    }
+  }
+
+  return [...preamble, ...turns.flat()];
+}
+
+function claudeVisibleConversationRows(rows: unknown[]): unknown[] {
+  const conversationRows = rows.filter((row) => isRecord(row) && (row.type === "user" || row.type === "assistant"));
+  if (conversationRows.length === 0) return rows;
+
+  const nodes = new Map<string, Record<string, unknown>>();
+  for (const row of conversationRows) {
+    if (!isRecord(row)) return rows;
+    const uuid = stringField(row, "uuid");
+    if (!uuid || nodes.has(uuid)) return rows;
+    nodes.set(uuid, row);
+  }
+
+  const visibleUuids = new Set<string>();
+  let current = conversationRows.at(-1) as Record<string, unknown>;
+  while (current) {
+    const uuid = stringField(current, "uuid");
+    if (!uuid || visibleUuids.has(uuid)) return rows;
+    visibleUuids.add(uuid);
+    const parentUuid = unknownField(current, "parentUuid");
+    if (parentUuid === null || parentUuid === undefined || parentUuid === "") break;
+    if (typeof parentUuid !== "string") return rows;
+    const parent = nodes.get(parentUuid);
+    if (!parent) return rows;
+    current = parent;
+  }
+
+  return rows.filter((row) => {
+    if (!isRecord(row) || (row.type !== "user" && row.type !== "assistant")) return true;
+    return visibleUuids.has(stringField(row, "uuid"));
+  });
+}
+
 function firstQuestion(messages: SessionMessage[]): string {
   return messages.find((message) => message.role === "user" && isMeaningfulUserMessage(message.content))?.content || "";
 }
@@ -887,9 +949,10 @@ export function loadCodexSessionRows(
   const meta = options.sessionMeta ?? findCodexSessionMeta(rows);
   if (!meta) return null;
 
-  const messages = extractMessages(rows, "codex");
+  const visibleRows = codexVisibleConversationRows(rows);
+  const messages = extractMessages(visibleRows, "codex");
   const tokenEvents = extractCodexTokenEvents(rows);
-  const traceEvents = options.includeTraceEvents === false ? [] : extractTraceEvents(rows, "codex");
+  const traceEvents = options.includeTraceEvents === false ? [] : extractTraceEvents(visibleRows, "codex");
   const tokenUsage = tokenUsageFromEvents(tokenEvents);
   const question = firstQuestion(messages);
   const source: SessionSource = options.sourceOverride || (CODEX_APP_ORIGINATORS.has(meta.originator || "") ? "codex-app" : "codex-cli");
@@ -995,9 +1058,10 @@ export function loadClaudeCliSessionRows(
   } = {},
 ): LoadedSession | null {
   const rawId = options.rawId || path.basename(filePath, ".jsonl");
-  const messages = extractMessages(rows, "claude");
+  const visibleRows = claudeVisibleConversationRows(rows);
+  const messages = extractMessages(visibleRows, "claude");
   const tokenEvents = extractClaudeTokenEvents(rows);
-  const traceEvents = options.includeTraceEvents === false ? [] : extractTraceEvents(rows, "claude");
+  const traceEvents = options.includeTraceEvents === false ? [] : extractTraceEvents(visibleRows, "claude");
   const tokenUsage = tokenUsageFromEvents(tokenEvents);
   const question = firstQuestion(messages);
   const aiTitle = firstAiTitle(rows);
@@ -1147,9 +1211,10 @@ export function* loadClaudeAppSessionsIterator(
     const stat = safeStat(convoPath);
     if (shouldSkipFile(options, convoPath, stat, metaStat.mtimeMs)) continue;
     const rows = fs.existsSync(convoPath) ? readJsonl(convoPath) : [];
-    const messages = extractMessages(rows, "claude");
+    const visibleRows = claudeVisibleConversationRows(rows);
+    const messages = extractMessages(visibleRows, "claude");
     const tokenEvents = extractClaudeTokenEvents(rows);
-    const traceEvents = extractTraceEvents(rows, "claude");
+    const traceEvents = extractTraceEvents(visibleRows, "claude");
     const tokenUsage = tokenUsageFromEvents(tokenEvents);
     const question = firstQuestion(messages);
     const title = appMeta.title && !/^Session\s+\d+$/i.test(appMeta.title) ? appMeta.title : cleanTitle(question);

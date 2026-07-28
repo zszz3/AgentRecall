@@ -23,6 +23,7 @@ import {
 } from "../../session-ui";
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
 import type { SessionFamily } from "../../../../core/session-family";
+import { canDeleteSessionLocally } from "../../../../core/session-environment";
 import { SubagentSessionTree } from "./subagent-session-tree";
 
 export type ConversationTimelineItem =
@@ -214,7 +215,7 @@ export function DetailPanel({
     && roleFilter !== "all"
     && !messages.some((message) => message.role === roleFilter);
   const localOnlyDisabled = isRemoteSession(session);
-  const canDelete = session.environmentKind !== "ssh";
+  const canDelete = canDeleteSessionLocally(session);
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
 
   const toggleTools = () => {

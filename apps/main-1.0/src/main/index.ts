@@ -91,7 +91,7 @@ import { listWslDistributions } from "../core/wsl";
 import { deleteWslSessionFile } from "../core/wsl-session-actions";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
-import { isLocalSessionEnvironment, isLocalSessionStorage, remoteSessionKey } from "../core/session-environment";
+import { canDeleteSessionLocally, isLocalSessionEnvironment, isLocalSessionStorage, remoteSessionKey } from "../core/session-environment";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
@@ -1891,7 +1891,7 @@ function registerIpc(): void {
   ipcMain.handle("hide:set", (_event, sessionKey: string, hidden: boolean) => store.setHidden(sessionKey, hidden));
   ipcMain.handle("session:delete", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
-    if (session?.environmentKind === "ssh") {
+    if (session && !canDeleteSessionLocally(session)) {
       throw new Error("Cannot delete sessions stored on SSH remote environments.");
     }
     if (!session || session.environmentKind !== "wsl") return store.deleteSession(sessionKey);

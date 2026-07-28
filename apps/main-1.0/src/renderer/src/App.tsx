@@ -26,6 +26,7 @@ import type { MigrationTargetSettings } from "../../core/migration-targets";
 import type { RemoteHealthReport } from "../../core/remote-health";
 import type { RemoteSessionDetailSnapshot, RemoteSessionListItem } from "../../core/remote-session-sync";
 import type { SessionFamily } from "../../core/session-family";
+import { canDeleteSessionLocally } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type { TraceEventQueryOptions } from "../../core/session-store";
@@ -2448,7 +2449,7 @@ function ContextMenu({
   const menu = useClampedContextMenuStyle(state);
   const localOnlyDisabled = isRemoteSession(state.session);
   const migrationDisabled = state.session.environmentKind === "ssh";
-  const canDelete = state.session.environmentKind !== "ssh";
+  const canDelete = canDeleteSessionLocally(state.session);
   const revealTitle = localOnlyDisabled ? remoteRevealTitle(language) : l(`Show in ${revealLabel}`, `在${revealLabel}中显示`);
   const openAppTitle = localOnlyDisabled ? remoteOpenAppTitle(language) : l("Open native app", "打开原生应用");
   const migrateTitle = migrationDisabled
