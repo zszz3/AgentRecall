@@ -268,12 +268,26 @@ export class RemoteSessionService {
     const client = this.createClient();
     const remotes = (await client.listRemoteSessions())
       .filter((remote) => store.getSession(remote.sourceSessionKey)?.isSubagent !== true);
-    const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
-    await this.runBounded(store.searchSessions({ limit: 100_000, excludeSubagents: true }), 4, async (session) => {
-      if (session.environmentKind === "wsl") return;
-      if (!migrationAgentForSource(session.source)) return;
+    const indexedSessions = store.searchSessions({ limit: 100_000, excludeSubagents: false })
+      .filter((session) =>
+        session.environmentKind !== "wsl"
+        && migrationAgentForSource(session.source) !== null);
+    await this.runBounded(indexedSessions, 4, async (session) => {
       try {
         await this.dependencies.ensureSessionDetails(session.sessionKey);
+      } catch (error) {
+        if (error instanceof SessionSourceUnavailableError) {
+          this.dependencies.logError(
+            `Skipping unavailable local session ${session.sessionKey} during cloud comparison: ${error.message}`,
+          );
+          return;
+        }
+        throw new Error(`Could not load ${session.displayTitle || session.sessionKey} before comparing it with the cloud copy: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+    const locals: Array<{ session: SessionSearchResult; revision: string }> = [];
+    await this.runBounded(indexedSessions.filter((session) => session.isSubagent !== true), 4, async (session) => {
+      try {
         const hydrated = store.getSession(session.sessionKey);
         if (!hydrated) return;
         const binding = store.getSessionSyncBindingForLocalKey(session.sessionKey);

@@ -6,6 +6,7 @@ import type { MigrationAgent, PortableSession, SessionMessage, SessionSearchResu
 
 export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
+const REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES = 5 * 1024 * 1024;
 const REMOTE_SESSION_COLUMNS =
   "id,source_session_key,source_agent,source_source,source_environment_id,source_environment_kind,source_environment_label,title,project_path,started_at,updated_at,content_hash,revision_version,message_count,trace_event_count,ai_summary,tags,search_text,detail_object_key,portable_object_key,detail_sha256,portable_sha256,created_at,synced_at";
 const REMOTE_SESSION_LEGACY_COLUMNS =
@@ -31,6 +32,13 @@ export interface RemoteSessionSourceArchiveEntry {
   parentSessionId: string | null;
   artifactKind: "session-file" | "cursor-state" | "codewiz-state";
   fileName: string;
+  objectKey?: string;
+  chunks?: RemoteSessionSourceArchiveChunk[];
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface RemoteSessionSourceArchiveChunk {
   objectKey: string;
   sha256: string;
   sizeBytes: number;
@@ -313,6 +321,7 @@ export function remoteSessionContentHash(detail: RemoteSessionDetailSnapshot, po
           schemaVersion: detail.sourceArchive.schemaVersion,
           entries: detail.sourceArchive.entries.map(({
             objectKey: _objectKey,
+            chunks: _chunks,
             sessionKey: _sessionKey,
             ...entry
           }) => entry),
@@ -447,15 +456,35 @@ export function buildRemoteSessionUploadFromStore(
       const digest = createHash("sha256").update(artifact.bytes).digest("hex");
       const safeName = artifact.fileName.replace(/[^A-Za-z0-9._-]+/g, "_").slice(-160) || "session";
       const sequence = String(sourceArchiveEntries.length).padStart(4, "0");
-      const objectKey = `sessions/${resolvedRemoteId}/${uploadId}/source/${sequence}-${digest}-${safeName}`;
-      sourceObjects.push({ objectKey, bytes: artifact.bytes, mimeType: artifact.mimeType });
+      const objectKeyPrefix = `sessions/${resolvedRemoteId}/${uploadId}/source/${sequence}-${digest}-${safeName}`;
+      let storageLocation: Pick<RemoteSessionSourceArchiveEntry, "objectKey" | "chunks">;
+      if (artifact.bytes.byteLength <= REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES) {
+        sourceObjects.push({ objectKey: objectKeyPrefix, bytes: artifact.bytes, mimeType: artifact.mimeType });
+        storageLocation = { objectKey: objectKeyPrefix };
+      } else {
+        const chunkCount = Math.ceil(artifact.bytes.byteLength / REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES);
+        const chunkDigits = String(chunkCount - 1).length;
+        const chunks: RemoteSessionSourceArchiveChunk[] = [];
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          const start = chunkIndex * REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES;
+          const bytes = artifact.bytes.subarray(
+            start,
+            Math.min(start + REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES, artifact.bytes.byteLength),
+          );
+          const chunkKey = `${objectKeyPrefix}.part-${String(chunkIndex).padStart(chunkDigits, "0")}`;
+          const chunkDigest = createHash("sha256").update(bytes).digest("hex");
+          sourceObjects.push({ objectKey: chunkKey, bytes, mimeType: artifact.mimeType });
+          chunks.push({ objectKey: chunkKey, sha256: chunkDigest, sizeBytes: bytes.byteLength });
+        }
+        storageLocation = { chunks };
+      }
       sourceArchiveEntries.push({
         sessionKey: sourceSession.sessionKey,
         sourceSessionId: sourceSession.rawId,
         parentSessionId: sourceSession.parentSessionId ?? null,
         artifactKind: artifact.kind,
         fileName: artifact.fileName,
-        objectKey,
+        ...storageLocation,
         sha256: digest,
         sizeBytes: artifact.bytes.byteLength,
       });
@@ -983,7 +1012,10 @@ function remoteManagedObjectKeys(snapshot: RemoteSessionDetailSnapshot, remoteId
     ...snapshot.messages.flatMap((message) =>
       (message.attachments ?? []).flatMap((attachment) =>
         attachment.remoteObjectKey ? [attachment.remoteObjectKey] : [])),
-    ...(snapshot.sourceArchive?.entries.map((entry) => entry.objectKey) ?? []),
+    ...(snapshot.sourceArchive?.entries.flatMap((entry) => [
+      ...(entry.objectKey ? [entry.objectKey] : []),
+      ...(entry.chunks?.map((chunk) => chunk.objectKey) ?? []),
+    ]) ?? []),
   ])].filter((key) => key.startsWith(prefix));
 }
 
@@ -1074,19 +1106,45 @@ function parseRemoteSessionSourceArchive(value: unknown): RemoteSessionSourceArc
   const entries = archive.entries.map((value) => {
     if (!value || typeof value !== "object") throw new Error("Remote source archive entry was invalid.");
     const entry = value as Partial<RemoteSessionSourceArchiveEntry>;
+    const chunks = Array.isArray(entry.chunks)
+      ? entry.chunks.map((value) => {
+          if (!value || typeof value !== "object") throw new Error("Remote source archive chunk was invalid.");
+          const chunk = value as Partial<RemoteSessionSourceArchiveChunk>;
+          if (
+            typeof chunk.objectKey !== "string"
+            || typeof chunk.sha256 !== "string"
+            || typeof chunk.sizeBytes !== "number"
+          ) {
+            throw new Error("Remote source archive chunk was invalid.");
+          }
+          return chunk as RemoteSessionSourceArchiveChunk;
+        })
+      : null;
+    const hasObjectKey = typeof entry.objectKey === "string";
+    const hasChunks = chunks !== null && chunks.length > 0;
     if (
       typeof entry.sessionKey !== "string"
       || typeof entry.sourceSessionId !== "string"
       || (entry.parentSessionId !== null && typeof entry.parentSessionId !== "string")
       || (entry.artifactKind !== "session-file" && entry.artifactKind !== "cursor-state" && entry.artifactKind !== "codewiz-state")
       || typeof entry.fileName !== "string"
-      || typeof entry.objectKey !== "string"
+      || hasObjectKey === hasChunks
       || typeof entry.sha256 !== "string"
       || typeof entry.sizeBytes !== "number"
+      || (chunks !== null && chunks.reduce((total, chunk) => total + chunk.sizeBytes, 0) !== entry.sizeBytes)
     ) {
       throw new Error("Remote source archive entry was invalid.");
     }
-    return entry as RemoteSessionSourceArchiveEntry;
+    return {
+      sessionKey: entry.sessionKey,
+      sourceSessionId: entry.sourceSessionId,
+      parentSessionId: entry.parentSessionId,
+      artifactKind: entry.artifactKind,
+      fileName: entry.fileName,
+      ...(hasObjectKey ? { objectKey: entry.objectKey } : { chunks: chunks! }),
+      sha256: entry.sha256,
+      sizeBytes: entry.sizeBytes,
+    } as RemoteSessionSourceArchiveEntry;
   });
   return { schemaVersion: 1, entries };
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -279,6 +280,49 @@ describe("remote session sync model", () => {
     expect(parseDetailSnapshot(JSON.parse(built.detailJson)).sourceArchive?.entries).toHaveLength(1);
   });
 
+  it("splits large source artifacts into independently verified objects without changing their content revision", () => {
+    const rawTranscript = Buffer.alloc(5 * 1024 * 1024 + 137, "complete-source-archive");
+    const built = buildRemoteSessionUploadFromStore({
+      getSession: () => SESSION,
+      getAllMessages: () => MESSAGES,
+      getTraceEvents: () => [],
+      getSessionSourceArtifacts: () => [{
+        kind: "session-file" as const,
+        fileName: "large.jsonl",
+        bytes: rawTranscript,
+        mimeType: "application/x-ndjson",
+      }],
+    }, SESSION.sessionKey, 12_000);
+
+    expect(built.sourceObjects).toHaveLength(2);
+    expect(built.sourceObjects.every((object) => object.bytes.byteLength <= 5 * 1024 * 1024)).toBe(true);
+    expect(Buffer.compare(
+      Buffer.concat(built.sourceObjects.map((object) => Buffer.from(object.bytes))),
+      rawTranscript,
+    )).toBe(0);
+    const [entry] = built.detail.sourceArchive?.entries ?? [];
+    expect(entry.objectKey).toBeUndefined();
+    expect(entry.chunks).toEqual(built.sourceObjects.map((object) => ({
+      objectKey: object.objectKey,
+      sha256: createHash("sha256").update(object.bytes).digest("hex"),
+      sizeBytes: object.bytes.byteLength,
+    })));
+    expect(parseDetailSnapshot(JSON.parse(built.detailJson)).sourceArchive?.entries[0]).toEqual(entry);
+
+    const legacyLocationDetail = {
+      ...built.detail,
+      sourceArchive: {
+        schemaVersion: 1 as const,
+        entries: [{
+          ...entry,
+          objectKey: `sessions/${built.payload.id}/legacy/source/large.jsonl`,
+          chunks: undefined,
+        }],
+      },
+    };
+    expect(remoteSessionContentHash(legacyLocationDetail, built.portable)).toBe(built.payload.content_hash);
+  });
+
   it("changes the remote revision when only hidden raw source data changes", () => {
     const build = (raw: string) => buildRemoteSessionUploadFromStore({
       getSession: () => SESSION,
@@ -540,7 +584,10 @@ describe("remote session sync model", () => {
   });
 
   it("deletes storage objects before removing the remote database row", async () => {
-    const sourceKey = `sessions/${remoteSessionId(SESSION.sessionKey)}/archive/source.jsonl`;
+    const sourceKeys = [
+      `sessions/${remoteSessionId(SESSION.sessionKey)}/archive/source.jsonl.part-0`,
+      `sessions/${remoteSessionId(SESSION.sessionKey)}/archive/source.jsonl.part-1`,
+    ];
     const detail = {
       ...buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000),
       schemaVersion: 3 as const,
@@ -552,7 +599,11 @@ describe("remote session sync model", () => {
           parentSessionId: null,
           artifactKind: "session-file" as const,
           fileName: "abc.jsonl",
-          objectKey: sourceKey,
+          chunks: sourceKeys.map((objectKey) => ({
+            objectKey,
+            sha256: "b".repeat(64),
+            sizeBytes: 6,
+          })),
           sha256: "a".repeat(64),
           sizeBytes: 12,
         }],
@@ -586,8 +637,13 @@ describe("remote session sync model", () => {
     });
     expect(calls[0]).toBe("row-GET");
     expect(calls[1]).toBe("storage-GET");
-    expect(calls.slice(2, 5).sort()).toEqual(["storage-DELETE", "storage-DELETE", "storage-DELETE"]);
-    expect(calls[5]).toBe("row-DELETE");
+    expect(calls.slice(2, 6).sort()).toEqual([
+      "storage-DELETE",
+      "storage-DELETE",
+      "storage-DELETE",
+      "storage-DELETE",
+    ]);
+    expect(calls[6]).toBe("row-DELETE");
   });
 
   it("keeps a selected session as failed when its delete preflight cannot reach Supabase", async () => {

@@ -47,7 +47,19 @@ function syncItemTitle(item: SessionSyncItem): string {
   return item.local?.displayTitle || item.remote?.title || "Untitled session";
 }
 
-function syncStateLabel(state: SessionSyncState, language: LanguageMode): string {
+function isCursorFullSessionUpdate(item: SessionSyncItem): boolean {
+  return (
+    item.state === "local-newer"
+    && item.local?.source === "cursor-agent"
+    && item.remote !== null
+    && item.local.messageCount === item.remote.messageCount
+  );
+}
+
+function syncStateLabel(item: SessionSyncItem, language: LanguageMode): string {
+  if (isCursorFullSessionUpdate(item)) {
+    return localize(language, "Full session changed", "完整会话有更新");
+  }
   const labels: Record<SessionSyncState, [string, string]> = {
     "local-only": ["Local only", "仅本地"],
     "local-newer": ["Upload available", "待更新云端"],
@@ -56,7 +68,16 @@ function syncStateLabel(state: SessionSyncState, language: LanguageMode): string
     "remote-only": ["Cloud only", "仅云端"],
     conflict: ["Conflict", "内容冲突"],
   };
-  return localize(language, ...labels[state]);
+  return localize(language, ...labels[item.state]);
+}
+
+function syncStateDescription(item: SessionSyncItem, language: LanguageMode): string | undefined {
+  if (!isCursorFullSessionUpdate(item)) return undefined;
+  return localize(
+    language,
+    "Message counts cover the visible branch only. Changes elsewhere in the complete Cursor session, including hidden branches, also require a cloud update.",
+    "消息数只统计当前可见分支；完整 Cursor 会话中的其他内容（包括隐藏分支）发生变化时，也需要更新云端。",
+  );
 }
 
 export function RemoteSessionsDialog({
@@ -396,7 +417,9 @@ export function RemoteSessionsDialog({
                    <span className={`source-badge ${sourceDescriptor ? sourceUiFamily(sourceDescriptor.id) : "other"}`}>
                      {sourceDescriptor?.label ?? remote?.sourceAgent ?? (local ? migrationAgentForSource(local.source) : "")}
                    </span>
-                   <span className={`sync-state-badge ${item.state}`}>{syncStateLabel(item.state, language)}</span>
+                   <span className={`sync-state-badge ${item.state}`} title={syncStateDescription(item, language)}>
+                     {syncStateLabel(item, language)}
+                   </span>
                  </div>
                  <div className="remote-session-context">
                    <span>{local?.projectPath || remote?.projectPath || l("No project path", "无项目路径")}</span>

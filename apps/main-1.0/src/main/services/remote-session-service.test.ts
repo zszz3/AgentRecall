@@ -467,7 +467,7 @@ describe("RemoteSessionService cloud orchestration", () => {
     expect(harness.store.deleteSessionSyncBindingForRemoteId).toHaveBeenNthCalledWith(2, "remote-2");
   });
 
-  it("excludes local and cloud subagent conversations from the sync comparison", async () => {
+  it("hydrates subagent bundles before excluding them from the top-level sync comparison", async () => {
     const regular = localSession();
     const subagent = localSession({
       sessionKey: "local:subagent",
@@ -485,10 +485,14 @@ describe("RemoteSessionService cloud orchestration", () => {
 
     expect(harness.store.searchSessions).toHaveBeenCalledWith({
       limit: 100_000,
-      excludeSubagents: true,
+      excludeSubagents: false,
     });
-    expect(harness.ensureSessionDetails).toHaveBeenCalledOnce();
+    expect(harness.ensureSessionDetails).toHaveBeenCalledTimes(2);
     expect(harness.ensureSessionDetails).toHaveBeenCalledWith(regular.sessionKey);
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(subagent.sessionKey);
+    expect(Math.max(...harness.ensureSessionDetails.mock.invocationCallOrder)).toBeLessThan(
+      harness.buildUpload.mock.invocationCallOrder[0],
+    );
     expect(harness.buildSyncItems).toHaveBeenCalledWith(
       [{ session: regular, revision: "local-revision" }],
       [],
