@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { scanCompleteJsonl } from "./codex-jsonl-stream";
+import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 import { loadCodexSessionFile } from "./session-loader";
 
 const roots: string[] = [];
@@ -56,6 +56,47 @@ describe("scanCompleteJsonl", () => {
     expect(result.malformedLines).toBe(1);
   });
 
+  test("commits intentionally skipped large records without parsing them", async () => {
+    const skipped = JSON.stringify({ type: "function_call_output", output: "x".repeat(100_000) });
+    const kept = { id: 2 };
+    const filePath = fixture(`${skipped}\n${JSON.stringify(kept)}\n`);
+    const records: unknown[] = [];
+
+    const result = await scanCompleteJsonlAsync(filePath, {
+      chunkSize: 1024,
+      shouldParseLine: (line) => line.length < 10_000,
+      onRecord: (record) => records.push(record),
+    });
+
+    expect(records).toEqual([kept]);
+    expect(result.committedOffset).toBe(fs.statSync(filePath).size);
+    expect(result.malformedLines).toBe(0);
+  });
+
+  test("discards a skipped line as soon as its prefix is recognized", async () => {
+    const skipped = JSON.stringify({
+      type: "function_call_output",
+      image_url: `data:image/png;base64,${"x".repeat(100_000)}`,
+    });
+    const kept = { id: 3 };
+    const filePath = fixture(`${skipped}\n${JSON.stringify(kept)}\n`);
+    const records: unknown[] = [];
+    let largestPrefix = 0;
+
+    const result = await scanCompleteJsonlAsync(filePath, {
+      chunkSize: 1024,
+      shouldSkipLinePrefix: (prefix) => {
+        largestPrefix = Math.max(largestPrefix, prefix.length);
+        return prefix.includes(Buffer.from("data:image/"));
+      },
+      onRecord: (record) => records.push(record),
+    });
+
+    expect(records).toEqual([kept]);
+    expect(largestPrefix).toBeLessThan(2_048);
+    expect(result.committedOffset).toBe(fs.statSync(filePath).size);
+  });
+
   test("loads a Codex session without reading the whole source into one string", () => {
     const sessionId = "019f0000-0000-7000-8000-000000000001";
     const filePath = fixture([
@@ -75,5 +116,27 @@ describe("scanCompleteJsonl", () => {
     expect(wholeFileRead).not.toHaveBeenCalledWith(filePath, expect.anything());
     expect(loaded?.session.rawId).toBe(sessionId);
     expect(loaded?.messages.map((message) => message.content)).toEqual(["检查项目", "完成"]);
+  });
+
+  test("allows the event loop to run while scanning a large file", async () => {
+    const filePath = fixture(
+      Array.from({ length: 4_000 }, (_, index) => JSON.stringify({
+        id: index,
+        content: "x".repeat(1_000),
+      })).join("\n") + "\n",
+    );
+    let timerTicks = 0;
+    const timer = setInterval(() => {
+      timerTicks++;
+    }, 0);
+
+    const result = await scanCompleteJsonlAsync(filePath, {
+      chunkSize: 32 * 1024,
+      onRecord: () => undefined,
+    });
+    clearInterval(timer);
+
+    expect(timerTicks).toBeGreaterThan(1);
+    expect(result).toMatchObject({ committedOffset: fs.statSync(filePath).size });
   });
 });

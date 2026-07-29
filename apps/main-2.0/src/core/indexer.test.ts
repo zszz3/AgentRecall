@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, syncLoadedSessionsInBatches } from "./indexer";
 import { createInMemoryStore } from "./postgres/test-session-store";
 import { writeMigratedSession } from "./session-migration-writers";
@@ -199,10 +199,12 @@ describe("indexer", () => {
       fs.utimesSync(filePath, previousStat.fileMtimeMs / 1000, previousStat.fileMtimeMs / 1000);
       const oldIndexTime = new Date(Math.max(0, previousStat.indexedAt - 1000));
       fs.utimesSync(path.join(homeDir, ".codex", "session_index.jsonl"), oldIndexTime, oldIndexTime);
+      const getAllMessages = vi.spyOn(store, "getAllMessages");
 
       const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
 
       expect(warm).toMatchObject({ indexed: 0, skipped: 1, total: 1 });
+      expect(getAllMessages).not.toHaveBeenCalled();
       expect(await store.searchSessions({ query: "original question", limit: 10 })).toHaveLength(1);
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });

@@ -8,7 +8,7 @@ import {
   loadCodexSessionRows,
   loadCursorTranscriptFile,
   loadDefaultSessions,
-  loadDefaultSessionsIterator,
+  loadDefaultSessionsAsyncIterator,
   parseJsonlText,
   type SessionLoadOptions,
 } from "./session-loader";
@@ -63,7 +63,7 @@ function indexFailureMessage(failed: number): string | null {
 
 export async function syncLoadedSessionsInBatches(
   store: SessionStore,
-  loaded: Iterable<LoadedSession>,
+  loaded: Iterable<LoadedSession> | AsyncIterable<LoadedSession>,
   options: BatchIndexOptions = {},
 ): Promise<IndexStatus> {
   const batchSize = Math.max(1, options.batchSize ?? 3);
@@ -83,7 +83,7 @@ export async function syncLoadedSessionsInBatches(
       .map((environment) => [environment.hostAlias!, environment]),
   );
 
-  for (const loadedItem of loaded) {
+  for await (const loadedItem of loaded) {
     const item = await resolveExecutionEnvironment(
       store,
       loadedItem,
@@ -181,19 +181,12 @@ export async function syncDefaultSessionsInBatches(
 ): Promise<IndexStatus> {
   const storedFiles = await store.listIndexedSessionFiles();
   const indexedFiles = sessionFileSnapshots(storedFiles);
-  const incrementalCodexSessions = new Map<string, { offset: number; loaded: LoadedSession }>();
+  const incrementalCodexFiles = new Map<string, { offset: number; sessionKey: string }>();
   for (const file of storedFiles) {
     if (file.source !== "codex-cli" && file.source !== "codex-app" && file.source !== "tcodex-cli") continue;
-    const session = await store.getSession(file.sessionKey);
-    if (!session) continue;
-    incrementalCodexSessions.set(file.filePath, {
+    incrementalCodexFiles.set(file.filePath, {
       offset: file.fileSize,
-      loaded: {
-        session,
-        messages: await store.getAllMessages(file.sessionKey),
-        tokenEvents: await store.getTokenEvents(file.sessionKey),
-        traceEvents: await store.getTraceEvents(file.sessionKey),
-      },
+      sessionKey: file.sessionKey,
     });
   }
   const dependencyChangedFiles = new Set<string>();
@@ -203,9 +196,23 @@ export async function syncDefaultSessionsInBatches(
   const onSkippedFile = loadOptions.onSkippedFile;
   const scannedFilePaths = new Set<string>();
   const scannedSessionKeys = new Set<string>();
-  const rawLoaded = loadDefaultSessionsIterator({
+  const rawLoaded = loadDefaultSessionsAsyncIterator({
     ...loadOptions,
-    incrementalCodexSessions,
+    loadIncrementalCodexSession: async (filePath) => {
+      const previous = incrementalCodexFiles.get(filePath);
+      if (!previous) return undefined;
+      const session = await store.getSession(previous.sessionKey);
+      if (!session) return undefined;
+      return {
+        offset: previous.offset,
+        loaded: {
+          session,
+          messages: await store.getAllMessages(previous.sessionKey),
+          tokenEvents: await store.getTokenEvents(previous.sessionKey),
+          traceEvents: await store.getTraceEvents(previous.sessionKey),
+        },
+      };
+    },
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0) => {
       scannedFilePaths.add(filePath);
       const customDecision = shouldSkipFile?.(filePath, stat, dependencyMtimeMs);
@@ -213,7 +220,7 @@ export async function syncDefaultSessionsInBatches(
       const snapshot = findSessionFileSnapshot(indexedFiles, filePath, stat);
       if (snapshot !== undefined && dependencyMtimeMs > snapshot.indexedAt) {
         dependencyChangedFiles.add(filePath);
-        incrementalCodexSessions.delete(filePath);
+        incrementalCodexFiles.delete(filePath);
       }
       return snapshot !== undefined && snapshot.indexedAt > 0 && dependencyMtimeMs <= snapshot.indexedAt;
     },
@@ -222,8 +229,8 @@ export async function syncDefaultSessionsInBatches(
       onSkippedFile?.(filePath, stat);
     },
   });
-  const loaded = (function* () {
-    for (const item of rawLoaded) {
+  const loaded = (async function* () {
+    for await (const item of rawLoaded) {
       if (item.session.filePath) scannedFilePaths.add(item.session.filePath);
       scannedSessionKeys.add(item.session.sessionKey);
       yield item;

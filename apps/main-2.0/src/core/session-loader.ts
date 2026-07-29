@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { cleanTitle, getAdapter, isMeaningfulUserMessage } from "./format-adapters";
-import { scanCompleteJsonl } from "./codex-jsonl-stream";
+import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 import {
   CODEWIZ_SHARE_DIR,
   QODER_DIR,
@@ -69,6 +69,9 @@ import type {
 } from "./types";
 
 const CODEX_APP_ORIGINATORS = new Set(["Codex Desktop", "codex_work_desktop"]);
+const CODEX_FUNCTION_OUTPUT_MARKER = Buffer.from('"type":"function_call_output"');
+const CODEX_CUSTOM_TOOL_OUTPUT_MARKER = Buffer.from('"type":"custom_tool_call_output"');
+const CODEX_INLINE_IMAGE_MARKER = Buffer.from('"image_url":"data:image/');
 const TCLAUDE_DIR = ".tclaude";
 const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
@@ -763,6 +766,20 @@ interface StreamedCodexTurn {
   traceEvents: TraceEventDraft[];
 }
 
+function isCodexInlineImageOutput(line: Buffer): boolean {
+  return (
+    (
+      line.indexOf(CODEX_FUNCTION_OUTPUT_MARKER) >= 0
+      || line.indexOf(CODEX_CUSTOM_TOOL_OUTPUT_MARKER) >= 0
+    )
+    && line.indexOf(CODEX_INLINE_IMAGE_MARKER) >= 0
+  );
+}
+
+function shouldParseCodexJsonlLine(line: Buffer): boolean {
+  return !(line.length > 512 * 1024 && isCodexInlineImageOutput(line));
+}
+
 function createLoadedCodexSession(
   filePath: string,
   meta: CodexSessionMeta,
@@ -797,14 +814,19 @@ function createLoadedCodexSession(
   return { session, messages, tokenEvents, traceEvents };
 }
 
-function scanCodexSessionFile(filePath: string, base?: { offset: number; loaded: LoadedSession }): {
+interface ScannedCodexSession {
   meta: CodexSessionMeta;
   messages: SessionMessage[];
   tokenEvents: TokenUsageEvent[];
   traceEvents: SessionTraceEvent[];
   committedOffset: number;
-} | null {
-  if (base && safeStat(filePath).size < base.offset) return scanCodexSessionFile(filePath);
+}
+
+function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSession }): {
+  onRecord(row: unknown): void;
+  finish(committedOffset: number): ScannedCodexSession | null;
+  hasInvalidRollback(): boolean;
+} {
   const adapter = getAdapter("codex");
   const allMessages: SessionMessage[] = [...(base?.loaded.messages ?? [])];
   const allTraceEvents: TraceEventDraft[] = [...(base?.loaded.traceEvents ?? [])];
@@ -823,73 +845,102 @@ function scanCodexSessionFile(filePath: string, base?: { offset: number; loaded:
     parentSessionId: base.loaded.session.parentSessionId ?? null,
   } : null;
   let invalidRollback = false;
-  let committedOffset = base?.offset ?? 0;
 
+  return {
+    onRecord: (row) => {
+      const parsedMeta = parseCodexSessionMetaLine(row);
+      if (parsedMeta) {
+        meta = meta ? {
+          ...meta,
+          projectPath: meta.projectPath || parsedMeta.projectPath,
+          ts: meta.ts || parsedMeta.ts,
+          title: meta.title || parsedMeta.title,
+          gitBranch: meta.gitBranch || parsedMeta.gitBranch,
+          originator: meta.originator || parsedMeta.originator,
+          isSubagent: meta.isSubagent || parsedMeta.isSubagent,
+          parentSessionId: meta.parentSessionId || parsedMeta.parentSessionId,
+        } : parsedMeta;
+      }
+      if (isRecord(row)) {
+        const payload = objectField(row, "payload");
+        if (row.type === "turn_context" || (row.type === "event_msg" && stringField(payload, "type") === "token_count")) tokenRows.push(row);
+        if (row.type === "event_msg" && payload?.type === "thread_rolled_back") {
+          const numTurns = payload.num_turns;
+          if (!Number.isSafeInteger(numTurns) || (numTurns as number) <= 0 || (numTurns as number) > turns.length) invalidRollback = true;
+          else {
+            turns.splice(turns.length - (numTurns as number), numTurns as number);
+            currentTurn = turns.at(-1) ?? null;
+          }
+          return;
+        }
+      }
+      const parsedMessage = adapter.parseLine(row);
+      const message = parsedMessage && (parsedMessage.role !== "user" || isMeaningfulUserMessage(parsedMessage.content))
+        ? { ...parsedMessage, index: 0 }
+        : null;
+      const traces = isRecord(row) ? [...extractCodexResponseTrace(row), ...extractCodexEventTrace(row)] : [];
+      if (message) allMessages.push(message);
+      allTraceEvents.push(...traces);
+      if (message?.role === "user") {
+        currentTurn = { messages: [message], traceEvents: [...traces] };
+        turns.push(currentTurn);
+      } else {
+        const target = currentTurn ?? preamble;
+        if (message) target.messages.push(message);
+        target.traceEvents.push(...traces);
+      }
+    },
+    finish: (committedOffset) => {
+      if (!meta) return null;
+      const visibleMessages = invalidRollback ? allMessages : [...preamble.messages, ...turns.flatMap((turn) => turn.messages)];
+      const visibleTraces = invalidRollback ? allTraceEvents : [...preamble.traceEvents, ...turns.flatMap((turn) => turn.traceEvents)];
+      return {
+        meta,
+        messages: visibleMessages.map((message, index) => ({ ...message, index })),
+        tokenEvents: [
+          ...(base?.loaded.tokenEvents ?? []),
+          ...extractCodexTokenEvents(base ? tokenRows.map(stripCodexCumulativeUsage) : tokenRows),
+        ],
+        traceEvents: dedupeTraceEvents(visibleTraces),
+        committedOffset,
+      };
+    },
+    hasInvalidRollback: () => invalidRollback,
+  };
+}
+
+function scanCodexSessionFile(filePath: string, base?: { offset: number; loaded: LoadedSession }): ScannedCodexSession | null {
+  if (base && safeStat(filePath).size < base.offset) return scanCodexSessionFile(filePath);
+  const accumulator = createCodexScanAccumulator(base);
   try {
     const result = scanCompleteJsonl(filePath, {
       startOffset: base?.offset,
-      onRecord: (row) => {
-        const parsedMeta = parseCodexSessionMetaLine(row);
-        if (parsedMeta) {
-          meta = meta ? {
-            ...meta,
-            projectPath: meta.projectPath || parsedMeta.projectPath,
-            ts: meta.ts || parsedMeta.ts,
-            title: meta.title || parsedMeta.title,
-            gitBranch: meta.gitBranch || parsedMeta.gitBranch,
-            originator: meta.originator || parsedMeta.originator,
-            isSubagent: meta.isSubagent || parsedMeta.isSubagent,
-            parentSessionId: meta.parentSessionId || parsedMeta.parentSessionId,
-          } : parsedMeta;
-        }
-        if (isRecord(row)) {
-          const payload = objectField(row, "payload");
-          if (row.type === "turn_context" || (row.type === "event_msg" && stringField(payload, "type") === "token_count")) tokenRows.push(row);
-          if (row.type === "event_msg" && payload?.type === "thread_rolled_back") {
-            const numTurns = payload.num_turns;
-            if (!Number.isSafeInteger(numTurns) || (numTurns as number) <= 0 || (numTurns as number) > turns.length) invalidRollback = true;
-            else {
-              turns.splice(turns.length - (numTurns as number), numTurns as number);
-              currentTurn = turns.at(-1) ?? null;
-            }
-            return;
-          }
-        }
-        const parsedMessage = adapter.parseLine(row);
-        const message = parsedMessage && (parsedMessage.role !== "user" || isMeaningfulUserMessage(parsedMessage.content))
-          ? { ...parsedMessage, index: 0 }
-          : null;
-        const traces = isRecord(row) ? [...extractCodexResponseTrace(row), ...extractCodexEventTrace(row)] : [];
-        if (message) allMessages.push(message);
-        allTraceEvents.push(...traces);
-        if (message?.role === "user") {
-          currentTurn = { messages: [message], traceEvents: [...traces] };
-          turns.push(currentTurn);
-        } else {
-          const target = currentTurn ?? preamble;
-          if (message) target.messages.push(message);
-          target.traceEvents.push(...traces);
-        }
-      },
+      shouldSkipLinePrefix: isCodexInlineImageOutput,
+      shouldParseLine: shouldParseCodexJsonlLine,
+      onRecord: accumulator.onRecord,
     });
-    committedOffset = result.committedOffset;
+    if (base && accumulator.hasInvalidRollback()) return scanCodexSessionFile(filePath);
+    return accumulator.finish(result.committedOffset);
   } catch {
     return null;
   }
-  if (base && invalidRollback) return scanCodexSessionFile(filePath);
-  if (!meta) return null;
-  const visibleMessages = invalidRollback ? allMessages : [...preamble.messages, ...turns.flatMap((turn) => turn.messages)];
-  const visibleTraces = invalidRollback ? allTraceEvents : [...preamble.traceEvents, ...turns.flatMap((turn) => turn.traceEvents)];
-  return {
-    meta,
-    messages: visibleMessages.map((message, index) => ({ ...message, index })),
-    tokenEvents: [
-      ...(base?.loaded.tokenEvents ?? []),
-      ...extractCodexTokenEvents(base ? tokenRows.map(stripCodexCumulativeUsage) : tokenRows),
-    ],
-    traceEvents: dedupeTraceEvents(visibleTraces),
-    committedOffset,
-  };
+}
+
+async function scanCodexSessionFileAsync(filePath: string, base?: { offset: number; loaded: LoadedSession }): Promise<ScannedCodexSession | null> {
+  if (base && safeStat(filePath).size < base.offset) return scanCodexSessionFileAsync(filePath);
+  const accumulator = createCodexScanAccumulator(base);
+  try {
+    const result = await scanCompleteJsonlAsync(filePath, {
+      startOffset: base?.offset,
+      shouldSkipLinePrefix: isCodexInlineImageOutput,
+      shouldParseLine: shouldParseCodexJsonlLine,
+      onRecord: accumulator.onRecord,
+    });
+    if (base && accumulator.hasInvalidRollback()) return scanCodexSessionFileAsync(filePath);
+    return accumulator.finish(result.committedOffset);
+  } catch {
+    return null;
+  }
 }
 
 function stripCodexCumulativeUsage(row: unknown): unknown {
@@ -935,6 +986,43 @@ export function* loadCodexSessionsIterator(
       stat: { ...stat, size: scanned.committedOffset },
     });
     yield loaded;
+  }
+}
+
+export async function* loadCodexSessionsAsyncIterator(
+  codexDir = path.join(os.homedir(), ".codex"),
+  sourceOverride?: SessionSource,
+  options: SessionLoadOptions = {},
+): AsyncGenerator<LoadedSession> {
+  const sessionsDir = path.join(codexDir, "sessions");
+  if (!fs.existsSync(sessionsDir)) return;
+
+  const titleMap = new Map<string, { title: string; updatedAt: string }>();
+  const indexPath = path.join(codexDir, "session_index.jsonl");
+  const indexStat = fs.existsSync(indexPath) ? safeStat(indexPath) : { mtimeMs: 0, size: 0 };
+  if (fs.existsSync(indexPath)) {
+    for (const row of readJsonl(indexPath) as Array<{ id?: string; thread_name?: string; updated_at?: string }>) {
+      if (row.id && row.thread_name) titleMap.set(row.id, { title: row.thread_name, updatedAt: row.updated_at || "" });
+    }
+  }
+
+  for (const filePath of walkJsonlFiles(sessionsDir)) {
+    const stat = safeStat(filePath);
+    if (shouldSkipFile(options, filePath, stat, indexStat.mtimeMs)) continue;
+    const incrementalBase = await options.loadIncrementalCodexSession?.(filePath)
+      ?? options.incrementalCodexSessions?.get(filePath);
+    const scanned = await scanCodexSessionFileAsync(
+      filePath,
+      incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
+    );
+    if (!scanned) continue;
+    const indexedTitle = titleMap.get(scanned.meta.id);
+    yield createLoadedCodexSession(filePath, scanned.meta, scanned.messages, scanned.tokenEvents, scanned.traceEvents, {
+      title: indexedTitle?.title,
+      updatedAt: indexedTitle?.updatedAt,
+      sourceOverride,
+      stat: { ...stat, size: scanned.committedOffset },
+    });
   }
 }
 
@@ -1231,5 +1319,32 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
+  if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
+}
+
+export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOptions = {}): AsyncGenerator<LoadedSession> {
+  const homeDir = options.homeDir ?? os.homedir();
+  yield* loadClaudeCliSessionsIterator(path.join(homeDir, ".claude"), "claude-cli", options);
+  yield* loadClaudeAppSessionsIterator(
+    path.join(homeDir, "Library", "Application Support", "Claude", "claude-code-sessions"),
+    path.join(homeDir, ".claude"),
+    options,
+  );
+  yield* loadCodexSessionsAsyncIterator(path.join(homeDir, ".codex"), undefined, options);
+  if (options.includeOpenClaw) {
+    yield* loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options);
+    yield* loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options);
+  }
+  if (options.includeHermes) yield* loadHermesSessions();
+  if (options.includeOpenCode) yield* loadOpenCodeSessions();
+  if (options.includeZcode) yield* loadZcodeSessions(path.join(homeDir, ".zcode"));
+  if (options.includeCodeWizCli) yield* loadCodeWizSessions(path.join(homeDir, CODEWIZ_SHARE_DIR));
+  if (options.includeCursorAgent) yield* loadCursorAgentSessionsIterator(path.join(homeDir, ".cursor"), options);
+  if (options.includeTrae) {
+    for (const dirName of TRAE_DIR_NAMES) yield* loadTraeSessionsIterator(path.join(homeDir, dirName), options);
+  }
+  if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
+  if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
+  if (options.includeTcodex) yield* loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
 }

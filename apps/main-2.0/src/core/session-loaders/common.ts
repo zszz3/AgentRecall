@@ -38,6 +38,9 @@ export interface SessionLoadOptions {
   ) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
   incrementalCodexSessions?: ReadonlyMap<string, { offset: number; loaded: LoadedSession }>;
+  loadIncrementalCodexSession?: (
+    filePath: string,
+  ) => Promise<{ offset: number; loaded: LoadedSession } | undefined>;
 }
 
 export interface VirtualSessionFileStat {
