@@ -4,6 +4,7 @@ import {
   materializeSessionAttachment,
   MAX_SESSION_ATTACHMENT_BYTES,
 } from "../session-attachments";
+import { codexTaskWorkspaceDate } from "../project-identity";
 import { truncateTraceDetail } from "../trace-detail";
 import type {
   IndexedSession,
@@ -2280,26 +2281,6 @@ function branchTagName(branch: string | null | undefined): string | null {
 
 function projectParts(projectPath: string): string[] {
   return projectPath.split(/[\\/]+/).filter(Boolean);
-}
-
-function validIsoDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
-
-function codexTaskWorkspaceDate(projectPath: string): string | null {
-  const parts = projectParts(projectPath);
-  if (parts.length < 3) return null;
-  const codexSegment = parts.at(-3) || "";
-  const dateSegment = parts.at(-2) || "";
-  const taskSegment = parts.at(-1) || "";
-  if (codexSegment.toLowerCase() !== "codex" || !taskSegment || !validIsoDate(dateSegment)) return null;
-  return dateSegment;
 }
 
 function rootProjectTitle(row: ProjectAggregateRow): string | null {

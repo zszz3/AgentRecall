@@ -1,8 +1,12 @@
+import { codexTaskWorkspaceDate } from "../../../../core/project-identity";
+import { sessionSourceDescriptor } from "../../../../core/session-sources";
+import type { SessionSource } from "../../../../core/types";
+
 export type GroupMode = "flat" | "project" | "source" | "time";
 
 export interface GroupableSession {
   sessionKey: string;
-  source: string;
+  source: SessionSource;
   projectPath: string;
   timestamp: number;
 }
@@ -13,6 +17,7 @@ export interface SessionGroup<T extends GroupableSession = GroupableSession> {
 }
 
 export const GROUP_MODES: GroupMode[] = ["flat", "project", "source", "time"];
+const NO_PROJECT_GROUP_PREFIX = "agent-recall:no-project:";
 
 export function groupSessions<T extends GroupableSession>(sessions: T[], mode: GroupMode, now = Date.now()): Array<SessionGroup<T>> {
   if (mode === "flat") {
@@ -20,7 +25,7 @@ export function groupSessions<T extends GroupableSession>(sessions: T[], mode: G
   }
   const keyOf =
     mode === "project"
-      ? (session: T) => session.projectPath || "(no project)"
+      ? projectGroupKey
       : mode === "source"
         ? (session: T) => session.source
         : (session: T) => timeBucket(session.timestamp, now);
@@ -36,6 +41,19 @@ export function groupSessions<T extends GroupableSession>(sessions: T[], mode: G
   return [...map.entries()]
     .map(([key, grouped]) => ({ key, sessions: grouped }))
     .sort((a, b) => compareGroups(a, b, mode));
+}
+
+export function isNoProjectGroupKey(key: string): boolean {
+  return key.startsWith(NO_PROJECT_GROUP_PREFIX);
+}
+
+function projectGroupKey(session: GroupableSession): string {
+  const sourceFamily = sessionSourceDescriptor(session.source).family;
+  const isCodexTaskWorkspace = sourceFamily === "codex"
+    && codexTaskWorkspaceDate(session.projectPath) !== null;
+  return !session.projectPath || isCodexTaskWorkspace
+    ? `${NO_PROJECT_GROUP_PREFIX}${sourceFamily}`
+    : session.projectPath;
 }
 
 function compareGroups<T extends GroupableSession>(a: SessionGroup<T>, b: SessionGroup<T>, mode: GroupMode): number {

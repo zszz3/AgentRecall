@@ -6,7 +6,7 @@ import { localize, type LanguageMode } from "../../language";
 import type { LiveSessionState } from "../../live-filter";
 import { SOURCE_LABEL } from "../../session-ui";
 import { SessionRow } from "./session-row";
-import { groupSessions, TIME_BUCKETS, type GroupMode } from "./group-logic";
+import { groupSessions, isNoProjectGroupKey, TIME_BUCKETS, type GroupMode, type SessionGroup } from "./group-logic";
 
 export function GroupedResults({
   sessions,
@@ -79,7 +79,7 @@ export function GroupedResults({
           <section key={group.key} className="result-group">
             <button className="result-group-head" onClick={() => toggleGroup(group.key)}>
               {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-              <span className="result-group-label">{groupLabel(group.key, groupMode, l)}</span>
+              <span className="result-group-label">{groupLabel(group, groupMode, l)}</span>
               <span className="result-group-count">{group.sessions.length}</span>
             </button>
             {!isCollapsed ? (
@@ -110,10 +110,11 @@ export function GroupedResults({
 }
 
 function groupLabel(
-  key: string,
+  group: SessionGroup<SessionSearchResult>,
   mode: GroupMode,
   l: (en: string, zh: string) => string,
 ): string {
+  const { key } = group;
   if (mode === "time") {
     const index = TIME_BUCKETS.indexOf(key as (typeof TIME_BUCKETS)[number]);
     if (index === 0) return l("Today", "今天");
@@ -123,6 +124,11 @@ function groupLabel(
   }
   if (mode === "source") {
     return SOURCE_LABEL[key as keyof typeof SOURCE_LABEL] ?? key;
+  }
+  if (isNoProjectGroupKey(key)) {
+    const source = group.sessions[0]?.source;
+    const sourceLabel = source ? SOURCE_LABEL[source] : l("Unknown source", "未知来源");
+    return `${sourceLabel} · ${l("No project", "无项目")}`;
   }
   // project: show the basename of the path
   const parts = key.replace(/\\/g, "/").split("/").filter(Boolean);
