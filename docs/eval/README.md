@@ -7,7 +7,7 @@ Skill，后续按同一框架扩展到 Workflow、Rules 等资产。本文定义
 整合方式、核心设计原则、术语和分期边界；各阶段的实现要求见对应的 phase 文
 档，随迭代持续补充并回填 PR 链接：
 
-- [阶段一：Skill 触发与会话的关联地基](./phase-01-skill-session-linkage.md)
+- [阶段一：Skill 触发与会话的关联地基](./phase-01-skill-session-linkage.md)（已合并，[PR #246](https://github.com/zszz3/AgentRecall/pull/246)）
 - 阶段二：Skill 实况报告（审计侧最小版）——待设计
 - 后续阶段：回归执行器、用例挖掘、报告与对比——待设计
 
@@ -118,7 +118,20 @@ Eval 页采用**对象视角**而非机械件视角：用户进入时回答的�
 
 ## 7. 当前实现边界
 
-尚无已实现部分。文档先行，每个阶段合并后在此更新实际边界与 PR 链接。
+阶段一已合并（[PR #246](https://github.com/zszz3/AgentRecall/pull/246)）：
+
+- Eval 为设置中默认关闭的开关；开启时若 usage hook 已安装会先卸后装，
+  确保生效脚本为 V2 版本；
+- Claude hook 记录新增 `session_id`/`cwd`；`skill_usage_events` 新增同名可空
+  列（迁移 v12）；
+- 关联在查询期解析：claude-hook 事件走 `session_id → sessions.raw_id`
+  （限本地存储环境），会话文件扫描出的事件走 `source_path →
+  sessions.file_path`（含 Codex、Cursor、Qoder 等全部会话文件来源），
+  turn 级按时间区间尽力解析；三档结果 linked-turn / linked-session /
+  unlinked，历史无键事件保持 unlinked；
+- Eval 页为对象视角最小骨架：Skills tab（触发列表 + 关联会话跳转）、
+  Experiments tab（原有实验功能）、Workflows/Rules 锁定态；
+- 审计指标、findings、回归执行器均未实现（阶段二及后续）。
 
 ## 8. 决策记录
 

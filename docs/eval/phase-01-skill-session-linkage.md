@@ -1,6 +1,6 @@
 # 阶段一：Skill 触发与会话的关联地基
 
-状态：已实现，待合并（合并后在此回填 PR 链接）。
+状态：已合并（[PR #246](https://github.com/zszz3/AgentRecall/pull/246)）。
 
 ## 1. 目标与非目标
 
