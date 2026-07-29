@@ -5,6 +5,7 @@ import type { SkillsShDetail, SkillsShPage } from "../../core/skills-sh";
 import type { SkillDiffSnapshot } from "../../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
 import type { SkillUsageRefreshStatus } from "../../core/skill-usage";
+import type { SkillTriggerLink } from "../../core/session-store";
 import { SKILLS_IPC } from "../../shared/ipc/skills";
 import { combineIpcDisposers, registerIpcHandler, type IpcMainRegistrar } from "./register-ipc-handler";
 
@@ -32,6 +33,7 @@ export interface SkillsIpcService {
   getUsageHookStatus(): boolean;
   installUsageHook(): string;
   uninstallUsageHook(): string;
+  listSkillTriggers(options: { skill?: string; limit?: number }): Promise<SkillTriggerLink[]>;
 }
 
 export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcService): () => void {
@@ -59,5 +61,6 @@ export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcServi
     registerIpcHandler(ipc, SKILLS_IPC.getUsageHookStatus, () => service.getUsageHookStatus()),
     registerIpcHandler(ipc, SKILLS_IPC.installUsageHook, () => service.installUsageHook()),
     registerIpcHandler(ipc, SKILLS_IPC.uninstallUsageHook, () => service.uninstallUsageHook()),
+    registerIpcHandler(ipc, SKILLS_IPC.listTriggers, (_event, options) => service.listSkillTriggers(options)),
   ]);
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadSkillUsage, usageForSkill } from "./skill-usage";
+import { loadSkillUsage, readSkillUsageSourceEvents, usageForSkill } from "./skill-usage";
 
 function writeUsageLog(lines: string[]): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-usage-"));
@@ -53,6 +53,31 @@ describe("skill usage", () => {
 
     expect(snapshot.totalEvents).toBe(1);
     expect(snapshot.stats.map((stat) => stat.skill)).toEqual(["review-code"]);
+
+    fs.rmSync(path.dirname(usagePath), { recursive: true, force: true });
+  });
+
+  it("carries session linkage fields from newer hook records and tolerates old ones", () => {
+    const usagePath = writeUsageLog([
+      JSON.stringify({ skill: "review", ts: "2026-06-01T10:00:00.000Z" }),
+      JSON.stringify({ skill: "review", ts: "2026-06-02T10:00:00.000Z", session_id: "abc-123", cwd: "/repo" }),
+      JSON.stringify({ skill: "review", ts: "2026-06-03T10:00:00.000Z", session_id: "   ", cwd: 42 }),
+    ]);
+
+    const events = readSkillUsageSourceEvents({
+      agent: "claude",
+      kind: "claude-hook",
+      path: usagePath,
+      mtimeMs: 1,
+      fileSize: 1,
+    });
+
+    expect(events).toHaveLength(3);
+    expect(events[0]?.sessionId).toBeUndefined();
+    expect(events[0]?.cwd).toBeUndefined();
+    expect(events[1]).toMatchObject({ sessionId: "abc-123", cwd: "/repo" });
+    expect(events[2]?.sessionId).toBeUndefined();
+    expect(events[2]?.cwd).toBeUndefined();
 
     fs.rmSync(path.dirname(usagePath), { recursive: true, force: true });
   });

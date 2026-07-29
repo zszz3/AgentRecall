@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AppSettings } from "../../core/platform";
-import type { SkillSyncBinding } from "../../core/session-store";
+import type { SkillSyncBinding, SkillTriggerLink } from "../../core/session-store";
 import { runSkillAiSearch, type SkillAiSearchResult } from "../../core/skill-ai-search";
 import {
   ManagedSkillLibrary,
@@ -74,6 +74,7 @@ export interface SkillStorePort {
   isSkillUsageSourceFresh(source: SkillUsageSource): Promise<boolean>;
   upsertSkillUsageSource(source: SkillUsageSource, events: SkillUsageEvent[]): Promise<void>;
   pruneSkillUsageSources(activePaths: string[]): Promise<void>;
+  listRecentSkillTriggers(options: { skill?: string; limit?: number }): Promise<SkillTriggerLink[]>;
   listSkillSyncBindings(): Promise<SkillSyncBinding[]>;
   getSkillSyncBindingForPortableIdentity(identity: string): Promise<SkillSyncBinding | null>;
   upsertSkillSyncBinding(binding: SkillSyncBinding): Promise<void>;
@@ -568,6 +569,17 @@ export class SkillService {
     } catch {
       return false;
     }
+  }
+
+  // Eval-gated: resolving triggers against indexed sessions is only exposed
+  // once the user has opted into Eval in Settings.
+  async listSkillTriggers(
+    options: { skill?: string; limit?: number } = {},
+  ): Promise<SkillTriggerLink[]> {
+    if (!this.dependencies.getSettings().evalEnabled) {
+      throw new Error("Eval is disabled. Enable it in Settings first.");
+    }
+    return this.dependencies.getStore().listRecentSkillTriggers(options);
   }
 
   installUsageHook(): string {

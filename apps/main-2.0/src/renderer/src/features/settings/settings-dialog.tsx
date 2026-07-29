@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   Activity,
+  Beaker,
   BrainCircuit,
   CheckCircle2,
   ChevronRight,
@@ -46,6 +47,7 @@ import {
   environmentTarget,
 } from "../environments/environment-display";
 import { OpenVikingMemorySettings } from "./openviking-memory-settings";
+import { EvalSettings } from "./eval-settings";
 
 export type SettingsSection =
   | "terminal"
@@ -57,6 +59,7 @@ export type SettingsSection =
   | "memory"
   | "remote"
   | "skills"
+  | "eval"
   | "appearance"
   | "about";
 
@@ -317,6 +320,10 @@ export function SettingsDialog({
             <button className={activeSection === "skills" ? "active" : ""} onClick={() => setActiveSection("skills")}>
               <PackageSearch size={15} />
               <span>{l("Skills", "Skills")}</span>
+            </button>
+            <button className={activeSection === "eval" ? "active" : ""} onClick={() => setActiveSection("eval")}>
+              <Beaker size={15} />
+              <span>{l("Eval", "Eval")}</span>
             </button>
             <button className={activeSection === "appearance" ? "active" : ""} onClick={() => setActiveSection("appearance")}>
               <Sun size={15} />
@@ -802,6 +809,14 @@ export function SettingsDialog({
             ) : null}
             {activeSection === "memory" ? (
               <OpenVikingMemorySettings
+                language={language}
+                settings={settings}
+                saving={saving}
+                onSettingsChange={onSettingsChange}
+              />
+            ) : null}
+            {activeSection === "eval" ? (
+              <EvalSettings
                 language={language}
                 settings={settings}
                 saving={saving}

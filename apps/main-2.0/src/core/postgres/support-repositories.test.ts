@@ -173,6 +173,78 @@ describe("PostgreSQL support repositories", () => {
     });
   });
 
+  it("resolves skill triggers against indexed sessions and keeps legacy events unlinked", async () => {
+    const repository = new PostgresSkillRepository(database);
+    const sessionRepository = new PostgresSessionRepository(database);
+    await sessionRepository.upsertIndexedSession({
+      ...session("local:claude:abc"),
+      rawId: "claude-session-abc",
+      source: "claude-cli",
+      filePath: "/fixtures/claude-abc.jsonl",
+      originalTitle: "Fix login bug",
+    }, []);
+    await sessionRepository.upsertIndexedSession({
+      ...session("local:codex:roll"),
+      filePath: "/fixtures/codex-rollout.jsonl",
+      originalTitle: "Codex rollout",
+    }, []);
+    await database.query(
+      `
+        insert into agent_recall.session_turns (
+          id, session_key, turn_index, started_at, ended_at, derivation_version
+        )
+        values ('turn-1', 'local:claude:abc', 7, $1, $2, 1)
+      `,
+      [new Date(900).toISOString(), new Date(1_100).toISOString()],
+    );
+
+    await repository.upsertSkillUsageSource({
+      agent: "claude",
+      kind: "claude-hook",
+      path: "/fixtures/skill-usage.jsonl",
+      mtimeMs: 1,
+      fileSize: 1,
+    }, [
+      { agent: "claude", skill: "review", timestamp: 1_000, sessionId: "claude-session-abc", cwd: "/repo" },
+      { agent: "claude", skill: "review", timestamp: 500 },
+    ]);
+    await repository.upsertSkillUsageSource({
+      agent: "codex",
+      kind: "codex-session",
+      path: "/fixtures/codex-rollout.jsonl",
+      mtimeMs: 1,
+      fileSize: 1,
+    }, [
+      { agent: "codex", skill: "review", timestamp: 2_000 },
+    ]);
+
+    const triggers = await repository.listRecentSkillTriggers({ skill: "Review" });
+    expect(triggers).toHaveLength(3);
+    expect(triggers[0]).toMatchObject({
+      agent: "codex",
+      linkState: "linked-session",
+      sessionKey: "local:codex:roll",
+      sessionTitle: "Codex rollout",
+      turnId: null,
+    });
+    expect(triggers[1]).toMatchObject({
+      agent: "claude",
+      linkState: "linked-turn",
+      sessionKey: "local:claude:abc",
+      sessionTitle: "Fix login bug",
+      turnId: "turn-1",
+    });
+    expect(triggers[2]).toMatchObject({
+      agent: "claude",
+      linkState: "unlinked",
+      sessionKey: null,
+      sessionTitle: null,
+      turnId: null,
+    });
+
+    await expect(repository.listRecentSkillTriggers({ skill: "unknown" })).resolves.toEqual([]);
+  });
+
   it("stores sync metadata, provider keys, and ordered migration history", async () => {
     const sessionRepository = new PostgresSessionRepository(database);
     await sessionRepository.upsertIndexedSession(session("local:old"), []);

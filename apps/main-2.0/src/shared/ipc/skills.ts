@@ -30,6 +30,15 @@ const discoveredSkillIdInput = z.string().trim().min(1).max(512).refine((value) 
 const optionalBooleanInput = z
   .union([z.tuple([pathInput]), z.tuple([pathInput, z.boolean().optional()])])
   .transform((input): [string, boolean] => [input[0], input[1] ?? false]);
+const triggersQueryInput = z
+  .union([
+    z.tuple([]),
+    z.tuple([z.object({
+      skill: z.string().trim().max(200).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+    }).strict().optional()]),
+  ])
+  .transform((input): [{ skill?: string; limit?: number }] => [input[0] ?? {}]);
 
 export const SKILLS_IPC = {
   list: defineIpcRequest("skills:list", noInput),
@@ -55,4 +64,5 @@ export const SKILLS_IPC = {
   getUsageHookStatus: defineIpcRequest("skills:usage-hook-status", noInput),
   installUsageHook: defineIpcRequest("skills:install-usage-hook", noInput),
   uninstallUsageHook: defineIpcRequest("skills:uninstall-usage-hook", noInput),
+  listTriggers: defineIpcRequest("skills:list-triggers", triggersQueryInput),
 } as const;

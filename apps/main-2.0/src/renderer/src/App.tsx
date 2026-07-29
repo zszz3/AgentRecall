@@ -104,7 +104,7 @@ const WorkflowFeaturePage = lazy(() =>
 const TeamChatPage = lazy(() =>
   import("./features/team-chat/team-chat-page").then((module) => ({ default: module.TeamChatPage })));
 const EvaluationFeaturePage = lazy(() =>
-  import("./features/automation/evaluation-feature-page").then((module) => ({ default: module.EvaluationFeaturePage })));
+  import("./features/eval/eval-page").then((module) => ({ default: module.EvalPage })));
 const RuntimeFeaturePage = lazy(() =>
   import("./features/automation/runtime-feature-page").then((module) => ({ default: module.RuntimeFeaturePage })));
 const McpFeaturePage = lazy(() =>
@@ -1399,7 +1399,21 @@ export function App(): ReactElement {
             ) : null}
 
             {activePage === "evaluation" ? (
-              <EvaluationFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
+              <EvaluationFeaturePage
+                language={language}
+                enabled={Boolean(appSettings?.evalEnabled)}
+                onOpenSettings={() => {
+                  setSettingsInitialSection("eval");
+                  setSettingsOpen(true);
+                }}
+                onOpenSession={(sessionKey) => {
+                  void (async () => {
+                    const session = await window.sessionSearch.getSession(sessionKey);
+                    if (session) await openDetail(session);
+                  })();
+                }}
+                onNavigationGuardChange={setPageNavigationGuard}
+              />
             ) : null}
 
             {activePage === "runtimes" ? (

@@ -84,6 +84,7 @@ export interface AppSettings {
   includeQoder: boolean;
   rulesSyncEnabled: boolean;
   memoriesSyncEnabled: boolean;
+  evalEnabled: boolean;
   openVikingMemoryEnabled: boolean;
   openVikingClaudeEnabled: boolean;
   openVikingCodexEnabled: boolean;
@@ -150,6 +151,7 @@ export const defaultSettings: AppSettings = {
   includeQoder: false,
   rulesSyncEnabled: false,
   memoriesSyncEnabled: false,
+  evalEnabled: false,
   openVikingMemoryEnabled: false,
   openVikingClaudeEnabled: false,
   openVikingCodexEnabled: false,
@@ -192,6 +194,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     compressionConcurrency: normalizeCompressionConcurrency(merged.compressionConcurrency),
     migrationCompleteTokenLimit: normalizeMigrationCompleteTokenLimit(merged.migrationCompleteTokenLimit),
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
+    evalEnabled: Boolean(merged.evalEnabled),
     openVikingMemoryEnabled: Boolean(merged.openVikingMemoryEnabled),
     openVikingClaudeEnabled: Boolean(merged.openVikingClaudeEnabled),
     openVikingCodexEnabled: Boolean(merged.openVikingCodexEnabled),

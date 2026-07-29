@@ -83,6 +83,14 @@ function decodeEncodedCmdPowerShell(command: string): string {
 }
 
 describe("platform application resolution", () => {
+  it("keeps Eval opt-in and normalizes the persisted flag", () => {
+    expect(defaultSettings.evalEnabled).toBe(false);
+    expect(mergeAppSettings(defaultSettings, {})).toMatchObject({ evalEnabled: false });
+    expect(mergeAppSettings(defaultSettings, {
+      evalEnabled: 1 as unknown as boolean,
+    })).toMatchObject({ evalEnabled: true });
+  });
+
   it("keeps OpenViking memory opt-in and preserves explicit integration settings", () => {
     expect(defaultSettings.openVikingMemoryEnabled).toBe(false);
     expect(defaultSettings.openVikingClaudeEnabled).toBe(false);

@@ -1,5 +1,6 @@
 import {
   skillUsageSnapshotFromEvents,
+  type SkillUsageAgent,
   type SkillUsageEvent,
   type SkillUsageSnapshot,
   type SkillUsageSource,
@@ -7,6 +8,21 @@ import {
 import type { PostgresDatabase } from "./database";
 
 export type SkillSyncDirection = "upload" | "download";
+
+// How far a recorded skill trigger could be resolved against the indexed
+// sessions. Historical records without a linkage key stay "unlinked".
+export type SkillTriggerLinkState = "linked-turn" | "linked-session" | "unlinked";
+
+export interface SkillTriggerLink {
+  agent: SkillUsageAgent;
+  skill: string;
+  occurredAt: number;
+  linkState: SkillTriggerLinkState;
+  sessionKey: string | null;
+  sessionTitle: string | null;
+  projectPath: string | null;
+  turnId: string | null;
+}
 
 export interface SkillSyncBinding {
   localSkillPath: string;
@@ -113,9 +129,9 @@ export class PostgresSkillRepository {
         await client.query(
           `
             insert into agent_recall.skill_usage_events (
-              source_path, event_index, agent, skill, occurred_at
+              source_path, event_index, agent, skill, occurred_at, session_id, cwd
             )
-            values ($1, $2, $3, $4, $5)
+            values ($1, $2, $3, $4, $5, $6, $7)
           `,
           [
             source.path,
@@ -123,6 +139,8 @@ export class PostgresSkillRepository {
             event.agent,
             skill,
             new Date(Math.max(0, event.timestamp)).toISOString(),
+            event.sessionId?.trim() || null,
+            event.cwd?.trim() || null,
           ],
         );
         eventIndex += 1;
@@ -140,6 +158,84 @@ export class PostgresSkillRepository {
       "delete from agent_recall.skill_usage_sources where not (source_path = any($1::text[]))",
       [active],
     );
+  }
+
+  // Resolves recorded skill triggers against indexed sessions at query time:
+  // claude-hook events join on the captured session_id, codex events join on
+  // the session transcript path. Records without a hit stay "unlinked" rather
+  // than being attributed by time-window guessing.
+  async listRecentSkillTriggers(
+    options: { skill?: string; limit?: number } = {},
+  ): Promise<SkillTriggerLink[]> {
+    const skill = options.skill?.trim() || null;
+    const limit = Math.max(1, Math.min(500, Math.floor(options.limit ?? 50)));
+    const result = await this.database.query<{
+      agent: SkillUsageAgent;
+      skill: string;
+      occurred_at: Date | string;
+      session_key: string | null;
+      session_title: string | null;
+      project_path: string | null;
+      turn_id: string | null;
+    }>(
+      `
+        select
+          events.agent,
+          events.skill,
+          events.occurred_at,
+          linked.session_key,
+          linked.session_title,
+          linked.project_path,
+          turn.turn_id
+        from agent_recall.skill_usage_events events
+        left join lateral (
+          select
+            sessions.session_key,
+            coalesce(
+              nullif(sessions.custom_title, ''),
+              nullif(sessions.original_title, ''),
+              sessions.first_question
+            ) as session_title,
+            sessions.project_path
+          from agent_recall.sessions sessions
+          where
+            (
+              events.session_id is not null
+              and sessions.raw_id = events.session_id
+              and sessions.source in ('claude-cli', 'claude-app')
+              and sessions.storage_environment_id = 'local'
+            )
+            or (events.agent = 'codex' and sessions.file_path = events.source_path)
+          order by sessions.file_mtime_ms desc
+          limit 1
+        ) linked on true
+        left join lateral (
+          select turns.id as turn_id
+          from agent_recall.session_turns turns
+          where turns.session_key = linked.session_key
+            and turns.started_at is not null
+            and turns.ended_at is not null
+            and turns.started_at <= events.occurred_at
+            and turns.ended_at >= events.occurred_at
+          order by turns.turn_index
+          limit 1
+        ) turn on true
+        where $1::text is null or lower(events.skill) = lower($1)
+        order by events.occurred_at desc, events.source_path, events.event_index desc
+        limit $2
+      `,
+      [skill, limit],
+    );
+    return result.rows.map((row) => ({
+      agent: row.agent,
+      skill: row.skill,
+      occurredAt: timeValue(row.occurred_at),
+      linkState: row.turn_id ? "linked-turn" : row.session_key ? "linked-session" : "unlinked",
+      sessionKey: row.session_key,
+      sessionTitle: row.session_key ? row.session_title || null : null,
+      projectPath: row.session_key ? row.project_path || null : null,
+      turnId: row.turn_id,
+    }));
   }
 
   async getSkillUsageSnapshot(): Promise<SkillUsageSnapshot> {

@@ -53,12 +53,25 @@ function buildRecord(input) {
   const skill = extractSkillName(input.tool_input);
   if (!skill) return null;
 
-  return {
+  // session_id and cwd come straight from the PostToolUse stdin payload. They
+  // let AgentRecall link the usage record to the indexed session; transcripts
+  // do not record skill invocations, so this is the only linkage source.
+  const sessionId = cleanText(input.session_id);
+  const cwd = cleanText(input.cwd);
+
+  const record = {
     skill,
     agent: "claude",
     event: typeof input.hook_event_name === "string" ? input.hook_event_name : "PostToolUse",
     ts: new Date().toISOString(),
   };
+  if (sessionId) record.session_id = sessionId;
+  if (cwd) record.cwd = cwd;
+  return record;
+}
+
+function cleanText(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function extractSkillName(toolInput) {

@@ -2258,6 +2258,20 @@ function registerIpc(): void {
     if ("remoteSyncEnabled" in settings && !next.remoteSyncEnabled) {
       remoteSessionService.disableSync();
     }
+    // Enabling Eval re-installs an already-present usage hook so the active
+    // script is this app's copy, which captures the session linkage fields.
+    // Install alone reports "already" for any script with the same basename
+    // (e.g. the V1 copy), so remove our hook entry first, then re-add it.
+    if ("evalEnabled" in settings && next.evalEnabled && !previous.evalEnabled) {
+      try {
+        if (skillService.getUsageHookStatus()) {
+          skillService.uninstallUsageHook();
+          skillService.installUsageHook();
+        }
+      } catch (error) {
+        console.error(`Failed to refresh the skill usage hook for Eval: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     await providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
     if (openVikingSettingsChanged) {

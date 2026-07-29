@@ -18,6 +18,9 @@ interface HookSetupModule {
 
 const require = createRequire(import.meta.url);
 const setup = require(path.resolve("bin", "setup-skill-usage-hook.cjs")) as HookSetupModule;
+const record = require(path.resolve("bin", "skill-usage-record.cjs")) as {
+  buildRecord(input: unknown): Record<string, unknown> | null;
+};
 
 function freshHome(): string {
   const homeDir = path.join(tmpdir(), `skill-usage-hook-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -97,5 +100,43 @@ describe("skill usage hook setup", () => {
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("skill usage record payload", () => {
+  it("captures session linkage fields from the PostToolUse payload", () => {
+    const built = record.buildRecord({
+      tool_name: "Skill",
+      hook_event_name: "PostToolUse",
+      tool_input: { skill: "review" },
+      session_id: " abc-123 ",
+      cwd: "/repo",
+    });
+    expect(built).toMatchObject({
+      skill: "review",
+      agent: "claude",
+      session_id: "abc-123",
+      cwd: "/repo",
+    });
+  });
+
+  it("omits linkage fields when the payload does not provide usable values", () => {
+    const built = record.buildRecord({
+      tool_name: "Skill",
+      tool_input: { skill: "review" },
+      session_id: 7,
+      cwd: "   ",
+    });
+    expect(built).toMatchObject({ skill: "review", agent: "claude" });
+    expect(built).not.toHaveProperty("session_id");
+    expect(built).not.toHaveProperty("cwd");
+  });
+
+  it("still ignores non-Skill tools", () => {
+    expect(record.buildRecord({
+      tool_name: "Bash",
+      tool_input: { skill: "review" },
+      session_id: "abc-123",
+    })).toBeNull();
   });
 });

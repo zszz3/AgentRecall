@@ -16,6 +16,7 @@ import "./styles/app-shell.css";
 import "./styles/workbench.css";
 import "./styles/skills-page.css";
 import "./styles/openviking-memory.css";
+import "./styles/eval.css";
 import "./styles/team-chat.css";
 import "./styles/automation-upstream/part-01.css";
 import "./styles/automation-upstream/part-02.css";

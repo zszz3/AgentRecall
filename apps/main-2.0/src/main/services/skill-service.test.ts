@@ -99,6 +99,16 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
     isSkillUsageSourceFresh: vi.fn(async () => false),
     upsertSkillUsageSource: vi.fn(async () => undefined),
     pruneSkillUsageSources: vi.fn(async () => undefined),
+    listRecentSkillTriggers: vi.fn(async () => [{
+      agent: "claude" as const,
+      skill: "review",
+      occurredAt: 100,
+      linkState: "linked-session" as const,
+      sessionKey: "local:claude:abc",
+      sessionTitle: "Fix bug",
+      projectPath: "/repo",
+      turnId: null,
+    }]),
     listSkillSyncBindings: vi.fn(async () => bindings),
     getSkillSyncBindingForPortableIdentity: vi.fn(async (identity) =>
       bindings.find((binding) => binding.portableIdentity === identity) ?? null),
@@ -208,6 +218,20 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
 }
 
 describe("SkillService local skills and usage", () => {
+  it("gates skill trigger listing behind the Eval setting", async () => {
+    const disabled = createHarness();
+    await expect(disabled.service.listSkillTriggers()).rejects.toThrow("Eval is disabled");
+    expect(disabled.store.listRecentSkillTriggers).not.toHaveBeenCalled();
+
+    const settings = structuredClone(defaultSettings);
+    settings.evalEnabled = true;
+    const enabled = createHarness({ settings });
+    await expect(enabled.service.listSkillTriggers({ skill: "review", limit: 10 })).resolves.toMatchObject([
+      { skill: "review", linkState: "linked-session", sessionKey: "local:claude:abc" },
+    ]);
+    expect(enabled.store.listRecentSkillTriggers).toHaveBeenCalledWith({ skill: "review", limit: 10 });
+  });
+
   it("merges usage and hook state into the installed Skill snapshot", async () => {
     const harness = createHarness();
     const snapshot = await harness.service.listSkills();

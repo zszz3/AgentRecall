@@ -1,0 +1,226 @@
+.eval-page {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  padding: 24px 28px 28px;
+}
+
+.eval-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eval-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.eval-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.eval-tabs button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.eval-disabled-state {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 410px;
+  gap: 10px;
+  padding: 40px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 50% 10%, color-mix(in srgb, var(--accent-soft) 50%, transparent), transparent 48%),
+    var(--panel-bg);
+  text-align: center;
+}
+
+.eval-disabled-state button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.eval-disabled-state button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.eval-skills-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.eval-skill-list,
+.eval-trigger-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  overflow-y: auto;
+}
+
+.eval-skill-list > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-dim);
+}
+
+.eval-skill-list > header button {
+  display: flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.eval-skill-list > header button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.eval-skill-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+}
+
+.eval-skill-item:hover {
+  border-color: var(--border-strong);
+}
+
+.eval-skill-item.active {
+  border-color: var(--accent);
+}
+
+.eval-skill-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.eval-skill-meta,
+.eval-muted,
+.eval-trigger-time,
+.eval-trigger-agent {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.eval-trigger-panel > header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.eval-trigger-panel > header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.eval-trigger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.eval-trigger-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.eval-trigger-list li:hover {
+  border-color: var(--border-strong);
+}
+
+.eval-trigger-time {
+  flex: 0 0 82px;
+}
+
+.eval-trigger-agent {
+  flex: 0 0 70px;
+  text-transform: capitalize;
+}
+
+.eval-trigger-session {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12.5px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.eval-trigger-session:hover {
+  text-decoration: underline;
+}
+
+.eval-trigger-unlinked {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.eval-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger, #d64545);
+}
