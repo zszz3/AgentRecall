@@ -1064,6 +1064,13 @@ export function loadClaudeCliSessionRows(
   const traceEvents = options.includeTraceEvents === false ? [] : extractTraceEvents(visibleRows, "claude");
   const tokenUsage = tokenUsageFromEvents(tokenEvents);
   const question = firstQuestion(messages);
+  let customTitle = "";
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (!isRecord(row) || row.type !== "custom-title") continue;
+    customTitle = stringField(row, "customTitle").trim();
+    if (customTitle) break;
+  }
   const aiTitle = firstAiTitle(rows);
   const embeddedCwd = (rows.find((row) => row && typeof row === "object" && "cwd" in row) as ClaudeConversationLine | undefined)?.cwd;
   const gitBranch = firstClaudeGitBranch(rows);
@@ -1074,7 +1081,7 @@ export function loadClaudeCliSessionRows(
       source: options.source ?? "claude-cli",
       projectPath: options.cwd || embeddedCwd || "",
       filePath,
-      originalTitle: aiTitle || cleanTitle(question) || "Untitled Session",
+      originalTitle: customTitle || aiTitle || cleanTitle(question) || "Untitled Session",
       firstQuestion: cleanTitle(question),
       timestamp: options.startedAt || 0,
       gitBranch,

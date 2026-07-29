@@ -279,6 +279,14 @@ test("terminal launcher continues with a validated Electron runtime after repair
   assert.match(launcherSource, /继续启动应用/);
 });
 
+test("terminal launcher restores embedded PostgreSQL links before starting Electron", () => {
+  assert.match(launcherSource, /restoreEmbeddedPostgresNativeLinks/);
+  assert.match(
+    launcherSource,
+    /await restoreEmbeddedPostgresNativeLinks\(path\.join\(packagePath, "node_modules"\)\);\s*try \{\s*await ensureElectronRuntimeForLaunch/,
+  );
+});
+
 test("terminal launcher does not prompt again for a skipped update version", () => {
   assert.match(launcherSource, /!result\.updateSkipped && !result\.promptSnoozed/);
   assert.match(launcherSource, /\[1\] 更新\s+\[2\] 跳过\s+\[3\] 跳过，直至下个版本/);

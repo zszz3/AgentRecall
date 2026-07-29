@@ -1,6 +1,6 @@
 # AgentRecall User Guide
 
-This guide collects the detailed reference material behind the [English README](./README.en.md): exact file paths per source, remote sync behavior, Supabase setup, Skills sync, digital assets, and installation notes.
+This guide collects the detailed reference material behind the [English README](../README.en.md): exact file paths per source, remote sync behavior, Supabase setup, Skills sync, digital assets, and installation notes.
 
 ## Supported Sources in Detail
 
@@ -138,4 +138,4 @@ If you do not use nvm and have Node.js 22.13+ installed system-wide, daily start
 
 The terminal checks the latest GitHub Release automatically. When an update is available, it shows the release's new features and bug fixes and asks whether to install it. The same version, release notes, and **Update now** action are available under **Settings -> About**. Use `agent-recall --check-update` to check without launching the app or `agent-recall --update` to install immediately. If an automatic update fails, the external updater attempts to reopen the installed version and uses an operating-system dialog to offer actions for copying the manual installation command or opening the latest Release page.
 
-See [Install.md](../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.
+See [Install.md](../../Install.md) for updating, uninstalling, installing from a fresh clone, and network mirror tips.

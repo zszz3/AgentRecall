@@ -1,11 +1,13 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createRequire } from "node:module";
+import { StringDecoder } from "node:string_decoder";
 
-// Aggregates skill usage from two local sources:
-// - Claude Code PostToolUse hook records in ~/.claude/skill-usage.jsonl.
-// - Codex function_call arguments that reference a */SKILL.md file in
-//   ~/.codex/sessions/**/*.jsonl.
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite") as {
+  DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync;
+};
 
 export interface SkillUsageStat {
   skill: string;
@@ -14,7 +16,32 @@ export interface SkillUsageStat {
 }
 
 export type SkillUsageAgent = "codex" | "claude" | "qoder";
-export type SkillUsageSourceKind = "claude-hook" | "codex-session";
+export type SkillUsageSourceKind =
+  | "claude-hook"
+  | "claude-session"
+  | "codex-session"
+  | "codebuddy-session"
+  | "cursor-session"
+  | "openclaw-session"
+  | "qoder-session"
+  | "hermes-db"
+  | "opencode-db"
+  | "codewiz-db"
+  | "zcode-db";
+
+export type SkillUsageProvider =
+  | "claude"
+  | "codex"
+  | "tclaude"
+  | "tcodex"
+  | "codebuddy"
+  | "cursor"
+  | "openclaw"
+  | "qoder"
+  | "hermes"
+  | "opencode"
+  | "codewiz"
+  | "zcode";
 
 export interface SkillUsageEvent {
   agent: SkillUsageAgent;
@@ -23,7 +50,9 @@ export interface SkillUsageEvent {
 }
 
 export interface SkillUsageSource {
+  // Kept for persistence compatibility. Events carry the attributed Skill owner.
   agent: SkillUsageAgent;
+  provider?: SkillUsageProvider;
   kind: SkillUsageSourceKind;
   path: string;
   mtimeMs: number;
@@ -51,6 +80,21 @@ export interface SkillUsageOptions {
   homeDir?: string;
   usagePath?: string;
   codexSessionsDir?: string | null;
+  includeTclaude?: boolean;
+  includeTcodex?: boolean;
+  includeCodeBuddyCli?: boolean;
+  includeCodeWizCli?: boolean;
+  includeOpenClaw?: boolean;
+  includeHermes?: boolean;
+  includeOpenCode?: boolean;
+  includeZcode?: boolean;
+  includeCursorAgent?: boolean;
+  includeQoder?: boolean;
+}
+
+interface StructuredToolCall {
+  name: string;
+  input: unknown;
 }
 
 export function loadSkillUsage(options: SkillUsageOptions = {}): SkillUsageSnapshot {
@@ -66,7 +110,11 @@ export function loadSkillUsage(options: SkillUsageOptions = {}): SkillUsageSnaps
   return skillUsageSnapshotFromEvents(events, usagePath, exists);
 }
 
-export function skillUsageSnapshotFromEvents(events: SkillUsageEvent[], usagePath = "", exists = events.length > 0): SkillUsageSnapshot {
+export function skillUsageSnapshotFromEvents(
+  events: SkillUsageEvent[],
+  usagePath = "",
+  exists = events.length > 0,
+): SkillUsageSnapshot {
   const byKey = new Map<string, SkillUsageStat>();
   const byAgentKey = new Map<string, SkillUsageStat>();
   addUsageEvents(byKey, byAgentKey, events);
@@ -74,36 +122,83 @@ export function skillUsageSnapshotFromEvents(events: SkillUsageEvent[], usagePat
   for (const [key, stat] of byKey) byName[key] = stat;
   const byAgentName: Record<string, SkillUsageStat> = {};
   for (const [key, stat] of byAgentKey) byAgentName[key] = stat;
-  const stats = [...byKey.values()].sort((a, b) => b.count - a.count || b.lastUsedAt - a.lastUsedAt || a.skill.localeCompare(b.skill));
+  const stats = [...byKey.values()].sort(
+    (a, b) => b.count - a.count || b.lastUsedAt - a.lastUsedAt || a.skill.localeCompare(b.skill),
+  );
 
   return { path: usagePath, exists, totalEvents: events.length, stats, byName, byAgentName };
 }
 
 export function listSkillUsageSources(options: SkillUsageOptions = {}): SkillUsageSource[] {
+  const homeDir = options.homeDir ?? os.homedir();
   const sources: SkillUsageSource[] = [];
-  const usagePath = resolveUsagePath(options);
-  const claudeStat = safeStat(usagePath);
-  if (claudeStat) {
-    sources.push({ agent: "claude", kind: "claude-hook", path: usagePath, ...claudeStat });
+
+  addJsonlSources(sources, path.join(homeDir, ".claude", "projects"), "claude", "claude", "claude-session");
+  if (options.includeTclaude !== false) {
+    addJsonlSources(sources, path.join(homeDir, ".tclaude", "projects"), "claude", "tclaude", "claude-session");
   }
 
-  const codexSessionsDir = resolveCodexSessionsDir(options);
-  if (codexSessionsDir) {
-    for (const filePath of walkJsonlFiles(codexSessionsDir)) {
-      const stat = safeStat(filePath);
-      if (stat) sources.push({ agent: "codex", kind: "codex-session", path: filePath, ...stat });
+  const hasNativeClaudeSessions = sources.some(
+    (source) => source.kind === "claude-session" && source.provider === "claude",
+  );
+  if (!hasNativeClaudeSessions) {
+    const usagePath = resolveUsagePath(options);
+    const stat = safeStat(usagePath);
+    if (stat) {
+      sources.push({ agent: "claude", provider: "claude", kind: "claude-hook", path: usagePath, ...stat });
     }
   }
 
-  return sources;
+  const codexSessionsDir = resolveCodexSessionsDir(options);
+  if (codexSessionsDir) addJsonlSources(sources, codexSessionsDir, "codex", "codex", "codex-session");
+  if (options.includeTcodex !== false) {
+    addJsonlSources(sources, path.join(homeDir, ".tcodex", "sessions"), "codex", "tcodex", "codex-session");
+  }
+  if (options.includeCodeBuddyCli !== false) {
+    addJsonlSources(sources, path.join(homeDir, ".codebuddy", "projects"), "codex", "codebuddy", "codebuddy-session");
+  }
+  if (options.includeCursorAgent !== false) addCursorSources(sources, path.join(homeDir, ".cursor", "projects"));
+  if (options.includeOpenClaw !== false) {
+    addOpenClawSources(sources, path.join(homeDir, ".openclaw", "agents"));
+    addOpenClawSources(sources, path.join(homeDir, ".clawdbot", "agents"));
+  }
+  if (options.includeQoder !== false) {
+    addJsonlSources(
+      sources,
+      path.join(homeDir, ".qoder", "cache", "projects"),
+      "qoder",
+      "qoder",
+      "qoder-session",
+      "/conversation-history/",
+    );
+  }
+  if (options.includeHermes !== false) {
+    addDatabaseSource(sources, path.join(homeDir, ".hermes", "state.db"), "hermes", "hermes-db");
+  }
+  if (options.includeOpenCode !== false) {
+    addDatabaseSource(sources, path.join(homeDir, ".local", "share", "opencode", "opencode.db"), "opencode", "opencode-db");
+  }
+  if (options.includeCodeWizCli !== false) {
+    addDatabaseSource(sources, path.join(homeDir, ".local", "share", "codewiz", "opencode.db"), "codewiz", "codewiz-db");
+  }
+  if (options.includeZcode !== false) {
+    addDatabaseSource(sources, path.join(homeDir, ".zcode", "cli", "db", "db.sqlite"), "zcode", "zcode-db");
+  }
+
+  return sources.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 export function readSkillUsageSourceEvents(source: SkillUsageSource): SkillUsageEvent[] {
   if (source.kind === "claude-hook") return readClaudeUsageEvents(source.path) ?? [];
-  return readCodexSessionFileUsageEvents(source.path);
+  if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
+  return readSessionFileUsageEvents(source);
 }
 
-function addUsageEvents(byKey: Map<string, SkillUsageStat>, byAgentKey: Map<string, SkillUsageStat>, events: SkillUsageEvent[]): number {
+function addUsageEvents(
+  byKey: Map<string, SkillUsageStat>,
+  byAgentKey: Map<string, SkillUsageStat>,
+  events: SkillUsageEvent[],
+): number {
   let added = 0;
   for (const event of events) {
     added += 1;
@@ -128,27 +223,19 @@ function addUsageEvents(byKey: Map<string, SkillUsageStat>, byAgentKey: Map<stri
 }
 
 function readClaudeUsageEvents(usagePath: string): SkillUsageEvent[] | null {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(usagePath, "utf8");
-  } catch {
-    return null;
-  }
-
   const events: SkillUsageEvent[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const event = parseUsageLine(trimmed);
-    if (!event) continue;
-    events.push({ ...event, agent: "claude" });
-  }
-  return events;
+  const read = forEachJsonlLine(usagePath, (line) => {
+    const event = parseUsageLine(line);
+    if (event) events.push({ ...event, agent: "claude" });
+  });
+  return read ? events : null;
 }
 
-// Looks up a usage stat by skill name, case-insensitively, matching how the
-// hook records names regardless of capitalization differences across sources.
-export function usageForSkill(snapshot: SkillUsageSnapshot, skillName: string, agent?: SkillUsageAgent): SkillUsageStat | null {
+export function usageForSkill(
+  snapshot: SkillUsageSnapshot,
+  skillName: string,
+  agent?: SkillUsageAgent,
+): SkillUsageStat | null {
   if (agent) return snapshot.byAgentName[usageAgentKey(agent, skillName)] ?? null;
   return snapshot.byName[skillName.trim().toLowerCase()] ?? null;
 }
@@ -160,85 +247,198 @@ function parseUsageLine(line: string): { skill: string; timestamp: number } | nu
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== "object") return null;
-  const skill = (parsed as { skill?: unknown }).skill;
+  if (!isRecord(parsed)) return null;
+  const skill = parsed.skill;
   if (typeof skill !== "string" || !skill.trim()) return null;
-  const ts = (parsed as { ts?: unknown }).ts;
-  const timestamp = typeof ts === "string" ? Date.parse(ts) : NaN;
-  return { skill: skill.trim(), timestamp: Number.isFinite(timestamp) ? timestamp : 0 };
+  return { skill: skill.trim(), timestamp: timestampFrom(parsed.ts) };
 }
 
-function readCodexSessionUsageEvents(sessionsDir: string): SkillUsageEvent[] {
+function readSessionFileUsageEvents(source: SkillUsageSource): SkillUsageEvent[] {
   const events: SkillUsageEvent[] = [];
-  for (const filePath of walkJsonlFiles(sessionsDir)) {
-    events.push(...readCodexSessionFileUsageEvents(filePath));
-  }
+  forEachJsonlLine(source.path, (line) => events.push(...parseSessionUsageLine(line, source)));
   return events;
 }
 
-function readCodexSessionFileUsageEvents(filePath: string): SkillUsageEvent[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf8");
-  } catch {
-    return [];
-  }
-  const events: SkillUsageEvent[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const eventRows = parseCodexUsageLine(line);
-    events.push(...eventRows);
-  }
-  return events;
-}
-
-function parseCodexUsageLine(line: string): SkillUsageEvent[] {
+function parseSessionUsageLine(line: string, source: SkillUsageSource): SkillUsageEvent[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
     return [];
   }
-  if (!isRecord(parsed) || parsed.type !== "response_item") return [];
-  const payload = recordField(parsed, "payload");
-  if (!payload || payload.type !== "function_call") return [];
+  if (!isRecord(parsed)) return [];
 
-  if (!isCodexSkillReadFunction(payload.name)) return [];
-  const skillNames = skillNamesFromText(codexCommandText(payload.arguments));
-  if (skillNames.length === 0) return [];
-  const timestamp = typeof parsed.timestamp === "string" ? Date.parse(parsed.timestamp) : NaN;
-  return skillNames.map((skill) => ({ agent: "codex", skill, timestamp: Number.isFinite(timestamp) ? timestamp : 0 }));
+  const timestamp = timestampFrom(parsed.timestamp ?? parsed.createdAt ?? parsed.created_at);
+  const calls = source.kind === "codex-session"
+    ? codexToolCalls(parsed)
+    : source.kind === "codebuddy-session"
+      ? codeBuddyToolCalls(parsed)
+      : source.kind === "openclaw-session"
+        ? openClawToolCalls(parsed)
+        : assistantToolCalls(parsed);
+  const defaultOwner = source.provider === "claude" || source.provider === "tclaude"
+    ? "claude"
+    : source.provider === "codex" || source.provider === "tcodex"
+      ? "codex"
+      : source.provider === "qoder"
+        ? "qoder"
+        : undefined;
+
+  return calls.flatMap((call) => usageEventsFromToolCall(call, timestamp, defaultOwner));
 }
 
-function isCodexSkillReadFunction(name: unknown): boolean {
-  if (typeof name !== "string") return false;
-  const normalized = name.trim().toLowerCase();
-  if (!normalized) return false;
-  if (normalized.includes("apply_patch") || normalized.includes("patch") || normalized.includes("write") || normalized.includes("edit")) {
-    return false;
+function codexToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
+  if (row.type !== "response_item") return [];
+  const payload = recordField(row, "payload");
+  if (!payload || (payload.type !== "function_call" && payload.type !== "custom_tool_call")) return [];
+  if (typeof payload.name !== "string") return [];
+  return [{ name: payload.name, input: payload.type === "custom_tool_call" ? payload.input : payload.arguments }];
+}
+
+function codeBuddyToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
+  if (row.type === "function_call" && typeof row.name === "string") {
+    return [{ name: row.name, input: row.input ?? row.arguments }];
   }
-  return normalized.includes("exec") || normalized.includes("command") || normalized.includes("shell");
+  return assistantToolCalls(row);
 }
 
-function codexCommandText(argumentsValue: unknown): string {
-  const args = parseMaybeJson(argumentsValue);
-  if (!isRecord(args)) return "";
-  const cmd = args.cmd;
-  if (typeof cmd === "string" && cmd) return cmd;
-  const command = args.command;
-  if (typeof command === "string") return command;
-  if (Array.isArray(command)) return command.filter((item): item is string => typeof item === "string").join(" ");
+function assistantToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
+  const message = recordField(row, "message") ?? row;
+  if (message.role !== "assistant" && row.type !== "assistant") return [];
+  const content = message.content;
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((item): StructuredToolCall[] => {
+    if (!isRecord(item) || item.type !== "tool_use" || typeof item.name !== "string") return [];
+    return [{ name: item.name, input: item.input }];
+  });
+}
+
+function openClawToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
+  if (row.type !== "custom" || row.customType !== "tool_call") return [];
+  const data = recordField(row, "data");
+  if (!data) return [];
+  const name = typeof data.name === "string" ? data.name : typeof data.tool_name === "string" ? data.tool_name : null;
+  if (!name) return [];
+  return [{ name, input: data.input ?? data.arguments ?? data }];
+}
+
+function usageEventsFromToolCall(
+  call: StructuredToolCall,
+  timestamp: number,
+  defaultOwner?: SkillUsageAgent,
+): SkillUsageEvent[] {
+  const normalizedName = baseToolName(call.name);
+  if (!normalizedName || isMutatingOrResultTool(normalizedName)) return [];
+  const input = parseMaybeJson(call.input);
+
+  if (normalizedName === "skill") {
+    if (!defaultOwner) return [];
+    const skill = explicitSkillName(input);
+    return skill ? [{ agent: defaultOwner, skill, timestamp }] : [];
+  }
+  if (isShellTool(normalizedName)) {
+    const command = shellCommandText(input);
+    if (!isReadOnlySkillCommand(command)) return [];
+  } else if (!isReadOnlyFileTool(normalizedName)) {
+    return [];
+  }
+
+  const events = new Map<string, SkillUsageEvent>();
+  for (const { skill, path: skillPath } of skillPathsFromText(toolInputText(input))) {
+    const owner = ownerFromSkillPath(skillPath) ?? defaultOwner;
+    if (owner) events.set(`${owner}:${skill.toLowerCase()}`, { agent: owner, skill, timestamp });
+  }
+  return [...events.values()];
+}
+
+function baseToolName(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  return normalized.split(/[:./]/).filter(Boolean).pop() ?? "";
+}
+
+function isMutatingOrResultTool(name: string): boolean {
+  return name.includes("apply_patch") || name.includes("patch") || name.includes("write") ||
+    name.includes("edit") || name.includes("delete") || name.includes("remove") ||
+    name.includes("move") || name.includes("copy") || name.includes("result") || name.includes("output");
+}
+
+function isReadOnlyFileTool(name: string): boolean {
+  return name === "read" || name === "read_file" || name === "readfile" ||
+    name.endsWith("_read") || name.endsWith("__read_file") || name.endsWith("__readfile");
+}
+
+function isShellTool(name: string): boolean {
+  return name.includes("exec") || name.includes("command") || name.includes("shell") ||
+    name === "bash" || name === "terminal" || name === "powershell";
+}
+
+function shellCommandText(input: unknown): string {
+  if (typeof input === "string") return input;
+  if (!isRecord(input)) return "";
+  for (const key of ["cmd", "command"]) {
+    const value = input[key];
+    if (typeof value === "string") return value;
+    if (Array.isArray(value) && value.every((item) => typeof item === "string")) return value.join(" ");
+  }
   return "";
 }
 
-function skillNamesFromText(text: string): string[] {
+function isReadOnlySkillCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed || !skillPathsFromText(trimmed).length) return false;
+  if (/(^|[^<])>(?!>)|>>|\b(?:rm|mv|cp|install|tee|dd|truncate|touch|chmod|chown|del|erase|remove-item|move-item|copy-item|set-content|add-content|out-file)\b/i.test(trimmed)) {
+    return false;
+  }
+  const segments = trimmed.split(/&&|\|\||;|\r?\n/).map((part) => part.trim()).filter(Boolean);
+  if (segments.length !== 1) return false;
+  const executable = segments[0].match(/^(?:sudo\s+)?(?:[A-Za-z]:\\[^\s]+\s+|[^\s]+\/)?([^\s]+)(?:\s|$)/)?.[1]?.toLowerCase();
+  if (!executable) return false;
+  if (["cat", "head", "tail", "less", "more", "bat", "type", "get-content", "gc"].includes(executable)) return true;
+  return executable === "sed" && /(?:^|\s)-n(?:\s|$)/.test(segments[0]) && !/(?:^|\s)-(?:i|e)(?:\s|$)/.test(segments[0]);
+}
+
+function explicitSkillName(input: unknown): string | null {
+  if (typeof input === "string") return input.trim() || null;
+  if (!isRecord(input)) return null;
+  for (const key of ["skill", "skill_name", "skillName", "name"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function toolInputText(input: unknown): string {
+  if (typeof input === "string") return input;
+  if (!isRecord(input)) return "";
+  const values: string[] = [];
+  for (const key of ["path", "file_path", "cmd", "command"]) {
+    const value = input[key];
+    if (typeof value === "string") values.push(value);
+    else if (Array.isArray(value)) values.push(...value.filter((item): item is string => typeof item === "string"));
+  }
+  return values.join(" ");
+}
+
+function skillPathsFromText(text: string): Array<{ skill: string; path: string }> {
   const normalized = text.replace(/\\\//g, "/");
-  const names = new Set<string>();
-  const pattern = /([^/\\\s"'`]+)[/\\]SKILL\.md\b/g;
+  const matches = new Map<string, { skill: string; path: string }>();
+  const pattern = /([^\s"'`]*[/\\])?([^/\\\s"'`]+)[/\\]SKILL\.md\b/gi;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(normalized))) {
-    if (match[1]) names.add(match[1]);
+    const skill = match[2];
+    if (!skill) continue;
+    const skillPath = match[0];
+    matches.set(`${skill.toLowerCase()}\0${skillPath.toLowerCase()}`, { skill, path: skillPath });
   }
-  return [...names];
+  return [...matches.values()];
+}
+
+function ownerFromSkillPath(skillPath: string): SkillUsageAgent | null {
+  const normalized = skillPath.replace(/\\/g, "/").toLowerCase();
+  if (normalized.includes("/.claude/skills/")) return "claude";
+  if (normalized.includes("/.qoder/skills/")) return "qoder";
+  if (normalized.includes("/.codex/skills/") || normalized.includes("/.agents/skills/")) return "codex";
+  return null;
 }
 
 function parseMaybeJson(value: unknown): unknown {
@@ -247,6 +447,120 @@ function parseMaybeJson(value: unknown): unknown {
     return JSON.parse(value);
   } catch {
     return value;
+  }
+}
+
+function readDatabaseUsageEvents(source: SkillUsageSource): SkillUsageEvent[] {
+  let db: import("node:sqlite").DatabaseSync;
+  try {
+    db = new DatabaseSync(source.path, { readOnly: true });
+  } catch {
+    return [];
+  }
+  try {
+    if (source.kind === "hermes-db") return readHermesUsageEvents(db);
+    return readOpenCodeLikeUsageEvents(db);
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
+function readHermesUsageEvents(db: import("node:sqlite").DatabaseSync): SkillUsageEvent[] {
+  const rows = db.prepare(
+    "SELECT tool_name, tool_calls, timestamp FROM messages WHERE tool_name IS NOT NULL OR tool_calls IS NOT NULL ORDER BY timestamp, id",
+  ).all() as Array<Record<string, unknown>>;
+  const events: SkillUsageEvent[] = [];
+  for (const row of rows) {
+    const timestamp = timestampFromDatabase(row.timestamp);
+    const calls = parseMaybeJson(row.tool_calls);
+    if (Array.isArray(calls)) {
+      for (const value of calls) {
+        if (!isRecord(value)) continue;
+        const fn = recordField(value, "function") ?? value;
+        if (typeof fn.name === "string") {
+          events.push(...usageEventsFromToolCall({ name: fn.name, input: fn.arguments ?? fn.input }, timestamp));
+        }
+      }
+      continue;
+    }
+    if (typeof row.tool_name === "string" && isRecord(calls)) {
+      events.push(...usageEventsFromToolCall({ name: row.tool_name, input: calls }, timestamp));
+    }
+  }
+  return events;
+}
+
+function readOpenCodeLikeUsageEvents(db: import("node:sqlite").DatabaseSync): SkillUsageEvent[] {
+  const rows = db.prepare("SELECT data, time_created FROM part ORDER BY time_created, id").all() as Array<Record<string, unknown>>;
+  const events: SkillUsageEvent[] = [];
+  for (const row of rows) {
+    const part = parseMaybeJson(row.data);
+    if (!isRecord(part) || part.type !== "tool") continue;
+    const tool = typeof part.tool === "string"
+      ? part.tool
+      : typeof part.toolName === "string"
+        ? part.toolName
+        : typeof part.name === "string"
+          ? part.name
+          : null;
+    if (!tool) continue;
+    const state = recordField(part, "state");
+    const input = state?.input ?? part.input ?? part.arguments;
+    const time = state ? recordField(state, "time") : null;
+    const timestamp = timestampFromDatabase(time?.start ?? row.time_created);
+    events.push(...usageEventsFromToolCall({ name: tool, input }, timestamp));
+  }
+  return events;
+}
+
+function timestampFromDatabase(value: unknown): number {
+  const timestamp = timestampFrom(value);
+  return timestamp > 0 && timestamp < 100_000_000_000 ? timestamp * 1000 : timestamp;
+}
+
+function addJsonlSources(
+  sources: SkillUsageSource[],
+  dir: string,
+  agent: SkillUsageAgent,
+  provider: SkillUsageProvider,
+  kind: SkillUsageSourceKind,
+  requiredPathPart?: string,
+): void {
+  for (const filePath of walkJsonlFiles(dir)) {
+    const normalized = filePath.replace(/\\/g, "/");
+    if (requiredPathPart && !normalized.includes(requiredPathPart)) continue;
+    const stat = safeStat(filePath);
+    if (stat) sources.push({ agent, provider, kind, path: filePath, ...stat });
+  }
+}
+
+function addDatabaseSource(
+  sources: SkillUsageSource[],
+  filePath: string,
+  provider: SkillUsageProvider,
+  kind: SkillUsageSourceKind,
+): void {
+  const stat = safeStat(filePath);
+  if (stat) sources.push({ agent: "codex", provider, kind, path: filePath, ...stat });
+}
+
+function addCursorSources(sources: SkillUsageSource[], projectsDir: string): void {
+  for (const filePath of walkJsonlFiles(projectsDir)) {
+    const normalized = filePath.replace(/\\/g, "/");
+    if (!normalized.includes("/agent-transcripts/")) continue;
+    const stat = safeStat(filePath);
+    if (stat) sources.push({ agent: "codex", provider: "cursor", kind: "cursor-session", path: filePath, ...stat });
+  }
+}
+
+function addOpenClawSources(sources: SkillUsageSource[], agentsDir: string): void {
+  for (const filePath of walkJsonlFiles(agentsDir)) {
+    const normalized = filePath.replace(/\\/g, "/");
+    if (!normalized.includes("/sessions/") || normalized.endsWith(".trajectory.jsonl")) continue;
+    const stat = safeStat(filePath);
+    if (stat) sources.push({ agent: "codex", provider: "openclaw", kind: "openclaw-session", path: filePath, ...stat });
   }
 }
 
@@ -267,8 +581,40 @@ function walkJsonlFiles(dir: string): string[] {
   return files;
 }
 
+function forEachJsonlLine(filePath: string, visit: (line: string) => void): boolean {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch {
+    return false;
+  }
+
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      pending += decoder.write(buffer.subarray(0, bytesRead));
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) visit(trimmed);
+      }
+    } while (bytesRead > 0);
+    pending += decoder.end();
+    const trimmed = pending.trim();
+    if (trimmed) visit(trimmed);
+    return true;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function recordField(value: Record<string, unknown>, key: string): Record<string, unknown> | null {
@@ -279,10 +625,16 @@ function recordField(value: Record<string, unknown>, key: string): Record<string
 function safeStat(filePath: string): { mtimeMs: number; fileSize: number } | null {
   try {
     const stat = fs.statSync(filePath);
-    return { mtimeMs: stat.mtimeMs, fileSize: stat.size };
+    return stat.isFile() ? { mtimeMs: stat.mtimeMs, fileSize: stat.size } : null;
   } catch {
     return null;
   }
+}
+
+function timestampFrom(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const timestamp = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function usageAgentKey(agent: SkillUsageAgent, skillName: string): string {
@@ -299,5 +651,6 @@ function resolveCodexSessionsDir(options: SkillUsageOptions): string | null {
   if (options.codexSessionsDir === null) return null;
   if (options.codexSessionsDir) return options.codexSessionsDir;
   const homeDir = options.homeDir ?? os.homedir();
-  return path.join(homeDir, ".codex", "sessions");
+  const codexHome = process.env.CODEX_HOME?.trim() || path.join(homeDir, ".codex");
+  return path.join(codexHome, "sessions");
 }

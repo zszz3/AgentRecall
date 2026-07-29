@@ -73,6 +73,7 @@ import {
 } from "./features/sessions/session-migration-copy";
 import { SESSION_PAGE_SIZE, useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
+import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
 import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
@@ -497,6 +498,20 @@ export function App(): ReactElement {
     });
   }, [language]);
 
+  const focusMainSearch = useCallback(() => {
+    void navigateToPage("sessions").then((navigated) => {
+      if (!navigated) return;
+      window.requestAnimationFrame(() => {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      });
+    });
+  }, [navigateToPage, searchRef]);
+  useMainSearchShortcut(
+    !(detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen),
+    focusMainSearch,
+  );
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === ",") {
@@ -504,18 +519,6 @@ export function App(): ReactElement {
         setContextMenu(null);
         setSettingsInitialSection("terminal");
         setSettingsOpen(true);
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        void navigateToPage("sessions").then((navigated) => {
-          if (!navigated) return;
-          window.requestAnimationFrame(() => {
-            searchRef.current?.focus();
-            searchRef.current?.select();
-          });
-        });
         return;
       }
 
@@ -579,7 +582,7 @@ export function App(): ReactElement {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen, actionStatus, navigateToPage, t]);
+  }, [displayedResults, selectedKey, detail, remoteDetail, dialog, migrationDialog, deleteSessionCandidate, deletingSession, deleteTagName, contextMenu, aiAssistantOpen, settingsOpen, sshDialogOpen, wslDialogOpen, remoteSessionsOpen, actionStatus, t]);
 
   useEffect(() => {
     if (!selectedKey) return;

@@ -22,6 +22,9 @@ const {
   waitForUpdateCompletion,
   waitForProcessExit,
 } = require("./update-client.cjs");
+const {
+  restoreEmbeddedPostgresNativeLinks,
+} = require("./staged-package-dependencies.cjs");
 
 async function scheduleUpdate(manifest, { stopApp }) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-recall-apply-"));
@@ -153,6 +156,7 @@ async function main() {
     },
   });
   const packagePath = path.resolve(__dirname, "..");
+  await restoreEmbeddedPostgresNativeLinks(path.join(packagePath, "node_modules"));
   try {
     await ensureElectronRuntimeForLaunch({
       packagePath,

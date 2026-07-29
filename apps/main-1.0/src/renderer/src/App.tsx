@@ -96,6 +96,7 @@ import { SkillsDialog } from "./features/skills/skills-dialog";
 import { DigitalAssetsDialog } from "./features/digital-assets/digital-assets-dialog";
 import { DEFAULT_QUERY_BUILDER_STATE, countActiveFilters, toSearchOptionsPatch, type QueryBuilderState } from "./features/search/query-builder-types";
 import type { GroupMode } from "./features/search/group-logic";
+import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
 import type { SavedSearch } from "../../core/store/saved-searches";
 import type { RulesSyncSnapshot } from "../../core/rules-sync";
 import type { MemoriesSyncSnapshot } from "../../core/memories-sync";
@@ -1037,6 +1038,14 @@ export function App(): ReactElement {
     () => displayedResults.find((session) => session.sessionKey === selectedKey) || null,
     [displayedResults, selectedKey],
   );
+  const focusMainSearch = useCallback(() => {
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, []);
+  useMainSearchShortcut(
+    !(detail || remoteDetail || dialog || migrationDialog || deleteSessionCandidate || deleteTagName || contextMenu || skillsOpen || assetsOpen || apiConfigOpen || aiAssistantOpen || settingsOpen || sshDialogOpen || wslDialogOpen || remoteSessionsOpen),
+    focusMainSearch,
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1047,13 +1056,6 @@ export function App(): ReactElement {
         setApiConfigOpen(false);
         setSettingsInitialSection("terminal");
         setSettingsOpen(true);
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
         return;
       }
 

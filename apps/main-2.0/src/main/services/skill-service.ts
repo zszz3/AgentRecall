@@ -27,6 +27,7 @@ import {
   type DeleteInstalledSkillResult,
   type InstalledSkill,
   type InstalledSkillsSnapshot,
+  type SkillAgent,
 } from "../../core/skill-manager";
 import { buildSkillDiffSnapshot, type SkillContentSnapshot, type SkillDiffSnapshot } from "../../core/skill-diff";
 import {
@@ -52,6 +53,7 @@ import {
   readSkillUsageSourceEvents,
   usageForSkill,
   type SkillUsageEvent,
+  type SkillUsageAgent,
   type SkillUsageRefreshStatus,
   type SkillUsageSnapshot,
   type SkillUsageSource,
@@ -174,6 +176,10 @@ const defaultTimers = {
   clearInterval: (timer: ReturnType<typeof setInterval>) => clearInterval(timer),
 };
 
+function isSkillUsageAgent(agent: SkillAgent): agent is SkillUsageAgent {
+  return agent === "codex" || agent === "claude" || agent === "qoder";
+}
+
 export class SkillService {
   private readonly operations: SkillServiceOperations;
   private readonly timers: NonNullable<SkillServiceDependencies["timers"]>;
@@ -207,7 +213,7 @@ export class SkillService {
       : this.operations.listInstalledSkills({ projectDirs: await this.projectDirs() });
     const usage = await store.getSkillUsageSnapshot();
     const skills = snapshot.skills.map((skill) => {
-      const stat = this.managedLibrary
+      const stat = this.managedLibrary || !isSkillUsageAgent(skill.agent)
         ? this.operations.usageForSkill(usage, skill.name)
         : this.operations.usageForSkill(usage, skill.name, skill.agent);
       return { ...skill, usageCount: stat?.count ?? 0, lastUsedAt: stat?.lastUsedAt ?? null };
@@ -233,7 +239,9 @@ export class SkillService {
     return {
       ...snapshot,
       skills: snapshot.skills.map((skill) => {
-        const stat = this.operations.usageForSkill(usage, skill.name, skill.agent);
+        const stat = isSkillUsageAgent(skill.agent)
+          ? this.operations.usageForSkill(usage, skill.name, skill.agent)
+          : this.operations.usageForSkill(usage, skill.name);
         return { ...skill, usageCount: stat?.count ?? 0, lastUsedAt: stat?.lastUsedAt ?? null };
       }),
     };
@@ -296,7 +304,20 @@ export class SkillService {
 
   async refreshUsage(): Promise<SkillUsageRefreshStatus> {
     const store = this.dependencies.getStore();
-    const sources = this.operations.listSkillUsageSources();
+    const settings = this.dependencies.getSettings();
+    const sources = this.operations.listSkillUsageSources({
+      homeDir: this.dependencies.homeDir,
+      includeTclaude: settings.includeTclaude,
+      includeTcodex: settings.includeTcodex,
+      includeCodeBuddyCli: settings.includeCodeBuddyCli,
+      includeCodeWizCli: settings.includeCodeWizCli,
+      includeOpenClaw: settings.includeOpenClaw,
+      includeHermes: settings.includeHermes,
+      includeOpenCode: settings.includeOpenCode,
+      includeZcode: settings.includeZcode,
+      includeCursorAgent: settings.includeCursorAgent,
+      includeQoder: settings.includeQoder,
+    });
     let refreshed = 0;
     let skipped = 0;
     for (const source of sources) {

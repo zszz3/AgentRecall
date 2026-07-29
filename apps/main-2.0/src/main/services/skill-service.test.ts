@@ -210,6 +210,7 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
     now: () => 123,
     logError: vi.fn(),
     operations,
+    homeDir: "/tmp/agent-recall-test-home",
     managedLibrary,
     skillsShClient,
     executeAiSearch,
@@ -279,6 +280,29 @@ describe("SkillService local skills and usage", () => {
     expect(harness.operations.usageForSkill).toHaveBeenCalledWith(expect.any(Object), "review", "codex");
   });
 
+  it("uses name-only usage for local Skill agents without scoped usage data", async () => {
+    const harness = createHarness();
+    const localSkill: InstalledSkill = {
+      ...installedSkill(),
+      id: "trae-user:review",
+      agent: "trae",
+      source: "trae-user",
+      path: "/tmp/.trae/skills/review/SKILL.md",
+      directoryPath: "/tmp/.trae/skills/review",
+      rootPath: "/tmp/.trae/skills",
+    };
+    vi.mocked(harness.managedLibrary.listImportCandidates).mockReturnValue({
+      skills: [localSkill],
+      roots: [],
+      scannedAt: 1,
+    });
+
+    await harness.service.listImportCandidates();
+
+    expect(harness.operations.usageForSkill).toHaveBeenCalledWith(expect.any(Object), "review");
+    expect(harness.operations.usageForSkill).not.toHaveBeenCalledWith(expect.any(Object), "review", "trae");
+  });
+
   it("caches local Skill discovery until an explicit refresh", async () => {
     const harness = createHarness();
 
@@ -327,7 +351,10 @@ describe("SkillService local skills and usage", () => {
   });
 
   it("refreshes only stale usage sources and prunes removed files", async () => {
-    const harness = createHarness();
+    const settings = structuredClone(defaultSettings);
+    settings.includeTclaude = true;
+    settings.includeCodeBuddyCli = true;
+    const harness = createHarness({ settings });
     harness.usageSources.push(
       { agent: "codex", kind: "codex-session", path: "/tmp/a.jsonl", mtimeMs: 1, fileSize: 1 },
       { agent: "claude", kind: "claude-hook", path: "/tmp/b.jsonl", mtimeMs: 1, fileSize: 1 },
@@ -342,6 +369,19 @@ describe("SkillService local skills and usage", () => {
       total: 2,
       totalEvents: 3,
       lastRefreshedAt: 123,
+    });
+    expect(harness.operations.listSkillUsageSources).toHaveBeenCalledWith({
+      homeDir: "/tmp/agent-recall-test-home",
+      includeTclaude: true,
+      includeTcodex: false,
+      includeCodeBuddyCli: true,
+      includeCodeWizCli: false,
+      includeOpenClaw: false,
+      includeHermes: false,
+      includeOpenCode: false,
+      includeZcode: false,
+      includeCursorAgent: false,
+      includeQoder: false,
     });
     expect(harness.store.upsertSkillUsageSource).toHaveBeenCalledOnce();
     expect(harness.store.pruneSkillUsageSources).toHaveBeenCalledWith(["/tmp/a.jsonl", "/tmp/b.jsonl"]);

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -129,6 +129,10 @@ try {
   await access(path.join(installedRoot, "bin", "setup-openviking-memory-hooks.cjs"));
   await access(path.join(installedRoot, "THIRD_PARTY_NOTICES.md"));
   const installedRequire = createRequire(path.join(installedRoot, "package.json"));
+  const {
+    restoreEmbeddedPostgresNativeLinks,
+  } = installedRequire("./bin/staged-package-dependencies.cjs");
+  await restoreEmbeddedPostgresNativeLinks(path.join(installedRoot, "node_modules"));
   const embeddedPostgresEntry = installedRequire.resolve("embedded-postgres");
   const { default: EmbeddedPostgres } = await import(pathToFileURL(embeddedPostgresEntry).href);
   localPostgres = new EmbeddedPostgres({
@@ -204,6 +208,20 @@ try {
     access(path.join(stagedRoot, "node_modules", "electron", "package.json")),
     access(path.join(stagedRoot, "node_modules", "electron-store", "package.json")),
   ]);
+  const stagedEmbeddedPostgresRoot = path.join(stagedRoot, "node_modules", "@embedded-postgres");
+  for (const platformPackage of await readdir(stagedEmbeddedPostgresRoot)) {
+    const platformPackageRoot = path.join(stagedEmbeddedPostgresRoot, platformPackage);
+    let nativeLinks;
+    try {
+      nativeLinks = JSON.parse(
+        await readFile(path.join(platformPackageRoot, "native", "pg-symlinks.json"), "utf8"),
+      );
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    await Promise.all(nativeLinks.map(({ target }) => access(path.join(platformPackageRoot, target))));
+  }
   try {
     await access(path.join(home, ".claude", "settings.json"));
     throw new Error("Staging postinstall must not write Claude settings.");

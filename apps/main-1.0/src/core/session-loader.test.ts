@@ -853,6 +853,27 @@ describe("Claude session loading", () => {
     expect(loaded?.messages.map((message) => message.content)).toEqual(["真实问题"]);
   });
 
+  it("prefers the latest Claude Code custom title over the AI title", () => {
+    const loaded = loadClaudeCliSessionRows(
+      "/tmp/claude-custom-title.jsonl",
+      [
+        { type: "ai-title", aiTitle: "自动生成标题", sessionId: "claude-custom-title" },
+        { type: "custom-title", customTitle: "第一次重命名", sessionId: "claude-custom-title" },
+        {
+          type: "user",
+          timestamp: "2026-07-29T02:35:40Z",
+          cwd: "/repo",
+          message: { role: "user", content: "真实问题" },
+        },
+        { type: "custom-title", customTitle: "最终会话名称", sessionId: "claude-custom-title" },
+      ],
+      { rawId: "claude-custom-title" },
+    );
+
+    expect(loaded?.session.originalTitle).toBe("最终会话名称");
+    expect(loaded?.messages.map((message) => message.content)).toEqual(["真实问题"]);
+  });
+
   it("extracts branch metadata from Claude Code jsonl rows", () => {
     const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-claude-"));
     const projectDir = path.join(claudeDir, "projects", "-repo");

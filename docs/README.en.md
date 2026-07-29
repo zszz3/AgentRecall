@@ -45,7 +45,7 @@ Claude Code and Codex are supported by default. Enable more sources under Settin
 | Optional local sources | CodeBuddy, CodeWiz, TClaude, TCodex, OpenClaw, Hermes, OpenCode, ZCode, Cursor Agent, Trae, Qoder |
 | Extended environments | Windows WSL, SSH remote environments |
 
-Capabilities vary slightly by source; the app shows the available view, resume, migrate, and stats actions per source in the UI. See the [User Guide](./guide.en.md) for the exact file paths each source reads.
+Capabilities vary slightly by source; the app shows the available view, resume, migrate, and stats actions per source in the UI. See the [User Guide](./v1/guide.en.md) for the exact file paths each source reads.
 
 ## Quick Start
 
@@ -65,7 +65,7 @@ You can also paste the following paragraph to your AI agent (Claude Code, Codex,
 | macOS | `agent-recall` | `⌥ Option + Space` |
 | Windows | `agent-recall` | `Ctrl + Alt + Space` |
 
-After launch, the app stays in the menu bar or system tray; settings, theme, language, and shortcuts are all adjustable in the app. On macOS, run `agent-recall install-app` to generate a local `AgentRecall.app` you can open from Launchpad / Spotlight / Dock. Update with `agent-recall --update`; full install, update, rollback, uninstall, and mirror notes are in [Install.md](../Install.md) and the [User Guide](./guide.en.md).
+After launch, the app stays in the menu bar or system tray; settings, theme, language, and shortcuts are all adjustable in the app. On macOS, run `agent-recall install-app` to generate a local `AgentRecall.app` you can open from Launchpad / Spotlight / Dock. Update with `agent-recall --update`; full install, update, rollback, uninstall, and mirror notes are in [Install.md](../Install.md) and the [User Guide](./v1/guide.en.md).
 
 ## Privacy and Security
 
@@ -81,7 +81,7 @@ After launch, the app stays in the menu bar or system tray; settings, theme, lan
 - **MCP tools**: The built-in `agent-recall-mcp` lets Claude Code, Codex, CodeBuddy, and others search and read session history in chat, manage tags, favorites, and visibility, or run cross-agent migration.
 - **Skills and digital assets**: View, filter, and manage local Codex / Claude Code Skills, and sync Skills, Rules (such as `CLAUDE.md`, `AGENTS.md`, and Qoder rules), and Memories (Qoder / Codex memories) across machines through Supabase.
 
-These capabilities share the same Supabase configuration inside the app and are designed for personal cross-device use. Setup steps and details are in the [User Guide](./guide.en.md).
+These capabilities share the same Supabase configuration inside the app and are designed for personal cross-device use. Setup steps and details are in the [User Guide](./v1/guide.en.md).
 
 ## Contributing
 

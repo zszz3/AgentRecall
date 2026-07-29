@@ -34,6 +34,8 @@ export function skillSourceLabel(source: SkillSource): string {
   if (source === "codex-project") return "Codex Project";
   if (source === "claude-project") return "Project";
   if (source === "claude-plugin") return "Claude Plugin";
+  if (source === "qoder-user") return "Qoder";
+  if (source === "qoder-project") return "Qoder Project";
   return "Claude Code";
 }
 
@@ -42,7 +44,7 @@ function matchesSourceFilter(skill: InstalledSkill, sourceFilter: SkillSourceFil
   if (sourceFilter === "codex") return skill.agent === "codex";
   if (sourceFilter === "claude") return skill.agent === "claude";
   if (sourceFilter === "shared") return skill.source === "codex-shared";
-  return skill.source === "claude-project" || skill.source === "codex-project";
+  return skill.source === "claude-project" || skill.source === "codex-project" || skill.source === "qoder-project";
 }
 
 function matchesSkillQuery(skill: InstalledSkill, normalizedQuery: string): boolean {

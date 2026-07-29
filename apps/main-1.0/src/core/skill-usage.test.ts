@@ -2,166 +2,276 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadSkillUsage, usageForSkill } from "./skill-usage";
+import { createRequire } from "node:module";
+import { listSkillUsageSources, loadSkillUsage, usageForSkill } from "./skill-usage";
 
-function writeUsageLog(lines: string[]): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-usage-"));
-  const usagePath = path.join(dir, "skill-usage.jsonl");
-  fs.writeFileSync(usagePath, lines.join("\n"), "utf8");
-  return usagePath;
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite") as {
+  DatabaseSync: new (path: string) => import("node:sqlite").DatabaseSync;
+};
+
+function withTempHome(run: (homeDir: string) => void): void {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-skill-usage-"));
+  try {
+    run(homeDir);
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
 }
 
-function writeCodexSession(lines: string[]): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-usage-"));
-  const sessionDir = path.join(dir, "sessions", "2026", "06", "01");
-  fs.mkdirSync(sessionDir, { recursive: true });
-  fs.writeFileSync(path.join(sessionDir, "rollout.jsonl"), lines.join("\n"), "utf8");
-  return path.join(dir, "sessions");
+function writeJsonl(filePath: string, rows: unknown[]): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, rows.map((row) => typeof row === "string" ? row : JSON.stringify(row)).join("\n"), "utf8");
+}
+
+function codexCall(
+  name: string,
+  input: unknown,
+  timestamp = "2026-06-01T10:00:00.000Z",
+  type: "function_call" | "custom_tool_call" = "function_call",
+): unknown {
+  return {
+    type: "response_item",
+    timestamp,
+    payload: { type, name, [type === "custom_tool_call" ? "input" : "arguments"]: input },
+  };
+}
+
+function assistantToolUse(name: string, input: unknown, timestamp = "2026-06-01T10:00:00.000Z"): unknown {
+  return {
+    type: "assistant",
+    timestamp,
+    message: { role: "assistant", content: [{ type: "tool_use", name, input }] },
+  };
 }
 
 describe("skill usage", () => {
-  it("aggregates counts and last-used time per skill", () => {
-    const usagePath = writeUsageLog([
-      JSON.stringify({ skill: "brainstorming", ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "brainstorming", ts: "2026-06-02T10:00:00.000Z" }),
-      JSON.stringify({ skill: "tdd", ts: "2026-06-03T10:00:00.000Z" }),
+  it("aggregates Claude hook records and skips malformed lines", () => withTempHome((homeDir) => {
+    const usagePath = path.join(homeDir, ".claude", "skill-usage.jsonl");
+    writeJsonl(usagePath, [
+      { skill: "brainstorming", ts: "2026-06-01T10:00:00.000Z" },
+      "not json",
+      { ts: "2026-06-02T10:00:00.000Z" },
+      { skill: "brainstorming", ts: "2026-06-03T10:00:00.000Z" },
+      { skill: "tdd", ts: "2026-06-02T10:00:00.000Z" },
     ]);
 
-    const snapshot = loadSkillUsage({ usagePath, codexSessionsDir: null });
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null });
 
     expect(snapshot.exists).toBe(true);
     expect(snapshot.totalEvents).toBe(3);
     expect(snapshot.stats).toEqual([
-      { skill: "brainstorming", count: 2, lastUsedAt: Date.parse("2026-06-02T10:00:00.000Z") },
-      { skill: "tdd", count: 1, lastUsedAt: Date.parse("2026-06-03T10:00:00.000Z") },
+      { skill: "brainstorming", count: 2, lastUsedAt: Date.parse("2026-06-03T10:00:00.000Z") },
+      { skill: "tdd", count: 1, lastUsedAt: Date.parse("2026-06-02T10:00:00.000Z") },
     ]);
-    expect(usageForSkill(snapshot, "Brainstorming")?.count).toBe(2);
+    expect(usageForSkill(snapshot, "Brainstorming", "claude")?.count).toBe(2);
+  }));
 
-    fs.rmSync(path.dirname(usagePath), { recursive: true, force: true });
-  });
-
-  it("skips malformed lines and records without a skill name", () => {
-    const usagePath = writeUsageLog([
-      "not json",
-      JSON.stringify({ ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "  ", ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "review-code", ts: "2026-06-01T10:00:00.000Z" }),
-      "",
-    ]);
-
-    const snapshot = loadSkillUsage({ usagePath, codexSessionsDir: null });
-
-    expect(snapshot.totalEvents).toBe(1);
-    expect(snapshot.stats.map((stat) => stat.skill)).toEqual(["review-code"]);
-
-    fs.rmSync(path.dirname(usagePath), { recursive: true, force: true });
-  });
-
-  it("returns an empty snapshot when the log is missing", () => {
-    const snapshot = loadSkillUsage({ usagePath: path.join(os.tmpdir(), "session-search-missing-usage.jsonl"), codexSessionsDir: null });
+  it("returns an empty snapshot when no synthetic source exists", () => withTempHome((homeDir) => {
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null });
     expect(snapshot.exists).toBe(false);
     expect(snapshot.totalEvents).toBe(0);
-    expect(snapshot.stats).toEqual([]);
     expect(usageForSkill(snapshot, "anything")).toBeNull();
-  });
+  }));
 
-  it("counts Codex skill reads from function call arguments", () => {
-    const codexSessionsDir = writeCodexSession([
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-01T10:00:00.000Z",
-        payload: {
-          type: "function_call",
-          name: "shell_command",
-          arguments: JSON.stringify({ command: "sed -n '1,200p' /tmp/session-search-fixtures/codex/skills/brainstorming/SKILL.md" }),
-        },
-      }),
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-02T10:00:00.000Z",
-        payload: {
-          type: "function_call",
-          name: "read_file",
-          arguments: { path: "/tmp/session-search-fixtures/agents/skills/tdd/SKILL.md" },
-        },
-      }),
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-02T10:30:00.000Z",
-        payload: {
-          type: "function_call",
-          name: "apply_patch",
-          arguments: JSON.stringify({ patch: "*** Update File: /tmp/session-search-fixtures/codex/skills/patch-helper/SKILL.md" }),
-        },
-      }),
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-03T10:00:00.000Z",
-        payload: {
-          type: "function_call",
-          name: "shell_command",
-          arguments: JSON.stringify({ command: "cat /tmp/session-search-fixtures/codex/skills/brainstorming/SKILL.md" }),
-        },
-      }),
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-04T10:00:00.000Z",
-        payload: {
-          type: "function_call_output",
-          output: "/tmp/session-search-fixtures/.codex/skills/ignored/SKILL.md",
-        },
-      }),
+  it("counts Codex Read/read_file and structured custom tool calls", () => withTempHome((homeDir) => {
+    const sessionsDir = path.join(homeDir, "codex-fixture", "sessions");
+    writeJsonl(path.join(sessionsDir, "2026", "06", "rollout.jsonl"), [
+      codexCall("shell_command", JSON.stringify({ command: "cat /tmp/.codex/skills/brainstorming/SKILL.md" })),
+      codexCall("read_file", { path: "/tmp/.agents/skills/tdd/SKILL.md" }, "2026-06-02T10:00:00.000Z"),
+      codexCall("Read", JSON.stringify({ file_path: "C:\\Users\\me\\.codex\\skills\\review-code\\SKILL.md" }), "2026-06-03T10:00:00.000Z"),
+      codexCall("read_file", { path: "/tmp/.claude/skills/shared-review/SKILL.md" }, "2026-06-04T10:00:00.000Z"),
+      codexCall("read_file", { path: "/tmp/.qoder/skills/qoder-review/SKILL.md" }, "2026-06-05T10:00:00.000Z"),
+      codexCall("read_file", { path: "/tmp/.codex/skills/custom/SKILL.md" }, "2026-06-06T10:00:00.000Z", "custom_tool_call"),
     ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: sessionsDir });
+
+    expect(snapshot.totalEvents).toBe(6);
+    expect(usageForSkill(snapshot, "brainstorming", "codex")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "tdd", "codex")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "review-code", "codex")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "shared-review", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "qoder-review", "qoder")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "custom", "codex")?.count).toBe(1);
+  }));
+
+  it("excludes edit, write, patch, result, and output records", () => withTempHome((homeDir) => {
+    const sessionsDir = path.join(homeDir, "codex-fixture", "sessions");
+    const skillPath = "/tmp/.codex/skills/ignored/SKILL.md";
+    writeJsonl(path.join(sessionsDir, "rollout.jsonl"), [
+      codexCall("apply_patch", { patch: skillPath }),
+      codexCall("write_file", { path: skillPath }),
+      codexCall("edit", { file_path: skillPath }),
+      { type: "response_item", timestamp: "2026-06-01T10:00:00.000Z", payload: { type: "function_call_output", output: skillPath } },
+      { type: "response_item", timestamp: "2026-06-01T10:00:00.000Z", payload: { type: "custom_tool_call_output", output: skillPath } },
+    ]);
+
+    expect(loadSkillUsage({ homeDir, codexSessionsDir: sessionsDir }).totalEvents).toBe(0);
+  }));
+
+  it("counts native Claude tool_use and explicit Skill calls instead of the hook", () => withTempHome((homeDir) => {
+    writeJsonl(path.join(homeDir, ".claude", "skill-usage.jsonl"), [
+      { skill: "duplicate", ts: "2026-06-01T09:00:00.000Z" },
+    ]);
+    writeJsonl(path.join(homeDir, ".claude", "projects", "repo", "session.jsonl"), [
+      assistantToolUse("Skill", { skill: "brainstorming" }),
+      assistantToolUse("Read", { file_path: "/tmp/.claude/skills/review-code/SKILL.md" }, "2026-06-02T10:00:00.000Z"),
+      { type: "user", timestamp: "2026-06-03T10:00:00.000Z", message: { role: "user", content: [{ type: "tool_result", content: "/tmp/.claude/skills/ignored/SKILL.md" }] } },
+    ]);
+
+    const sources = listSkillUsageSources({ homeDir, codexSessionsDir: null });
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null });
+
+    expect(sources.map((source) => source.kind)).toEqual(["claude-session"]);
+    expect(snapshot.totalEvents).toBe(2);
+    expect(usageForSkill(snapshot, "brainstorming", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "review-code", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "duplicate")).toBeNull();
+  }));
+
+  it("discovers TClaude and TCodeX native sessions", () => withTempHome((homeDir) => {
+    writeJsonl(path.join(homeDir, ".tclaude", "projects", "repo", "session.jsonl"), [
+      assistantToolUse("Skill", { name: "claude-review" }),
+    ]);
+    writeJsonl(path.join(homeDir, ".tcodex", "sessions", "rollout.jsonl"), [
+      codexCall("read_file", { path: "/tmp/project/skills/codex-review/SKILL.md" }),
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null });
+    expect(usageForSkill(snapshot, "claude-review", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "codex-review", "codex")?.count).toBe(1);
+  }));
+
+  it("uses informative paths to assign CodeBuddy calls without guessing pathless ownership", () => withTempHome((homeDir) => {
+    const sessionPath = path.join(homeDir, ".codebuddy", "projects", "repo", "session.jsonl");
+    writeJsonl(sessionPath, [
+      { type: "function_call", name: "Read", timestamp: 1_780_000_001_100, arguments: { path: "/tmp/.claude/skills/claude-review/SKILL.md" } },
+      { type: "function_call", name: "Read", timestamp: 1_780_000_001_200, input: { path: "C:\\Users\\me\\.qoder\\skills\\qoder-review\\SKILL.md" } },
+      { type: "function_call", name: "Skill", timestamp: 1_780_000_001_300, arguments: { skill: "unknown-owner" } },
+      { type: "function_call", name: "Read", timestamp: 1_780_000_001_400, arguments: { path: "/tmp/unowned/skills/unowned/SKILL.md" } },
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null });
+    expect(snapshot.totalEvents).toBe(2);
+    expect(usageForSkill(snapshot, "claude-review", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "qoder-review", "qoder")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "unknown-owner")).toBeNull();
+    expect(usageForSkill(snapshot, "unowned")).toBeNull();
+  }));
+
+  it("discovers proven Cursor and OpenClaw structured tool calls", () => withTempHome((homeDir) => {
+    writeJsonl(path.join(homeDir, ".cursor", "projects", "repo", "agent-transcripts", "session.jsonl"), [
+      assistantToolUse("Read", { path: "/tmp/.codex/skills/cursor-review/SKILL.md" }),
+    ]);
+    writeJsonl(path.join(homeDir, ".openclaw", "agents", "main", "sessions", "session.jsonl"), [
+      {
+        type: "custom",
+        customType: "tool_call",
+        timestamp: "2026-06-01T10:00:00.000Z",
+        data: { name: "shell", command: "cat /tmp/.claude/skills/openclaw-review/SKILL.md" },
+      },
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null });
+    expect(usageForSkill(snapshot, "cursor-review", "codex")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "openclaw-review", "claude")?.count).toBe(1);
+  }));
+
+  it("validates shell commands, aliases, namespaces, and per-call deduplication", () => withTempHome((homeDir) => {
+    const sessionsDir = path.join(homeDir, "codex-fixture", "sessions");
+    const skillPath = "/tmp/.codex/skills/safe-read/SKILL.md";
+    writeJsonl(path.join(sessionsDir, "rollout.jsonl"), [
+      codexCall("mcp__filesystem__read_file", { path: `${skillPath} ${skillPath}` }),
+      codexCall("shell_command", { command: `head -20 ${skillPath}` }),
+      codexCall("shell_command", { command: `sed -n '1,20p' ${skillPath}` }),
+      codexCall("shell_command", { command: `rm ${skillPath}` }),
+      codexCall("shell_command", { command: `cat ${skillPath} > /tmp/copy` }),
+      codexCall("shell_command", { command: `python inspect.py ${skillPath}` }),
+      codexCall("shell_command", { command: `cat ${skillPath} && echo done` }),
+      codexCall("functions.Skill", { skill_name: "explicit-alias" }),
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: sessionsDir });
+    expect(snapshot.totalEvents).toBe(4);
+    expect(usageForSkill(snapshot, "safe-read", "codex")?.count).toBe(3);
+    expect(usageForSkill(snapshot, "explicit-alias", "codex")?.count).toBe(1);
+  }));
+
+  it("honors optional source settings and parses Qoder structured calls", () => withTempHome((homeDir) => {
+    const qoderPath = path.join(
+      homeDir,
+      ".qoder",
+      "cache",
+      "projects",
+      "demo-aabbccdd",
+      "conversation-history",
+      "task-1",
+      "task-1.jsonl",
+    );
+    writeJsonl(qoderPath, [assistantToolUse("Read", { path: "/tmp/.qoder/skills/qoder-review/SKILL.md" })]);
+
+    expect(listSkillUsageSources({ homeDir, codexSessionsDir: null, includeQoder: false }))
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "qoder-session" })]));
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: null, includeQoder: true });
+    expect(usageForSkill(snapshot, "qoder-review", "qoder")?.count).toBe(1);
+  }));
+
+  it("parses trusted Hermes, OpenCode, CodeWiz, and ZCode database tool calls", () => withTempHome((homeDir) => {
+    const hermesPath = path.join(homeDir, ".hermes", "state.db");
+    fs.mkdirSync(path.dirname(hermesPath), { recursive: true });
+    const hermes = new DatabaseSync(hermesPath);
+    hermes.exec("CREATE TABLE messages (id INTEGER PRIMARY KEY, tool_name TEXT, tool_calls TEXT, timestamp REAL)");
+    hermes.prepare("INSERT INTO messages (tool_name, tool_calls, timestamp) VALUES (?, ?, ?)").run(
+      "terminal",
+      JSON.stringify([{ function: { name: "Read", arguments: JSON.stringify({ path: "/tmp/.claude/skills/hermes-review/SKILL.md" }) } }]),
+      1_780_000_001,
+    );
+    hermes.close();
+
+    const databases = [
+      [path.join(homeDir, ".local", "share", "opencode", "opencode.db"), "/tmp/.codex/skills/opencode-review/SKILL.md"],
+      [path.join(homeDir, ".local", "share", "codewiz", "opencode.db"), "/tmp/.qoder/skills/codewiz-review/SKILL.md"],
+      [path.join(homeDir, ".zcode", "cli", "db", "db.sqlite"), "/tmp/.claude/skills/zcode-review/SKILL.md"],
+    ] as const;
+    for (const [dbPath, skillPath] of databases) {
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      const db = new DatabaseSync(dbPath);
+      db.exec("CREATE TABLE part (id TEXT PRIMARY KEY, time_created INTEGER, data TEXT)");
+      db.prepare("INSERT INTO part (id, time_created, data) VALUES (?, ?, ?)").run(
+        path.basename(skillPath),
+        1_780_000_002_000,
+        JSON.stringify({ type: "tool", tool: "Read", state: { input: { file_path: skillPath } } }),
+      );
+      db.close();
+    }
 
     const snapshot = loadSkillUsage({
-      usagePath: path.join(os.tmpdir(), "session-search-missing-usage.jsonl"),
-      codexSessionsDir,
+      homeDir,
+      codexSessionsDir: null,
+      includeHermes: true,
+      includeOpenCode: true,
+      includeCodeWizCli: true,
+      includeZcode: true,
     });
+    expect(usageForSkill(snapshot, "hermes-review", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "opencode-review", "codex")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "codewiz-review", "qoder")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "zcode-review", "claude")?.count).toBe(1);
+  }));
 
-    expect(snapshot.exists).toBe(true);
-    expect(snapshot.totalEvents).toBe(2);
-    expect(snapshot.stats).toEqual([
-      { skill: "brainstorming", count: 2, lastUsedAt: Date.parse("2026-06-03T10:00:00.000Z") },
+  it("honors CODEX_HOME for default Codex discovery", () => withTempHome((homeDir) => {
+    const codexHome = path.join(homeDir, "custom-codex");
+    writeJsonl(path.join(codexHome, "sessions", "rollout.jsonl"), [
+      codexCall("read_file", { path: "/tmp/.codex/skills/from-env/SKILL.md" }),
     ]);
-    expect(usageForSkill(snapshot, "TDD")).toBeNull();
-    expect(usageForSkill(snapshot, "patch-helper")).toBeNull();
-    expect(usageForSkill(snapshot, "TDD", "claude")).toBeNull();
-
-    fs.rmSync(path.dirname(codexSessionsDir), { recursive: true, force: true });
-  });
-
-  it("keeps same-name Codex and Claude usage separate for per-agent lookups", () => {
-    const usagePath = writeUsageLog([
-      JSON.stringify({ skill: "brainstorming", ts: "2026-06-01T10:00:00.000Z" }),
-    ]);
-    const codexSessionsDir = writeCodexSession([
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-02T10:00:00.000Z",
-        payload: {
-          type: "function_call",
-          name: "shell_command",
-          arguments: JSON.stringify({ command: "cat /tmp/session-search-fixtures/.codex/skills/brainstorming/SKILL.md" }),
-        },
-      }),
-      JSON.stringify({
-        type: "response_item",
-        timestamp: "2026-06-03T10:00:00.000Z",
-        payload: {
-          type: "function_call",
-          name: "shell_command",
-          arguments: JSON.stringify({ command: "cat /tmp/session-search-fixtures/.codex/skills/brainstorming/SKILL.md" }),
-        },
-      }),
-    ]);
-
-    const snapshot = loadSkillUsage({ usagePath, codexSessionsDir });
-
-    expect(usageForSkill(snapshot, "brainstorming")?.count).toBe(3);
-    expect(usageForSkill(snapshot, "brainstorming", "claude")?.count).toBe(1);
-    expect(usageForSkill(snapshot, "brainstorming", "codex")?.count).toBe(2);
-
-    fs.rmSync(path.dirname(usagePath), { recursive: true, force: true });
-    fs.rmSync(path.dirname(codexSessionsDir), { recursive: true, force: true });
-  });
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = codexHome;
+    try {
+      expect(usageForSkill(loadSkillUsage({ homeDir }), "from-env", "codex")?.count).toBe(1);
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previous;
+    }
+  }));
 });

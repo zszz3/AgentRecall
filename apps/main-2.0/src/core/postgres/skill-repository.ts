@@ -161,9 +161,11 @@ export class PostgresSkillRepository {
   }
 
   // Resolves recorded skill triggers against indexed sessions at query time:
-  // claude-hook events join on the captured session_id, codex events join on
-  // the session transcript path. Records without a hit stay "unlinked" rather
-  // than being attributed by time-window guessing.
+  // claude-hook events join on the captured session_id, and events scanned
+  // out of session transcripts join on the transcript path itself (the hook
+  // log path never matches a session file, so that branch stays inert for
+  // hook events). Records without a hit stay "unlinked" rather than being
+  // attributed by time-window guessing.
   async listRecentSkillTriggers(
     options: { skill?: string; limit?: number } = {},
   ): Promise<SkillTriggerLink[]> {
@@ -205,7 +207,7 @@ export class PostgresSkillRepository {
               and sessions.source in ('claude-cli', 'claude-app')
               and sessions.storage_environment_id = 'local'
             )
-            or (events.agent = 'codex' and sessions.file_path = events.source_path)
+            or sessions.file_path = events.source_path
           order by sessions.file_mtime_ms desc
           limit 1
         ) linked on true

@@ -84,7 +84,7 @@ export function SkillsDialog({
           || (sourceFilter === "codex" && (entry.local?.agent ?? entry.remote?.agent) === "codex")
           || (sourceFilter === "claude" && (entry.local?.agent ?? entry.remote?.agent) === "claude")
           || (sourceFilter === "shared" && entry.source === "codex-shared")
-          || (sourceFilter === "project" && (entry.source === "codex-project" || entry.source === "claude-project"));
+          || (sourceFilter === "project" && (entry.source === "codex-project" || entry.source === "claude-project" || entry.source === "qoder-project"));
         if (!matchesSource || !normalizedQuery) return matchesSource;
         return [entry.name, entry.description, entry.identity, entry.local?.path ?? "", entry.remote?.relativePath ?? ""]
           .join("\n")
@@ -630,7 +630,7 @@ function SkillDiffView({ snapshot, language }: { snapshot: SkillDiffSnapshot; la
 }
 
 const SKILL_SOURCE_FILTERS: SkillSourceFilter[] = ["all", "codex", "claude", "shared", "project"];
-const PROJECT_SKILL_SOURCES = new Set<SkillSource>(["codex-project", "claude-project"]);
+const PROJECT_SKILL_SOURCES = new Set<SkillSource>(["codex-project", "claude-project", "qoder-project"]);
 
 export function summarizeSkillRoots(roots: SkillRootStatus[]): SkillRootStatus[] {
   const visible: SkillRootStatus[] = [];
@@ -676,12 +676,14 @@ function skillSourceUiLabel(source: SkillSource, language: LanguageMode): string
   if (source === "codex-project") return localize(language, "Codex Project", "Codex 项目");
   if (source === "claude-project") return localize(language, "Project", "项目");
   if (source === "claude-plugin") return localize(language, "Claude Plugin", "Claude 插件");
+  if (source === "qoder-user") return "Qoder";
+  if (source === "qoder-project") return localize(language, "Qoder Project", "Qoder 项目");
   return skillSourceLabel(source);
 }
 
 function skillManagementLabel(source: SkillSource, language: LanguageMode): string | null {
   if (source === "claude-plugin") return localize(language, "Managed by Claude Plugin", "由 Claude Plugin 管理");
-  if (source === "codex-project" || source === "claude-project") return localize(language, "Synced with the Git repository", "随 Git 仓库同步");
+  if (source === "codex-project" || source === "claude-project" || source === "qoder-project") return localize(language, "Synced with the Git repository", "随 Git 仓库同步");
   if (source === "codex-system") return localize(language, "Built into the system", "系统内置");
   return null;
 }

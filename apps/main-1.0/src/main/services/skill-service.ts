@@ -168,7 +168,19 @@ export class SkillService {
 
   refreshUsage(): SkillUsageRefreshStatus {
     const store = this.dependencies.getStore();
-    const sources = this.operations.listSkillUsageSources();
+    const settings = this.dependencies.getSettings();
+    const sources = this.operations.listSkillUsageSources({
+      includeTclaude: settings.includeTclaude,
+      includeTcodex: settings.includeTcodex,
+      includeCodeBuddyCli: settings.includeCodeBuddyCli,
+      includeCodeWizCli: settings.includeCodeWizCli,
+      includeOpenClaw: settings.includeOpenClaw,
+      includeHermes: settings.includeHermes,
+      includeOpenCode: settings.includeOpenCode,
+      includeZcode: settings.includeZcode,
+      includeCursorAgent: settings.includeCursorAgent,
+      includeQoder: settings.includeQoder,
+    });
     let refreshed = 0;
     let skipped = 0;
     for (const source of sources) {

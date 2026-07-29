@@ -232,7 +232,7 @@ export function SettingsDialog({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const appShortcutModifier = platform === "darwin" ? "⌘" : "Ctrl";
   const appShortcuts: Array<{ label: string; keyGroups: string[][]; accessibleLabel?: string }> = [
-    { label: l("Focus search", "聚焦搜索"), keyGroups: [[appShortcutModifier, "K"]] },
+    { label: l("Focus search", "聚焦搜索"), keyGroups: [[appShortcutModifier, "F"]] },
     { label: l("Search", "执行搜索"), keyGroups: [["Enter"]] },
     { label: l("Select session", "选择会话"), keyGroups: [["↑"], ["↓"]] },
     { label: l("Open details", "打开详情"), keyGroups: [["Space"]] },

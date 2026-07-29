@@ -339,6 +339,8 @@ export function DetailPanel({
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         setPanelSearchOpen(true);
+        panelSearchInputRef.current?.focus();
+        panelSearchInputRef.current?.select();
         return;
       }
 

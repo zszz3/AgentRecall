@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupSessions, timeBucket, type GroupableSession } from "./group-logic";
+import { groupSessions, isNoProjectGroupKey, timeBucket, type GroupableSession } from "./group-logic";
 
 const NOW = new Date("2026-07-15T12:00:00.000Z").getTime();
 
@@ -38,6 +38,33 @@ describe("groupSessions", () => {
     expect(groups).toHaveLength(2);
     const app = groups.find((g) => g.key === "/work/app");
     expect(app?.sessions).toHaveLength(2);
+  });
+
+  it("groups Codex task workspaces and empty paths as source-specific no-project groups", () => {
+    const groups = groupSessions(
+      [
+        session({ sessionKey: "codex-a", source: "codex-cli", projectPath: "/Users/me/Documents/Codex/2026-07-16/1" }),
+        session({ sessionKey: "codex-b", source: "codex-app", projectPath: "C:\\Users\\me\\Documents\\Codex\\2026-07-16\\2" }),
+        session({ sessionKey: "cursor", source: "cursor-agent", projectPath: "" }),
+        session({ sessionKey: "repo", source: "codex-cli", projectPath: "/work/app" }),
+      ],
+      "project",
+      NOW,
+    );
+    const noProjectGroups = groups.filter((group) => isNoProjectGroupKey(group.key));
+    expect(noProjectGroups).toHaveLength(2);
+    expect(noProjectGroups.find((group) => group.sessions[0]?.source.startsWith("codex"))?.sessions).toHaveLength(2);
+    expect(noProjectGroups.find((group) => group.sessions[0]?.source === "cursor-agent")?.sessions).toHaveLength(1);
+    expect(groups.find((group) => group.key === "/work/app")?.sessions).toHaveLength(1);
+  });
+
+  it("keeps date-like non-Codex paths as real projects", () => {
+    const [group] = groupSessions(
+      [session({ projectPath: "/work/archive/2026-07-16/1" })],
+      "project",
+      NOW,
+    );
+    expect(group.key).toBe("/work/archive/2026-07-16/1");
   });
 
   it("groups by source", () => {
