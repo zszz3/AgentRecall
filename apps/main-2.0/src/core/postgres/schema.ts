@@ -1099,4 +1099,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         WHERE session_id IS NOT NULL;
     `,
   ],
+}, {
+  version: 13,
+  name: "record the skill version hash on usage events",
+  statements: [
+    `
+      ALTER TABLE agent_recall.skill_usage_events
+        ADD COLUMN IF NOT EXISTS skill_hash text;
+    `,
+  ],
 }];

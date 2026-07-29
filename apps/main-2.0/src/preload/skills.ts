@@ -7,6 +7,7 @@ import type { SkillDiffSnapshot } from "../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SkillTriggerLink } from "../core/session-store";
+import type { SkillEvalDetail, SkillEvalOverview } from "../main/services/skill-service";
 import { SKILLS_IPC } from "../shared/ipc/skills";
 
 export type SkillsIpcRenderer = Pick<IpcRenderer, "invoke">;
@@ -51,6 +52,8 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
     uninstallSkillUsageHook: (): Promise<string> => ipc.invoke(SKILLS_IPC.uninstallUsageHook.channel),
     listSkillTriggers: (options?: { skill?: string; limit?: number }): Promise<SkillTriggerLink[]> =>
       options ? ipc.invoke(SKILLS_IPC.listTriggers.channel, options) : ipc.invoke(SKILLS_IPC.listTriggers.channel),
+    getSkillEvalOverview: (): Promise<SkillEvalOverview> => ipc.invoke(SKILLS_IPC.getEvalOverview.channel),
+    getSkillEvalDetail: (skill: string): Promise<SkillEvalDetail> => ipc.invoke(SKILLS_IPC.getEvalDetail.channel, skill),
   };
 }
 

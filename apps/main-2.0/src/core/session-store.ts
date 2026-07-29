@@ -34,8 +34,11 @@ import {
 } from "./postgres/session-turn-repository";
 import {
   PostgresSkillRepository,
+  type SkillPerformanceSignals,
   type SkillSyncBinding,
   type SkillTriggerLink,
+  type SkillUsageOverviewRow,
+  type SkillVersionGroup,
 } from "./postgres/skill-repository";
 import { findSessionFamily, type SessionFamily as SessionFamilyResult } from "./session-family";
 import type {
@@ -78,10 +81,13 @@ export type {
 } from "./session-family";
 export type { TraceEventQueryOptions } from "./postgres/session-turn-repository";
 export type {
+  SkillPerformanceSignals,
   SkillSyncBinding,
   SkillSyncDirection,
   SkillTriggerLink,
   SkillTriggerLinkState,
+  SkillUsageOverviewRow,
+  SkillVersionGroup,
 } from "./postgres/skill-repository";
 
 export class SessionStore {
@@ -475,6 +481,26 @@ export class SessionStore {
   ): Promise<SkillTriggerLink[]> {
     await this.ready;
     return this.skills.listRecentSkillTriggers(options);
+  }
+
+  async listSkillUsageOverview(): Promise<SkillUsageOverviewRow[]> {
+    await this.ready;
+    return this.skills.listSkillUsageOverview();
+  }
+
+  async getSkillPerformanceSignals(skill: string): Promise<SkillPerformanceSignals> {
+    await this.ready;
+    return this.skills.getSkillPerformanceSignals(skill);
+  }
+
+  async listSkillVersionGroups(skill: string): Promise<SkillVersionGroup[]> {
+    await this.ready;
+    return this.skills.listSkillVersionGroups(skill);
+  }
+
+  async hasClaudeHookUsageEvents(): Promise<boolean> {
+    await this.ready;
+    return this.skills.hasClaudeHookUsageEvents();
   }
 
   async getSkillUsageSnapshot(): Promise<SkillUsageSnapshot> {

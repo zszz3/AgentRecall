@@ -224,3 +224,136 @@
   font-size: 12.5px;
   color: var(--danger, #d64545);
 }
+
+.eval-observability-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-bg) 82%, var(--accent) 18%);
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.eval-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.eval-badge-warn {
+  border: 1px solid color-mix(in srgb, var(--danger, #d64545) 45%, transparent);
+  color: var(--danger, #d64545);
+}
+
+.eval-badge-dim {
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+}
+
+.eval-badge-current {
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent);
+}
+
+.eval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--panel-bg);
+}
+
+.eval-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.eval-card > header h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.eval-evidence-tag {
+  padding: 1px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: help;
+}
+
+.eval-signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eval-signal-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.eval-signal-list li > span:first-child {
+  flex: 1;
+  color: var(--text-dim);
+}
+
+.eval-signal-list strong {
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.eval-baseline {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.eval-version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eval-version-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.eval-version-list code {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.eval-version-meta {
+  color: var(--text-dim);
+  font-size: 12px;
+}

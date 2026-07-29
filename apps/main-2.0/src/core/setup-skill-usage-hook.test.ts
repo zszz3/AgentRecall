@@ -1,8 +1,9 @@
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 interface HookSetupOptions {
   homeDir?: string;
@@ -20,6 +21,7 @@ const require = createRequire(import.meta.url);
 const setup = require(path.resolve("bin", "setup-skill-usage-hook.cjs")) as HookSetupModule;
 const record = require(path.resolve("bin", "skill-usage-record.cjs")) as {
   buildRecord(input: unknown): Record<string, unknown> | null;
+  skillMarkdownHash(skill: string, cwd: string): string;
 };
 
 function freshHome(): string {
@@ -138,5 +140,61 @@ describe("skill usage record payload", () => {
       tool_input: { skill: "review" },
       session_id: "abc-123",
     })).toBeNull();
+  });
+});
+
+describe("skill markdown hash capture", () => {
+  afterEach(() => {
+    delete process.env.AGENT_RECALL_TEST_HOME;
+  });
+
+  function writeSkill(root: string, skill: string, body: string): string {
+    const dir = path.join(root, ".claude", "skills", skill);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "SKILL.md"), body, "utf8");
+    return createHash("sha256").update(Buffer.from(body, "utf8")).digest("hex");
+  }
+
+  it("prefers the project-level SKILL.md over the user-level one", () => {
+    const homeDir = freshHome();
+    const projectDir = path.join(homeDir, "repo");
+    try {
+      process.env.AGENT_RECALL_TEST_HOME = homeDir;
+      writeSkill(homeDir, "review", "# user copy\n");
+      const projectHash = writeSkill(projectDir, "review", "# project copy\n");
+
+      const built = record.buildRecord({
+        tool_name: "Skill",
+        tool_input: { skill: "review" },
+        session_id: "abc",
+        cwd: projectDir,
+      });
+      expect(built).toMatchObject({ skill: "review", skill_hash: projectHash });
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the user-level SKILL.md and omits the field when missing", () => {
+    const homeDir = freshHome();
+    try {
+      process.env.AGENT_RECALL_TEST_HOME = homeDir;
+      const userHash = writeSkill(homeDir, "review", "# user copy\n");
+
+      expect(record.skillMarkdownHash("review", path.join(homeDir, "elsewhere"))).toBe(userHash);
+      expect(record.skillMarkdownHash("missing-skill", "")).toBe("");
+      // Path-traversal shaped names must never touch the filesystem.
+      expect(record.skillMarkdownHash("../evil", "")).toBe("");
+
+      const built = record.buildRecord({
+        tool_name: "Skill",
+        tool_input: { skill: "missing-skill" },
+        cwd: homeDir,
+      });
+      expect(built).toMatchObject({ skill: "missing-skill" });
+      expect(built).not.toHaveProperty("skill_hash");
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
   });
 });

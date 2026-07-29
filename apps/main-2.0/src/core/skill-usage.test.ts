@@ -65,8 +65,8 @@ describe("skill usage", () => {
   it("carries session linkage fields from newer hook records and tolerates old ones", () => withTempHome((homeDir) => {
     const usagePath = writeUsageLog(homeDir, [
       JSON.stringify({ skill: "review", ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "review", ts: "2026-06-02T10:00:00.000Z", session_id: "abc-123", cwd: "/repo" }),
-      JSON.stringify({ skill: "review", ts: "2026-06-03T10:00:00.000Z", session_id: "   ", cwd: 42 }),
+      JSON.stringify({ skill: "review", ts: "2026-06-02T10:00:00.000Z", session_id: "abc-123", cwd: "/repo", skill_hash: "a1b2c3" }),
+      JSON.stringify({ skill: "review", ts: "2026-06-03T10:00:00.000Z", session_id: "   ", cwd: 42, skill_hash: "  " }),
     ]);
 
     const events = readSkillUsageSourceEvents({
@@ -80,9 +80,11 @@ describe("skill usage", () => {
     expect(events).toHaveLength(3);
     expect(events[0]?.sessionId).toBeUndefined();
     expect(events[0]?.cwd).toBeUndefined();
-    expect(events[1]).toMatchObject({ sessionId: "abc-123", cwd: "/repo" });
+    expect(events[0]?.skillHash).toBeUndefined();
+    expect(events[1]).toMatchObject({ sessionId: "abc-123", cwd: "/repo", skillHash: "a1b2c3" });
     expect(events[2]?.sessionId).toBeUndefined();
     expect(events[2]?.cwd).toBeUndefined();
+    expect(events[2]?.skillHash).toBeUndefined();
   }));
 
   it("returns an empty snapshot when the log is missing", () => withTempHome((homeDir) => {

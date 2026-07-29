@@ -24,6 +24,40 @@ export interface SkillTriggerLink {
   turnId: string | null;
 }
 
+// Aggregated trigger-layer stats per recorded skill (audit side, phase two).
+export interface SkillUsageOverviewRow {
+  agent: SkillUsageAgent;
+  skill: string;
+  totalTriggers: number;
+  triggers7d: number;
+  triggers30d: number;
+  lastTriggeredAt: number;
+  linkedTriggers: number;
+}
+
+// Descriptive turn-level metrics for one skill's linked-turn triggers plus a
+// library-wide baseline. Values are facts at Exercised evidence strength; no
+// scoring happens here or above.
+export interface SkillPerformanceSignals {
+  sampleSize: number;
+  medianTotalTokens: number | null;
+  medianDurationMs: number | null;
+  errorTurnRatio: number | null;
+  baselineTurnCount: number;
+  baselineMedianTotalTokens: number | null;
+  baselineMedianDurationMs: number | null;
+  baselineErrorTurnRatio: number | null;
+}
+
+// Trigger counts sliced by the SKILL.md hash captured at trigger time.
+// A null hash groups historical events recorded before hashes existed.
+export interface SkillVersionGroup {
+  skillHash: string | null;
+  triggerCount: number;
+  firstTriggeredAt: number;
+  lastTriggeredAt: number;
+}
+
 export interface SkillSyncBinding {
   localSkillPath: string;
   portableIdentity?: string;
@@ -49,6 +83,13 @@ interface SkillSyncBindingRow extends Record<string, unknown> {
 function timeValue(value: Date | string): number {
   const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+// Aggregate metrics arrive as numeric strings (or null on empty sets).
+function metricValue(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function isoValue(value: Date | string): string {
@@ -129,9 +170,9 @@ export class PostgresSkillRepository {
         await client.query(
           `
             insert into agent_recall.skill_usage_events (
-              source_path, event_index, agent, skill, occurred_at, session_id, cwd
+              source_path, event_index, agent, skill, occurred_at, session_id, cwd, skill_hash
             )
-            values ($1, $2, $3, $4, $5, $6, $7)
+            values ($1, $2, $3, $4, $5, $6, $7, $8)
           `,
           [
             source.path,
@@ -141,6 +182,7 @@ export class PostgresSkillRepository {
             new Date(Math.max(0, event.timestamp)).toISOString(),
             event.sessionId?.trim() || null,
             event.cwd?.trim() || null,
+            event.skillHash?.trim() || null,
           ],
         );
         eventIndex += 1;
@@ -238,6 +280,185 @@ export class PostgresSkillRepository {
       projectPath: row.session_key ? row.project_path || null : null,
       turnId: row.turn_id,
     }));
+  }
+
+  // Trigger-layer stats per skill name (case-insensitive), newest first.
+  // "linked" counts events that resolve to an indexed session by either
+  // linkage route used in listRecentSkillTriggers.
+  async listSkillUsageOverview(): Promise<SkillUsageOverviewRow[]> {
+    const result = await this.database.query<{
+      agent: SkillUsageAgent;
+      skill: string;
+      total_triggers: number | string;
+      triggers_7d: number | string;
+      triggers_30d: number | string;
+      last_triggered_at: Date | string;
+      linked_triggers: number | string;
+    }>(
+      `
+        select
+          (array_agg(events.agent order by events.occurred_at desc))[1] as agent,
+          (array_agg(events.skill order by events.occurred_at desc))[1] as skill,
+          count(*) as total_triggers,
+          count(*) filter (where events.occurred_at >= now() - interval '7 days') as triggers_7d,
+          count(*) filter (where events.occurred_at >= now() - interval '30 days') as triggers_30d,
+          max(events.occurred_at) as last_triggered_at,
+          count(*) filter (where linked.session_key is not null) as linked_triggers
+        from agent_recall.skill_usage_events events
+        left join lateral (
+          select sessions.session_key
+          from agent_recall.sessions sessions
+          where
+            (
+              events.session_id is not null
+              and sessions.raw_id = events.session_id
+              and sessions.source in ('claude-cli', 'claude-app')
+              and sessions.storage_environment_id = 'local'
+            )
+            or sessions.file_path = events.source_path
+          limit 1
+        ) linked on true
+        group by lower(events.skill)
+        order by max(events.occurred_at) desc
+      `,
+    );
+    return result.rows.map((row) => ({
+      agent: row.agent,
+      skill: row.skill,
+      totalTriggers: Number(row.total_triggers),
+      triggers7d: Number(row.triggers_7d),
+      triggers30d: Number(row.triggers_30d),
+      lastTriggeredAt: timeValue(row.last_triggered_at),
+      linkedTriggers: Number(row.linked_triggers),
+    }));
+  }
+
+  // Median tokens/duration and error ratio over the skill's linked-turn
+  // trigger turns, next to a library-wide baseline over non-synthetic turns.
+  // Purely descriptive; evidence strength for the sample is "Exercised".
+  async getSkillPerformanceSignals(skill: string): Promise<SkillPerformanceSignals> {
+    const sample = await this.database.query<{
+      sample_size: number | string;
+      median_total_tokens: number | string | null;
+      median_duration_ms: number | string | null;
+      error_turn_ratio: number | string | null;
+    }>(
+      `
+        select
+          count(*) as sample_size,
+          percentile_cont(0.5) within group (order by turn.total_tokens) as median_total_tokens,
+          percentile_cont(0.5) within group (order by turn.duration_ms) as median_duration_ms,
+          avg(case when turn.error_count > 0 then 1.0 else 0.0 end) as error_turn_ratio
+        from agent_recall.skill_usage_events events
+        join lateral (
+          select sessions.session_key
+          from agent_recall.sessions sessions
+          where
+            (
+              events.session_id is not null
+              and sessions.raw_id = events.session_id
+              and sessions.source in ('claude-cli', 'claude-app')
+              and sessions.storage_environment_id = 'local'
+            )
+            or sessions.file_path = events.source_path
+          order by sessions.file_mtime_ms desc
+          limit 1
+        ) linked on true
+        join lateral (
+          select
+            turns.total_tokens,
+            turns.error_count,
+            extract(epoch from (turns.ended_at - turns.started_at)) * 1000 as duration_ms
+          from agent_recall.session_turns turns
+          where turns.session_key = linked.session_key
+            and turns.started_at is not null
+            and turns.ended_at is not null
+            and turns.started_at <= events.occurred_at
+            and turns.ended_at >= events.occurred_at
+          order by turns.turn_index
+          limit 1
+        ) turn on true
+        where lower(events.skill) = lower($1)
+      `,
+      [skill],
+    );
+    const baseline = await this.database.query<{
+      baseline_turn_count: number | string;
+      baseline_median_total_tokens: number | string | null;
+      baseline_median_duration_ms: number | string | null;
+      baseline_error_turn_ratio: number | string | null;
+    }>(
+      `
+        select
+          count(*) as baseline_turn_count,
+          percentile_cont(0.5) within group (order by turns.total_tokens) as baseline_median_total_tokens,
+          percentile_cont(0.5) within group (order by extract(epoch from (turns.ended_at - turns.started_at)) * 1000)
+            filter (where turns.started_at is not null and turns.ended_at is not null) as baseline_median_duration_ms,
+          avg(case when turns.error_count > 0 then 1.0 else 0.0 end) as baseline_error_turn_ratio
+        from agent_recall.session_turns turns
+        where turns.synthetic = false
+      `,
+    );
+    const sampleRow = sample.rows[0];
+    const baselineRow = baseline.rows[0];
+    return {
+      sampleSize: Number(sampleRow?.sample_size ?? 0),
+      medianTotalTokens: metricValue(sampleRow?.median_total_tokens),
+      medianDurationMs: metricValue(sampleRow?.median_duration_ms),
+      errorTurnRatio: metricValue(sampleRow?.error_turn_ratio),
+      baselineTurnCount: Number(baselineRow?.baseline_turn_count ?? 0),
+      baselineMedianTotalTokens: metricValue(baselineRow?.baseline_median_total_tokens),
+      baselineMedianDurationMs: metricValue(baselineRow?.baseline_median_duration_ms),
+      baselineErrorTurnRatio: metricValue(baselineRow?.baseline_error_turn_ratio),
+    };
+  }
+
+  // Groups a skill's triggers by the SKILL.md hash captured at trigger time.
+  // Events recorded before hash capture existed land in the null-hash group.
+  async listSkillVersionGroups(skill: string): Promise<SkillVersionGroup[]> {
+    const result = await this.database.query<{
+      skill_hash: string | null;
+      trigger_count: number | string;
+      first_triggered_at: Date | string;
+      last_triggered_at: Date | string;
+    }>(
+      `
+        select
+          skill_hash,
+          count(*) as trigger_count,
+          min(occurred_at) as first_triggered_at,
+          max(occurred_at) as last_triggered_at
+        from agent_recall.skill_usage_events
+        where lower(skill) = lower($1)
+        group by skill_hash
+        order by max(occurred_at) desc
+      `,
+      [skill],
+    );
+    return result.rows.map((row) => ({
+      skillHash: row.skill_hash || null,
+      triggerCount: Number(row.trigger_count),
+      firstTriggeredAt: timeValue(row.first_triggered_at),
+      lastTriggeredAt: timeValue(row.last_triggered_at),
+    }));
+  }
+
+  // Observability floor for claude skills: the hook pipeline has demonstrably
+  // produced at least one record. Until then "no triggers" must be reported
+  // as Unobserved rather than never-used.
+  async hasClaudeHookUsageEvents(): Promise<boolean> {
+    const result = await this.database.query<{ found: boolean }>(
+      `
+        select exists(
+          select 1
+          from agent_recall.skill_usage_events events
+          join agent_recall.skill_usage_sources sources
+            on sources.source_path = events.source_path
+          where sources.kind = 'claude-hook'
+        ) as found
+      `,
+    );
+    return Boolean(result.rows[0]?.found);
   }
 
   async getSkillUsageSnapshot(): Promise<SkillUsageSnapshot> {

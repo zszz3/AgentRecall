@@ -1,7 +1,15 @@
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import type { AppSettings } from "../../core/platform";
-import type { SkillSyncBinding, SkillTriggerLink } from "../../core/session-store";
+import type {
+  SkillPerformanceSignals,
+  SkillSyncBinding,
+  SkillTriggerLink,
+  SkillUsageOverviewRow,
+  SkillVersionGroup,
+} from "../../core/session-store";
 import { runSkillAiSearch, type SkillAiSearchResult } from "../../core/skill-ai-search";
 import {
   ManagedSkillLibrary,
@@ -70,6 +78,43 @@ export interface SkillUsageHookSetup {
   skillUsageHookStatus(options?: Record<string, unknown>): { installed: boolean };
 }
 
+// Evidence-ladder state for a skill in the Eval overview. "unobserved" means
+// the collection pipeline cannot see this skill yet, which must never be
+// presented as "never used".
+export type SkillEvalObservation = "exercised" | "never-used" | "unobserved";
+
+export interface SkillEvalOverviewItem {
+  skill: string;
+  // Agent of the most recent trigger; null when the skill has none yet.
+  agent: SkillUsageAgent | null;
+  installed: boolean;
+  totalTriggers: number;
+  triggers7d: number;
+  triggers30d: number;
+  lastTriggeredAt: number | null;
+  linkedTriggers: number;
+  observation: SkillEvalObservation;
+}
+
+export interface SkillEvalOverview {
+  hookInstalled: boolean;
+  // Whether the claude hook pipeline has demonstrably produced records.
+  claudeHookObservable: boolean;
+  skills: SkillEvalOverviewItem[];
+}
+
+export interface SkillEvalVersionGroup extends SkillVersionGroup {
+  current: boolean;
+}
+
+export interface SkillEvalDetail {
+  skill: string;
+  signals: SkillPerformanceSignals;
+  versions: SkillEvalVersionGroup[];
+  currentHash: string | null;
+  remoteVersion: number | null;
+}
+
 export interface SkillStorePort {
   listProjects(): Promise<ProjectSummary[]>;
   getSkillUsageSnapshot(): Promise<SkillUsageSnapshot>;
@@ -77,6 +122,10 @@ export interface SkillStorePort {
   upsertSkillUsageSource(source: SkillUsageSource, events: SkillUsageEvent[]): Promise<void>;
   pruneSkillUsageSources(activePaths: string[]): Promise<void>;
   listRecentSkillTriggers(options: { skill?: string; limit?: number }): Promise<SkillTriggerLink[]>;
+  listSkillUsageOverview(): Promise<SkillUsageOverviewRow[]>;
+  getSkillPerformanceSignals(skill: string): Promise<SkillPerformanceSignals>;
+  listSkillVersionGroups(skill: string): Promise<SkillVersionGroup[]>;
+  hasClaudeHookUsageEvents(): Promise<boolean>;
   listSkillSyncBindings(): Promise<SkillSyncBinding[]>;
   getSkillSyncBindingForPortableIdentity(identity: string): Promise<SkillSyncBinding | null>;
   upsertSkillSyncBinding(binding: SkillSyncBinding): Promise<void>;
@@ -597,10 +646,107 @@ export class SkillService {
   async listSkillTriggers(
     options: { skill?: string; limit?: number } = {},
   ): Promise<SkillTriggerLink[]> {
+    this.requireEvalEnabled();
+    return this.dependencies.getStore().listRecentSkillTriggers(options);
+  }
+
+  // Live-report overview: merges recorded triggers with the installed skill
+  // list so skills without any record still appear, labelled by what the
+  // pipeline can actually observe.
+  async getSkillEvalOverview(): Promise<SkillEvalOverview> {
+    this.requireEvalEnabled();
+    const store = this.dependencies.getStore();
+    const [overview, installedSnapshot, hookEventsExist] = await Promise.all([
+      store.listSkillUsageOverview(),
+      this.listSkills(),
+      store.hasClaudeHookUsageEvents(),
+    ]);
+    const hookInstalled = this.getUsageHookStatus();
+    const claudeHookObservable = hookInstalled && hookEventsExist;
+    const byName = new Map<string, SkillEvalOverviewItem>();
+    for (const row of overview) {
+      byName.set(row.skill.trim().toLowerCase(), {
+        skill: row.skill,
+        agent: row.agent,
+        installed: false,
+        totalTriggers: row.totalTriggers,
+        triggers7d: row.triggers7d,
+        triggers30d: row.triggers30d,
+        lastTriggeredAt: row.lastTriggeredAt,
+        linkedTriggers: row.linkedTriggers,
+        observation: "exercised",
+      });
+    }
+    for (const skill of installedSnapshot.skills) {
+      const key = skill.name.trim().toLowerCase();
+      const existing = byName.get(key);
+      if (existing) {
+        existing.installed = true;
+        continue;
+      }
+      // Claude transcripts never record skill invocations, so a claude skill
+      // without records is only "never used" once the hook pipeline has
+      // proven itself; other agents are observable from session files.
+      const observable = skill.agent === "claude" ? claudeHookObservable : true;
+      byName.set(key, {
+        skill: skill.name,
+        agent: null,
+        installed: true,
+        totalTriggers: 0,
+        triggers7d: 0,
+        triggers30d: 0,
+        lastTriggeredAt: null,
+        linkedTriggers: 0,
+        observation: observable ? "never-used" : "unobserved",
+      });
+    }
+    const skills = [...byName.values()].sort((a, b) =>
+      (b.lastTriggeredAt ?? 0) - (a.lastTriggeredAt ?? 0) || a.skill.localeCompare(b.skill));
+    return { hookInstalled, claudeHookObservable, skills };
+  }
+
+  async getSkillEvalDetail(skillName: string): Promise<SkillEvalDetail> {
+    this.requireEvalEnabled();
+    const name = skillName.trim();
+    if (!name) throw new Error("A skill name is required.");
+    const store = this.dependencies.getStore();
+    const [signals, groups, installedSnapshot, bindings] = await Promise.all([
+      store.getSkillPerformanceSignals(name),
+      store.listSkillVersionGroups(name),
+      this.listSkills(),
+      store.listSkillSyncBindings(),
+    ]);
+    const installed = installedSnapshot.skills.find(
+      (item) => item.name.trim().toLowerCase() === name.toLowerCase());
+    // Same invariant as skillMarkdownHash in bin/skill-usage-record.cjs:
+    // sha256 over the raw SKILL.md bytes. Keep the two in lockstep.
+    let currentHash: string | null = null;
+    if (installed) {
+      try {
+        currentHash = createHash("sha256").update(fs.readFileSync(installed.path)).digest("hex");
+      } catch {
+        currentHash = null;
+      }
+    }
+    const binding = installed
+      ? bindings.find((item) => path.resolve(item.localSkillPath) === path.resolve(installed.directoryPath)) ?? null
+      : null;
+    return {
+      skill: installed?.name ?? name,
+      signals,
+      versions: groups.map((group) => ({
+        ...group,
+        current: Boolean(currentHash && group.skillHash === currentHash),
+      })),
+      currentHash,
+      remoteVersion: binding?.remoteVersion ?? null,
+    };
+  }
+
+  private requireEvalEnabled(): void {
     if (!this.dependencies.getSettings().evalEnabled) {
       throw new Error("Eval is disabled. Enable it in Settings first.");
     }
-    return this.dependencies.getStore().listRecentSkillTriggers(options);
   }
 
   installUsageHook(): string {

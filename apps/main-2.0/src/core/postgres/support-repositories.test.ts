@@ -245,6 +245,89 @@ describe("PostgreSQL support repositories", () => {
     await expect(repository.listRecentSkillTriggers({ skill: "unknown" })).resolves.toEqual([]);
   });
 
+  it("aggregates the skill live report across overview, signals, and version groups", async () => {
+    const repository = new PostgresSkillRepository(database);
+    const sessionRepository = new PostgresSessionRepository(database);
+    const now = Date.now();
+    await sessionRepository.upsertIndexedSession({
+      ...session("local:claude:live"),
+      rawId: "claude-live",
+      source: "claude-cli",
+      filePath: "/fixtures/claude-live.jsonl",
+      originalTitle: "Live report fixture",
+    }, []);
+    await database.query(
+      `
+        insert into agent_recall.session_turns (
+          id, session_key, turn_index, started_at, ended_at, total_tokens, error_count, derivation_version
+        )
+        values
+          ('live-turn-1', 'local:claude:live', 7, $1, $2, 30000, 1, 1),
+          ('live-turn-2', 'local:claude:live', 8, $3, $4, 1000, 0, 1)
+      `,
+      [
+        new Date(now - 60_000).toISOString(),
+        new Date(now + 60_000).toISOString(),
+        new Date(now + 120_000).toISOString(),
+        new Date(now + 180_000).toISOString(),
+      ],
+    );
+
+    await repository.upsertSkillUsageSource({
+      agent: "codex",
+      kind: "codex-session",
+      path: "/fixtures/codex-live.jsonl",
+      mtimeMs: 1,
+      fileSize: 1,
+    }, [
+      { agent: "codex", skill: "other", timestamp: now },
+    ]);
+    // The claude observability floor only trips once hook records exist.
+    await expect(repository.hasClaudeHookUsageEvents()).resolves.toBe(false);
+
+    await repository.upsertSkillUsageSource({
+      agent: "claude",
+      kind: "claude-hook",
+      path: "/fixtures/skill-usage.jsonl",
+      mtimeMs: 1,
+      fileSize: 1,
+    }, [
+      { agent: "claude", skill: "review", timestamp: now, sessionId: "claude-live", skillHash: "hash-b" },
+      { agent: "claude", skill: "review", timestamp: now - 10 * 86_400_000, skillHash: "hash-a" },
+      { agent: "claude", skill: "review", timestamp: now - 40 * 86_400_000 },
+    ]);
+    await expect(repository.hasClaudeHookUsageEvents()).resolves.toBe(true);
+
+    const overview = await repository.listSkillUsageOverview();
+    expect(overview).toHaveLength(2);
+    const review = overview.find((row) => row.skill === "review");
+    expect(review).toMatchObject({
+      agent: "claude",
+      totalTriggers: 3,
+      triggers7d: 1,
+      triggers30d: 2,
+      linkedTriggers: 1,
+    });
+
+    const signals = await repository.getSkillPerformanceSignals("Review");
+    expect(signals.sampleSize).toBe(1);
+    expect(signals.medianTotalTokens).toBe(30_000);
+    expect(signals.medianDurationMs).toBe(120_000);
+    expect(signals.errorTurnRatio).toBe(1);
+    // Both fixture turns are non-synthetic; upsert's synthetic turn stays out.
+    expect(signals.baselineTurnCount).toBe(2);
+    expect(signals.baselineMedianTotalTokens).toBe(15_500);
+    expect(signals.baselineErrorTurnRatio).toBe(0.5);
+
+    const groups = await repository.listSkillVersionGroups("review");
+    expect(groups.map((group) => group.skillHash)).toEqual(["hash-b", "hash-a", null]);
+    expect(groups[0]).toMatchObject({ triggerCount: 1 });
+
+    const emptySignals = await repository.getSkillPerformanceSignals("unknown");
+    expect(emptySignals.sampleSize).toBe(0);
+    expect(emptySignals.medianTotalTokens).toBeNull();
+  });
+
   it("stores sync metadata, provider keys, and ordered migration history", async () => {
     const sessionRepository = new PostgresSessionRepository(database);
     await sessionRepository.upsertIndexedSession(session("local:old"), []);

@@ -65,4 +65,6 @@ export const SKILLS_IPC = {
   installUsageHook: defineIpcRequest("skills:install-usage-hook", noInput),
   uninstallUsageHook: defineIpcRequest("skills:uninstall-usage-hook", noInput),
   listTriggers: defineIpcRequest("skills:list-triggers", triggersQueryInput),
+  getEvalOverview: defineIpcRequest("skills:eval-overview", noInput),
+  getEvalDetail: defineIpcRequest("skills:eval-detail", z.tuple([z.string().trim().min(1).max(200)])),
 } as const;

@@ -109,6 +109,30 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
       projectPath: "/repo",
       turnId: null,
     }]),
+    listSkillUsageOverview: vi.fn(async () => [{
+      agent: "claude" as const,
+      skill: "review",
+      totalTriggers: 3,
+      triggers7d: 1,
+      triggers30d: 2,
+      lastTriggeredAt: 100,
+      linkedTriggers: 1,
+    }]),
+    getSkillPerformanceSignals: vi.fn(async () => ({
+      sampleSize: 1,
+      medianTotalTokens: 30_000,
+      medianDurationMs: 120_000,
+      errorTurnRatio: 1,
+      baselineTurnCount: 2,
+      baselineMedianTotalTokens: 15_500,
+      baselineMedianDurationMs: 60_000,
+      baselineErrorTurnRatio: 0.5,
+    })),
+    listSkillVersionGroups: vi.fn(async () => [
+      { skillHash: "hash-b", triggerCount: 1, firstTriggeredAt: 100, lastTriggeredAt: 100 },
+      { skillHash: null, triggerCount: 2, firstTriggeredAt: 1, lastTriggeredAt: 50 },
+    ]),
+    hasClaudeHookUsageEvents: vi.fn(async () => true),
     listSkillSyncBindings: vi.fn(async () => bindings),
     getSkillSyncBindingForPortableIdentity: vi.fn(async (identity) =>
       bindings.find((binding) => binding.portableIdentity === identity) ?? null),
@@ -231,6 +255,76 @@ describe("SkillService local skills and usage", () => {
       { skill: "review", linkState: "linked-session", sessionKey: "local:claude:abc" },
     ]);
     expect(enabled.store.listRecentSkillTriggers).toHaveBeenCalledWith({ skill: "review", limit: 10 });
+  });
+
+  it("gates the live report behind the Eval setting", async () => {
+    const disabled = createHarness();
+    await expect(disabled.service.getSkillEvalOverview()).rejects.toThrow("Eval is disabled");
+    await expect(disabled.service.getSkillEvalDetail("review")).rejects.toThrow("Eval is disabled");
+    expect(disabled.store.listSkillUsageOverview).not.toHaveBeenCalled();
+  });
+
+  it("labels skills without records as never-used only when the pipeline can observe them", async () => {
+    const settings = structuredClone(defaultSettings);
+    settings.evalEnabled = true;
+    const harness = createHarness({ settings });
+    harness.managedLibrary.list = vi.fn(() => ({
+      skills: [
+        installedSkill(),
+        { ...installedSkill(), id: "claude:ghost", name: "ghost", agent: "claude" as const },
+        { ...installedSkill(), id: "codex:helper", name: "helper", agent: "codex" as const },
+      ],
+      roots: [],
+      scannedAt: 1,
+    }));
+
+    const overview = await harness.service.getSkillEvalOverview();
+    expect(overview.hookInstalled).toBe(true);
+    expect(overview.claudeHookObservable).toBe(true);
+    expect(overview.skills.find((item) => item.skill === "review")).toMatchObject({
+      observation: "exercised",
+      installed: true,
+      totalTriggers: 3,
+      linkedTriggers: 1,
+    });
+    expect(overview.skills.find((item) => item.skill === "ghost")).toMatchObject({
+      observation: "never-used",
+      totalTriggers: 0,
+    });
+
+    // Without the hook the claude pipeline is blind: "no records" must read
+    // as unobserved, while codex skills stay observable from session files.
+    harness.hookSetup.skillUsageHookStatus = vi.fn(() => ({ installed: false }));
+    const blind = await harness.service.getSkillEvalOverview();
+    expect(blind.claudeHookObservable).toBe(false);
+    expect(blind.skills.find((item) => item.skill === "ghost")).toMatchObject({ observation: "unobserved" });
+    expect(blind.skills.find((item) => item.skill === "helper")).toMatchObject({ observation: "never-used" });
+  });
+
+  it("builds the eval detail with version groups and the bound remote version", async () => {
+    const settings = structuredClone(defaultSettings);
+    settings.evalEnabled = true;
+    const harness = createHarness({ settings });
+    harness.bindings.push({
+      localSkillPath: installedSkill().directoryPath,
+      portableIdentity: "agent-recall/review",
+      remoteSkillId: "remote-v1",
+      remoteUpdatedAt: "2026-07-16T00:00:00.000Z",
+      remoteVersion: 4,
+      lastContentHash: "remote-hash",
+      lastSyncedAt: 1,
+      direction: "upload",
+    });
+
+    const detail = await harness.service.getSkillEvalDetail("Review");
+    expect(detail.skill).toBe("review");
+    expect(detail.remoteVersion).toBe(4);
+    // The fixture SKILL.md path does not exist, so the current hash (and any
+    // "current" marking) degrades gracefully instead of guessing.
+    expect(detail.currentHash).toBeNull();
+    expect(detail.versions.map((group) => group.current)).toEqual([false, false]);
+    expect(harness.store.getSkillPerformanceSignals).toHaveBeenCalledWith("Review");
+    expect(harness.store.listSkillVersionGroups).toHaveBeenCalledWith("Review");
   });
 
   it("merges usage and hook state into the installed Skill snapshot", async () => {

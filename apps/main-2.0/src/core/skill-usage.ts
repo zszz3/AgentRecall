@@ -51,6 +51,9 @@ export interface SkillUsageEvent {
   // capturing its PostToolUse payload. Older records stay unlinked.
   sessionId?: string;
   cwd?: string;
+  // sha256 of the skill's SKILL.md at trigger time (claude-hook records
+  // written since phase two). Absent means "version unknown".
+  skillHash?: string;
 }
 
 export interface SkillUsageSource {
@@ -244,7 +247,7 @@ export function usageForSkill(
   return snapshot.byName[skillName.trim().toLowerCase()] ?? null;
 }
 
-function parseUsageLine(line: string): { skill: string; timestamp: number; sessionId?: string; cwd?: string } | null {
+function parseUsageLine(line: string): { skill: string; timestamp: number; sessionId?: string; cwd?: string; skillHash?: string } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -256,11 +259,13 @@ function parseUsageLine(line: string): { skill: string; timestamp: number; sessi
   if (typeof skill !== "string" || !skill.trim()) return null;
   const sessionId = optionalText((parsed as { session_id?: unknown }).session_id);
   const cwd = optionalText((parsed as { cwd?: unknown }).cwd);
+  const skillHash = optionalText((parsed as { skill_hash?: unknown }).skill_hash);
   return {
     skill: skill.trim(),
     timestamp: timestampFrom(parsed.ts),
     ...(sessionId ? { sessionId } : {}),
     ...(cwd ? { cwd } : {}),
+    ...(skillHash ? { skillHash } : {}),
   };
 }
 
