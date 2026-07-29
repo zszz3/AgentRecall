@@ -10,6 +10,8 @@ import type { SessionEnvironment, SessionSearchResult } from "../../core/types";
 
 export interface RemoteSessionAccessDependencies {
   getStore(): SessionStore;
+  runSshCommand(environment: SessionEnvironment, remoteCommand: string): Promise<string>;
+  runSshHealthCommand(environment: SessionEnvironment, remoteCommand: string): Promise<string>;
 }
 
 /**
@@ -72,7 +74,9 @@ export class RemoteSessionAccess {
   async ensureResumePreflight(session: SessionSearchResult): Promise<void> {
     const environment = await this.requireRemoteSshEnvironment(session);
     if (!environment) return;
-    const report = await preflightRemoteSessionResume(environment, session);
+    const report = await preflightRemoteSessionResume(environment, session, {
+      runSsh: this.dependencies.runSshHealthCommand,
+    });
     const errors = report.checks.filter((check) => check.status === "error");
     if (errors.length === 0) return;
     const detail = errors.map((check) => `${check.label}: ${check.message}`).join("; ");
@@ -128,7 +132,9 @@ export class RemoteSessionAccess {
     if (!environment) {
       throw new Error("Remote environment is not available for this session.");
     }
-    const payload = await fetchRemoteSessionFilePayload(environment, session);
+    const payload = await fetchRemoteSessionFilePayload(environment, session, {
+      ...(environment.kind === "ssh" ? { runSsh: this.dependencies.runSshCommand } : {}),
+    });
     if (environment.kind === "wsl") {
       const loaded = loadWslSessionDetailPayload(environment, payload, session);
       if (loaded) {

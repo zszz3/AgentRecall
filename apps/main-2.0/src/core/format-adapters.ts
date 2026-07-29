@@ -299,7 +299,7 @@ export function isMeaningfulUserMessage(text: string): boolean {
   if (!trimmed) return false;
   if (/^#\s*(AGENTS|CLAUDE)\.md/i.test(trimmed)) return false;
   if (
-    /^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]/.test(
+    /^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-caveat|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]/.test(
       trimmed,
     )
   ) {

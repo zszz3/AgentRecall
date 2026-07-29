@@ -18,7 +18,7 @@ export type SessionFormat = "claude" | "codex" | "codebuddy" | "codewiz" | "open
 export type SessionSortBy = "smart" | "activity" | "created";
 export type EnvironmentKind = "local" | "wsl" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";
-export type SshAuthMode = "none" | "identityFile";
+export type SshAuthMode = "none" | "identityFile" | "password";
 
 export interface SessionEnvironment {
   id: string;
@@ -50,6 +50,7 @@ export interface EnvironmentUpsertInput {
   port?: number | null;
   authMode?: SshAuthMode;
   identityFile?: string | null;
+  password?: string | null;
   enabled?: boolean;
 }
 

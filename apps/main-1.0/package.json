@@ -51,12 +51,14 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "ssh2": "1.17.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@types/ssh2": "1.15.5",
     "@vitejs/plugin-react": "^4.3.4",
     "electron-vite": "^2.3.0",
     "typescript": "^5.7.2",

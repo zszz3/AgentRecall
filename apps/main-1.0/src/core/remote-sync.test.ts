@@ -1405,6 +1405,7 @@ db.close()
       expect(script).toContain("def meaningful_user(text):");
       expect(script).toContain("(AGENTS|CLAUDE)");
       expect(script).toContain("system-reminder");
+      expect(script).toContain("local-command-caveat");
     }
     // The collector must not keep the looser legacy heuristic that disagreed with paging.
     expect(collectorScript).not.toContain("def meaningful(text):");

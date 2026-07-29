@@ -64,6 +64,7 @@ Host review dev
       port: 2222,
       authMode: "identityFile",
       identityFile: "~/.ssh/id_ed25519",
+      password: null,
     });
   });
 
@@ -83,6 +84,7 @@ Host review dev
       port: null,
       authMode: "none",
       identityFile: null,
+      password: null,
     });
   });
 
@@ -197,7 +199,49 @@ IdentityFile = "/tmp/key#space"
       port: null,
       authMode: "none",
       identityFile: null,
+      password: null,
     });
+  });
+
+  it("normalizes password authentication without changing the password", () => {
+    expect(
+      normalizeManualSshInput({
+        label: "",
+        host: "embedded@example.com",
+        user: "explicit",
+        port: "",
+        authMode: "password",
+        identityFile: "",
+        password: "  secret with spaces  ",
+      }),
+    ).toEqual({
+      label: "example.com",
+      host: "example.com",
+      user: "explicit",
+      port: null,
+      authMode: "password",
+      identityFile: null,
+      password: "  secret with spaces  ",
+    });
+  });
+
+  it("builds password-only ssh argv for interactive terminals", () => {
+    expect(
+      buildSshArgs(
+        { hostAlias: null, host: "example.com", user: "bob", port: 2222, authMode: "password", identityFile: null },
+        "echo ok",
+      ),
+    ).toEqual([
+      "-o",
+      "PreferredAuthentications=password,keyboard-interactive",
+      "-o",
+      "PubkeyAuthentication=no",
+      "-p",
+      "2222",
+      "--",
+      "bob@example.com",
+      "echo ok",
+    ]);
   });
 
   it("rejects invalid non-empty manual ports", () => {

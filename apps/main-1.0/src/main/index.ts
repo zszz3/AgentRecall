@@ -7,6 +7,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  safeStorage,
   screen,
   shell,
   Tray,
@@ -20,7 +21,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import {
@@ -111,6 +111,8 @@ import {
   type AppUpdateClient,
 } from "./services/app-update-service";
 import { ProviderService } from "./services/provider-service";
+import { SshCommandService } from "./services/ssh-command-service";
+import { SshCredentialService } from "./services/ssh-credential-service";
 import {
   codexAuthPath,
   createQuotaCache,
@@ -250,6 +252,26 @@ const windowStateStore = new Store<SavedWindowState>({
   name: "window-state",
   defaults: { width: 0, height: 0 },
 });
+
+const sshCredentialStore = new Store<{ passwords: Record<string, string> }>({
+  name: "ssh-credentials",
+  defaults: { passwords: {} },
+});
+const sshCredentialService = new SshCredentialService(sshCredentialStore, safeStorage);
+const sshCommandService = new SshCommandService({
+  getPassword: (environmentId) => sshCredentialService.getPassword(environmentId),
+});
+
+function runSshSessionCommand(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
+  return sshCommandService.run(environment, remoteCommand);
+}
+
+function runSshHealthCommand(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
+  return sshCommandService.run(environment, remoteCommand, {
+    maxBuffer: 512 * 1024,
+    timeout: 20_000,
+  });
+}
 
 function getSettings(): AppSettings {
   const settings = mergeAppSettings(defaultSettings, settingsStore.store);
@@ -551,7 +573,7 @@ function requireSshEnvironment(environmentId: string): SessionEnvironment {
 async function ensureRemoteResumePreflight(session: SessionSearchResult): Promise<void> {
   const environment = requireRemoteSshEnvironment(session);
   if (!environment) return;
-  const report = await preflightRemoteSessionResume(environment, session);
+  const report = await preflightRemoteSessionResume(environment, session, { runSsh: runSshHealthCommand });
   const errors = report.checks.filter((check) => check.status === "error");
   if (errors.length === 0) return;
   const detail = errors.map((check) => `${check.label}: ${check.message}`).join("; ");
@@ -582,7 +604,7 @@ async function ensureRemoteSessionDetailsLoaded(sessionKey: string): Promise<voi
       return;
     }
     if (!environment || environment.kind !== "ssh") throw new Error("SSH environment is not available for this remote session.");
-    const payload = await fetchRemoteSessionFilePayload(environment, latest);
+    const payload = await fetchRemoteSessionFilePayload(environment, latest, { runSsh: runSshSessionCommand });
     const loaded = loadRemoteSessionDetailPayload(environment, payload, latest);
     if (loaded) store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
   })().finally(() => {
@@ -989,6 +1011,8 @@ function remoteSyncErrorMessage(error: unknown): string {
 function ensureRemoteWatchManager(): RemoteWatchManager {
   if (!remoteWatchManager) {
     remoteWatchManager = new RemoteWatchManager({
+      startWatcher: (environment, onEvent, onUnavailable) =>
+        sshCommandService.watch(environment, onEvent, onUnavailable),
       syncEnvironment: (environment) => ensureRemoteEnvironmentLifecycle().syncFromWatcher(environment),
       onSyncError: (environment, error) => {
         store.updateEnvironmentSyncState(environment.id, "error", { lastError: remoteSyncErrorMessage(error) });
@@ -1027,6 +1051,7 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
       store,
       syncEnvironment: async (environment) => {
         await syncRemoteEnvironment(store, environment, {
+          ...(environment.kind === "ssh" ? { runSsh: runSshSessionCommand } : {}),
           enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
         });
         if (environment.kind === "wsl") {
@@ -1036,6 +1061,8 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
         }
       },
       watchManager: ensureRemoteWatchManager(),
+      onEnvironmentSaved: (environment, input) => sshCredentialService.saveForEnvironment(environment, input),
+      onEnvironmentDeleted: (environmentId) => sshCredentialService.deletePassword(environmentId),
       onEnvironmentsUpdated: () => emitEnvironmentsUpdated(),
     });
   }
@@ -1242,6 +1269,7 @@ async function createSourceRemoteRestoreDependencies(
     record: (record) => store.recordSessionMigration(record),
     refreshIndex: async () => {
       await syncRemoteEnvironment(store, environment, {
+        ...(environment.kind === "ssh" ? { runSsh: runSshSessionCommand } : {}),
         enabledOptionalSources: enabledRemoteOptionalSources(getSettings()),
       });
       mainWindow?.webContents.send("environments-updated", store.listEnvironments());
@@ -1480,13 +1508,10 @@ function runRemotePython(environment: SessionEnvironment, script: string, payloa
 }
 
 function runSshWithInput(environment: SessionEnvironment, remoteCommand: string, input: string): Promise<string> {
-  const args = buildRemoteSyncSshArgs(environment, remoteCommand);
-  return new Promise((resolve, reject) => {
-    const child = execFile("ssh", args, { maxBuffer: 128 * 1024 * 1024, timeout: 90_000 }, (error, stdout, stderr) => {
-      if (error) reject(new Error(stderr.trim() || error.message));
-      else resolve(stdout);
-    });
-    child.stdin?.end(input);
+  return sshCommandService.run(environment, remoteCommand, {
+    input,
+    maxBuffer: 128 * 1024 * 1024,
+    timeout: 90_000,
   });
 }
 
@@ -1638,7 +1663,9 @@ function registerIpc(): void {
         ? requireWslEnvironment(session)
         : requireRemoteSshEnvironment(session);
       if (!environment) return [];
-      return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit);
+      return fetchRemoteSessionMessagePage(environment, session, pageOffset, pageLimit, {
+        ...(environment.kind === "ssh" ? { runSsh: runSshSessionCommand } : {}),
+      });
     }
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getMessages(sessionKey, pageOffset, pageLimit);
@@ -1862,7 +1889,7 @@ function registerIpc(): void {
   ipcMain.handle("environment:diagnose", (_event, environmentId: string) => {
     const environment = store.getEnvironment(environmentId);
     if (environment?.kind === "wsl") return diagnoseRemoteEnvironment(environment);
-    return diagnoseRemoteEnvironment(requireSshEnvironment(environmentId));
+    return diagnoseRemoteEnvironment(requireSshEnvironment(environmentId), { runSsh: runSshHealthCommand });
   });
   ipcMain.handle("title:set", (_event, sessionKey: string, title: string | null) =>
     setSessionCustomTitleAndSyncTerminal(sessionKey, title, {

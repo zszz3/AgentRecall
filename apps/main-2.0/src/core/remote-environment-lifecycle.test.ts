@@ -141,6 +141,43 @@ async function flushPromises(): Promise<void> {
 }
 
 describe("RemoteEnvironmentLifecycle", () => {
+  it("runs credential hooks when an environment is saved and deleted", async () => {
+    const store = createStore();
+    const onEnvironmentSaved = vi.fn();
+    const onEnvironmentDeleted = vi.fn();
+    const lifecycle = new RemoteEnvironmentLifecycle({
+      store,
+      watchManager: createWatchManager(),
+      syncEnvironment: async () => undefined,
+      onEnvironmentSaved,
+      onEnvironmentDeleted,
+    });
+    const input = { id: "ssh-devbox", kind: "ssh" as const, label: "devbox", enabled: false };
+
+    const environment = await lifecycle.saveEnvironment(input);
+    await lifecycle.deleteEnvironment(environment.id);
+
+    expect(onEnvironmentSaved).toHaveBeenCalledWith(environment, input);
+    expect(onEnvironmentDeleted).toHaveBeenCalledWith(environment.id);
+  });
+
+  it("rolls back a new environment when its credential cannot be saved", async () => {
+    const store = createStore();
+    const lifecycle = new RemoteEnvironmentLifecycle({
+      store,
+      watchManager: createWatchManager(),
+      syncEnvironment: async () => undefined,
+      onEnvironmentSaved: () => {
+        throw new Error("Secure storage failed");
+      },
+    });
+
+    await expect(
+      lifecycle.saveEnvironment({ id: "ssh-devbox", kind: "ssh", label: "devbox", enabled: false }),
+    ).rejects.toThrow("Secure storage failed");
+    await expect(store.getEnvironment("ssh-devbox")).resolves.toBeNull();
+  });
+
   it("stops an existing watcher before syncing an updated ssh environment", async () => {
     const store = createStore();
     const watchManager = createWatchManager();

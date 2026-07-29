@@ -344,6 +344,17 @@ describe("OpenVikingRuntimeService", () => {
     }
   });
 
+  it("requires reinstalling a runtime left behind by a translated Intel process", async () => {
+    const root = await temporaryRoot();
+    const { service } = runtimeHarness(root);
+    await writeFile(
+      path.join(root, "active-runtime.json"),
+      JSON.stringify(manifest({ arch: "x64" })),
+    );
+
+    await expect(service.getStatus()).resolves.toEqual({ state: "not-installed" });
+  });
+
   it("installs a checksummed local archive only when development mode enables it", async () => {
     const root = await temporaryRoot();
     const archivePath = path.join(root, "development-runtime.tar.gz");

@@ -90,7 +90,7 @@ def meaningful_user(text):
     return False
   if re.match(r"^#\s*(AGENTS|CLAUDE)\.md", value, re.I):
     return False
-  if re.match(r"^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]", value):
+  if re.match(r"^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-caveat|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]", value):
     return False
   if value.startswith("Caveat:"):
     return False

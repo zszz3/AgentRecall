@@ -153,7 +153,7 @@ export function buildRemoteWatchCommand(): string {
   return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
 }
 
-function startSystemWatcher(environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void): WatchHandle {
+export function startSystemWatcher(environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void): WatchHandle {
   if (environment.kind === "wsl") return startWslWatcher(environment, onEvent, onUnavailable);
   const remoteCommand = buildRemoteWatchCommand();
   let reportedUnavailable = false;

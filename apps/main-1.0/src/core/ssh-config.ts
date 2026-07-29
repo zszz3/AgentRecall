@@ -14,9 +14,11 @@ export interface SshConfigHost {
 export interface ManualSshInput {
   label: string;
   host: string;
+  user?: string;
   port: string;
   authMode: SshAuthMode;
   identityFile: string;
+  password?: string;
 }
 
 export interface NormalizedManualSshInput {
@@ -26,6 +28,7 @@ export interface NormalizedManualSshInput {
   port: number | null;
   authMode: SshAuthMode;
   identityFile: string | null;
+  password: string | null;
 }
 
 export interface SshTarget {
@@ -89,7 +92,8 @@ export function parseSshConfigHosts(content: string): SshConfigHost[] {
 export function normalizeManualSshInput(input: ManualSshInput): NormalizedManualSshInput {
   const rawHost = input.host.trim();
   const at = rawHost.lastIndexOf("@");
-  const user = at >= 0 ? rawHost.slice(0, at).trim() || null : null;
+  const embeddedUser = at >= 0 ? rawHost.slice(0, at).trim() || null : null;
+  const user = input.user?.trim() || embeddedUser;
   const host = at >= 0 ? rawHost.slice(at + 1).trim() : rawHost;
   const port = parseManualPort(input.port.trim());
   const label = input.label.trim() || host;
@@ -100,6 +104,7 @@ export function normalizeManualSshInput(input: ManualSshInput): NormalizedManual
     port,
     authMode: input.authMode,
     identityFile: input.authMode === "identityFile" ? input.identityFile.trim() || null : null,
+    password: input.authMode === "password" ? input.password || null : null,
   };
 }
 
@@ -108,6 +113,14 @@ export function buildSshArgs(target: SshTarget, remoteCommand: string): string[]
   if (!target.host) throw new Error("SSH host is required.");
   const args: string[] = [];
   if (target.authMode === "identityFile" && target.identityFile) args.push("-i", target.identityFile);
+  if (target.authMode === "password") {
+    args.push(
+      "-o",
+      "PreferredAuthentications=password,keyboard-interactive",
+      "-o",
+      "PubkeyAuthentication=no",
+    );
+  }
   if (target.port) args.push("-p", String(target.port));
   args.push("--");
   args.push(target.user ? `${target.user}@${target.host}` : target.host);

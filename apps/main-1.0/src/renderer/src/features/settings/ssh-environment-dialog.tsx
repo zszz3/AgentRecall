@@ -53,9 +53,11 @@ export function SshEnvironmentDialog({
   const [localError, setLocalError] = useState<string | null>(null);
   const [manualLabel, setManualLabel] = useState("");
   const [manualHost, setManualHost] = useState("");
+  const [manualUser, setManualUser] = useState("");
   const [manualPort, setManualPort] = useState("");
   const [manualAuthMode, setManualAuthMode] = useState<SshAuthMode>("none");
   const [manualIdentityFile, setManualIdentityFile] = useState("");
+  const [manualPassword, setManualPassword] = useState("");
   const saving = feedback?.kind === "running";
   const existingAliases = useMemo(() => existingSshHostAliases(environments), [environments]);
   const disabledEnvironmentIds = useMemo(
@@ -131,9 +133,11 @@ export function SshEnvironmentDialog({
       const normalized = normalizeManualSshDraft({
         label: manualLabel,
         host: manualHost,
+        user: manualUser,
         port: manualPort,
         authMode: manualAuthMode,
         identityFile: manualIdentityFile,
+        password: manualPassword,
       });
       setLocalError(null);
       await onSaveEnvironment({
@@ -145,6 +149,7 @@ export function SshEnvironmentDialog({
         port: normalized.port,
         authMode: normalized.authMode,
         identityFile: normalized.identityFile,
+        password: normalized.password,
         enabled: true,
       });
       onClose();
@@ -212,7 +217,11 @@ export function SshEnvironmentDialog({
               </label>
               <label className="ssh-form-field">
                 <span>{l("Host", "主机")}</span>
-                <input value={manualHost} onChange={(event) => setManualHost(event.target.value)} placeholder="user@host.com" autoFocus />
+                <input value={manualHost} onChange={(event) => setManualHost(event.target.value)} placeholder="host.com" autoFocus />
+              </label>
+              <label className="ssh-form-field">
+                <span>{l("Username", "账号")}</span>
+                <input value={manualUser} onChange={(event) => setManualUser(event.target.value)} placeholder="user" autoComplete="username" />
               </label>
               <label className="ssh-form-field">
                 <span>{l("SSH port", "SSH 端口")}</span>
@@ -231,6 +240,13 @@ export function SshEnvironmentDialog({
                   >
                     {l("Identity file", "身份文件")}
                   </button>
+                  <button
+                    type="button"
+                    className={manualAuthMode === "password" ? "active" : ""}
+                    onClick={() => setManualAuthMode("password")}
+                  >
+                    {l("Password", "密码")}
+                  </button>
                 </div>
               </div>
               {manualAuthMode === "identityFile" ? (
@@ -240,6 +256,17 @@ export function SshEnvironmentDialog({
                     value={manualIdentityFile}
                     onChange={(event) => setManualIdentityFile(event.target.value)}
                     placeholder="~/.ssh/id_ed25519"
+                  />
+                </label>
+              ) : null}
+              {manualAuthMode === "password" ? (
+                <label className="ssh-form-field">
+                  <span>{l("Password", "密码")}</span>
+                  <input
+                    type="password"
+                    value={manualPassword}
+                    onChange={(event) => setManualPassword(event.target.value)}
+                    autoComplete="current-password"
                   />
                 </label>
               ) : null}
@@ -278,9 +305,11 @@ export function SshEnvironmentDialog({
 interface ManualSshDraft {
   label: string;
   host: string;
+  user: string;
   port: string;
   authMode: SshAuthMode;
   identityFile: string;
+  password: string;
 }
 
 function normalizeManualSshDraft(input: ManualSshDraft): {
@@ -290,14 +319,19 @@ function normalizeManualSshDraft(input: ManualSshDraft): {
   port: number | null;
   authMode: SshAuthMode;
   identityFile: string | null;
+  password: string | null;
 } {
   const rawHost = input.host.trim();
   if (!rawHost) throw new Error("SSH host is required.");
   const at = rawHost.lastIndexOf("@");
-  const user = at >= 0 ? rawHost.slice(0, at).trim() || null : null;
+  const embeddedUser = at >= 0 ? rawHost.slice(0, at).trim() || null : null;
+  const user = input.user.trim() || embeddedUser;
   const host = at >= 0 ? rawHost.slice(at + 1).trim() : rawHost;
   if (!host) throw new Error("SSH host is required.");
   const port = parseManualSshPort(input.port.trim());
+  const password = input.authMode === "password" ? input.password : "";
+  if (input.authMode === "password" && !user) throw new Error("SSH username is required for password authentication.");
+  if (input.authMode === "password" && !password) throw new Error("SSH password is required.");
   return {
     label: input.label.trim() || host,
     host,
@@ -305,6 +339,7 @@ function normalizeManualSshDraft(input: ManualSshDraft): {
     port,
     authMode: input.authMode,
     identityFile: input.authMode === "identityFile" ? input.identityFile.trim() || null : null,
+    password: input.authMode === "password" ? password : null,
   };
 }
 

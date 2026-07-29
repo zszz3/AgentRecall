@@ -139,6 +139,9 @@ export class OpenVikingRuntimeService {
     if (this.transientStatus) return this.transientStatus;
     const manifest = await this.readActiveManifest();
     if (!manifest) return { state: "not-installed" };
+    if (manifest.platform !== this.platform || manifest.arch !== this.arch) {
+      return { state: "not-installed" };
+    }
     let installedBytes: number | undefined;
     try {
       installedBytes = (await stat(this.runtimeArchivePath(manifest))).size;

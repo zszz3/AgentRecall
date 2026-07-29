@@ -21,6 +21,8 @@ export interface RemoteEnvironmentLifecycleOptions {
   store: RemoteEnvironmentStore;
   syncEnvironment: (environment: SessionEnvironment) => Promise<void>;
   watchManager: RemoteEnvironmentWatchManager;
+  onEnvironmentSaved?: (environment: SessionEnvironment, input: EnvironmentUpsertInput) => void;
+  onEnvironmentDeleted?: (environmentId: string) => void;
   onEnvironmentsUpdated?: (environments: SessionEnvironment[]) => void;
 }
 
@@ -43,6 +45,8 @@ export class RemoteEnvironmentLifecycle {
   private readonly store: RemoteEnvironmentStore;
   private readonly syncEnvironment: (environment: SessionEnvironment) => Promise<void>;
   private readonly watchManager: RemoteEnvironmentWatchManager;
+  private readonly onEnvironmentSaved: (environment: SessionEnvironment, input: EnvironmentUpsertInput) => void;
+  private readonly onEnvironmentDeleted: (environmentId: string) => void;
   private readonly onEnvironmentsUpdated: (environments: SessionEnvironment[]) => void;
   private readonly generations = new Map<string, number>();
   private readonly activeSyncs = new Map<string, ActiveSync>();
@@ -53,6 +57,8 @@ export class RemoteEnvironmentLifecycle {
     this.store = options.store;
     this.syncEnvironment = options.syncEnvironment;
     this.watchManager = options.watchManager;
+    this.onEnvironmentSaved = options.onEnvironmentSaved ?? (() => undefined);
+    this.onEnvironmentDeleted = options.onEnvironmentDeleted ?? (() => undefined);
     this.onEnvironmentsUpdated = options.onEnvironmentsUpdated ?? (() => undefined);
   }
 
@@ -61,7 +67,15 @@ export class RemoteEnvironmentLifecycle {
   }
 
   async saveEnvironment(input: EnvironmentUpsertInput): Promise<SessionEnvironment> {
+    const previous = input.id ? await this.store.getEnvironment(input.id) : null;
     const environment = await this.store.upsertEnvironment(input);
+    try {
+      this.onEnvironmentSaved(environment, input);
+    } catch (error) {
+      if (previous) await this.store.upsertEnvironment(environmentInput(previous));
+      else await this.store.deleteEnvironment(environment.id);
+      throw error;
+    }
     this.deletedEnvironmentIds.delete(environment.id);
     this.bumpGeneration(environment.id);
     this.watchManager.stop(environment.id);
@@ -79,6 +93,7 @@ export class RemoteEnvironmentLifecycle {
     this.pendingLatestSyncs.delete(environmentId);
     this.watchManager.stop(environmentId);
     await this.store.deleteEnvironment(environmentId);
+    this.onEnvironmentDeleted(environmentId);
     await this.emitEnvironmentsUpdated();
   }
 
@@ -251,6 +266,22 @@ export class RemoteEnvironmentLifecycle {
 
 function isRemoteEnvironment(environment: SessionEnvironment): boolean {
   return isSshEnvironment(environment) || environment.kind === "wsl";
+}
+
+function environmentInput(environment: SessionEnvironment): EnvironmentUpsertInput {
+  return {
+    id: environment.id,
+    kind: environment.kind,
+    label: environment.label,
+    wslDistribution: environment.wslDistribution,
+    hostAlias: environment.hostAlias,
+    host: environment.host,
+    user: environment.user,
+    port: environment.port,
+    authMode: environment.authMode,
+    identityFile: environment.identityFile,
+    enabled: environment.enabled,
+  };
 }
 
 function isEnabledRemoteEnvironment(environment: SessionEnvironment): boolean {
