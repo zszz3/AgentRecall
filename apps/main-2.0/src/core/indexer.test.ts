@@ -209,6 +209,32 @@ describe("indexer", () => {
     }
   });
 
+  it("indexes only the appended Codex tail after the first scan", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-codex-tail-"));
+    try {
+      const filePath = writeCodexSession(homeDir, "codex-tail", "original question", "Tail");
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+      const originalSize = fs.statSync(filePath).size;
+      fs.writeFileSync(filePath, `${"x".repeat(originalSize)}\n${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-01T10:02:00Z",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "appended answer" }] },
+      })}\n`);
+
+      const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+
+      expect(warm.indexed).toBe(1);
+      expect((await store.getAllMessages("codex:codex-tail")).map((message) => message.content)).toEqual([
+        "original question",
+        "appended answer",
+      ]);
+    } finally {
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a Cursor conversation as cache when its row disappears from the shared database", async () => {
     const store = createInMemoryStore();
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-cursor-cache-"));

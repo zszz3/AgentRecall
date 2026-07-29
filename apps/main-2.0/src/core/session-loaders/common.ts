@@ -5,6 +5,7 @@ import { getAdapter, isMeaningfulUserMessage } from "../format-adapters";
 import { truncateTraceDetail } from "../trace-detail";
 import type {
   IndexedSession,
+  LoadedSession,
   SessionFormat,
   SessionMessage,
   SessionSource,
@@ -36,6 +37,7 @@ export interface SessionLoadOptions {
     dependencyMtimeMs?: number,
   ) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
+  incrementalCodexSessions?: ReadonlyMap<string, { offset: number; loaded: LoadedSession }>;
 }
 
 export interface VirtualSessionFileStat {

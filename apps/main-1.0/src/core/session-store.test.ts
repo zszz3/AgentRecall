@@ -2852,6 +2852,33 @@ describe("SessionStore", () => {
     expect(page.hasMore).toBe(false);
   });
 
+  it("keeps an old open session on the first unfiltered page", () => {
+    const store = createInMemoryStore();
+    for (let index = 0; index < 35; index += 1) {
+      store.upsertIndexedSession(sampleSession({
+        sessionKey: `codex:closed-${index}`,
+        rawId: `closed-${index}`,
+        timestamp: Date.parse("2026-06-30T10:00:00Z") - index,
+      }), messages);
+    }
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "codex:open-old",
+      rawId: "open-old",
+      timestamp: Date.parse("2020-01-01T00:00:00Z"),
+    }), messages);
+
+    const page = store.searchSessionPage({
+      query: "",
+      sortBy: "created",
+      limit: 30,
+      liveSessionKeys: ["codex:open-old"],
+    });
+
+    expect(page.sessions[0]?.sessionKey).toBe("codex:open-old");
+    expect(page.sessions).toHaveLength(30);
+    expect(page.totalCount).toBe(36);
+  });
+
   it("counts closed live status pages after excluding open sessions", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(

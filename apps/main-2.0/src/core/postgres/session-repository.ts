@@ -889,15 +889,17 @@ export class PostgresSessionRepository {
 
   async listIndexedSessionFiles(
     environmentId = "local",
-  ): Promise<Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>> {
+  ): Promise<Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>> {
     const result = await this.database.query<{
+      session_key: string;
+      source: SessionSource;
       file_path: string;
       file_mtime_ms: number | string;
       file_size: number | string;
       indexed_at: Date | string;
     }>(
       `
-        select file_path, file_mtime_ms, file_size, indexed_at
+        select session_key, source, file_path, file_mtime_ms, file_size, indexed_at
         from agent_recall.sessions
         where environment_id = $1 and file_path <> ''
         order by file_path
@@ -905,10 +907,39 @@ export class PostgresSessionRepository {
       [environmentId],
     );
     return result.rows.map((row) => ({
+      sessionKey: row.session_key,
+      source: row.source,
       filePath: row.file_path,
       fileMtimeMs: numberValue(row.file_mtime_ms),
       fileSize: numberValue(row.file_size),
       indexedAt: timeValue(row.indexed_at),
+    }));
+  }
+
+  async getTokenEvents(sessionKey: string): Promise<TokenUsageEvent[]> {
+    const result = await this.database.query<{
+      occurred_at: Date | string;
+      dedupe_key: string;
+      input_tokens: number | string;
+      output_tokens: number | string;
+      cached_input_tokens: number | string;
+      reasoning_output_tokens: number | string;
+      total_tokens: number | string;
+    }>(`
+      select occurred_at, dedupe_key, input_tokens, output_tokens, cached_input_tokens,
+             reasoning_output_tokens, total_tokens
+      from agent_recall.token_events
+      where session_key = $1
+      order by occurred_at, dedupe_key
+    `, [sessionKey]);
+    return result.rows.map((row) => ({
+      timestamp: timeValue(row.occurred_at),
+      dedupeKey: row.dedupe_key,
+      inputTokens: numberValue(row.input_tokens),
+      outputTokens: numberValue(row.output_tokens),
+      cachedInputTokens: numberValue(row.cached_input_tokens),
+      reasoningOutputTokens: numberValue(row.reasoning_output_tokens),
+      totalTokens: numberValue(row.total_tokens),
     }));
   }
 

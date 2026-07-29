@@ -426,18 +426,38 @@ export class SessionsStore {
     this.db.prepare("UPDATE sessions SET source_available = ? WHERE session_key = ?").run(available ? 1 : 0, sessionKey);
   }
 
-  listIndexedSessionFiles(environmentId = "local"): Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
+  listIndexedSessionFiles(environmentId = "local"): Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
     return this.db
       .prepare(
         `
-        SELECT file_path AS filePath, file_mtime_ms AS fileMtimeMs, file_size AS fileSize, indexed_at AS indexedAt
+        SELECT session_key AS sessionKey, source, file_path AS filePath, file_mtime_ms AS fileMtimeMs, file_size AS fileSize, indexed_at AS indexedAt
         FROM sessions
         WHERE storage_environment_id = ?
           AND file_path != ''
           AND file_mtime_ms > 0
       `,
       )
-      .all(environmentId) as Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>;
+      .all(environmentId) as Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>;
+  }
+
+  getTokenEvents(sessionKey: string): TokenUsageEvent[] {
+    return this.db.prepare(`
+      SELECT timestamp, dedupe_key, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens
+      FROM token_events
+      WHERE session_key = ?
+      ORDER BY timestamp, dedupe_key
+    `).all(sessionKey).map((row) => {
+      const value = row as Record<string, string | number>;
+      return {
+        timestamp: Number(value.timestamp),
+        dedupeKey: String(value.dedupe_key),
+        inputTokens: Number(value.input_tokens),
+        outputTokens: Number(value.output_tokens),
+        cachedInputTokens: Number(value.cached_input_tokens),
+        reasoningOutputTokens: Number(value.reasoning_output_tokens),
+        totalTokens: Number(value.total_tokens),
+      };
+    });
   }
 
   upsertIndexedSessionSummary(
@@ -1653,6 +1673,11 @@ export class SessionsStore {
     const { where, args } = this.sessionWhereClause(options);
 
     if (!query) {
+      const liveSessionKeys = options.liveStatus ? [] : [...new Set(options.liveSessionKeys ?? [])].filter(Boolean);
+      const liveOrder = liveSessionKeys.length > 0
+        ? `CASE WHEN ${LIVE_SESSION_KEY_SQL} IN (${liveSessionKeys.map(() => "?").join(", ")}) THEN 0 ELSE 1 END, `
+        : "";
+      args.push(...liveSessionKeys);
       args.push(limit);
       return this.db
         .prepare(
@@ -1660,7 +1685,7 @@ export class SessionsStore {
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
-          ORDER BY ${sessionSortSql(options.sortBy)}
+          ORDER BY ${liveOrder}${sessionSortSql(options.sortBy)}
           LIMIT ?
         `,
         )

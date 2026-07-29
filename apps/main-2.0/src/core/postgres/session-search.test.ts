@@ -226,4 +226,14 @@ describe("PostgreSQL Turn search", () => {
       "codex:two",
     ]);
   });
+
+  it("keeps an old open session on the first unfiltered page", async () => {
+    const page = await searchRepository.searchSessionPage({
+      limit: 1,
+      liveSessionKeys: ["claude:two"],
+    });
+
+    expect(page.sessions[0]?.sessionKey).toBe("codex:two");
+    expect(page.totalCount).toBe(4);
+  });
 });
