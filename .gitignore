@@ -20,3 +20,8 @@ docs/specs/
 docs/superpowers/
 .build-sentinel
 .qoder/
+
+# 会话产生的临时预览产物，不入库
+wbtest/
+wb_*.jpg
+wb_*.json
