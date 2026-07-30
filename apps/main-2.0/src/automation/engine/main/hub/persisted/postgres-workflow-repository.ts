@@ -93,6 +93,11 @@ export class PostgresWorkflowRepository {
         updatedAt: postgresTime(row.updated_at),
       };
       optional(workflow, "workDir", row.work_dir);
+      optional(workflow, "origin", postgresJson(row.origin));
+      optional(workflow, "confirmedRevision", row.confirmed_revision === null || row.confirmed_revision === undefined ? undefined : Number(row.confirmed_revision));
+      optional(workflow, "reviewerConfiguredAgentId", row.reviewer_configured_agent_id);
+      optional(workflow, "reviewerModelId", row.reviewer_model_id);
+      optional(workflow, "generationReview", postgresJson(row.generation_review));
       optional(workflow, "error", row.error);
       optional(workflow, "finalReport", row.final_report);
       optional(workflow, "definition", postgresJson(row.definition));
@@ -150,10 +155,13 @@ export class PostgresWorkflowRepository {
           id, title, status, revision, configured_agent_id, model_id, objective,
           work_dir, reply, error, run_context_document, context_document,
           final_report, runtime_conversation, definition, workflow_v2_plan,
-          source_type, topology_locked, created_at, updated_at
+          source_type, topology_locked, origin, confirmed_revision,
+          reviewer_configured_agent_id, reviewer_model_id, generation_review,
+          created_at, updated_at
         ) values (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-          $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, $19, $20
+          $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, $19::jsonb, $20,
+          $21, $22, $23::jsonb, $24, $25
         )`,
         [
           workflowId,
@@ -174,6 +182,11 @@ export class PostgresWorkflowRepository {
           jsonParameter(workflow.workflowV2Plan),
           workflow.sourceType === "official" ? "official" : "user",
           workflow.topologyLocked === true,
+          jsonParameter(workflow.origin),
+          asOptionalNumber(workflow.confirmedRevision) ?? null,
+          asOptionalString(workflow.reviewerConfiguredAgentId) ?? null,
+          asOptionalString(workflow.reviewerModelId) ?? null,
+          jsonParameter(workflow.generationReview),
           new Date(asNumber(workflow.createdAt)),
           new Date(asNumber(workflow.updatedAt)),
         ],

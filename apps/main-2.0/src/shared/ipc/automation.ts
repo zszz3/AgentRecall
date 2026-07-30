@@ -56,6 +56,11 @@ export const AUTOMATION_CHANNELS = {
   workflowSelect: "automation:workflow:select",
   workflowRename: "automation:workflow:rename",
   workflowDelete: "automation:workflow:delete",
+  workflowCloneOfficial: "automation:workflow:clone-official",
+  workflowImportBegin: "automation:workflow:import-begin",
+  workflowImportConfirm: "automation:workflow:import-confirm",
+  workflowImportCancel: "automation:workflow:import-cancel",
+  workflowExport: "automation:workflow:export",
   workflowConfirm: "automation:workflow:confirm",
   workflowReview: "automation:workflow:review",
   workflowReviewInterrupt: "automation:workflow:review-interrupt",
@@ -98,6 +103,7 @@ export interface AutomationEntityPatch<T> {
 
 export interface WorkflowAutomationPatch {
   activeWorkflowId?: string | null;
+  readinessByWorkflowId?: WorkflowStoreState["readinessByWorkflowId"];
   workflows?: AutomationEntityPatch<WorkflowDraftState>;
   runs?: AutomationEntityPatch<WorkflowStoreState["runs"][number]>;
   conversations?: AutomationEntityPatch<WorkflowNodeConversation>;

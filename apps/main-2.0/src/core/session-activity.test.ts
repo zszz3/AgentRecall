@@ -180,22 +180,30 @@ describe("live session detection", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("maps only Codex Desktop sessions whose agents are working", async () => {
+  it("maps only recently active Codex Desktop sessions whose agents have unfinished tasks", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-app-live-"));
+    const now = new Date("2026-07-28T12:00:00.000Z");
     const sessionsDir = path.join(root, "Test User", ".codex", "sessions", "2026", "07", "27");
     const firstSessionId = "019e82e1-b60d-7b12-95c3-d33e1d05f0a9";
     const secondSessionId = "019e82e1-b60d-7b12-95c3-d33e1d05f0b0";
     const thirdSessionId = "019e82e1-b60d-7b12-95c3-d33e1d05f0b1";
+    const fourthSessionId = "019e82e1-b60d-7b12-95c3-d33e1d05f0b2";
+    const fifthSessionId = "019e82e1-b60d-7b12-95c3-d33e1d05f0b3";
     const firstSessionFile = path.join(sessionsDir, `rollout-2026-07-27T10-00-00-${firstSessionId}.jsonl`);
     const secondSessionFile = path.join(sessionsDir, `rollout-2026-07-27T10-05-00-${secondSessionId}.jsonl`);
     const thirdSessionFile = path.join(sessionsDir, `rollout-2026-07-27T10-10-00-${thirdSessionId}.jsonl`);
+    const fourthSessionFile = path.join(sessionsDir, `rollout-2026-07-27T10-15-00-${fourthSessionId}.jsonl`);
+    const fifthSessionFile = path.join(sessionsDir, `rollout-2026-07-27T10-20-00-${fifthSessionId}.jsonl`);
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.writeFileSync(firstSessionFile, [
       JSON.stringify({ type: "session_meta", payload: { id: firstSessionId } }),
       JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }),
       JSON.stringify({
         type: "response_item",
-        payload: { type: "message", content: `${"x".repeat(70_000)} mentions "type":"task_complete" without completing` },
+        payload: {
+          type: "function_call_output",
+          output: `data:image/png;base64,${"x".repeat(2 * 1024 * 1024)}`,
+        },
       }),
     ].join("\n") + "\n");
     fs.writeFileSync(secondSessionFile, [
@@ -207,6 +215,19 @@ describe("live session detection", () => {
       JSON.stringify({ type: "event_msg", payload: { type: "task_complete" } }),
       JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }),
     ].join("\n") + "\n");
+    fs.writeFileSync(fourthSessionFile, [
+      JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "turn_aborted" } }),
+    ].join("\n") + "\n");
+    fs.writeFileSync(fifthSessionFile, [
+      JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }),
+    ].join("\n") + "\n");
+    const activeModifiedAt = new Date(now.getTime() - 23 * 60 * 60 * 1000);
+    const staleModifiedAt = new Date(now.getTime() - 25 * 60 * 60 * 1000);
+    for (const sessionFile of [firstSessionFile, secondSessionFile, thirdSessionFile, fourthSessionFile]) {
+      fs.utimesSync(sessionFile, activeModifiedAt, activeModifiedAt);
+    }
+    fs.utimesSync(fifthSessionFile, staleModifiedAt, staleModifiedAt);
     const lsofCalls: string[] = [];
     try {
       const snapshot = await loadLiveSessionSnapshot({
@@ -231,12 +252,15 @@ describe("live session detection", () => {
                 `codex 603 user 44u REG 1,4 0 1 ${secondSessionFile}`,
                 `codex 603 user 47u REG 1,4 0 1 ${thirdSessionFile}`,
                 `codex 603 user 48u REG 1,4 0 1 ${thirdSessionFile}`,
+                `codex 603 user 49u REG 1,4 0 1 ${fourthSessionFile}`,
+                `codex 603 user 50u REG 1,4 0 1 ${fifthSessionFile}`,
               ].join("\n");
             }
             return "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n";
           }
           return "";
         },
+        now,
       });
 
       expect(snapshot.sessions).toEqual([

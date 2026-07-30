@@ -16,6 +16,7 @@ import {
   WorkbenchEmpty,
 } from "../../ui/workbench/Workbench";
 import { useMcpAgentBindings } from "./useMcpAgentBindings";
+import { toolCountLabel } from "./mcp-tools";
 
 export function McpAgentBindings({
   language = "en",
@@ -200,7 +201,7 @@ export function McpAgentBindings({
                     <strong>{server.name}</strong>
                     <span className="mcp-binding-server-meta">
                       <code>{server.transport.toUpperCase()}</code>
-                      <small>{copy.tools(server.tools.length)}</small>
+                      <small>{toolCountLabel(server, zh ? "个工具" : "tools")}</small>
                       <small className={`is-${server.status}`}>
                         <i />
                         {statusCopy}

@@ -6,6 +6,8 @@ import type {
   ScheduledWorkflowSchedule,
   ScheduledWorkflowStoreState,
   WorkflowV2Plan,
+  WorkflowOriginMetadata,
+  WorkflowV2GenerationReviewState,
 } from "../../../shared/types";
 import type { RuntimeConversation } from "../../../shared/runtime/conversation";
 import type { WorkflowDraftState, WorkflowGrillEvent, WorkflowStoreState } from "../../../shared/workflow/draft";
@@ -202,6 +204,9 @@ export function restoreWorkflowDraft(
     : restoreWorkflowV2Plan(record.workflowV2Plan);
   if (record.workflowV2Plan !== undefined && !restoredWorkflowV2Plan) return undefined;
   if (workflowId !== definition.workflowId) return undefined;
+  const origin = restoreWorkflowOrigin(record.origin);
+  const confirmedRevision = Number.isSafeInteger(record.confirmedRevision) && Number(record.confirmedRevision) > 0 ? Number(record.confirmedRevision) : undefined;
+  const generationReview = restoreGenerationReview(record.generationReview);
   return deps.cloneWorkflowDraft({
     workflowId,
     sourceType: record.sourceType === "official" ? "official" : "user",
@@ -209,6 +214,8 @@ export function restoreWorkflowDraft(
     title: asOptionalString(record.title) ?? definition.objective ?? "Untitled workflow",
     status: restoreWorkflowDraftStatus(record.status),
     revision: Math.max(1, Math.floor(asNumber(record.revision, 1))),
+    ...(confirmedRevision !== undefined ? { confirmedRevision } : {}),
+    ...(origin ? { origin } : {}),
     configuredAgentId: asOptionalString(record.configuredAgentId) ?? "",
     modelId: asOptionalString(record.modelId) ?? "",
     reviewerConfiguredAgentId: asOptionalString(record.reviewerConfiguredAgentId) ?? asOptionalString(record.configuredAgentId) ?? "",
@@ -239,12 +246,48 @@ export function restoreWorkflowDraft(
     runContextDocument: asOptionalString(record.runContextDocument) ?? "",
     contextDocument: asOptionalString(record.contextDocument) ?? "",
     ...(restoredWorkflowV2Plan ? { workflowV2Plan: restoredWorkflowV2Plan } : {}),
+    ...(generationReview ? { generationReview } : {}),
     ...(finalReport !== undefined ? { finalReport } : {}),
     runIds: asArray(record.runIds).map((runId) => asOptionalString(runId)).filter((runId): runId is string => Boolean(runId)),
     ...(restoredRuntimeConversation ? { runtimeConversation: restoredRuntimeConversation } : {}),
     createdAt: asNumber(record.createdAt, Date.now()),
     updatedAt: asNumber(record.updatedAt, Date.now()),
   });
+}
+
+function restoreWorkflowOrigin(raw: unknown): WorkflowOriginMetadata | undefined {
+  const record = asRecord(raw);
+  if (!record) return undefined;
+  const imported = asRecord(record.importedFrom);
+  const root = asRecord(record.rootOrigin);
+  const importedFrom = imported
+    && asOptionalString(imported.fileName)
+    && asOptionalString(imported.workflowId)
+    && asOptionalString(imported.title)
+    && Number.isSafeInteger(imported.revision) && Number(imported.revision) > 0
+    && typeof imported.importedAt === "number" && Number.isFinite(imported.importedAt) && imported.importedAt >= 0
+    ? { fileName: asOptionalString(imported.fileName)!, workflowId: asOptionalString(imported.workflowId)!, title: asOptionalString(imported.title)!, revision: Number(imported.revision), importedAt: imported.importedAt }
+    : undefined;
+  const rootTrust = root?.trust === "catalog" || root?.trust === "file_claim" ? root.trust : undefined;
+  const rootOrigin: WorkflowOriginMetadata["rootOrigin"] = root
+    && root.kind === "official"
+    && asOptionalString(root.workflowId)
+    && asOptionalString(root.title)
+    && Number.isSafeInteger(root.revision) && Number(root.revision) > 0
+    && typeof root.clonedAt === "number" && Number.isFinite(root.clonedAt) && root.clonedAt >= 0
+    && rootTrust
+    ? { kind: "official", workflowId: asOptionalString(root.workflowId)!, title: asOptionalString(root.title)!, revision: Number(root.revision), clonedAt: root.clonedAt, trust: rootTrust }
+    : undefined;
+  return importedFrom || rootOrigin ? { ...(importedFrom ? { importedFrom } : {}), ...(rootOrigin ? { rootOrigin } : {}) } : undefined;
+}
+
+function restoreGenerationReview(raw: unknown): WorkflowV2GenerationReviewState | undefined {
+  const record = asRecord(raw);
+  if (!record || !["not_reviewed", "reviewing", "approved", "changes_requested", "failed"].includes(String(record.status))) return undefined;
+  const reviewerConfiguredAgentId = asOptionalString(record.reviewerConfiguredAgentId);
+  const reviewerModelId = asOptionalString(record.reviewerModelId);
+  if (!reviewerConfiguredAgentId || !reviewerModelId || typeof record.updatedAt !== "number" || !Number.isFinite(record.updatedAt)) return undefined;
+  return structuredClone(record) as unknown as WorkflowV2GenerationReviewState;
 }
 
 export function restoreWorkflowRun(raw: unknown): WorkflowRunState | undefined {

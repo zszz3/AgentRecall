@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
+import { scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as {
@@ -201,6 +202,21 @@ export function readSkillUsageSourceEvents(source: SkillUsageSource): SkillUsage
   return readSessionFileUsageEvents(source);
 }
 
+export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource): Promise<SkillUsageEvent[]> {
+  if (source.kind === "claude-hook") return readClaudeUsageEvents(source.path) ?? [];
+  if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
+  const events: SkillUsageEvent[] = [];
+  try {
+    await scanCompleteJsonlAsync(source.path, {
+      shouldParseLine: (line) => line.length <= 512 * 1024,
+      onRecord: (record) => events.push(...parseSessionUsageRecord(record, source)),
+    });
+  } catch {
+    return [];
+  }
+  return events;
+}
+
 function addUsageEvents(
   byKey: Map<string, SkillUsageStat>,
   byAgentKey: Map<string, SkillUsageStat>,
@@ -286,6 +302,10 @@ function parseSessionUsageLine(line: string, source: SkillUsageSource): SkillUsa
   } catch {
     return [];
   }
+  return parseSessionUsageRecord(parsed, source);
+}
+
+function parseSessionUsageRecord(parsed: unknown, source: SkillUsageSource): SkillUsageEvent[] {
   if (!isRecord(parsed)) return [];
 
   const timestamp = timestampFrom(parsed.timestamp ?? parsed.createdAt ?? parsed.created_at);

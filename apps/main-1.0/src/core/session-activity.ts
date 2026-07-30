@@ -3,14 +3,13 @@ import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { LIVE_SESSION_SNAPSHOT_CACHE_TTL_MS } from "./refresh-policy";
+import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS, LIVE_SESSION_SNAPSHOT_CACHE_TTL_MS } from "./refresh-policy";
 import { encodeCursorWorkspaceSlug } from "./session-loader";
 import type { LiveSession, LiveSessionFamily, LiveSessionSnapshot } from "./types";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
 const CLAUDE_SESSION_START_SKEW_MS = 2 * 60 * 1000;
-const CODEX_APP_STALE_SESSION_MS = 24 * 60 * 60 * 1000;
 const CODEX_LIFECYCLE_READ_CHUNK_SIZE = 64 * 1024;
 
 type ProcessListRunner = (command: string, args: string[]) => Promise<string>;
@@ -725,7 +724,7 @@ function isCodexAgentWorking(sessionFile: string, nowMs: number): boolean {
   try {
     fileDescriptor = fs.openSync(sessionFile, "r");
     const fileStat = fs.fstatSync(fileDescriptor);
-    if (nowMs - fileStat.mtimeMs >= CODEX_APP_STALE_SESSION_MS) return false;
+    if (nowMs - fileStat.mtimeMs >= LIVE_SESSION_INACTIVITY_TIMEOUT_MS) return false;
     let position = fileStat.size;
     let partialLine = Buffer.alloc(0);
 

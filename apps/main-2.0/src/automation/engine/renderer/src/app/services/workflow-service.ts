@@ -25,6 +25,9 @@ import type {
   InterruptWorkflowReviewRequest,
   RejectWorkflowNodeCompletionRequest,
   SendWorkflowNodeMessageRequest,
+  WorkflowImportPreview,
+  ConfirmWorkflowImportRequest,
+  WorkflowExportResult,
 } from "../../../../shared/types";
 import { agentRecallAutomationService } from "./agent-recall-service";
 
@@ -38,6 +41,11 @@ export interface WorkflowService {
   selectWorkflow: (workflowId: string) => Promise<AppSnapshot>;
   renameWorkflow: (workflowId: string, title: string) => Promise<AppSnapshot>;
   deleteWorkflow: (workflowId: string) => Promise<AppSnapshot>;
+  cloneOfficialWorkflow: (workflowId: string) => Promise<AppSnapshot>;
+  beginImport: () => Promise<WorkflowImportPreview | undefined>;
+  confirmImport: (request: ConfirmWorkflowImportRequest) => Promise<AppSnapshot>;
+  cancelImport: (previewToken: string) => Promise<void>;
+  exportWorkflow: (workflowId: string) => Promise<WorkflowExportResult>;
   confirmWorkflow: (request: ConfirmWorkflowRequest) => Promise<WorkflowOperationResult>;
   reviewWorkflow: (request: ReviewWorkflowRequest) => Promise<AppSnapshot>;
   interruptWorkflowReview: (request: InterruptWorkflowReviewRequest) => Promise<AppSnapshot>;
@@ -72,6 +80,11 @@ export function workflowService(): WorkflowService {
     selectWorkflow: (workflowId) => api.selectWorkflow(workflowId),
     renameWorkflow: (workflowId, title) => api.renameWorkflow(workflowId, title),
     deleteWorkflow: (workflowId) => api.deleteWorkflow(workflowId),
+    cloneOfficialWorkflow: (workflowId) => api.cloneOfficialWorkflow(workflowId),
+    beginImport: () => api.beginWorkflowImport(),
+    confirmImport: (request) => api.confirmWorkflowImport(request),
+    cancelImport: (previewToken) => api.cancelWorkflowImport(previewToken),
+    exportWorkflow: (workflowId) => api.exportWorkflow(workflowId),
     confirmWorkflow: (request) => api.confirmWorkflow(request),
     reviewWorkflow: (request) => api.reviewWorkflow(request),
     interruptWorkflowReview: (request) => api.interruptWorkflowReview(request),

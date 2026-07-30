@@ -226,4 +226,65 @@ describe("PostgreSQL Turn search", () => {
       "codex:two",
     ]);
   });
+
+  it("keeps an old open session on the first unfiltered page", async () => {
+    const page = await searchRepository.searchSessionPage({
+      limit: 1,
+      liveSessionKeys: ["claude:two"],
+    });
+
+    expect(page.sessions[0]?.sessionKey).toBe("codex:two");
+    expect(page.totalCount).toBe(4);
+  });
+
+  it("moves a detected session from closed back to open after a new conversation", async () => {
+    const now = Date.now();
+    const staleAt = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+    const recentAt = new Date(now - 60 * 60 * 1000).toISOString();
+    const projectPath = "/projects/live-status";
+    const staleSession = session("codex:stale-live", "Stale live session", staleAt, { projectPath });
+    await repository.upsertIndexedSession(staleSession, [
+      message("user", "old conversation", staleAt, 0),
+    ]);
+    await repository.upsertIndexedSession(
+      session("codex:recent-live", "Recent live session", recentAt, { projectPath }),
+      [message("user", "recent conversation", recentAt, 0)],
+    );
+    const liveSessionKeys = ["codex:stale-live", "codex:recent-live"];
+
+    const openPage = await searchRepository.searchSessionPage({
+      projectPath,
+      liveStatus: "open",
+      liveSessionKeys,
+    });
+    const closedPage = await searchRepository.searchSessionPage({
+      projectPath,
+      liveStatus: "closed",
+      liveSessionKeys,
+    });
+    expect(openPage.sessions.map((item) => item.sessionKey)).toEqual(["codex:recent-live"]);
+    expect(closedPage.sessions.map((item) => item.sessionKey)).toEqual(["codex:stale-live"]);
+
+    const resumedAt = new Date().toISOString();
+    await repository.upsertIndexedSession(staleSession, [
+      message("user", "old conversation", staleAt, 0),
+      message("user", "new conversation", resumedAt, 1),
+    ]);
+
+    const reopenedPage = await searchRepository.searchSessionPage({
+      projectPath,
+      liveStatus: "open",
+      liveSessionKeys,
+    });
+    const remainingClosedPage = await searchRepository.searchSessionPage({
+      projectPath,
+      liveStatus: "closed",
+      liveSessionKeys,
+    });
+    expect(reopenedPage.sessions.map((item) => item.sessionKey).sort()).toEqual([
+      "codex:recent-live",
+      "codex:stale-live",
+    ]);
+    expect(remainingClosedPage.sessions).toEqual([]);
+  });
 });

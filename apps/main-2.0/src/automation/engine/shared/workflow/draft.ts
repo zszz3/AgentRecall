@@ -4,6 +4,7 @@ import type { WorkflowV2Definition } from "../workflow-v2/definition";
 import type { WorkflowV2Plan } from "../workflow-v2/planning";
 import type { WorkflowV2GenerationReviewState } from "../workflow-v2/generation-review";
 import type { WorkflowRunProgressItem, WorkflowRunState, WorkflowStatus } from "./run";
+import type { WorkflowOriginMetadata, WorkflowReadinessResult } from "./portable";
 
 export interface WorkflowGrillMessage {
   id: string;
@@ -28,6 +29,7 @@ export interface WorkflowDraftState {
   workflowId: string;
   sourceType?: ResourceSourceType;
   topologyLocked?: boolean;
+  origin?: WorkflowOriginMetadata;
   title: string;
   status: WorkflowStatus;
   revision: number;
@@ -58,4 +60,5 @@ export interface WorkflowStoreState {
   activeWorkflowId: string | undefined;
   workflows: WorkflowDraftState[];
   runs: WorkflowRunState[];
+  readinessByWorkflowId?: Record<string, WorkflowReadinessResult>;
 }

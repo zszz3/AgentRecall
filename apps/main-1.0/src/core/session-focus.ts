@@ -30,9 +30,12 @@ interface WezTermTarget {
 }
 
 export function liveSessionPidForSession(session: SessionSearchResult, liveSessions: LiveSession[]): number | null {
+  if (session.environmentKind !== "local") return null;
   const family = sessionSourceDescriptor(session.source).liveFamily;
   if (!family) return null;
-  return liveSessions.find((liveSession) => liveSession.family === family && liveSession.rawId === session.rawId)?.pid ?? null;
+  return liveSessions.find(
+    (liveSession) => !liveSession.environmentId && liveSession.family === family && liveSession.rawId === session.rawId,
+  )?.pid ?? null;
 }
 
 export async function focusLiveSessionTerminal(pid: number, options: FocusLiveSessionOptions = {}): Promise<void> {

@@ -3,14 +3,17 @@ import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { LIVE_SESSION_SNAPSHOT_CACHE_TTL_MS } from "./refresh-policy";
+import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS, LIVE_SESSION_SNAPSHOT_CACHE_TTL_MS } from "./refresh-policy";
 import { encodeCursorWorkspaceSlug } from "./session-loader";
 import type { LiveSession, LiveSessionFamily, LiveSessionSnapshot } from "./types";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
 const CLAUDE_SESSION_START_SKEW_MS = 2 * 60 * 1000;
-const CODEX_LIFECYCLE_READ_CHUNK_SIZE = 64 * 1024;
+const CODEX_LIFECYCLE_READ_CHUNK_SIZE = 1024 * 1024;
+const CODEX_LIFECYCLE_MAX_LINE_SIZE = 512 * 1024;
+const CODEX_LIFECYCLE_MAX_READ_SIZE = 8 * 1024 * 1024;
+const CODEX_RECENT_ACTIVITY_FALLBACK_MS = 2 * 60 * 1000;
 
 type ProcessListRunner = (command: string, args: string[]) => Promise<string>;
 type LiveSessionSnapshotLoader = (options?: LoadLiveSessionOptions) => Promise<LiveSessionSnapshot>;
@@ -144,7 +147,8 @@ function liveSessionSnapshotCacheKey(options: LoadLiveSessionOptions): string {
 }
 
 export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = {}): Promise<LiveSessionSnapshot> {
-  const generatedAt = (options.now ?? new Date()).toISOString();
+  const now = options.now ?? new Date();
+  const generatedAt = now.toISOString();
   const platform = options.platform ?? process.platform;
   const runner = options.runner ?? execText;
 
@@ -163,7 +167,7 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
         ? [new Map<number, string>(), new Map<number, string[]>(), new Map<number, string>()]
         : await Promise.all([
             loadPlainCodexSessionFiles(lines, runner, options.homeDir ?? os.homedir()),
-            loadCodexAppSessionFiles(lines, runner),
+            loadCodexAppSessionFiles(lines, runner, now.getTime()),
             loadPlainClaudeSessionFiles(lines, runner, options.homeDir ?? os.homedir()),
           ]);
     const traeSessionIdsByPid =
@@ -229,7 +233,7 @@ async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRu
   );
 }
 
-async function loadCodexAppSessionFiles(lines: string[], runner: ProcessListRunner): Promise<Map<number, string[]>> {
+async function loadCodexAppSessionFiles(lines: string[], runner: ProcessListRunner, nowMs: number): Promise<Map<number, string[]>> {
   const entries = lines.map(parseProcessLine).filter((entry): entry is ProcessEntry => Boolean(entry));
   const pids = entries.filter((entry) => isCodexAppServerCommand(splitCommandLine(entry.command))).map((entry) => entry.pid);
   const sessionFiles = new Map<number, string[]>();
@@ -237,7 +241,7 @@ async function loadCodexAppSessionFiles(lines: string[], runner: ProcessListRunn
   await Promise.all(
     pids.map(async (pid) => {
       try {
-        const files = extractCodexSessionFiles(await runner("lsof", ["-p", String(pid)])).filter(isCodexAgentWorking);
+        const files = extractCodexSessionFiles(await runner("lsof", ["-p", String(pid)])).filter((file) => isCodexAgentWorking(file, nowMs));
         if (files.length > 0) sessionFiles.set(pid, files);
       } catch {
         return;
@@ -718,32 +722,57 @@ function extractCodexSessionFiles(lsofOutput: string): string[] {
   return [...sessionFiles];
 }
 
-function isCodexAgentWorking(sessionFile: string): boolean {
+function isCodexAgentWorking(sessionFile: string, nowMs: number): boolean {
   let fileDescriptor: number | null = null;
   try {
     fileDescriptor = fs.openSync(sessionFile, "r");
-    let position = fs.fstatSync(fileDescriptor).size;
+    const stat = fs.fstatSync(fileDescriptor);
+    if (nowMs - stat.mtimeMs >= LIVE_SESSION_INACTIVITY_TIMEOUT_MS) return false;
+    let position = stat.size;
+    const earliestPosition = Math.max(0, stat.size - CODEX_LIFECYCLE_MAX_READ_SIZE);
     let partialLine = Buffer.alloc(0);
+    let skippingOversizedLine = false;
 
-    while (position > 0) {
-      const bytesToRead = Math.min(CODEX_LIFECYCLE_READ_CHUNK_SIZE, position);
+    while (position > earliestPosition) {
+      const bytesToRead = Math.min(
+        CODEX_LIFECYCLE_READ_CHUNK_SIZE,
+        position - earliestPosition,
+      );
       position -= bytesToRead;
       const chunk = Buffer.allocUnsafe(bytesToRead);
       fs.readSync(fileDescriptor, chunk, 0, bytesToRead, position);
-      const content = Buffer.concat([chunk, partialLine]);
+      const content = partialLine.length > 0
+        ? Buffer.concat([chunk, partialLine])
+        : chunk;
       let lineEnd = content.length;
+      let skipCurrentLine = skippingOversizedLine;
 
       for (let index = content.length - 1; index >= 0; index--) {
         if (content[index] !== 0x0a) continue;
-        const state = codexAgentWorkingStateFromLine(content.subarray(index + 1, lineEnd).toString("utf8"));
-        if (state !== null) return state;
+        const line = content.subarray(index + 1, lineEnd);
+        if (!skipCurrentLine && line.length <= CODEX_LIFECYCLE_MAX_LINE_SIZE) {
+          const state = codexAgentWorkingStateFromLine(line.toString("utf8"));
+          if (state !== null) return state;
+        }
+        skipCurrentLine = false;
         lineEnd = index;
       }
 
-      partialLine = Buffer.from(content.subarray(0, lineEnd));
+      const leadingPartial = content.subarray(0, lineEnd);
+      if (skipCurrentLine || leadingPartial.length > CODEX_LIFECYCLE_MAX_LINE_SIZE) {
+        partialLine = Buffer.alloc(0);
+        skippingOversizedLine = true;
+      } else {
+        partialLine = Buffer.from(leadingPartial);
+        skippingOversizedLine = false;
+      }
     }
 
-    return codexAgentWorkingStateFromLine(partialLine.toString("utf8")) ?? false;
+    if (!skippingOversizedLine && partialLine.length <= CODEX_LIFECYCLE_MAX_LINE_SIZE) {
+      const state = codexAgentWorkingStateFromLine(partialLine.toString("utf8"));
+      if (state !== null) return state;
+    }
+    return nowMs - stat.mtimeMs <= CODEX_RECENT_ACTIVITY_FALLBACK_MS;
   } catch {
     return false;
   } finally {
@@ -752,12 +781,12 @@ function isCodexAgentWorking(sessionFile: string): boolean {
 }
 
 function codexAgentWorkingStateFromLine(line: string): boolean | null {
-  if (!line.includes("task_started") && !line.includes("task_complete")) return null;
+  if (!line.includes("task_started") && !line.includes("task_complete") && !line.includes("turn_aborted")) return null;
   try {
     const row = JSON.parse(line) as { type?: unknown; payload?: { type?: unknown } };
     if (row.type !== "event_msg") return null;
     if (row.payload?.type === "task_started") return true;
-    if (row.payload?.type === "task_complete") return false;
+    if (row.payload?.type === "task_complete" || row.payload?.type === "turn_aborted") return false;
   } catch {
     return null;
   }

@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { McpPage } from "./McpPage";
 import { McpAgentBindings } from "./McpAgentBindings";
+import { McpToolPreview } from "./McpToolPreview";
 
 vi.stubGlobal("window", { addEventListener: () => undefined, removeEventListener: () => undefined, sessionSearch: { automation: { listMcpServers: async () => [], listAgentMcps: async () => [] } } });
 
@@ -35,5 +36,23 @@ describe("McpPage", () => {
 
     expect(html).toContain("API Agents do not support MCP servers");
     expect(html).not.toContain('type="checkbox"');
+  });
+});
+
+describe("McpToolPreview", () => {
+  test("renders the tool description, disabled state and input schema", () => {
+    const html = renderToStaticMarkup(
+      <McpToolPreview
+        language="zh"
+        tool={{ name: "read_file", description: "Read a file", inputSchema: { type: "object", properties: { path: { type: "string" } } } }}
+        disabled
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("read_file");
+    expect(html).toContain("Read a file");
+    expect(html).toContain("已禁用");
+    expect(html).toContain("&quot;type&quot;: &quot;object&quot;");
   });
 });

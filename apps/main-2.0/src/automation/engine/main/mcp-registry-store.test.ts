@@ -61,4 +61,27 @@ describe("PostgreSQL MCP registry", () => {
     expect(await store.delete("filesystem")).toBe(true);
     expect(await store.list()).toEqual([]);
   });
+
+  it("persists disabled tools and prunes names that are no longer discovered", async () => {
+    await store.upsert({
+      id: "filesystem",
+      name: "Filesystem",
+      transport: "stdio",
+      command: "node",
+      args: [],
+      env: {},
+      enabled: true,
+      tools: [
+        { name: "read_file", inputSchema: {} },
+        { name: "write_file", inputSchema: {} },
+      ],
+      disabledTools: ["write_file", "removed_tool"],
+      status: "connected",
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+
+    const [stored] = await store.list();
+    expect(stored?.disabledTools).toEqual(["write_file"]);
+  });
 });

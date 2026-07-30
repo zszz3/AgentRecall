@@ -2822,6 +2822,9 @@ describe("SessionStore", () => {
 
   it("applies live status filtering before page limits", () => {
     const store = createInMemoryStore();
+    const recentMessages: SessionMessage[] = [
+      { role: "user", content: "continue", timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(), index: 0 },
+    ];
     store.upsertIndexedSession(
       sampleSession({
         sessionKey: "codex:closed-newest",
@@ -2836,7 +2839,7 @@ describe("SessionStore", () => {
         rawId: "open-oldest",
         timestamp: new Date("2026-06-01T10:00:00Z").getTime(),
       }),
-      messages,
+      recentMessages,
     );
 
     const page = store.searchSessionPage({
@@ -2852,15 +2855,45 @@ describe("SessionStore", () => {
     expect(page.hasMore).toBe(false);
   });
 
+  it("keeps an old open session on the first unfiltered page", () => {
+    const store = createInMemoryStore();
+    for (let index = 0; index < 35; index += 1) {
+      store.upsertIndexedSession(sampleSession({
+        sessionKey: `codex:closed-${index}`,
+        rawId: `closed-${index}`,
+        timestamp: Date.parse("2026-06-30T10:00:00Z") - index,
+      }), messages);
+    }
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "codex:open-old",
+      rawId: "open-old",
+      timestamp: Date.parse("2020-01-01T00:00:00Z"),
+    }), messages);
+
+    const page = store.searchSessionPage({
+      query: "",
+      sortBy: "created",
+      limit: 30,
+      liveSessionKeys: ["codex:open-old"],
+    });
+
+    expect(page.sessions[0]?.sessionKey).toBe("codex:open-old");
+    expect(page.sessions).toHaveLength(30);
+    expect(page.totalCount).toBe(36);
+  });
+
   it("counts closed live status pages after excluding open sessions", () => {
     const store = createInMemoryStore();
+    const recentMessages: SessionMessage[] = [
+      { role: "user", content: "continue", timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(), index: 0 },
+    ];
     store.upsertIndexedSession(
       sampleSession({
         sessionKey: "codex:open-newest",
         rawId: "open-newest",
         timestamp: new Date("2026-06-03T10:00:00Z").getTime(),
       }),
-      messages,
+      recentMessages,
     );
     store.upsertIndexedSession(
       sampleSession({
@@ -2882,6 +2915,42 @@ describe("SessionStore", () => {
     expect(page.sessions.map((session) => session.sessionKey)).toEqual(["codex:closed-oldest"]);
     expect(page.totalCount).toBe(1);
     expect(page.hasMore).toBe(false);
+  });
+
+  it("moves a detected session from closed back to open after a new conversation", () => {
+    const store = createInMemoryStore();
+    const session = sampleSession({
+      sessionKey: "codex:stale-live",
+      rawId: "stale-live",
+      timestamp: Date.now() - 25 * 60 * 60 * 1000,
+    });
+    const staleMessages: SessionMessage[] = [
+      { role: "user", content: "old conversation", timestamp: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), index: 0 },
+    ];
+    store.upsertIndexedSession(session, staleMessages);
+
+    expect(store.searchSessions({
+      liveStatus: "open",
+      liveSessionKeys: ["codex:stale-live"],
+    })).toEqual([]);
+    expect(store.searchSessions({
+      liveStatus: "closed",
+      liveSessionKeys: ["codex:stale-live"],
+    }).map((result) => result.sessionKey)).toEqual(["codex:stale-live"]);
+
+    store.upsertIndexedSession(session, [
+      ...staleMessages,
+      { role: "user", content: "new conversation", timestamp: new Date().toISOString(), index: 1 },
+    ]);
+
+    expect(store.searchSessions({
+      liveStatus: "open",
+      liveSessionKeys: ["codex:stale-live"],
+    }).map((result) => result.sessionKey)).toEqual(["codex:stale-live"]);
+    expect(store.searchSessions({
+      liveStatus: "closed",
+      liveSessionKeys: ["codex:stale-live"],
+    })).toEqual([]);
   });
 
   it("deletes tags globally and removes unused tags after unlinking", () => {

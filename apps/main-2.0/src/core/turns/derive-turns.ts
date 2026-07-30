@@ -136,33 +136,6 @@ function ensureSyntheticTurn(turns: TurnDraft[]): TurnDraft {
   return synthetic;
 }
 
-function turnStartMs(turn: TurnDraft): number | null {
-  const boundary = turn.messages.find((message) => message.role === "user");
-  if (boundary) return timestampMs(boundary.timestamp);
-  const timestamps = [
-    ...turn.messages.map((message) => timestampMs(message.timestamp)),
-    ...turn.traceEvents.map((event) => timestampMs(event.timestamp)),
-    ...turn.tokenEvents.map((event) => timestampMs(event.timestamp)),
-  ].filter((value): value is number => value !== null);
-  return timestamps.length > 0 ? Math.min(...timestamps) : null;
-}
-
-function findTurnForTimestamp(turns: TurnDraft[], occurredAt: number | null): TurnDraft | null {
-  if (turns.length === 0) return null;
-  if (occurredAt === null) return turns.at(-1) ?? null;
-
-  let candidate: TurnDraft | null = null;
-  for (const turn of turns) {
-    if (turn.synthetic) continue;
-    const startedAt = turnStartMs(turn);
-    if (startedAt !== null && startedAt <= occurredAt) candidate = turn;
-  }
-  if (candidate) return candidate;
-
-  const synthetic = turns.find((turn) => turn.synthetic);
-  return synthetic ?? null;
-}
-
 function buildTurnDrafts(
   messages: readonly SessionMessage[],
   traceEvents: readonly SessionTraceEvent[],
@@ -187,19 +160,52 @@ function buildTurnDrafts(
     }
   }
 
+  const timestampBoundaries = turns
+    .map((turn, order) => ({
+      turn,
+      order,
+      startedAt: timestampMs(turn.messages.find((message) => message.role === "user")?.timestamp ?? ""),
+    }))
+    .filter((boundary): boundary is typeof boundary & { startedAt: number } => boundary.startedAt !== null)
+    .sort((left, right) => left.startedAt - right.startedAt || left.order - right.order);
+  let latestOrder = -1;
+  let latestTurn: TurnDraft | null = null;
+  const timestampCandidates = timestampBoundaries.map((boundary) => {
+    if (boundary.order >= latestOrder) {
+      latestOrder = boundary.order;
+      latestTurn = boundary.turn;
+    }
+    return latestTurn;
+  });
+  const findTurnForTimestamp = (occurredAt: number | null): TurnDraft | null => {
+    if (turns.length === 0) return null;
+    if (occurredAt === null) return turns.at(-1) ?? null;
+
+    let low = 0;
+    let high = timestampBoundaries.length;
+    while (low < high) {
+      const middle = low + Math.floor((high - low) / 2);
+      if (timestampBoundaries[middle].startedAt <= occurredAt) low = middle + 1;
+      else high = middle;
+    }
+    return low > 0
+      ? timestampCandidates[low - 1]
+      : turns.find((turn) => turn.synthetic) ?? null;
+  };
+
   for (const event of [...traceEvents].sort(compareTimestamped)) {
     const occurredAt = timestampMs(event.timestamp);
-    let target = findTurnForTimestamp(turns, occurredAt);
+    let target = findTurnForTimestamp(occurredAt);
     if (!target) target = ensureSyntheticTurn(turns);
     target.traceEvents.push(event);
   }
 
   for (const event of [...tokenEvents].sort((left, right) => {
     if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp;
-    return left.dedupeKey.localeCompare(right.dedupeKey);
+      return left.dedupeKey.localeCompare(right.dedupeKey);
   })) {
     const occurredAt = timestampMs(event.timestamp);
-    let target = findTurnForTimestamp(turns, occurredAt);
+    let target = findTurnForTimestamp(occurredAt);
     if (!target) target = ensureSyntheticTurn(turns);
     target.tokenEvents.push(event);
   }

@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadSkillUsage, readSkillUsageSourceEvents, usageForSkill } from "./skill-usage";
+import {
+  loadSkillUsage,
+  readSkillUsageSourceEvents,
+  readSkillUsageSourceEventsAsync,
+  usageForSkill,
+} from "./skill-usage";
 
 function withTempHome(run: (homeDir: string) => void): void {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skill-usage-"));
@@ -195,4 +200,49 @@ describe("skill usage", () => {
     expect(usageForSkill(snapshot, "brainstorming", "claude")?.count).toBe(1);
     expect(usageForSkill(snapshot, "brainstorming", "codex")?.count).toBe(2);
   }));
+
+  it("streams Codex usage logs without parsing oversized image rows", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-skill-usage-"));
+    try {
+      const codexSessionsDir = writeCodexSession(homeDir, [
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            output: `data:image/png;base64,${"x".repeat(2 * 1024 * 1024)}`,
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-06-05T10:00:00.000Z",
+          payload: {
+            type: "function_call",
+            name: "shell_command",
+            arguments: JSON.stringify({
+              command: "cat /tmp/session-search-fixtures/.codex/skills/tdd/SKILL.md",
+            }),
+          },
+        }),
+      ]);
+      const filePath = path.join(codexSessionsDir, "2026", "06", "01", "rollout.jsonl");
+      const stat = fs.statSync(filePath);
+
+      const events = await readSkillUsageSourceEventsAsync({
+        agent: "codex",
+        provider: "codex",
+        kind: "codex-session",
+        path: filePath,
+        mtimeMs: stat.mtimeMs,
+        fileSize: stat.size,
+      });
+
+      expect(events).toEqual([{
+        agent: "codex",
+        skill: "tdd",
+        timestamp: Date.parse("2026-06-05T10:00:00.000Z"),
+      }]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
 });

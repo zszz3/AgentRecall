@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
-import { GitBranch, LockKeyhole, Plus, SquarePen, Trash2, UserRound, X } from "lucide-react";
-import type { WorkflowDraftState } from "../../../../shared/types";
+import { Copy, Download, GitBranch, LockKeyhole, Plus, SquarePen, Trash2, Upload, UserRound, X } from "lucide-react";
+import type { WorkflowDraftState, WorkflowReadinessResult } from "../../../../shared/types";
 
 type MaybePromise = void | Promise<void>;
 
@@ -11,6 +11,7 @@ interface WorkflowHistoryPanelProps {
   contextMenu?: { workflowId: string; x: number; y: number } | undefined;
   renameDraft?: { workflowId: string; title: string } | undefined;
   onNewWorkflow: () => MaybePromise;
+  onImportWorkflow?: () => MaybePromise;
   onSelectWorkflow: (workflowId: string) => MaybePromise;
   onOpenContextMenu?: (event: MouseEvent, workflowId: string) => void;
   onStartRename?: (workflowId: string) => MaybePromise;
@@ -18,6 +19,10 @@ interface WorkflowHistoryPanelProps {
   onConfirmRename?: () => MaybePromise;
   onCancelRename?: () => void;
   onDeleteWorkflow?: (workflowId: string) => MaybePromise;
+  onCloneWorkflow?: (workflowId: string) => MaybePromise;
+  onExportWorkflow?: (workflowId: string) => MaybePromise;
+  readinessByWorkflowId?: Record<string, WorkflowReadinessResult>;
+  portableBusy?: boolean;
 }
 
 export function WorkflowHistoryPanel({
@@ -27,6 +32,7 @@ export function WorkflowHistoryPanel({
   contextMenu,
   renameDraft,
   onNewWorkflow,
+  onImportWorkflow,
   onSelectWorkflow,
   onOpenContextMenu,
   onStartRename,
@@ -34,6 +40,10 @@ export function WorkflowHistoryPanel({
   onConfirmRename,
   onCancelRename,
   onDeleteWorkflow,
+  onCloneWorkflow,
+  onExportWorkflow,
+  readinessByWorkflowId = {},
+  portableBusy = false,
 }: WorkflowHistoryPanelProps) {
   const officialWorkflows = workflows.filter((workflow) => workflow.sourceType === "official");
   const userWorkflows = workflows.filter((workflow) => workflow.sourceType === "user");
@@ -44,11 +54,12 @@ export function WorkflowHistoryPanel({
       key={workflow.workflowId}
       className={`workflow-history-card ${official ? "is-official" : "is-personal"} ${workflow.workflowId === activeWorkflowId ? "is-active" : ""}`}
       onClick={() => void onSelectWorkflow(workflow.workflowId)}
-      onContextMenu={official ? undefined : (event) => onOpenContextMenu?.(event, workflow.workflowId)}
+      onContextMenu={(event) => onOpenContextMenu?.(event, workflow.workflowId)}
     >
       <div className="workflow-history-card-title">
         <strong>{workflow.title}</strong>
         {official ? <span className="workflow-official-badge"><LockKeyhole size={10} />Official</span> : null}
+        {!official && readinessByWorkflowId[workflow.workflowId]?.ready === false ? <span className="workflow-readiness-badge">待配置</span> : null}
       </div>
       <span>{`${workflow.status} · ${workflow.definition.nodes.length} nodes · rev ${workflow.revision}`}</span>
       <small>
@@ -67,9 +78,13 @@ export function WorkflowHistoryPanel({
         <GitBranch size={14} />
       </div>
       <div className="new-chat-menu-wrap">
-        <button className="new-chat-compact-btn" onClick={() => void onNewWorkflow()}>
+        <button className="new-chat-compact-btn" disabled={portableBusy} onClick={() => void onNewWorkflow()}>
           <Plus size={13} />
           <span>New workflow</span>
+        </button>
+        <button className="new-chat-compact-btn" disabled={portableBusy} onClick={() => void onImportWorkflow?.()}>
+          <Upload size={13} />
+          <span>Import workflow</span>
         </button>
       </div>
       <div className="workflow-history-list" aria-label="Workflow history">
@@ -102,19 +117,32 @@ export function WorkflowHistoryPanel({
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <button type="button" className="agent-context-menu-item" onClick={() => void onStartRename?.(contextMenu.workflowId)}>
-            <SquarePen size={13} />
-            <span>Rename workflow</span>
-          </button>
-          <button
-            type="button"
-            className="agent-context-menu-item danger"
-            disabled={running}
-            onClick={() => void onDeleteWorkflow?.(contextMenu.workflowId)}
-          >
-            <Trash2 size={13} />
-            <span>Delete workflow</span>
-          </button>
+          {workflows.find((workflow) => workflow.workflowId === contextMenu.workflowId)?.sourceType === "official" ? (
+            <button type="button" className="agent-context-menu-item" disabled={portableBusy} onClick={() => void onCloneWorkflow?.(contextMenu.workflowId)}>
+              <Copy size={13} />
+              <span>Clone to my workflows</span>
+            </button>
+          ) : (
+            <>
+              <button type="button" className="agent-context-menu-item" onClick={() => void onStartRename?.(contextMenu.workflowId)}>
+                <SquarePen size={13} />
+                <span>Rename workflow</span>
+              </button>
+              <button type="button" className="agent-context-menu-item" disabled={portableBusy} onClick={() => void onExportWorkflow?.(contextMenu.workflowId)}>
+                <Download size={13} />
+                <span>Export workflow</span>
+              </button>
+              <button
+                type="button"
+                className="agent-context-menu-item danger"
+                disabled={running}
+                onClick={() => void onDeleteWorkflow?.(contextMenu.workflowId)}
+              >
+                <Trash2 size={13} />
+                <span>Delete workflow</span>
+              </button>
+            </>
+          )}
         </div>
       ) : null}
       {renameDraft ? (

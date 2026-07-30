@@ -16,6 +16,11 @@ export interface McpServerDefinition {
   env: Record<string, string>;
   enabled: boolean;
   tools: McpToolDefinition[];
+  /**
+   * Names of tools that are disabled on this server. Disabled tools are hidden
+   * from Agents at runtime. Absent or empty means every discovered tool is enabled.
+   */
+  disabledTools?: string[];
   status: "untested" | "connected" | "error";
   lastError?: string;
   lastTestedAt?: number;

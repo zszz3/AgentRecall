@@ -17,10 +17,10 @@ export class McpRegistryStore {
     await this.database.transaction(async (transaction) => {
       await transaction.query(
         `insert into agent_recall.mcp_servers (
-          id, name, transport, command, args, url, env, enabled, status,
+          id, name, transport, command, args, url, env, enabled, disabled_tools, status,
           last_error, last_tested_at, created_at, updated_at
         ) values (
-          $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9, $10, $11, $12, $13
+          $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13, $14
         )
         on conflict (id) do update set
           name = excluded.name,
@@ -30,6 +30,7 @@ export class McpRegistryStore {
           url = excluded.url,
           env = excluded.env,
           enabled = excluded.enabled,
+          disabled_tools = excluded.disabled_tools,
           status = excluded.status,
           last_error = excluded.last_error,
           last_tested_at = excluded.last_tested_at,
@@ -43,6 +44,7 @@ export class McpRegistryStore {
           server.url?.trim() || null,
           JSON.stringify(server.env),
           server.enabled,
+          JSON.stringify(disabledToolNames(server)),
           server.status,
           server.lastError ?? null,
           optionalDate(server.lastTestedAt),
@@ -131,6 +133,7 @@ export class McpRegistryStore {
         ...(tool.description ? { description: String(tool.description) } : {}),
         inputSchema: jsonRecord(tool.input_schema),
       })),
+      disabledTools: jsonArray(row.disabled_tools),
       status: row.status as McpServerDefinition["status"],
       ...(row.last_error ? { lastError: String(row.last_error) } : {}),
       ...(row.last_tested_at ? { lastTestedAt: timestamp(row.last_tested_at) } : {}),
@@ -147,6 +150,11 @@ function jsonValue(value: unknown): unknown {
 function jsonArray(value: unknown): string[] {
   const parsed = jsonValue(value);
   return Array.isArray(parsed) ? parsed.map(String) : [];
+}
+
+function disabledToolNames(server: McpServerDefinition): string[] {
+  const known = new Set(server.tools.map((tool) => tool.name));
+  return [...new Set(server.disabledTools ?? [])].filter((name) => known.has(name));
 }
 
 function jsonRecord(value: unknown): Record<string, unknown> {

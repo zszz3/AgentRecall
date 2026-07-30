@@ -97,6 +97,11 @@ export function applyAutomationChange(
       activeWorkflowId,
       workflows,
       runs,
+      ...(change.payload.readinessByWorkflowId !== undefined
+        ? { readinessByWorkflowId: change.payload.readinessByWorkflowId }
+        : snapshot.workflowStore.readinessByWorkflowId !== undefined
+          ? { readinessByWorkflowId: snapshot.workflowStore.readinessByWorkflowId }
+          : {}),
     },
     workflowNodeConversations: applyEntityPatch(snapshot.workflowNodeConversations, change.payload.conversations, (value) => value.conversationId),
     workflowDraft,

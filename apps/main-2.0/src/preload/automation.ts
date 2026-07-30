@@ -44,6 +44,9 @@ import type {
   SubmitWorkflowScriptInputRequest,
   UpdateWorkflowRequest,
   WorkflowOperationResult,
+  WorkflowImportPreview,
+  ConfirmWorkflowImportRequest,
+  WorkflowExportResult,
   McpServerDefinition,
 } from "../automation/contracts";
 import type {
@@ -109,6 +112,11 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     selectWorkflow: (workflowId: string): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowSelect, workflowId),
     renameWorkflow: (workflowId: string, title: string): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowRename, { workflowId, title }),
     deleteWorkflow: (workflowId: string): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowDelete, workflowId),
+    cloneOfficialWorkflow: (workflowId: string): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowCloneOfficial, workflowId),
+    beginWorkflowImport: (): Promise<WorkflowImportPreview | undefined> => ipc.invoke(AUTOMATION_CHANNELS.workflowImportBegin),
+    confirmWorkflowImport: (request: ConfirmWorkflowImportRequest): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowImportConfirm, request),
+    cancelWorkflowImport: (previewToken: string): Promise<void> => ipc.invoke(AUTOMATION_CHANNELS.workflowImportCancel, { previewToken }),
+    exportWorkflow: (workflowId: string): Promise<WorkflowExportResult> => ipc.invoke(AUTOMATION_CHANNELS.workflowExport, workflowId),
     confirmWorkflow: (request: ConfirmWorkflowRequest): Promise<WorkflowOperationResult> => ipc.invoke(AUTOMATION_CHANNELS.workflowConfirm, request),
     reviewWorkflow: (request: ReviewWorkflowRequest): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowReview, request),
     interruptWorkflowReview: (request: InterruptWorkflowReviewRequest): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowReviewInterrupt, request),

@@ -56,6 +56,7 @@ import { loadUsageQuotaSnapshot } from "../core/quota";
 import { focusLiveSessionTerminal, setLiveSessionTerminalTitle } from "../core/session-focus";
 import { setSessionCustomTitleAndSyncTerminal } from "../core/session-title-sync";
 import { createCachedLiveSessionSnapshotLoader } from "../core/session-activity";
+import { loadRemoteLiveSessions } from "../core/remote-session-activity";
 import { summarizeSession, type SummaryEndpoint } from "../core/session-summarizer";
 import {
   buildCodexExecEndpoint as buildCodexExecEndpointShared,
@@ -1125,7 +1126,24 @@ async function runIndexSync(): Promise<IndexStatus> {
   return activeIndexRun;
 }
 
-const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader();
+const loadCachedLocalLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader();
+const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader({
+  load: async (options) => {
+    const [snapshot, remoteSessions] = await Promise.all([
+      loadCachedLocalLiveSessionSnapshot(options),
+      Promise.resolve()
+        .then(() => loadRemoteLiveSessions(
+          store.listEnvironments(),
+          (environment, remoteCommand) => sshCommandService.run(environment, remoteCommand, {
+            maxBuffer: 512 * 1024,
+            timeout: 10_000,
+          }),
+        ))
+        .catch(() => []),
+    ]);
+    return { ...snapshot, sessions: [...snapshot.sessions, ...remoteSessions] };
+  },
+});
 
 let summaryBackfillRunning = false;
 
@@ -1896,7 +1914,7 @@ function registerIpc(): void {
       getSession: (key) => store.getSession(key),
       setCustomTitle: (key, customTitle) => store.setCustomTitle(key, customTitle),
       loadLiveSessions: () =>
-        loadCachedLiveSessionSnapshot({
+        loadCachedLocalLiveSessionSnapshot({
           includeTrae: getSettings().includeTrae,
           includeQoder: getSettings().includeQoder,
           includeOpenClaw: getSettings().includeOpenClaw,
@@ -1990,7 +2008,7 @@ function registerIpc(): void {
       store.markResumed(sessionKey);
       return { route: "resume" as const };
     }
-    const snapshot = await loadCachedLiveSessionSnapshot({
+    const snapshot = await loadCachedLocalLiveSessionSnapshot({
       includeTrae: getSettings().includeTrae,
       includeQoder: getSettings().includeQoder,
       includeOpenClaw: getSettings().includeOpenClaw,

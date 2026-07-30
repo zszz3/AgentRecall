@@ -73,6 +73,21 @@ describe("AgentRecall PostgreSQL schema", () => {
       is_nullable: "NO",
       column_default: "true",
     }]);
+    const workflowOriginColumns = await database.query<{ column_name: string; data_type: string; is_nullable: string }>(`
+      select column_name, data_type, is_nullable
+      from information_schema.columns
+      where table_schema = 'agent_recall'
+        and table_name = 'workflows'
+        and column_name in ('origin', 'confirmed_revision', 'reviewer_configured_agent_id', 'reviewer_model_id', 'generation_review')
+      order by column_name
+    `);
+    expect(workflowOriginColumns.rows).toEqual([
+      { column_name: "confirmed_revision", data_type: "integer", is_nullable: "YES" },
+      { column_name: "generation_review", data_type: "jsonb", is_nullable: "YES" },
+      { column_name: "origin", data_type: "jsonb", is_nullable: "YES" },
+      { column_name: "reviewer_configured_agent_id", data_type: "text", is_nullable: "YES" },
+      { column_name: "reviewer_model_id", data_type: "text", is_nullable: "YES" },
+    ]);
     await database.close();
   });
 

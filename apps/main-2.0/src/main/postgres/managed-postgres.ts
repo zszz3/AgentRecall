@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
+import { Client } from "pg";
 
 export interface EmbeddedPostgresOptions {
   databaseDir: string;
@@ -35,6 +36,7 @@ interface StartPostgresRuntimeOptions {
   createEmbedded?: (
     options: EmbeddedPostgresOptions,
   ) => EmbeddedPostgresInstance | Promise<EmbeddedPostgresInstance>;
+  isRuntimeAvailable?: (connectionUrl: string) => Promise<boolean>;
   choosePort?: () => Promise<number>;
   createPassword?: () => string;
 }
@@ -80,6 +82,18 @@ export async function startPostgresRuntime(
   };
   if (!existingConfig) await writeRuntimeConfig(configPath, config);
 
+  const connectionUrl = runtimeConnectionUrl(config);
+  if (
+    existingConfig?.initialized
+    && await (options.isRuntimeAvailable ?? isRuntimeAvailable)(connectionUrl)
+  ) {
+    return {
+      connectionUrl,
+      managed: true,
+      stop: async () => undefined,
+    };
+  }
+
   const createEmbedded = options.createEmbedded ?? defaultCreateEmbedded;
   const embedded = await createEmbedded({
     databaseDir: path.join(runtimeDirectory, "data"),
@@ -115,7 +129,7 @@ export async function startPostgresRuntime(
 
   let stopped = false;
   return {
-    connectionUrl: runtimeConnectionUrl(config),
+    connectionUrl,
     managed: true,
     stop: async () => {
       if (stopped) return;
@@ -123,6 +137,22 @@ export async function startPostgresRuntime(
       await embedded.stop();
     },
   };
+}
+
+async function isRuntimeAvailable(connectionUrl: string): Promise<boolean> {
+  const client = new Client({
+    connectionString: connectionUrl,
+    connectionTimeoutMillis: 1_000,
+  });
+  try {
+    await client.connect();
+    await client.query("select 1");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await client.end().catch(() => undefined);
+  }
 }
 
 async function defaultCreateEmbedded(options: EmbeddedPostgresOptions): Promise<EmbeddedPostgresInstance> {

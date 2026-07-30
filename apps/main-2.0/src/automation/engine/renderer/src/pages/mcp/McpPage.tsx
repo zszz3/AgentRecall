@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { PlugZap, Save, Server, Trash2, Wifi } from "lucide-react";
+import { Eye, FileJson, PlugZap, Save, Server, Trash2, Wifi } from "lucide-react";
 import type { Language } from "../../app/language";
 import { APP_SAVE_REQUEST_EVENT } from "../../app/save-shortcut";
 import {
@@ -15,7 +15,11 @@ import {
 } from "../../ui/workbench/Workbench";
 import { useMcpRegistry } from "./useMcpRegistry";
 import { McpAgentBindings } from "./McpAgentBindings";
+import { McpToolPreview } from "./McpToolPreview";
+import { McpJsonImport } from "./McpJsonImport";
+import { toolCountLabel } from "./mcp-tools";
 import type { ConfiguredAgent } from "../../../../shared/types";
+import type { McpToolDefinition } from "../../../../shared/mcp/types";
 
 export function McpPage({
   language = "en",
@@ -29,6 +33,8 @@ export function McpPage({
   const zh = language === "zh";
   const model = useMcpRegistry();
   const [view, setView] = useState<"servers" | "agents">("servers");
+  const [previewTool, setPreviewTool] = useState<McpToolDefinition>();
+  const [importOpen, setImportOpen] = useState(false);
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (!model.dirty) return;
@@ -96,6 +102,17 @@ export function McpPage({
                 label={zh ? "服务器" : "Servers"}
                 actionLabel={zh ? "新建 MCP Server" : "New MCP server"}
                 onAdd={model.create}
+                extra={
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label={zh ? "从 JSON 导入" : "Import from JSON"}
+                    title={zh ? "从 JSON 导入" : "Import from JSON"}
+                    onClick={() => setImportOpen(true)}
+                  >
+                    <FileJson size={14} />
+                  </button>
+                }
               />
               <div className="workbench-browser-list">
                 {model.servers.map((server) => (
@@ -103,7 +120,7 @@ export function McpPage({
                     key={server.id}
                     selected={server.id === draft?.id}
                     title={server.name}
-                    meta={`${server.transport.toUpperCase()} · ${server.tools.length} tools`}
+                    meta={`${server.transport.toUpperCase()} · ${toolCountLabel(server, zh ? "工具" : "tools")}`}
                     status={
                       server.status === "connected"
                         ? "success"
@@ -371,32 +388,63 @@ export function McpPage({
                 <WorkbenchSection
                   title={zh ? "已发现工具" : "Discovered tools"}
                   description={
-                    zh
-                      ? "连接测试成功后自动刷新工具清单。"
-                      : "The tool catalog refreshes after a successful connection test."
+                    draft.tools.length
+                      ? zh
+                        ? `连接测试成功后自动刷新工具清单。已启用 ${draft.tools.length - (draft.disabledTools?.length ?? 0)} / ${draft.tools.length} 个工具。`
+                        : `The tool catalog refreshes after a successful connection test. ${draft.tools.length - (draft.disabledTools?.length ?? 0)} of ${draft.tools.length} tools enabled.`
+                      : zh
+                        ? "连接测试成功后自动刷新工具清单。"
+                        : "The tool catalog refreshes after a successful connection test."
                   }
                 >
                   {draft.tools.length ? (
                     <div className="workbench-table-wrap">
-                      <table className="workbench-table">
+                      <table className="workbench-table mcp-tool-table">
                         <thead>
                           <tr>
+                            <th>{zh ? "启用" : "Enabled"}</th>
                             <th>{zh ? "工具" : "Tool"}</th>
                             <th>{zh ? "描述" : "Description"}</th>
+                            <th aria-label={zh ? "操作" : "Actions"} />
                           </tr>
                         </thead>
                         <tbody>
-                          {draft.tools.map((tool) => (
-                            <tr key={tool.name}>
-                              <td className="mono">
-                                <strong>{tool.name}</strong>
-                              </td>
-                              <td>
-                                {tool.description ||
-                                  (zh ? "无描述" : "No description")}
-                              </td>
-                            </tr>
-                          ))}
+                          {draft.tools.map((tool) => {
+                            const toolDisabled = (draft.disabledTools ?? []).includes(tool.name);
+                            return (
+                              <tr key={tool.name} className={toolDisabled ? "is-disabled" : ""}>
+                                <td>
+                                  <span className="mcp-binding-switch">
+                                    <input
+                                      type="checkbox"
+                                      aria-label={`${zh ? "启用" : "Enable"} ${tool.name}`}
+                                      checked={!toolDisabled}
+                                      onChange={() => model.toggleTool(tool.name)}
+                                    />
+                                    <i aria-hidden="true" />
+                                  </span>
+                                </td>
+                                <td className="mono">
+                                  <strong>{tool.name}</strong>
+                                </td>
+                                <td>
+                                  {tool.description ||
+                                    (zh ? "无描述" : "No description")}
+                                </td>
+                                <td className="mcp-tool-actions">
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    aria-label={`${zh ? "预览" : "Preview"} ${tool.name}`}
+                                    title={zh ? "预览" : "Preview"}
+                                    onClick={() => setPreviewTool(tool)}
+                                  >
+                                    <Eye size={13} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -431,6 +479,21 @@ export function McpPage({
       </div>
         </>
       )}
+      {previewTool ? (
+        <McpToolPreview
+          language={language}
+          tool={previewTool}
+          disabled={(draft?.disabledTools ?? []).includes(previewTool.name)}
+          onClose={() => setPreviewTool(undefined)}
+        />
+      ) : null}
+      {importOpen ? (
+        <McpJsonImport
+          language={language}
+          onClose={() => setImportOpen(false)}
+          onImport={model.importServers}
+        />
+      ) : null}
     </section>
   );
 }

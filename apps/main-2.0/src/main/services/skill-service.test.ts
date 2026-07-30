@@ -200,7 +200,7 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
     skillProjectDirsFromIndexedProjects: vi.fn(() => []),
     usageForSkill: vi.fn(() => ({ skill: "review", count: 3, lastUsedAt: 100 })),
     listSkillUsageSources: vi.fn(() => usageSources),
-    readSkillUsageSourceEvents: vi.fn(() => [{ agent: "codex" as const, skill: "review", timestamp: 100 }]),
+    readSkillUsageSourceEvents: vi.fn(async () => [{ agent: "codex" as const, skill: "review", timestamp: 100 }]),
     isSyncableSkill: vi.fn(() => true),
     portableSkillLocation: vi.fn(() => ({ scope: "agent-recall-v2" as const, relativePath: "review", identity: "agent-recall/review" })),
     skillSyncLocalContentHash: vi.fn(async () => "local-hash"),

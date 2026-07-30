@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, syncLoadedSessionsInBatches } from "./indexer";
 import { createInMemoryStore } from "./postgres/test-session-store";
 import { writeMigratedSession } from "./session-migration-writers";
@@ -199,12 +199,40 @@ describe("indexer", () => {
       fs.utimesSync(filePath, previousStat.fileMtimeMs / 1000, previousStat.fileMtimeMs / 1000);
       const oldIndexTime = new Date(Math.max(0, previousStat.indexedAt - 1000));
       fs.utimesSync(path.join(homeDir, ".codex", "session_index.jsonl"), oldIndexTime, oldIndexTime);
+      const getAllMessages = vi.spyOn(store, "getAllMessages");
 
       const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
 
       expect(warm).toMatchObject({ indexed: 0, skipped: 1, total: 1 });
+      expect(getAllMessages).not.toHaveBeenCalled();
       expect(await store.searchSessions({ query: "original question", limit: 10 })).toHaveLength(1);
     } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("indexes only the appended Codex tail after the first scan", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-codex-tail-"));
+    try {
+      const filePath = writeCodexSession(homeDir, "codex-tail", "original question", "Tail");
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+      const originalSize = fs.statSync(filePath).size;
+      fs.writeFileSync(filePath, `${"x".repeat(originalSize)}\n${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-01T10:02:00Z",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "appended answer" }] },
+      })}\n`);
+
+      const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+
+      expect(warm.indexed).toBe(1);
+      expect((await store.getAllMessages("codex:codex-tail")).map((message) => message.content)).toEqual([
+        "original question",
+        "appended answer",
+      ]);
+    } finally {
+      await store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });
     }
   });
@@ -280,6 +308,101 @@ describe("indexer", () => {
         messageCount: 1,
       });
       await expect(store.searchSessions({ query: "Only cached prompt", limit: 10 })).resolves.toHaveLength(1);
+    } finally {
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rekeys a cached Cursor conversation when the same composer moves to a new workspace key", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-cursor-rekey-"));
+    const stateDbPath = path.join(homeDir, "Cursor", "User", "globalStorage", "state.vscdb");
+    fs.mkdirSync(path.dirname(stateDbPath), { recursive: true });
+    const db = new DatabaseSync(stateDbPath);
+    db.exec(`
+      CREATE TABLE composerHeaders (
+        composerId TEXT PRIMARY KEY,
+        createdAt INTEGER,
+        isSubagent INTEGER,
+        value TEXT
+      );
+      CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);
+    `);
+    db.prepare("INSERT INTO composerHeaders (composerId, createdAt, isSubagent, value) VALUES (?, ?, 0, ?)").run(
+      "same-composer",
+      Date.parse("2026-07-29T10:00:00Z"),
+      JSON.stringify({
+        name: "Moved Cursor session",
+        workspaceIdentifier: { uri: { scheme: "file", fsPath: "/repo/new" } },
+      }),
+    );
+    db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+      "bubbleId:same-composer:user-1",
+      JSON.stringify({
+        bubbleId: "user-1",
+        type: 1,
+        text: "Current Cursor prompt",
+        createdAt: "2026-07-29T10:00:00Z",
+      }),
+    );
+    db.close();
+    const stat = fs.statSync(stateDbPath);
+    const cached = session(99);
+    cached.session = {
+      ...cached.session,
+      sessionKey: "cursor:repo-old:same-composer",
+      rawId: "same-composer",
+      source: "cursor-agent",
+      filePath: stateDbPath,
+      fileMtimeMs: stat.mtimeMs,
+      fileSize: stat.size,
+    };
+    cached.messages = [{
+      role: "user",
+      content: "Cached Cursor prompt",
+      timestamp: "2026-07-28T10:00:00Z",
+      index: 0,
+    }];
+    await store.upsertIndexedSession(cached.session, cached.messages);
+    await store.upsertIndexedSession({
+      ...cached.session,
+      sessionKey: "cursor:repo-new:same-composer",
+      projectPath: "/repo/new",
+      originalTitle: "Moved Cursor session",
+      firstQuestion: "Current Cursor prompt",
+      timestamp: Date.parse("2026-07-29T10:00:00Z"),
+    }, [{
+      role: "user",
+      content: "Current Cursor prompt",
+      timestamp: "2026-07-29T10:00:00Z",
+      index: 0,
+    }]);
+    await store.setCustomTitle(cached.session.sessionKey, "Remembered Cursor title");
+    await store.setFavorited(cached.session.sessionKey, true);
+    await store.addTag(cached.session.sessionKey, "cursor-work");
+
+    try {
+      await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions: {
+          homeDir,
+          includeCursorAgent: true,
+          cursorStateDbPath: stateDbPath,
+        },
+      });
+
+      await expect(store.getSession("cursor:repo-old:same-composer")).resolves.toBeNull();
+      await expect(store.getSession("cursor:repo-new:same-composer")).resolves.toMatchObject({
+        rawId: "same-composer",
+        sourceAvailable: true,
+        displayTitle: "Remembered Cursor title",
+        favorited: true,
+        tags: ["cursor-work"],
+        messageCount: 1,
+      });
+      await expect(store.searchSessions({ query: "Cached Cursor prompt", limit: 10 })).resolves.toHaveLength(0);
+      await expect(store.searchSessions({ query: "Current Cursor prompt", limit: 10 })).resolves.toHaveLength(1);
     } finally {
       await store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });

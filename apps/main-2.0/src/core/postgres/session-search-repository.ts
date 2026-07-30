@@ -5,6 +5,7 @@ import type {
   SessionSearchPage,
   SessionSearchResult,
 } from "../types";
+import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS } from "../refresh-policy";
 import type { PostgresDatabase } from "./database";
 import {
   SESSION_ACTIVITY_SQL,
@@ -18,6 +19,20 @@ import {
   searchTerms,
   type SessionRow,
 } from "./session-records";
+
+const LIVE_SESSION_KEY_SQL = `
+  case
+    when sessions.source in ('claude-cli', 'claude-app', 'claude-internal') then 'claude:' || sessions.raw_id
+    when sessions.source in ('codex-cli', 'codex-app', 'codex-internal') then 'codex:' || sessions.raw_id
+    when sessions.source = 'tclaude-cli' then 'tclaude:' || sessions.raw_id
+    when sessions.source = 'tcodex-cli' then 'tcodex:' || sessions.raw_id
+    when sessions.source = 'codebuddy-cli' then 'codebuddy:' || sessions.raw_id
+    when sessions.source = 'codewiz-cli' then 'codewiz:' || sessions.raw_id
+    when sessions.source = 'trae' then 'trae:' || sessions.raw_id
+    when sessions.source = 'qoder' then 'qoder:' || sessions.raw_id
+    else null
+  end
+`;
 
 export class PostgresSessionSearchRepository {
   constructor(private readonly database: PostgresDatabase) {}
@@ -71,29 +86,17 @@ export class PostgresSessionSearchRepository {
         )
       `);
     }
+    const liveKeys = [...new Set(options.liveSessionKeys ?? [])].filter(Boolean);
     if (options.liveStatus) {
-      const liveKeys = [...new Set(options.liveSessionKeys ?? [])].filter(Boolean);
       if (liveKeys.length === 0 && options.liveStatus === "open") {
         filters.push("false");
       } else if (liveKeys.length > 0) {
-        const liveExpression = `
-          case
-            when sessions.source in ('claude-cli', 'claude-app', 'claude-internal') then 'claude:' || sessions.raw_id
-            when sessions.source in ('codex-cli', 'codex-app', 'codex-internal') then 'codex:' || sessions.raw_id
-            when sessions.source = 'tclaude-cli' then 'tclaude:' || sessions.raw_id
-            when sessions.source = 'tcodex-cli' then 'tcodex:' || sessions.raw_id
-            when sessions.source = 'codebuddy-cli' then 'codebuddy:' || sessions.raw_id
-            when sessions.source = 'codewiz-cli' then 'codewiz:' || sessions.raw_id
-            when sessions.source = 'trae' then 'trae:' || sessions.raw_id
-            when sessions.source = 'qoder' then 'qoder:' || sessions.raw_id
-            else null
-          end
-        `;
         const placeholders = liveKeys.map((key) => bind(key)).join(", ");
+        const activeAfter = bind(new Date(Date.now() - LIVE_SESSION_INACTIVITY_TIMEOUT_MS).toISOString());
         filters.push(
           options.liveStatus === "open"
-            ? `${liveExpression} in (${placeholders})`
-            : `(${liveExpression} is null or ${liveExpression} not in (${placeholders}))`,
+            ? `(${LIVE_SESSION_KEY_SQL} in (${placeholders}) and ${SESSION_ACTIVITY_SQL} > ${activeAfter})`
+            : `(${LIVE_SESSION_KEY_SQL} is null or ${LIVE_SESSION_KEY_SQL} not in (${placeholders}) or ${SESSION_ACTIVITY_SQL} <= ${activeAfter})`,
         );
       }
     }
@@ -138,6 +141,9 @@ export class PostgresSessionSearchRepository {
     const limit = Math.max(0, options.limit ?? 200);
     const limitPlaceholder = bind(limit);
     const favoriteOrder = options.prioritizeFavorites === false ? "" : "sessions.favorited desc,";
+    const liveOrder = !options.liveStatus && liveKeys.length > 0
+      ? `case when ${LIVE_SESSION_KEY_SQL} in (${liveKeys.map((key) => bind(key)).join(", ")}) then 0 else 1 end,`
+      : "";
     const primarySort =
       options.sortBy === "created"
         ? "sessions.started_at desc"
@@ -171,7 +177,7 @@ export class PostgresSessionSearchRepository {
         join agent_recall.environments environments on environments.id = sessions.environment_id
         ${bestTurnJoin}
         where ${filters.join(" and ")}
-        order by ${favoriteOrder} ${primarySort}, sessions.session_key
+        order by ${liveOrder} ${favoriteOrder} ${primarySort}, sessions.session_key
         limit ${limitPlaceholder}
       `,
       values,

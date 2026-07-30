@@ -8,7 +8,7 @@ import {
   loadCodexSessionRows,
   loadCursorTranscriptFile,
   loadDefaultSessions,
-  loadDefaultSessionsIterator,
+  loadDefaultSessionsAsyncIterator,
   parseJsonlText,
   type SessionLoadOptions,
 } from "./session-loader";
@@ -63,7 +63,7 @@ function indexFailureMessage(failed: number): string | null {
 
 export async function syncLoadedSessionsInBatches(
   store: SessionStore,
-  loaded: Iterable<LoadedSession>,
+  loaded: Iterable<LoadedSession> | AsyncIterable<LoadedSession>,
   options: BatchIndexOptions = {},
 ): Promise<IndexStatus> {
   const batchSize = Math.max(1, options.batchSize ?? 3);
@@ -76,6 +76,7 @@ export async function syncLoadedSessionsInBatches(
   let total = 0;
   let pendingInBatch = 0;
   let sliceStartedAt = now();
+  let cursorSessionKeysByIdentity: Map<string, Set<string>> | null = null;
   const environments = await store.listEnvironments();
   const sshEnvironmentByHostAlias = new Map(
     environments
@@ -83,7 +84,7 @@ export async function syncLoadedSessionsInBatches(
       .map((environment) => [environment.hostAlias!, environment]),
   );
 
-  for (const loadedItem of loaded) {
+  for await (const loadedItem of loaded) {
     const item = await resolveExecutionEnvironment(
       store,
       loadedItem,
@@ -91,7 +92,33 @@ export async function syncLoadedSessionsInBatches(
       options.onEnvironmentsChanged,
     );
     try {
-      if (!options.forceReindex?.(item) && await store.isIndexedSessionFresh(item.session)) {
+      let sessionKeyMigrated = false;
+      if (item.session.source === "cursor-agent") {
+        if (!cursorSessionKeysByIdentity) {
+          cursorSessionKeysByIdentity = new Map();
+          for (const identity of await store.listSessionIdentitiesBySource("cursor-agent")) {
+            const key = `${identity.storageEnvironmentId}\u0000${identity.rawId}`;
+            const sessionKeys = cursorSessionKeysByIdentity.get(key) ?? new Set<string>();
+            sessionKeys.add(identity.sessionKey);
+            cursorSessionKeysByIdentity.set(key, sessionKeys);
+          }
+        }
+        const storageEnvironmentId =
+          item.session.storageEnvironmentId ?? item.session.environmentId ?? "local";
+        const identityKey = `${storageEnvironmentId}\u0000${item.session.rawId}`;
+        for (const previousKey of cursorSessionKeysByIdentity.get(identityKey) ?? []) {
+          if (previousKey === item.session.sessionKey) continue;
+          sessionKeyMigrated =
+            await store.migrateSessionKeyPreservingUserState(previousKey, item.session.sessionKey)
+            || sessionKeyMigrated;
+        }
+        cursorSessionKeysByIdentity.set(identityKey, new Set([item.session.sessionKey]));
+      }
+      if (
+        !sessionKeyMigrated
+        && !options.forceReindex?.(item)
+        && await store.isIndexedSessionFresh(item.session)
+      ) {
         await store.touchIndexedAtIfMissing(item.session.sessionKey);
         skipped++;
       } else {
@@ -179,7 +206,16 @@ export async function syncDefaultSessionsInBatches(
   store: SessionStore,
   options: BatchIndexOptions = {},
 ): Promise<IndexStatus> {
-  const indexedFiles = sessionFileSnapshots(await store.listIndexedSessionFiles());
+  const storedFiles = await store.listIndexedSessionFiles();
+  const indexedFiles = sessionFileSnapshots(storedFiles);
+  const incrementalCodexFiles = new Map<string, { offset: number; sessionKey: string }>();
+  for (const file of storedFiles) {
+    if (file.source !== "codex-cli" && file.source !== "codex-app" && file.source !== "tcodex-cli") continue;
+    incrementalCodexFiles.set(file.filePath, {
+      offset: file.fileSize,
+      sessionKey: file.sessionKey,
+    });
+  }
   const dependencyChangedFiles = new Set<string>();
   let fileSkipped = 0;
   const loadOptions = options.loadOptions ?? {};
@@ -187,8 +223,26 @@ export async function syncDefaultSessionsInBatches(
   const onSkippedFile = loadOptions.onSkippedFile;
   const scannedFilePaths = new Set<string>();
   const scannedSessionKeys = new Set<string>();
-  const rawLoaded = loadDefaultSessionsIterator({
+  const rawLoaded = loadDefaultSessionsAsyncIterator({
     ...loadOptions,
+    loadIncrementalCodexSession: async (filePath) => {
+      const previous = incrementalCodexFiles.get(filePath);
+      if (!previous) return undefined;
+      const session = await store.getSession(previous.sessionKey);
+      if (!session) return undefined;
+      const messages = await store.getAllMessages(previous.sessionKey);
+      const tokenEvents = await store.getTokenEvents(previous.sessionKey);
+      const traceEvents = await store.getTraceEvents(previous.sessionKey);
+      return {
+        offset: previous.offset,
+        loaded: {
+          session,
+          messages,
+          tokenEvents,
+          traceEvents,
+        },
+      };
+    },
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0) => {
       scannedFilePaths.add(filePath);
       const customDecision = shouldSkipFile?.(filePath, stat, dependencyMtimeMs);
@@ -196,6 +250,7 @@ export async function syncDefaultSessionsInBatches(
       const snapshot = findSessionFileSnapshot(indexedFiles, filePath, stat);
       if (snapshot !== undefined && dependencyMtimeMs > snapshot.indexedAt) {
         dependencyChangedFiles.add(filePath);
+        incrementalCodexFiles.delete(filePath);
       }
       return snapshot !== undefined && snapshot.indexedAt > 0 && dependencyMtimeMs <= snapshot.indexedAt;
     },
@@ -204,8 +259,8 @@ export async function syncDefaultSessionsInBatches(
       onSkippedFile?.(filePath, stat);
     },
   });
-  const loaded = (function* () {
-    for (const item of rawLoaded) {
+  const loaded = (async function* () {
+    for await (const item of rawLoaded) {
       if (item.session.filePath) scannedFilePaths.add(item.session.filePath);
       scannedSessionKeys.add(item.session.sessionKey);
       yield item;

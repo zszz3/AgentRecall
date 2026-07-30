@@ -69,6 +69,7 @@ describe("startPostgresRuntime", () => {
       userDataPath,
       environment: {},
       createEmbedded,
+      isRuntimeAvailable: async () => false,
       choosePort: async () => 59999,
       createPassword: () => "must-not-replace-secret",
     });
@@ -92,6 +93,35 @@ describe("startPostgresRuntime", () => {
     const mode = (await fs.stat(credentialsPath)).mode & 0o777;
     if (process.platform !== "win32") expect(mode).toBe(0o600);
     await second.stop();
+  });
+
+  it("reuses a healthy managed server left running by an earlier app process", async () => {
+    const userDataPath = await temporaryUserData();
+    const firstInstance = new FakeEmbeddedPostgres();
+    const first = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      createEmbedded: () => firstInstance,
+      choosePort: async () => 55441,
+      createPassword: () => "local-test-secret",
+    });
+    await first.stop();
+
+    const createEmbedded = vi.fn();
+    const isRuntimeAvailable = vi.fn(async () => true);
+    const reused = await startPostgresRuntime({
+      userDataPath,
+      environment: {},
+      createEmbedded,
+      isRuntimeAvailable,
+    });
+
+    expect(isRuntimeAvailable).toHaveBeenCalledWith(first.connectionUrl);
+    expect(createEmbedded).not.toHaveBeenCalled();
+    expect(reused.connectionUrl).toBe(first.connectionUrl);
+    expect(reused.managed).toBe(true);
+    await reused.stop();
+    expect(firstInstance.stop).toHaveBeenCalledOnce();
   });
 
   it("stops a managed server when database creation fails", async () => {

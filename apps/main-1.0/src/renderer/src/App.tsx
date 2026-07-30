@@ -399,7 +399,7 @@ export function App(): ReactElement {
       dateTo,
       limit: sessionLimit,
       liveStatus: liveStatus === "all" ? undefined : liveStatus,
-      liveSessionKeys: liveStatus === "all" || liveDetectionFailed ? [] : liveSearchKeys,
+      liveSessionKeys: liveDetectionFailed ? [] : liveSearchKeys,
     };
     const page = searchScope.projectEnvironmentConflict
       ? { sessions: [], totalCount: 0, hasMore: false }

@@ -20,6 +20,26 @@ describe("createAutomationApi", () => {
     expect(ipc.invoke).toHaveBeenNthCalledWith(3, AUTOMATION_CHANNELS.workflowDraftCreate, { title: "Ship" });
   });
 
+  it("keeps portable Workflow file contents behind explicit IPC calls", async () => {
+    const ipc = { invoke: vi.fn(async () => ({ ok: true })), on: vi.fn(), removeListener: vi.fn() };
+    const api = createAutomationApi(ipc as never);
+    const request = { previewToken: "workflow_import_1", agentMappings: { missing: "agent-1" } };
+
+    await api.cloneOfficialWorkflow("official-1");
+    await api.beginWorkflowImport();
+    await api.confirmWorkflowImport(request);
+    await api.cancelWorkflowImport("workflow_import_2");
+    await api.exportWorkflow("personal-1");
+
+    expect(ipc.invoke.mock.calls).toEqual([
+      [AUTOMATION_CHANNELS.workflowCloneOfficial, "official-1"],
+      [AUTOMATION_CHANNELS.workflowImportBegin],
+      [AUTOMATION_CHANNELS.workflowImportConfirm, request],
+      [AUTOMATION_CHANNELS.workflowImportCancel, { previewToken: "workflow_import_2" }],
+      [AUTOMATION_CHANNELS.workflowExport, "personal-1"],
+    ]);
+  });
+
   it("unsubscribes snapshot listeners with the same callback", () => {
     const ipc = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
     const api = createAutomationApi(ipc as never);

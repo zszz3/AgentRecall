@@ -65,6 +65,13 @@ function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefi
     workflows: hub,
     mcp,
     evaluations,
+    portableWorkflows: {
+      cloneOfficialWorkflow: vi.fn(async (workflowId) => ({ workflowId })),
+      beginImport: vi.fn(async () => ({ previewToken: "workflow_import_1" })),
+      confirmImport: vi.fn(async (previewToken, mapping) => ({ previewToken, mapping })),
+      cancelImport: vi.fn(),
+      exportWorkflow: vi.fn(async () => ({ status: "exported" })),
+    },
     resolveRuntimeApproval: vi.fn(),
   } as unknown as NativeAutomationService;
   registerAutomationIpc({ ipc: ipc as never, service, send: vi.fn(), pickDirectory });
@@ -77,6 +84,16 @@ describe("registerAutomationIpc", () => {
     const { handlers } = setup();
     expect([...handlers.keys()].length).toBeGreaterThan(30);
     expect([...handlers.keys()].every((channel) => channel.startsWith("automation:"))).toBe(true);
+  });
+
+  it("validates portable Workflow identifiers and mapping payloads", async () => {
+    const { invoke, service } = setup();
+    const portable = service.portableWorkflows;
+
+    await expect(invoke(AUTOMATION_CHANNELS.workflowCloneOfficial, "official-1")).resolves.toEqual({ workflowId: "official-1" });
+    await expect(invoke(AUTOMATION_CHANNELS.workflowImportConfirm, { previewToken: "workflow_import_1", agentMappings: { missing: "agent-1" } })).resolves.toMatchObject({ previewToken: "workflow_import_1" });
+    expect(portable.confirmImport).toHaveBeenCalledWith("workflow_import_1", { previewToken: "workflow_import_1", agentMappings: { missing: "agent-1" } });
+    await expect(invoke(AUTOMATION_CHANNELS.workflowImportConfirm, { previewToken: "", definition: {} })).rejects.toThrow();
   });
 
   it("loads the overview snapshot without starting the execution engine", async () => {
@@ -150,6 +167,30 @@ describe("registerAutomationIpc", () => {
 
     await expect(invoke(AUTOMATION_CHANNELS.mcpSave, server)).rejects.toThrow(/http/i);
     expect(registry.upsert).not.toHaveBeenCalled();
+  });
+
+  it("persists disabled tools through the mcpSave schema boundary", async () => {
+    const { invoke, registry } = setup();
+    const server = {
+      id: "docs",
+      name: "Docs",
+      transport: "stdio",
+      command: "node",
+      args: ["server.js"],
+      env: {},
+      enabled: true,
+      tools: [{ name: "search", inputSchema: {} }],
+      disabledTools: ["search"],
+      status: "untested",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    await invoke(AUTOMATION_CHANNELS.mcpSave, server);
+
+    expect(registry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ disabledTools: ["search"] }),
+    );
   });
 
   it("refreshes runtime MCP state and removes stale Agent bindings after deletion", async () => {

@@ -33,6 +33,10 @@ import type { PostgresDatabase } from "../../core/postgres/database";
 import { TeamChatService } from "../team-chat/team-chat-service";
 import { PostgresTeamChatStore } from "../team-chat/postgres-team-chat-store";
 import { McpAutomationModule } from "./mcp-automation-module";
+import {
+  WorkflowPortableService,
+  type WorkflowPortableFileSelection,
+} from "./workflow-portable-service";
 
 export interface AutomationServiceOptions {
   database: PostgresDatabase;
@@ -41,6 +45,9 @@ export interface AutomationServiceOptions {
   appDataPath: string;
   bundledWorkflowsPath: string;
   workflowMcpServerPath: string;
+  chooseWorkflowImportFile?: () => Promise<WorkflowPortableFileSelection | undefined>;
+  chooseWorkflowExportPath?: (defaultFileName: string) => Promise<string | undefined>;
+  writeWorkflowExportFile?: (filePath: string, content: string) => Promise<void>;
 }
 
 interface AutomationServiceDependencies {
@@ -88,7 +95,7 @@ function workflowRunVersion(run: AppSnapshot["workflowStore"]["runs"][number]): 
 }
 
 function buildWorkflowPatch(current: AppSnapshot, next: Partial<WorkflowAutomationProjection>): WorkflowAutomationPatch {
-  const workflows = next.workflowStore ? diffEntities(current.workflowStore.workflows, next.workflowStore.workflows, (value) => value.workflowId, (value) => `${value.updatedAt}:${value.revision}:${value.status}:${value.messages.length}:${value.messages.at(-1)?.id ?? ""}:${value.messages.at(-1)?.content ?? ""}`) : undefined;
+  const workflows = next.workflowStore ? diffEntities(current.workflowStore.workflows, next.workflowStore.workflows, (value) => value.workflowId, (value) => JSON.stringify([value.updatedAt, value.revision, value.status, value.sourceType, value.topologyLocked, value.origin, value.messages.length, value.messages.at(-1)?.id ?? "", value.messages.at(-1)?.content ?? ""])) : undefined;
   const runs = next.workflowStore ? diffEntities(current.workflowStore.runs, next.workflowStore.runs, (value) => value.runId, workflowRunVersion) : undefined;
   const conversations = next.workflowNodeConversations ? diffEntities(current.workflowNodeConversations, next.workflowNodeConversations, (value) => value.conversationId, (value) => `${value.updatedAt}:${value.status}:${value.messages.length}:${value.messages.at(-1)?.id ?? ""}:${value.messages.at(-1)?.content ?? ""}`) : undefined;
   const tasks = next.tasks ? diffEntities(current.tasks, next.tasks, (value) => value.id, (value) => `${value.updatedAt}:${value.status}:${value.messages.length}:${value.messages.at(-1)?.id ?? ""}:${value.messages.at(-1)?.content ?? ""}`) : undefined;
@@ -96,6 +103,9 @@ function buildWorkflowPatch(current: AppSnapshot, next: Partial<WorkflowAutomati
   return {
     ...(next.workflowStore && current.workflowStore.activeWorkflowId !== next.workflowStore.activeWorkflowId
       ? { activeWorkflowId: next.workflowStore.activeWorkflowId ?? null }
+      : {}),
+    ...(next.workflowStore && JSON.stringify(current.workflowStore.readinessByWorkflowId ?? {}) !== JSON.stringify(next.workflowStore.readinessByWorkflowId ?? {})
+      ? { readinessByWorkflowId: next.workflowStore.readinessByWorkflowId ?? {} }
       : {}),
     ...(workflows ? { workflows } : {}),
     ...(runs ? { runs } : {}),
@@ -128,6 +138,7 @@ function applyWorkflowPatch(current: AppSnapshot, patch: WorkflowAutomationPatch
       activeWorkflowId,
       workflows,
       runs,
+      ...(patch.readinessByWorkflowId !== undefined ? { readinessByWorkflowId: patch.readinessByWorkflowId } : {}),
     },
     workflowDraft: projection.workflowDraft ?? workflows.find((workflow) => workflow.workflowId === activeWorkflowId),
     workflowNodeConversations: applyEntityPatch(current.workflowNodeConversations, patch.conversations, (value) => value.conversationId),
@@ -193,6 +204,7 @@ export class NativeAutomationService {
   readonly mcp: McpAutomationModule;
   readonly evaluations: EvaluationService;
   readonly teamChat: TeamChatService;
+  readonly portableWorkflows: WorkflowPortableService;
   private readonly hubInstance: AgentHub;
   private readonly configuredAgentExecutor: ConfiguredAgentExecutionService;
   private readonly registryInstance: McpRegistryStore;
@@ -255,6 +267,18 @@ export class NativeAutomationService {
     });
     this.runtime = this.hubInstance;
     this.workflows = this.hubInstance;
+    this.portableWorkflows = new WorkflowPortableService({
+      hub: this.hubInstance,
+      chooseImportFile: options.chooseWorkflowImportFile ?? (async () => {
+        throw new Error("Workflow import file picker is unavailable.");
+      }),
+      chooseExportPath: options.chooseWorkflowExportPath ?? (async () => {
+        throw new Error("Workflow export file picker is unavailable.");
+      }),
+      writeExportFile: options.writeWorkflowExportFile ?? (async () => {
+        throw new Error("Workflow export writer is unavailable.");
+      }),
+    });
     this.mcp = new McpAutomationModule({
       registry: this.registryInstance,
       agents: this.agentsInstance,

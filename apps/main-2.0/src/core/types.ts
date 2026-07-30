@@ -479,6 +479,7 @@ export interface LiveSession {
   family: LiveSessionFamily;
   rawId: string;
   pid: number;
+  environmentId?: string;
 }
 
 export interface LiveSessionSnapshot {

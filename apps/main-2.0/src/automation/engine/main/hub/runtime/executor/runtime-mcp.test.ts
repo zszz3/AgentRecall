@@ -87,6 +87,28 @@ describe("runtime MCP configuration", () => {
     expect(names.every((name) => name.startsWith("agent_recall_"))).toBe(true);
   });
 
+  test("excludes disabled tools from Codex and Claude configurations", () => {
+    const bindings: BoundMcpServer[] = [
+      {
+        server: {
+          ...servers[0]!.server,
+          disabledTools: ["read_file"],
+        },
+        toolAllowlist: [],
+      },
+    ];
+
+    const codex = codexMcpLaunchConfig(bindings, { HOST_API_TOKEN: "secret-value" });
+    expect(codex.args.join("\n")).toContain('enabled_tools=["write_file"]');
+
+    const claude = claudeMcpServers(bindings, { HOST_API_TOKEN: "secret-value" });
+    const server = Object.values(claude ?? {})[0] as { tools?: { name: string; permission_policy: string }[] };
+    expect(server.tools).toEqual(expect.arrayContaining([
+      { name: "read_file", permission_policy: "always_deny" },
+      { name: "write_file", permission_policy: "always_allow" },
+    ]));
+  });
+
   test("projects the complete workflow binding into ACP environment entries", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "workflow-acp-mcp-"));
     const serverScriptPath = path.join(dir, "server.js");

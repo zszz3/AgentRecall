@@ -229,4 +229,34 @@ describe("deriveSessionTimeline", () => {
       "token",
     ]);
   });
+
+  it("assigns large trace histories without rescanning every Turn", () => {
+    const startedAt = Date.parse("2026-07-23T10:00:00.000Z");
+    const manyMessages = Array.from({ length: 800 }, (_, index): SessionMessage => ({
+      role: "user",
+      content: `request ${index}`,
+      timestamp: new Date(startedAt + index * 1_000).toISOString(),
+      index,
+    }));
+    const manyTraceEvents = Array.from({ length: 8_000 }, (_, index): SessionTraceEvent => ({
+      index,
+      kind: "event",
+      source: "codex",
+      title: "progress",
+      detail: "",
+      timestamp: new Date(startedAt + (index % manyMessages.length) * 1_000 + 1).toISOString(),
+      status: "success",
+    }));
+
+    const before = performance.now();
+    const timeline = deriveSessionTimeline({
+      sessionKey: "codex:large",
+      messages: manyMessages,
+      traceEvents: manyTraceEvents,
+    });
+
+    expect(timeline.turns).toHaveLength(manyMessages.length);
+    expect(timeline.rawEvents).toHaveLength(manyMessages.length + manyTraceEvents.length);
+    expect(performance.now() - before).toBeLessThan(1_500);
+  });
 });

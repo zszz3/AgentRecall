@@ -67,6 +67,7 @@ export async function syncLoadedSessionsInBatches(
   let total = 0;
   let pendingInBatch = 0;
   let sliceStartedAt = now();
+  let cursorSessionKeysByIdentity: Map<string, Set<string>> | null = null;
   const sshEnvironmentByHostAlias = new Map(
     store
       .listEnvironments()
@@ -81,7 +82,33 @@ export async function syncLoadedSessionsInBatches(
       sshEnvironmentByHostAlias,
       options.onEnvironmentsChanged,
     );
-    if (!options.forceReindex?.(item) && store.isIndexedSessionFresh(item.session)) {
+    let sessionKeyMigrated = false;
+    if (item.session.source === "cursor-agent") {
+      if (!cursorSessionKeysByIdentity) {
+        cursorSessionKeysByIdentity = new Map();
+        for (const identity of store.listSessionIdentitiesBySource("cursor-agent")) {
+          const key = `${identity.storageEnvironmentId}\u0000${identity.rawId}`;
+          const sessionKeys = cursorSessionKeysByIdentity.get(key) ?? new Set<string>();
+          sessionKeys.add(identity.sessionKey);
+          cursorSessionKeysByIdentity.set(key, sessionKeys);
+        }
+      }
+      const storageEnvironmentId =
+        item.session.storageEnvironmentId ?? item.session.environmentId ?? "local";
+      const identityKey = `${storageEnvironmentId}\u0000${item.session.rawId}`;
+      for (const previousKey of cursorSessionKeysByIdentity.get(identityKey) ?? []) {
+        if (previousKey === item.session.sessionKey) continue;
+        sessionKeyMigrated =
+          store.migrateSessionKeyPreservingUserState(previousKey, item.session.sessionKey)
+          || sessionKeyMigrated;
+      }
+      cursorSessionKeysByIdentity.set(identityKey, new Set([item.session.sessionKey]));
+    }
+    if (
+      !sessionKeyMigrated
+      && !options.forceReindex?.(item)
+      && store.isIndexedSessionFresh(item.session)
+    ) {
       store.touchIndexedAtIfMissing(item.session.sessionKey);
       skipped++;
     } else {
@@ -148,7 +175,23 @@ function resolveExecutionEnvironment(
 }
 
 export function syncDefaultSessionsInBatches(store: SessionStore, options: BatchIndexOptions = {}): Promise<IndexStatus> {
-  const indexedFiles = sessionFileSnapshots(store.listIndexedSessionFiles());
+  const storedFiles = store.listIndexedSessionFiles();
+  const indexedFiles = sessionFileSnapshots(storedFiles);
+  const incrementalCodexSessions = new Map<string, { offset: number; loaded: LoadedSession }>();
+  for (const file of storedFiles) {
+    if (file.source !== "codex-cli" && file.source !== "codex-app" && file.source !== "tcodex-cli") continue;
+    const session = store.getSession(file.sessionKey);
+    if (!session) continue;
+    incrementalCodexSessions.set(file.filePath, {
+      offset: file.fileSize,
+      loaded: {
+        session,
+        messages: store.getAllMessages(file.sessionKey),
+        tokenEvents: store.getTokenEvents(file.sessionKey),
+        traceEvents: store.getTraceEvents(file.sessionKey),
+      },
+    });
+  }
   const dependencyChangedFiles = new Set<string>();
   let fileSkipped = 0;
   const loadOptions = options.loadOptions ?? {};
@@ -158,6 +201,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   const scannedSessionKeys = new Set<string>();
   const rawLoaded = loadDefaultSessionsIterator({
     ...loadOptions,
+    incrementalCodexSessions,
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0) => {
       scannedFilePaths.add(filePath);
       const customDecision = shouldSkipFile?.(filePath, stat, dependencyMtimeMs);
@@ -165,6 +209,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
       const snapshot = findSessionFileSnapshot(indexedFiles, filePath, stat);
       if (snapshot !== undefined && dependencyMtimeMs > snapshot.indexedAt) {
         dependencyChangedFiles.add(filePath);
+        incrementalCodexSessions.delete(filePath);
       }
       return snapshot !== undefined && snapshot.indexedAt > 0 && dependencyMtimeMs <= snapshot.indexedAt;
     },

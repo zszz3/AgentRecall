@@ -286,6 +286,8 @@ describe("PostgresSessionRepository", () => {
     await expect(repository.isIndexedSessionFresh(session())).resolves.toBe(true);
     await expect(repository.isIndexedSessionFresh(session({ fileSize: 101 }))).resolves.toBe(false);
     await expect(repository.listIndexedSessionFiles()).resolves.toEqual([{
+      sessionKey: "codex:session-a",
+      source: "codex-cli",
       filePath: "/fixtures/session-a.jsonl",
       fileMtimeMs: 200,
       fileSize: 100,

@@ -61,4 +61,15 @@ describe("applyAutomationChange", () => {
 
     expect(result.snapshot.workflowDraft?.definition).toBe(definition);
   });
+
+  it("preserves and updates derived Workflow readiness across incremental events", () => {
+    const snapshot = { ...DEFAULT_SNAPSHOT, workflowStore: { ...DEFAULT_SNAPSHOT.workflowStore, readinessByWorkflowId: { wf: { ready: false, issues: [] } } } };
+    const unrelated = applyAutomationChange(snapshot, change(1), undefined);
+    expect(unrelated.snapshot.workflowStore.readinessByWorkflowId).toEqual(snapshot.workflowStore.readinessByWorkflowId);
+
+    const readinessChange = change(2);
+    readinessChange.payload.readinessByWorkflowId = { wf: { ready: true, issues: [] } };
+    const updated = applyAutomationChange(unrelated.snapshot, readinessChange, 1);
+    expect(updated.snapshot.workflowStore.readinessByWorkflowId).toEqual({ wf: { ready: true, issues: [] } });
+  });
 });

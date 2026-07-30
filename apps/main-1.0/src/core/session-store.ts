@@ -124,7 +124,7 @@ export class SessionStore {
 
   listIndexedSessionFiles(
     environmentId = "local",
-  ): Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
+  ): Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
     return this.sessions.listIndexedSessionFiles(environmentId);
   }
 
@@ -163,6 +163,14 @@ export class SessionStore {
 
   migrateSessionKeyPreservingUserState(legacyKey: string, targetKey: string): boolean {
     return this.sessions.migrateSessionKeyPreservingUserState(legacyKey, targetKey);
+  }
+
+  listSessionIdentitiesBySource(source: SessionSource): Array<{
+    sessionKey: string;
+    rawId: string;
+    storageEnvironmentId: string;
+  }> {
+    return this.sessions.listSessionIdentitiesBySource(source);
   }
 
   listSessionKeysByFilePath(
@@ -266,6 +274,10 @@ export class SessionStore {
 
   getTraceEvents(sessionKey: string, options: TraceEventQueryOptions = {}): SessionTraceEvent[] {
     return this.sessions.getTraceEvents(sessionKey, options);
+  }
+
+  getTokenEvents(sessionKey: string): TokenUsageEvent[] {
+    return this.sessions.getTokenEvents(sessionKey);
   }
 
   isSkillUsageSourceFresh(source: SkillUsageSource): boolean {

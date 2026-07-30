@@ -260,120 +260,182 @@ function publicProjectSummary(draft: ProjectSummaryDraft): ProjectSummary {
   };
 }
 
-async function insertRawEvent(
+const INDEX_INSERT_BATCH_SIZE = 1_000;
+
+async function insertRawEvents(
   client: PostgresQueryable,
   sessionKey: string,
-  event: DerivedRawEvent,
+  events: readonly DerivedRawEvent[],
 ): Promise<void> {
-  await client.query(
-    `
-      insert into agent_recall.session_raw_events (
-        session_key, event_index, event_id, kind, role, occurred_at, payload
-      )
-      values ($1, $2, $3, $4, $5, $6, $7::jsonb)
-    `,
-    [
-      sessionKey,
-      event.eventIndex,
-      event.eventId,
-      event.kind,
-      event.role,
-      event.occurredAt,
-      JSON.stringify(event.payload),
-    ],
-  );
+  for (let offset = 0; offset < events.length; offset += INDEX_INSERT_BATCH_SIZE) {
+    const batch = events.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
+    await client.query(
+      `
+        insert into agent_recall.session_raw_events (
+          session_key, event_index, event_id, kind, role, occurred_at, payload
+        )
+        select $1, event_index, event_id, kind, role, occurred_at, payload
+        from jsonb_to_recordset($2::jsonb) as records(
+          event_index integer,
+          event_id text,
+          kind text,
+          role text,
+          occurred_at timestamptz,
+          payload jsonb
+        )
+      `,
+      [sessionKey, JSON.stringify(batch.map((event) => ({
+        event_index: event.eventIndex,
+        event_id: event.eventId,
+        kind: event.kind,
+        role: event.role,
+        occurred_at: event.occurredAt,
+        payload: event.payload,
+      })))],
+    );
+  }
 }
 
-async function insertTurn(
+async function insertTurns(
   client: PostgresQueryable,
   sessionKey: string,
-  turn: DerivedSessionTurn,
+  turns: readonly DerivedSessionTurn[],
 ): Promise<void> {
-  await client.query(
-    `
-      insert into agent_recall.session_turns (
-        id, session_key, turn_index, source_message_index, synthetic, status,
-        started_at, ended_at, user_text, assistant_text, tool_text, search_text,
-        input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
-        total_tokens, error_count, tool_names, derivation_version
-      )
-      values (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, $16, $17, $18, $19, $20
-      )
-    `,
-    [
-      turn.id,
-      sessionKey,
-      turn.turnIndex,
-      turn.sourceMessageIndex,
-      turn.synthetic,
-      turn.status,
-      turn.startedAt,
-      turn.endedAt,
-      turn.userText,
-      turn.assistantText,
-      turn.toolText,
-      turn.searchText,
-      turn.inputTokens,
-      turn.outputTokens,
-      turn.cachedInputTokens,
-      turn.reasoningOutputTokens,
-      turn.totalTokens,
-      turn.errorCount,
-      turn.toolNames,
-      turn.derivationVersion,
-    ],
-  );
+  for (let offset = 0; offset < turns.length; offset += INDEX_INSERT_BATCH_SIZE) {
+    const batch = turns.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
+    await client.query(
+      `
+        insert into agent_recall.session_turns (
+          id, session_key, turn_index, source_message_index, synthetic, status,
+          started_at, ended_at, user_text, assistant_text, tool_text, search_text,
+          input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+          total_tokens, error_count, tool_names, derivation_version
+        )
+        select
+          id, $1, turn_index, source_message_index, synthetic, status,
+          started_at, ended_at, user_text, assistant_text, tool_text, search_text,
+          input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+          total_tokens, error_count, tool_names, derivation_version
+        from jsonb_to_recordset($2::jsonb) as records(
+          id text,
+          turn_index integer,
+          source_message_index integer,
+          synthetic boolean,
+          status text,
+          started_at timestamptz,
+          ended_at timestamptz,
+          user_text text,
+          assistant_text text,
+          tool_text text,
+          search_text text,
+          input_tokens integer,
+          output_tokens integer,
+          cached_input_tokens integer,
+          reasoning_output_tokens integer,
+          total_tokens integer,
+          error_count integer,
+          tool_names text[],
+          derivation_version integer
+        )
+      `,
+      [sessionKey, JSON.stringify(batch.map((turn) => ({
+        id: turn.id,
+        turn_index: turn.turnIndex,
+        source_message_index: turn.sourceMessageIndex,
+        synthetic: turn.synthetic,
+        status: turn.status,
+        started_at: turn.startedAt,
+        ended_at: turn.endedAt,
+        user_text: turn.userText,
+        assistant_text: turn.assistantText,
+        tool_text: turn.toolText,
+        search_text: turn.searchText,
+        input_tokens: turn.inputTokens,
+        output_tokens: turn.outputTokens,
+        cached_input_tokens: turn.cachedInputTokens,
+        reasoning_output_tokens: turn.reasoningOutputTokens,
+        total_tokens: turn.totalTokens,
+        error_count: turn.errorCount,
+        tool_names: turn.toolNames,
+        derivation_version: turn.derivationVersion,
+      })))],
+    );
+  }
 
-  for (const message of turn.messages) {
+  const messages = turns.flatMap((turn) => turn.messages.map((message) => ({
+    turn_id: turn.id,
+    message_index: message.messageIndex,
+    source_message_index: message.sourceMessageIndex,
+    role: message.role,
+    content: message.content,
+    occurred_at: message.occurredAt,
+    metadata: message.metadata,
+  })));
+  for (let offset = 0; offset < messages.length; offset += INDEX_INSERT_BATCH_SIZE) {
     await client.query(
       `
         insert into agent_recall.turn_messages (
           turn_id, message_index, source_message_index, role, content, occurred_at, metadata
         )
-        values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        select turn_id, message_index, source_message_index, role, content, occurred_at, metadata
+        from jsonb_to_recordset($1::jsonb) as records(
+          turn_id text,
+          message_index integer,
+          source_message_index integer,
+          role text,
+          content text,
+          occurred_at timestamptz,
+          metadata jsonb
+        )
       `,
-      [
-        turn.id,
-        message.messageIndex,
-        message.sourceMessageIndex,
-        message.role,
-        message.content,
-        message.occurredAt,
-        JSON.stringify(message.metadata),
-      ],
+      [JSON.stringify(messages.slice(offset, offset + INDEX_INSERT_BATCH_SIZE))],
     );
   }
 
-  for (const span of turn.spans) {
+  const spans = turns.flatMap((turn) => turn.spans.map((span) => ({
+    id: span.id,
+    turn_id: turn.id,
+    parent_span_id: span.parentSpanId,
+    span_index: span.spanIndex,
+    kind: span.kind,
+    name: span.name,
+    status: span.status,
+    started_at: span.startedAt,
+    ended_at: span.endedAt,
+    call_id: span.callId,
+    input: span.input,
+    output: span.output,
+    error: span.error,
+    attributes: span.attributes,
+  })));
+  for (let offset = 0; offset < spans.length; offset += INDEX_INSERT_BATCH_SIZE) {
     await client.query(
       `
         insert into agent_recall.trace_spans (
           id, turn_id, parent_span_id, span_index, kind, name, status,
           started_at, ended_at, call_id, input, output, error, attributes
         )
-        values (
-          $1, $2, $3, $4, $5, $6, $7,
-          $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14::jsonb
+        select
+          id, turn_id, parent_span_id, span_index, kind, name, status,
+          started_at, ended_at, call_id, input, output, error, attributes
+        from jsonb_to_recordset($1::jsonb) as records(
+          id text,
+          turn_id text,
+          parent_span_id text,
+          span_index integer,
+          kind text,
+          name text,
+          status text,
+          started_at timestamptz,
+          ended_at timestamptz,
+          call_id text,
+          input jsonb,
+          output jsonb,
+          error text,
+          attributes jsonb
         )
       `,
-      [
-        span.id,
-        turn.id,
-        span.parentSpanId,
-        span.spanIndex,
-        span.kind,
-        span.name,
-        span.status,
-        span.startedAt,
-        span.endedAt,
-        span.callId,
-        span.input ? JSON.stringify(span.input) : null,
-        span.output ? JSON.stringify(span.output) : null,
-        span.error,
-        JSON.stringify(span.attributes),
-      ],
+      [JSON.stringify(spans.slice(offset, offset + INDEX_INSERT_BATCH_SIZE))],
     );
   }
 }
@@ -531,64 +593,102 @@ export class PostgresSessionRepository {
       await client.query("delete from agent_recall.session_turns where session_key = $1", [session.sessionKey]);
       await client.query("delete from agent_recall.token_events where session_key = $1", [session.sessionKey]);
 
-      for (const event of timeline.rawEvents) await insertRawEvent(client, session.sessionKey, event);
-      for (const message of persistedMessages) {
+      await insertRawEvents(client, session.sessionKey, timeline.rawEvents);
+      const messageEvents = persistedMessages.map((message) => {
         const occurredAt = Date.parse(message.timestamp);
+        return {
+          message_index: message.index,
+          occurred_at: new Date(Number.isFinite(occurredAt) && occurredAt >= 0 ? occurredAt : 0).toISOString(),
+        };
+      });
+      for (let offset = 0; offset < messageEvents.length; offset += INDEX_INSERT_BATCH_SIZE) {
         await client.query(
           `
             insert into agent_recall.session_message_events (
               session_key, message_index, occurred_at
             )
-            values ($1, $2, $3)
+            select $1, message_index, occurred_at
+            from jsonb_to_recordset($2::jsonb) as records(
+              message_index integer,
+              occurred_at timestamptz
+            )
           `,
           [
             session.sessionKey,
-            message.index,
-            new Date(Number.isFinite(occurredAt) && occurredAt >= 0 ? occurredAt : 0).toISOString(),
+            JSON.stringify(messageEvents.slice(offset, offset + INDEX_INSERT_BATCH_SIZE)),
           ],
         );
       }
-      for (const turn of timeline.turns) await insertTurn(client, session.sessionKey, turn);
-      for (const attachment of attachmentRows) {
+      await insertTurns(client, session.sessionKey, timeline.turns);
+      for (let offset = 0; offset < attachmentRows.length; offset += INDEX_INSERT_BATCH_SIZE) {
+        const batch = attachmentRows.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
         await client.query(
           `
             insert into agent_recall.session_attachments (
               session_key, attachment_id, message_index, file_name, mime_type,
               preview_kind, status, size_bytes, cache_path
             )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            select
+              $1, attachment_id, message_index, file_name, mime_type,
+              preview_kind, status, size_bytes, cache_path
+            from jsonb_to_recordset($2::jsonb) as records(
+              attachment_id text,
+              message_index integer,
+              file_name text,
+              mime_type text,
+              preview_kind text,
+              status text,
+              size_bytes bigint,
+              cache_path text
+            )
           `,
           [
             session.sessionKey,
-            attachment.id,
-            attachment.messageIndex,
-            attachment.fileName,
-            attachment.mimeType,
-            attachment.previewKind,
-            attachment.status,
-            attachment.sizeBytes ?? null,
-            attachment.cachePath,
+            JSON.stringify(batch.map((attachment) => ({
+              attachment_id: attachment.id,
+              message_index: attachment.messageIndex,
+              file_name: attachment.fileName,
+              mime_type: attachment.mimeType,
+              preview_kind: attachment.previewKind,
+              status: attachment.status,
+              size_bytes: attachment.sizeBytes ?? null,
+              cache_path: attachment.cachePath,
+            }))),
           ],
         );
       }
-      for (const event of persistedTokenEvents) {
+      for (let offset = 0; offset < persistedTokenEvents.length; offset += INDEX_INSERT_BATCH_SIZE) {
+        const batch = persistedTokenEvents.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
         await client.query(
           `
             insert into agent_recall.token_events (
               session_key, dedupe_key, occurred_at, input_tokens, output_tokens,
               cached_input_tokens, reasoning_output_tokens, total_tokens
             )
-            values ($1, $2, $3, $4, $5, $6, $7, $8)
+            select
+              $1, dedupe_key, occurred_at, input_tokens, output_tokens,
+              cached_input_tokens, reasoning_output_tokens, total_tokens
+            from jsonb_to_recordset($2::jsonb) as records(
+              dedupe_key text,
+              occurred_at timestamptz,
+              input_tokens bigint,
+              output_tokens bigint,
+              cached_input_tokens bigint,
+              reasoning_output_tokens bigint,
+              total_tokens bigint
+            )
           `,
           [
             session.sessionKey,
-            event.dedupeKey,
-            new Date(Math.max(0, event.timestamp)).toISOString(),
-            event.inputTokens,
-            event.outputTokens,
-            event.cachedInputTokens,
-            event.reasoningOutputTokens,
-            event.totalTokens,
+            JSON.stringify(batch.map((event) => ({
+              dedupe_key: event.dedupeKey,
+              occurred_at: new Date(Math.max(0, event.timestamp)).toISOString(),
+              input_tokens: event.inputTokens,
+              output_tokens: event.outputTokens,
+              cached_input_tokens: event.cachedInputTokens,
+              reasoning_output_tokens: event.reasoningOutputTokens,
+              total_tokens: event.totalTokens,
+            }))),
           ],
         );
       }
@@ -865,15 +965,17 @@ export class PostgresSessionRepository {
 
   async listIndexedSessionFiles(
     environmentId = "local",
-  ): Promise<Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>> {
+  ): Promise<Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>> {
     const result = await this.database.query<{
+      session_key: string;
+      source: SessionSource;
       file_path: string;
       file_mtime_ms: number | string;
       file_size: number | string;
       indexed_at: Date | string;
     }>(
       `
-        select file_path, file_mtime_ms, file_size, indexed_at
+        select session_key, source, file_path, file_mtime_ms, file_size, indexed_at
         from agent_recall.sessions
         where environment_id = $1 and file_path <> ''
         order by file_path
@@ -881,10 +983,39 @@ export class PostgresSessionRepository {
       [environmentId],
     );
     return result.rows.map((row) => ({
+      sessionKey: row.session_key,
+      source: row.source,
       filePath: row.file_path,
       fileMtimeMs: numberValue(row.file_mtime_ms),
       fileSize: numberValue(row.file_size),
       indexedAt: timeValue(row.indexed_at),
+    }));
+  }
+
+  async getTokenEvents(sessionKey: string): Promise<TokenUsageEvent[]> {
+    const result = await this.database.query<{
+      occurred_at: Date | string;
+      dedupe_key: string;
+      input_tokens: number | string;
+      output_tokens: number | string;
+      cached_input_tokens: number | string;
+      reasoning_output_tokens: number | string;
+      total_tokens: number | string;
+    }>(`
+      select occurred_at, dedupe_key, input_tokens, output_tokens, cached_input_tokens,
+             reasoning_output_tokens, total_tokens
+      from agent_recall.token_events
+      where session_key = $1
+      order by occurred_at, dedupe_key
+    `, [sessionKey]);
+    return result.rows.map((row) => ({
+      timestamp: timeValue(row.occurred_at),
+      dedupeKey: row.dedupe_key,
+      inputTokens: numberValue(row.input_tokens),
+      outputTokens: numberValue(row.output_tokens),
+      cachedInputTokens: numberValue(row.cached_input_tokens),
+      reasoningOutputTokens: numberValue(row.reasoning_output_tokens),
+      totalTokens: numberValue(row.total_tokens),
     }));
   }
 
@@ -1290,6 +1421,31 @@ export class PostgresSessionRepository {
       await client.query("delete from agent_recall.sessions where session_key = $1", [legacyKey]);
       return true;
     });
+  }
+
+  async listSessionIdentitiesBySource(source: SessionSource): Promise<Array<{
+    sessionKey: string;
+    rawId: string;
+    storageEnvironmentId: string;
+  }>> {
+    const result = await this.database.query<{
+      session_key: string;
+      raw_id: string;
+      storage_environment_id: string;
+    }>(
+      `
+        select session_key, raw_id, storage_environment_id
+        from agent_recall.sessions
+        where source = $1
+        order by session_key
+      `,
+      [source],
+    );
+    return result.rows.map((row) => ({
+      sessionKey: row.session_key,
+      rawId: row.raw_id,
+      storageEnvironmentId: row.storage_environment_id,
+    }));
   }
 
   async listSessionKeysByFilePath(

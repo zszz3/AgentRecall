@@ -95,6 +95,8 @@ npm run setup:v2
 npm run dev:v2
 ```
 
+Windows 用户首次执行 `npm run setup:v2` 时，需要以管理员身份运行终端，以便下载并准备内置 PostgreSQL；完成后再执行 `npm run dev:v2`。
+
 v2 的命令、应用数据、数据库、MCP 标识和更新缓存都与 v1 分开，当前不会读取或导入 v1 数据。
 
 > 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。

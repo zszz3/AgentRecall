@@ -58,7 +58,7 @@ hook `buildRecord` 新增可选字段 `skill_hash`：
 ### 3.3 数据落地
 
 - 解析层 `SkillUsageEvent` 加可选 `skillHash`；
-- 迁移 v13：`skill_usage_events` 加 `skill_hash text` 可空列；
+- 迁移 v15：`skill_usage_events` 加 `skill_hash text` 可空列；
 - 历史事件无 hash → 版本切分中归入 `version unknown` 组，与 unlinked 的
   处理哲学一致，不做猜测归因。
 
@@ -109,7 +109,7 @@ hook `buildRecord` 新增可选字段 `skill_hash`：
 | --- | --- |
 | Hook | `bin/skill-usage-record.cjs`：`buildRecord` 加 `skill_hash`（导出 hash 函数供 core 复用） |
 | 解析 | `src/core/skill-usage.ts`：`SkillUsageEvent.skillHash` 可选字段 |
-| Schema | 迁移 v13：`skill_usage_events.skill_hash text` 可空列 |
+| Schema | 迁移 v15：`skill_usage_events.skill_hash text` 可空列 |
 | 查询 | `skill-repository.ts`：新增实况聚合查询（触发层统计 + 表现层三信号 + 版本分组），继续沿用查询期解析、不物化 |
 | 服务 | `SkillService` 新增实况报告方法（`evalEnabled` 门禁，模式同 `listSkillTriggers`）；组合 `skill-manager` 扫描结果得出已装未用/Unobserved |
 | IPC | `SKILLS_IPC` 新增实况报告通道（shared 契约 → main 注册 → preload） |

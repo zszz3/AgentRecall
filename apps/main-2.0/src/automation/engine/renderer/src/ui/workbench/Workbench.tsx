@@ -79,23 +79,28 @@ export function BrowserHeader({
   label,
   actionLabel,
   onAdd,
+  extra,
 }: {
   label: string;
   actionLabel: string;
   onAdd: () => void;
+  extra?: ReactNode;
 }) {
   return (
     <div className="workbench-browser-header">
       <span>{label}</span>
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label={actionLabel}
-        title={actionLabel}
-        onClick={onAdd}
-      >
-        <Plus size={14} />
-      </button>
+      <div className="workbench-browser-header-actions">
+        {extra}
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={actionLabel}
+          title={actionLabel}
+          onClick={onAdd}
+        >
+          <Plus size={14} />
+        </button>
+      </div>
     </div>
   );
 }

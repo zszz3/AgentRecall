@@ -4,7 +4,7 @@
 
 <h1 align="center">AgentRecall</h1>
 
-<p align="center">A local desktop tool to search, view, and resume AI coding-agent sessions</p>
+<p align="center">A local desktop app for searching, viewing, and resuming AI coding-agent sessions</p>
 
 <p align="center">
   <a href="../README.md">简体中文</a> ｜ English
@@ -23,78 +23,168 @@
   <img src="../assets/show.png" alt="AgentRecall preview" width="860">
 </p>
 
-AgentRecall brings back the local sessions scattered across your AI coding agents: it indexes, searches, and shows full context in one place, and lets you resume or migrate a session when you need to. It is designed for personal local use on macOS and Windows.
+AgentRecall brings together sessions scattered across different AI coding agents. You can search past conversations, view their full context, organize important records, and resume, migrate, or restore sessions across devices.
 
-## Core Features
+This repository maintains both v1 and v2. They use separate commands, app data, and databases, so they can run side by side but do not automatically share or import data.
 
-| Feature | Description |
-| --- | --- |
-| Unified search | Index sessions across Claude Code, Codex, and a dozen optional sources, with keyword, tag, favorite, time-range, and source filters |
-| Full context | View messages, tool calls, Markdown, code blocks, attachments, and AI summaries; export Markdown or common model-request JSON |
-| Resume and migrate | Jump back into the original agent from a search result, or migrate sessions between supported local agents |
-| Cross-device restore | Sync session snapshots through your own Supabase project, then search, view, and restore them on another device |
-| Usage and quota | Track token usage per agent and check Claude Code / Codex quota status |
+## Choose a Version
 
-## Supported Sources
+| Version | Best for | Launch command |
+| --- | --- | --- |
+| AgentRecall v1 | Managing local and remote agent sessions immediately after installation | `agent-recall` |
+| AgentRecall v2 (development) | Exploring Workbench, Chat, Workflow, Eval, Runtime, directory memory, and other features from source | `npm run dev:v2` |
 
-Claude Code and Codex are supported by default. Enable more sources under Settings -> Optional sources.
+## AgentRecall v1
 
-| Type | Sources |
-| --- | --- |
-| Default sources | Claude Code CLI, Claude Desktop app, Codex CLI, Codex Desktop |
-| Optional local sources | CodeBuddy, CodeWiz, TClaude, TCodex, OpenClaw, Hermes, OpenCode, ZCode, Cursor Agent, Trae, Qoder |
-| Extended environments | Windows WSL, SSH remote environments |
+### Features
 
-Capabilities vary slightly by source; the app shows the available view, resume, migrate, and stats actions per source in the UI. See the [User Guide](./v1/guide.en.md) for the exact file paths each source reads.
+- **Search and organize sessions**: Index Claude Code, Codex, and enabled optional sources in one place. Filter by keyword, environment, project, source, tag, favorite, hidden state, or time range, and save frequently used searches.
+- **View full context**: Read messages, Markdown, code blocks, tool events, and attachments on the detail page. Search within a session and narrow matches to user or assistant messages.
+- **Resume, migrate, and export**: Resume the original session from a search result, migrate between supported local agents, or export as Markdown, plain text, or JSON in common model-request formats.
+- **Add more session sources**: Claude Code and Codex are enabled by default. Enable CodeBuddy, CodeWiz, TClaude, TCodex, OpenClaw, Hermes, OpenCode, ZCode, Cursor Agent, Trae, and Qoder under **Settings → Optional Sources**. Windows WSL and SSH environments can be added separately.
+- **AI-assisted retrieval**: Generate session summaries or describe what you want to find in natural language. Summaries and AI session search use the Codex, Claude Code, or custom endpoint selected under Provider.
+- **Sync across devices**: Use your own Supabase project to upload sessions manually, or install sync Hooks for Claude Code and Codex. Search, view, and restore cloud sessions on another device.
+- **Skills and digital assets**: View and manage local Skills, then sync Skills, Rules, and Memories across devices. Cloud versions can be previewed, installed, or restored.
+- **MCP, usage, and quota**: Let Claude Code, Codex, CodeBuddy, and other agents search and organize session history through MCP. Workbench also tracks token usage and displays Claude Code and Codex quota status.
 
-## Quick Start
+### Install and Launch
 
-Install **Node.js 22.13+**, then install the latest Release:
+Install Node.js 22.13 or later, then install the latest Release:
 
 ```bash
 npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz
 agent-recall
 ```
 
-You can also paste the following paragraph to your AI agent (Claude Code, Codex, etc.) and let it install for you:
+You can also paste the following paragraph into an AI agent such as Claude Code or Codex and let it install AgentRecall for you:
 
-> Please install AgentRecall for me: first confirm Node.js 22.13 or newer is available, then run `npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz`. If npm or the Electron download is slow, retry with `--registry=https://registry.npmmirror.com` and the environment variable `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`. After installation, run `agent-recall` to confirm it starts; if anything fails, read https://github.com/zszz3/AgentRecall/blob/main/Install.md to troubleshoot.
+> Please install AgentRecall for me. First confirm that Node.js 22.13 or later is available, then run `npm install -g https://github.com/zszz3/AgentRecall/releases/latest/download/agent-recall.tgz`. If npm or Electron downloads are slow, retry with `--registry=https://registry.npmmirror.com` and set `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`. After installation, run `agent-recall` to confirm that it starts correctly. If anything fails, see https://github.com/zszz3/AgentRecall/blob/main/Install.md for troubleshooting.
 
 | System | Launch command | Default shortcut |
 | --- | --- | --- |
 | macOS | `agent-recall` | `⌥ Option + Space` |
 | Windows | `agent-recall` | `Ctrl + Alt + Space` |
 
-After launch, the app stays in the menu bar or system tray; settings, theme, language, and shortcuts are all adjustable in the app. On macOS, run `agent-recall install-app` to generate a local `AgentRecall.app` you can open from Launchpad / Spotlight / Dock. Update with `agent-recall --update`; full install, update, rollback, uninstall, and mirror notes are in [Install.md](../Install.md) and the [User Guide](./v1/guide.en.md).
+After launch, the app stays in the menu bar or system tray. Settings, theme, language, and shortcuts can all be changed in the app. On macOS, run `agent-recall install-app` to create a local `AgentRecall.app`, which you can then open from Launchpad, Spotlight, or the Dock. Run `agent-recall --update` to update. See [Install.md](../Install.md) for complete installation, update, rollback, uninstall, and mirror instructions.
 
-## Privacy and Security
+> For more detailed usage instructions, see the [AgentRecall v1 Guide](./v1/guide.en.md).
 
-- Session indexes and metadata stay in a local SQLite database on your machine and never pass through any third-party server.
-- Each agent's original session files are read-only inputs; restore and migration always create new copies and never rewrite the originals.
-- Cross-device sync is fully optional and uses your own Supabase project; the app stores only the Project URL and anon key locally.
-- No telemetry or usage data is collected.
-- The code is fully open source and auditable.
+## AgentRecall v2 (Development)
 
-## Advanced Capabilities
+In addition to session management, remote sync, and usage statistics, v2 adds reusable Agents, multi-agent Chat, Workflow, Eval, MCP, directory memory, and a Skill library.
 
-- **Remote sync**: After configuring the same Supabase URL and anon key, another device can search and view cloud sessions and restore them into Claude Code, Codex, CodeBuddy, CodeWiz, or Cursor; upload manually, or install the Claude Code / Codex hooks to record pending sessions automatically. Sync is designed for personal projects, and deleting a cloud copy never affects the local session.
-- **MCP tools**: The built-in `agent-recall-mcp` lets Claude Code, Codex, CodeBuddy, and others search and read session history in chat, manage tags, favorites, and visibility, or run cross-agent migration.
-- **Skills and digital assets**: View, filter, and manage local Codex / Claude Code Skills, and sync Skills, Rules (such as `CLAUDE.md`, `AGENTS.md`, and Qoder rules), and Memories (Qoder / Codex memories) across machines through Supabase.
+### Features
 
-These capabilities share the same Supabase configuration inside the app and are designed for personal cross-device use. Setup steps and details are in the [User Guide](./v1/guide.en.md).
+- **Workbench and Sessions**: View usage, model quotas, and recent activity. Search, filter, and organize sessions from different sources. The detail page supports in-session search, Resume, migration, export, AI summaries, and remote restore.
+- **Runtime and Agents**: Prepare execution configurations for Codex, Claude Code, API, Hermes, OpenCode, or OpenClaw, then save Agents with fixed models and purpose descriptions for reuse in Chat, Workflow, Eval, and MCP.
+- **Multi-agent Chat**: Create a studio with a shared project directory while each employee keeps an independent context. Use `@name` or the recipient list to request responses from one or more Agents.
+- **Workflow**: Describe a task and answer the planning Agent's follow-up questions. Generate, review, and confirm a workflow diagram before running Agent or script nodes. During execution, you can handle follow-up questions, approvals, artifacts, and error recovery.
+- **Eval**: Run an Agent repeatedly against a fixed dataset and evaluators, then review average scores, pass rates, failed cases, evaluation reasons, and historical results.
+- **MCP**: Register and test STDIO or HTTP MCP Servers, inspect their tool lists, and bind the services you need to new sessions for selected Agents.
+- **Directory Memory**: Create isolated long-term memory for each project directory you select. Import past sessions, maintain manual memories, and enable automatic recall for Codex, Claude Code, or OpenCode.
+- **Skills and Provider**: View local Skills or discover Skills from public repositories, add them to the Skill library, and install them for coding agents such as Codex and Claude Code. The Provider page separately manages the services used by local Codex, Claude Code, and session AI features.
 
-## Contributing
+### Run from Source
 
-Issues and PRs are welcome. Local development:
+v2 currently runs from the repository source:
 
 ```bash
 git clone https://github.com/zszz3/AgentRecall.git
 cd AgentRecall
-npm ci
-npm run dev
+npm run setup:v2
+npm run dev:v2
 ```
 
-Before submitting, please read [CONTRIBUTING.md](../CONTRIBUTING.md) and make sure `npm test`, `npm run typecheck`, and `npm run release-note:check` pass. Meet everyone who has contributed on the [contributors page](https://github.com/zszz3/AgentRecall/graphs/contributors).
+On Windows, run the terminal as an administrator the first time you execute `npm run setup:v2`, so v2 can download and prepare its bundled PostgreSQL runtime. After setup completes, run `npm run dev:v2`.
+
+v2 uses separate commands, app data, a database, MCP identifiers, and an update cache from v1. It does not currently read or import v1 data.
+
+> For more detailed usage instructions, see the [AgentRecall v2 Guide](./v2/guide.md).
+
+## Privacy and Security
+
+- Session indexes and metadata are stored locally and do not pass through any third-party service provided by AgentRecall.
+- Each agent's original session files are used only as read sources. Restore and migration create new copies.
+- Cross-device sync is fully optional and uses your own Supabase project.
+- AI summaries, AI search, and automatic memory send relevant content to the Provider you select. You decide whether to enable these features.
+- AgentRecall does not collect telemetry or usage data, and the project source code is public in this repository.
+
+## Contributing
+
+Issues and PRs are welcome. For local development:
+
+```bash
+git clone https://github.com/zszz3/AgentRecall.git
+cd AgentRecall
+npm run setup:v1
+npm run dev:v1
+```
+
+When developing `agent-recall-v2`, use `npm run setup:v2` and `npm run dev:v2` instead. The two apps live under `apps/main-1.0` and `apps/main-2.0`, while root-level commands run shared tests, type checks, and builds.
+
+Before submitting, read [CONTRIBUTING.md](../CONTRIBUTING.md) and make sure `npm test`, `npm run typecheck`, and `npm run release-note:check` pass.
+
+### Collaborators
+
+<!-- readme: collaborators -start -->
+<table>
+	<tbody>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/Blue-Berrys">
+                    <img src="https://avatars.githubusercontent.com/u/75206464?v=4" width="80;" alt="Blue-Berrys"/>
+                    <br />
+                    <sub><b>Blue-Berrys</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/G-Pegasus">
+                    <img src="https://avatars.githubusercontent.com/u/87853009?v=4" width="80;" alt="G-Pegasus"/>
+                    <br />
+                    <sub><b>G-Pegasus</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/zszz3">
+                    <img src="https://avatars.githubusercontent.com/u/91608029?v=4" width="80;" alt="zszz3"/>
+                    <br />
+                    <sub><b>zszz3</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/mesakurax">
+                    <img src="https://avatars.githubusercontent.com/u/140772694?v=4" width="80;" alt="mesakurax"/>
+                    <br />
+                    <sub><b>mesakurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/LANSGANBS">
+                    <img src="https://avatars.githubusercontent.com/u/144577410?v=4" width="80;" alt="LANSGANBS"/>
+                    <br />
+                    <sub><b>LANSGANBS</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/forbbiden1">
+                    <img src="https://avatars.githubusercontent.com/u/153357541?v=4" width="80;" alt="forbbiden1"/>
+                    <br />
+                    <sub><b>forbbiden1</b></sub>
+                </a>
+            </td>
+		</tr>
+		<tr>
+            <td align="center">
+                <a href="https://github.com/MeloMei">
+                    <img src="https://avatars.githubusercontent.com/u/225048942?v=4" width="80;" alt="MeloMei"/>
+                    <br />
+                    <sub><b>MeloMei</b></sub>
+                </a>
+            </td>
+		</tr>
+	<tbody>
+</table>
+<!-- readme: collaborators -end -->
 
 ## Star History
 
@@ -104,9 +194,9 @@ Before submitting, please read [CONTRIBUTING.md](../CONTRIBUTING.md) and make su
 
 ## License
 
-This project is licensed under the [MIT License](../LICENSE).
+This project is open source under the [MIT License](../LICENSE).
 
 > [!NOTE]
 > AgentRecall is an independent open-source project and is not affiliated with Anthropic, OpenAI, Cursor, or any other company. Claude, Codex, and other names and trademarks belong to their respective owners.
 
-If you run into any problems, please open an Issue. If the project helps you, a Star is appreciated.
+If you have any questions, please open an Issue. If the project helps you, a Star is appreciated.

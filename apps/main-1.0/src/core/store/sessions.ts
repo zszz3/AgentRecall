@@ -5,6 +5,7 @@ import {
   MAX_SESSION_ATTACHMENT_BYTES,
 } from "../session-attachments";
 import { codexTaskWorkspaceDate } from "../project-identity";
+import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS } from "../refresh-policy";
 import { truncateTraceDetail } from "../trace-detail";
 import type {
   IndexedSession,
@@ -427,18 +428,38 @@ export class SessionsStore {
     this.db.prepare("UPDATE sessions SET source_available = ? WHERE session_key = ?").run(available ? 1 : 0, sessionKey);
   }
 
-  listIndexedSessionFiles(environmentId = "local"): Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
+  listIndexedSessionFiles(environmentId = "local"): Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }> {
     return this.db
       .prepare(
         `
-        SELECT file_path AS filePath, file_mtime_ms AS fileMtimeMs, file_size AS fileSize, indexed_at AS indexedAt
+        SELECT session_key AS sessionKey, source, file_path AS filePath, file_mtime_ms AS fileMtimeMs, file_size AS fileSize, indexed_at AS indexedAt
         FROM sessions
         WHERE storage_environment_id = ?
           AND file_path != ''
           AND file_mtime_ms > 0
       `,
       )
-      .all(environmentId) as Array<{ filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>;
+      .all(environmentId) as Array<{ sessionKey: string; source: SessionSource; filePath: string; fileMtimeMs: number; fileSize: number; indexedAt: number }>;
+  }
+
+  getTokenEvents(sessionKey: string): TokenUsageEvent[] {
+    return this.db.prepare(`
+      SELECT timestamp, dedupe_key, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens
+      FROM token_events
+      WHERE session_key = ?
+      ORDER BY timestamp, dedupe_key
+    `).all(sessionKey).map((row) => {
+      const value = row as Record<string, string | number>;
+      return {
+        timestamp: Number(value.timestamp),
+        dedupeKey: String(value.dedupe_key),
+        inputTokens: Number(value.input_tokens),
+        outputTokens: Number(value.output_tokens),
+        cachedInputTokens: Number(value.cached_input_tokens),
+        reasoningOutputTokens: Number(value.reasoning_output_tokens),
+        totalTokens: Number(value.total_tokens),
+      };
+    });
   }
 
   upsertIndexedSessionSummary(
@@ -754,6 +775,28 @@ export class SessionsStore {
       migrated = true;
     });
     return migrated;
+  }
+
+  listSessionIdentitiesBySource(source: SessionSource): Array<{
+    sessionKey: string;
+    rawId: string;
+    storageEnvironmentId: string;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT
+           session_key AS sessionKey,
+           raw_id AS rawId,
+           storage_environment_id AS storageEnvironmentId
+         FROM sessions
+         WHERE source = ?
+         ORDER BY session_key`,
+      )
+      .all(source) as Array<{
+        sessionKey: string;
+        rawId: string;
+        storageEnvironmentId: string;
+      }>;
   }
 
   listSessionKeysByFilePath(
@@ -1251,7 +1294,8 @@ export class SessionsStore {
     const limit = options.limit ?? 200;
     const query = normalizeExplicitAnd(options.query?.trim() || "");
     const ftsMatches = query ? this.searchFts(query) : new Map<string, string | null>();
-    const rows = this.getCandidateRows(options, query, limit);
+    const liveActivityAfter = Date.now() - LIVE_SESSION_INACTIVITY_TIMEOUT_MS;
+    const rows = this.getCandidateRows(options, query, limit, liveActivityAfter);
     const tagsBySession = this.getTagsForSessions(rows.map((row) => row.session_key));
     const merged = new Map<string, SessionSearchResult>();
 
@@ -1277,7 +1321,7 @@ export class SessionsStore {
       }
       return this.score(b, query) - this.score(a, query) || this.sortValue(b, sortBy) - this.sortValue(a, sortBy);
     });
-    const totalCount = query ? sorted.length : this.countCandidateRows(options);
+    const totalCount = query ? sorted.length : this.countCandidateRows(options, liveActivityAfter);
     const sessions = sorted.slice(0, limit);
     if (query) this.attachSearchMatchDetails(sessions, query);
     return {
@@ -1650,10 +1694,15 @@ export class SessionsStore {
     }>;
   }
 
-  private getCandidateRows(options: SearchOptions, query: string, limit: number): SessionRow[] {
-    const { where, args } = this.sessionWhereClause(options);
+  private getCandidateRows(options: SearchOptions, query: string, limit: number, liveActivityAfter: number): SessionRow[] {
+    const { where, args } = this.sessionWhereClause(options, liveActivityAfter);
 
     if (!query) {
+      const liveSessionKeys = options.liveStatus ? [] : [...new Set(options.liveSessionKeys ?? [])].filter(Boolean);
+      const liveOrder = liveSessionKeys.length > 0
+        ? `CASE WHEN ${LIVE_SESSION_KEY_SQL} IN (${liveSessionKeys.map(() => "?").join(", ")}) THEN 0 ELSE 1 END, `
+        : "";
+      args.push(...liveSessionKeys);
       args.push(limit);
       return this.db
         .prepare(
@@ -1661,7 +1710,7 @@ export class SessionsStore {
           SELECT sessions.*, ${sessionActivitySql("sessions")} AS last_activity_at
           FROM sessions
           WHERE ${where.join(" AND ")}
-          ORDER BY ${sessionSortSql(options.sortBy)}
+          ORDER BY ${liveOrder}${sessionSortSql(options.sortBy)}
           LIMIT ?
         `,
         )
@@ -1673,13 +1722,13 @@ export class SessionsStore {
       .all(...args) as unknown as SessionRow[];
   }
 
-  private countCandidateRows(options: SearchOptions): number {
-    const { where, args } = this.sessionWhereClause(options);
+  private countCandidateRows(options: SearchOptions, liveActivityAfter: number): number {
+    const { where, args } = this.sessionWhereClause(options, liveActivityAfter);
     const row = this.db.prepare(`SELECT COUNT(*) AS count FROM sessions WHERE ${where.join(" AND ")}`).get(...args) as { count: number };
     return row.count;
   }
 
-  private sessionWhereClause(options: SearchOptions): { where: string[]; args: SQLInputValue[] } {
+  private sessionWhereClause(options: SearchOptions, liveActivityAfter: number): { where: string[]; args: SQLInputValue[] } {
     const where: string[] = [];
     const args: SQLInputValue[] = [];
 
@@ -1716,12 +1765,12 @@ export class SessionsStore {
         if (liveSessionKeys.length === 0) {
           where.push("0 = 1");
         } else {
-          where.push(`${LIVE_SESSION_KEY_SQL} IN (${liveSessionKeys.map(() => "?").join(", ")})`);
-          args.push(...liveSessionKeys);
+          where.push(`(${LIVE_SESSION_KEY_SQL} IN (${liveSessionKeys.map(() => "?").join(", ")}) AND ${sessionActivitySql("sessions")} > ?)`);
+          args.push(...liveSessionKeys, liveActivityAfter);
         }
       } else if (liveSessionKeys.length > 0) {
-        where.push(`(${LIVE_SESSION_KEY_SQL} IS NULL OR ${LIVE_SESSION_KEY_SQL} NOT IN (${liveSessionKeys.map(() => "?").join(", ")}))`);
-        args.push(...liveSessionKeys);
+        where.push(`(${LIVE_SESSION_KEY_SQL} IS NULL OR ${LIVE_SESSION_KEY_SQL} NOT IN (${liveSessionKeys.map(() => "?").join(", ")}) OR ${sessionActivitySql("sessions")} <= ?)`);
+        args.push(...liveSessionKeys, liveActivityAfter);
       }
     }
 

@@ -52,6 +52,19 @@ describe("live session focus", () => {
     expect(liveSessionPidForSession(session({ source: "opencode-cli", rawId: "same-id" }), liveSessions)).toBeNull();
   });
 
+  it("does not use a remote process id for local terminal focus", () => {
+    const liveSessions: LiveSession[] = [
+      { family: "codex", rawId: "codex-1", pid: 301, environmentId: "ssh-devbox" },
+    ];
+
+    expect(liveSessionPidForSession(session({ rawId: "codex-1" }), liveSessions)).toBeNull();
+    expect(liveSessionPidForSession(session({
+      rawId: "codex-1",
+      environmentId: "ssh-devbox",
+      environmentKind: "ssh",
+    }), liveSessions)).toBeNull();
+  });
+
   it("activates the terminal app that owns the live session process", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const runner = async (command: string, args: string[]): Promise<string> => {

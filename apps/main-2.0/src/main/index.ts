@@ -47,6 +47,7 @@ import { loadUsageQuotaSnapshot } from "../core/quota";
 import { setLiveSessionTerminalTitle } from "../core/session-focus";
 import { setSessionCustomTitleAndSyncTerminal } from "../core/session-title-sync";
 import { createCachedLiveSessionSnapshotLoader } from "../core/session-activity";
+import { loadRemoteLiveSessions } from "../core/remote-session-activity";
 import { summarizeSession, type SummaryEndpoint } from "../core/session-summarizer";
 import {
   buildCodexExecEndpoint as buildCodexExecEndpointShared,
@@ -165,6 +166,8 @@ import { SessionCommandService } from "./services/session-command-service";
 import { RemoteSessionAccess } from "./services/remote-session-access";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
 import { startPostgresRuntime, type PostgresRuntime } from "./postgres/managed-postgres";
+import { WORKFLOW_PORTABLE_MAX_BYTES } from "../automation/engine/main/hub/workflow/workflow-portable-file";
+import { writeWorkflowExportFileAtomically } from "./services/workflow-portable-filesystem";
 import type {
   EnvironmentUpsertInput,
   MigrationAgent,
@@ -376,7 +379,36 @@ function createAutomationService(): NativeAutomationService {
     appDataPath: app.getPath("appData"),
     bundledWorkflowsPath: bundledAutomationWorkflowsPath(),
     workflowMcpServerPath: path.join(app.getAppPath(), "out", "mcp", "workflow-entry.js"),
+    chooseWorkflowImportFile: chooseWorkflowImportFile,
+    chooseWorkflowExportPath: chooseWorkflowExportPath,
+    writeWorkflowExportFile: writeWorkflowExportFileAtomically,
   });
+}
+
+async function chooseWorkflowImportFile(): Promise<{ fileName: string; content: string } | undefined> {
+  const options: Electron.OpenDialogOptions = {
+    title: "Import workflow",
+    properties: ["openFile"],
+    filters: [{ name: "AgentRecall Workflow", extensions: ["agentrecall-workflow.json"] }],
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  const filePath = result.canceled ? undefined : result.filePaths[0];
+  if (!filePath) return undefined;
+  if (!filePath.toLowerCase().endsWith(".agentrecall-workflow.json")) throw new Error("WORKFLOW_IMPORT_FORMAT_UNSUPPORTED: Choose an .agentrecall-workflow.json file.");
+  const stat = await fs.stat(filePath);
+  if (stat.size > WORKFLOW_PORTABLE_MAX_BYTES) throw new Error("WORKFLOW_IMPORT_FILE_TOO_LARGE: Workflow file exceeds the 5 MiB limit.");
+  return { fileName: path.basename(filePath), content: await fs.readFile(filePath, "utf8") };
+}
+
+async function chooseWorkflowExportPath(defaultFileName: string): Promise<string | undefined> {
+  const options: Electron.SaveDialogOptions = {
+    title: "Export workflow",
+    defaultPath: path.join(app.getPath("documents"), defaultFileName),
+    filters: [{ name: "AgentRecall Workflow", extensions: ["agentrecall-workflow.json"] }],
+  };
+  const result = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return undefined;
+  return result.filePath.toLowerCase().endsWith(".agentrecall-workflow.json") ? result.filePath : `${result.filePath}.agentrecall-workflow.json`;
 }
 
 async function pickAutomationDirectory(defaultPath?: string): Promise<string | undefined> {
@@ -1436,7 +1468,24 @@ async function runIndexSync(): Promise<IndexStatus> {
   return activeIndexRun;
 }
 
-const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader();
+const loadCachedLocalLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader();
+const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader({
+  load: async (options) => {
+    const [snapshot, remoteSessions] = await Promise.all([
+      loadCachedLocalLiveSessionSnapshot(options),
+      Promise.resolve()
+        .then(async () => loadRemoteLiveSessions(
+          await store.listEnvironments(),
+          (environment, remoteCommand) => sshCommandService.run(environment, remoteCommand, {
+            maxBuffer: 512 * 1024,
+            timeout: 10_000,
+          }),
+        ))
+        .catch(() => []),
+    ]);
+    return { ...snapshot, sessions: [...snapshot.sessions, ...remoteSessions] };
+  },
+});
 
 let summaryBackfillRunning = false;
 
@@ -2051,7 +2100,7 @@ function registerIpc(): void {
       setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
         getSession: (key) => store.getSession(key),
         setCustomTitle: (key, customTitle) => store.setCustomTitle(key, customTitle),
-        loadLiveSessions: () => loadCachedLiveSessionSnapshot({
+        loadLiveSessions: () => loadCachedLocalLiveSessionSnapshot({
           includeTrae: getSettings().includeTrae,
           includeQoder: getSettings().includeQoder,
           includeOpenClaw: getSettings().includeOpenClaw,
@@ -2343,7 +2392,7 @@ function registerIpc(): void {
     store,
     remoteAccess: remoteSessionAccess,
     getSettings,
-    loadLiveSessions: () => loadCachedLiveSessionSnapshot({
+    loadLiveSessions: () => loadCachedLocalLiveSessionSnapshot({
       includeTrae: getSettings().includeTrae,
       includeQoder: getSettings().includeQoder,
     }),

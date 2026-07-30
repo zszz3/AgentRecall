@@ -480,6 +480,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         url text,
         env jsonb NOT NULL,
         enabled boolean NOT NULL DEFAULT true,
+        disabled_tools jsonb NOT NULL DEFAULT '[]'::jsonb,
         status text NOT NULL DEFAULT 'untested',
         last_error text,
         last_tested_at timestamptz,
@@ -1101,6 +1102,28 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
   ],
 }, {
   version: 13,
+  name: "persist Workflow portable origin and review metadata",
+  statements: [
+    `
+      ALTER TABLE agent_recall.workflows
+        ADD COLUMN IF NOT EXISTS origin jsonb,
+        ADD COLUMN IF NOT EXISTS confirmed_revision integer,
+        ADD COLUMN IF NOT EXISTS reviewer_configured_agent_id text,
+        ADD COLUMN IF NOT EXISTS reviewer_model_id text,
+        ADD COLUMN IF NOT EXISTS generation_review jsonb;
+    `,
+  ],
+}, {
+  version: 14,
+  name: "track disabled MCP tools per server",
+  statements: [
+    `
+      ALTER TABLE agent_recall.mcp_servers
+        ADD COLUMN IF NOT EXISTS disabled_tools jsonb NOT NULL DEFAULT '[]'::jsonb;
+    `,
+  ],
+}, {
+  version: 15,
   name: "record the skill version hash on usage events",
   statements: [
     `

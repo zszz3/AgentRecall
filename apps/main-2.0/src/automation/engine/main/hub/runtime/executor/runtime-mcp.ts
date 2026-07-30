@@ -21,6 +21,26 @@ function resolvedEnvironment(
   );
 }
 
+/**
+ * Combine the per-binding allowlist with the server-level disabled tools to
+ * decide which tool names an Agent may actually use. `restricted` is false only
+ * when every discovered tool is allowed (no allowlist and nothing disabled), in
+ * which case callers should skip emitting an explicit tool restriction.
+ */
+function allowedToolNames(
+  server: McpServerDefinition,
+  toolAllowlist: string[],
+): { restricted: boolean; allowed: Set<string> } {
+  const disabled = new Set(server.disabledTools ?? []);
+  const enabled = server.tools.map((tool) => tool.name).filter((name) => !disabled.has(name));
+  const hasAllowlist = toolAllowlist.length > 0;
+  const hasDisabled = server.tools.some((tool) => disabled.has(tool.name));
+  const allowed = new Set(
+    hasAllowlist ? enabled.filter((name) => toolAllowlist.includes(name)) : enabled,
+  );
+  return { restricted: hasAllowlist || hasDisabled, allowed };
+}
+
 export function codexMcpLaunchConfig(
   bindings: BoundMcpServer[],
   environment: NodeJS.ProcessEnv = process.env,
@@ -43,8 +63,9 @@ export function codexMcpLaunchConfig(
     } else {
       continue;
     }
-    if (toolAllowlist.length > 0) {
-      args.push("-c", `${prefix}.enabled_tools=[${toolAllowlist.map((name) => JSON.stringify(name)).join(", ")}]`);
+    const { restricted, allowed } = allowedToolNames(server, toolAllowlist);
+    if (restricted) {
+      args.push("-c", `${prefix}.enabled_tools=[${[...allowed].map((name) => JSON.stringify(name)).join(", ")}]`);
     }
   }
   return { args, env };
@@ -57,10 +78,11 @@ export function claudeMcpServers(
   const result: NonNullable<ClaudeAgentSdkRunInput["mcpServers"]> = {};
   for (const { server, toolAllowlist } of bindings) {
     const name = runtimeServerName(server.id);
-    const tools = toolAllowlist.length > 0 && server.tools.length > 0
+    const { restricted, allowed } = allowedToolNames(server, toolAllowlist);
+    const tools = restricted && server.tools.length > 0
       ? server.tools.map((tool) => ({
           name: tool.name,
-          permission_policy: toolAllowlist.includes(tool.name) ? "always_allow" as const : "always_deny" as const,
+          permission_policy: allowed.has(tool.name) ? "always_allow" as const : "always_deny" as const,
         }))
       : undefined;
     if (server.transport === "stdio" && server.command?.trim()) {

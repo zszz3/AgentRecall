@@ -15,6 +15,7 @@ const GITHUB_REPOSITORY = "zszz3/AgentRecall";
 const TRUSTED_GITHUB_REPOSITORIES = new Set([GITHUB_REPOSITORY.toLowerCase(), "zszz3/agentrecall"]);
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100`;
 const LATEST_RELEASE_URL = `https://github.com/${GITHUB_REPOSITORY}/releases`;
+const RELEASE_REFS_URL = `https://github.com/${GITHUB_REPOSITORY}.git/info/refs?service=git-upload-pack`;
 const UPDATE_ASSET_NAME = "update-v2.json";
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
@@ -238,45 +239,76 @@ async function checkForUpdate(options = {}) {
     let release = null;
     let releaseListEtag = null;
     let releasePageUrl = LATEST_RELEASE_API;
-    const visitedReleasePages = new Set();
-    while (releasePageUrl) {
-      if (visitedReleasePages.has(releasePageUrl)) throw new Error("GitHub release pagination contains a loop.");
-      visitedReleasePages.add(releasePageUrl);
-      const headers = { ...requestHeaders };
-      if (releasePageUrl === LATEST_RELEASE_API && cached?.etag) headers["If-None-Match"] = cached.etag;
-      const releaseResponse = await fetchWithTimeout(fetchImpl, releasePageUrl, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
-      if (releaseResponse.status === 304 && cached) {
-        await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
-        return updateResult(version, cached.manifest || null, now, false, null, cached, options);
+    let releaseTag = null;
+    let manifestResponse;
+    try {
+      const visitedReleasePages = new Set();
+      while (releasePageUrl) {
+        if (visitedReleasePages.has(releasePageUrl)) throw new Error("GitHub release pagination contains a loop.");
+        visitedReleasePages.add(releasePageUrl);
+        const headers = { ...requestHeaders };
+        if (releasePageUrl === LATEST_RELEASE_API && cached?.etag) headers["If-None-Match"] = cached.etag;
+        const releaseResponse = await fetchWithTimeout(fetchImpl, releasePageUrl, { headers }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+        if (releaseResponse.status === 304 && cached) {
+          await writeJsonAtomic(cachePath, { ...cached, checkedAt: now });
+          return updateResult(version, cached.manifest || null, now, false, null, cached, options);
+        }
+        if (releaseResponse.status === 404 && releasePageUrl === LATEST_RELEASE_API) {
+          await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
+          return updateResult(version, null, now, false, null, null, options);
+        }
+        if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
+        if (releasePageUrl === LATEST_RELEASE_API) releaseListEtag = releaseResponse.headers.get("etag");
+        const releases = await releaseResponse.json();
+        if (!Array.isArray(releases)) throw new Error("GitHub release list is invalid.");
+        release = releases.find((item) =>
+          item?.draft !== true
+          && item?.prerelease !== true
+          && /^v2-\d+\.\d+\.\d+$/.test(item?.tag_name)
+          && Array.isArray(item.assets)
+          && item.assets.some((asset) => asset?.name === UPDATE_ASSET_NAME && asset?.browser_download_url));
+        if (release) break;
+        releasePageUrl = nextGitHubReleasePage(releaseResponse.headers.get("link"));
       }
-      if (releaseResponse.status === 404 && releasePageUrl === LATEST_RELEASE_API) {
-        await writeJsonAtomic(cachePath, { checkedAt: now, etag: null, manifest: null });
-        return updateResult(version, null, now, false, null, null, options);
+      if (!release) {
+        const cache = { checkedAt: now, etag: releaseListEtag, manifest: null };
+        await writeJsonAtomic(cachePath, cache);
+        return updateResult(version, null, now, false, null, cache, options);
       }
-      if (!releaseResponse.ok) throw new Error(`GitHub release check failed (${releaseResponse.status}).`);
-      if (releasePageUrl === LATEST_RELEASE_API) releaseListEtag = releaseResponse.headers.get("etag");
-      const releases = await releaseResponse.json();
-      if (!Array.isArray(releases)) throw new Error("GitHub release list is invalid.");
-      release = releases.find((item) =>
-        item?.draft !== true
-        && item?.prerelease !== true
-        && /^v2-\d+\.\d+\.\d+$/.test(item?.tag_name)
-        && Array.isArray(item.assets)
-        && item.assets.some((asset) => asset?.name === UPDATE_ASSET_NAME && asset?.browser_download_url));
-      if (release) break;
-      releasePageUrl = nextGitHubReleasePage(releaseResponse.headers.get("link"));
+      const asset = release.assets.find((item) => item?.name === UPDATE_ASSET_NAME);
+      manifestResponse = await fetchWithTimeout(fetchImpl, asset.browser_download_url, {
+        headers: { "User-Agent": "agent-recall-v2-updater" },
+      }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+      if (!manifestResponse.ok) throw new Error(`Update manifest download failed (${manifestResponse.status}).`);
+      releaseTag = release.tag_name;
+    } catch (releaseError) {
+      try {
+        const refsResponse = await fetchWithTimeout(fetchImpl, RELEASE_REFS_URL, {
+          headers: { Accept: "application/x-git-upload-pack-advertisement", "User-Agent": "agent-recall-v2-updater" },
+        }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+        if (!refsResponse.ok) throw new Error(`GitHub release refs check failed (${refsResponse.status}).`);
+        const advertisement = await refsResponse.text();
+        const tags = [...new Set([...advertisement.matchAll(/refs\/tags\/(v2-\d+\.\d+\.\d+)(?=\^\{\}|[\u0000\n]|$)/g)]
+          .map((match) => match[1]))]
+          .sort((left, right) => compareVersions(right.replace(/^v2-/, ""), left.replace(/^v2-/, "")));
+        if (tags.length === 0) throw new Error("GitHub release refs do not contain a V2 release.");
+        for (const tag of tags.slice(0, 10)) {
+          const manifestUrl = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${UPDATE_ASSET_NAME}`;
+          const response = await fetchWithTimeout(fetchImpl, manifestUrl, {
+            headers: { "User-Agent": "agent-recall-v2-updater" },
+          }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
+          if (response.status === 404) continue;
+          if (!response.ok) throw new Error(`Direct update manifest download failed (${response.status}).`);
+          releaseTag = tag;
+          manifestResponse = response;
+          break;
+        }
+        if (!manifestResponse) throw new Error("GitHub release refs do not point to a published V2 manifest.");
+        releaseListEtag = null;
+      } catch {
+        throw releaseError;
+      }
     }
-    if (!release) {
-      const cache = { checkedAt: now, etag: releaseListEtag, manifest: null };
-      await writeJsonAtomic(cachePath, cache);
-      return updateResult(version, null, now, false, null, cache, options);
-    }
-    const asset = release.assets.find((item) => item?.name === UPDATE_ASSET_NAME);
-    const manifestResponse = await fetchWithTimeout(fetchImpl, asset.browser_download_url, {
-      headers: { "User-Agent": "agent-recall-v2-updater" },
-    }, options.timeoutMs ?? UPDATE_REQUEST_TIMEOUT_MS);
-    if (!manifestResponse.ok) throw new Error(`Update manifest download failed (${manifestResponse.status}).`);
-    const releaseTag = release.tag_name;
     const manifest = parseUpdateManifest(await manifestResponse.json());
     if (releaseTag && releaseTag !== manifest.tag) throw new Error(`GitHub Release tag does not match ${UPDATE_ASSET_NAME}.`);
     const sameSnoozedVersion = cached?.snoozedVersion === manifest.version;

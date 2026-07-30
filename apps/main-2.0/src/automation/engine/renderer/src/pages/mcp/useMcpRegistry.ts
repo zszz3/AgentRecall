@@ -12,6 +12,7 @@ function createServer(): McpServerDefinition {
     env: {},
     enabled: true,
     tools: [],
+    disabledTools: [],
     status: "untested",
     createdAt: now,
     updatedAt: now,
@@ -58,6 +59,7 @@ export function useMcpRegistry() {
             args: [...selected.args],
             env: { ...selected.env },
             tools: [...selected.tools],
+            disabledTools: [...(selected.disabledTools ?? [])],
           }
         : undefined,
     );
@@ -66,6 +68,16 @@ export function useMcpRegistry() {
 
   const update = useCallback((value: McpServerDefinition) => {
     setDraft(value);
+    setDirty(true);
+  }, []);
+  const toggleTool = useCallback((name: string) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const disabled = new Set(current.disabledTools ?? []);
+      if (disabled.has(name)) disabled.delete(name);
+      else disabled.add(name);
+      return { ...current, disabledTools: [...disabled] };
+    });
     setDirty(true);
   }, []);
   const create = useCallback(() => {
@@ -137,6 +149,20 @@ export function useMcpRegistry() {
       setBusy(undefined);
     }
   }, [draft, servers]);
+  const importServers = useCallback(async (definitions: McpServerDefinition[]) => {
+    const saved: McpServerDefinition[] = [];
+    for (const definition of definitions) {
+      saved.push(await agentRecallAutomationService().saveMcpServer(definition));
+    }
+    setServers((items) => {
+      const ids = new Set(saved.map((item) => item.id));
+      return [...items.filter((item) => !ids.has(item.id)), ...saved].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+    });
+    if (saved[0]) setSelectedId(saved[0].id);
+    return saved.length;
+  }, []);
   return {
     servers,
     draft,
@@ -146,9 +172,11 @@ export function useMcpRegistry() {
     create,
     select,
     update,
+    toggleTool,
     save,
     test,
     remove,
+    importServers,
     setDirty,
   };
 }

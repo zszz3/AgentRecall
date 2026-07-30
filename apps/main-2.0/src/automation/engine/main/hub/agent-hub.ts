@@ -92,6 +92,9 @@ import type {
   WorkflowStatus,
   WorkflowStoreState,
   WorkflowRunProgressItem,
+  WorkflowPortableFileV1,
+  WorkflowImportMapping,
+  WorkflowReadinessResult,
 } from "../../shared/types";
 import type { BoundMcpServer } from "./runtime/executor/runtime-mcp";
 import { normalizeConfigChannelsForStorage } from "../../shared/config-channels";
@@ -293,6 +296,8 @@ import { abandonWorkflowDraftReplyState as abandonWorkflowDraftReplyStateValue }
 import { assertWorkflowV2ConfiguredAgentReplacement, validateWorkflowV2Definition } from "../../shared/workflow-v2/validation";
 import { normalizeWorkflowV2TerminalNode } from "../../shared/workflow-v2/topology";
 import { WorkflowGenerationReviewCoordinator } from "./workflow/workflow-generation-review-service";
+import { applyWorkflowImportMappings, sanitizeWorkflowPortableDefinition, WorkflowPortableError } from "./workflow/workflow-portable-file";
+import { inspectWorkflowReadiness, portableWorkflowReadiness } from "./workflow/workflow-readiness";
 import {
   emitWorkflowAgentApprovalEvent,
   WORKFLOW_DEVELOPER_INSTRUCTIONS,
@@ -1260,6 +1265,8 @@ export class AgentHub {
     }
     const validation = validateWorkflowV2Definition(workflow.definition, { configuredAgentIds: this.configuredAgents.keys() });
     if (!validation.valid) return { ok: false, workflowId: workflow.workflowId, revision: workflow.revision, error: validation.errors[0] ?? "Workflow V2 definition is invalid." };
+    const readiness = this.workflowReadiness(workflow.workflowId);
+    if (!readiness.ready) return { ok: false, workflowId: workflow.workflowId, revision: workflow.revision, error: readiness.issues[0]?.message ?? "Workflow requires configuration before confirmation." };
     let frozenPlan;
     try {
       const plan = workflow.workflowV2Plan ?? buildWorkflowV2PlanSync({ definition: workflow.definition, approvedBy: "workflow-confirmation" });
@@ -1372,6 +1379,148 @@ export class AgentHub {
     if (changed) this.emitWorkflow();
   }
 
+  async cloneOfficialWorkflow(workflowId: string): Promise<AppSnapshot> {
+    const source = this.workflowStore.workflows.get(workflowId);
+    if (!source) {
+      throw new WorkflowPortableError("WORKFLOW_CLONE_SOURCE_NOT_FOUND", "Official workflow was not found.");
+    }
+    if (source.sourceType !== "official") {
+      throw new WorkflowPortableError("WORKFLOW_CLONE_SOURCE_NOT_OFFICIAL", "Only official workflows can be cloned from this action.");
+    }
+    const validation = validateWorkflowV2Definition(source.definition);
+    if (!validation.valid) throw new WorkflowPortableError("WORKFLOW_IMPORT_DEFINITION_INVALID", validation.errors[0] ?? "Official workflow definition is invalid.");
+    if (this.workflowStore.workflowCount() >= MAX_WORKFLOW_COUNT) throw new Error(`Workflow limit of ${MAX_WORKFLOW_COUNT} reached.`);
+    const now = Date.now();
+    const nextId = `wf_${randomUUID()}`;
+    const definition = structuredClone(source.definition);
+    definition.workflowId = nextId;
+    const workflow = this.cloneWorkflowDraft({
+      workflowId: nextId,
+      sourceType: "user",
+      topologyLocked: false,
+      origin: {
+        rootOrigin: {
+          kind: "official",
+          workflowId: source.workflowId,
+          title: source.title,
+          revision: source.revision,
+          clonedAt: now,
+          trust: "catalog",
+        },
+      },
+      title: this.nextWorkflowCopyTitle(source.title),
+      status: "draft",
+      revision: 1,
+      configuredAgentId: source.configuredAgentId,
+      modelId: source.modelId,
+      reviewerConfiguredAgentId: source.reviewerConfiguredAgentId,
+      reviewerModelId: source.reviewerModelId,
+      objective: source.objective,
+      definition,
+      messages: [],
+      reply: "",
+      error: undefined,
+      runProgress: [],
+      runContextDocument: "",
+      contextDocument: "",
+      runIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    await this.storeNewWorkflowAtomically(workflow);
+    return this.snapshot();
+  }
+
+  async importPortableWorkflow(file: WorkflowPortableFileV1, fileName: string, mapping: WorkflowImportMapping = {}): Promise<AppSnapshot> {
+    if (this.workflowStore.workflowCount() >= MAX_WORKFLOW_COUNT) throw new Error(`Workflow limit of ${MAX_WORKFLOW_COUNT} reached.`);
+    const sanitized = sanitizeWorkflowPortableDefinition(file.workflow.definition);
+    const mappedFile = applyWorkflowImportMappings({
+      file: { ...structuredClone(file), workflow: { ...structuredClone(file.workflow), definition: sanitized.definition } },
+      mapping,
+      configuredAgents: this.configuredAgents.values(),
+      channels: this.channels,
+    });
+    const validation = validateWorkflowV2Definition(mappedFile.workflow.definition);
+    if (!validation.valid) {
+      throw new WorkflowPortableError("WORKFLOW_IMPORT_DEFINITION_INVALID", validation.errors[0] ?? "Workflow definition is invalid.");
+    }
+    const now = Date.now();
+    const nextId = `wf_${randomUUID()}`;
+    const definition = structuredClone(mappedFile.workflow.definition);
+    definition.workflowId = nextId;
+    const workflow = this.cloneWorkflowDraft({
+      workflowId: nextId,
+      sourceType: "user",
+      topologyLocked: false,
+      origin: {
+        importedFrom: {
+          fileName,
+          workflowId: mappedFile.workflow.workflowId,
+          title: mappedFile.workflow.title,
+          revision: mappedFile.workflow.revision,
+          importedAt: now,
+        },
+        ...(mappedFile.workflow.rootOrigin ? {
+          rootOrigin: { ...mappedFile.workflow.rootOrigin, trust: "file_claim" as const },
+        } : {}),
+      },
+      title: this.nextWorkflowCopyTitle(mappedFile.workflow.title),
+      status: "draft",
+      revision: 1,
+      configuredAgentId: mappedFile.workflow.executionDefaults.configuredAgentId,
+      modelId: mappedFile.workflow.executionDefaults.modelId,
+      reviewerConfiguredAgentId: mappedFile.workflow.executionDefaults.reviewerConfiguredAgentId,
+      reviewerModelId: mappedFile.workflow.executionDefaults.reviewerModelId,
+      objective: mappedFile.workflow.objective,
+      definition,
+      messages: [],
+      reply: "",
+      error: undefined,
+      runProgress: [],
+      runContextDocument: "",
+      contextDocument: "",
+      runIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    await this.storeNewWorkflowAtomically(workflow);
+    return this.snapshot();
+  }
+
+  workflowReadiness(workflowId: string): WorkflowReadinessResult {
+    const workflow = this.workflowStore.workflows.get(workflowId);
+    return workflow ? inspectWorkflowReadiness({ workflow, configuredAgents: this.configuredAgents.values(), channels: this.channels, mcpServers: this.mcpServers }) : { ready: false, issues: [] };
+  }
+
+  portableWorkflowReadiness(file: WorkflowPortableFileV1): WorkflowReadinessResult {
+    return portableWorkflowReadiness(file, { configuredAgents: this.configuredAgents.values(), channels: this.channels, mcpServers: this.mcpServers });
+  }
+
+  private async storeNewWorkflowAtomically(workflow: WorkflowDraftState): Promise<void> {
+    const previousActiveId = this.workflowStore.activeId;
+    this.workflowStore.workflows.set(workflow.workflowId, workflow);
+    this.workflowStore.activeId = workflow.workflowId;
+    try {
+      await this.persistState(true);
+    } catch (error) {
+      this.workflowStore.workflows.delete(workflow.workflowId);
+      this.workflowStore.activeId = previousActiveId;
+      throw new WorkflowPortableError("WORKFLOW_IMPORT_PERSIST_FAILED", error instanceof Error ? error.message : "Workflow could not be saved.");
+    }
+    this.emitWorkflow();
+  }
+
+  private nextWorkflowCopyTitle(sourceTitle: string): string {
+    const existing = new Set([...this.workflowStore.workflows.values()].map((workflow) => workflow.title));
+    const base = `${sourceTitle} - 副本`;
+    if (!existing.has(base)) return base;
+    for (let copy = 2; copy < 10_000; copy += 1) {
+      const candidate = `${base} ${copy}`;
+      if (!existing.has(candidate)) return candidate;
+    }
+    return `${base} ${randomUUID().slice(0, 8)}`;
+  }
+
   selectWorkflow(workflowId: string): AppSnapshot {
     if (this.workflowStore.workflows.has(workflowId)) {
       this.workflowStore.activeId = workflowId;
@@ -1473,6 +1622,10 @@ export class AgentHub {
   }
 
   runWorkflow(input: RunWorkflowRequest): WorkflowOperationResult {
+    if (this.workflowStore.workflows.has(input.workflowId)) {
+      const readiness = this.workflowReadiness(input.workflowId);
+      if (!readiness.ready) return { ok: false, workflowId: input.workflowId, error: readiness.issues[0]?.message ?? "Workflow requires configuration before running." };
+    }
     return this.workflowRunService.run(input);
   }
 
@@ -2484,13 +2637,15 @@ export class AgentHub {
   }
 
   private cloneWorkflowStore(): WorkflowStoreState {
-    return cloneWorkflowStoreValue({
+    const store = cloneWorkflowStoreValue({
       activeWorkflowId: this.workflowStore.activeId,
       workflows: this.workflowStore.workflows.values(),
       workflowRuns: this.workflowStore.runs.values(),
       cloneDraft: (draft) => this.cloneWorkflowDraft(draft),
       cloneRun: (run) => this.cloneWorkflowRun(run),
     });
+    store.readinessByWorkflowId = Object.fromEntries(store.workflows.map((workflow) => [workflow.workflowId, this.workflowReadiness(workflow.workflowId)]));
+    return store;
   }
 
   private cloneWorkflowRun(run: WorkflowRunState): WorkflowRunState {
@@ -3198,7 +3353,7 @@ export class AgentHub {
     });
   }
 
-  private async persistState(): Promise<void> {
+  private async persistState(throwOnError = false): Promise<void> {
     if ((!this.storagePath && !this.persistedStore) || this.persistenceWriteBlocked) return;
     if (this.persistInFlight) await this.persistInFlight;
 
@@ -3218,6 +3373,7 @@ export class AgentHub {
           : `Failed to persist chat history to ${this.storagePath}:`,
         error,
       );
+      if (throwOnError) throw error;
     } finally {
       this.persistInFlight = undefined;
     }
