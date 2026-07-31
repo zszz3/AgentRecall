@@ -18,6 +18,7 @@ dist/main/*
 docs/plans/
 docs/specs/
 docs/superpowers/
+docs/eval/
 .build-sentinel
 .qoder/
 
