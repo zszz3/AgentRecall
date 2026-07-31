@@ -687,10 +687,12 @@ export class SkillService {
         existing.installed = true;
         continue;
       }
-      // Claude transcripts never record skill invocations, so a claude skill
-      // without records is only "never used" once the hook pipeline has
-      // proven itself; other agents are observable from session files.
-      const observable = skill.agent === "claude" ? claudeHookObservable : true;
+      // Skill triggers are recovered from each agent's own session transcripts,
+      // so "no records" genuinely means "never used" wherever those transcripts
+      // are scanned; the hook only adds the trigger-time version fingerprint on
+      // top. Trae keeps no scanned transcript, so its skills stay unobserved
+      // instead of being reported as unused.
+      const observable = skill.agent !== "trae";
       byName.set(key, {
         skill: skill.name,
         agent: null,

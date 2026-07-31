@@ -80,12 +80,12 @@ export function EvalSettings({
               ? l("Checking hook status...", "正在检查 Hook 状态...")
               : hookInstalled
                 ? l(
-                  "Installed. New Claude skill triggers record which session they belong to.",
-                  "已安装。新的 Claude Skill 触发会记录其所属会话。",
+                  "Installed. Claude skill triggers also record the skill version they ran against.",
+                  "已安装。Claude 的 Skill 触发会额外记录当时运行的 Skill 版本。",
                 )
                 : l(
-                  "Not installed. Without it, Claude skill triggers cannot be linked to sessions.",
-                  "未安装。缺少它时，Claude 的 Skill 触发无法关联到会话。",
+                  "Not installed. Triggers are still detected from session history; only the version they ran against is missing.",
+                  "未安装。触发仍会从会话记录中探测到，仅缺少当时运行的 Skill 版本。",
                 )}
           </span>
         </div>

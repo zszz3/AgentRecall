@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { scanCompleteJsonlAsync } from "./codex-jsonl-stream";
@@ -48,12 +49,14 @@ export interface SkillUsageEvent {
   agent: SkillUsageAgent;
   skill: string;
   timestamp: number;
-  // Present only for claude-hook records written since the hook started
-  // capturing its PostToolUse payload. Older records stay unlinked.
+  // Set by claude-hook records and by codex-session scans (from the session's
+  // own metadata). Lets a trigger resolve to a session even when the session
+  // file moved, which Codex does when it archives a thread.
   sessionId?: string;
   cwd?: string;
-  // sha256 of the skill's SKILL.md at trigger time (claude-hook records
-  // written since phase two). Absent means "version unknown".
+  // sha256 of the skill's SKILL.md as it was at trigger time. Claude gets it
+  // from the hook; Codex derives it from the skill text that its transcript
+  // embeds. Absent means "version unknown".
   skillHash?: string;
 }
 
@@ -103,6 +106,8 @@ export interface SkillUsageOptions {
 interface StructuredToolCall {
   name: string;
   input: unknown;
+  // Claude only: lets a call be dropped when its result reports an error.
+  toolUseId?: string;
 }
 
 export function loadSkillUsage(options: SkillUsageOptions = {}): SkillUsageSnapshot {
@@ -157,8 +162,9 @@ export function listSkillUsageSources(options: SkillUsageOptions = {}): SkillUsa
     }
   }
 
-  const codexSessionsDir = resolveCodexSessionsDir(options);
-  if (codexSessionsDir) addJsonlSources(sources, codexSessionsDir, "codex", "codex", "codex-session");
+  for (const codexSessionsDir of resolveCodexSessionDirs(options)) {
+    addJsonlSources(sources, codexSessionsDir, "codex", "codex", "codex-session");
+  }
   if (options.includeTcodex !== false) {
     addJsonlSources(sources, path.join(homeDir, ".tcodex", "sessions"), "codex", "tcodex", "codex-session");
   }
@@ -205,16 +211,17 @@ export function readSkillUsageSourceEvents(source: SkillUsageSource): SkillUsage
 export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource): Promise<SkillUsageEvent[]> {
   if (source.kind === "claude-hook") return readClaudeUsageEvents(source.path) ?? [];
   if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
-  const events: SkillUsageEvent[] = [];
+  const context: SessionFileContext = { failedToolUseIds: new Set() };
+  const events: ScannedUsageEvent[] = [];
   try {
     await scanCompleteJsonlAsync(source.path, {
       shouldParseLine: (line) => line.length <= 512 * 1024,
-      onRecord: (record) => events.push(...parseSessionUsageRecord(record, source)),
+      onRecord: (record) => events.push(...parseSessionUsageRecord(record, source, context)),
     });
   } catch {
     return [];
   }
-  return events;
+  return settleSessionFileEvents(events, context);
 }
 
 function addUsageEvents(
@@ -290,25 +297,68 @@ function optionalText(value: unknown): string {
 }
 
 function readSessionFileUsageEvents(source: SkillUsageSource): SkillUsageEvent[] {
-  const events: SkillUsageEvent[] = [];
-  forEachJsonlLine(source.path, (line) => events.push(...parseSessionUsageLine(line, source)));
-  return events;
+  const context: SessionFileContext = { failedToolUseIds: new Set() };
+  const events: ScannedUsageEvent[] = [];
+  forEachJsonlLine(source.path, (line) => events.push(...parseSessionUsageLine(line, source, context)));
+  return settleSessionFileEvents(events, context);
 }
 
-function parseSessionUsageLine(line: string, source: SkillUsageSource): SkillUsageEvent[] {
+// Scanning state that a single trigger cannot carry on its own: Codex keeps the
+// session id and cwd in the first line, and Claude reports a failed skill call
+// in the tool result that follows the call itself.
+interface SessionFileContext {
+  sessionId?: string;
+  cwd?: string;
+  failedToolUseIds: Set<string>;
+}
+
+interface ScannedUsageEvent extends SkillUsageEvent {
+  toolUseId?: string;
+}
+
+// A skill that errored out ("Unknown skill", disabled, ...) was never exercised,
+// so it must not count as usage. The result arrives after the call, which is why
+// this runs once the whole file has been read.
+function settleSessionFileEvents(
+  events: ScannedUsageEvent[],
+  context: SessionFileContext,
+): SkillUsageEvent[] {
+  const settled: SkillUsageEvent[] = [];
+  for (const { toolUseId, ...event } of events) {
+    if (toolUseId && context.failedToolUseIds.has(toolUseId)) continue;
+    settled.push(event);
+  }
+  return settled;
+}
+
+function parseSessionUsageLine(
+  line: string,
+  source: SkillUsageSource,
+  context: SessionFileContext,
+): ScannedUsageEvent[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
     return [];
   }
-  return parseSessionUsageRecord(parsed, source);
+  return parseSessionUsageRecord(parsed, source, context);
 }
 
-function parseSessionUsageRecord(parsed: unknown, source: SkillUsageSource): SkillUsageEvent[] {
+function parseSessionUsageRecord(
+  parsed: unknown,
+  source: SkillUsageSource,
+  context: SessionFileContext,
+): ScannedUsageEvent[] {
   if (!isRecord(parsed)) return [];
 
   const timestamp = timestampFrom(parsed.timestamp ?? parsed.createdAt ?? parsed.created_at);
+  if (source.kind === "codex-session") {
+    if (readCodexSessionMeta(parsed, context)) return [];
+    const envelope = codexSkillEnvelopeEvent(parsed, timestamp, context);
+    if (envelope) return [envelope];
+  }
+  collectFailedToolUseIds(parsed, context);
   const calls = source.kind === "codex-session"
     ? codexToolCalls(parsed)
     : source.kind === "codebuddy-session"
@@ -323,8 +373,76 @@ function parseSessionUsageRecord(parsed: unknown, source: SkillUsageSource): Ski
       : source.provider === "qoder"
         ? "qoder"
         : undefined;
+  const sessionId = optionalText(parsed.sessionId ?? parsed.session_id) || context.sessionId;
+  const cwd = optionalText(parsed.cwd) || context.cwd;
 
-  return calls.flatMap((call) => usageEventsFromToolCall(call, timestamp, defaultOwner));
+  return calls.flatMap((call) => usageEventsFromToolCall(call, timestamp, defaultOwner).map((event) => ({
+    ...event,
+    ...(sessionId ? { sessionId } : {}),
+    ...(cwd ? { cwd } : {}),
+    ...(call.toolUseId ? { toolUseId: call.toolUseId } : {}),
+  })));
+}
+
+// The Codex session header carries the ids that every trigger in the file needs.
+function readCodexSessionMeta(row: Record<string, unknown>, context: SessionFileContext): boolean {
+  if (row.type !== "session_meta") return false;
+  const payload = recordField(row, "payload") ?? row;
+  context.sessionId = optionalText(payload.session_id ?? payload.id) || context.sessionId;
+  context.cwd = optionalText(payload.cwd) || context.cwd;
+  return true;
+}
+
+// Codex expands a skill by injecting a synthetic user message that names the
+// skill, resolves its SKILL.md path and inlines that file's text. The user's own
+// prompt stays a separate record, so merely mentioning a skill never registers
+// as a trigger. The inlined text is the file's content plus one trailing
+// newline, which makes the trigger-time version hash recoverable from history.
+const CODEX_SKILL_ENVELOPE = /^<skill>\s*<name>([^<]+)<\/name>\s*<path>([^<]+)<\/path>\n([\s\S]*)<\/skill>$/;
+
+function codexSkillEnvelopeEvent(
+  row: Record<string, unknown>,
+  timestamp: number,
+  context: SessionFileContext,
+): ScannedUsageEvent | null {
+  if (row.type !== "response_item") return null;
+  const payload = recordField(row, "payload");
+  if (!payload || payload.type !== "message" || payload.role !== "user") return null;
+  const content = payload.content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .map((item) => (isRecord(item) && typeof item.text === "string" ? item.text : ""))
+    .join("")
+    .trim();
+  if (!text.startsWith("<skill>")) return null;
+  const match = CODEX_SKILL_ENVELOPE.exec(text);
+  if (!match) return null;
+  const skill = match[1].trim();
+  if (!skill) return null;
+  const body = match[3];
+  return {
+    agent: "codex",
+    skill,
+    timestamp,
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+    ...(context.cwd ? { cwd: context.cwd } : {}),
+    ...(body.endsWith("\n")
+      // Hash the SKILL.md bytes, matching skillMarkdownHash in
+      // bin/skill-usage-record.cjs so both agents key versions the same way.
+      ? { skillHash: createHash("sha256").update(body.slice(0, -1), "utf8").digest("hex") }
+      : {}),
+  };
+}
+
+function collectFailedToolUseIds(row: Record<string, unknown>, context: SessionFileContext): void {
+  const message = recordField(row, "message") ?? row;
+  const content = message.content;
+  if (!Array.isArray(content)) return;
+  for (const item of content) {
+    if (!isRecord(item) || item.type !== "tool_result" || item.is_error !== true) continue;
+    const id = optionalText(item.tool_use_id);
+    if (id) context.failedToolUseIds.add(id);
+  }
 }
 
 function codexToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
@@ -349,7 +467,8 @@ function assistantToolCalls(row: Record<string, unknown>): StructuredToolCall[] 
   if (!Array.isArray(content)) return [];
   return content.flatMap((item): StructuredToolCall[] => {
     if (!isRecord(item) || item.type !== "tool_use" || typeof item.name !== "string") return [];
-    return [{ name: item.name, input: item.input }];
+    const toolUseId = optionalText(item.id);
+    return [{ name: item.name, input: item.input, ...(toolUseId ? { toolUseId } : {}) }];
   });
 }
 
@@ -473,11 +592,15 @@ function skillPathsFromText(text: string): Array<{ skill: string; path: string }
   return [...matches.values()];
 }
 
+// Maps a SKILL.md path back to the agent that owns it. Codex resolves plugin
+// skills under `plugins/cache/<marketplace>/<plugin>/<version>/skills/<name>/`,
+// which is why a plain `/.codex/skills/` check is not enough.
 function ownerFromSkillPath(skillPath: string): SkillUsageAgent | null {
   const normalized = skillPath.replace(/\\/g, "/").toLowerCase();
   if (normalized.includes("/.claude/skills/")) return "claude";
   if (normalized.includes("/.qoder/skills/")) return "qoder";
   if (normalized.includes("/.codex/skills/") || normalized.includes("/.agents/skills/")) return "codex";
+  if (normalized.includes("/.codex/plugins/")) return "codex";
   return null;
 }
 
@@ -687,10 +810,12 @@ function resolveUsagePath(options: SkillUsageOptions): string {
   return path.join(homeDir, ".claude", "skill-usage.jsonl");
 }
 
-function resolveCodexSessionsDir(options: SkillUsageOptions): string | null {
-  if (options.codexSessionsDir === null) return null;
-  if (options.codexSessionsDir) return options.codexSessionsDir;
-  const homeDir = options.homeDir ?? os.homedir();
-  const codexHome = process.env.CODEX_HOME?.trim() || path.join(homeDir, ".codex");
-  return path.join(codexHome, "sessions");
+// Codex keeps live threads in `sessions/` and moves older ones into a sibling
+// `archived_sessions/`. Archiving must not make a recorded trigger disappear,
+// so both directories are scanned.
+function resolveCodexSessionDirs(options: SkillUsageOptions): string[] {
+  if (options.codexSessionsDir === null) return [];
+  const sessionsDir = options.codexSessionsDir
+    || path.join(process.env.CODEX_HOME?.trim() || path.join(options.homeDir ?? os.homedir(), ".codex"), "sessions");
+  return [sessionsDir, path.join(path.dirname(sessionsDir), "archived_sessions")];
 }

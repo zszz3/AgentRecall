@@ -264,7 +264,7 @@ describe("SkillService local skills and usage", () => {
     expect(disabled.store.listSkillUsageOverview).not.toHaveBeenCalled();
   });
 
-  it("labels skills without records as never-used only when the pipeline can observe them", async () => {
+  it("labels unused skills never-used where transcripts are scanned and unobserved elsewhere", async () => {
     const settings = structuredClone(defaultSettings);
     settings.evalEnabled = true;
     const harness = createHarness({ settings });
@@ -273,6 +273,7 @@ describe("SkillService local skills and usage", () => {
         installedSkill(),
         { ...installedSkill(), id: "claude:ghost", name: "ghost", agent: "claude" as const },
         { ...installedSkill(), id: "codex:helper", name: "helper", agent: "codex" as const },
+        { ...installedSkill(), id: "trae:opaque", name: "opaque", agent: "trae" as const },
       ],
       roots: [],
       scannedAt: 1,
@@ -291,14 +292,20 @@ describe("SkillService local skills and usage", () => {
       observation: "never-used",
       totalTriggers: 0,
     });
+    // Trae keeps no transcript that the usage scan reads, so "no records" there
+    // cannot be reported as "never used".
+    expect(overview.skills.find((item) => item.skill === "opaque")).toMatchObject({
+      observation: "unobserved",
+    });
 
-    // Without the hook the claude pipeline is blind: "no records" must read
-    // as unobserved, while codex skills stay observable from session files.
+    // The hook only adds the trigger-time version fingerprint. Claude triggers
+    // are read from the session transcripts, so dropping the hook must not turn
+    // an unused claude skill into an unobservable one.
     harness.hookSetup.skillUsageHookStatus = vi.fn(() => ({ installed: false }));
-    const blind = await harness.service.getSkillEvalOverview();
-    expect(blind.claudeHookObservable).toBe(false);
-    expect(blind.skills.find((item) => item.skill === "ghost")).toMatchObject({ observation: "unobserved" });
-    expect(blind.skills.find((item) => item.skill === "helper")).toMatchObject({ observation: "never-used" });
+    const withoutHook = await harness.service.getSkillEvalOverview();
+    expect(withoutHook.claudeHookObservable).toBe(false);
+    expect(withoutHook.skills.find((item) => item.skill === "ghost")).toMatchObject({ observation: "never-used" });
+    expect(withoutHook.skills.find((item) => item.skill === "helper")).toMatchObject({ observation: "never-used" });
   });
 
   it("builds the eval detail with version groups and the bound remote version", async () => {

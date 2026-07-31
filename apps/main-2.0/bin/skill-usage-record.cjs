@@ -3,9 +3,13 @@
 
 // Claude Code PostToolUse hook target. Fires after every `Skill` tool call and
 // appends one usage record to ~/.claude/skill-usage.jsonl. Append-only JSONL is
-// concurrency-safe across parallel Claude Code processes, and the session JSONL
-// transcripts do not record skill invocations on their own, so this bridge is
-// the only reliable source of per-skill usage counts.
+// concurrency-safe across parallel Claude Code processes.
+//
+// Session transcripts do record the `Skill` tool call itself, so counting and
+// session linkage do not depend on this hook. What only the hook can supply is
+// `skill_hash`: the SKILL.md digest as it was at trigger time. A later scan can
+// only read today's file, which would label every historical trigger with the
+// current version.
 //
 // Self-contained CommonJS (no build output or dependencies) so it runs straight
 // from a freshly unpacked global install.
@@ -54,9 +58,8 @@ function buildRecord(input) {
   const skill = extractSkillName(input.tool_input);
   if (!skill) return null;
 
-  // session_id and cwd come straight from the PostToolUse stdin payload. They
-  // let AgentRecall link the usage record to the indexed session; transcripts
-  // do not record skill invocations, so this is the only linkage source.
+  // session_id and cwd come straight from the PostToolUse stdin payload and let
+  // AgentRecall link the record to the indexed session without re-deriving it.
   const sessionId = cleanText(input.session_id);
   const cwd = cleanText(input.cwd);
   // skill_hash keys the trigger to the skill version that was active at the

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import {
   loadSkillUsage,
   readSkillUsageSourceEvents,
@@ -245,4 +246,157 @@ describe("skill usage", () => {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }
   });
+
+  it("records a Codex skill expansion with its session, cwd and trigger-time version", () => withTempHome((homeDir) => {
+    const skillBody = "---\nname: control-in-app-browser\n---\n\n# Browser\nDrive the in-app browser.\n";
+    const skillPath = "/home/dev/.codex/plugins/cache/openai-bundled/browser/26.7/skills/control-in-app-browser/SKILL.md";
+    const codexSessionsDir = writeCodexSession(homeDir, [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { session_id: "019fb258-e7ba", cwd: "/home/dev/project" },
+      }),
+      // What the user typed. A mention alone must never count as a trigger.
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-05T09:00:00.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: `[$browser:control-in-app-browser](${skillPath}) open github` }],
+        },
+      }),
+      // What Codex injected when it expanded the skill.
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-05T09:00:01.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{
+            type: "input_text",
+            text: `<skill>\n<name>browser:control-in-app-browser</name>\n<path>${skillPath}</path>\n${skillBody}</skill>`,
+          }],
+        },
+      }),
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, usagePath: path.join(homeDir, "missing.jsonl"), codexSessionsDir });
+
+    expect(snapshot.totalEvents).toBe(1);
+    expect(usageForSkill(snapshot, "browser:control-in-app-browser", "codex")?.count).toBe(1);
+  }));
+
+  it("hashes the embedded skill text exactly as the on-disk SKILL.md", () => withTempHome((homeDir) => {
+    const skillBody = "---\nname: tdd\n---\n\n# TDD\nWrite the test first.\n";
+    const skillPath = path.join(homeDir, ".codex", "skills", "tdd", "SKILL.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, skillBody, "utf8");
+    const codexSessionsDir = writeCodexSession(homeDir, [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { session_id: "sess-hash", cwd: homeDir },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-05T09:00:01.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          // Codex inlines the file plus one trailing newline.
+          content: [{ type: "input_text", text: `<skill>\n<name>tdd</name>\n<path>${skillPath}</path>\n${skillBody}\n</skill>` }],
+        },
+      }),
+    ]);
+    const filePath = path.join(codexSessionsDir, "2026", "06", "01", "rollout.jsonl");
+    const stat = fs.statSync(filePath);
+
+    const events = readSkillUsageSourceEvents({
+      agent: "codex",
+      provider: "codex",
+      kind: "codex-session",
+      path: filePath,
+      mtimeMs: stat.mtimeMs,
+      fileSize: stat.size,
+    });
+
+    expect(events).toEqual([{
+      agent: "codex",
+      skill: "tdd",
+      timestamp: Date.parse("2026-06-05T09:00:01.000Z"),
+      sessionId: "sess-hash",
+      cwd: homeDir,
+      // Same invariant as skillMarkdownHash in bin/skill-usage-record.cjs.
+      skillHash: createHash("sha256").update(fs.readFileSync(skillPath)).digest("hex"),
+    }]);
+  }));
+
+  it("keeps reading Codex triggers after a thread is archived", () => withTempHome((homeDir) => {
+    const codexHome = path.join(homeDir, "codex-fixture");
+    const archivedDir = path.join(codexHome, "archived_sessions");
+    fs.mkdirSync(archivedDir, { recursive: true });
+    fs.writeFileSync(path.join(archivedDir, "rollout-archived.jsonl"), [
+      JSON.stringify({ type: "session_meta", payload: { session_id: "archived-1", cwd: "/home/dev/p" } }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-06-06T09:00:00.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "<skill>\n<name>visualize</name>\n<path>/home/dev/.codex/plugins/cache/o/visualize/1.0/skills/visualize/SKILL.md</path>\nbody\n</skill>" }],
+        },
+      }),
+    ].join("\n"), "utf8");
+
+    const snapshot = loadSkillUsage({
+      homeDir,
+      usagePath: path.join(homeDir, "missing.jsonl"),
+      codexSessionsDir: path.join(codexHome, "sessions"),
+    });
+
+    expect(usageForSkill(snapshot, "visualize", "codex")?.count).toBe(1);
+  }));
+
+  it("ignores a Claude skill call whose result reports an error", () => withTempHome((homeDir) => {
+    const projectDir = path.join(homeDir, ".claude", "projects", "repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "session.jsonl"), [
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-06-07T09:00:00.000Z",
+        sessionId: "claude-1",
+        cwd: "/home/dev/repo",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call_ok", name: "Skill", input: { skill: "repo-health" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-06-07T09:00:02.000Z",
+        sessionId: "claude-1",
+        cwd: "/home/dev/repo",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call_bad", name: "Skill", input: { skill: "ghost" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-06-07T09:00:03.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call_bad", is_error: true, content: "Unknown skill: ghost" }],
+        },
+      }),
+    ].join("\n"), "utf8");
+
+    const snapshot = loadSkillUsage({
+      homeDir,
+      usagePath: path.join(homeDir, "missing.jsonl"),
+      codexSessionsDir: null,
+    });
+
+    expect(usageForSkill(snapshot, "repo-health", "claude")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "ghost", "claude")).toBeNull();
+  }));
 });
