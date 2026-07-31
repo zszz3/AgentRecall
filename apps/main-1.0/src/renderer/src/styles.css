@@ -3047,6 +3047,11 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.trace-meta .trace-duration {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .trace-event pre {
   display: none;
   margin: 0;

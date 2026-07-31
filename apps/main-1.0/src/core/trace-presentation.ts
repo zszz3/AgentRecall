@@ -57,3 +57,63 @@ export function tracePresentation(
   }
   return { category: "tool", visibility: "timeline" };
 }
+
+function readableJsonText(value: unknown, indent = ""): string | null {
+  if (typeof value === "string") return value;
+  if (value === null || typeof value !== "object") return null;
+  const entries = Array.isArray(value)
+    ? value.map((item, index) => [String(index), item] as const)
+    : Object.entries(value);
+  if (entries.length === 0) return null;
+  const nested = `${indent}  `;
+  return entries
+    .map(([key, nestedValue]) => {
+      if (typeof nestedValue === "string") {
+        return nestedValue.includes("\n")
+          ? `${indent}${key}:\n${nestedValue}`
+          : `${indent}${key}: ${nestedValue}`;
+      }
+      const rendered = readableJsonText(nestedValue, nested);
+      return rendered === null
+        ? `${indent}${key}: ${JSON.stringify(nestedValue)}`
+        : `${indent}${key}:\n${rendered}`;
+    })
+    .join("\n");
+}
+
+function unescapeJsonFragment(detail: string): string {
+  return detail.replaceAll(/\\(["\\/bfnrt])/gu, (match, escape: string) => {
+    if (escape === "n") return "\n";
+    if (escape === "t") return "\t";
+    if (escape === "r") return "\r";
+    if (escape === "b" || escape === "f") return match;
+    return escape;
+  });
+}
+
+export function traceDetailText(detail: string): string {
+  if (!detail.includes("\\n") && !detail.includes('\\"')) return detail;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return unescapeJsonFragment(detail);
+  }
+  const record = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null;
+  if (record?.truncated === true && typeof record.preview === "string") {
+    return traceDetailText(record.preview);
+  }
+  return readableJsonText(parsed) ?? detail;
+}
+
+export function traceDurationLabel(attributes: Record<string, unknown> | undefined): string | null {
+  const value = attributes?.durationMs;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  if (value < 1_000) return `${value}ms`;
+  if (value < 60_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}s`;
+  const minutes = Math.floor(value / 60_000);
+  const seconds = Math.round((value % 60_000) / 1_000);
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}

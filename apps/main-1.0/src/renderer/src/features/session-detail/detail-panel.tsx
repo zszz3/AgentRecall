@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
-import { tracePresentation } from "../../../../core/trace-presentation";
+import { traceDetailText, traceDurationLabel, tracePresentation } from "../../../../core/trace-presentation";
 import type { SessionMessage, SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
 import { hasTokenUsage } from "../../session-ui";
@@ -793,10 +793,12 @@ const TRACE_TRUNCATE_LIMIT = 2400;
 function TraceEventBlock({ event, language, timelineKey }: { event: SessionTraceEvent; language: LanguageMode; timelineKey: string }): ReactElement {
   const truncated = Boolean(event.detail) && event.detail.length > TRACE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
+  const durationText = traceDurationLabel(event.attributes);
   const detail = useMemo(() => {
     if (!event.detail) return localize(language, "No detail captured.", "没有记录详情。");
-    if (!truncated || expanded) return event.detail;
-    return `${event.detail.slice(0, TRACE_TRUNCATE_LIMIT)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
+    const readable = traceDetailText(event.detail);
+    if (!truncated || expanded) return readable;
+    return `${readable.slice(0, TRACE_TRUNCATE_LIMIT)}\n\n${localize(language, "...(truncated)", "...（已截断）")}`;
   }, [event.detail, truncated, expanded, language]);
 
   return (
@@ -811,6 +813,7 @@ function TraceEventBlock({ event, language, timelineKey }: { event: SessionTrace
       </summary>
       <div className="trace-meta">
         {event.eventType ? <span>{event.eventType}</span> : null}
+        {durationText ? <span className="trace-duration">{durationText}</span> : null}
         {event.callId ? <span>{event.callId}</span> : null}
       </div>
       <pre>{detail}</pre>
