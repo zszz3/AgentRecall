@@ -445,8 +445,11 @@ export class PostgresSkillRepository {
   }
 
   // Observability floor for claude skills: the hook pipeline has demonstrably
-  // produced at least one record. Until then "no triggers" must be reported
-  // as Unobserved rather than never-used.
+  // contributed version data to at least one indexed session event. The hook
+  // source no longer emits independent events (its skill_hash is merged into
+  // claude-session events at read time), so we check whether any claude session
+  // event carries a non-null skill_hash. Until then "no triggers" must be
+  // reported as Unobserved rather than never-used.
   async hasClaudeHookUsageEvents(): Promise<boolean> {
     const result = await this.database.query<{ found: boolean }>(
       `
@@ -455,7 +458,9 @@ export class PostgresSkillRepository {
           from agent_recall.skill_usage_events events
           join agent_recall.skill_usage_sources sources
             on sources.source_path = events.source_path
-          where sources.kind = 'claude-hook'
+          where sources.kind = 'claude-session'
+            and events.agent = 'claude'
+            and events.skill_hash is not null
         ) as found
       `,
     );

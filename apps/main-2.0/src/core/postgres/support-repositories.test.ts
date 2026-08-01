@@ -282,13 +282,14 @@ describe("PostgreSQL support repositories", () => {
     }, [
       { agent: "codex", skill: "other", timestamp: now },
     ]);
-    // The claude observability floor only trips once hook records exist.
+    // The claude observability floor trips once a claude session event carries
+    // a skill_hash — the signature that the hook contributed version data.
     await expect(repository.hasClaudeHookUsageEvents()).resolves.toBe(false);
 
     await repository.upsertSkillUsageSource({
       agent: "claude",
-      kind: "claude-hook",
-      path: "/fixtures/skill-usage.jsonl",
+      kind: "claude-session",
+      path: "/fixtures/claude-session.jsonl",
       mtimeMs: 1,
       fileSize: 1,
     }, [

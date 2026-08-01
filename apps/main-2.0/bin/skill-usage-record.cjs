@@ -83,7 +83,9 @@ function buildRecord(input) {
 // Resolves the skill's SKILL.md (project level first, matching Claude's
 // resolution order) and returns its sha256 hex, or "" when the file cannot
 // be found or read. Never throws. The home directory is resolved per call so
-// tests can point it at a temporary HOME.
+// tests can point it at a temporary HOME. Plugin skills installed via
+// ~/.claude/plugins are searched after the standard roots, mirroring
+// collectClaudePluginRoots in skill-manager.ts.
 function skillMarkdownHash(skill, cwd) {
   if (!skill || /[\\/]|\.\./.test(skill)) return "";
   const homeDir = process.env.AGENT_RECALL_TEST_HOME || os.homedir();
@@ -98,7 +100,71 @@ function skillMarkdownHash(skill, cwd) {
       // Missing at this root; try the next one.
     }
   }
+  // Search plugin skill roots: Claude resolves plugin skills under
+  // ~/.claude/plugins, either via installed_plugins.json or the marketplaces
+  // directory walk. Each plugin's skills live at <plugin>/skills/<name>/.
+  for (const root of collectClaudePluginSkillRoots(homeDir)) {
+    try {
+      const markdown = fs.readFileSync(path.join(root, skill, "SKILL.md"));
+      return crypto.createHash("sha256").update(markdown).digest("hex");
+    } catch {
+      // Not a plugin skill at this root; try the next one.
+    }
+  }
   return "";
+}
+
+// Collects skill roots from Claude's plugin directory, mirroring
+// collectClaudePluginRoots in skill-manager.ts. Must stay self-contained (no
+// imports from TypeScript modules) because this script runs from a freshly
+// unpacked global install.
+function collectClaudePluginSkillRoots(homeDir) {
+  const pluginsDir = path.join(homeDir, ".claude", "plugins");
+  const roots = [];
+  // 1. Try installed_plugins.json (newer Claude Code versions).
+  try {
+    const raw = fs.readFileSync(path.join(pluginsDir, "installed_plugins.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.plugins && typeof parsed.plugins === "object") {
+      for (const installs of Object.values(parsed.plugins)) {
+        if (!Array.isArray(installs)) continue;
+        for (const install of installs) {
+          const installPath = install && install.installPath;
+          if (typeof installPath === "string" && installPath) {
+            roots.push(path.join(installPath, "skills"));
+          }
+        }
+      }
+    }
+  } catch {
+    // Missing or unreadable; fall through to marketplace walk.
+  }
+  // 2. Walk the marketplaces directory.
+  const marketplacesDir = path.join(pluginsDir, "marketplaces");
+  let marketplaces;
+  try {
+    marketplaces = fs.readdirSync(marketplacesDir, { withFileTypes: true });
+  } catch {
+    return roots;
+  }
+  for (const marketplace of marketplaces) {
+    if (!marketplace.isDirectory()) continue;
+    for (const collectionName of ["plugins", "external_plugins"]) {
+      const collectionDir = path.join(marketplacesDir, marketplace.name, collectionName);
+      let entries;
+      try {
+        entries = fs.readdirSync(collectionDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          roots.push(path.join(collectionDir, entry.name, "skills"));
+        }
+      }
+    }
+  }
+  return roots;
 }
 
 function cleanText(value) {
@@ -119,4 +185,4 @@ function expandHome(value) {
   return path.join(os.homedir(), value.slice(2));
 }
 
-module.exports = { buildRecord, extractSkillName, skillMarkdownHash };
+module.exports = { buildRecord, extractSkillName, skillMarkdownHash, collectClaudePluginSkillRoots };

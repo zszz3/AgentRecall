@@ -197,4 +197,52 @@ describe("skill markdown hash capture", () => {
       rmSync(homeDir, { recursive: true, force: true });
     }
   });
+
+  it("resolves plugin skills under ~/.claude/plugins/marketplaces", () => {
+    const homeDir = freshHome();
+    try {
+      process.env.AGENT_RECALL_TEST_HOME = homeDir;
+      const pluginSkillDir = path.join(
+        homeDir, ".claude", "plugins", "marketplaces", "acme", "plugins", "acme-helper", "skills", "deploy",
+      );
+      mkdirSync(pluginSkillDir, { recursive: true });
+      const body = "# Deploy\nProduction deploy guide.\n";
+      writeFileSync(path.join(pluginSkillDir, "SKILL.md"), body, "utf8");
+      const expectedHash = createHash("sha256").update(Buffer.from(body, "utf8")).digest("hex");
+
+      expect(record.skillMarkdownHash("deploy", "")).toBe(expectedHash);
+
+      const built = record.buildRecord({
+        tool_name: "Skill",
+        tool_input: { skill: "deploy" },
+        cwd: homeDir,
+      });
+      expect(built).toMatchObject({ skill: "deploy", skill_hash: expectedHash });
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves plugin skills via installed_plugins.json", () => {
+    const homeDir = freshHome();
+    try {
+      process.env.AGENT_RECALL_TEST_HOME = homeDir;
+      const installDir = path.join(homeDir, "custom-plugin");
+      const skillDir = path.join(installDir, "skills", "lint");
+      mkdirSync(skillDir, { recursive: true });
+      const body = "# Lint\nCode quality checks.\n";
+      writeFileSync(path.join(skillDir, "SKILL.md"), body, "utf8");
+      const expectedHash = createHash("sha256").update(Buffer.from(body, "utf8")).digest("hex");
+
+      const pluginsFile = path.join(homeDir, ".claude", "plugins", "installed_plugins.json");
+      mkdirSync(path.dirname(pluginsFile), { recursive: true });
+      writeFileSync(pluginsFile, JSON.stringify({
+        plugins: { acme: [{ installPath: installDir }] },
+      }), "utf8");
+
+      expect(record.skillMarkdownHash("lint", "")).toBe(expectedHash);
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
 });

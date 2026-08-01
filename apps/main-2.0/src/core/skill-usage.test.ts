@@ -34,15 +34,33 @@ function writeCodexSession(homeDir: string, lines: string[]): string {
   return sessionsDir;
 }
 
+function writeClaudeSession(homeDir: string, lines: string[]): string {
+  const projectDir = path.join(homeDir, ".claude", "projects", "repo");
+  fs.mkdirSync(projectDir, { recursive: true });
+  const filePath = path.join(projectDir, "session.jsonl");
+  fs.writeFileSync(filePath, lines.join("\n"), "utf8");
+  return filePath;
+}
+
+function claudeSkillUse(id: string, skill: string, timestamp: string, sessionId = "sess-1", cwd = "/repo"): string {
+  return JSON.stringify({
+    type: "assistant",
+    timestamp,
+    sessionId,
+    cwd,
+    message: { role: "assistant", content: [{ type: "tool_use", id, name: "Skill", input: { skill } }] },
+  });
+}
+
 describe("skill usage", () => {
-  it("aggregates counts and last-used time per skill", () => withTempHome((homeDir) => {
-    const usagePath = writeUsageLog(homeDir, [
-      JSON.stringify({ skill: "brainstorming", ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "brainstorming", ts: "2026-06-02T10:00:00.000Z" }),
-      JSON.stringify({ skill: "tdd", ts: "2026-06-03T10:00:00.000Z" }),
+  it("aggregates counts and last-used time per skill from Claude sessions", () => withTempHome((homeDir) => {
+    writeClaudeSession(homeDir, [
+      claudeSkillUse("call_1", "brainstorming", "2026-06-01T10:00:00.000Z"),
+      claudeSkillUse("call_2", "brainstorming", "2026-06-02T10:00:00.000Z"),
+      claudeSkillUse("call_3", "tdd", "2026-06-03T10:00:00.000Z"),
     ]);
 
-    const snapshot = loadSkillUsage({ homeDir, usagePath, codexSessionsDir: null });
+    const snapshot = loadSkillUsage({ homeDir, usagePath: path.join(homeDir, "missing.jsonl"), codexSessionsDir: null });
 
     expect(snapshot.exists).toBe(true);
     expect(snapshot.totalEvents).toBe(3);
@@ -50,29 +68,12 @@ describe("skill usage", () => {
       { skill: "brainstorming", count: 2, lastUsedAt: Date.parse("2026-06-02T10:00:00.000Z") },
       { skill: "tdd", count: 1, lastUsedAt: Date.parse("2026-06-03T10:00:00.000Z") },
     ]);
-    expect(usageForSkill(snapshot, "Brainstorming")?.count).toBe(2);
+    expect(usageForSkill(snapshot, "Brainstorming", "claude")?.count).toBe(2);
   }));
 
-  it("skips malformed lines and records without a skill name", () => withTempHome((homeDir) => {
+  it("returns no events from the claude-hook source (data is merged into sessions)", () => withTempHome((homeDir) => {
     const usagePath = writeUsageLog(homeDir, [
-      "not json",
-      JSON.stringify({ ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "  ", ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "review-code", ts: "2026-06-01T10:00:00.000Z" }),
-      "",
-    ]);
-
-    const snapshot = loadSkillUsage({ homeDir, usagePath, codexSessionsDir: null });
-
-    expect(snapshot.totalEvents).toBe(1);
-    expect(snapshot.stats.map((stat) => stat.skill)).toEqual(["review-code"]);
-  }));
-
-  it("carries session linkage fields from newer hook records and tolerates old ones", () => withTempHome((homeDir) => {
-    const usagePath = writeUsageLog(homeDir, [
-      JSON.stringify({ skill: "review", ts: "2026-06-01T10:00:00.000Z" }),
-      JSON.stringify({ skill: "review", ts: "2026-06-02T10:00:00.000Z", session_id: "abc-123", cwd: "/repo", skill_hash: "a1b2c3" }),
-      JSON.stringify({ skill: "review", ts: "2026-06-03T10:00:00.000Z", session_id: "   ", cwd: 42, skill_hash: "  " }),
+      JSON.stringify({ skill: "review", ts: "2026-06-01T10:00:00.000Z", session_id: "abc-123", skill_hash: "a1b2c3" }),
     ]);
 
     const events = readSkillUsageSourceEvents({
@@ -83,14 +84,34 @@ describe("skill usage", () => {
       fileSize: 1,
     });
 
-    expect(events).toHaveLength(3);
-    expect(events[0]?.sessionId).toBeUndefined();
-    expect(events[0]?.cwd).toBeUndefined();
-    expect(events[0]?.skillHash).toBeUndefined();
-    expect(events[1]).toMatchObject({ sessionId: "abc-123", cwd: "/repo", skillHash: "a1b2c3" });
-    expect(events[2]?.sessionId).toBeUndefined();
-    expect(events[2]?.cwd).toBeUndefined();
-    expect(events[2]?.skillHash).toBeUndefined();
+    expect(events).toEqual([]);
+  }));
+
+  it("enriches Claude session events with skill_hash from matching hook records", () => withTempHome((homeDir) => {
+    const sessionPath = writeClaudeSession(homeDir, [
+      claudeSkillUse("call_1", "review", "2026-06-01T10:00:00.000Z", "sess-abc"),
+    ]);
+    const hookLogPath = writeUsageLog(homeDir, [
+      "not json",
+      JSON.stringify({ ts: "2026-06-01T10:00:00.000Z" }),
+      JSON.stringify({ skill: "  ", ts: "2026-06-01T10:00:00.000Z" }),
+      JSON.stringify({ skill: "review", ts: "2026-06-01T10:00:01.000Z", session_id: "sess-abc", skill_hash: "a1b2c3" }),
+      JSON.stringify({ skill: "review", ts: "2026-06-01T10:00:00.000Z", session_id: "other", skill_hash: "deadbeef" }),
+    ]);
+    const stat = fs.statSync(sessionPath);
+
+    const events = readSkillUsageSourceEvents({
+      agent: "claude",
+      provider: "claude",
+      kind: "claude-session",
+      path: sessionPath,
+      mtimeMs: stat.mtimeMs,
+      fileSize: stat.size,
+      hookLogPath,
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ skill: "review", sessionId: "sess-abc", skillHash: "a1b2c3" });
   }));
 
   it("returns an empty snapshot when the log is missing", () => withTempHome((homeDir) => {
@@ -171,8 +192,8 @@ describe("skill usage", () => {
   }));
 
   it("keeps same-name Codex and Claude usage separate for per-agent lookups", () => withTempHome((homeDir) => {
-    const usagePath = writeUsageLog(homeDir, [
-      JSON.stringify({ skill: "brainstorming", ts: "2026-06-01T10:00:00.000Z" }),
+    writeClaudeSession(homeDir, [
+      claudeSkillUse("call_1", "brainstorming", "2026-06-01T10:00:00.000Z"),
     ]);
     const codexSessionsDir = writeCodexSession(homeDir, [
       JSON.stringify({
@@ -195,7 +216,7 @@ describe("skill usage", () => {
       }),
     ]);
 
-    const snapshot = loadSkillUsage({ homeDir, usagePath, codexSessionsDir });
+    const snapshot = loadSkillUsage({ homeDir, usagePath: path.join(homeDir, "missing.jsonl"), codexSessionsDir });
 
     expect(usageForSkill(snapshot, "brainstorming")?.count).toBe(3);
     expect(usageForSkill(snapshot, "brainstorming", "claude")?.count).toBe(1);

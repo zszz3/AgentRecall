@@ -68,6 +68,11 @@ export interface SkillUsageSource {
   path: string;
   mtimeMs: number;
   fileSize: number;
+  // Set on claude-session sources by listSkillUsageSources so the reader knows
+  // where to find the hook log for skill_hash enrichment. The hook log is the
+  // only place the trigger-time SKILL.md hash is captured for Claude; sessions
+  // carry no such content, so the hash must be merged in at read time.
+  hookLogPath?: string;
 }
 
 export interface SkillUsageRefreshStatus {
@@ -146,19 +151,25 @@ export function listSkillUsageSources(options: SkillUsageOptions = {}): SkillUsa
   const homeDir = options.homeDir ?? os.homedir();
   const sources: SkillUsageSource[] = [];
 
+  const hookLogPath = resolveUsagePath(options);
+
   addJsonlSources(sources, path.join(homeDir, ".claude", "projects"), "claude", "claude", "claude-session");
   if (options.includeTclaude !== false) {
     addJsonlSources(sources, path.join(homeDir, ".tclaude", "projects"), "claude", "tclaude", "claude-session");
   }
 
-  const hasNativeClaudeSessions = sources.some(
-    (source) => source.kind === "claude-session" && source.provider === "claude",
-  );
-  if (!hasNativeClaudeSessions) {
-    const usagePath = resolveUsagePath(options);
-    const stat = safeStat(usagePath);
-    if (stat) {
-      sources.push({ agent: "claude", provider: "claude", kind: "claude-hook", path: usagePath, ...stat });
+  // Always include the hook source so its skill_hash data can enrich session
+  // events at read time. The hook log is the only place the trigger-time
+  // SKILL.md hash is captured for Claude; sessions carry no such content.
+  const hookStat = safeStat(hookLogPath);
+  if (hookStat) {
+    sources.push({ agent: "claude", provider: "claude", kind: "claude-hook", path: hookLogPath, ...hookStat });
+    // Attach the hook log path to Claude session sources so the reader knows
+    // where to look for hash enrichment. tclaude sessions have different
+    // session ids and won't match hook records, but setting the path is
+    // harmless—the enrichment simply finds no matches.
+    for (const source of sources) {
+      if (source.kind === "claude-session" && source.provider === "claude") source.hookLogPath = hookLogPath;
     }
   }
 
@@ -203,13 +214,17 @@ export function listSkillUsageSources(options: SkillUsageOptions = {}): SkillUsa
 }
 
 export function readSkillUsageSourceEvents(source: SkillUsageSource): SkillUsageEvent[] {
-  if (source.kind === "claude-hook") return readClaudeUsageEvents(source.path) ?? [];
+  // The hook source no longer emits independent events: its skill_hash data is
+  // merged into claude-session events at read time via enrichEventsWithHookHash.
+  if (source.kind === "claude-hook") return [];
   if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
   return readSessionFileUsageEvents(source);
 }
 
 export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource): Promise<SkillUsageEvent[]> {
-  if (source.kind === "claude-hook") return readClaudeUsageEvents(source.path) ?? [];
+  // The hook source no longer emits independent events: its skill_hash data is
+  // merged into claude-session events at read time via enrichEventsWithHookHash.
+  if (source.kind === "claude-hook") return [];
   if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
   const context: SessionFileContext = { failedToolUseIds: new Set() };
   const events: ScannedUsageEvent[] = [];
@@ -221,7 +236,9 @@ export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource):
   } catch {
     return [];
   }
-  return settleSessionFileEvents(events, context);
+  const settled = settleSessionFileEvents(events, context);
+  if (source.hookLogPath) enrichEventsWithHookHash(settled, source.hookLogPath);
+  return settled;
 }
 
 function addUsageEvents(
@@ -259,6 +276,44 @@ function readClaudeUsageEvents(usagePath: string): SkillUsageEvent[] | null {
     if (event) events.push({ ...event, agent: "claude" });
   });
   return read ? events : null;
+}
+
+// Merges the hook's skill_hash into Claude session events that describe the
+// same trigger. The hook log is small (one line per trigger) so reading it
+// per session file is cheap. Matching by session id + skill name + a 60-second
+// time window keeps the enrichment precise even when a skill is called
+// repeatedly in the same session. The hook fires at PostToolUse (after the
+// tool returns), while the session timestamp is the transcript line time —
+// the two differ by seconds, not minutes.
+function enrichEventsWithHookHash(events: SkillUsageEvent[], hookLogPath: string): void {
+  const hookEvents = readClaudeUsageEvents(hookLogPath);
+  if (!hookEvents || hookEvents.length === 0) return;
+
+  const hookBySession = new Map<string, Array<{ event: SkillUsageEvent; used: boolean }>>();
+  for (const event of hookEvents) {
+    if (!event.sessionId || !event.skillHash) continue;
+    const list = hookBySession.get(event.sessionId) ?? [];
+    list.push({ event, used: false });
+    hookBySession.set(event.sessionId, list);
+  }
+
+  for (const event of events) {
+    if (event.skillHash || !event.sessionId) continue;
+    const candidates = hookBySession.get(event.sessionId);
+    if (!candidates) continue;
+    let best: { entry: { event: SkillUsageEvent; used: boolean }; diff: number } | null = null;
+    for (const entry of candidates) {
+      if (entry.used) continue;
+      if (entry.event.skill.toLowerCase() !== event.skill.toLowerCase()) continue;
+      const diff = Math.abs(entry.event.timestamp - event.timestamp);
+      if (diff > 60_000) continue;
+      if (!best || diff < best.diff) best = { entry, diff };
+    }
+    if (best) {
+      event.skillHash = best.entry.event.skillHash;
+      best.entry.used = true;
+    }
+  }
 }
 
 export function usageForSkill(
@@ -300,7 +355,9 @@ function readSessionFileUsageEvents(source: SkillUsageSource): SkillUsageEvent[]
   const context: SessionFileContext = { failedToolUseIds: new Set() };
   const events: ScannedUsageEvent[] = [];
   forEachJsonlLine(source.path, (line) => events.push(...parseSessionUsageLine(line, source, context)));
-  return settleSessionFileEvents(events, context);
+  const settled = settleSessionFileEvents(events, context);
+  if (source.hookLogPath) enrichEventsWithHookHash(settled, source.hookLogPath);
+  return settled;
 }
 
 // Scanning state that a single trigger cannot carry on its own: Codex keeps the
