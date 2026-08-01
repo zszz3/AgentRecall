@@ -279,14 +279,29 @@ function readClaudeUsageEvents(usagePath: string): SkillUsageEvent[] | null {
 }
 
 // Merges the hook's skill_hash into Claude session events that describe the
-// same trigger. The hook log is small (one line per trigger) so reading it
-// per session file is cheap. Matching by session id + skill name + a 60-second
-// time window keeps the enrichment precise even when a skill is called
-// repeatedly in the same session. The hook fires at PostToolUse (after the
-// tool returns), while the session timestamp is the transcript line time —
-// the two differ by seconds, not minutes.
+// same trigger. Matching by session id + skill name + a 60-second time window
+// keeps the enrichment precise even when a skill is called repeatedly in the
+// same session. The hook fires at PostToolUse (after the tool returns), while
+// the session timestamp is the transcript line time — the two differ by
+// seconds, not minutes.
+//
+// The hook log is parsed once per refresh cycle and cached by path + mtime so
+// that scanning many Claude session files does not re-read the same small file
+// each time.
+const hookEventCache = new Map<string, { mtimeMs: number; events: SkillUsageEvent[] | null }>();
+
+function readCachedHookEvents(hookLogPath: string): SkillUsageEvent[] | null {
+  const stat = safeStat(hookLogPath);
+  if (!stat) return null;
+  const cached = hookEventCache.get(hookLogPath);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.events;
+  const events = readClaudeUsageEvents(hookLogPath);
+  hookEventCache.set(hookLogPath, { mtimeMs: stat.mtimeMs, events });
+  return events;
+}
+
 function enrichEventsWithHookHash(events: SkillUsageEvent[], hookLogPath: string): void {
-  const hookEvents = readClaudeUsageEvents(hookLogPath);
+  const hookEvents = readCachedHookEvents(hookLogPath);
   if (!hookEvents || hookEvents.length === 0) return;
 
   const hookBySession = new Map<string, Array<{ event: SkillUsageEvent; used: boolean }>>();

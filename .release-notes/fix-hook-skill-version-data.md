@@ -2,5 +2,5 @@
 
 ## Bug 修复
 
-- 修复 Claude Skill 的触发时版本指纹（`skill_hash`）无法进入 Eval 数据库的问题：当本机存在 Claude 会话转录时，hook 日志被跳过，导致版本对比功能失效。现在 hook 日志始终参与扫描，`skill_hash` 会被合并到对应的会话事件中。
-- 修复插件 Skill 无法计算版本指纹的问题：hook 脚本现在能搜索 `~/.claude/plugins` 下的插件 Skill 目录（包括 `installed_plugins.json` 和 `marketplaces` 两种路径），不再只查找 `~/.claude/skills/`。
+- 修复 Claude Skill 的版本对比功能在存在会话记录时无法正常工作的问题：版本指纹现在能正确关联到每次 Skill 触发，不再因会话记录的存在而被跳过。
+- 修复通过插件安装的 Claude Skill 无法识别版本的问题：插件 Skill 的版本指纹现在能被正确计算。
