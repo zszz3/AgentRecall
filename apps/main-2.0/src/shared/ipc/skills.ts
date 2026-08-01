@@ -9,8 +9,8 @@ const pathListInput = z.array(pathInput).min(1).max(500);
 const managedSkillIdInput = z.string().trim().min(1).max(80)
   .regex(/^[a-z0-9._-]+$/)
   .refine((value) => value !== "." && value !== "..", "Invalid managed Skill id.");
-const installTargetInput = z.enum(["codex", "claude", "trae"]);
-const installTargetsInput = z.array(installTargetInput).max(3);
+const installTargetInput = z.enum(["codex", "claude", "codebuddy", "qoder", "trae"]);
+const installTargetsInput = z.array(installTargetInput).max(5);
 const discoveryQueryInput = z.object({
   page: z.number().int().min(0).max(10_000),
   query: z.string().max(500).transform((value) => value.trim()),
