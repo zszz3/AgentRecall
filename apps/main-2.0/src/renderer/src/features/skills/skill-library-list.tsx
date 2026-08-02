@@ -160,6 +160,7 @@ export function SkillLibraryList({
                       <button
                         type="button"
                         className="skill-eval-badge-link"
+                        aria-label={l(`View ${total} findings in Eval`, `在 Eval 中查看 ${total} 条诊断`)}
                         onClick={(event) => {
                           event.stopPropagation();
                           onNavigateToEval(skill.name);

@@ -511,8 +511,8 @@ export class PostgresSkillRepository {
           tool_name,
           count(*) as call_count,
           count(*) filter (where span_status = 'failed') as failure_count,
-          array_agg(span_id) filter (where span_status = 'failed') as sample_span_ids,
-          array_agg(distinct left(span_error, 200)) filter (where span_status = 'failed' and span_error is not null) as sample_errors
+          array_agg(span_id order by span_id) filter (where span_status = 'failed') as sample_span_ids,
+          array_agg(distinct left(span_error, 200) order by left(span_error, 200)) filter (where span_status = 'failed' and span_error is not null) as sample_errors
         from linked_tool_spans
         group by tool_name
         order by failure_count desc, call_count desc

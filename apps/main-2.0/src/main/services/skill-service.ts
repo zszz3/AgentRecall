@@ -770,23 +770,13 @@ export class SkillService {
     const overviewItem = overview.find(
       (item) => item.skill.trim().toLowerCase() === name.toLowerCase(),
     ) ?? null;
-    // Mark installed status from the snapshot for the installed-never-exercised rule.
     const installedSnapshot = await this.listSkills();
-    const installed = installedSnapshot.skills.some(
+    const installedSkill = installedSnapshot.skills.find(
       (item) => item.name.trim().toLowerCase() === name.toLowerCase(),
     );
-    const overviewLike = overviewItem
-      ? {
-          observation: (overviewItem.linkedTriggers > 0 ? "exercised" : "never-used") as "exercised" | "never-used" | "unobserved",
-          installed,
-          totalTriggers: overviewItem.totalTriggers,
-        }
-      : installed
-        ? { observation: "never-used" as const, installed: true, totalTriggers: 0 }
-        : null;
     return evaluateSkillFindings({
       skill: name,
-      overviewItem: overviewLike,
+      overviewItem: buildOverviewLike(overviewItem, installedSkill ?? null),
       signals,
       toolOutcomes,
     });
@@ -797,13 +787,13 @@ export class SkillService {
     const store = this.dependencies.getStore();
     const overview = await store.listSkillUsageOverview();
     const installedSnapshot = await this.listSkills();
-    const installedNames = new Set(
-      installedSnapshot.skills.map((s) => s.name.trim().toLowerCase()),
+    const installedByName = new Map(
+      installedSnapshot.skills.map((s) => [s.name.trim().toLowerCase(), s]),
     );
     // Collect all skill names (triggered + installed-never-used).
     const allNames = new Set<string>();
     for (const row of overview) allNames.add(row.skill.trim().toLowerCase());
-    for (const name of installedNames) allNames.add(name);
+    for (const name of installedByName.keys()) allNames.add(name);
     const results: { skill: string; low: number; medium: number }[] = [];
     for (const name of allNames) {
       const [signals, toolOutcomes] = await Promise.all([
@@ -813,19 +803,10 @@ export class SkillService {
       const overviewItem = overview.find(
         (item) => item.skill.trim().toLowerCase() === name,
       ) ?? null;
-      const installed = installedNames.has(name);
-      const overviewLike = overviewItem
-        ? {
-            observation: (overviewItem.linkedTriggers > 0 ? "exercised" : "never-used") as "exercised" | "never-used" | "unobserved",
-            installed,
-            totalTriggers: overviewItem.totalTriggers,
-          }
-        : installed
-          ? { observation: "never-used" as const, installed: true, totalTriggers: 0 }
-          : null;
+      const installedSkill = installedByName.get(name) ?? null;
       const findings = evaluateSkillFindings({
         skill: name,
-        overviewItem: overviewLike,
+        overviewItem: buildOverviewLike(overviewItem, installedSkill),
         signals,
         toolOutcomes,
       });
@@ -985,4 +966,30 @@ export class SkillService {
     });
     await Promise.all(workers);
   }
+}
+
+// Builds the overview-like object for the findings evaluator from an overview
+// row (if any) and an installed skill (if any). Observation is derived from
+// totalTriggers — NOT linkedTriggers — because a skill with unlinked triggers
+// was still exercised; "never-used" requires zero total triggers. Only trae
+// (no scanned transcript) is unobserved.
+function buildOverviewLike(
+  overviewItem: SkillUsageOverviewRow | null,
+  installedSkill: InstalledSkill | null,
+): { observation: "exercised" | "never-used" | "unobserved"; installed: boolean; totalTriggers: number } | null {
+  if (overviewItem) {
+    return {
+      observation: overviewItem.totalTriggers > 0 ? "exercised" : "never-used",
+      installed: Boolean(installedSkill),
+      totalTriggers: overviewItem.totalTriggers,
+    };
+  }
+  if (installedSkill) {
+    return {
+      observation: installedSkill.agent === "trae" ? "unobserved" : "never-used",
+      installed: true,
+      totalTriggers: 0,
+    };
+  }
+  return null;
 }

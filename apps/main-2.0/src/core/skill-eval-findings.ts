@@ -170,7 +170,7 @@ export function assertFindingWording(findings: SkillFinding[]): string[] {
         violations.push(`${f.rule}: observation contains "${word}"`);
       }
     }
-    if (!/Consider checking/i.test(f.repairDirection)) {
+    if (!/^Consider checking/i.test(f.repairDirection)) {
       violations.push(`${f.rule}: repairDirection must start with "Consider checking"`);
     }
   }
