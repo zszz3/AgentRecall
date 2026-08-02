@@ -113,6 +113,7 @@ import { registerProvidersIpc } from "./ipc/providers";
 import { resolveOpenVikingExtractionConfig } from "./services/openviking-extraction-config";
 import {
   openVikingExtractionSettingsChanged,
+  restartRunningOpenVikingForPathSettings,
   restartOpenVikingForExtractionSettings,
 } from "./services/openviking-settings-lifecycle";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
@@ -306,6 +307,7 @@ let disposeAutomationIpc: (() => void) | null = null;
 let disposeTeamChatIpc: (() => void) | null = null;
 let disposeOpenVikingMemoryIpc: (() => void) | null = null;
 let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
+let openVikingModelManager: OpenVikingLocalModelManager | null = null;
 let openVikingControlService: OpenVikingControlService | null = null;
 let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
 let openVikingHookStateFlusher: OpenVikingHookStateFlusher | null = null;
@@ -955,6 +957,7 @@ function initializeOpenVikingMemory(): void {
   const runtime = new OpenVikingRuntimeService({
     rootDir,
     codexAuthBootstrapPath: codexAuthPath(process.env, app.getPath("home")),
+    configuredRuntimePath: () => getSettings().openVikingRuntimePath,
     version: OPENVIKING_RUNTIME_VERSION,
     arch: openVikingRuntimeArch,
     allowLocalRuntime: !releaseUpdateRuntime,
@@ -962,7 +965,9 @@ function initializeOpenVikingMemory(): void {
   const model = new OpenVikingLocalModelManager({
     rootDir,
     resolveManifest: async () => BUILTIN_OPENVIKING_MODEL_MANIFEST,
+    configuredModelPath: () => getSettings().openVikingModelPath,
   });
+  openVikingModelManager = model;
   let control: OpenVikingControlService;
   const client = new AutoStartingOpenVikingClient({
     ensureRunning: async () => {
@@ -2394,6 +2399,7 @@ function registerIpc(): void {
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
     const previous = getSettings();
     const next = mergeAppSettings(previous, settings);
+    const openVikingPathChanged = "openVikingRuntimePath" in settings || "openVikingModelPath" in settings;
     const openVikingSettingsChanged = [
       "openVikingMemoryEnabled",
       "openVikingClaudeEnabled",
@@ -2401,6 +2407,12 @@ function registerIpc(): void {
       "openVikingOpenCodeEnabled",
     ].some((key) => key in settings);
     const openVikingExtractionChanged = openVikingExtractionSettingsChanged(settings);
+    if ("openVikingRuntimePath" in settings) {
+      await openVikingRuntimeService?.validateConfiguredPath(next.openVikingRuntimePath);
+    }
+    if ("openVikingModelPath" in settings) {
+      await openVikingModelManager?.validateConfiguredPath(next.openVikingModelPath);
+    }
     if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
       throw new Error(
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -2433,7 +2445,9 @@ function registerIpc(): void {
         );
       });
       await refreshOpenVikingHookManifest();
-      if (!openVikingExtractionChanged) await startConfiguredOpenVikingRuntime(next);
+      if (!openVikingExtractionChanged && !openVikingPathChanged) {
+        await startConfiguredOpenVikingRuntime(next);
+      }
     }
     if (openVikingControlService && openVikingExtractionChanged) {
       const snapshot = await openVikingControlService.snapshot();
@@ -2444,6 +2458,20 @@ function registerIpc(): void {
         stop: () => openVikingControlService!.stopRuntime(),
         start: () => startConfiguredOpenVikingRuntime(next),
       });
+    }
+    if (openVikingControlService && openVikingPathChanged && next.openVikingMemoryEnabled) {
+      const snapshot = await openVikingControlService.snapshot();
+      try {
+        await restartRunningOpenVikingForPathSettings({
+          enabled: next.openVikingMemoryEnabled,
+          runtimeState: snapshot.runtime.state,
+          stop: () => openVikingControlService!.stopRuntime(),
+          start: () => openVikingControlService!.startRuntime(),
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`The paths were saved, but OpenViking failed to restart: ${detail}`, { cause: error });
+      }
     }
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
     await pruneDisabledOptionalSources(next);

@@ -34,6 +34,48 @@ const manifest: OpenVikingModelManifest = {
 };
 
 describe("OpenVikingLocalModelManager", () => {
+  it("uses a configured absolute GGUF path without downloading the managed model", async () => {
+    const directory = await root();
+    const configuredModel = path.join(directory, "existing-model.gguf");
+    await writeFile(configuredModel, "configured model");
+    const manager = new OpenVikingLocalModelManager({
+      rootDir: directory,
+      resolveManifest: async () => manifest,
+      configuredModelPath: () => configuredModel,
+    });
+
+    await expect(manager.getStatus()).resolves.toEqual({
+      model: "BAAI/bge-small-zh-v1.5",
+      installed: true,
+      totalBytes: Buffer.byteLength("configured model"),
+    });
+    await expect(manager.getModelPath()).resolves.toBe(configuredModel);
+  });
+
+  it("reports configuration errors for invalid model paths", async () => {
+    const directory = await root();
+    const relativeManager = new OpenVikingLocalModelManager({
+      rootDir: directory,
+      resolveManifest: async () => manifest,
+      configuredModelPath: () => "relative-model.gguf",
+    });
+    const missingManager = new OpenVikingLocalModelManager({
+      rootDir: directory,
+      resolveManifest: async () => manifest,
+      configuredModelPath: () => path.join(directory, "missing.gguf"),
+    });
+
+    await expect(relativeManager.getStatus()).resolves.toMatchObject({
+      installed: false,
+      error: "OpenViking model path must be an absolute path.",
+    });
+    await expect(missingManager.getStatus()).resolves.toMatchObject({
+      installed: false,
+      error: "OpenViking model file was not found at the configured absolute path.",
+    });
+    await expect(relativeManager.getModelPath()).rejects.toThrow("absolute path");
+  });
+
   it("pins the official GGUF artifact selected for local memory", () => {
     expect(BUILTIN_OPENVIKING_MODEL_MANIFEST).toEqual({
       model: "BAAI/bge-small-zh-v1.5",

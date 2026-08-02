@@ -6,6 +6,7 @@ import {
   readFile,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -40,6 +41,7 @@ export const BUILTIN_OPENVIKING_MODEL_MANIFEST: OpenVikingModelManifest = Object
 interface OpenVikingLocalModelManagerOptions {
   rootDir: string;
   resolveManifest(): Promise<OpenVikingModelManifest | null>;
+  configuredModelPath?: () => string | undefined;
   download?: (url: string, destination: string) => Promise<void>;
   env?: NodeJS.ProcessEnv;
 }
@@ -56,6 +58,24 @@ export class OpenVikingLocalModelManager {
   }
 
   async getStatus(): Promise<OpenVikingModelStatus> {
+    const configured = (this.options.configuredModelPath?.() ?? "").trim();
+    if (configured) {
+      try {
+        const configuredPath = this.configuredPath(configured);
+        const model = await this.requireConfiguredModel(configuredPath);
+        return {
+          model: OPENVIKING_LOCAL_EMBEDDING_MODEL,
+          installed: true,
+          totalBytes: model.size,
+        };
+      } catch (error) {
+        return {
+          model: OPENVIKING_LOCAL_EMBEDDING_MODEL,
+          installed: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
     const [active, available] = await Promise.all([
       this.readActiveManifest(),
       this.options.resolveManifest(),
@@ -121,6 +141,12 @@ export class OpenVikingLocalModelManager {
   }
 
   async getModelPath(): Promise<string> {
+    const configured = (this.options.configuredModelPath?.() ?? "").trim();
+    if (configured) {
+      const configuredPath = this.configuredPath(configured);
+      await this.requireConfiguredModel(configuredPath);
+      return configuredPath;
+    }
     const manifest = await this.readActiveManifest();
     if (!manifest) throw new Error("OpenViking embedding model is not installed.");
     const modelPath = this.modelPath(manifest);
@@ -138,6 +164,33 @@ export class OpenVikingLocalModelManager {
 
   private activeManifestPath(): string {
     return this.ownedPath("models", "active-model.json");
+  }
+
+  async validateConfiguredPath(configuredPath?: string): Promise<void> {
+    const configured = (configuredPath ?? "").trim();
+    if (!configured) return;
+    await this.requireConfiguredModel(this.configuredPath(configured));
+  }
+
+  private configuredPath(configured: string): string {
+    if (!path.isAbsolute(configured)) {
+      throw new Error("OpenViking model path must be an absolute path.");
+    }
+    return path.resolve(configured);
+  }
+
+  private async requireConfiguredModel(modelPath: string): Promise<{ size: number }> {
+    if (!modelPath.toLowerCase().endsWith(".gguf")) {
+      throw new Error("OpenViking model path must point to a .gguf file.");
+    }
+    try {
+      const model = await stat(modelPath);
+      if (!model.isFile()) throw new Error("Configured model path is not a file.");
+      return { size: model.size };
+    } catch (error) {
+      if (error instanceof Error && error.message === "Configured model path is not a file.") throw error;
+      throw new Error("OpenViking model file was not found at the configured absolute path.", { cause: error });
+    }
   }
 
   private async readActiveManifest(): Promise<OpenVikingModelManifest | null> {

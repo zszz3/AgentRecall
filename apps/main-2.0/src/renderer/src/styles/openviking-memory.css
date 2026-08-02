@@ -989,7 +989,7 @@
   color: var(--accent-bright);
 }
 
-.openviking-component-card > div {
+.openviking-component-copy {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -1006,8 +1006,53 @@
   font-size: 12.5px;
 }
 
-.openviking-component-card > div > span {
+.openviking-component-copy > span {
   color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.openviking-component-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.openviking-path-config {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.openviking-path-config > span {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.openviking-path-config > input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  outline: none;
+}
+
+.openviking-path-config > input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.openviking-path-config > small {
+  color: var(--danger);
   font-size: 10.5px;
   line-height: 1.4;
 }
@@ -1150,8 +1195,9 @@
     grid-template-columns: 34px minmax(0, 1fr) auto;
   }
 
-  .openviking-component-card .settings-action-button {
+  .openviking-component-actions {
     grid-column: 2 / -1;
     justify-self: start;
+    flex-wrap: wrap;
   }
 }

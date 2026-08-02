@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
-import { spawn, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { createReadStream } from "node:fs";
 import {
   access,
@@ -16,6 +16,7 @@ import {
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import * as tar from "tar";
 
 import type {
@@ -29,6 +30,8 @@ const OPENVIKING_SERVER_BOOTSTRAP = [
   "from openviking_cli.server_bootstrap import main",
   "raise SystemExit(main())",
 ].join("; ");
+const SUPPORTED_OPENVIKING_PACKAGE_VERSION = "0.4.11";
+const execFileAsync = promisify(execFile);
 
 export interface OpenVikingRuntimeManifest {
   version: string;
@@ -78,6 +81,8 @@ interface ExtractArchiveInput {
 interface RuntimeServiceOptions {
   rootDir: string;
   codexAuthBootstrapPath: string;
+  configuredRuntimePath?: () => string | undefined;
+  resolveRuntimeVersion?: (pythonPath: string) => Promise<string>;
   version?: string;
   platform?: NodeJS.Platform;
   arch?: string;
@@ -115,6 +120,8 @@ interface PersistedRuntimeState {
 export class OpenVikingRuntimeService {
   private readonly rootDir: string;
   private readonly codexAuthBootstrapPath: string;
+  private readonly configuredRuntimePath: NonNullable<RuntimeServiceOptions["configuredRuntimePath"]>;
+  private readonly resolveRuntimeVersion: NonNullable<RuntimeServiceOptions["resolveRuntimeVersion"]>;
   private readonly version: string | undefined;
   private readonly platform: NodeJS.Platform;
   private readonly arch: string;
@@ -132,6 +139,8 @@ export class OpenVikingRuntimeService {
   constructor(options: RuntimeServiceOptions) {
     this.rootDir = path.resolve(options.rootDir);
     this.codexAuthBootstrapPath = path.resolve(options.codexAuthBootstrapPath);
+    this.configuredRuntimePath = options.configuredRuntimePath ?? (() => undefined);
+    this.resolveRuntimeVersion = options.resolveRuntimeVersion ?? resolveInstalledOpenVikingVersion;
     this.version = options.version;
     this.platform = options.platform ?? process.platform;
     this.arch = options.arch ?? process.arch;
@@ -148,28 +157,34 @@ export class OpenVikingRuntimeService {
 
   async getStatus(): Promise<OpenVikingRuntimeStatus> {
     if (this.transientStatus) return this.transientStatus;
-    const manifest = await this.readActiveManifest();
-    if (!manifest) return { state: "not-installed" };
-    if (
-      (this.version !== undefined && manifest.version !== this.version)
-      || manifest.platform !== this.platform
-      || manifest.arch !== this.arch
-    ) {
-      return { state: "not-installed" };
+    const configured = (this.configuredRuntimePath() ?? "").trim();
+    const manifest = configured ? null : await this.readActiveManifest();
+    if (!configured) {
+      if (!manifest) return { state: "not-installed" };
+      if (
+        (this.version !== undefined && manifest.version !== this.version)
+        || manifest.platform !== this.platform
+        || manifest.arch !== this.arch
+      ) {
+        return { state: "not-installed" };
+      }
     }
     let installedBytes: number | undefined;
-    try {
-      installedBytes = (await stat(this.runtimeArchivePath(manifest))).size;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (manifest) {
+      try {
+        installedBytes = (await stat(this.runtimeArchivePath(manifest))).size;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
+    const version = manifest?.version ?? this.version;
     if (this.child?.exitCode === null) {
       const state = await this.readRuntimeState();
       return {
         state: "running",
-        version: manifest.version,
-        ...(installedBytes === undefined ? {} : { installedBytes }),
+        ...(version ? { version } : {}),
         ...(state ? { port: state.port } : {}),
+        ...(installedBytes === undefined ? {} : { installedBytes }),
       };
     }
     const persisted = await this.readRuntimeState();
@@ -177,16 +192,33 @@ export class OpenVikingRuntimeService {
       if (this.isProcessAlive(persisted.pid)) {
         return {
           state: "running",
-          version: manifest.version,
+          ...(version ? { version } : {}),
           port: persisted.port,
           ...(installedBytes === undefined ? {} : { installedBytes }),
         };
       }
       await rm(this.runtimeStatePath(), { force: true });
     }
+    if (configured) {
+      try {
+        const configuredPath = this.configuredRuntimeRoot(configured);
+        const pythonPath = await this.requireRuntimeExecutables(configuredPath);
+        await this.requireSupportedVersion(pythonPath);
+        return {
+          state: "stopped",
+          ...(version ? { version } : {}),
+        };
+      } catch (error) {
+        return {
+          state: "error",
+          ...(version ? { version } : {}),
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
     return {
       state: "stopped",
-      version: manifest.version,
+      version: manifest!.version,
       ...(installedBytes === undefined ? {} : { installedBytes }),
     };
   }
@@ -257,22 +289,21 @@ export class OpenVikingRuntimeService {
   async start(config: OpenVikingServerConfig): Promise<OpenVikingRuntimeStatus> {
     const current = await this.getStatus();
     if (current.state === "running") return current;
-    const manifest = await this.readActiveManifest();
-    if (!manifest) throw new Error("OpenViking runtime is not installed.");
-    this.validateManifest(manifest);
+    const configured = (this.configuredRuntimePath() ?? "").trim();
+    const configuredPath = configured ? this.configuredRuntimeRoot(configured) : null;
+    const manifest = configuredPath ? null : await this.readActiveManifest();
+    if (!configuredPath && !manifest) throw new Error("OpenViking runtime is not installed.");
+    if (manifest) this.validateManifest(manifest);
+    const runtimePath = configuredPath ?? this.resolveOwnedPath("runtime", manifest!.version);
+    const executablePath = manifest?.executablePath
+      ?? (this.platform === "win32" ? "Scripts/openviking-server.exe" : "bin/openviking-server");
+    const python = await this.requireRuntimeExecutables(runtimePath, executablePath);
+    if (configuredPath) await this.requireSupportedVersion(python);
     this.transientStatus = {
       state: "starting",
-      version: manifest.version,
+      version: manifest?.version ?? this.version,
       ...(current.installedBytes === undefined ? {} : { installedBytes: current.installedBytes }),
     };
-    const runtimePath = this.resolveOwnedPath("runtime", manifest.version);
-    const executable = resolveArchivePath(runtimePath, manifest.executablePath);
-    await access(executable);
-    const python = resolveArchivePath(
-      runtimePath,
-      this.platform === "win32" ? "python.exe" : "bin/python3",
-    );
-    await access(python);
     const port = await this.allocatePort();
     const rootApiKey = await this.loadOrCreateRootApiKey();
     await mkdir(this.resolveOwnedPath("data"), { recursive: true });
@@ -494,6 +525,49 @@ export class OpenVikingRuntimeService {
     );
   }
 
+  async validateConfiguredPath(configuredPath?: string): Promise<void> {
+    const configured = (configuredPath ?? "").trim();
+    if (!configured) return;
+    const python = await this.requireRuntimeExecutables(this.configuredRuntimeRoot(configured));
+    await this.requireSupportedVersion(python);
+  }
+
+  private async requireSupportedVersion(pythonPath: string): Promise<void> {
+    const installedVersion = await this.resolveRuntimeVersion(pythonPath);
+    if (installedVersion !== SUPPORTED_OPENVIKING_PACKAGE_VERSION) {
+      throw new Error(
+        `OpenViking ${installedVersion || "unknown"} is not supported. Install OpenViking ${SUPPORTED_OPENVIKING_PACKAGE_VERSION} and configure that runtime directory.`,
+      );
+    }
+  }
+
+  private configuredRuntimeRoot(configured: string): string {
+    if (!path.isAbsolute(configured)) {
+      throw new Error("OpenViking runtime path must be an absolute path.");
+    }
+    return path.resolve(configured);
+  }
+
+  private async requireRuntimeExecutables(
+    runtimePath: string,
+    executablePath = this.platform === "win32" ? "Scripts/openviking-server.exe" : "bin/openviking-server",
+  ): Promise<string> {
+    const executable = resolveArchivePath(runtimePath, executablePath);
+    const python = resolveArchivePath(
+      runtimePath,
+      this.platform === "win32" ? "python.exe" : "bin/python3",
+    );
+    try {
+      await Promise.all([access(executable), access(python)]);
+    } catch (error) {
+      throw new Error(
+        `OpenViking runtime path does not contain ${executablePath} and ${this.platform === "win32" ? "python.exe" : "bin/python3"}.`,
+        { cause: error },
+      );
+    }
+    return python;
+  }
+
   private resolveOwnedPath(...segments: string[]): string {
     const resolved = path.resolve(this.rootDir, ...segments);
     const relative = path.relative(this.rootDir, resolved);
@@ -501,6 +575,23 @@ export class OpenVikingRuntimeService {
       throw new Error("OpenViking path escaped the application-owned directory.");
     }
     return resolved;
+  }
+}
+
+async function resolveInstalledOpenVikingVersion(pythonPath: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      pythonPath,
+      ["-c", "from importlib.metadata import version; print(version('openviking'))"],
+      { encoding: "utf8", timeout: 10_000, windowsHide: true },
+    );
+    return stdout.trim();
+  } catch (error) {
+    const stderr = typeof (error as { stderr?: unknown }).stderr === "string"
+      ? (error as { stderr: string }).stderr.trim()
+      : "";
+    const detail = stderr || (error instanceof Error ? error.message : String(error));
+    throw new Error(`Could not inspect the configured OpenViking runtime: ${detail}`, { cause: error });
   }
 }
 

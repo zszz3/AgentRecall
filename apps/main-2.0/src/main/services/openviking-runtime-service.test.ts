@@ -116,6 +116,8 @@ function runtimeHarness(root: string, options: {
   executablePath?: string;
   alive?: boolean;
   codexAuthBootstrapPath?: string;
+  configuredRuntimePath?: () => string | undefined;
+  resolveRuntimeVersion?: (pythonPath: string) => Promise<string>;
   download?: (url: string, destination: string) => Promise<void>;
   child?: FakeChild;
 } = {}) {
@@ -131,6 +133,8 @@ function runtimeHarness(root: string, options: {
     rootDir: root,
     codexAuthBootstrapPath: options.codexAuthBootstrapPath
       ?? path.join(root, "synthetic-codex-home", "auth.json"),
+    configuredRuntimePath: options.configuredRuntimePath,
+    resolveRuntimeVersion: options.resolveRuntimeVersion ?? (async () => "0.4.11"),
     platform: options.platform ?? "darwin",
     arch: options.platform === "win32" ? "x64" : "arm64",
     download: options.download ?? (async (_url, destination) => {
@@ -169,6 +173,79 @@ function runtimeHarness(root: string, options: {
 }
 
 describe("OpenVikingRuntimeService", () => {
+  it("starts from a configured absolute runtime directory without an active manifest", async () => {
+    const root = await temporaryRoot();
+    const runtime = path.join(root, "existing-openviking");
+    await mkdir(path.join(runtime, "Scripts"), { recursive: true });
+    await writeFile(path.join(runtime, "python.exe"), "");
+    await writeFile(path.join(runtime, "Scripts", "openviking-server.exe"), "");
+    const { service, spawnCalls } = runtimeHarness(root, {
+      platform: "win32",
+      configuredRuntimePath: () => runtime,
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({ state: "stopped" });
+    await service.start({
+      embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+      vlm: { provider: "openai-codex", model: "gpt-5.4" },
+    });
+
+    expect(spawnCalls[0].command).toBe(path.join(runtime, "python.exe"));
+    expect(spawnCalls[0].cwd).toBe(path.join(root, "data"));
+  });
+
+  it("reports a configuration error for a relative runtime path", async () => {
+    const root = await temporaryRoot();
+    const { service } = runtimeHarness(root, {
+      platform: "win32",
+      configuredRuntimePath: () => "relative-openviking",
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      state: "error",
+      error: "OpenViking runtime path must be an absolute path.",
+    });
+    await expect(service.start({
+      embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+      vlm: { provider: "openai-codex", model: "gpt-5.4" },
+    })).rejects.toThrow("absolute path");
+    await expect(service.getStatus()).resolves.toMatchObject({ state: "error" });
+  });
+
+  it("rejects a configured runtime with an unsupported OpenViking version", async () => {
+    const root = await temporaryRoot();
+    const runtime = path.join(root, "existing-openviking");
+    await mkdir(path.join(runtime, "Scripts"), { recursive: true });
+    await writeFile(path.join(runtime, "python.exe"), "");
+    await writeFile(path.join(runtime, "Scripts", "openviking-server.exe"), "");
+    const { service } = runtimeHarness(root, {
+      platform: "win32",
+      resolveRuntimeVersion: async () => "0.5.0",
+    });
+
+    await expect(service.validateConfiguredPath(runtime)).rejects.toThrow(
+      "OpenViking 0.5.0 is not supported. Install OpenViking 0.4.11",
+    );
+  });
+
+  it("surfaces an unsupported persisted runtime in status", async () => {
+    const root = await temporaryRoot();
+    const runtime = path.join(root, "existing-openviking");
+    await mkdir(path.join(runtime, "Scripts"), { recursive: true });
+    await writeFile(path.join(runtime, "python.exe"), "");
+    await writeFile(path.join(runtime, "Scripts", "openviking-server.exe"), "");
+    const { service } = runtimeHarness(root, {
+      platform: "win32",
+      configuredRuntimePath: () => runtime,
+      resolveRuntimeVersion: async () => "0.5.0",
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      state: "error",
+      error: "OpenViking 0.5.0 is not supported. Install OpenViking 0.4.11 and configure that runtime directory.",
+    });
+  });
+
   it("imports Codex OAuth into an app-owned OpenViking credential store", async () => {
     const root = await temporaryRoot();
     const authFile = path.join(root, "synthetic-codex-home", "auth.json");

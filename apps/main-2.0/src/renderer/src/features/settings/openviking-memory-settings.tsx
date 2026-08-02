@@ -7,6 +7,7 @@ import {
   Download,
   Play,
   RefreshCw,
+  Settings2,
 } from "lucide-react";
 
 import type {
@@ -37,6 +38,10 @@ export function OpenVikingMemorySettings({
   const [snapshot, setSnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
   const [action, setAction] = useState<ComponentAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const [runtimeConfigOpen, setRuntimeConfigOpen] = useState(false);
+  const [modelConfigOpen, setModelConfigOpen] = useState(false);
+  const [runtimePathDraft, setRuntimePathDraft] = useState("");
+  const [modelPathDraft, setModelPathDraft] = useState("");
 
   const refresh = useCallback(async () => {
     setSnapshot(await window.sessionSearch.getOpenVikingMemorySnapshot());
@@ -44,7 +49,29 @@ export function OpenVikingMemorySettings({
 
   useEffect(() => {
     void refresh().catch((cause) => setError(errorMessage(cause)));
-  }, [refresh]);
+  }, [refresh, settings?.openVikingModelPath, settings?.openVikingRuntimePath]);
+
+  useEffect(() => {
+    setRuntimePathDraft(settings?.openVikingRuntimePath ?? "");
+  }, [settings?.openVikingRuntimePath]);
+
+  useEffect(() => {
+    setModelPathDraft(settings?.openVikingModelPath ?? "");
+  }, [settings?.openVikingModelPath]);
+
+  const commitRuntimePath = () => {
+    const next = runtimePathDraft.trim();
+    if (settings && next !== settings.openVikingRuntimePath) {
+      onSettingsChange({ openVikingRuntimePath: next });
+    }
+  };
+
+  const commitModelPath = () => {
+    const next = modelPathDraft.trim();
+    if (settings && next !== settings.openVikingModelPath) {
+      onSettingsChange({ openVikingModelPath: next });
+    }
+  };
 
   useEffect(() => {
     if (
@@ -96,7 +123,15 @@ export function OpenVikingMemorySettings({
     ? null
     : (snapshot.runtime.installedBytes / 1_000_000).toFixed(1);
   const modelInstalled = Boolean(snapshot?.model.installed);
+  const modelStateClass = snapshot?.model.error
+    ? "error"
+    : modelInstalled ? "running" : "not-installed";
   const controlsDisabled = !enabled || saving || action !== null;
+  const configDisabled = !settings
+    || saving
+    || action !== null
+    || runtimeState === "starting"
+    || runtimeState === "installing";
   return (
     <section className="settings-pane openviking-settings-pane">
       <header className="settings-pane-head">
@@ -127,7 +162,7 @@ export function OpenVikingMemorySettings({
       <div className="openviking-component-list">
         <div className="openviking-component-card">
           <span className="openviking-component-icon"><Box size={18} /></span>
-          <div>
+          <div className="openviking-component-copy">
             <strong>OpenViking {snapshot?.runtime.version ?? "0.4.11-r4"}</strong>
             <span>{runtimeInstalledSize
               ? `${runtimeInstalledSize} / ${runtimeInstalledSize} MB`
@@ -156,67 +191,143 @@ export function OpenVikingMemorySettings({
               </div>
             ) : null}
           </div>
-          <span className={`openviking-status ${runtimeState}`}>
+          <span className={`openviking-status ${runtimeState}`} title={snapshot?.runtime.error}>
             {runtimeLabel(runtimeState, language, runtimeProgress?.phase)}
           </span>
-          {runtimeState === "not-installed" ? (
+          <div className="openviking-component-actions">
+            {runtimeState === "not-installed" ? (
+              <button
+                type="button"
+                className="settings-action-button"
+                disabled={controlsDisabled}
+                onClick={() => void run("runtime", () => window.sessionSearch.installOpenVikingRuntime())}
+              >
+                {action === "runtime" ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
+                {l("Download", "下载")}
+              </button>
+            ) : runtimeState === "running" ? (
+              <button
+                type="button"
+                className="settings-action-button"
+                disabled={controlsDisabled}
+                onClick={() => void run("stop", () => window.sessionSearch.stopOpenVikingRuntime())}
+              >
+                {action === "stop" ? <RefreshCw size={14} className="spin" /> : <CircleStop size={14} />}
+                {l("Stop", "停止")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="settings-action-button"
+                disabled={controlsDisabled || !modelInstalled}
+                onClick={() => void run("start", () => window.sessionSearch.startOpenVikingRuntime())}
+              >
+                {action === "start" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
+                {l("Start", "启动")}
+              </button>
+            )}
             <button
               type="button"
               className="settings-action-button"
-              disabled={controlsDisabled}
-              onClick={() => void run("runtime", () => window.sessionSearch.installOpenVikingRuntime())}
+              disabled={configDisabled}
+              aria-expanded={runtimeConfigOpen}
+              aria-controls="openviking-runtime-path-config"
+              onClick={() => setRuntimeConfigOpen((open) => !open)}
             >
-              {action === "runtime" ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
-              {l("Download", "下载")}
+              <Settings2 size={14} />
+              {l("Configure", "配置")}
             </button>
-          ) : runtimeState === "running" ? (
-            <button
-              type="button"
-              className="settings-action-button"
-              disabled={controlsDisabled}
-              onClick={() => void run("stop", () => window.sessionSearch.stopOpenVikingRuntime())}
-            >
-              {action === "stop" ? <RefreshCw size={14} className="spin" /> : <CircleStop size={14} />}
-              {l("Stop", "停止")}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="settings-action-button"
-              disabled={controlsDisabled || !modelInstalled}
-              onClick={() => void run("start", () => window.sessionSearch.startOpenVikingRuntime())}
-            >
-              {action === "start" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
-              {l("Start", "启动")}
-            </button>
-          )}
+          </div>
+          {runtimeConfigOpen ? (
+            <label className="openviking-path-config" id="openviking-runtime-path-config">
+              <span>{l("OpenViking runtime absolute path", "OpenViking 运行时绝对路径")}</span>
+              <input
+                type="text"
+                value={runtimePathDraft}
+                disabled={configDisabled}
+                placeholder={l(
+                  "Enter the absolute path to the OpenViking runtime directory",
+                  "请输入 OpenViking 运行时目录的绝对路径",
+                )}
+                onChange={(event) => setRuntimePathDraft(event.currentTarget.value)}
+                onBlur={commitRuntimePath}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    setRuntimePathDraft(settings?.openVikingRuntimePath ?? "");
+                    setRuntimeConfigOpen(false);
+                  }
+                }}
+              />
+              {snapshot?.runtime.error ? <small>{snapshot.runtime.error}</small> : null}
+            </label>
+          ) : null}
         </div>
 
         <div className="openviking-component-card">
           <span className="openviking-component-icon"><Cpu size={18} /></span>
-          <div>
+          <div className="openviking-component-copy">
             <strong>BAAI/bge-small-zh-v1.5</strong>
             <span>{l(
               "Local embedding · 47.9 MB · CPU is enough, no dedicated GPU required",
               "本地向量模型 · 47.9 MB · CPU 即可运行，不要求独立显卡",
             )}</span>
           </div>
-          <span className={`openviking-status ${modelInstalled ? "running" : "not-installed"}`}>
-            {modelInstalled ? l("Downloaded", "已下载") : l("Not downloaded", "未下载")}
+          <span className={`openviking-status ${modelStateClass}`} title={snapshot?.model.error}>
+            {snapshot?.model.error
+              ? l("Error", "异常")
+              : modelInstalled ? l("Downloaded", "已下载") : l("Not downloaded", "未下载")}
           </span>
-          {!modelInstalled ? (
+          <div className="openviking-component-actions">
+            {!modelInstalled && !snapshot?.model.error ? (
+              <button
+                type="button"
+                className="settings-action-button"
+                disabled={controlsDisabled}
+                onClick={() => void run(
+                  "model",
+                  () => window.sessionSearch.installOpenVikingModel("BAAI/bge-small-zh-v1.5"),
+                )}
+              >
+                {action === "model" ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
+                {l("Download 47.9 MB", "下载 47.9 MB")}
+              </button>
+            ) : null}
             <button
               type="button"
               className="settings-action-button"
-              disabled={controlsDisabled}
-              onClick={() => void run(
-                "model",
-                () => window.sessionSearch.installOpenVikingModel("BAAI/bge-small-zh-v1.5"),
-              )}
+              disabled={configDisabled}
+              aria-expanded={modelConfigOpen}
+              aria-controls="openviking-model-path-config"
+              onClick={() => setModelConfigOpen((open) => !open)}
             >
-              {action === "model" ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
-              {l("Download 47.9 MB", "下载 47.9 MB")}
+              <Settings2 size={14} />
+              {l("Configure", "配置")}
             </button>
+          </div>
+          {modelConfigOpen ? (
+            <label className="openviking-path-config" id="openviking-model-path-config">
+              <span>{l("Embedding model absolute path", "向量模型绝对路径")}</span>
+              <input
+                type="text"
+                value={modelPathDraft}
+                disabled={configDisabled}
+                placeholder={l(
+                  "Enter the absolute path to the GGUF model file",
+                  "请输入 GGUF 模型文件的绝对路径",
+                )}
+                onChange={(event) => setModelPathDraft(event.currentTarget.value)}
+                onBlur={commitModelPath}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    setModelPathDraft(settings?.openVikingModelPath ?? "");
+                    setModelConfigOpen(false);
+                  }
+                }}
+              />
+              {snapshot?.model.error ? <small>{snapshot.model.error}</small> : null}
+            </label>
           ) : null}
         </div>
       </div>

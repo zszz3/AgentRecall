@@ -95,6 +95,8 @@ export interface AppSettings {
   memoriesSyncEnabled: boolean;
   evalEnabled: boolean;
   openVikingMemoryEnabled: boolean;
+  openVikingRuntimePath: string;
+  openVikingModelPath: string;
   openVikingClaudeEnabled: boolean;
   openVikingCodexEnabled: boolean;
   openVikingOpenCodeEnabled: boolean;
@@ -166,6 +168,8 @@ export const defaultSettings: AppSettings = {
   memoriesSyncEnabled: false,
   evalEnabled: false,
   openVikingMemoryEnabled: false,
+  openVikingRuntimePath: "",
+  openVikingModelPath: "",
   openVikingClaudeEnabled: false,
   openVikingCodexEnabled: false,
   openVikingOpenCodeEnabled: false,
@@ -212,6 +216,8 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
     evalEnabled: Boolean(merged.evalEnabled),
     openVikingMemoryEnabled: Boolean(merged.openVikingMemoryEnabled),
+    openVikingRuntimePath: String(merged.openVikingRuntimePath ?? "").trim(),
+    openVikingModelPath: String(merged.openVikingModelPath ?? "").trim(),
     openVikingClaudeEnabled: Boolean(merged.openVikingClaudeEnabled),
     openVikingCodexEnabled: Boolean(merged.openVikingCodexEnabled),
     openVikingOpenCodeEnabled: Boolean(merged.openVikingOpenCodeEnabled),

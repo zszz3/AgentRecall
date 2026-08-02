@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppSettingsUpdate } from "../../core/platform";
-import { restartOpenVikingForExtractionSettings } from "./openviking-settings-lifecycle";
+import {
+  restartOpenVikingForExtractionSettings,
+  restartRunningOpenVikingForPathSettings,
+} from "./openviking-settings-lifecycle";
 
 describe("restartOpenVikingForExtractionSettings", () => {
   it.each<AppSettingsUpdate>([
@@ -52,5 +55,40 @@ describe("restartOpenVikingForExtractionSettings", () => {
     await run({ openVikingExtractionModel: "gpt-5.6-sol" }, false);
 
     expect(calls).toEqual([]);
+  });
+
+  it("restarts only an already running service for path changes", async () => {
+    const calls: string[] = [];
+    const run = (runtimeState: "running" | "stopped", enabled: boolean) =>
+      restartRunningOpenVikingForPathSettings({
+        enabled,
+        runtimeState,
+        stop: async () => { calls.push("stop"); },
+        start: async () => { calls.push("start"); },
+      });
+
+    await run("running", true);
+    await run("stopped", true);
+    await run("running", false);
+
+    expect(calls).toEqual(["stop", "start"]);
+  });
+
+  it("waits for an in-flight start before restarting with the saved paths", async () => {
+    const calls: string[] = [];
+    let startAttempt = 0;
+
+    await restartRunningOpenVikingForPathSettings({
+      enabled: true,
+      runtimeState: "starting",
+      stop: async () => { calls.push("stop"); },
+      start: async () => {
+        startAttempt += 1;
+        calls.push("start");
+        if (startAttempt === 1) throw new Error("old start failed");
+      },
+    });
+
+    expect(calls).toEqual(["start", "stop", "start"]);
   });
 });

@@ -23,3 +23,21 @@ export async function restartOpenVikingForExtractionSettings(input: {
   if (input.runtimeState === "running") await input.stop();
   await input.start();
 }
+
+export async function restartRunningOpenVikingForPathSettings(input: {
+  enabled: boolean;
+  runtimeState: OpenVikingRuntimeState;
+  stop(): Promise<unknown>;
+  start(): Promise<unknown>;
+}): Promise<void> {
+  if (!input.enabled || !["running", "starting"].includes(input.runtimeState)) return;
+  if (input.runtimeState === "starting") {
+    try {
+      await input.start();
+    } catch {
+      // The replacement start below uses the newly saved paths.
+    }
+  }
+  await input.stop();
+  await input.start();
+}

@@ -1221,6 +1221,11 @@ export function App(): ReactElement {
       }, 1600);
     } catch (error) {
       setSettingsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      try {
+        setAppSettings(await window.sessionSearch.getSettings());
+      } catch {
+        // Keep the last known settings when the refresh itself is unavailable.
+      }
     }
   }
 
