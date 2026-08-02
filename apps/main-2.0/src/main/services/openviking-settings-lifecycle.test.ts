@@ -57,9 +57,9 @@ describe("restartOpenVikingForExtractionSettings", () => {
     expect(calls).toEqual([]);
   });
 
-  it("restarts only an already running service for path changes", async () => {
+  it("restarts a running or errored service for path changes", async () => {
     const calls: string[] = [];
-    const run = (runtimeState: "running" | "stopped", enabled: boolean) =>
+    const run = (runtimeState: "running" | "stopped" | "error", enabled: boolean) =>
       restartRunningOpenVikingForPathSettings({
         enabled,
         runtimeState,
@@ -69,9 +69,10 @@ describe("restartOpenVikingForExtractionSettings", () => {
 
     await run("running", true);
     await run("stopped", true);
+    await run("error", true);
     await run("running", false);
 
-    expect(calls).toEqual(["stop", "start"]);
+    expect(calls).toEqual(["stop", "start", "stop", "start"]);
   });
 
   it("waits for an in-flight start before restarting with the saved paths", async () => {

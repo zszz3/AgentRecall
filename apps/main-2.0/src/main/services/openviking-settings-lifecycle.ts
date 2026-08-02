@@ -30,7 +30,7 @@ export async function restartRunningOpenVikingForPathSettings(input: {
   stop(): Promise<unknown>;
   start(): Promise<unknown>;
 }): Promise<void> {
-  if (!input.enabled || !["running", "starting"].includes(input.runtimeState)) return;
+  if (!input.enabled || !["running", "starting", "error"].includes(input.runtimeState)) return;
   if (input.runtimeState === "starting") {
     try {
       await input.start();
