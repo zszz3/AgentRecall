@@ -344,6 +344,25 @@ export function App(): ReactElement {
   const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
   const [remoteSessionsOpen, setRemoteSessionsOpen] = useState(false);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [evalPreselectedSkill, setEvalPreselectedSkill] = useState<string | null>(null);
+  const [evalFindingCounts, setEvalFindingCounts] = useState<{ skill: string; low: number; medium: number }[]>([]);
+
+  useEffect(() => {
+    if (!appSettings?.evalEnabled) {
+      setEvalFindingCounts([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const counts = await window.sessionSearch.getSkillEvalFindingCounts();
+        if (!cancelled) setEvalFindingCounts(counts);
+      } catch {
+        // Eval is opt-in; failures here are non-fatal.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [appSettings?.evalEnabled, skills.snapshot]);
   const [settingsFeedback, setSettingsFeedback] = useState<SettingsFeedback>(null);
   const [environmentHealthReports, setEnvironmentHealthReports] = useState<Record<string, RemoteHealthReport>>({});
   const [diagnosingEnvironmentId, setDiagnosingEnvironmentId] = useState<string | null>(null);
@@ -1570,6 +1589,11 @@ export function App(): ReactElement {
                   void runUtilityAction(`Opening ${FILE_MANAGER_LABEL}`, () => window.sessionSearch.revealSkill(skillPath), `${FILE_MANAGER_LABEL} opened.`)
                 }
                 onDelete={(skill) => skills.deleteSkill(skill)}
+                evalBadgeCounts={Boolean(appSettings?.evalEnabled) ? evalFindingCounts : undefined}
+                onNavigateToEval={(skillName) => {
+                  setEvalPreselectedSkill(skillName);
+                  void navigateToPage("evaluation");
+                }}
               />
             ) : null}
 
@@ -1583,6 +1607,8 @@ export function App(): ReactElement {
               <EvaluationFeaturePage
                 language={language}
                 enabled={Boolean(appSettings?.evalEnabled)}
+                preselectedSkill={evalPreselectedSkill}
+                onPreselectedConsumed={() => setEvalPreselectedSkill(null)}
                 onOpenSettings={() => {
                   setSettingsInitialSection("eval");
                   setSettingsOpen(true);

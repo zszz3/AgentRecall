@@ -58,6 +58,18 @@ export interface SkillVersionGroup {
   lastTriggeredAt: number;
 }
 
+// Per-tool call outcomes for one skill's linked-turn triggers (phase three,
+// tool-failure-rate rule evidence). Only kind='tool' spans are counted; both
+// Claude (tool_use/tool_result) and Codex (function_call/custom_tool_call)
+// produce this kind.
+export interface SkillToolOutcome {
+  toolName: string;
+  callCount: number;
+  failureCount: number; // status='failed' only, not 'aborted'
+  sampleSpanIds: string[]; // first 5 failed span ids
+  sampleErrors: string[]; // first 3 distinct error snippets, truncated to 200 chars
+}
+
 export interface SkillSyncBinding {
   localSkillPath: string;
   portableIdentity?: string;
@@ -441,6 +453,78 @@ export class PostgresSkillRepository {
       triggerCount: Number(row.trigger_count),
       firstTriggeredAt: timeValue(row.first_triggered_at),
       lastTriggeredAt: timeValue(row.last_triggered_at),
+    }));
+  }
+
+  // Per-tool call outcomes for one skill's linked-turn triggers. Joins
+  // skill_usage_events → sessions (LATERAL, session_id whitelist includes
+  // codex) → session_turns (LATERAL time window) → trace_spans (kind='tool').
+  // Only status='failed' counts as failure; 'aborted' is a user interrupt,
+  // not a tool failure.
+  async listSkillToolOutcomes(skill: string): Promise<SkillToolOutcome[]> {
+    const result = await this.database.query<{
+      tool_name: string;
+      call_count: number | string;
+      failure_count: number | string;
+      sample_span_ids: string[] | null;
+      sample_errors: string[] | null;
+    }>(
+      `
+        with linked_tool_spans as (
+          select
+            spans.name as tool_name,
+            spans.id as span_id,
+            spans.status as span_status,
+            spans.error as span_error
+          from agent_recall.skill_usage_events events
+          join lateral (
+            select sessions.session_key
+            from agent_recall.sessions sessions
+            where
+              (
+                events.session_id is not null
+                and sessions.raw_id = events.session_id
+                and sessions.source in ('claude-cli', 'claude-app', 'codex-cli', 'codex-app')
+                and sessions.storage_environment_id = 'local'
+              )
+              or sessions.file_path = events.source_path
+            order by sessions.file_mtime_ms desc
+            limit 1
+          ) linked on true
+          join lateral (
+            select turns.id as turn_id
+            from agent_recall.session_turns turns
+            where turns.session_key = linked.session_key
+              and turns.started_at is not null
+              and turns.ended_at is not null
+              and turns.started_at <= events.occurred_at
+              and turns.ended_at >= events.occurred_at
+            order by turns.turn_index
+            limit 1
+          ) turn on true
+          join agent_recall.trace_spans spans
+            on spans.turn_id = turn.turn_id
+            and spans.kind = 'tool'
+          where lower(events.skill) = lower($1)
+        )
+        select
+          tool_name,
+          count(*) as call_count,
+          count(*) filter (where span_status = 'failed') as failure_count,
+          array_agg(span_id) filter (where span_status = 'failed') as sample_span_ids,
+          array_agg(distinct left(span_error, 200)) filter (where span_status = 'failed' and span_error is not null) as sample_errors
+        from linked_tool_spans
+        group by tool_name
+        order by failure_count desc, call_count desc
+      `,
+      [skill],
+    );
+    return result.rows.map((row) => ({
+      toolName: row.tool_name,
+      callCount: Number(row.call_count),
+      failureCount: Number(row.failure_count),
+      sampleSpanIds: (row.sample_span_ids ?? []).slice(0, 5),
+      sampleErrors: (row.sample_errors ?? []).slice(0, 3),
     }));
   }
 

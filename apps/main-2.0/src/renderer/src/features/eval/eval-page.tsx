@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { Beaker, EyeOff, Link2Off, Lock, MousePointerClick, RefreshCw, Settings2 } from "lucide-react";
+import { AlertTriangle, Beaker, CheckCircle2, ChevronDown, ChevronRight, EyeOff, Link2Off, Lock, MousePointerClick, RefreshCw, Settings2 } from "lucide-react";
 
 import type { SkillTriggerLink } from "../../../../core/session-store";
+import type { SkillFinding } from "../../../../core/skill-eval-findings";
 import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem } from "../../../../main/services/skill-service";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
@@ -16,12 +17,16 @@ export function EvalPage({
   onOpenSettings,
   onOpenSession,
   onNavigationGuardChange,
+  preselectedSkill,
+  onPreselectedConsumed,
 }: {
   language: LanguageMode;
   enabled: boolean;
   onOpenSettings: () => void;
   onOpenSession: (sessionKey: string) => void;
   onNavigationGuardChange?: (guard: (() => Promise<boolean>) | null) => void;
+  preselectedSkill?: string | null;
+  onPreselectedConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [tab, setTab] = useState<EvalTab>("skills");
@@ -29,6 +34,7 @@ export function EvalPage({
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillEvalDetail | null>(null);
   const [triggers, setTriggers] = useState<SkillTriggerLink[] | null>(null);
+  const [findings, setFindings] = useState<SkillFinding[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,6 +56,7 @@ export function EvalPage({
       setOverview(null);
       setDetail(null);
       setTriggers(null);
+      setFindings(null);
       return;
     }
     void refresh();
@@ -62,20 +69,24 @@ export function EvalPage({
     if (!enabled || !selected) {
       setDetail(null);
       setTriggers(null);
+      setFindings(null);
       return;
     }
     let cancelled = false;
     setDetail(null);
     setTriggers(null);
+    setFindings(null);
     void (async () => {
       try {
-        const [nextDetail, nextTriggers] = await Promise.all([
+        const [nextDetail, nextTriggers, nextFindings] = await Promise.all([
           window.sessionSearch.getSkillEvalDetail(selected.skill),
           window.sessionSearch.listSkillTriggers({ skill: selected.skill, limit: 50 }),
+          window.sessionSearch.getSkillEvalFindings(selected.skill),
         ]);
         if (cancelled) return;
         setDetail(nextDetail);
         setTriggers(nextTriggers);
+        setFindings(nextFindings);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -86,6 +97,14 @@ export function EvalPage({
     // selected object identity changes on every refresh; key on the name.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, selected?.skill]);
+
+  // Consume preselected skill from Skills page badge click.
+  useEffect(() => {
+    if (preselectedSkill) {
+      setSelectedSkill(skillKey(preselectedSkill));
+      onPreselectedConsumed?.();
+    }
+  }, [preselectedSkill, onPreselectedConsumed]);
 
   return (
     <div className="eval-page">
@@ -202,6 +221,7 @@ export function EvalPage({
                     )}</p>
                   ) : (
                     <>
+                      <FindingsCard language={language} findings={findings} onOpenSession={onOpenSession} />
                       <SignalsCard language={language} item={selected} detail={detail} />
                       <VersionsCard language={language} detail={detail} />
                       <TriggersCard
@@ -384,4 +404,77 @@ function formatDuration(value: number | null): string {
 function formatRatio(value: number | null): string {
   if (value === null) return "—";
   return `${Math.round(value * 100)}%`;
+}
+
+function FindingsCard({
+  language,
+  findings,
+  onOpenSession,
+}: {
+  language: LanguageMode;
+  findings: SkillFinding[] | null;
+  onOpenSession: (sessionKey: string) => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  return (
+    <div className="eval-card eval-findings-card">
+      <header>
+        <h4>{l("Findings", "Findings")}</h4>
+        {findings !== null && findings.length > 0 ? (
+          <span className="eval-evidence-tag">{l(`${findings.length} found`, `发现 ${findings.length} 条`)}</span>
+        ) : null}
+      </header>
+      {findings === null ? (
+        <p className="eval-muted">{l("Loading...", "加载中...")}</p>
+      ) : findings.length === 0 ? (
+        <p className="eval-muted">
+          <CheckCircle2 size={14} style={{ verticalAlign: "middle", marginRight: 4 }} />
+          {l(
+            "No patterns of concern. This does not prove there are no issues — only that observable data did not meet the evidence threshold.",
+            "未发现需要关注的模式。这不证明没有问题——只是可观测数据未达到证据阈值。",
+          )}
+        </p>
+      ) : (
+        <ul className="eval-finding-list">
+          {findings.map((f, i) => {
+            const key = `${f.rule}-${i}`;
+            const isExpanded = expanded.has(key);
+            return (
+              <li key={key} className={`eval-finding eval-finding-${f.severity}`}>
+                <button
+                  type="button"
+                  className="eval-finding-header"
+                  onClick={() => toggle(key)}
+                >
+                  {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span className={`eval-badge eval-badge-${f.severity === "medium" ? "warn" : "dim"}`}>
+                    {f.severity}
+                  </span>
+                  <span className="eval-finding-rule">{f.rule}</span>
+                  <span className="eval-finding-strength">{f.evidenceStrength} · n={f.sampleSize}</span>
+                </button>
+                {isExpanded ? (
+                  <div className="eval-finding-body">
+                    <p>{f.observation}</p>
+                    <p className="eval-finding-repair">{f.repairDirection}</p>
+                    {f.evidence.spanIds && f.evidence.spanIds.length > 0 ? (
+                      <p className="eval-muted">{l("Evidence spans:", "证据 span：")} {f.evidence.spanIds.slice(0, 3).join(", ")}</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }

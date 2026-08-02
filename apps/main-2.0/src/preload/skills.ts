@@ -8,6 +8,7 @@ import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSy
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SkillTriggerLink } from "../core/session-store";
 import type { SkillEvalDetail, SkillEvalOverview } from "../main/services/skill-service";
+import type { SkillFinding } from "../core/skill-eval-findings";
 import { SKILLS_IPC } from "../shared/ipc/skills";
 
 export type SkillsIpcRenderer = Pick<IpcRenderer, "invoke">;
@@ -54,6 +55,8 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
       options ? ipc.invoke(SKILLS_IPC.listTriggers.channel, options) : ipc.invoke(SKILLS_IPC.listTriggers.channel),
     getSkillEvalOverview: (): Promise<SkillEvalOverview> => ipc.invoke(SKILLS_IPC.getEvalOverview.channel),
     getSkillEvalDetail: (skill: string): Promise<SkillEvalDetail> => ipc.invoke(SKILLS_IPC.getEvalDetail.channel, skill),
+    getSkillEvalFindings: (skill: string): Promise<SkillFinding[]> => ipc.invoke(SKILLS_IPC.getEvalFindings.channel, skill),
+    getSkillEvalFindingCounts: (): Promise<{ skill: string; low: number; medium: number }[]> => ipc.invoke(SKILLS_IPC.getEvalFindingCounts.channel),
   };
 }
 

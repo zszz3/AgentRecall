@@ -132,6 +132,7 @@ function createHarness(options: { settings?: AppSettings; groups?: RemoteSkillGr
       { skillHash: "hash-b", triggerCount: 1, firstTriggeredAt: 100, lastTriggeredAt: 100 },
       { skillHash: null, triggerCount: 2, firstTriggeredAt: 1, lastTriggeredAt: 50 },
     ]),
+    listSkillToolOutcomes: vi.fn(async () => []),
     hasClaudeHookUsageEvents: vi.fn(async () => true),
     listSkillSyncBindings: vi.fn(async () => bindings),
     getSkillSyncBindingForPortableIdentity: vi.fn(async (identity) =>

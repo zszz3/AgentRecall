@@ -6,6 +6,7 @@ import type { AppSettings } from "../../core/platform";
 import type {
   SkillPerformanceSignals,
   SkillSyncBinding,
+  SkillToolOutcome,
   SkillTriggerLink,
   SkillUsageOverviewRow,
   SkillVersionGroup,
@@ -71,6 +72,7 @@ import {
   INITIAL_SKILL_USAGE_REFRESH_DELAY_MS,
 } from "../../core/refresh-policy";
 import type { ProjectSummary } from "../../core/types";
+import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
 
 export interface SkillUsageHookSetup {
   installSkillUsageHook(options?: Record<string, unknown>): { status: string; detail?: string };
@@ -125,6 +127,7 @@ export interface SkillStorePort {
   listSkillUsageOverview(): Promise<SkillUsageOverviewRow[]>;
   getSkillPerformanceSignals(skill: string): Promise<SkillPerformanceSignals>;
   listSkillVersionGroups(skill: string): Promise<SkillVersionGroup[]>;
+  listSkillToolOutcomes(skill: string): Promise<SkillToolOutcome[]>;
   hasClaudeHookUsageEvents(): Promise<boolean>;
   listSkillSyncBindings(): Promise<SkillSyncBinding[]>;
   getSkillSyncBindingForPortableIdentity(identity: string): Promise<SkillSyncBinding | null>;
@@ -752,6 +755,87 @@ export class SkillService {
     if (!this.dependencies.getSettings().evalEnabled) {
       throw new Error("Eval is disabled. Enable it in Settings first.");
     }
+  }
+
+  async getSkillFindings(skillName: string): Promise<SkillFinding[]> {
+    this.requireEvalEnabled();
+    const name = skillName.trim();
+    if (!name) throw new Error("A skill name is required.");
+    const store = this.dependencies.getStore();
+    const [overview, signals, toolOutcomes] = await Promise.all([
+      store.listSkillUsageOverview(),
+      store.getSkillPerformanceSignals(name),
+      store.listSkillToolOutcomes(name),
+    ]);
+    const overviewItem = overview.find(
+      (item) => item.skill.trim().toLowerCase() === name.toLowerCase(),
+    ) ?? null;
+    // Mark installed status from the snapshot for the installed-never-exercised rule.
+    const installedSnapshot = await this.listSkills();
+    const installed = installedSnapshot.skills.some(
+      (item) => item.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    const overviewLike = overviewItem
+      ? {
+          observation: (overviewItem.linkedTriggers > 0 ? "exercised" : "never-used") as "exercised" | "never-used" | "unobserved",
+          installed,
+          totalTriggers: overviewItem.totalTriggers,
+        }
+      : installed
+        ? { observation: "never-used" as const, installed: true, totalTriggers: 0 }
+        : null;
+    return evaluateSkillFindings({
+      skill: name,
+      overviewItem: overviewLike,
+      signals,
+      toolOutcomes,
+    });
+  }
+
+  async getSkillFindingCounts(): Promise<{ skill: string; low: number; medium: number }[]> {
+    this.requireEvalEnabled();
+    const store = this.dependencies.getStore();
+    const overview = await store.listSkillUsageOverview();
+    const installedSnapshot = await this.listSkills();
+    const installedNames = new Set(
+      installedSnapshot.skills.map((s) => s.name.trim().toLowerCase()),
+    );
+    // Collect all skill names (triggered + installed-never-used).
+    const allNames = new Set<string>();
+    for (const row of overview) allNames.add(row.skill.trim().toLowerCase());
+    for (const name of installedNames) allNames.add(name);
+    const results: { skill: string; low: number; medium: number }[] = [];
+    for (const name of allNames) {
+      const [signals, toolOutcomes] = await Promise.all([
+        store.getSkillPerformanceSignals(name),
+        store.listSkillToolOutcomes(name),
+      ]);
+      const overviewItem = overview.find(
+        (item) => item.skill.trim().toLowerCase() === name,
+      ) ?? null;
+      const installed = installedNames.has(name);
+      const overviewLike = overviewItem
+        ? {
+            observation: (overviewItem.linkedTriggers > 0 ? "exercised" : "never-used") as "exercised" | "never-used" | "unobserved",
+            installed,
+            totalTriggers: overviewItem.totalTriggers,
+          }
+        : installed
+          ? { observation: "never-used" as const, installed: true, totalTriggers: 0 }
+          : null;
+      const findings = evaluateSkillFindings({
+        skill: name,
+        overviewItem: overviewLike,
+        signals,
+        toolOutcomes,
+      });
+      const low = findings.filter((f) => f.severity === "low").length;
+      const medium = findings.filter((f) => f.severity === "medium").length;
+      if (low > 0 || medium > 0) {
+        results.push({ skill: overviewItem?.skill ?? name, low, medium });
+      }
+    }
+    return results;
   }
 
   installUsageHook(): string {

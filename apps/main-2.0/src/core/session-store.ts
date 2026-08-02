@@ -38,6 +38,7 @@ import {
   PostgresSkillRepository,
   type SkillPerformanceSignals,
   type SkillSyncBinding,
+  type SkillToolOutcome,
   type SkillTriggerLink,
   type SkillUsageOverviewRow,
   type SkillVersionGroup,
@@ -88,6 +89,7 @@ export type {
   SkillPerformanceSignals,
   SkillSyncBinding,
   SkillSyncDirection,
+  SkillToolOutcome,
   SkillTriggerLink,
   SkillTriggerLinkState,
   SkillUsageOverviewRow,
@@ -548,6 +550,11 @@ export class SessionStore {
   async listSkillVersionGroups(skill: string): Promise<SkillVersionGroup[]> {
     await this.ready;
     return this.skills.listSkillVersionGroups(skill);
+  }
+
+  async listSkillToolOutcomes(skill: string): Promise<SkillToolOutcome[]> {
+    await this.ready;
+    return this.skills.listSkillToolOutcomes(skill);
   }
 
   async hasClaudeHookUsageEvents(): Promise<boolean> {

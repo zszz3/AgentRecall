@@ -46,6 +46,8 @@ export function SkillLibraryList({
   onSortChange,
   onSelect,
   onToggleChecked,
+  evalBadgeCounts,
+  onNavigateToEval,
 }: {
   skills: ManagedSkill[];
   selectedId: string | null;
@@ -60,6 +62,8 @@ export function SkillLibraryList({
   onSortChange: (sort: ManagedSkillSort) => void;
   onSelect: (managedId: string) => void;
   onToggleChecked: (managedId: string) => void;
+  evalBadgeCounts?: Map<string, { low: number; medium: number }>;
+  onNavigateToEval?: (skillName: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -147,6 +151,24 @@ export function SkillLibraryList({
                 <p>{skill.description || l("No description", "暂无说明")}</p>
                 <div className="skill-library-row-meta">
                   <span>{l(`Used ${formatCompactNumber(skill.usageCount ?? 0)} times`, `使用 ${formatCompactNumber(skill.usageCount ?? 0)} 次`)}</span>
+                  {evalBadgeCounts && onNavigateToEval ? (() => {
+                    const badge = evalBadgeCounts.get(skill.name.trim().toLowerCase());
+                    if (!badge) return null;
+                    const total = badge.low + badge.medium;
+                    if (total === 0) return null;
+                    return (
+                      <button
+                        type="button"
+                        className="skill-eval-badge-link"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onNavigateToEval(skill.name);
+                        }}
+                      >
+                        {badge.medium > 0 ? `⚠ ${badge.medium}` : `· ${badge.low}`}
+                      </button>
+                    );
+                  })() : null}
                   <span className="skill-target-dots" aria-label={l("Installation targets", "安装目标")}>
                     {skill.installations.map((installation) => (
                       <i key={installation.target} className={installation.state} title={`${installation.target}: ${installation.state}`} />

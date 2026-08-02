@@ -36,6 +36,8 @@ export function SkillsPage({
   onCopyPath,
   onReveal,
   onDelete,
+  evalBadgeCounts,
+  onNavigateToEval,
 }: {
   snapshot: InstalledSkillsSnapshot;
   syncSnapshot: SkillSyncSnapshot;
@@ -54,9 +56,16 @@ export function SkillsPage({
   onCopyPath: (skillPath: string) => void;
   onReveal: (skillPath: string) => void;
   onDelete: (skill: InstalledSkill) => Promise<void>;
+  evalBadgeCounts?: { skill: string; low: number; medium: number }[];
+  onNavigateToEval?: (skillName: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const managedSkills = useMemo(() => snapshot.skills.filter(isManagedSkill), [snapshot.skills]);
+  const evalBadgeCountsMap = useMemo(() => {
+    const m = new Map<string, { low: number; medium: number }>();
+    for (const item of evalBadgeCounts ?? []) m.set(item.skill.trim().toLowerCase(), { low: item.low, medium: item.medium });
+    return m;
+  }, [evalBadgeCounts]);
   const unifiedEntries = useMemo(() => buildUnifiedSkillEntries(snapshot, syncSnapshot), [snapshot, syncSnapshot]);
   const [query, setQuery] = useState("");
   const [originFilter, setOriginFilter] = useState<ManagedSkillOriginFilter>("all");
@@ -256,6 +265,8 @@ export function SkillsPage({
                 else next.add(managedId);
                 return next;
               })}
+              evalBadgeCounts={evalBadgeCountsMap}
+              onNavigateToEval={onNavigateToEval}
             />
             <SkillLibraryDetail
               skill={selectedSkill}

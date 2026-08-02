@@ -67,4 +67,6 @@ export const SKILLS_IPC = {
   listTriggers: defineIpcRequest("skills:list-triggers", triggersQueryInput),
   getEvalOverview: defineIpcRequest("skills:eval-overview", noInput),
   getEvalDetail: defineIpcRequest("skills:eval-detail", z.tuple([z.string().trim().min(1).max(200)])),
+  getEvalFindings: defineIpcRequest("skills:eval-findings", z.tuple([z.string().trim().min(1).max(200)])),
+  getEvalFindingCounts: defineIpcRequest("skills:eval-finding-counts", noInput),
 } as const;

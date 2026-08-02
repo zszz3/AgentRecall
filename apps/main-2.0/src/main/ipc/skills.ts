@@ -37,6 +37,8 @@ export interface SkillsIpcService {
   listSkillTriggers(options: { skill?: string; limit?: number }): Promise<SkillTriggerLink[]>;
   getSkillEvalOverview(): Promise<SkillEvalOverview>;
   getSkillEvalDetail(skill: string): Promise<SkillEvalDetail>;
+  getSkillFindings(skill: string): Promise<import("../../core/skill-eval-findings").SkillFinding[]>;
+  getSkillFindingCounts(): Promise<{ skill: string; low: number; medium: number }[]>;
 }
 
 export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcService): () => void {
@@ -67,5 +69,7 @@ export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcServi
     registerIpcHandler(ipc, SKILLS_IPC.listTriggers, (_event, options) => service.listSkillTriggers(options)),
     registerIpcHandler(ipc, SKILLS_IPC.getEvalOverview, () => service.getSkillEvalOverview()),
     registerIpcHandler(ipc, SKILLS_IPC.getEvalDetail, (_event, skill) => service.getSkillEvalDetail(skill)),
+    registerIpcHandler(ipc, SKILLS_IPC.getEvalFindings, (_event, skill) => service.getSkillFindings(skill)),
+    registerIpcHandler(ipc, SKILLS_IPC.getEvalFindingCounts, () => service.getSkillFindingCounts()),
   ]);
 }
