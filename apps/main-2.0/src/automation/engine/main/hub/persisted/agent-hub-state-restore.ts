@@ -36,11 +36,10 @@ export {
 export interface RestoreConfiguredAgentDeps {
   channels: AgentChannel[];
   channelById: (channelId: string) => AgentChannel | undefined;
-  defaultAgentId: AgentId;
 }
 
 export interface RestoreChatStateDeps {
-  configuredAgentOrDefault: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
+  configuredAgentById: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
   normalizeModelIdForConfiguredAgent: (
     configuredAgentId: string | undefined,
     modelId: string | undefined,
@@ -55,7 +54,7 @@ export interface RestoreChatStateDeps {
 
 export interface RestoreTaskStateDeps {
   workDir: string;
-  configuredAgentOrDefault: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
+  configuredAgentById: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
   normalizeModelIdForConfiguredAgent: (
     configuredAgentId: string | undefined,
     modelId: string | undefined,
@@ -74,9 +73,13 @@ export function restoreConfiguredAgentState(
   if (!record) return undefined;
   const id = asOptionalString(record.id)?.trim();
   const name = asOptionalString(record.name)?.trim();
-  const runtimeAgentId = isAgentId(record.runtimeAgentId) ? record.runtimeAgentId : deps.defaultAgentId;
-  if (!id || !name) return undefined;
   const channelId = asOptionalString(record.channelId);
+  const runtimeAgentId = isAgentId(record.runtimeAgentId)
+    ? record.runtimeAgentId
+    : channelId
+      ? deps.channelById(channelId)?.agentId
+      : undefined;
+  if (!id || !name || !runtimeAgentId) return undefined;
   const normalizedChannel = channelId && deps.channelById(channelId)?.agentId === runtimeAgentId
     ? deps.channelById(channelId)
     : deps.channels.find((channel) => channel.agentId === runtimeAgentId);
@@ -163,7 +166,7 @@ export function restoreChatState(raw: unknown, deps: RestoreChatStateDeps): Chat
   if (!record || "sessionId" in record || "runtimeSession" in record) return null;
 
   const now = Date.now();
-  const configuredAgent = deps.configuredAgentOrDefault(asOptionalString(record.configuredAgentId));
+  const configuredAgent = deps.configuredAgentById(asOptionalString(record.configuredAgentId));
   if (!configuredAgent) return null;
   const chat = new ChatState(
     configuredAgent.id,
@@ -212,7 +215,7 @@ export function restoreTaskState(raw: unknown, deps: RestoreTaskStateDeps): Task
   const record = asRecord(raw);
   if (!record || "sessionId" in record || typeof record.prompt !== "string") return null;
 
-  const configuredAgent = deps.configuredAgentOrDefault(asOptionalString(record.configuredAgentId));
+  const configuredAgent = deps.configuredAgentById(asOptionalString(record.configuredAgentId));
   if (!configuredAgent) return null;
   const now = Date.now();
   const task = new TaskState(

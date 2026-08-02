@@ -9,7 +9,10 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
+import type {
+  AppSettings,
+  AppSettingsUpdate,
+} from "../../../../core/platform";
 import type {
   OpenVikingMemorySnapshot,
   OpenVikingRuntimeInstallPhase,
@@ -94,7 +97,6 @@ export function OpenVikingMemorySettings({
     : (snapshot.runtime.installedBytes / 1_000_000).toFixed(1);
   const modelInstalled = Boolean(snapshot?.model.installed);
   const controlsDisabled = !enabled || saving || action !== null;
-
   return (
     <section className="settings-pane openviking-settings-pane">
       <header className="settings-pane-head">
@@ -126,7 +128,7 @@ export function OpenVikingMemorySettings({
         <div className="openviking-component-card">
           <span className="openviking-component-icon"><Box size={18} /></span>
           <div>
-            <strong>OpenViking {snapshot?.runtime.version ?? "0.4.11-r2"}</strong>
+            <strong>OpenViking {snapshot?.runtime.version ?? "0.4.11-r4"}</strong>
             <span>{runtimeInstalledSize
               ? `${runtimeInstalledSize} / ${runtimeInstalledSize} MB`
               : l(

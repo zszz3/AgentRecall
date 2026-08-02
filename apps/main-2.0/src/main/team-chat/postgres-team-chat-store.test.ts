@@ -519,6 +519,9 @@ describe("PostgresTeamChatStore", () => {
 
     await expect(store.updateRoom(updated)).resolves.toEqual(updated);
     await expect(store.getRoom(ROOM_ID)).resolves.toEqual(updated);
+    const empty = { ...updated, agents: [], updatedAt: "2026-07-23T08:03:30.000Z" };
+    await expect(store.updateRoom(empty)).resolves.toEqual(empty);
+    await expect(store.getRoom(ROOM_ID)).resolves.toEqual(empty);
     await store.archiveRoom(ROOM_ID, "2026-07-23T08:04:00.000Z");
     await expect(store.listRooms()).resolves.toEqual([]);
   });

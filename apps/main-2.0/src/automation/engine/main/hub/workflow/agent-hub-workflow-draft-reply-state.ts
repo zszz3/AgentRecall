@@ -94,8 +94,8 @@ export function createWorkflowDraftInteractiveRequest(input: {
     prompt: input.started.starting
       ? buildWorkflowAgentPrompt({ workflowId: input.started.next.workflowId, objective: input.reply })
       : buildWorkflowRevisionPrompt({ workflowId: input.started.next.workflowId, revision: input.started.next.revision, definition: input.started.next.definition, request: input.reply }),
-    configuredAgentId: input.started.next.configuredAgentId,
-    modelId: input.started.next.modelId,
+    configuredAgentId: input.started.next.reviewerConfiguredAgentId,
+    modelId: input.started.next.reviewerModelId,
     workDir: input.started.next.workDir || input.defaultWorkDir,
     starting: input.started.starting,
     ...(input.started.next.runtimeConversation

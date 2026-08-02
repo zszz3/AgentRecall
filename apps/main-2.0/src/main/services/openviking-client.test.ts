@@ -20,10 +20,12 @@ describe("OpenVikingGateway", () => {
   let baseUrl = "";
   let closeServer: (() => Promise<void>) | undefined;
   let failure: { path: string; status: number; body: unknown } | undefined;
+  let busyUserRegistryResponses = 0;
 
   beforeEach(async () => {
     requests.length = 0;
     failure = undefined;
+    busyUserRegistryResponses = 0;
     const server = createServer(async (request, response) => {
       const body = await readBody(request);
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -33,6 +35,21 @@ describe("OpenVikingGateway", () => {
         headers: request.headers,
         body,
       });
+      if (url.pathname === "/api/v1/admin/accounts" && busyUserRegistryResponses > 0) {
+        busyUserRegistryResponses -= 1;
+        sendJson(response, 409, {
+          status: "error",
+          error: {
+            code: "CONFLICT",
+            message: "Another user operation is in progress for this account. Please retry.",
+            details: {
+              conflict_type: "user_registry_busy",
+              retryable: true,
+            },
+          },
+        });
+        return;
+      }
       if (failure?.path === url.pathname) {
         sendJson(response, failure.status, failure.body);
         return;
@@ -73,6 +90,26 @@ describe("OpenVikingGateway", () => {
       account_id: "agent-recall-v2",
       admin_user_id: "workspace_abcd",
     });
+  });
+
+  it("retries while the OpenViking user registry is busy", async () => {
+    busyUserRegistryResponses = 2;
+    const gateway = new OpenVikingGateway({
+      baseUrl,
+      rootApiKey: "root-key",
+      userOperationRetryDelayMs: 0,
+      userOperationMaxAttempts: 3,
+    });
+
+    await expect(gateway.ensureWorkspaceUser({
+      accountId: "agent-recall-v2",
+      userId: "workspace_abcd",
+    })).resolves.toMatchObject({
+      accountId: "agent-recall-v2",
+      userId: "workspace_abcd",
+    });
+    expect(requests.filter((request) => request.path === "/api/v1/admin/accounts"))
+      .toHaveLength(4);
   });
 
   it("registers another workspace user in an existing account", async () => {
@@ -124,7 +161,7 @@ describe("OpenVikingGateway", () => {
       { role: "user", content: "question", createdAt: "2026-07-24T00:00:00.000Z" },
       { role: "assistant", content: "answer" },
     ]);
-    await expect(gateway.commitSession(auth, "session-1")).resolves.toEqual({
+    await expect(gateway.commitSession(auth, "session-1", 10)).resolves.toEqual({
       taskId: "task-1",
     });
     await expect(gateway.getTask(auth, "task-1")).resolves.toMatchObject({
@@ -144,6 +181,7 @@ describe("OpenVikingGateway", () => {
       expect(request.headers["x-openviking-account"]).toBe("agent-recall-v2");
       expect(request.headers["x-openviking-user"]).toBe("workspace_abcd");
     }
+    expect(userRequests[2]?.body).toEqual({ keep_recent_count: 10 });
   });
 
   it("normalizes memory search, read, write and delete operations", async () => {
@@ -171,7 +209,51 @@ describe("OpenVikingGateway", () => {
       content: "Keep directory isolation",
     });
     expect(saved.id).toBe("viking://user/memories/manual/manual-1.md");
+    expect(requests.find((request) => request.path === "/api/v1/content/write")?.body).toMatchObject({
+      uri: "viking://user/memories/manual/manual-1.md",
+      content: "Keep directory isolation",
+      mode: "create",
+      wait: true,
+    });
     await gateway.deleteMemory(auth, saved.id);
+  });
+
+  it("updates an editable identity memory in place", async () => {
+    const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
+    const auth: OpenVikingWorkspaceAuth = {
+      accountId: "agent-recall-v2",
+      userId: "workspace_abcd",
+      apiKey: "workspace-key",
+    };
+
+    const saved = await gateway.saveMemory(auth, {
+      uri: "viking://user/memories/identity.md",
+      title: "identity.md",
+      content: "# Identity\n\n- Name: 小王",
+    });
+
+    expect(saved.id).toBe("viking://user/memories/identity.md");
+    expect(requests.find((request) => request.path === "/api/v1/content/write")?.body).toMatchObject({
+      uri: "viking://user/memories/identity.md",
+      content: "# Identity\n\n- Name: 小王",
+      mode: "replace",
+      wait: true,
+    });
+  });
+
+  it("does not allow arbitrary generated memories to be overwritten", async () => {
+    const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
+
+    await expect(gateway.saveMemory({
+      accountId: "agent-recall-v2",
+      userId: "workspace_abcd",
+      apiKey: "workspace-key",
+    }, {
+      uri: "viking://user/memories/experiences/generated.md",
+      title: "generated.md",
+      content: "overwrite",
+    })).rejects.toThrow("Only manual, identity, and soul memories can be edited.");
+    expect(requests).toHaveLength(0);
   });
 
   it("lists nested event memories when the query is empty", async () => {
@@ -242,14 +324,30 @@ describe("OpenVikingGateway", () => {
   it("removes workspace user data through the root administration client", async () => {
     const gateway = new OpenVikingGateway({ baseUrl, rootApiKey: "root-key" });
 
-    await gateway.deleteWorkspaceUser("agent-recall-v2", "workspace_abcd");
+    await gateway.deleteWorkspaceUser({
+      accountId: "agent-recall-v2",
+      userId: "workspace_abcd",
+      apiKey: "workspace-key",
+    });
 
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({
+    expect(requests).toHaveLength(7);
+    expect(requests.slice(0, 6)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "DELETE",
+        path: expect.stringContaining("/api/v1/fs?"),
+      }),
+    ]));
+    expect(requests.slice(0, 6).every((request) => {
+      const url = new URL(request.path, "http://127.0.0.1");
+      return url.searchParams.get("recursive") === "true"
+        && url.searchParams.get("wait") === "true";
+    })).toBe(true);
+    expect(requests[6]).toMatchObject({
       method: "DELETE",
       path: "/api/v1/admin/accounts/agent-recall-v2/users/workspace_abcd",
     });
-    expect(requests[0].headers["x-api-key"]).toBe("root-key");
+    expect(requests.slice(0, 6).every((request) => request.headers["x-api-key"] === "workspace-key")).toBe(true);
+    expect(requests[6].headers["x-api-key"]).toBe("root-key");
   });
 
   function route(url: URL, request: IncomingMessage, response: ServerResponse): void {
@@ -295,6 +393,9 @@ describe("OpenVikingGateway", () => {
       });
     }
     if (url.pathname === "/api/v1/admin/accounts/agent-recall-v2/users/workspace_abcd" && request.method === "DELETE") {
+      return sendJson(response, 200, { status: "ok", result: {} });
+    }
+    if (url.pathname === "/api/v1/fs" && request.method === "DELETE") {
       return sendJson(response, 200, { status: "ok", result: {} });
     }
     if (url.pathname === "/api/v1/sessions/session-1" && request.method === "GET") {

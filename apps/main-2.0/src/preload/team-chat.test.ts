@@ -19,6 +19,7 @@ describe("createTeamChatApi", () => {
       members: [{ configuredAgentId: "builder", displayName: "Builder" }],
     });
     await api.updateRoom({ roomId: "room-1", name: "Renamed" });
+    await api.removeRoomMember({ roomId: "room-1", memberId: "employee-1" });
     await api.archiveRoom("room-1");
     await api.deleteRoom("room-1");
     await api.listMessages({ roomId: "room-1", limit: 50 });
@@ -39,6 +40,7 @@ describe("createTeamChatApi", () => {
         members: [{ configuredAgentId: "builder", displayName: "Builder" }],
       }],
       [TEAM_CHAT_CHANNELS.roomsUpdate, { roomId: "room-1", name: "Renamed" }],
+      [TEAM_CHAT_CHANNELS.roomsRemoveMember, { roomId: "room-1", memberId: "employee-1" }],
       [TEAM_CHAT_CHANNELS.roomsArchive, "room-1"],
       [TEAM_CHAT_CHANNELS.roomsDelete, "room-1"],
       [TEAM_CHAT_CHANNELS.messagesList, { roomId: "room-1", limit: 50 }],

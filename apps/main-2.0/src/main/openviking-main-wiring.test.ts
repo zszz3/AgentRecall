@@ -10,8 +10,13 @@ describe("OpenViking main-process wiring", () => {
     expect(mainSource).toContain("registerOpenVikingMemoryIpc");
     expect(mainSource).toContain("initializeOpenVikingMemory");
     expect(mainSource).toContain("OpenVikingHookManifestService");
+    expect(mainSource).toContain("OpenVikingHookStateFlusher");
+    expect(mainSource).toContain("openVikingHookStateFlusher.start()");
+    expect(mainSource).toContain("openVikingHookStateFlusher?.stop()");
+    expect(mainSource).toContain("openVikingHookManifestService?.clear()");
     expect(mainSource).toContain("reconcileOpenVikingMemoryHooks");
     expect(mainSource).toContain("refreshOpenVikingHookManifest");
+    expect(mainSource).toContain("void openVikingControlService.syncManagedWorkspaces()");
     expect(mainSource).toContain("build-openviking-runtime.mjs");
     expect(mainSource).toContain("developmentFallback");
     expect(mainSource).toContain("allowLocalRuntime: !releaseUpdateRuntime");

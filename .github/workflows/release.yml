@@ -106,7 +106,7 @@ jobs:
           PYTHON_SHA256: ${{ matrix.python_sha256 }}
         run: |
           node apps/main-2.0/scripts/build-openviking-runtime.mjs \
-            --version 0.4.11-r2 \
+            --version 0.4.11-r4 \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
             --build-home "$BUILD_HOME" \
@@ -317,7 +317,7 @@ jobs:
 
       - name: Verify OpenViking runtime artifacts
         if: steps.pending.outputs.v2_publish == 'true' && steps.v2_version.outputs.release_required == 'true'
-        run: node apps/main-2.0/scripts/verify-openviking-runtime-assets.mjs release/v2 0.4.11-r2
+        run: node apps/main-2.0/scripts/verify-openviking-runtime-assets.mjs release/v2 0.4.11-r4
 
       - name: Publish V1 GitHub Release
         if: steps.pending.outputs.v1_publish == 'true' && steps.v1_version.outputs.release_required == 'true'
@@ -398,7 +398,7 @@ jobs:
             --version "$V2_VERSION" \
             --repository "$GITHUB_REPOSITORY" \
             --output "$verify_directory"
-          node apps/main-2.0/scripts/verify-openviking-runtime-assets.mjs "$verify_directory" 0.4.11-r2
+          node apps/main-2.0/scripts/verify-openviking-runtime-assets.mjs "$verify_directory" 0.4.11-r4
           gh release edit "$V2_TAG" --draft=false --latest=false
 
       # V1's updater hardcodes `releases/latest/download/update.json`, so the

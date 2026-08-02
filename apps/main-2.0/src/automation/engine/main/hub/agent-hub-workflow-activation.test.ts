@@ -3,6 +3,8 @@ import { AgentHub } from "./agent-hub";
 import { createWorkflowV2InlineScriptSpec } from "../../shared/workflow-v2/definition";
 import { createStrictWorkflowTransactionPolicy } from "../../shared/workflow-v2/transaction";
 
+const TEST_AGENT_ID = "runtime-agent:codex-openai";
+
 describe("AgentHub workflow materialization", () => {
   test("seeds bundled workflows as locked official workflows", () => {
     const hub = new AgentHub();
@@ -14,7 +16,7 @@ describe("AgentHub workflow materialization", () => {
         workflowId: "bundled-test",
         graphVersion: 1,
         objective: "Test bundled workflow",
-        nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", prompt: "Answer.", outputFields: [{ key: "answer_markdown", required: true }] }],
+        nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", configuredAgentId: TEST_AGENT_ID, prompt: "Answer.", outputFields: [{ key: "answer_markdown", required: true }] }],
         edges: [],
       },
     }]);
@@ -26,9 +28,11 @@ describe("AgentHub workflow materialization", () => {
     });
     expect(bundledWorkflow.workflowV2Plan).toBeUndefined();
 
-    expect(hub.confirmWorkflow({ workflowId: "bundled-test", expectedRevision: bundledWorkflow.revision })).toMatchObject({ ok: true });
+    hub.patchWorkflowDraft({ workflowId: "bundled-test", reviewerConfiguredAgentId: TEST_AGENT_ID });
+    const configuredWorkflow = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    expect(hub.confirmWorkflow({ workflowId: "bundled-test", expectedRevision: configuredWorkflow.revision })).toMatchObject({ ok: true });
     expect(hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")).toMatchObject({
-      confirmedRevision: bundledWorkflow.revision,
+      confirmedRevision: configuredWorkflow.revision,
       workflowV2Plan: {
         approvedBy: "workflow-confirmation",
         definition: { workflowId: "bundled-test" },
@@ -198,11 +202,11 @@ describe("AgentHub workflow materialization", () => {
 
   test("requires confirmation and invalidates it after a draft definition change", () => {
     const hub = new AgentHub();
-    const workflowId = hub.createWorkflowDraft().workflowDraft!.workflowId;
+    const workflowId = hub.createWorkflowDraft({ reviewerConfiguredAgentId: TEST_AGENT_ID }).workflowDraft!.workflowId;
     const materialized = hub.materializeWorkflowDraft(workflowId, {
       title: "Answer",
       objective: "Answer",
-      definition: { workflowId, graphVersion: 1, objective: "Answer", nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }], edges: [] },
+      definition: { workflowId, graphVersion: 1, objective: "Answer", nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", configuredAgentId: TEST_AGENT_ID, prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }], edges: [] },
     });
     expect(hub.runWorkflow({ workflowId })).toMatchObject({ ok: false, error: "Workflow must be confirmed before starting a run." });
     expect(hub.confirmWorkflow({ workflowId, ...(materialized.revision !== undefined ? { expectedRevision: materialized.revision } : {}) })).toMatchObject({ ok: true });
@@ -216,7 +220,7 @@ describe("AgentHub workflow materialization", () => {
 
   test("fails closed before creating a run when strict transaction capabilities are unavailable", () => {
     const hub = new AgentHub();
-    const workflowId = hub.createWorkflowDraft().workflowDraft!.workflowId;
+    const workflowId = hub.createWorkflowDraft({ reviewerConfiguredAgentId: TEST_AGENT_ID }).workflowDraft!.workflowId;
     const materialized = hub.materializeWorkflowDraft(workflowId, {
       title: "Strict answer",
       objective: "Answer safely",
@@ -224,7 +228,7 @@ describe("AgentHub workflow materialization", () => {
         workflowId,
         graphVersion: 1,
         objective: "Answer safely",
-        nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }],
+        nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", configuredAgentId: TEST_AGENT_ID, prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }],
         edges: [],
         transactionPolicy: createStrictWorkflowTransactionPolicy(),
       },
@@ -301,6 +305,6 @@ describe("AgentHub workflow materialization", () => {
     const workflowId = hub.createWorkflowDraft().workflowDraft!.workflowId;
     const result = hub.materializeWorkflowDraft(workflowId, { title: "Answer", objective: "Answer", definition: { workflowId, graphVersion: 1, objective: "Answer", nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", configuredAgentId: specialist.id, prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }], edges: [] } });
     expect(result.ok).toBe(true);
-    expect(() => hub.updateConfiguredAgents(existing)).toThrow(/Reassign the workflow node/);
+    expect(() => hub.updateConfiguredAgents(existing)).toThrow(/Workflow Answer node Answer/);
   });
 });

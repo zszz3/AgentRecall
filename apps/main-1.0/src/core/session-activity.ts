@@ -163,7 +163,7 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
       platform === "win32"
         ? [new Map<number, string>(), new Map<number, string[]>(), new Map<number, string>()]
         : await Promise.all([
-            loadPlainCodexSessionFiles(lines, runner, options.homeDir ?? os.homedir()),
+            loadPlainCodexSessionFiles(lines, runner, options.homeDir ?? os.homedir(), now.getTime()),
             loadCodexAppSessionFiles(lines, runner, now.getTime()),
             loadPlainClaudeSessionFiles(lines, runner, now.getTime(), options.homeDir ?? os.homedir()),
           ]);
@@ -219,12 +219,17 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
   }
 }
 
-async function loadPlainCodexSessionFiles(lines: string[], runner: ProcessListRunner, homeDir = os.homedir()): Promise<Map<number, string>> {
+async function loadPlainCodexSessionFiles(
+  lines: string[],
+  runner: ProcessListRunner,
+  homeDir = os.homedir(),
+  nowMs = Date.now(),
+): Promise<Map<number, string>> {
   return loadPlainSessionFilesWithCwdFallback(
     lines,
     runner,
     isPlainCodexCommand,
-    extractCodexSessionFile,
+    (lsofOutput) => extractCodexSessionFile(lsofOutput, nowMs),
     homeDir,
     (home, cwd) => findMostRecentCodexSessionByCwd(home, cwd),
   );
@@ -556,6 +561,7 @@ function isPlainCodexCommand(tokens: string[]): boolean {
   for (const index of commandStartIndexes) {
     const family = executableFamily(tokens[index]);
     if (family !== "codex") continue;
+    if (normalizedExecutableName(tokens[index]) !== "codex") continue;
     if (isCodexDesktopProcess(tokens[index])) return false;
     const args = tokens.slice(index + 1);
     if (args.includes("resume")) return false;
@@ -722,8 +728,22 @@ function extractCodexSessionId(sessionFile: string): string | null {
   return sessionFile.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/)?.[1] ?? null;
 }
 
-function extractCodexSessionFile(lsofOutput: string): string | null {
-  return extractCodexSessionFiles(lsofOutput)[0] ?? null;
+function extractCodexSessionFile(lsofOutput: string, nowMs = Date.now()): string | null {
+  const sessionFiles = extractCodexSessionFiles(lsofOutput);
+  const workingFiles = sessionFiles.filter((sessionFile) => isCodexAgentWorking(sessionFile, nowMs));
+  const candidates = workingFiles.length > 0 ? workingFiles : sessionFiles;
+  let mostRecent: { filePath: string; modifiedAtMs: number } | null = null;
+  for (const filePath of candidates) {
+    try {
+      const modifiedAtMs = fs.statSync(filePath).mtimeMs;
+      if (!mostRecent || modifiedAtMs > mostRecent.modifiedAtMs) {
+        mostRecent = { filePath, modifiedAtMs };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return mostRecent?.filePath ?? candidates[0] ?? null;
 }
 
 function extractCodexSessionFiles(lsofOutput: string): string[] {

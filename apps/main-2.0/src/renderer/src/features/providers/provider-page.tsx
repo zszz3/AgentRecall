@@ -13,6 +13,7 @@ import {
 } from "../../../../core/api-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
 import type { CodexConfigSnapshot } from "../../../../core/codex-profile";
+import { OPENVIKING_EXTRACTION_REASONING_EFFORTS } from "../../../../core/openviking-settings";
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
 
@@ -72,20 +73,7 @@ function buildSummaryDraftFromSettings(settings: AppSettings | null): ApiConfig 
 }
 
 function buildSummarySourceFromSettings(settings: AppSettings | null): AppSettings["summarySource"] {
-  const codex = settings?.apiConfig;
-  if (codex?.activeProvider === "custom" && (codex.customBaseUrl.trim() || codex.customModel.trim() || codex.customApiKey.trim())) {
-    return "custom";
-  }
-
-  const claude = settings?.claudeApiConfig;
-  if (claude?.activeProvider === "custom" && (claude.customBaseUrl.trim() || claude.customModel.trim() || claude.customApiKey.trim())) {
-    return "custom";
-  }
-
-  const summary = settings?.summaryApiConfig;
-  if (summary?.customBaseUrl.trim() || summary?.customModel.trim() || summary?.customApiKey.trim()) return "custom";
-
-  return settings?.summarySource ?? "custom";
+  return settings?.summarySource ?? "codex";
 }
 
 export function ProviderPage({
@@ -115,12 +103,20 @@ export function ProviderPage({
   );
   const [draftSummaryApiConfig, setDraftSummaryApiConfig] = useState<ApiConfig>(() => buildSummaryDraftFromSettings(settings));
   const [draftSummarySource, setDraftSummarySource] = useState<AppSettings["summarySource"]>(() => buildSummarySourceFromSettings(settings));
+  const [draftSummaryCodexModel, setDraftSummaryCodexModel] = useState(() => settings?.summaryCodexModel ?? "");
+  const [draftSummaryCodexReasoningEffort, setDraftSummaryCodexReasoningEffort] = useState(
+    () => settings?.openVikingExtractionReasoningEffort ?? "medium",
+  );
   const [codexConfig, setCodexConfig] = useState<CodexConfigSnapshot | null>(null);
   const [codexConfigError, setCodexConfigError] = useState("");
   const [selectedCodexConfigProviderId, setSelectedCodexConfigProviderId] = useState("");
   const [codexModelOptions, setCodexModelOptions] = useState<string[]>([]);
   const [codexModelMenuOpen, setCodexModelMenuOpen] = useState(false);
   const [codexModelProbeStatus, setCodexModelProbeStatus] = useState<SettingsFeedback>(null);
+  const [summaryModelOptions, setSummaryModelOptions] = useState<string[]>([]);
+  const [summaryModelMenuOpen, setSummaryModelMenuOpen] = useState(false);
+  const [summaryModelProbeStatus, setSummaryModelProbeStatus] = useState<SettingsFeedback>(null);
+  const [summaryConnectionStatus, setSummaryConnectionStatus] = useState<SettingsFeedback>(null);
   const apiPresetSelectionRef = useRef(0);
   const claudeApiPresetSelectionRef = useRef(0);
   const summaryApiPresetSelectionRef = useRef(0);
@@ -137,6 +133,14 @@ export function ProviderPage({
   const selectedSummaryPreset = useMemo(
     () => SUMMARY_API_PROVIDER_PRESETS.find((preset) => preset.id === draftSummaryApiConfig.customProviderId) ?? SUMMARY_API_PROVIDER_PRESETS[SUMMARY_API_PROVIDER_PRESETS.length - 1],
     [draftSummaryApiConfig.customProviderId],
+  );
+  const summaryCodexModelOptions = useMemo(
+    () => [...new Set([
+      draftSummaryCodexModel.trim(),
+      codexConfig?.activeModel.trim() ?? "",
+      ...(codexConfig?.availableModels ?? []),
+    ].filter(Boolean))],
+    [codexConfig?.activeModel, codexConfig?.availableModels, draftSummaryCodexModel],
   );
 
   const hydrateDraftFromCodexConfig = (snapshot: CodexConfigSnapshot) => {
@@ -243,6 +247,51 @@ export function ProviderPage({
     }
   };
 
+  const detectSummaryModels = async () => {
+    setSummaryModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
+    try {
+      const result = await window.sessionSearch.probeCodexModels({
+        baseUrl: draftSummaryApiConfig.customBaseUrl,
+        apiKey: draftSummaryApiConfig.customApiKey,
+        providerId: draftSummaryApiConfig.customProviderId,
+        keyTarget: "summary",
+      });
+      setSummaryModelOptions(result.models);
+      setSummaryModelMenuOpen(result.models.length > 0);
+      setSummaryModelProbeStatus({
+        kind: "success",
+        message: l(
+          `Found ${result.models.length} models from ${result.endpoint}.`,
+          `已从 ${result.endpoint} 找到 ${result.models.length} 个模型。`,
+        ),
+      });
+    } catch (error) {
+      setSummaryModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const testSummaryConnection = async () => {
+    setSummaryConnectionStatus({ kind: "running", message: l("Testing connection...", "正在测试连接...") });
+    try {
+      const result = await window.sessionSearch.testSummaryProviderConnection({
+        baseUrl: draftSummaryApiConfig.customBaseUrl,
+        apiKey: draftSummaryApiConfig.customApiKey,
+        providerId: draftSummaryApiConfig.customProviderId,
+        model: draftSummaryApiConfig.customModel,
+        apiFormat: draftSummaryApiConfig.customApiFormat,
+      });
+      setSummaryConnectionStatus({
+        kind: "success",
+        message: l(
+          `Connection succeeded in ${result.elapsedMs} ms.`,
+          `连接成功，耗时 ${result.elapsedMs} 毫秒。`,
+        ),
+      });
+    } catch (error) {
+      setSummaryConnectionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   const selectClaudeApiPreset = async (presetId: ClaudeApiProviderPresetId) => {
     const selectionId = ++claudeApiPresetSelectionRef.current;
     const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === presetId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
@@ -304,6 +353,10 @@ export function ProviderPage({
     setDraftSummaryApiConfig(next);
     setDraftSummarySource("custom");
     setShowSummaryApiKey(false);
+    setSummaryModelOptions([]);
+    setSummaryModelMenuOpen(false);
+    setSummaryModelProbeStatus(null);
+    setSummaryConnectionStatus(null);
   };
 
   useEffect(() => {
@@ -311,10 +364,19 @@ export function ProviderPage({
     setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
     setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings));
     setDraftSummarySource(buildSummarySourceFromSettings(settings));
-  }, [settings?.apiConfig, settings?.claudeApiConfig, settings?.summaryApiConfig]);
+    setDraftSummaryCodexModel(settings?.summaryCodexModel ?? "");
+    setDraftSummaryCodexReasoningEffort(settings?.openVikingExtractionReasoningEffort ?? "medium");
+  }, [
+    settings?.apiConfig,
+    settings?.claudeApiConfig,
+    settings?.summaryApiConfig,
+    settings?.summaryCodexModel,
+    settings?.summarySource,
+    settings?.openVikingExtractionReasoningEffort,
+  ]);
 
   useEffect(() => {
-    if (apiTarget === "codex") void refreshCodexConfig();
+    if (apiTarget === "codex" || apiTarget === "summary") void refreshCodexConfig();
   }, [apiTarget]);
 
   const runCodexAction = (action: "save" | "apply") => {
@@ -355,7 +417,12 @@ export function ProviderPage({
         onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
       }
     } else {
-      onSettingsChange({ summarySource: draftSummarySource, summaryApiConfig: draftSummaryApiConfig });
+      onSettingsChange({
+        summarySource: draftSummarySource,
+        summaryCodexModel: draftSummaryCodexModel,
+        openVikingExtractionReasoningEffort: draftSummaryCodexReasoningEffort,
+        summaryApiConfig: draftSummaryApiConfig,
+      });
     }
   };
 
@@ -871,6 +938,55 @@ export function ProviderPage({
                   </button>
                 ))}
               </div>
+              {activeSummarySource === "codex" ? (
+                <>
+                  <div className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Model", "模型")}</span>
+                      <span className="settings-field-sub">
+                        {l(
+                          "Used by local Codex summaries, AI search, and OpenViking memory extraction.",
+                          "用于本机 Codex 摘要、AI 搜索和 OpenViking 记忆提取。",
+                        )}
+                      </span>
+                    </div>
+                    <select
+                      value={draftSummaryCodexModel}
+                      disabled={!settings || saving}
+                      onChange={(event) => setDraftSummaryCodexModel(event.currentTarget.value)}
+                    >
+                      <option value="">
+                        {codexConfig?.activeModel
+                          ? l(`Follow current Codex (${codexConfig.activeModel})`, `跟随当前 Codex（${codexConfig.activeModel}）`)
+                          : l("Follow current Codex model", "跟随当前 Codex 模型")}
+                      </option>
+                      {summaryCodexModelOptions.map((model) => (
+                        <option value={model} key={model}>{model}</option>
+                      ))}
+                    </select>
+                    {codexConfigError ? <div className="api-config-status error">{codexConfigError}</div> : null}
+                  </div>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Reasoning effort", "推理强度")}</span>
+                      <span className="settings-field-sub">
+                        {l("Higher levels are slower but analyze more deeply.", "等级越高，分析越深入，但速度也越慢。")}
+                      </span>
+                    </div>
+                    <select
+                      value={draftSummaryCodexReasoningEffort}
+                      disabled={!settings || saving}
+                      onChange={(event) => setDraftSummaryCodexReasoningEffort(
+                        event.currentTarget.value as AppSettings["openVikingExtractionReasoningEffort"],
+                      )}
+                    >
+                      {OPENVIKING_EXTRACTION_REASONING_EFFORTS.map((effort) => (
+                        <option value={effort} key={effort}>{effort}</option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
               {activeSummarySource === "custom" ? (
                 <>
                   <div className="api-config-note">
@@ -897,19 +1013,92 @@ export function ProviderPage({
                       onChange={(event) => updateDraftSummaryApiConfig({ customBaseUrl: event.currentTarget.value })}
                     />
                   </label>
-                  <label className="settings-field">
+                  <div className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Model", "模型")}</span>
                       <span className="settings-field-sub">{l("API model used for summaries and search.", "用于摘要与搜索的 API 模型。")}</span>
                     </div>
-                    <input
-                      type="text"
-                      value={draftSummaryApiConfig.customModel}
-                      disabled={!settings || saving}
-                      placeholder="deepseek-v4-flash"
-                      onChange={(event) => updateDraftSummaryApiConfig({ customModel: event.currentTarget.value })}
-                    />
-                  </label>
+                    <div className="summary-model-control">
+                      <div className="codex-model-input">
+                        <div className="codex-model-combo">
+                          <input
+                            type="text"
+                            value={draftSummaryApiConfig.customModel}
+                            disabled={!settings || saving}
+                            placeholder="deepseek-v4-flash"
+                            aria-haspopup="listbox"
+                            aria-expanded={summaryModelMenuOpen}
+                            onFocus={() => setSummaryModelMenuOpen(summaryModelOptions.length > 0)}
+                            onBlur={() => window.setTimeout(() => setSummaryModelMenuOpen(false), 100)}
+                            onChange={(event) => {
+                              updateDraftSummaryApiConfig({ customModel: event.currentTarget.value });
+                              setSummaryModelMenuOpen(summaryModelOptions.length > 0);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="codex-model-menu-trigger"
+                            disabled={!settings || saving || summaryModelOptions.length === 0}
+                            aria-label={l("Choose detected model", "选择探测到的模型")}
+                            aria-haspopup="listbox"
+                            aria-expanded={summaryModelMenuOpen}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => setSummaryModelMenuOpen((current) => !current)}
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                          {summaryModelMenuOpen && summaryModelOptions.length > 0 ? (
+                            <div className="codex-model-menu" role="listbox">
+                              {summaryModelOptions.map((model) => (
+                                <button
+                                  type="button"
+                                  className="codex-model-option"
+                                  role="option"
+                                  aria-selected={model === draftSummaryApiConfig.customModel}
+                                  key={model}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => {
+                                    updateDraftSummaryApiConfig({ customModel: model });
+                                    setSummaryModelMenuOpen(false);
+                                  }}
+                                >
+                                  {model}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="provider-model-actions">
+                          <button
+                            type="button"
+                            className="codex-model-detect-button"
+                            disabled={!settings || saving || summaryModelProbeStatus?.kind === "running"}
+                            onClick={() => void detectSummaryModels()}
+                          >
+                            {l("Detect models", "探测模型")}
+                          </button>
+                          <button
+                            type="button"
+                            className="codex-model-detect-button"
+                            disabled={!settings || saving || summaryConnectionStatus?.kind === "running"}
+                            onClick={() => void testSummaryConnection()}
+                          >
+                            {l("Test connection", "测试连接")}
+                          </button>
+                        </div>
+                      </div>
+                      {summaryModelProbeStatus ? (
+                        <div className={`api-config-status ${summaryModelProbeStatus.kind}`}>
+                          {summaryModelProbeStatus.message}
+                        </div>
+                      ) : null}
+                      {summaryConnectionStatus ? (
+                        <div className={`api-config-status ${summaryConnectionStatus.kind}`}>
+                          {summaryConnectionStatus.message}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">API Key</span>

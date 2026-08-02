@@ -24,7 +24,7 @@ export interface RestoreTeamStateDeps {
 }
 
 export interface RestoreTeamRunStepDeps {
-  configuredAgentOrDefault: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
+  configuredAgentById: (configuredAgentId: string | undefined) => ConfiguredAgent | undefined;
 }
 
 export interface RestoreTeamRunStateDeps {
@@ -91,7 +91,7 @@ export function restoreTeamRunState(raw: unknown, deps: RestoreTeamRunStateDeps)
 export function restoreTeamRunStep(raw: unknown, deps: RestoreTeamRunStepDeps): TeamRunStep | null {
   const record = asRecord(raw);
   if (!record) return null;
-  const configuredAgent = deps.configuredAgentOrDefault(asOptionalString(record.configuredAgentId));
+  const configuredAgent = deps.configuredAgentById(asOptionalString(record.configuredAgentId));
   if (!configuredAgent) return null;
   return {
     id: asOptionalString(record.id) ?? randomUUID(),

@@ -134,8 +134,8 @@ export function parseWorkflowPortableFile(content: string): {
       title,
       objective,
       executionDefaults: {
-        configuredAgentId: requiredString(executionDefaults.configuredAgentId, "configuredAgentId"),
-        modelId: requiredString(executionDefaults.modelId, "modelId"),
+        configuredAgentId: stringValue(executionDefaults.configuredAgentId, "configuredAgentId"),
+        modelId: stringValue(executionDefaults.modelId, "modelId"),
         reviewerConfiguredAgentId: requiredString(executionDefaults.reviewerConfiguredAgentId, "reviewerConfiguredAgentId"),
         reviewerModelId: requiredString(executionDefaults.reviewerModelId, "reviewerModelId"),
       },
@@ -237,9 +237,11 @@ export function applyWorkflowImportMappings(input: {
 
   const defaults = next.workflow.executionDefaults;
   const sourceWorkflowAgentId = defaults.configuredAgentId;
-  const workflowRoute = mapRoute(defaults.configuredAgentId, defaults.modelId);
-  defaults.configuredAgentId = workflowRoute.configuredAgentId;
-  defaults.modelId = workflowRoute.modelId;
+  if (defaults.configuredAgentId) {
+    const workflowRoute = mapRoute(defaults.configuredAgentId, defaults.modelId);
+    defaults.configuredAgentId = workflowRoute.configuredAgentId;
+    defaults.modelId = workflowRoute.modelId;
+  }
   const reviewerRoute = mapRoute(defaults.reviewerConfiguredAgentId, defaults.reviewerModelId);
   defaults.reviewerConfiguredAgentId = reviewerRoute.configuredAgentId;
   defaults.reviewerModelId = reviewerRoute.modelId;
@@ -296,6 +298,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) throw schemaError(`${field} must be a non-empty string.`);
+  return value;
+}
+
+function stringValue(value: unknown, field: string): string {
+  if (typeof value !== "string") throw schemaError(`${field} must be a string.`);
   return value;
 }
 

@@ -173,6 +173,17 @@
   gap: 8px;
 }
 
+.summary-model-control {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.provider-model-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .codex-model-combo {
   position: relative;
   min-width: 0;

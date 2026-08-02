@@ -20,6 +20,7 @@ function setup() {
     getRoom: vi.fn(async (roomId) => ({ id: roomId })),
     createRoom: vi.fn(async (request) => ({ id: "room-1", ...request })),
     updateRoom: vi.fn(async (request) => request),
+    removeRoomMember: vi.fn(async (roomId) => ({ id: roomId, agents: [] })),
     archiveRoom: vi.fn(async () => undefined),
     deleteRoom: vi.fn(async () => undefined),
     listMessages: vi.fn(async () => ({ messages: [] })),
@@ -45,7 +46,7 @@ describe("registerTeamChatIpc", () => {
 
     fixture.emit(event);
 
-    expect([...fixture.handlers.keys()]).toHaveLength(14);
+    expect([...fixture.handlers.keys()]).toHaveLength(15);
     expect([...fixture.handlers.keys()].every((channel) => channel.startsWith("team-chat:"))).toBe(true);
     expect(fixture.send).toHaveBeenCalledWith(TEAM_CHAT_CHANNELS.event, event);
   });
@@ -127,6 +128,26 @@ describe("registerTeamChatIpc", () => {
     });
   });
 
+  it("allows a room update to remove its final unavailable employee", async () => {
+    const { invoke, service } = setup();
+
+    await expect(invoke(TEAM_CHAT_CHANNELS.roomsUpdate, {
+      roomId: "room-1",
+      members: [],
+    })).resolves.toEqual({ roomId: "room-1", members: [] });
+    expect(service.updateRoom).toHaveBeenCalledWith({ roomId: "room-1", members: [] });
+  });
+
+  it("removes a room employee by member id without checking its configured Agent", async () => {
+    const { invoke, service } = setup();
+
+    await expect(invoke(TEAM_CHAT_CHANNELS.roomsRemoveMember, {
+      roomId: "room-1",
+      memberId: "employee-1",
+    })).resolves.toMatchObject({ id: "room-1" });
+    expect(service.removeRoomMember).toHaveBeenCalledWith("room-1", "employee-1");
+  });
+
   it("bounds message length and pagination, then delegates valid requests", async () => {
     const { invoke, service } = setup();
 
@@ -191,7 +212,7 @@ describe("registerTeamChatIpc", () => {
     fixture.dispose();
     fixture.emit({ type: "rooms-changed" });
 
-    expect(fixture.ipc.removeHandler).toHaveBeenCalledTimes(14);
+    expect(fixture.ipc.removeHandler).toHaveBeenCalledTimes(15);
     expect(fixture.send).not.toHaveBeenCalled();
   });
 });

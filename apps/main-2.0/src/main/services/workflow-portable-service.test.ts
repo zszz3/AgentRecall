@@ -3,14 +3,16 @@ import { AgentHub } from "../../automation/engine/main/hub/agent-hub";
 import { portableFileFromWorkflow } from "../../automation/engine/main/hub/workflow/workflow-portable-file";
 import { WorkflowPortableService } from "./workflow-portable-service";
 
+const TEST_AGENT_ID = "runtime-agent:codex-openai";
+
 function sourceFixture(): { hub: AgentHub; content: string } {
   const hub = new AgentHub();
-  const workflow = hub.createWorkflowDraft({ title: "Portable" }).workflowDraft!;
+  const workflow = hub.createWorkflowDraft({ title: "Portable", reviewerConfiguredAgentId: TEST_AGENT_ID }).workflowDraft!;
   const definition = {
     workflowId: workflow.workflowId,
     graphVersion: 1,
     objective: "Portable objective",
-    nodes: [{ id: "answer", kind: "answer" as const, title: "Answer", execModel: "llm" as const, executionMode: "one-shot" as const, prompt: "Answer", outputFields: [{ key: "answer", required: true }] }],
+    nodes: [{ id: "answer", kind: "answer" as const, title: "Answer", execModel: "llm" as const, executionMode: "one-shot" as const, configuredAgentId: TEST_AGENT_ID, prompt: "Answer", outputFields: [{ key: "answer", required: true }] }],
     edges: [],
   };
   hub.materializeWorkflowDraft(workflow.workflowId, { title: "Portable", objective: "Portable objective", definition });

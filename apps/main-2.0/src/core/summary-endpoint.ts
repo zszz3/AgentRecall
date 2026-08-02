@@ -14,14 +14,21 @@ export interface BuildExecEndpointOptions {
 
 // Builds a `codex_exec` summary endpoint that drives `codex exec --ephemeral`.
 // The endpoint itself is just a description; session-summarizer runs the binary.
-export function buildCodexExecEndpoint(settings: Pick<AppSettings, "codexBinary">, options: BuildExecEndpointOptions = {}): SummaryEndpoint {
+export function buildCodexExecEndpoint(
+  settings: Pick<AppSettings, "codexBinary">
+    & Partial<Pick<AppSettings, "summaryCodexModel" | "openVikingExtractionReasoningEffort">>,
+  options: BuildExecEndpointOptions = {},
+): SummaryEndpoint {
+  const model = settings.summaryCodexModel?.trim() ?? "";
   return {
     baseUrl: "",
-    model: "codex",
+    model: model || "codex",
     apiKey: "",
     apiFormat: "codex_exec",
     command: settings.codexBinary,
     cwd: options.cwd ?? process.cwd(),
+    modelArg: model || undefined,
+    reasoningEffort: settings.openVikingExtractionReasoningEffort ?? "medium",
     onTemporarySession: options.onTemporarySession,
   };
 }
@@ -45,7 +52,8 @@ export function buildClaudeExecEndpoint(settings: Pick<AppSettings, "claudeBinar
 //   - "codex" (default): `codex exec --ephemeral`.
 // Returns null only when "custom" is selected but incomplete (no usable provider).
 export function resolveSummaryEndpointFromSettings(
-  settings: Pick<AppSettings, "summarySource" | "summaryApiConfig" | "claudeBinary" | "codexBinary">,
+  settings: Pick<AppSettings, "summarySource" | "summaryApiConfig" | "claudeBinary" | "codexBinary">
+    & Partial<Pick<AppSettings, "summaryCodexModel" | "openVikingExtractionReasoningEffort">>,
   options: BuildExecEndpointOptions = {},
 ): SummaryEndpoint | null {
   if (settings.summarySource === "custom") {

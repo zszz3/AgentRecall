@@ -14,6 +14,18 @@ export type OpenVikingRuntimeState =
   | "running"
   | "error";
 export type OpenVikingImportState = "idle" | "queued" | "running" | "paused" | "failed" | "completed";
+export type OpenVikingImportPhase = "scanning" | "uploading" | "extracting";
+
+export interface OpenVikingImportActivity {
+  phase: OpenVikingImportPhase;
+  sessionTitle?: string;
+  currentSession?: number;
+  totalSessions?: number;
+  currentBatch?: number;
+  totalBatches?: number;
+  currentTask?: number;
+  totalTasks?: number;
+}
 export type OpenVikingRuntimeInstallPhase =
   | "resolving-runtime"
   | "downloading-python"
@@ -40,6 +52,9 @@ export interface OpenVikingWorkspace {
   importState: OpenVikingImportState;
   importedTurns: number;
   totalTurns: number;
+  completedTasks?: number;
+  totalTasks?: number;
+  importActivity?: OpenVikingImportActivity;
   lastError?: string;
   createdAt: string;
   updatedAt: string;

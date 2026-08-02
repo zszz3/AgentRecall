@@ -16,7 +16,7 @@ interface AgentPageProps {
   onAddConfiguredAgent: () => MaybePromise;
   onSelectConfiguredAgent: (agentId: string) => void;
   onUpdateConfiguredAgent: (agentId: string, updater: (agent: ConfiguredAgent) => ConfiguredAgent) => void;
-  onDeleteConfiguredAgent?: (agentId: string) => void;
+  onDeleteConfiguredAgent?: (agentId: string) => MaybePromise;
 }
 
 function configTextFor(language: Language) {
@@ -116,7 +116,7 @@ export function AgentPage({
                       aria-label={configText.deleteAgent}
                       title={configText.deleteAgent}
                       disabled={!selectedConfiguredAgent || configuredAgents.length === 0}
-                      onClick={() => onDeleteConfiguredAgent(selectedConfiguredAgent!.id)}
+                      onClick={() => void onDeleteConfiguredAgent(selectedConfiguredAgent!.id)}
                     >
                       <Trash2 size={13} />
                     </button>

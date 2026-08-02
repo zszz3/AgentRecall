@@ -85,9 +85,11 @@ describe("existing Studio employees", () => {
   let root: Root;
   let onTeamChatEvent: (event: TeamChatEvent) => void;
   const updateRoom = vi.fn();
+  const removeRoomMember = vi.fn();
 
   beforeEach(async () => {
     updateRoom.mockReset();
+    removeRoomMember.mockReset();
     updateRoom.mockImplementation(async (request: {
       members: Array<{ memberId?: string; configuredAgentId: string; displayName: string }>;
     }) => ({
@@ -100,6 +102,8 @@ describe("existing Studio employees", () => {
         position,
       })),
     }));
+    removeRoomMember.mockResolvedValue({ ...ROOM, agents: [] });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     Reflect.set(Element.prototype, "scrollIntoView", vi.fn());
     Reflect.set(window, "sessionSearch", {
       teamChat: {
@@ -113,6 +117,7 @@ describe("existing Studio employees", () => {
         getRoom: vi.fn(async () => ROOM),
         listMessages: vi.fn(async () => ({ messages: [] })),
         updateRoom,
+        removeRoomMember,
         onEvent: vi.fn((listener: (event: TeamChatEvent) => void) => {
           onTeamChatEvent = listener;
           return () => undefined;
@@ -134,6 +139,7 @@ describe("existing Studio employees", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
   });
 
   it("adds an employee while preserving the existing room member identity", async () => {
@@ -215,5 +221,34 @@ describe("existing Studio employees", () => {
     const content = container.querySelector(".team-chat-message-content");
     expect(content?.querySelector("table")?.textContent).toContain("多 Agent 工作室");
     expect(content?.querySelector(".md-table-wrap > table.md-table")).not.toBeNull();
+  });
+
+  it("offers employee deletion only from the member context menu", async () => {
+    const memberRow = container.querySelector<HTMLElement>(".team-chat-member-row");
+    expect(memberRow).not.toBeNull();
+    expect(container.querySelector(".team-chat-member-context-menu")).toBeNull();
+
+    await act(async () => {
+      memberRow!.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        clientX: 40,
+        clientY: 60,
+      }));
+    });
+
+    const removeAction = container.querySelector<HTMLButtonElement>(
+      ".team-chat-member-context-action",
+    );
+    expect(removeAction?.textContent).toContain("删除员工");
+    await act(async () => {
+      removeAction!.click();
+      await Promise.resolve();
+    });
+
+    expect(removeRoomMember).toHaveBeenCalledWith({
+      roomId: "room-1",
+      memberId: "member-codex",
+    });
+    expect(updateRoom).not.toHaveBeenCalled();
   });
 });

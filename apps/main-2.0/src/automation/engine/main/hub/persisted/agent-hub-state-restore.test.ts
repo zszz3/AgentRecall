@@ -20,7 +20,6 @@ describe("restoreConfiguredAgentState", () => {
     }, {
       channels,
       channelById: (id) => channels.find((channel) => channel.id === id),
-      defaultAgentId: "codex",
     }, 1);
 
     expect(restored).toBeUndefined();
@@ -46,7 +45,6 @@ describe("restoreConfiguredAgentState", () => {
     }, {
       channels,
       channelById: (id) => channels.find((channel) => channel.id === id),
-      defaultAgentId: "codex",
     }, 1);
 
     expect(restored?.mcpBindings).toEqual([

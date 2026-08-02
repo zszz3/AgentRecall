@@ -127,6 +127,31 @@ export function cloneWorkflowDraft(input: {
   now?: number;
 }): WorkflowDraftState {
   const { draft, normalizeConfiguredAgentId, normalizeModelId, cloneConversation, now = Date.now() } = input;
+  const migrateConfiguredAgentId = (configuredAgentId: string | undefined): string =>
+    configuredAgentId === "default-agent"
+      ? normalizeConfiguredAgentId(configuredAgentId)
+      : configuredAgentId?.trim() ?? "";
+  const definition = structuredClone(draft.definition);
+  for (const node of definition.nodes) {
+    if (node.execModel !== "llm" || !node.configuredAgentId) continue;
+    const configuredAgentId = migrateConfiguredAgentId(node.configuredAgentId);
+    if (configuredAgentId) node.configuredAgentId = configuredAgentId;
+    else delete node.configuredAgentId;
+  }
+  const workflowV2Plan = draft.workflowV2Plan ? cloneWorkflowV2Plan(draft.workflowV2Plan) : undefined;
+  if (workflowV2Plan) {
+    for (const node of workflowV2Plan.definition.nodes) {
+      if (node.execModel !== "llm" || !node.configuredAgentId) continue;
+      const configuredAgentId = migrateConfiguredAgentId(node.configuredAgentId);
+      if (configuredAgentId) node.configuredAgentId = configuredAgentId;
+      else delete node.configuredAgentId;
+    }
+    for (const node of workflowV2Plan.nodes) {
+      if (node.configuredAgentId) node.configuredAgentId = migrateConfiguredAgentId(node.configuredAgentId);
+      if (node.taskPacket.configuredAgentId) node.taskPacket.configuredAgentId = migrateConfiguredAgentId(node.taskPacket.configuredAgentId);
+    }
+  }
+  const reviewerConfiguredAgentId = migrateConfiguredAgentId(draft.reviewerConfiguredAgentId);
   return {
     workflowId: draft.workflowId || `wf_${randomUUID()}`,
     sourceType: draft.sourceType === "official" ? "official" : "user",
@@ -138,12 +163,12 @@ export function cloneWorkflowDraft(input: {
     ...(Number.isFinite(draft.confirmedRevision) && draft.confirmedRevision === draft.revision
       ? { confirmedRevision: Math.floor(draft.confirmedRevision!) }
       : {}),
-    configuredAgentId: draft.configuredAgentId?.trim() || normalizeConfiguredAgentId(draft.configuredAgentId),
-    modelId: draft.modelId?.trim() || normalizeModelId(draft.configuredAgentId, draft.modelId),
-    reviewerConfiguredAgentId: draft.reviewerConfiguredAgentId?.trim() || normalizeConfiguredAgentId(draft.reviewerConfiguredAgentId),
-    reviewerModelId: draft.reviewerModelId?.trim() || normalizeModelId(draft.reviewerConfiguredAgentId, draft.reviewerModelId),
+    configuredAgentId: "",
+    modelId: "",
+    reviewerConfiguredAgentId,
+    reviewerModelId: draft.reviewerModelId?.trim() || normalizeModelId(reviewerConfiguredAgentId, draft.reviewerModelId),
     objective: draft.objective,
-    definition: structuredClone(draft.definition),
+    definition,
     ...(draft.workDir ? { workDir: draft.workDir } : {}),
     messages: draft.messages.map((message) => ({
       id: message.id,
@@ -156,7 +181,7 @@ export function cloneWorkflowDraft(input: {
     runProgress: draft.runProgress.map(cloneWorkflowRunProgressItem),
     runContextDocument: draft.runContextDocument,
     contextDocument: draft.contextDocument,
-    ...(draft.workflowV2Plan ? { workflowV2Plan: cloneWorkflowV2Plan(draft.workflowV2Plan) } : {}),
+    ...(workflowV2Plan ? { workflowV2Plan } : {}),
     ...(draft.generationReview ? { generationReview: structuredClone(draft.generationReview) } : {}),
     ...(draft.finalReport !== undefined ? { finalReport: draft.finalReport } : {}),
     runIds: draft.runIds.map((runId) => runId),

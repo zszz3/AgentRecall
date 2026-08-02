@@ -58,19 +58,28 @@ function fixture(injectAgents = true) {
       content: "runtime output",
       runtimeConversation: undefined,
     })),
+    configuredAgentDeletionReferences: vi.fn(() => []),
+    updateConfiguredAgents: vi.fn((agents) => {
+      current = { ...current, configuredAgents: agents };
+      return current;
+    }),
     shutdown: vi.fn(async () => { calls.push("hub-stop"); }),
   } as unknown as AgentHub;
   const registry = {
     list: vi.fn(async () => []),
     close: vi.fn(() => { calls.push("registry-close"); }),
   } as unknown as McpRegistryStore;
-  const evaluations = { close: vi.fn(() => { calls.push("evaluations-close"); }) } as unknown as EvaluationService;
+  const evaluations = {
+    configuredAgentReferences: vi.fn(async () => []),
+    close: vi.fn(() => { calls.push("evaluations-close"); }),
+  } as unknown as EvaluationService;
   const teamChats = {
     connect: vi.fn(async () => {
       calls.push("team-chat-start");
       return { state: "ready", mode: "local", databaseLabel: "Local database" } as const;
     }),
     close: vi.fn(async () => { calls.push("team-chat-close"); }),
+    configuredAgentReferences: vi.fn(async () => []),
     handleMcpRequest: vi.fn(async () => ({ ok: true })),
   } as unknown as TeamChatService;
   const agents = {} as McpAgentManagementService;
@@ -196,6 +205,41 @@ describe("NativeAutomationService", () => {
     emit(snapshot("/ignored"));
 
     expect(received.map((value) => value.workDir)).toEqual(["/repo", "/next"]);
+  });
+
+  it("blocks Agent deletion and reports references from every owning module", async () => {
+    const { service, hub, teamChats, evaluations, emit } = fixture();
+    const worker = {
+      id: "worker", name: "Worker", description: "", runtimeAgentId: "codex" as const,
+      channelId: "codex-openai", modelId: "default", tags: [], createdAt: 1, updatedAt: 1,
+    };
+    emit({ ...snapshot(), configuredAgents: [worker] });
+    vi.mocked(hub.configuredAgentDeletionReferences).mockReturnValue([
+      { agentId: "worker", agentName: "Worker", location: "Chat Support" },
+    ]);
+    vi.mocked(teamChats.configuredAgentReferences).mockResolvedValue([
+      { agentId: "worker", location: "Team Chat room Release member Reviewer" },
+    ]);
+    vi.mocked(evaluations.configuredAgentReferences).mockResolvedValue([
+      { agentId: "worker", location: "Evaluation experiment Regression" },
+    ]);
+
+    await expect(service.deleteConfiguredAgent("worker")).rejects.toThrow(/Chat Support.*Team Chat room Release member Reviewer.*Evaluation experiment Regression/);
+    expect(hub.updateConfiguredAgents).not.toHaveBeenCalled();
+  });
+
+  it("deletes an unreferenced Agent by id without replacing unrelated Agents", async () => {
+    const { service, hub, emit } = fixture();
+    const worker = {
+      id: "worker", name: "Worker", description: "", runtimeAgentId: "codex" as const,
+      channelId: "codex-openai", modelId: "default", tags: [], createdAt: 1, updatedAt: 1,
+    };
+    const reviewer = { ...worker, id: "reviewer", name: "Reviewer" };
+    emit({ ...snapshot(), configuredAgents: [worker, reviewer] });
+
+    await expect(service.deleteConfiguredAgent("worker"))
+      .resolves.toMatchObject({ configuredAgents: [reviewer] });
+    expect(hub.updateConfiguredAgents).toHaveBeenCalledWith([reviewer], { detectDeletedManagedAgents: true });
   });
 
   it("publishes ordered workflow changes without rebroadcasting a full snapshot", () => {

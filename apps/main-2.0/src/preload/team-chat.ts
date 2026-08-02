@@ -11,6 +11,7 @@ import type {
   TeamChatRoom,
   TeamChatRoomSummary,
   UpdateTeamChatRoomRequest,
+  RemoveTeamChatRoomMemberRequest,
 } from "../shared/team-chat";
 import { TEAM_CHAT_CHANNELS } from "../shared/ipc/team-chat";
 
@@ -33,6 +34,8 @@ export function createTeamChatApi(ipc: TeamChatIpcRenderer) {
       ipc.invoke(TEAM_CHAT_CHANNELS.roomsCreate, request),
     updateRoom: (request: UpdateTeamChatRoomRequest): Promise<TeamChatRoom> =>
       ipc.invoke(TEAM_CHAT_CHANNELS.roomsUpdate, request),
+    removeRoomMember: (request: RemoveTeamChatRoomMemberRequest): Promise<TeamChatRoom> =>
+      ipc.invoke(TEAM_CHAT_CHANNELS.roomsRemoveMember, request),
     archiveRoom: (roomId: string): Promise<void> => ipc.invoke(TEAM_CHAT_CHANNELS.roomsArchive, roomId),
     deleteRoom: (roomId: string): Promise<void> => ipc.invoke(TEAM_CHAT_CHANNELS.roomsDelete, roomId),
     listMessages: (request: ListTeamChatMessagesRequest): Promise<TeamChatMessagePage> =>

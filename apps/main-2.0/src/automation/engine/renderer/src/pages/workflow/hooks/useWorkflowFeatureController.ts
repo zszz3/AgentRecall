@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import type { AppSnapshot, ApprovalDecision, WorkflowRunState } from "../../../../../shared/types";
-import { defaultConfiguredAgentId } from "../../../app/agents";
 import type { WorkflowService } from "../../../app/services/workflow-service";
 import type { WorkflowController } from "../workflow-controller";
 import type { WorkflowDraftController } from "./useWorkflowDraft";
@@ -69,7 +68,7 @@ export function useWorkflowFeatureController({
       messages: draft.workflowMessages,
       reply: draft.workflowReply,
       error: draft.workflowError,
-      configuredAgentId: draft.workflowConfiguredAgentId || defaultConfiguredAgentId(snapshot.configuredAgents),
+      configuredAgentId: draft.workflowConfiguredAgentId,
       modelId: draft.workflowModelId,
       reviewerConfiguredAgentId: draft.workflowReviewerConfiguredAgentId,
       reviewerModelId: draft.workflowReviewerModelId,

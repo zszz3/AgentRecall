@@ -39,6 +39,7 @@ export interface CodexConfigSnapshot {
   exists: boolean;
   activeProviderId: string;
   activeModel: string;
+  availableModels?: string[];
   activeProvider: CodexConfigProviderEntry | null;
   providers: CodexConfigProviderEntry[];
 }
@@ -104,16 +105,29 @@ export async function loadCodexProfileDefaults(codexHome = path.join(os.homedir(
 
 export async function loadCodexConfigSnapshot(codexHome = path.join(os.homedir(), ".codex")): Promise<CodexConfigSnapshot> {
   const configPath = path.join(codexHome, "config.toml");
-  const text = await readOptionalFile(configPath);
+  const [text, modelCacheText] = await Promise.all([
+    readOptionalFile(configPath),
+    readOptionalFile(path.join(codexHome, "models_cache.json")),
+  ]);
   const activeProviderId = readTomlString(text, "model_provider") || OFFICIAL_CODEX_PROVIDER_ID;
   const activeModel = readTomlString(text, "model") || "";
   const providers = readCodexModelProviders(text);
+  let cachedModels: string[] = [];
+  try {
+    const parsed = JSON.parse(modelCacheText) as { models?: Array<{ slug?: unknown }> };
+    cachedModels = (parsed.models ?? [])
+      .map((model) => model.slug)
+      .filter((model): model is string => typeof model === "string" && model.trim().length > 0);
+  } catch {
+    cachedModels = [];
+  }
   return {
     codexHome,
     configPath,
     exists: text.trim().length > 0,
     activeProviderId,
     activeModel,
+    availableModels: [...new Set([activeModel, ...cachedModels].filter(Boolean))],
     activeProvider: providers.find((provider) => provider.id === activeProviderId) ?? null,
     providers,
   };

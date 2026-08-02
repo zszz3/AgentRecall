@@ -66,6 +66,7 @@ function service(): OpenVikingMemoryIpcService & Record<keyof OpenVikingMemoryIp
       relinkWorkspaceId: null,
     })),
     addWorkspace: vi.fn(async () => workspace),
+    listImportSessions: vi.fn(async () => []),
     importWorkspace: vi.fn(async () => completedJob),
     pauseImport: vi.fn(async () => ({ ...completedJob, state: "paused" as const })),
     resumeImport: vi.fn(async () => completedJob),
@@ -101,6 +102,7 @@ describe("OpenViking memory IPC", () => {
     await handlers.get(OPENVIKING_MEMORY_IPC.chooseDirectory.channel)?.(event);
     await handlers.get(OPENVIKING_MEMORY_IPC.previewDirectory.channel)?.(event, " /repo ");
     await handlers.get(OPENVIKING_MEMORY_IPC.addWorkspace.channel)?.(event, "/repo");
+    await handlers.get(OPENVIKING_MEMORY_IPC.listImportSessions.channel)?.(event, "workspace-1");
     await handlers.get(OPENVIKING_MEMORY_IPC.importWorkspace.channel)?.(event, "workspace-1");
     await handlers.get(OPENVIKING_MEMORY_IPC.pauseImport.channel)?.(event, "workspace-1");
     await handlers.get(OPENVIKING_MEMORY_IPC.resumeImport.channel)?.(event, "workspace-1");
@@ -176,6 +178,7 @@ describe("OpenViking memory IPC", () => {
     await api.chooseOpenVikingDirectory();
     await api.previewOpenVikingDirectory("/repo");
     await api.addOpenVikingWorkspace("/repo");
+    await api.listOpenVikingImportSessions("workspace-1");
     await api.importOpenVikingWorkspace("workspace-1");
     await api.pauseOpenVikingImport("workspace-1");
     await api.resumeOpenVikingImport("workspace-1");

@@ -248,12 +248,17 @@ export function registerAutomationIpc({
   ipc.handle(AUTOMATION_CHANNELS.health, () => service.health());
   prepared(AUTOMATION_CHANNELS.snapshot, () => service.snapshot());
   ready(AUTOMATION_CHANNELS.runtimeSaveChannels, (value: unknown) =>
-    service.runtime.saveModelChannels(z.array(channelSchema).max(500).parse(value) as AgentChannel[]));
+    service.runtime.saveModelChannels(
+      z.array(channelSchema).max(500).parse(value) as AgentChannel[],
+      { validateDeletedChannelReferences: true },
+    ));
   ready(AUTOMATION_CHANNELS.runtimeSaveAgents, (value: unknown) =>
-    service.runtime.updateConfiguredAgents(
+    service.updateConfiguredAgents(
       z.array(agentSchema).max(500).parse(value) as ConfiguredAgent[],
       { detectDeletedManagedAgents: true },
     ));
+  ready(AUTOMATION_CHANNELS.runtimeDeleteAgent, (value: unknown) =>
+    service.deleteConfiguredAgent(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.runtimeTestChannel, (value: unknown) =>
     service.runtime.testRuntimeChannel(idSchema.parse(value), (event) => send(AUTOMATION_CHANNELS.runtimeTestEvent, event)));
   ready(AUTOMATION_CHANNELS.runtimeTestAgent, (value: unknown) =>

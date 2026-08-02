@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const {
   captureTurn,
   commitSession,
+  explicitlyRequestsMemory,
   findWorkspaceForCwd,
   recallForWorkspace,
 } = require("./openviking-memory-hook.cjs");
@@ -32,12 +33,20 @@ export function createAgentRecallOpenVikingPlugin(manifestPath, dependencies = {
       const scope = await activeScope();
       const session = sessions.get(sessionID);
       if (!scope || !session?.user || !session?.assistant) return;
-      await captureTurn(scope.workspace, sessionKey(scope.workspace.id, sessionID), session, {
+      const captured = await captureTurn(scope.workspace, sessionKey(scope.workspace.id, sessionID), session, {
         baseUrl: scope.manifest.baseUrl,
         fetchImpl: dependencies.fetchImpl,
         timeoutMs: dependencies.timeoutMs,
         stateDir: scope.manifest.stateDir,
+        commitRequested: explicitlyRequestsMemory(session.user),
       });
+      if (captured) {
+        session.recentTurns = [...(session.recentTurns || []), {
+          user: session.user,
+          assistant: session.assistant,
+        }].slice(-2);
+        sessions.set(sessionID, session);
+      }
     }
 
     async function commit(sessionID) {
@@ -47,6 +56,7 @@ export function createAgentRecallOpenVikingPlugin(manifestPath, dependencies = {
         baseUrl: scope.manifest.baseUrl,
         fetchImpl: dependencies.fetchImpl,
         timeoutMs: dependencies.timeoutMs,
+        stateDir: scope.manifest.stateDir,
       });
     }
 
@@ -57,11 +67,14 @@ export function createAgentRecallOpenVikingPlugin(manifestPath, dependencies = {
         const prompt = textFromParts(output?.parts);
         if (!prompt) return;
         const sessionID = input?.sessionID || input?.sessionId || input?.session?.id;
-        if (sessionID) sessions.set(sessionID, { ...(sessions.get(sessionID) || {}), user: stripInjectedContext(prompt) });
+        const session = sessionID ? sessions.get(sessionID) : null;
+        if (sessionID) sessions.set(sessionID, { ...(session || {}), user: stripInjectedContext(prompt), assistant: "" });
         const recalled = await recallForWorkspace(scope.workspace, prompt, {
           baseUrl: scope.manifest.baseUrl,
           fetchImpl: dependencies.fetchImpl,
           timeoutMs: dependencies.timeoutMs,
+          sessionId: sessionID ? sessionKey(scope.workspace.id, sessionID) : undefined,
+          recentTurns: session?.recentTurns,
         });
         if (recalled && Array.isArray(output?.parts)) output.parts.unshift({ type: "text", text: recalled, synthetic: true });
       },

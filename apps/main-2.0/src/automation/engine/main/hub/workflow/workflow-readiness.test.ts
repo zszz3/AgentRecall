@@ -22,7 +22,7 @@ function workflow(): Pick<WorkflowDraftState, "configuredAgentId" | "modelId" | 
       workflowId: "wf-ready",
       graphVersion: 1,
       objective: "Ready",
-      nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", prompt: "Answer", outputFields: [{ key: "answer" }], requiredTools: ["search"] }],
+      nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", configuredAgentId: "agent-a", prompt: "Answer", outputFields: [{ key: "answer" }], requiredTools: ["search"] }],
       edges: [],
     },
   };
@@ -40,8 +40,8 @@ describe("workflow readiness", () => {
 
   test("reports missing dependencies without guessing by display name", () => {
     const draft = workflow();
-    draft.configuredAgentId = "Agent A";
-    draft.modelId = "model-missing";
+    draft.reviewerConfiguredAgentId = "Agent A";
+    draft.reviewerModelId = "model-missing";
     const node = draft.definition.nodes[0];
     if (node?.execModel !== "llm") throw new Error("expected llm fixture");
     node.configuredAgentId = "agent-a";

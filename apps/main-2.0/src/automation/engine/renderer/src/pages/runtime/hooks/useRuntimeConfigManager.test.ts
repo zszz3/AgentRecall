@@ -44,7 +44,7 @@ describe("confirmConfigSwitch", () => {
 });
 
 describe("configChannelUserReference", () => {
-  test("ignores managed runtime agents but keeps user-created references", () => {
+  test("finds managed and user-created Agent references", () => {
     const managed = {
       id: "runtime-agent:hermes-default",
       channelId: "hermes-default",
@@ -55,7 +55,7 @@ describe("configChannelUserReference", () => {
       channelId: "hermes-default",
     };
 
-    expect(configChannelUserReference([managed] as never, "hermes-default")).toBeUndefined();
-    expect(configChannelUserReference([managed, userCreated] as never, "hermes-default")).toBe(userCreated);
+    expect(configChannelUserReference([managed] as never, "hermes-default")).toBe(managed);
+    expect(configChannelUserReference([userCreated] as never, "hermes-default")).toBe(userCreated);
   });
 });

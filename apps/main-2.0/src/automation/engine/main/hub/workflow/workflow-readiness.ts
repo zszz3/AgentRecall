@@ -19,15 +19,18 @@ export function inspectWorkflowReadiness(input: {
 }): WorkflowReadinessResult {
   const agents = new Map([...input.configuredAgents].map((agent) => [agent.id, agent]));
   const issues: WorkflowReadinessIssue[] = [];
-  inspectRoute({ scope: "workflow", field: "configuredAgentId", configuredAgentId: input.workflow.configuredAgentId, modelId: input.workflow.modelId });
   inspectRoute({ scope: "reviewer", field: "reviewerConfiguredAgentId", configuredAgentId: input.workflow.reviewerConfiguredAgentId, modelId: input.workflow.reviewerModelId });
 
   for (const node of input.workflow.definition.nodes) {
     if (node.execModel === "llm") {
-      const configuredAgentId = node.configuredAgentId || input.workflow.configuredAgentId;
+      const configuredAgentId = node.configuredAgentId?.trim() ?? "";
+      if (!configuredAgentId) {
+        issues.push({ code: "AGENT_MISSING", scope: "node", nodeId: node.id, field: "configuredAgentId", configuredAgentId, message: `Node ${node.title} requires an Agent from Runtime.` });
+        continue;
+      }
       const agent = agents.get(configuredAgentId);
-      const modelId = node.modelId || (node.configuredAgentId ? agent?.modelId ?? "default" : input.workflow.modelId);
-      inspectRoute({ scope: "node", nodeId: node.id, field: node.configuredAgentId ? "configuredAgentId" : "workflow.configuredAgentId", configuredAgentId, modelId });
+      const modelId = node.modelId || agent?.modelId || "default";
+      inspectRoute({ scope: "node", nodeId: node.id, field: "configuredAgentId", configuredAgentId, modelId });
       if (agent) {
         const tools = availableTools(agent, input.mcpServers);
         for (const requiredTool of node.requiredTools ?? []) {

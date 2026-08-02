@@ -10,12 +10,13 @@ describe("WorkflowDraftEditorDialog", () => {
   test("renders a configured-agent selector for every LLM node", () => {
     const html = renderToStaticMarkup(<WorkflowDraftEditorDialog definition={definition} configuredAgents={[agent]} onSave={() => undefined} onClose={() => undefined} />);
     expect(html).toContain("Agent for Answer");
-    expect(html).toContain("Workflow default");
+    expect(html).toContain("Select Agent");
+    expect(html).not.toContain("System default");
     expect(html).toContain("Specialist · gpt-specialist");
     expect(html).toContain('value="specialist" selected=""');
   });
 
-  test("stores a node override and can restore workflow-default routing", () => {
+  test("stores a node override and can restore system-default routing", () => {
     const withModel = structuredClone(definition);
     const node = withModel.nodes[0]!;
     if (node.execModel !== "llm") throw new Error("expected llm node");

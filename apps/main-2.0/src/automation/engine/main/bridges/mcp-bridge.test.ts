@@ -69,6 +69,37 @@ describe("MCP bridge", () => {
     });
   });
 
+  test("routes MCP Agent deletion through the application reference validator", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-mcp-agent-delete-"));
+    const hub = new AgentHub();
+    const current = hub.listConfiguredAgents();
+    hub.updateConfiguredAgents([{
+      id: "room-agent",
+      name: "Room Agent",
+      description: "",
+      runtimeAgentId: "codex",
+      channelId: "codex-openai",
+      modelId: "default",
+      tags: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }, ...current]);
+    const updateConfiguredAgents = vi.fn(async () => {
+      throw new Error("Agent Room Agent is referenced by Team Chat room Release studio");
+    });
+    bridge = await startMcpBridge(hub, {
+      discoveryPath: path.join(dir, "bridge.json"),
+      updateConfiguredAgents,
+    });
+
+    const response = await bridgeRequest("/mcp/agents/delete", bridge.token, { agentId: "room-agent" });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: "Agent Room Agent is referenced by Team Chat room Release studio" });
+    expect(updateConfiguredAgents).toHaveBeenCalledWith(current);
+    expect(hub.listConfiguredAgents()).toContainEqual(expect.objectContaining({ id: "room-agent" }));
+  });
+
   test("routes managed lifecycle commands and projects runs for read-only clients", async () => {
     const outputDir = await mkdtemp(path.join(os.tmpdir(), "workflow-mcp-output-"));
     const outputPath = path.join(outputDir, "report.md");
@@ -360,7 +391,7 @@ describe("MCP bridge", () => {
     expect(agents).toMatchObject({ ok: true });
     expect(agents.agents).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "default-agent", name: "Codex OpenAI", runtimeAgentId: "codex" }),
+        expect.objectContaining({ id: "runtime-agent:codex-openai", name: "Codex OpenAI", runtimeAgentId: "codex" }),
         expect.objectContaining({ id: "repo-reviewer", name: "Repo Reviewer", runtimeAgentId: "codex" }),
       ]),
     );

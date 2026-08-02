@@ -33,15 +33,33 @@ export const codexModelProbeInput = z.object({
   baseUrl: boundedString(8_192),
   apiKey: boundedString(65_536),
   providerId: boundedString(128).trim().min(1).optional(),
+  keyTarget: z.enum(["codex", "summary"]).optional(),
+}).strict();
+
+export const summaryProviderConnectionInput = z.object({
+  baseUrl: boundedString(8_192).trim().min(1),
+  apiKey: boundedString(65_536),
+  providerId: boundedString(128).trim().min(1),
+  model: boundedString(512).trim().min(1),
+  apiFormat: z.enum(["openai_chat", "openai_responses"]),
 }).strict();
 
 export const providerKeyTarget = z.enum(["codex", "claude", "summary"]);
 export type ProviderKeyTarget = z.infer<typeof providerKeyTarget>;
 export type CodexModelProbeRequest = z.infer<typeof codexModelProbeInput>;
+export type SummaryProviderConnectionRequest = z.infer<typeof summaryProviderConnectionInput>;
+
+export interface SummaryProviderConnectionResult {
+  elapsedMs: number;
+}
 
 export const PROVIDERS_IPC = {
   getCodexConfig: defineIpcRequest("codex-config:get", z.tuple([])),
   probeCodexModels: defineIpcRequest("codex-config:probe-models", z.tuple([codexModelProbeInput])),
+  testSummaryProviderConnection: defineIpcRequest(
+    "summary-provider:test-connection",
+    z.tuple([summaryProviderConnectionInput]),
+  ),
   applyCodexProfile: defineIpcRequest("codex-profile:apply", z.tuple([apiConfigInput])),
   applyClaudeProfile: defineIpcRequest("claude-profile:apply", z.tuple([claudeApiConfigInput])),
   getCodexChatProxyStatus: defineIpcRequest("codex-chat-proxy:status", z.tuple([])),

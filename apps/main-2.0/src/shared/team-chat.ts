@@ -98,6 +98,11 @@ export interface TeamChatRoomMemberInput {
   displayName: string;
 }
 
+export interface RemoveTeamChatRoomMemberRequest {
+  roomId: string;
+  memberId: string;
+}
+
 export interface TeamChatMention {
   memberId: string;
   start: number;

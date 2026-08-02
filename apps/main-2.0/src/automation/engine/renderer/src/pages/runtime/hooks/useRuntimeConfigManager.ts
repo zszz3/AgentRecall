@@ -53,7 +53,7 @@ export function configChannelUserReference(
   agents: AppSnapshot["configuredAgents"],
   channelId: string,
 ): AppSnapshot["configuredAgents"][number] | undefined {
-  return agents.find((agent) => agent.channelId === channelId && agent.managed !== true);
+  return agents.find((agent) => agent.channelId === channelId);
 }
 
 interface UseRuntimeConfigManagerOptions {
@@ -61,6 +61,7 @@ interface UseRuntimeConfigManagerOptions {
   snapshot: AppSnapshot;
   setSnapshot: (snapshot: AppSnapshot) => void;
   runtimeViewActive?: boolean;
+  onChannelsSaved?: (previous: AppSnapshot, next: AppSnapshot) => void;
 }
 
 export interface RuntimeConfigManager {
@@ -105,6 +106,7 @@ export function useRuntimeConfigManager({
   snapshot,
   setSnapshot,
   runtimeViewActive = false,
+  onChannelsSaved,
 }: UseRuntimeConfigManagerOptions): RuntimeConfigManager {
   const [configChannels, setConfigChannels] = useState<AgentChannel[]>([]);
   const [selectedConfigChannelId, setSelectedConfigChannelId] = useState("");
@@ -249,8 +251,9 @@ export function useRuntimeConfigManager({
     setConfigDirty(false);
     setSelectedConfigChannelId((current) => channelForRuntimeSelection(next.channels, selectedRuntimeId, current)?.id ?? "");
     setSnapshot(next);
+    onChannelsSaved?.(snapshot, next);
     return next;
-  }, [channelForRuntimeSelection, chatApi, selectedRuntimeId, setSnapshot]);
+  }, [channelForRuntimeSelection, chatApi, onChannelsSaved, selectedRuntimeId, setSnapshot, snapshot]);
 
   const persistSpecificChannelConfig = useCallback(async (channels: AgentChannel[]): Promise<AppSnapshot> => {
     const next = await chatApi.saveModelChannels(channels);
@@ -258,8 +261,9 @@ export function useRuntimeConfigManager({
     setConfigDirty(false);
     setSelectedConfigChannelId((current) => channelForRuntimeSelection(next.channels, selectedRuntimeId, current)?.id ?? "");
     setSnapshot(next);
+    onChannelsSaved?.(snapshot, next);
     return next;
-  }, [channelForRuntimeSelection, chatApi, selectedRuntimeId, setSnapshot]);
+  }, [channelForRuntimeSelection, chatApi, onChannelsSaved, selectedRuntimeId, setSnapshot, snapshot]);
 
   const saveChannelConfig = useCallback(async (): Promise<void> => {
     try {

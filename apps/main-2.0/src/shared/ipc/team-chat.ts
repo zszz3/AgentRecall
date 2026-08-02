@@ -7,6 +7,7 @@ export const TEAM_CHAT_CHANNELS = {
   roomsGet: "team-chat:rooms:get",
   roomsCreate: "team-chat:rooms:create",
   roomsUpdate: "team-chat:rooms:update",
+  roomsRemoveMember: "team-chat:rooms:member:remove",
   roomsArchive: "team-chat:rooms:archive",
   roomsDelete: "team-chat:rooms:delete",
   messagesList: "team-chat:messages:list",

@@ -1,6 +1,6 @@
 import { assertSafeArchiveEntry, type OpenVikingRuntimeManifest } from "./openviking-runtime-service";
 
-export const OPENVIKING_RUNTIME_VERSION = "0.4.11-r2";
+export const OPENVIKING_RUNTIME_VERSION = "0.4.11-r4";
 
 interface RuntimeArtifactRecord {
   version?: unknown;

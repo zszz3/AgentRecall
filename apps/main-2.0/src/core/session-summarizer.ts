@@ -21,6 +21,7 @@ export interface SummaryEndpoint {
   command?: string;
   cwd?: string;
   modelArg?: string;
+  reasoningEffort?: string;
   onTemporarySession?: (sessionKey: string) => void;
 }
 
@@ -354,7 +355,18 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
   const mergedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
   return new Promise<string>((resolve, reject) => {
-    const proc = spawnCli(command, ["exec", "--ephemeral", "--json", "--skip-git-repo-check", "--sandbox", "read-only"], {
+    const proc = spawnCli(command, [
+      "exec",
+      "--ephemeral",
+      "--json",
+      "--skip-git-repo-check",
+      "--sandbox",
+      "read-only",
+      ...(endpoint.modelArg ? ["--model", endpoint.modelArg] : []),
+      ...(endpoint.reasoningEffort
+        ? ["--config", `model_reasoning_effort=\"${endpoint.reasoningEffort}\"`]
+        : []),
+    ], {
       cwd,
       signal: mergedSignal,
       input: prompt,
@@ -383,9 +395,8 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
         reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
         return;
       }
-      // If codex is not found, fall back to claude exec
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        resolve(claudeExecCompletion(endpoint, messages, signal));
+        reject(new Error(`Local Codex executable was not found: ${command}`));
         return;
       }
       reject(error);
@@ -410,14 +421,14 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
           reject(new Error(`AI summary request timed out after ${(REQUEST_TIMEOUT_MS * 2) / 1000}s.`));
           return;
         }
-        // Only fall back when Codex is unavailable. Runtime failures, including
-        // rejected or oversized prompts, should retain their original error.
+        // Keep local Codex failures visible instead of silently launching another
+        // provider after the user explicitly selected Codex for summaries.
         const hasNotFoundError = stderr.toLowerCase().includes("not found") ||
                                   stderr.toLowerCase().includes("not recognized") ||
                                   stderr.toLowerCase().includes("no such file") ||
                                   stderr.toLowerCase().includes("cannot find");
         if (hasNotFoundError) {
-          resolve(claudeExecCompletion(endpoint, messages, signal));
+          reject(new Error(`Local Codex executable was not found: ${command}`));
           return;
         }
         reject(new Error(`Codex summary exited with ${String(code)}. ${stderr.trim().slice(-1000)}`.trim()));

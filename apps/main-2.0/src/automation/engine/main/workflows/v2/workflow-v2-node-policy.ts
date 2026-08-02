@@ -148,17 +148,14 @@ export function workflowV2LlmNodePrompt(input: {
 
 export function resolveWorkflowNodeAgent(
   node: { configuredAgentId?: string | undefined; modelId?: string | undefined },
-  workflowDefaults: { configuredAgentId: string; modelId: string },
+  _workflowDefaults: { configuredAgentId: string; modelId: string },
   configuredAgents: Array<{ id: string; modelId: string }>,
 ): { configuredAgentId: string; modelId: string } {
-  const configuredAgentId = node.configuredAgentId || workflowDefaults.configuredAgentId;
+  const configuredAgentId = node.configuredAgentId?.trim();
+  if (!configuredAgentId) throw new Error("Workflow V2 LLM node requires an Agent from Runtime.");
   const agent = configuredAgents.find((item) => item.id === configuredAgentId);
-  if (node.configuredAgentId && !agent) throw new Error(`Workflow V2 configured agent ${configuredAgentId} was not found.`);
-  const modelId = node.modelId
-    ? node.modelId
-    : node.configuredAgentId
-      ? agent?.modelId || DEFAULT_MODEL_ID
-      : workflowDefaults.modelId || agent?.modelId || DEFAULT_MODEL_ID;
+  if (!agent) throw new Error(`Workflow V2 configured agent ${configuredAgentId} was not found.`);
+  const modelId = node.modelId || agent.modelId || DEFAULT_MODEL_ID;
   return { configuredAgentId, modelId };
 }
 

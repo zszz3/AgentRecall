@@ -11,9 +11,62 @@ import {
   buildRuntimeArtifactFromUrl,
   buildRuntimePlan,
   createRuntimeArchive,
+  patchCodexResponsesAdapter,
+  patchVlmReasoningEffortConfig,
   runtimeArchiveRoot,
   runtimeArtifactName,
 } from "./build-openviking-runtime.mjs";
+
+test("runtime patch forwards configured reasoning effort to Codex Responses", () => {
+  const source = [
+    "        response_kwargs: Dict[str, Any] = {",
+    '            "model": model,',
+    "        }",
+    '        tools = _convert_tools_for_responses(kwargs.get("tools"))',
+    "        if tools:",
+    '            response_kwargs["tools"] = tools',
+    "        stream = client.responses.create(**response_kwargs, stream=True)",
+    "",
+  ].join("\n");
+
+  const patched = patchCodexResponsesAdapter(source);
+
+  assert.match(patched, /reasoning_effort = kwargs\.get\("reasoning_effort"\)/u);
+  assert.match(patched, /response_kwargs\["reasoning"\] = \{"effort": reasoning_effort\}/u);
+  assert.throws(
+    () => patchCodexResponsesAdapter("unexpected source"),
+    /unsupported OpenViking Codex adapter/u,
+  );
+});
+
+test("runtime patch accepts and forwards configured VLM reasoning effort", () => {
+  const source = [
+    "    thinking: bool = Field(default=False, description=\"Enable thinking mode\")",
+    "",
+    "    def _build_vlm_config_dict_for_credential(self, credential):",
+    "        result = {",
+    '            "thinking": self.thinking,',
+    "        }",
+    "",
+    "    def _build_vlm_config_dict(self):",
+    "        result = {",
+    '            "thinking": self.thinking,',
+    "        }",
+    "",
+  ].join("\n");
+
+  const patched = patchVlmReasoningEffortConfig(source);
+
+  assert.match(patched, /reasoning_effort: str = Field\(default="low"/u);
+  assert.equal(
+    patched.match(/"reasoning_effort": self\.reasoning_effort/g)?.length,
+    2,
+  );
+  assert.throws(
+    () => patchVlmReasoningEffortConfig("unexpected source"),
+    /unsupported OpenViking VLM config/u,
+  );
+});
 
 test("runtime packaging reports real archive bytes and generation speed", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agent-recall-runtime-packaging-progress-"));
@@ -55,7 +108,7 @@ test("runtime build revisions keep the upstream OpenViking package version", asy
   const root = await mkdtemp(path.join(tmpdir(), "agent-recall-runtime-revision-"));
   try {
     const plan = buildRuntimePlan({
-      version: "0.4.11-r2",
+      version: "0.4.11-r4",
       platform: "darwin",
       arch: "arm64",
       buildHome: path.join(root, "home"),
@@ -66,10 +119,10 @@ test("runtime build revisions keep the upstream OpenViking package version", asy
 
     assert.equal(
       plan.outputPath,
-      path.join(root, "output", "openviking-runtime-0.4.11-r2-darwin-arm64.tar.gz"),
+      path.join(root, "output", "openviking-runtime-0.4.11-r4-darwin-arm64.tar.gz"),
     );
     assert.ok(plan.pipArgs.includes("openviking[local-embed]==0.4.11"));
-    assert.ok(!plan.pipArgs.includes("openviking[local-embed]==0.4.11-r2"));
+    assert.ok(!plan.pipArgs.includes("openviking[local-embed]==0.4.11-r4"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

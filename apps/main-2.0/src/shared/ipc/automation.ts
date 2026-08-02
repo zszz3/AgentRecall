@@ -13,6 +13,7 @@ export const AUTOMATION_CHANNELS = {
   change: "automation:change",
   runtimeSaveChannels: "automation:runtime:save-channels",
   runtimeSaveAgents: "automation:runtime:save-agents",
+  runtimeDeleteAgent: "automation:runtime:delete-agent",
   runtimeTestChannel: "automation:runtime:test-channel",
   runtimeTestAgent: "automation:runtime:test-agent",
   runtimeTestEvent: "automation:runtime:test-event",

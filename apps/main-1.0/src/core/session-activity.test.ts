@@ -88,6 +88,51 @@ describe("live session detection", () => {
     ).toEqual([{ family: "codex", rawId: "019e82e1-b60d-7b12-95c3-d33e1d05f0a9", pid: 224 }]);
   });
 
+  it("maps a plain Codex process to the active session when it keeps completed session files open", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-open-"));
+    const sessionDir = path.join(root, ".codex", "sessions", "2026", "07", "31");
+    const completedFile = path.join(
+      sessionDir,
+      "rollout-2026-07-31T10-00-00-11111111-1111-4111-8111-111111111111.jsonl",
+    );
+    const activeFile = path.join(
+      sessionDir,
+      "rollout-2026-07-31T10-01-00-22222222-2222-4222-8222-222222222222.jsonl",
+    );
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(completedFile, '{"type":"event_msg","payload":{"type":"task_complete"}}\n');
+    fs.writeFileSync(activeFile, '{"type":"event_msg","payload":{"type":"task_started"}}\n');
+
+    const snapshot = await loadLiveSessionSnapshot({
+      platform: "darwin",
+      now: new Date(),
+      runner: async (command) => {
+        if (command === "/bin/ps") return "223 /opt/homebrew/bin/codex";
+        if (command === "lsof") return `${completedFile}\n${activeFile}\n`;
+        return "";
+      },
+    });
+
+    expect(snapshot.sessions).toEqual([
+      { family: "codex", rawId: "22222222-2222-4222-8222-222222222222", pid: 223 },
+    ]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("does not treat Codex helper processes as independent sessions", () => {
+    expect(
+      detectLiveSessionsFromProcessLines(
+        ["225 /opt/lib/node_modules/@openai/codex/vendor/bin/codex-code-mode-host"],
+        new Map([
+          [
+            225,
+            "/tmp/.codex/sessions/2026/07/31/rollout-2026-07-31T10-00-00-33333333-3333-4333-8333-333333333333.jsonl",
+          ],
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
   it("maps a plain running Claude process through its open session file", () => {
     expect(
       detectLiveSessionsFromProcessLines(

@@ -8,6 +8,7 @@ describe("AutoStartingOpenVikingClient", () => {
     const downstream = {
       searchMemories: vi.fn(async () => []),
       deleteWorkspaceUser: vi.fn(async () => undefined),
+      commitSession: vi.fn(async () => ({ taskId: "task-1" })),
     } as unknown as OpenVikingClientPort;
     const ensureRunning = vi.fn(async () => undefined);
     const getConnection = vi.fn(async () => ({
@@ -23,17 +24,19 @@ describe("AutoStartingOpenVikingClient", () => {
     const auth = { accountId: "agent-recall-v2", userId: "workspace_one", apiKey: "user-key" };
 
     await client.searchMemories(auth, "query", 8);
-    await client.deleteWorkspaceUser("agent-recall-v2", "workspace_one");
+    await client.commitSession(auth, "session-1", 10);
+    await client.deleteWorkspaceUser(auth);
 
-    expect(ensureRunning).toHaveBeenCalledTimes(2);
-    expect(getConnection).toHaveBeenCalledTimes(2);
+    expect(ensureRunning).toHaveBeenCalledTimes(3);
+    expect(getConnection).toHaveBeenCalledTimes(3);
     expect(createClient).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledWith({
       baseUrl: "http://127.0.0.1:21933",
       rootApiKey: "root-key",
     });
     expect(downstream.searchMemories).toHaveBeenCalledWith(auth, "query", 8);
-    expect(downstream.deleteWorkspaceUser).toHaveBeenCalledWith("agent-recall-v2", "workspace_one");
+    expect(downstream.commitSession).toHaveBeenCalledWith(auth, "session-1", 10);
+    expect(downstream.deleteWorkspaceUser).toHaveBeenCalledWith(auth);
   });
 
   it("replaces the cached gateway when the runtime endpoint changes", async () => {

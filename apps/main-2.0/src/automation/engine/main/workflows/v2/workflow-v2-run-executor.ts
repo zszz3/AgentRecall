@@ -263,7 +263,7 @@ export class WorkflowV2RunExecutor {
         return;
       }
     }
-    const configuredAgentId = workflow.configuredAgentId || latestSnapshot.configuredAgents[0]?.id || "default-agent";
+    const configuredAgentId = workflow.configuredAgentId;
     const modelId = configuredAgentModelId(workflow, latestSnapshot);
     const publishTransactionProjection = async (transaction: WorkflowTransactionState): Promise<void> => {
       const operations = (await durableStore?.readOperations?.(workflow.workflowId, runId) ?? [])

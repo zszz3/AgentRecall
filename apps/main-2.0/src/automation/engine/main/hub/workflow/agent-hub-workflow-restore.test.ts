@@ -18,6 +18,8 @@ import { AgentHub } from "../agent-hub";
 import { createWorkflowV2InlineScriptSpec } from "../../../shared/workflow-v2/definition";
 import { reconcileWorkflowV2RunFromDurableState, restoreWorkflowDraft, restoreWorkflowRun, restoreWorkflowStoreCollections } from "./agent-hub-workflow-restore";
 
+const TEST_AGENT_ID = "runtime-agent:codex-openai";
+
 function definition(workflowId = "workflow-recovery"): WorkflowV2Definition {
   return {
     workflowId,
@@ -30,6 +32,7 @@ function definition(workflowId = "workflow-recovery"): WorkflowV2Definition {
         title: "Draft",
         execModel: "llm",
         executionMode: "one-shot",
+        configuredAgentId: TEST_AGENT_ID,
         prompt: "Draft the change.",
         outputFields: [{ key: "draft", required: true }],
       },
@@ -331,7 +334,7 @@ describe("Workflow V2 AgentHub durable restore", () => {
     const hub = new AgentHub();
     await hub.loadPersistedState(storagePath);
     const workflowDefinition = definition("startup-recovery-placeholder");
-    const workflowId = hub.createWorkflowDraft().workflowDraft!.workflowId;
+    const workflowId = hub.createWorkflowDraft({ reviewerConfiguredAgentId: TEST_AGENT_ID }).workflowDraft!.workflowId;
     const created = hub.materializeWorkflowDraft(workflowId, {
       title: "Startup recovery",
       objective: "Reconcile durable state",

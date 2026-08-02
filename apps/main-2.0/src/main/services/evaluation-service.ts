@@ -52,6 +52,16 @@ export class EvaluationService {
     return this.dependencies.store.listExperiments();
   }
 
+  async configuredAgentReferences(agentIds: ReadonlySet<string>): Promise<Array<{ agentId: string; location: string }>> {
+    if (agentIds.size === 0) return [];
+    return (await this.dependencies.store.listExperiments())
+      .filter((experiment) => agentIds.has(experiment.agentId))
+      .map((experiment) => ({
+        agentId: experiment.agentId,
+        location: `Evaluation experiment ${experiment.name || experiment.id}`,
+      }));
+  }
+
   saveExperiment(value: EvaluationExperiment): Promise<EvaluationExperiment> {
     return this.dependencies.store.saveExperiment(value);
   }

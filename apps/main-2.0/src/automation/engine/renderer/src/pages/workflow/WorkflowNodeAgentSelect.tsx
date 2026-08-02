@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 export function WorkflowNodeAgentSelect(props: {
   nodeTitle: string;
   configuredAgentId?: string;
-  workflowDefaultAgentId: string;
   configuredAgents: ConfiguredAgent[];
   onSelect: (configuredAgentId: string | undefined) => void | Promise<void>;
 }) {
@@ -14,7 +13,6 @@ export function WorkflowNodeAgentSelect(props: {
   useEffect(() => {
     if (pendingValue !== undefined && pendingValue !== "" && pendingValue === (props.configuredAgentId ?? "")) setPendingValue(undefined);
   }, [pendingValue, props.configuredAgentId]);
-  const workflowDefault = props.configuredAgents.find((agent) => agent.id === props.workflowDefaultAgentId);
   return <select
     className="workflow-node-agent-select nodrag nopan"
     aria-label={`Agent for ${props.nodeTitle}`}
@@ -32,7 +30,7 @@ export function WorkflowNodeAgentSelect(props: {
       });
     }}
   >
-    <option value="">Workflow default · {workflowDefault?.name ?? props.workflowDefaultAgentId}</option>
+    <option value="" disabled>Select Agent</option>
     {props.configuredAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.modelId}</option>)}
   </select>;
 }

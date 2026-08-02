@@ -20,6 +20,15 @@ describe("createAutomationApi", () => {
     expect(ipc.invoke).toHaveBeenNthCalledWith(3, AUTOMATION_CHANNELS.workflowDraftCreate, { title: "Ship" });
   });
 
+  it("deletes one concrete Agent by its persisted id", async () => {
+    const ipc = { invoke: vi.fn(async () => ({ configuredAgents: [] })), on: vi.fn(), removeListener: vi.fn() };
+    const api = createAutomationApi(ipc as never);
+
+    await api.deleteConfiguredAgent("agent-1");
+
+    expect(ipc.invoke).toHaveBeenCalledWith(AUTOMATION_CHANNELS.runtimeDeleteAgent, "agent-1");
+  });
+
   it("keeps portable Workflow file contents behind explicit IPC calls", async () => {
     const ipc = { invoke: vi.fn(async () => ({ ok: true })), on: vi.fn(), removeListener: vi.fn() };
     const api = createAutomationApi(ipc as never);

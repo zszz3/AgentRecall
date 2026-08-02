@@ -26,8 +26,16 @@ import {
 } from "./terminal-title";
 import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
+import {
+  OPENVIKING_EXTRACTION_REASONING_EFFORTS,
+  type OpenVikingExtractionReasoningEffort,
+} from "./openviking-settings";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
+export {
+  OPENVIKING_EXTRACTION_REASONING_EFFORTS,
+  type OpenVikingExtractionReasoningEffort,
+} from "./openviking-settings";
 export {
   defaultApiConfig,
   defaultClaudeApiConfig,
@@ -92,6 +100,8 @@ export interface AppSettings {
   openVikingOpenCodeEnabled: boolean;
   openVikingEmbeddingMode: "local" | "remote";
   openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5";
+  openVikingExtractionModel: string;
+  openVikingExtractionReasoningEffort: OpenVikingExtractionReasoningEffort;
   hideCodexQuota: boolean;
   hideClaudeQuota: boolean;
   autoCheckUpdates: boolean;
@@ -101,6 +111,7 @@ export interface AppSettings {
   compressionConcurrency: number;
   migrationCompleteTokenLimit: number;
   summarySource: "codex" | "claude" | "custom";
+  summaryCodexModel: string;
   sessionSearchMcpEnabled: boolean;
   skillAiRuntimeId: string;
   skillSyncEnabled: boolean;
@@ -160,6 +171,8 @@ export const defaultSettings: AppSettings = {
   openVikingOpenCodeEnabled: false,
   openVikingEmbeddingMode: "local",
   openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5",
+  openVikingExtractionModel: "",
+  openVikingExtractionReasoningEffort: "medium",
   hideCodexQuota: false,
   hideClaudeQuota: false,
   autoCheckUpdates: true,
@@ -168,7 +181,8 @@ export const defaultSettings: AppSettings = {
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
   migrationCompleteTokenLimit: 100_000,
-  summarySource: "custom",
+  summarySource: "codex",
+  summaryCodexModel: "",
   sessionSearchMcpEnabled: true,
   skillAiRuntimeId: "",
   skillSyncEnabled: false,
@@ -203,8 +217,15 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     openVikingOpenCodeEnabled: Boolean(merged.openVikingOpenCodeEnabled),
     openVikingEmbeddingMode: merged.openVikingEmbeddingMode === "remote" ? "remote" : "local",
     openVikingLocalEmbeddingModel: "BAAI/bge-small-zh-v1.5",
+    openVikingExtractionModel: String(merged.openVikingExtractionModel ?? "").trim(),
+    openVikingExtractionReasoningEffort: OPENVIKING_EXTRACTION_REASONING_EFFORTS.includes(
+      merged.openVikingExtractionReasoningEffort as OpenVikingExtractionReasoningEffort,
+    )
+      ? merged.openVikingExtractionReasoningEffort
+      : "medium",
     showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
+    summaryCodexModel: String(merged.summaryCodexModel ?? "").trim(),
     skillAiRuntimeId: String(merged.skillAiRuntimeId ?? "").trim(),
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),

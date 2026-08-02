@@ -27,7 +27,11 @@ describe("WorkflowPage macOS interactions", () => {
 
 describe("WorkflowPage input ownership", () => {
   test("renders the planning composer before a workflow graph exists", () => {
-    expect(renderToStaticMarkup(<WorkflowPage controller={controller(false)} />)).toContain("workflow-composer");
+    const html = renderToStaticMarkup(<WorkflowPage controller={controller(false)} />);
+    expect(html).toContain("workflow-composer");
+    expect(html).toContain("Choose work directory");
+    expect(html).toContain('aria-label="Configured agent"');
+    expect(html).toContain("Select Agent");
   });
   test("removes the planning composer once node execution owns user input", () => {
     const html = renderToStaticMarkup(<WorkflowPage controller={controller(true)} />);
@@ -169,7 +173,8 @@ describe("WorkflowPage input ownership", () => {
     const html = renderToStaticMarkup(<WorkflowPage controller={value} />);
     expect(html).toContain("Agent for Answer");
     expect(html).toContain("Specialist");
-    expect(html).toContain("Workflow default");
+    expect(html).toContain("Select Agent");
+    expect(html).not.toContain("System default");
   });
 
   test("offers same-run revision after the latest run fails while keeping draft editing available", () => {

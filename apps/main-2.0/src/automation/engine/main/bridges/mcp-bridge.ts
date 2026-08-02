@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { AgentHub } from "../hub/agent-hub";
 import { isRuntimeId } from "../../shared/runtime-catalog";
-import type { AgentChannel, ConfiguredAgent, MaterializeWorkflowDraftRequest, RegisterArtifactRequest, UpdateWorkflowRequest, WorkflowArtifactReference, AppendWorkflowRunContextRequest, ImportOnlineSkillRequest } from "../../shared/types";
+import type { AgentChannel, AppSnapshot, ConfiguredAgent, MaterializeWorkflowDraftRequest, RegisterArtifactRequest, UpdateWorkflowRequest, WorkflowArtifactReference, AppendWorkflowRunContextRequest, ImportOnlineSkillRequest } from "../../shared/types";
 import { SKILL_TEMPLATES } from "../../shared/skill-templates";
 import { importOnlineSkillToLibrary, listImportedSkillTemplates } from "../skills/skill-installer";
 import { fetchOnlineSkills, ONLINE_SKILL_SOURCES } from "../../shared/online-skills";
@@ -30,6 +30,7 @@ export interface StartMcpBridgeOptions {
   discoveryPath: string;
   bundledSkillsRoot?: string;
   fetcher?: typeof fetch;
+  updateConfiguredAgents?: (agents: ConfiguredAgent[]) => Promise<AppSnapshot>;
   studio?: {
     handleMcpRequest(
       token: string | undefined,
@@ -44,6 +45,7 @@ interface McpBridgeRuntimeOptions {
   fetcher?: typeof fetch;
   studio?: StartMcpBridgeOptions["studio"];
   studioToken?: string;
+  updateConfiguredAgents?: StartMcpBridgeOptions["updateConfiguredAgents"];
 }
 
 function jsonResponse(response: http.ServerResponse, statusCode: number, payload: unknown): void {
@@ -262,12 +264,19 @@ function isAgentInputError(value: ConfiguredAgent | { ok: false; error: string }
   return "ok" in value && value.ok === false;
 }
 
-function upsertAgent(hub: AgentHub, agent: ConfiguredAgent, existingId?: string): unknown {
+async function upsertAgent(
+  hub: AgentHub,
+  agent: ConfiguredAgent,
+  existingId?: string,
+  updateConfiguredAgents?: StartMcpBridgeOptions["updateConfiguredAgents"],
+): Promise<unknown> {
   const current = hub.listConfiguredAgents();
   const duplicate = current.find((item) => item.id === agent.id && item.id !== existingId);
   if (duplicate) return { ok: false, error: `Agent ${agent.id} already exists.` };
   const next = existingId ? current.map((item) => (item.id === existingId ? agent : item)) : [agent, ...current];
-  const snapshot = hub.updateConfiguredAgents(next);
+  const snapshot = updateConfiguredAgents
+    ? await updateConfiguredAgents(next)
+    : hub.updateConfiguredAgents(next);
   return { ok: true, agent, agents: snapshot.configuredAgents };
 }
 
@@ -303,7 +312,7 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     const agent = normalizeAgentInput(hub, record);
     if (isAgentInputError(agent)) return agent;
     if (hub.listConfiguredAgents().some((item) => item.id === agent.id)) return { ok: false, error: `Agent ${agent.id} already exists.` };
-    return upsertAgent(hub, agent);
+    return upsertAgent(hub, agent, undefined, options.updateConfiguredAgents);
   }
   if (route === "/mcp/agents/update") {
     const agentId = asString(record.agentId);
@@ -312,14 +321,17 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     if (!existing) return { ok: false, error: `Agent ${agentId} was not found.` };
     const agent = normalizeAgentInput(hub, record, existing);
     if (isAgentInputError(agent)) return agent;
-    return upsertAgent(hub, agent, agentId);
+    return upsertAgent(hub, agent, agentId, options.updateConfiguredAgents);
   }
   if (route === "/mcp/agents/delete") {
     const agentId = asString(record.agentId);
     if (!agentId) return { ok: false, error: "agents_delete requires agentId." };
     const current = hub.listConfiguredAgents();
     if (!current.some((agent) => agent.id === agentId)) return { ok: false, error: `Agent ${agentId} was not found.` };
-    const snapshot = hub.updateConfiguredAgents(current.filter((agent) => agent.id !== agentId));
+    const next = current.filter((agent) => agent.id !== agentId);
+    const snapshot = options.updateConfiguredAgents
+      ? await options.updateConfiguredAgents(next)
+      : hub.updateConfiguredAgents(next);
     return { ok: true, agentId, agents: snapshot.configuredAgents };
   }
   if (route === "/mcp/agents/test") {
@@ -457,6 +469,7 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
         if (options.bundledSkillsRoot) runtimeOptions.bundledSkillsRoot = options.bundledSkillsRoot;
         if (options.fetcher) runtimeOptions.fetcher = options.fetcher;
         if (options.studio) runtimeOptions.studio = options.studio;
+        if (options.updateConfiguredAgents) runtimeOptions.updateConfiguredAgents = options.updateConfiguredAgents;
         if (typeof studioToken === "string") runtimeOptions.studioToken = studioToken;
         const payload = await routeWorkflowRequest(hub, route, body, runtimeOptions);
         jsonResponse(response, 200, payload);

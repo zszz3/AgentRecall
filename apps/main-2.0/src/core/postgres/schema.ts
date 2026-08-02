@@ -1186,4 +1186,99 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
       WHERE source IN ('codex-cli', 'codex-app', 'tcodex-cli');
     `,
   ],
+}, {
+  version: 19,
+  name: "track incremental OpenViking Session imports",
+  statements: [
+    `
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_imported_sessions (
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        session_key text NOT NULL,
+        source_revision text NOT NULL,
+        imported_turns integer NOT NULL CHECK (imported_turns >= 0),
+        updated_at timestamptz NOT NULL,
+        PRIMARY KEY (workspace_id, session_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS openviking_imported_sessions_workspace_idx
+        ON agent_recall.openviking_imported_sessions (workspace_id, updated_at DESC);
+    `,
+  ],
+}, {
+  version: 20,
+  name: "persist resumable OpenViking import tasks",
+  statements: [
+    `
+      ALTER TABLE agent_recall.openviking_import_jobs
+        ADD COLUMN IF NOT EXISTS completed_tasks integer NOT NULL DEFAULT 0
+          CHECK (completed_tasks >= 0),
+        ADD COLUMN IF NOT EXISTS total_tasks integer NOT NULL DEFAULT 0
+          CHECK (total_tasks >= 0);
+
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_import_tasks (
+        id text PRIMARY KEY,
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        session_key text NOT NULL,
+        source_revision text NOT NULL,
+        session_title text NOT NULL,
+        payload jsonb NOT NULL,
+        state text NOT NULL DEFAULT 'queued'
+          CHECK (state IN ('queued', 'uploading', 'waiting', 'completed', 'failed')),
+        attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        remote_task_id text,
+        last_error text,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS openviking_import_tasks_workspace_state_idx
+        ON agent_recall.openviking_import_tasks (workspace_id, state, created_at);
+    `,
+  ],
+}, {
+  version: 21,
+  name: "preserve planned OpenViking import order",
+  statements: [
+    `
+      ALTER TABLE agent_recall.openviking_import_tasks
+        ADD COLUMN IF NOT EXISTS position integer NOT NULL DEFAULT 0
+          CHECK (position >= 0);
+
+      CREATE INDEX IF NOT EXISTS openviking_import_tasks_workspace_position_idx
+        ON agent_recall.openviking_import_tasks (workspace_id, position);
+    `,
+  ],
+}, {
+  version: 22,
+  name: "persist selected OpenViking import sessions",
+  statements: [
+    `
+      ALTER TABLE agent_recall.openviking_import_jobs
+        ADD COLUMN IF NOT EXISTS selected_session_keys jsonb;
+    `,
+  ],
+}, {
+  version: 23,
+  name: "reconcile OpenViking and Codex migration histories",
+  statements: [
+    `
+      ALTER TABLE agent_recall.sessions
+        ADD COLUMN IF NOT EXISTS codex_history_mode text;
+
+      ALTER TABLE agent_recall.session_turns
+        ADD COLUMN IF NOT EXISTS source_turn_id text,
+        ADD COLUMN IF NOT EXISTS duration_ms bigint,
+        ADD COLUMN IF NOT EXISTS time_to_first_token_ms bigint,
+        ADD COLUMN IF NOT EXISTS abort_reason text;
+
+      CREATE INDEX IF NOT EXISTS session_turns_source_turn_idx
+        ON agent_recall.session_turns (session_key, source_turn_id)
+      WHERE source_turn_id IS NOT NULL;
+
+      ALTER TABLE agent_recall.token_events
+        ADD COLUMN IF NOT EXISTS source_turn_id text;
+    `,
+  ],
 }];

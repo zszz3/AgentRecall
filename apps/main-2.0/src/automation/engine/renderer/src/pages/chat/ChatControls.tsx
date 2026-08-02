@@ -8,7 +8,6 @@ import {
   resolveConfiguredAgentChannel,
   runtimeStatus,
 } from "../../app/agents";
-import { DEFAULT_MODEL_ID } from "../../../../shared/models";
 import type { AgentChannel, AgentRuntime, ConfiguredAgent } from "../../../../shared/types";
 
 type MaybePromise = void | Promise<void>;
@@ -22,6 +21,7 @@ interface ChatControlsProps {
   running: boolean;
   workDir: string;
   runtimes: AgentRuntime[];
+  showAgentControls?: boolean;
   onSelectConfiguredAgent: (configuredAgentId: string) => MaybePromise;
   onSelectModel?: (modelId: string) => MaybePromise;
   onChooseWorkDir: () => MaybePromise;
@@ -36,6 +36,7 @@ export function ChatControls({
   running,
   workDir,
   runtimes,
+  showAgentControls = true,
   onSelectConfiguredAgent,
   onSelectModel = () => undefined,
   onChooseWorkDir,
@@ -46,13 +47,13 @@ export function ChatControls({
   const runtimeId = configuredAgentRuntimeId(selectedAgent, selectedChannel);
   const runtime = runtimeMap.get(runtimeId) ?? fallbackRuntime(runtimeId);
   const selectedModel = configuredAgentModel(selectedAgent, selectedChannel, modelId);
-  const modelOptions = selectedChannel?.models.length ? selectedChannel.models : [{ id: DEFAULT_MODEL_ID, label: "Default" }];
-  const selectedModelId = selectedModel?.id ?? DEFAULT_MODEL_ID;
+  const modelOptions = selectedChannel?.models.length ? selectedChannel.models : [{ id: "", label: "Select Agent first" }];
+  const selectedModelId = selectedModel?.id ?? "";
   const selectsDisabled = locked || running;
   const configTitle = [
     selectedAgent?.name,
-    selectedChannel?.label ?? "No config",
-    selectedModel?.label ?? selectedAgent?.modelId ?? DEFAULT_MODEL_ID,
+    selectedChannel?.label ?? "No Agent selected",
+    selectedModel?.label ?? selectedAgent?.modelId,
     runtimeStatus(runtime),
   ]
     .filter(Boolean)
@@ -60,8 +61,8 @@ export function ChatControls({
 
   return (
     <div className="composer-controls">
-      <label className="composer-select-wrap" title={configTitle}>
-        <span className={`runtime-dot ${agentAccent(runtimeId)}`} />
+      {showAgentControls ? <><label className="composer-select-wrap" title={configTitle}>
+        {selectedAgent ? <span className={`runtime-dot ${agentAccent(runtimeId)}`} /> : null}
         <select
           className="composer-select"
           aria-label="Configured agent"
@@ -69,6 +70,7 @@ export function ChatControls({
           disabled={selectsDisabled || configuredAgents.length === 0}
           onChange={(event) => void onSelectConfiguredAgent(event.currentTarget.value)}
         >
+          <option value="" disabled>Select Agent</option>
           {configuredAgents.map((agent) => (
             <option key={agent.id} value={agent.id}>
               {agent.name || agent.id}
@@ -90,7 +92,7 @@ export function ChatControls({
             </option>
           ))}
         </select>
-      </label>
+      </label></> : null}
       <button
         className="workdir-picker composer-workdir-picker"
         onClick={() => void onChooseWorkDir()}

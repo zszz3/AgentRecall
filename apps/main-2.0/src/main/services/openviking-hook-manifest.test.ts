@@ -48,6 +48,25 @@ describe("OpenVikingHookManifestService", () => {
       expect((await stat(manifestPath)).mode & 0o777).toBe(0o600);
     }
   });
+
+  it("removes the active manifest when the application stops", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-manifest-"));
+    roots.push(root);
+    const service = new OpenVikingHookManifestService({
+      rootDir: root,
+      realpath: async (value) => value,
+      credentials: { get: async () => null },
+    });
+    const manifestPath = await service.write({
+      baseUrl: "http://127.0.0.1:21933",
+      integrations: { claude: false, codex: true, opencode: false },
+      workspaces: [],
+    });
+
+    await service.clear();
+
+    await expect(stat(manifestPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 function workspace(id: string, managed: boolean) {

@@ -167,11 +167,11 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   const workflowStarted = messages.length > 0;
   const grillComplete = Math.max(0, messages.filter((message) => message.role === "user").length - 1) >= WORKFLOW_TOTAL_QUESTION_COUNT;
   const runtimeMap = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
-  const workflowConfiguredAgent = configuredAgentById(configuredAgentId, configuredAgents);
+  const workflowConfiguredAgent = configuredAgentById(reviewerConfiguredAgentId, configuredAgents);
   const workflowChannel = resolveConfiguredAgentChannel(workflowConfiguredAgent, channels);
   const workflowRuntimeId = configuredAgentRuntimeId(workflowConfiguredAgent, workflowChannel);
   const workflowRuntime = runtimeMap.get(workflowRuntimeId) ?? fallbackRuntime(workflowRuntimeId);
-  const workflowModel = configuredAgentModel(workflowConfiguredAgent, workflowChannel, modelId);
+  const workflowModel = configuredAgentModel(workflowConfiguredAgent, workflowChannel, reviewerModelId);
   const workflowConfigTitle = [
     workflowConfiguredAgent?.name,
     workflowChannel?.label,
@@ -306,15 +306,15 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
 
   function renderWorkflowNodeCard(node: WorkflowV2Node, compact: boolean): ReactElement {
     const nodeRunProgress = runProgressByNodeId.get(node.id);
-    const nodeAgentId = node.execModel === "llm" ? node.configuredAgentId ?? configuredAgentId : configuredAgentId;
+    const nodeAgentId = node.execModel === "llm" ? node.configuredAgentId ?? "" : "";
     const nodeAgentConfig = configuredAgentById(nodeAgentId, configuredAgents);
-    const nodeAgentName = nodeAgentConfig?.name || nodeAgentId || "default";
-    const nodeModelId = node.execModel === "llm" ? node.modelId ?? nodeAgentConfig?.modelId ?? modelId : "script";
+    const nodeAgentName = nodeAgentConfig?.name || nodeAgentId || "Unconfigured";
+    const nodeModelId = node.execModel === "llm" ? node.modelId ?? nodeAgentConfig?.modelId ?? "-" : "script";
     const canConfigureNodeAgent = node.execModel === "llm" && canEditDefinition;
     const nodeAgentRow =
       node.execModel === "llm" ? (
         <div className="workflow-node-agent-row" title={`Agent: ${nodeAgentName} · Model: ${nodeModelId}`}>
-          {canConfigureNodeAgent ? <WorkflowNodeAgentSelect nodeTitle={node.title} {...(node.configuredAgentId ? { configuredAgentId: node.configuredAgentId } : {})} workflowDefaultAgentId={configuredAgentId} configuredAgents={configuredAgents} onSelect={(selectedAgentId) => source.onUpdateNode(node.id, { configuredAgentId: selectedAgentId, modelId: undefined } as Partial<WorkflowV2Node>)} /> : <><span className="workflow-node-agent-name">{nodeAgentName}</span><span className="workflow-node-agent-model">{nodeModelId}</span></>}
+          {canConfigureNodeAgent ? <WorkflowNodeAgentSelect nodeTitle={node.title} {...(node.configuredAgentId ? { configuredAgentId: node.configuredAgentId } : {})} configuredAgents={configuredAgents} onSelect={(selectedAgentId) => source.onUpdateNode(node.id, { configuredAgentId: selectedAgentId, modelId: undefined } as Partial<WorkflowV2Node>)} /> : <><span className="workflow-node-agent-name">{nodeAgentName}</span><span className="workflow-node-agent-model">{nodeModelId}</span></>}
         </div>
       ) : null;
 
@@ -374,9 +374,9 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
         <div className="chat-title-block">
           <h2>{workflowDisplayTitle}</h2>
           <div className="chat-subtitle">
-            <span className={`agent-badge mini ${agentAccent(workflowRuntimeId)}`} title={workflowConfigTitle}>
-              {workflowConfiguredAgent?.name || agentLabel(workflowRuntimeId)}
-            </span>
+            {workflowConfiguredAgent ? <span className={`agent-badge mini ${agentAccent(workflowRuntimeId)}`} title={workflowConfigTitle}>
+              {workflowConfiguredAgent.name || agentLabel(workflowRuntimeId)}
+            </span> : <span className="agent-badge mini" title="Select an Agent from Runtime">Unconfigured</span>}
             <span>{graphVisible ? `${definition?.nodes.length ?? 0} ${workflowText.executableNodes}` : status}</span>
             <button
               type="button"
@@ -622,16 +622,16 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
           />
           <div className="composer-footer">
             <ChatControls
-              configuredAgentId={configuredAgentId}
-              modelId={modelId}
+              configuredAgentId={reviewerConfiguredAgentId}
+              modelId={reviewerModelId}
               configuredAgents={configuredAgents}
               channels={channels}
               locked={composerLocked}
               running={running}
               workDir={workDir}
               runtimes={runtimes}
-              onSelectConfiguredAgent={onSelectConfiguredAgent}
-              onSelectModel={onSelectModel}
+              onSelectConfiguredAgent={onSelectReviewerConfiguredAgent}
+              onSelectModel={onSelectReviewerModel}
               onChooseWorkDir={onChooseWorkDir}
             />
             <div className="workflow-composer-actions">

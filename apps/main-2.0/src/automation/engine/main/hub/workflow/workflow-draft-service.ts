@@ -38,8 +38,8 @@ export class WorkflowDraftService {
     if (this.deps.store.workflowCount() >= this.deps.maxWorkflowCount) return this.deps.snapshot();
     const now = this.deps.now();
     const workflowId = this.deps.createWorkflowId();
-    const configuredAgentId = this.deps.normalizeConfiguredAgentId(input.configuredAgentId);
-    const modelId = this.deps.normalizeModelId(configuredAgentId, input.modelId);
+    const configuredAgentId = this.deps.normalizeConfiguredAgentId(undefined);
+    const modelId = this.deps.normalizeModelId(configuredAgentId, undefined);
     const reviewerConfiguredAgentId = this.deps.normalizeConfiguredAgentId(input.reviewerConfiguredAgentId ?? configuredAgentId);
     const reviewerModelId = this.deps.normalizeModelId(reviewerConfiguredAgentId, input.reviewerModelId ?? (reviewerConfiguredAgentId === configuredAgentId ? modelId : undefined));
     const workflow = this.deps.cloneDraft({

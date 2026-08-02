@@ -1,5 +1,10 @@
-import type { AppSnapshot } from "../../automation/contracts";
-import { AgentHub, type AgentHubChange } from "../../automation/engine/main/hub/agent-hub";
+import type { AppSnapshot, ConfiguredAgent } from "../../automation/contracts";
+import {
+  AgentHub,
+  configuredAgentReferenceError,
+  type AgentHubChange,
+  type ConfiguredAgentReference,
+} from "../../automation/engine/main/hub/agent-hub";
 import { PostgresAppStore } from "../../automation/engine/main/hub/persisted/postgres-store";
 import {
   startCodexChatRouter,
@@ -347,6 +352,7 @@ export class NativeAutomationService {
     this.bridge = await this.startBridgeService(this.hubInstance, {
       discoveryPath: this.paths.discoveryPath,
       bundledSkillsRoot: this.paths.bundledSkillsPath,
+      updateConfiguredAgents: (agents) => this.updateConfiguredAgents(agents),
       studio: {
         handleMcpRequest: (token, route, body) =>
           this.teamChat.handleMcpRequest(token, route, body),
@@ -376,6 +382,44 @@ export class NativeAutomationService {
 
   snapshot(): AppSnapshot {
     return this.currentSnapshot;
+  }
+
+  async updateConfiguredAgents(
+    agents: ConfiguredAgent[],
+    options: { detectDeletedManagedAgents?: boolean } = {},
+  ): Promise<AppSnapshot> {
+    const currentAgents = this.hubInstance.snapshot().configuredAgents;
+    const nextAgentIds = new Set(agents.map((agent) => agent.id));
+    const removedAgents = currentAgents.filter((agent) => !nextAgentIds.has(agent.id));
+    const removedAgentIds = new Set(removedAgents.map((agent) => agent.id));
+    const agentNames = new Map(removedAgents.map((agent) => [agent.id, agent.name || agent.id]));
+    const [teamChatReferences, evaluationReferences] = await Promise.all([
+      this.teamChat.configuredAgentReferences(removedAgentIds),
+      this.evaluations.configuredAgentReferences(removedAgentIds),
+    ]);
+    const externalReferences: ConfiguredAgentReference[] = [...teamChatReferences, ...evaluationReferences]
+      .map((reference) => ({
+        ...reference,
+        agentName: agentNames.get(reference.agentId) ?? reference.agentId,
+      }));
+    const references = [
+      ...this.hubInstance.configuredAgentDeletionReferences(agents, options),
+      ...externalReferences,
+    ];
+    if (references.length > 0) throw configuredAgentReferenceError(references);
+    return this.hubInstance.updateConfiguredAgents(agents, options);
+  }
+
+  async deleteConfiguredAgent(agentId: string): Promise<AppSnapshot> {
+    const normalizedAgentId = agentId.trim();
+    const agents = this.hubInstance.snapshot().configuredAgents;
+    if (!agents.some((agent) => agent.id === normalizedAgentId)) {
+      throw new Error(`Agent was not found: ${normalizedAgentId}`);
+    }
+    return this.updateConfiguredAgents(
+      agents.filter((agent) => agent.id !== normalizedAgentId),
+      { detectDeletedManagedAgents: true },
+    );
   }
 
   subscribe(listener: SnapshotListener): () => void {

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { DEFAULT_MODEL_ID } from "../../../../../shared/models";
 import type {
   AgentChannel,
   AppSnapshot,
@@ -10,7 +9,7 @@ import type {
   WorkflowRunProgressItem,
   WorkflowStatus,
 } from "../../../../../shared/types";
-import { configuredAgentModelId, defaultConfiguredAgentId } from "../../../app/agents";
+import { configuredAgentModelId } from "../../../app/agents";
 import type { WorkflowService } from "../../../app/services/workflow-service";
 
 export interface WorkflowDraftController {
@@ -73,13 +72,6 @@ export function useWorkflowDraft({
   onCreateNewWorkflow,
 }: UseWorkflowDraftOptions): WorkflowDraftController {
   const activeWorkflow = snapshot.workflowDraft;
-  const fallbackConfiguredAgentId = defaultConfiguredAgentId(configuredAgents);
-  const fallbackModelId = configuredAgentModelId(
-    fallbackConfiguredAgentId,
-    DEFAULT_MODEL_ID,
-    configuredAgents,
-    channels,
-  );
   const [workflowObjectiveInput, setWorkflowObjectiveInput] = useState("");
   const [workflowReplyInput, setWorkflowReplyInput] = useState("");
   const [workflowGrillBusy, setWorkflowGrillBusy] = useState(false);
@@ -152,31 +144,17 @@ export function useWorkflowDraft({
   const ensureActiveWorkflow = useCallback(async (): Promise<WorkflowDraftState | undefined> => {
     const currentWorkflow = snapshotRef.current.workflowDraft;
     if (currentWorkflow) return currentWorkflow;
-    const next = await workflows.createDraft(
-      fallbackConfiguredAgentId
-        ? {
-            configuredAgentId: fallbackConfiguredAgentId,
-            modelId: fallbackModelId,
-          }
-        : undefined,
-    );
+    const next = await workflows.createDraft();
     setSnapshot(next);
     return next.workflowDraft;
-  }, [fallbackConfiguredAgentId, fallbackModelId, setSnapshot, snapshotRef, workflows]);
+  }, [setSnapshot, snapshotRef, workflows]);
 
   const createNewWorkflow = useCallback(async (): Promise<void> => {
     resetWorkflowLocalDraft();
-    const next = await workflows.createDraft(
-      fallbackConfiguredAgentId
-        ? {
-            configuredAgentId: fallbackConfiguredAgentId,
-            modelId: fallbackModelId,
-          }
-        : undefined,
-    );
+    const next = await workflows.createDraft();
     setSnapshot(next);
     onCreateNewWorkflow?.();
-  }, [fallbackConfiguredAgentId, fallbackModelId, onCreateNewWorkflow, resetWorkflowLocalDraft, setSnapshot, workflows]);
+  }, [onCreateNewWorkflow, resetWorkflowLocalDraft, setSnapshot, workflows]);
 
   const resetWorkflowSession = useCallback(async (): Promise<void> => {
     const workflow = snapshotRef.current.workflowDraft;
@@ -313,15 +291,12 @@ export function useWorkflowDraft({
     setSnapshot(await workflows.patchDraft({ workflowId: workflow.workflowId, reviewerModelId, error: null }));
   }, [ensureActiveWorkflow, setSnapshot, workflows]);
 
-  const workflowConfiguredAgentId = activeWorkflow?.configuredAgentId || fallbackConfiguredAgentId;
-  const workflowModelId = configuredAgentModelId(
-    workflowConfiguredAgentId,
-    activeWorkflow?.modelId || fallbackModelId,
-    configuredAgents,
-    channels,
-  );
-  const workflowReviewerConfiguredAgentId = activeWorkflow?.reviewerConfiguredAgentId || workflowConfiguredAgentId;
-  const workflowReviewerModelId = configuredAgentModelId(workflowReviewerConfiguredAgentId, activeWorkflow?.reviewerModelId || workflowModelId, configuredAgents, channels);
+  const workflowConfiguredAgentId = "";
+  const workflowModelId = "";
+  const workflowReviewerConfiguredAgentId = activeWorkflow?.reviewerConfiguredAgentId ?? "";
+  const workflowReviewerModelId = workflowReviewerConfiguredAgentId
+    ? configuredAgentModelId(workflowReviewerConfiguredAgentId, activeWorkflow?.reviewerModelId, configuredAgents, channels)
+    : "";
 
   return useMemo(
     () => ({

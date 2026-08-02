@@ -7,12 +7,17 @@ const pathInput = z.string().trim().min(1).max(32_768)
   .refine((value) => !value.includes("\0"), "Path must not contain NUL.");
 const workspaceIdInput = z.string().trim().min(1).max(128)
   .regex(/^[A-Za-z0-9_-]+$/u, "Workspace ID is invalid.");
+const sessionKeyInput = z.string().trim().min(1).max(8_192)
+  .refine((value) => !value.includes("\0"), "Session key must not contain NUL.");
+const sessionKeysInput = z.array(sessionKeyInput).min(1).max(10_000)
+  .refine((values) => new Set(values).size === values.length, "Session keys must be unique.");
 const queryInput = z.string().trim().max(2_000);
 const memoryUriInput = z.string().trim().min(1).max(8_192)
   .startsWith("viking://user/memories", "Memory URI must stay under the user memory scope.")
   .refine((value) => !value.includes("\0"), "Memory URI must not contain NUL.");
 const memoryInput = z.object({
   id: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/u).optional(),
+  uri: memoryUriInput.optional(),
   title: z.string().trim().min(1).max(200),
   content: z.string().max(1_048_576),
 }).strict();
@@ -22,7 +27,14 @@ export const OPENVIKING_MEMORY_IPC = {
   chooseDirectory: defineIpcRequest("openviking-memory:choose-directory", noInput),
   previewDirectory: defineIpcRequest("openviking-memory:preview-directory", z.tuple([pathInput])),
   addWorkspace: defineIpcRequest("openviking-memory:add-workspace", z.tuple([pathInput])),
-  importWorkspace: defineIpcRequest("openviking-memory:import-workspace", z.tuple([workspaceIdInput])),
+  listImportSessions: defineIpcRequest(
+    "openviking-memory:list-import-sessions",
+    z.tuple([workspaceIdInput]),
+  ),
+  importWorkspace: defineIpcRequest(
+    "openviking-memory:import-workspace",
+    z.tuple([workspaceIdInput, sessionKeysInput.optional()]),
+  ),
   pauseImport: defineIpcRequest("openviking-memory:pause-import", z.tuple([workspaceIdInput])),
   resumeImport: defineIpcRequest("openviking-memory:resume-import", z.tuple([workspaceIdInput])),
   search: defineIpcRequest(

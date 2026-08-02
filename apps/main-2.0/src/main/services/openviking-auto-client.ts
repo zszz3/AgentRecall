@@ -35,8 +35,8 @@ export class AutoStartingOpenVikingClient implements OpenVikingClientPort {
     return (await this.client()).ensureWorkspaceUser(input);
   }
 
-  async deleteWorkspaceUser(accountId: string, userId: string): Promise<void> {
-    return (await this.client()).deleteWorkspaceUser(accountId, userId);
+  async deleteWorkspaceUser(auth: OpenVikingWorkspaceAuth): Promise<void> {
+    return (await this.client()).deleteWorkspaceUser(auth);
   }
 
   async appendMessages(
@@ -50,8 +50,9 @@ export class AutoStartingOpenVikingClient implements OpenVikingClientPort {
   async commitSession(
     auth: OpenVikingWorkspaceAuth,
     sessionId: string,
+    keepRecentCount?: number,
   ): Promise<OpenVikingTaskRef> {
-    return (await this.client()).commitSession(auth, sessionId);
+    return (await this.client()).commitSession(auth, sessionId, keepRecentCount);
   }
 
   async getTask(

@@ -89,6 +89,14 @@ function fixture(options: { dataset?: EvaluationDataset; agents?: ConfiguredAgen
 }
 
 describe("EvaluationService", () => {
+  it("reports experiments that reference an Agent", async () => {
+    const { service } = fixture();
+
+    await expect(service.configuredAgentReferences(new Set(["target-agent"]))).resolves.toEqual([
+      { agentId: "target-agent", location: "Evaluation experiment Regression" },
+    ]);
+  });
+
   it("runs a saved experiment with its target Agent and Runtime Judge", async () => {
     const { service, executeAgent, saveRun } = fixture();
 

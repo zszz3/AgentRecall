@@ -1156,7 +1156,7 @@ export class WorkflowRuntime {
 
     const snapshot = this.deps.snapshot();
     const workDir = input.workflow.workDir || snapshot.workDir;
-    const configuredAgentId = input.workflow.configuredAgentId || snapshot.configuredAgents[0]?.id || "default-agent";
+    const configuredAgentId = input.workflow.configuredAgentId;
     const modelId = configuredAgentModelId(input.workflow, snapshot);
     const cacheEntries = new Map<string, WorkflowV2CacheEntryMetadata>();
     const targetFingerprints = new Map<string, WorkflowV2NodeCacheFingerprint>();

@@ -18,7 +18,12 @@ import {
   type CodexModelProbeResult,
 } from "../../core/codex-profile";
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
+import { requestSummaryCompletion } from "../../core/session-summarizer";
 import type { CodexModelProbeRequest, ProviderKeyTarget } from "../../shared/ipc/providers";
+import type {
+  SummaryProviderConnectionRequest,
+  SummaryProviderConnectionResult,
+} from "../../shared/ipc/providers";
 
 export interface ProviderKeyStore {
   get(target: ProviderKeyTarget, providerId: string): Promise<string>;
@@ -42,6 +47,7 @@ export interface ProviderServiceOperations {
   loadClaudeApiConfigDefaults: typeof loadClaudeApiConfigDefaults;
   loadCodexConfigSnapshot: typeof loadCodexConfigSnapshot;
   probeCodexModels: typeof probeCodexModels;
+  requestSummaryCompletion: typeof requestSummaryCompletion;
   applyCodexApiConfig: typeof applyCodexApiConfig;
   applyClaudeApiConfig: typeof applyClaudeApiConfig;
   createCodexChatProxy(options: CodexChatProxyOptions): CodexChatProxyPort;
@@ -60,6 +66,7 @@ const defaultOperations: ProviderServiceOperations = {
   loadClaudeApiConfigDefaults,
   loadCodexConfigSnapshot,
   probeCodexModels,
+  requestSummaryCompletion,
   applyCodexApiConfig,
   applyClaudeApiConfig,
   createCodexChatProxy: (options) => new CodexChatProxy(options),
@@ -165,16 +172,40 @@ export class ProviderService {
 
   async probeCodexModels(input: CodexModelProbeRequest): Promise<CodexModelProbeResult> {
     const settings = this.dependencies.getSettings();
+    const keyTarget = input.keyTarget ?? "codex";
+    const fallbackProviderId = keyTarget === "summary"
+      ? settings.summaryApiConfig.customProviderId
+      : settings.apiConfig.customProviderId;
     const savedKey = (
       input.providerId
-        ? await this.dependencies.keys.get("codex", input.providerId)
+        ? await this.dependencies.keys.get(keyTarget, input.providerId)
         : ""
-    ) || await this.dependencies.keys.get("codex", settings.apiConfig.customProviderId);
+    ) || await this.dependencies.keys.get(keyTarget, fallbackProviderId);
     return this.operations.probeCodexModels({
       baseUrl: input.baseUrl,
       apiKey: input.apiKey || savedKey,
       providerId: input.providerId,
     });
+  }
+
+  async testSummaryProviderConnection(
+    input: SummaryProviderConnectionRequest,
+  ): Promise<SummaryProviderConnectionResult> {
+    const apiKey = input.apiKey.trim()
+      || await this.dependencies.keys.get("summary", input.providerId);
+    if (!apiKey) throw new Error("API key is required to test the summary Provider.");
+    const startedAt = Date.now();
+    await this.operations.requestSummaryCompletion(
+      {
+        baseUrl: input.baseUrl.trim().replace(/\/+$/, ""),
+        apiKey,
+        model: input.model.trim(),
+        apiFormat: input.apiFormat,
+      },
+      [{ role: "user", content: "Reply with exactly OK." }],
+      AbortSignal.timeout(30_000),
+    );
+    return { elapsedMs: Math.max(0, Date.now() - startedAt) };
   }
 
   async applyCodexProfile(apiConfigInput: Partial<ApiConfig>): Promise<ApplyCodexProfileResult> {

@@ -54,9 +54,11 @@ describe("AgentRecall PostgreSQL schema", () => {
       "chat_workspace_reservations",
       "openviking_workspaces",
       "openviking_import_jobs",
+      "openviking_import_tasks",
+      "openviking_imported_sessions",
       "openviking_imported_turns",
     ]));
-    expect(names).toHaveLength(59);
+    expect(names).toHaveLength(61);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;
@@ -170,6 +172,67 @@ describe("AgentRecall PostgreSQL schema", () => {
     expect(migrations.rows.map((row) => Number(row.version))).toEqual(
       POSTGRES_MIGRATIONS.map((migration) => migration.version),
     );
+    await upgradedDatabase.close();
+  });
+
+  it("reconciles the OpenViking branch migration versions with Codex metadata", async () => {
+    const pool = new PGliteTestPool();
+    const branchDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 15),
+    });
+    await branchDatabase.initialize();
+    await branchDatabase.query(`
+      DROP INDEX IF EXISTS agent_recall.session_turns_source_turn_idx;
+      ALTER TABLE agent_recall.sessions DROP COLUMN IF EXISTS codex_history_mode;
+      ALTER TABLE agent_recall.session_turns
+        DROP COLUMN IF EXISTS source_turn_id,
+        DROP COLUMN IF EXISTS duration_ms,
+        DROP COLUMN IF EXISTS time_to_first_token_ms,
+        DROP COLUMN IF EXISTS abort_reason;
+      ALTER TABLE agent_recall.token_events DROP COLUMN IF EXISTS source_turn_id;
+    `);
+
+    for (const version of [19, 20, 21, 22]) {
+      const migration = POSTGRES_MIGRATIONS.find((candidate) => candidate.version === version)!;
+      for (const statement of migration.statements) await branchDatabase.query(statement);
+    }
+    await branchDatabase.query(`
+      insert into agent_recall.schema_migrations (version, name) values
+        (16, 'track incremental OpenViking Session imports'),
+        (17, 'persist resumable OpenViking import tasks'),
+        (18, 'preserve planned OpenViking import order'),
+        (19, 'persist selected OpenViking import sessions');
+    `);
+
+    const upgradedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await upgradedDatabase.initialize();
+
+    const columns = await upgradedDatabase.query<{ table_name: string; column_name: string }>(`
+      select table_name, column_name
+      from information_schema.columns
+      where table_schema = 'agent_recall'
+        and (table_name, column_name) in (
+          ('sessions', 'codex_history_mode'),
+          ('session_turns', 'source_turn_id'),
+          ('session_turns', 'duration_ms'),
+          ('session_turns', 'time_to_first_token_ms'),
+          ('session_turns', 'abort_reason'),
+          ('token_events', 'source_turn_id')
+        )
+      order by table_name, column_name
+    `);
+    expect(columns.rows).toEqual([
+      { table_name: "session_turns", column_name: "abort_reason" },
+      { table_name: "session_turns", column_name: "duration_ms" },
+      { table_name: "session_turns", column_name: "source_turn_id" },
+      { table_name: "session_turns", column_name: "time_to_first_token_ms" },
+      { table_name: "sessions", column_name: "codex_history_mode" },
+      { table_name: "token_events", column_name: "source_turn_id" },
+    ]);
     await upgradedDatabase.close();
   });
 

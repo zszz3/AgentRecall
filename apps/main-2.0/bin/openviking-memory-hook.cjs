@@ -12,7 +12,10 @@ const MAX_STDIN_BYTES = 1024 * 1024;
 const MAX_PROMPT_CHARS = 2_000;
 const MAX_TURN_CHARS = 12_000;
 const MAX_CONTEXT_CHARS = 6_000;
-const REQUEST_TIMEOUT_MS = 5_000;
+const MAX_RECENT_CONTEXT_CHARS = 3_000;
+const MAX_CORE_MEMORY_CHARS = 2_000;
+const REQUEST_TIMEOUT_MS = 2_000;
+const DEFAULT_COMMIT_TOKEN_THRESHOLD = 7_000;
 
 function findWorkspaceForCwd(manifest, cwd, platform = process.platform) {
   if (!manifest || !Array.isArray(manifest.workspaces) || typeof cwd !== "string" || !cwd.trim()) return null;
@@ -58,13 +61,23 @@ async function handleHook(input, options) {
     const workspace = findWorkspaceForCwd(manifest, canonicalCwd, opts.platform || process.platform);
     if (!workspace) return {};
 
+    const sessionId = hookSessionId(workspace.id, agent, input);
     if (opts.event === "UserPromptSubmit") {
       const prompt = cleanText(input.prompt, MAX_PROMPT_CHARS);
       if (!prompt) return {};
+      const stateDir = opts.stateDir || manifest.stateDir;
+      const state = sessionId ? readSessionState(stateDir, sessionId) : null;
+      const recentTurns = state?.recentTurns?.length
+        ? state.recentTurns
+        : isVagueContinuation(prompt)
+          ? latestWorkspaceHandoff(stateDir, workspace.id, sessionId)
+          : undefined;
       const context = await recallForWorkspace(workspace, prompt, {
         baseUrl: manifest.baseUrl,
         fetchImpl: opts.fetchImpl,
         timeoutMs: opts.timeoutMs,
+        sessionId,
+        recentTurns,
       });
       return context ? {
         hookSpecificOutput: {
@@ -74,7 +87,6 @@ async function handleHook(input, options) {
       } : {};
     }
 
-    const sessionId = hookSessionId(workspace.id, agent, input);
     if (!sessionId) return {};
     if (opts.event === "Stop") {
       const turn = latestTurn(input);
@@ -84,6 +96,8 @@ async function handleHook(input, options) {
         fetchImpl: opts.fetchImpl,
         timeoutMs: opts.timeoutMs,
         stateDir: opts.stateDir || manifest.stateDir,
+        commitTokenThreshold: opts.commitTokenThreshold,
+        commitRequested: explicitlyRequestsMemory(turn.user),
       });
       return {};
     }
@@ -93,6 +107,7 @@ async function handleHook(input, options) {
         baseUrl: manifest.baseUrl,
         fetchImpl: opts.fetchImpl,
         timeoutMs: opts.timeoutMs,
+        stateDir: opts.stateDir || manifest.stateDir,
       });
     }
   } catch {
@@ -104,11 +119,27 @@ async function handleHook(input, options) {
 async function recallForWorkspace(workspace, query, options) {
   const prompt = cleanText(query, MAX_PROMPT_CHARS);
   if (!prompt) return "";
-  const response = await requestJson("/api/v1/search/find", workspace, options, {
+  const contextualQuery = buildContextualQuery(prompt, options.recentTurns);
+  const searchBody = {
+    query: contextualQuery,
+    target_uri: "viking://user/memories",
+    limit: 12,
+    ...(options.sessionId ? { session_id: options.sessionId } : {}),
+  };
+  const searchRoute = options.sessionId ? "/api/v1/search/search" : "/api/v1/search/find";
+  const [coreMemories, initialResponse] = await Promise.all([
+    readCoreMemories(workspace, options),
+    requestJson(searchRoute, workspace, options, {
+      method: "POST",
+      body: JSON.stringify(searchBody),
+    }),
+  ]);
+  const response = initialResponse.accepted || !options.sessionId || initialResponse.transportFailed
+    ? initialResponse
+    : await requestJson("/api/v1/search/find", workspace, options, {
     method: "POST",
-    body: JSON.stringify({ query: prompt, target_uri: "viking://user/memories", limit: 5 }),
+      body: JSON.stringify({ ...searchBody, session_id: undefined }),
   });
-  if (!response.accepted) return "";
   const result = response.payload?.result || response.payload || {};
   const memories = Array.isArray(result.memories)
     ? result.memories
@@ -117,24 +148,106 @@ async function recallForWorkspace(workspace, query, options) {
       : Array.isArray(result.items)
         ? result.items
         : [];
-  const snippets = memories.slice(0, 5).map((memory) => {
+  const snippets = selectRecallMemories(memories).map((memory) => {
     if (!memory || typeof memory !== "object") return "";
     const content = cleanText(memory.abstract || memory.overview || memory.content || memory.title, 1_000);
     if (!content) return "";
     const uri = cleanText(memory.uri, 300);
     return uri ? `- ${content} (${uri})` : `- ${content}`;
   }).filter(Boolean);
-  if (snippets.length === 0) return "";
-  return `<openviking-context source="auto-recall">\nRelevant memory from this managed directory:\n${snippets.join("\n")}\n</openviking-context>`
-    .slice(0, MAX_CONTEXT_CHARS);
+  if (coreMemories.length === 0 && snippets.length === 0) return "";
+  const sections = [];
+  if (coreMemories.length > 0) {
+    sections.push(`<openviking-core>\n${coreMemories.join("\n")}\n</openviking-core>`);
+  }
+  if (snippets.length > 0) {
+    const opening = "<openviking-recall>\n";
+    const closing = "\n</openviking-recall>";
+    const outerSize = '<openviking-context source="auto-recall">\n\n</openviking-context>'.length;
+    const fixedSize = sections.join("\n").length;
+    const accepted = [];
+    for (const snippet of snippets) {
+      const candidate = [...accepted, snippet].join("\n");
+      if (outerSize + fixedSize + opening.length + candidate.length + closing.length > MAX_CONTEXT_CHARS) break;
+      accepted.push(snippet);
+    }
+    if (accepted.length > 0) sections.push(`${opening}${accepted.join("\n")}${closing}`);
+  }
+  return `<openviking-context source="auto-recall">\n${sections.join("\n")}\n</openviking-context>`;
+}
+
+function selectRecallMemories(memories) {
+  const quotas = { personal: 2, project: 2, execution: 3, other: 1 };
+  const selected = [];
+  const counts = { personal: 0, project: 0, execution: 0, other: 0 };
+  for (const memory of memories) {
+    if (!memory || typeof memory !== "object") continue;
+    const uri = String(memory.uri || "").toLowerCase();
+    const bucket = /\/(?:profile|preferences|entities)\//u.test(`${uri}/`)
+      ? "personal"
+      : /\/(?:events|decisions|context)\//u.test(`${uri}/`)
+        ? "project"
+        : /\/(?:cases|patterns|experiences|trajectories|tools|skills)\//u.test(`${uri}/`)
+          ? "execution"
+          : "other";
+    if (counts[bucket] >= quotas[bucket]) continue;
+    counts[bucket] += 1;
+    selected.push(memory);
+  }
+  return selected;
+}
+
+function buildContextualQuery(prompt, recentTurns) {
+  const turns = Array.isArray(recentTurns) ? recentTurns.slice(-2) : [];
+  const context = turns.map((turn) => {
+    const user = cleanText(turn?.user, 750);
+    const assistant = cleanText(turn?.assistant, 750);
+    return [
+      user ? `User: ${user}` : "",
+      assistant ? `Assistant outcome: ${assistant}` : "",
+    ].filter(Boolean).join("\n");
+  }).filter(Boolean).join("\n\n");
+  if (!context) return prompt;
+  return `Current request:\n${prompt}\n\nRecent conversation:\n${context}`
+    .slice(0, MAX_PROMPT_CHARS + MAX_RECENT_CONTEXT_CHARS);
+}
+
+async function readCoreMemories(workspace, options) {
+  const uris = [
+    "viking://user/memories/identity.md",
+    "viking://user/memories/soul.md",
+  ];
+  const values = await Promise.all(uris.map(async (uri) => {
+    const response = await requestJson(
+      `/api/v1/content/read?uri=${encodeURIComponent(uri)}&offset=0&limit=${MAX_CORE_MEMORY_CHARS}`,
+      workspace,
+      options,
+      { method: "GET" },
+    );
+    if (!response.accepted) return "";
+    const result = response.payload?.result ?? response.payload;
+    const content = typeof result === "string"
+      ? result
+      : result && typeof result === "object"
+        ? result.content ?? result.text ?? result.data
+        : "";
+    const cleaned = cleanText(content, MAX_CORE_MEMORY_CHARS / uris.length);
+    return cleaned ? `- ${cleaned} (${uri})` : "";
+  }));
+  return values.filter(Boolean);
 }
 
 async function captureTurn(workspace, sessionId, turn, options) {
   const user = cleanText(turn?.user, MAX_TURN_CHARS);
-  const assistant = cleanText(turn?.assistant, MAX_TURN_CHARS);
+  const assistantResult = cleanText(turn?.assistant, MAX_TURN_CHARS);
+  const executionSummary = cleanText(turn?.executionSummary, 1_000);
+  const assistant = cleanText([
+    assistantResult,
+    executionSummary ? `Execution summary: ${executionSummary}` : "",
+  ].filter(Boolean).join("\n\n"), MAX_TURN_CHARS);
   if (!user || !assistant) return false;
   const fingerprint = sha256(JSON.stringify([user, assistant]));
-  const statePath = options.stateDir ? path.join(options.stateDir, `${sha256(sessionId)}.json`) : null;
+  const statePath = sessionStatePath(options.stateDir, sessionId);
   if (statePath) {
     try {
       const previous = JSON.parse(fs.readFileSync(statePath, "utf8"));
@@ -152,10 +265,28 @@ async function captureTurn(workspace, sessionId, turn, options) {
     body: JSON.stringify({ messages: [{ role: "user", content: user }, { role: "assistant", content: assistant }] }),
   });
   if (!appended.accepted) return false;
-  const committed = await commitSession(workspace, sessionId, options);
-  if (!committed) return false;
 
-  if (statePath) writeStateAtomic(statePath, { fingerprint, updatedAt: new Date().toISOString() });
+  const previous = readSessionState(options.stateDir, sessionId) || {};
+  const pendingTokenEstimate = Number(previous.pendingTokenEstimate || 0) + estimateTokens(user) + estimateTokens(assistant);
+  if (statePath) {
+    const recentTurns = Array.isArray(previous.recentTurns) ? previous.recentTurns : [];
+    writeStateAtomic(statePath, {
+      ...previous,
+      sessionId,
+      workspaceId: workspace.id,
+      fingerprint,
+      recentTurns: [...recentTurns, { user, assistant }].slice(-2),
+      pendingTokenEstimate,
+      pendingSince: previous.pendingSince || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  const threshold = Number.isFinite(options.commitTokenThreshold)
+    ? Math.max(1, options.commitTokenThreshold)
+    : DEFAULT_COMMIT_TOKEN_THRESHOLD;
+  if (options.commitRequested === true || pendingTokenEstimate >= threshold) {
+    await commitSession(workspace, sessionId, options);
+  }
   return true;
 }
 
@@ -164,7 +295,35 @@ async function commitSession(workspace, sessionId, options) {
     method: "POST",
     body: JSON.stringify({ keep_recent_count: 0 }),
   });
+  if (response.accepted) {
+    const statePath = sessionStatePath(options.stateDir, sessionId);
+    if (statePath) {
+      const previous = readSessionState(options.stateDir, sessionId);
+      if (previous) {
+        writeStateAtomic(statePath, {
+          ...previous,
+          pendingTokenEstimate: 0,
+          pendingSince: null,
+          lastCommittedAt: new Date().toISOString(),
+        });
+      }
+    }
+  }
   return response.accepted;
+}
+
+function estimateTokens(value) {
+  const text = String(value || "");
+  let cjk = 0;
+  for (const character of text) {
+    if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(character)) cjk += 1;
+  }
+  return cjk + Math.ceil((text.length - cjk) / 4);
+}
+
+function explicitlyRequestsMemory(value) {
+  const text = cleanText(value, MAX_PROMPT_CHARS);
+  return /(?:请|帮我)?(?:记住|记一下|保存为记忆)|(?:remember|save)\s+(?:this|that|it|as memory)\b/iu.test(text);
 }
 
 async function requestJson(route, workspace, options, init) {
@@ -191,9 +350,9 @@ async function requestJson(route, workspace, options, init) {
       // Successful endpoints may return no body.
     }
     const envelopeFailed = payload && (payload.status === "error" || payload.success === false || payload.code >= 400);
-    return { accepted: response.ok !== false && !envelopeFailed, payload };
+    return { accepted: response.ok !== false && !envelopeFailed, payload, transportFailed: false };
   } catch {
-    return { accepted: false, payload: null };
+    return { accepted: false, payload: null, transportFailed: true };
   } finally {
     clearTimeout(timer);
   }
@@ -224,7 +383,44 @@ function latestTurn(input) {
     if (!assistant && role === "assistant") assistant = content;
     if (!user && (role === "user" || role === "human")) user = content;
   }
-  return user && assistant ? { user, assistant } : null;
+  return user && assistant ? {
+    user,
+    assistant,
+    executionSummary: summarizeExecution(entries),
+  } : null;
+}
+
+function summarizeExecution(entries) {
+  let turnStart = -1;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index] || {};
+    const message = entry.message && typeof entry.message === "object" ? entry.message : entry;
+    const role = message.role || entry.type;
+    if ((role === "user" || role === "human") && cleanText(message.content ?? message.text, MAX_TURN_CHARS)) {
+      turnStart = index;
+      break;
+    }
+  }
+  const tools = new Map();
+  for (const entry of entries.slice(turnStart + 1)) {
+    const message = entry?.message && typeof entry.message === "object" ? entry.message : entry;
+    const parts = Array.isArray(message?.content) ? message.content : [];
+    for (const part of parts) {
+      if (part?.type === "tool_use") {
+        const name = String(part.name || "tool").replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 80) || "tool";
+        tools.set(String(part.id || name), { name, status: "invoked" });
+      }
+      if (part?.type === "tool_result") {
+        const key = String(part.tool_use_id || "");
+        const existing = tools.get(key);
+        if (existing) existing.status = part.is_error === true ? "failed" : "succeeded";
+      }
+    }
+  }
+  return [...tools.values()]
+    .slice(0, 20)
+    .map((tool) => `${tool.name} (${tool.status})`)
+    .join(", ");
 }
 
 function cleanText(value, maxLength) {
@@ -243,6 +439,50 @@ function cleanText(value, maxLength) {
 function hookSessionId(workspaceId, agent, input) {
   const externalId = input.session_id || input.sessionId || input.conversation_id || input.conversationId;
   return externalId ? `agent-recall-${sha256(`${workspaceId}:${agent}:${externalId}`).slice(0, 32)}` : null;
+}
+
+function sessionStatePath(stateDir, sessionId) {
+  return stateDir && sessionId ? path.join(stateDir, `${sha256(sessionId)}.json`) : null;
+}
+
+function readSessionState(stateDir, sessionId) {
+  const filePath = sessionStatePath(stateDir, sessionId);
+  if (!filePath) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function latestWorkspaceHandoff(stateDir, workspaceId, excludedSessionId) {
+  if (!stateDir || !workspaceId) return undefined;
+  let filenames;
+  try {
+    filenames = fs.readdirSync(stateDir).filter((name) => name.endsWith(".json")).slice(0, 500);
+  } catch {
+    return undefined;
+  }
+  let latest = null;
+  for (const filename of filenames) {
+    try {
+      const value = JSON.parse(fs.readFileSync(path.join(stateDir, filename), "utf8"));
+      if (value?.workspaceId !== workspaceId || value?.sessionId === excludedSessionId) continue;
+      if (!Array.isArray(value.recentTurns) || value.recentTurns.length === 0) continue;
+      const updatedAt = Date.parse(value.updatedAt || "");
+      if (!latest || updatedAt > latest.updatedAt) latest = { updatedAt, recentTurns: value.recentTurns };
+    } catch {
+      // Corrupt hook state is isolated to that session.
+    }
+  }
+  return latest?.recentTurns?.slice(-2);
+}
+
+function isVagueContinuation(value) {
+  const text = cleanText(value, 200);
+  if (!text || text.length > 80) return false;
+  return /(?:继续|接着|刚才|上次|那个|这个|按这个|照这个|然后呢|做吧)|\b(?:continue|resume|that|it|previous|pick up)\b/iu.test(text);
 }
 
 function readManifest(manifestPath) {
@@ -303,6 +543,7 @@ function runCli() {
 module.exports = {
   captureTurn,
   commitSession,
+  explicitlyRequestsMemory,
   findWorkspaceForCwd,
   handleHook,
   recallForWorkspace,

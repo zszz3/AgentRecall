@@ -8,7 +8,10 @@ import type {
   OpenVikingWorkspace,
 } from "../core/openviking-memory";
 import type { OpenVikingImportJob } from "../core/postgres/openviking-memory-repository";
-import type { OpenVikingDirectoryPreview } from "../main/services/openviking-memory-service";
+import type {
+  OpenVikingDirectoryPreview,
+  OpenVikingImportSessionPreview,
+} from "../main/services/openviking-memory-service";
 import type { SaveOpenVikingMemoryInput } from "../main/services/openviking-client";
 import { OPENVIKING_MEMORY_IPC } from "../shared/ipc/openviking-memory";
 
@@ -24,8 +27,13 @@ export function createOpenVikingMemoryApi(ipc: OpenVikingMemoryIpcRenderer) {
       ipc.invoke(OPENVIKING_MEMORY_IPC.previewDirectory.channel, rootPath),
     addOpenVikingWorkspace: (rootPath: string): Promise<OpenVikingWorkspace> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.addWorkspace.channel, rootPath),
-    importOpenVikingWorkspace: (workspaceId: string): Promise<OpenVikingImportJob> =>
-      ipc.invoke(OPENVIKING_MEMORY_IPC.importWorkspace.channel, workspaceId),
+    listOpenVikingImportSessions: (workspaceId: string): Promise<OpenVikingImportSessionPreview[]> =>
+      ipc.invoke(OPENVIKING_MEMORY_IPC.listImportSessions.channel, workspaceId),
+    importOpenVikingWorkspace: (
+      workspaceId: string,
+      selectedSessionKeys?: string[],
+    ): Promise<OpenVikingImportJob> =>
+      ipc.invoke(OPENVIKING_MEMORY_IPC.importWorkspace.channel, workspaceId, selectedSessionKeys),
     pauseOpenVikingImport: (workspaceId: string): Promise<OpenVikingImportJob> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.pauseImport.channel, workspaceId),
     resumeOpenVikingImport: (workspaceId: string): Promise<OpenVikingImportJob> =>

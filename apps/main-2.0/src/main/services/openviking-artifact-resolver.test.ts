@@ -6,6 +6,10 @@ import {
 } from "./openviking-artifact-resolver";
 
 describe("OpenViking artifact resolver", () => {
+  it("uses the runtime revision that forwards extraction reasoning effort", () => {
+    expect(OPENVIKING_RUNTIME_VERSION).toBe("0.4.11-r4");
+  });
+
   it("loads the matching runtime manifest from the current AgentRecall release", async () => {
     const fetchImpl = vi.fn(async (url: string) => new Response(JSON.stringify({
       version: OPENVIKING_RUNTIME_VERSION,

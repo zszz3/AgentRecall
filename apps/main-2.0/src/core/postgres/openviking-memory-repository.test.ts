@@ -86,6 +86,12 @@ describe("PostgresOpenVikingMemoryRepository", () => {
     });
     await repository.recordImportedTurn("workspace-1", "codex:session-1:0", "turn-hash");
     await repository.recordImportedTurn("workspace-1", "codex:session-1:0", "turn-hash");
+    await repository.recordSessionCheckpoint(
+      "workspace-1",
+      "codex:session-1",
+      "session-revision",
+      1,
+    );
 
     await expect(repository.getWorkspace("workspace-1")).resolves.toMatchObject({
       importState: "running",
@@ -97,6 +103,18 @@ describe("PostgresOpenVikingMemoryRepository", () => {
       lastError: null,
     });
     await expect(repository.hasImportedTurn("workspace-1", "codex:session-1:0", "turn-hash")).resolves.toBe(true);
+    await expect(repository.listImportedTurns("workspace-1")).resolves.toEqual([{
+      sourceTurnId: "codex:session-1:0",
+      fingerprint: "turn-hash",
+    }]);
+    await expect(repository.listSessionCheckpoints("workspace-1")).resolves.toEqual([
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        sessionKey: "codex:session-1",
+        sourceRevision: "session-revision",
+        importedTurns: 1,
+      }),
+    ]);
     await expect(repository.countImportedTurns("workspace-1")).resolves.toBe(1);
   });
 
@@ -113,6 +131,94 @@ describe("PostgresOpenVikingMemoryRepository", () => {
     await expect(repository.deleteWorkspace("workspace-1")).resolves.toBe(true);
     await expect(repository.countImportedTurns("workspace-1")).resolves.toBe(0);
     await expect(repository.getWorkspace("workspace-1")).resolves.toBeNull();
+  });
+
+  it("persists remote extraction tasks and checkpoints Turns only when a task completes", async () => {
+    await repository.addWorkspace({
+      id: "workspace-1",
+      userId: "workspace_abcd",
+      rootPath: "/projects/app",
+      identity: "path:task-workspace",
+      displayName: "app",
+    });
+    const payload = {
+      context: [],
+      primary: [{
+        sourceTurnId: "codex:session-1:0",
+        fingerprint: "turn-hash",
+        user: "question",
+        assistant: "answer",
+      }],
+    };
+    const [task] = await repository.syncImportTasks("workspace-1", [{
+      id: "task-1",
+      position: 0,
+      workspaceId: "workspace-1",
+      sessionKey: "codex:session-1",
+      sourceRevision: "revision-1",
+      sessionTitle: "Session 1",
+      payload,
+    }], [{
+      sessionKey: "codex:session-1",
+      sourceRevision: "revision-1",
+    }]);
+
+    expect(task.state).toBe("queued");
+    await repository.beginImportTaskAttempt(task.id);
+    await repository.waitForImportTask(task.id, "remote-task-1");
+    await expect(repository.hasImportedTurn(
+      "workspace-1",
+      "codex:session-1:0",
+      "turn-hash",
+    )).resolves.toBe(false);
+
+    await repository.completeImportTask(task.id);
+
+    await expect(repository.hasImportedTurn(
+      "workspace-1",
+      "codex:session-1:0",
+      "turn-hash",
+    )).resolves.toBe(true);
+    await expect(repository.listImportTasks("workspace-1")).resolves.toEqual([
+      expect.objectContaining({
+        id: "task-1",
+        state: "completed",
+        remoteTaskId: "remote-task-1",
+      }),
+    ]);
+    await expect(repository.getImportJob("workspace-1")).resolves.toMatchObject({
+      completedTasks: 1,
+      totalTasks: 1,
+    });
+  });
+
+  it("lists planned import batches in their persisted order instead of hash ID order", async () => {
+    await repository.addWorkspace({
+      id: "workspace-1",
+      userId: "workspace_abcd",
+      rootPath: "/projects/app",
+      identity: "path:ordered-task-workspace",
+      displayName: "app",
+    });
+    const task = (id: string, position: number) => ({
+      id,
+      position,
+      workspaceId: "workspace-1",
+      sessionKey: "codex:session-1",
+      sourceRevision: "revision-1",
+      sessionTitle: "Session 1",
+      payload: { context: [], primary: [] },
+    });
+
+    await repository.syncImportTasks("workspace-1", [
+      task("task-z", 0),
+      task("task-a", 1),
+    ], [{ sessionKey: "codex:session-1", sourceRevision: "revision-1" }]);
+
+    await expect(repository.listImportTasks("workspace-1")).resolves.toEqual([
+      expect.objectContaining({ id: "task-z", position: 0 }),
+      expect.objectContaining({ id: "task-a", position: 1 }),
+    ]);
   });
 
   it("is exposed through SessionStore without leaking database details", async () => {

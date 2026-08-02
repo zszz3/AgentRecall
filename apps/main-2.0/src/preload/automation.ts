@@ -66,6 +66,7 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     getSnapshot: (): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.snapshot),
     saveModelChannels: (channels: AgentChannel[]): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.runtimeSaveChannels, channels),
     saveConfiguredAgents: (agents: ConfiguredAgent[]): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.runtimeSaveAgents, agents),
+    deleteConfiguredAgent: (agentId: string): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.runtimeDeleteAgent, agentId),
     testRuntimeChannel: (channelId: string): Promise<AgentTestResult> => ipc.invoke(AUTOMATION_CHANNELS.runtimeTestChannel, channelId),
     testConfiguredAgent: (agentId: string): Promise<AgentTestResult> => ipc.invoke(AUTOMATION_CHANNELS.runtimeTestAgent, agentId),
     queryRuntimeChannelBalance: (channelId: string): Promise<ProviderBalanceResult> => ipc.invoke(AUTOMATION_CHANNELS.runtimeBalance, channelId),

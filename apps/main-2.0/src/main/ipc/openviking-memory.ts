@@ -9,6 +9,7 @@ import type { OpenVikingImportJob } from "../../core/postgres/openviking-memory-
 import { OPENVIKING_MEMORY_IPC } from "../../shared/ipc/openviking-memory";
 import type {
   OpenVikingDirectoryPreview,
+  OpenVikingImportSessionPreview,
 } from "../services/openviking-memory-service";
 import type { SaveOpenVikingMemoryInput } from "../services/openviking-client";
 import {
@@ -22,7 +23,8 @@ export interface OpenVikingMemoryIpcService {
   chooseDirectory(): Promise<OpenVikingDirectoryPreview | null>;
   previewDirectory(rootPath: string): Promise<OpenVikingDirectoryPreview>;
   addWorkspace(rootPath: string): Promise<OpenVikingWorkspace>;
-  importWorkspace(workspaceId: string): Promise<OpenVikingImportJob>;
+  listImportSessions(workspaceId: string): Promise<OpenVikingImportSessionPreview[]>;
+  importWorkspace(workspaceId: string, selectedSessionKeys?: string[]): Promise<OpenVikingImportJob>;
   pauseImport(workspaceId: string): Promise<OpenVikingImportJob>;
   resumeImport(workspaceId: string): Promise<OpenVikingImportJob>;
   search(workspaceId: string, query: string, limit?: number): Promise<OpenVikingMemoryItem[]>;
@@ -48,8 +50,10 @@ export function registerOpenVikingMemoryIpc(
       service.previewDirectory(rootPath)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.addWorkspace, (_event, rootPath) =>
       service.addWorkspace(rootPath)),
-    registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.importWorkspace, (_event, workspaceId) =>
-      service.importWorkspace(workspaceId)),
+    registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.listImportSessions, (_event, workspaceId) =>
+      service.listImportSessions(workspaceId)),
+    registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.importWorkspace, (_event, workspaceId, selectedSessionKeys?) =>
+      service.importWorkspace(workspaceId, selectedSessionKeys)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.pauseImport, (_event, workspaceId) =>
       service.pauseImport(workspaceId)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.resumeImport, (_event, workspaceId) =>

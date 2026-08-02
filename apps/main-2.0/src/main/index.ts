@@ -110,6 +110,11 @@ import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
+import { resolveOpenVikingExtractionConfig } from "./services/openviking-extraction-config";
+import {
+  openVikingExtractionSettingsChanged,
+  restartOpenVikingForExtractionSettings,
+} from "./services/openviking-settings-lifecycle";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerMemoriesIpc, type MemoriesIpcService } from "./ipc/memories";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
@@ -132,6 +137,7 @@ import { resolveOpenVikingRuntimeArchitecture } from "./services/openviking-runt
 import { OpenVikingGateway } from "./services/openviking-client";
 import { OpenVikingControlService } from "./services/openviking-control-service";
 import { OpenVikingHookManifestService } from "./services/openviking-hook-manifest";
+import { OpenVikingHookStateFlusher } from "./services/openviking-hook-state-flusher";
 import { SshCommandService } from "./services/ssh-command-service";
 import { SshCredentialService } from "./services/ssh-credential-service";
 import {
@@ -302,6 +308,7 @@ let disposeOpenVikingMemoryIpc: (() => void) | null = null;
 let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
 let openVikingControlService: OpenVikingControlService | null = null;
 let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
+let openVikingHookStateFlusher: OpenVikingHookStateFlusher | null = null;
 let automationQuitReady = false;
 let postgresRuntime: PostgresRuntime | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
@@ -977,6 +984,12 @@ function initializeOpenVikingMemory(): void {
   });
   openVikingRuntimeService = runtime;
   openVikingHookManifestService = hookManifest;
+  openVikingHookStateFlusher = new OpenVikingHookStateFlusher({
+    stateDir: hookManifest.stateDir(),
+    client,
+    credentials,
+  });
+  openVikingHookStateFlusher.start();
   control = new OpenVikingControlService({
     runtime,
     model,
@@ -992,21 +1005,21 @@ function initializeOpenVikingMemory(): void {
         ? undefined
         : () => buildDevelopmentOpenVikingRuntime(rootDir, onProgress),
     }),
-    serverConfig: async () => ({
-      embedding: {
-        dense: {
-          provider: "local",
-          model: "bge-small-zh-v1.5-f16",
-          dimension: 512,
-          model_path: await model.getModelPath(),
+    serverConfig: async () => {
+      const settings = await providerService.hydrateSettings();
+      const codex = await providerService.getCodexConfig();
+      return {
+        embedding: {
+          dense: {
+            provider: "local",
+            model: "bge-small-zh-v1.5-f16",
+            dimension: 512,
+            model_path: await model.getModelPath(),
+          },
         },
-      },
-      vlm: {
-        provider: "openai-codex",
-        model: "gpt-5.4",
-        api_base: "https://chatgpt.com/backend-api/codex",
-      },
-    }),
+        vlm: resolveOpenVikingExtractionConfig({ settings, codex }),
+      };
+    },
     onStateChanged: refreshOpenVikingHookManifest,
   });
   openVikingControlService = control;
@@ -1051,8 +1064,20 @@ function reconcileOpenVikingMemoryHooks(settings: AppSettings): void {
 async function startConfiguredOpenVikingRuntime(settings: AppSettings): Promise<void> {
   if (!openVikingControlService || !Object.values(openVikingIntegrations(settings)).some(Boolean)) return;
   const snapshot = await openVikingControlService.snapshot();
+  const hasActiveWorkspace = snapshot.workspaces.some(
+    (workspace) => workspace.managed && workspace.importState !== "paused",
+  );
+  if (!hasActiveWorkspace) {
+    await openVikingControlService.syncManagedWorkspaces();
+    return;
+  }
+  let running = snapshot.runtime.state === "running";
   if (snapshot.runtime.state === "stopped" && snapshot.model.installed) {
     await openVikingControlService.startRuntime();
+    running = true;
+  }
+  if (running) {
+    void openVikingControlService.syncManagedWorkspaces();
   }
 }
 
@@ -2375,6 +2400,7 @@ function registerIpc(): void {
       "openVikingCodexEnabled",
       "openVikingOpenCodeEnabled",
     ].some((key) => key in settings);
+    const openVikingExtractionChanged = openVikingExtractionSettingsChanged(settings);
     if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
       throw new Error(
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -2407,7 +2433,17 @@ function registerIpc(): void {
         );
       });
       await refreshOpenVikingHookManifest();
-      await startConfiguredOpenVikingRuntime(next);
+      if (!openVikingExtractionChanged) await startConfiguredOpenVikingRuntime(next);
+    }
+    if (openVikingControlService && openVikingExtractionChanged) {
+      const snapshot = await openVikingControlService.snapshot();
+      await restartOpenVikingForExtractionSettings({
+        update: settings,
+        enabled: Object.values(openVikingIntegrations(next)).some(Boolean),
+        runtimeState: snapshot.runtime.state,
+        stop: () => openVikingControlService!.stopRuntime(),
+        start: () => startConfiguredOpenVikingRuntime(next),
+      });
     }
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
     await pruneDisabledOptionalSources(next);
@@ -2568,6 +2604,7 @@ app.on("before-quit", (event) => {
   if (automationQuitReady) return;
   event.preventDefault();
   installedRuntimeMonitor?.stop();
+  openVikingHookStateFlusher?.stop();
   stopAutoIndexRefresh();
   skillService.stopUsageRefresh();
   remoteSessionService.stopQueue();
@@ -2584,6 +2621,7 @@ app.on("before-quit", (event) => {
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
     providerService.stopCodexChatProxy(),
+    openVikingHookManifestService?.clear() ?? Promise.resolve(),
     openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {
     await postgresDatabase?.close().catch((error) => {
