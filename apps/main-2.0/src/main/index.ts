@@ -103,7 +103,7 @@ import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
-import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
+import type { OpenVikingRuntimeInstallProgress, OpenVikingRuntimeState } from "../core/openviking-memory";
 import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerTeamChatIpc } from "./ipc/team-chat";
@@ -2413,6 +2413,10 @@ function registerIpc(): void {
     if ("openVikingModelPath" in settings) {
       await openVikingModelManager?.validateConfiguredPath(next.openVikingModelPath);
     }
+    const previousOpenVikingRuntimeState: OpenVikingRuntimeState | undefined =
+      openVikingControlService && openVikingPathChanged && next.openVikingMemoryEnabled
+        ? (await openVikingControlService.snapshot()).runtime.state
+        : undefined;
     if (next.globalShortcut !== previous.globalShortcut && !registerAppGlobalShortcut(next.globalShortcut)) {
       throw new Error(
         `Shortcut ${globalShortcutLabel(next.globalShortcut)} could not be registered. It may be used by another app.`,
@@ -2460,11 +2464,10 @@ function registerIpc(): void {
       });
     }
     if (openVikingControlService && openVikingPathChanged && next.openVikingMemoryEnabled) {
-      const snapshot = await openVikingControlService.snapshot();
       try {
         await restartRunningOpenVikingForPathSettings({
           enabled: next.openVikingMemoryEnabled,
-          runtimeState: snapshot.runtime.state,
+          runtimeState: previousOpenVikingRuntimeState ?? "stopped",
           stop: () => openVikingControlService!.stopRuntime(),
           start: () => openVikingControlService!.startRuntime(),
         });
