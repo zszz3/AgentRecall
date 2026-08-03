@@ -68,9 +68,12 @@ describe("OpenVikingMemorySettings", () => {
       );
       runtimeInput!.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    await act(async () => {
-      runtimeInput!.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    expect(onSettingsChange).not.toHaveBeenCalled();
+    const runtimeSave = [...cards[0]!.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "保存");
+    expect(runtimeSave).toBeDefined();
+    expect(runtimeSave?.disabled).toBe(false);
+    await act(async () => runtimeSave!.click());
     expect(onSettingsChange).toHaveBeenCalledWith({ openVikingRuntimePath: "C:\\OpenViking" });
   });
 
@@ -125,5 +128,35 @@ describe("OpenVikingMemorySettings", () => {
       .filter((button) => button.textContent?.trim() === "配置");
     expect(configureButtons).toHaveLength(2);
     expect(configureButtons.every((button) => button.disabled)).toBe(true);
+  });
+
+  it("blocks runtime start when the summary provider uses OpenAI Responses", async () => {
+    getSnapshot.mockResolvedValue({
+      runtime: { state: "stopped" },
+      model: { model: "BAAI/bge-small-zh-v1.5", installed: true },
+      workspaces: [],
+    });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(OpenVikingMemorySettings, {
+        language: "zh",
+        settings: {
+          ...defaultSettings,
+          openVikingMemoryEnabled: true,
+          summarySource: "custom",
+          summaryApiConfig: { ...defaultSettings.summaryApiConfig, customApiFormat: "openai_responses" },
+        },
+        saving: false,
+        onSettingsChange,
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const startButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "启动");
+    expect(startButton?.disabled).toBe(true);
+    expect(container.textContent).toContain("OpenViking 要求摘要供应商使用 OpenAI Chat");
   });
 });

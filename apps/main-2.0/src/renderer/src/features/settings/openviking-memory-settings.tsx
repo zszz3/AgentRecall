@@ -7,6 +7,7 @@ import {
   Download,
   Play,
   RefreshCw,
+  Save,
   Settings2,
 } from "lucide-react";
 
@@ -126,6 +127,8 @@ export function OpenVikingMemorySettings({
   const modelStateClass = snapshot?.model.error
     ? "error"
     : modelInstalled ? "running" : "not-installed";
+  const extractionProviderUnsupported = settings?.summarySource === "custom"
+    && settings.summaryApiConfig.customApiFormat !== "openai_chat";
   const controlsDisabled = !enabled || saving || action !== null;
   const configDisabled = !settings
     || saving
@@ -190,6 +193,14 @@ export function OpenVikingMemorySettings({
                 </div>
               </div>
             ) : null}
+            {extractionProviderUnsupported ? (
+              <small className="openviking-config-warning">
+                {l(
+                  "OpenViking requires an OpenAI Chat summary provider. Switch from OpenAI Responses or use Codex.",
+                  "OpenViking 要求摘要供应商使用 OpenAI Chat，请切换为 OpenAI Chat 或 Codex。",
+                )}
+              </small>
+            ) : null}
           </div>
           <span className={`openviking-status ${runtimeState}`} title={snapshot?.runtime.error}>
             {runtimeLabel(runtimeState, language, runtimeProgress?.phase)}
@@ -219,7 +230,10 @@ export function OpenVikingMemorySettings({
               <button
                 type="button"
                 className="settings-action-button"
-                disabled={controlsDisabled || !modelInstalled}
+                disabled={controlsDisabled || !modelInstalled || extractionProviderUnsupported}
+                title={extractionProviderUnsupported
+                  ? l("Switch the Summary provider to OpenAI Chat or Codex first.", "请先将摘要供应商切换为 OpenAI Chat 或 Codex。")
+                  : undefined}
                 onClick={() => void run("start", () => window.sessionSearch.startOpenVikingRuntime())}
               >
                 {action === "start" ? <RefreshCw size={14} className="spin" /> : <Play size={14} />}
@@ -239,28 +253,41 @@ export function OpenVikingMemorySettings({
             </button>
           </div>
           {runtimeConfigOpen ? (
-            <label className="openviking-path-config" id="openviking-runtime-path-config">
-              <span>{l("OpenViking runtime absolute path", "OpenViking 运行时绝对路径")}</span>
-              <input
-                type="text"
-                value={runtimePathDraft}
-                disabled={configDisabled}
-                placeholder={l(
-                  "Enter the absolute path to the OpenViking runtime directory",
-                  "请输入 OpenViking 运行时目录的绝对路径",
-                )}
-                onChange={(event) => setRuntimePathDraft(event.currentTarget.value)}
-                onBlur={commitRuntimePath}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                  if (event.key === "Escape") {
-                    setRuntimePathDraft(settings?.openVikingRuntimePath ?? "");
-                    setRuntimeConfigOpen(false);
-                  }
-                }}
-              />
+            <div className="openviking-path-config" id="openviking-runtime-path-config">
+              <label htmlFor="openviking-runtime-path-input">
+                {l("OpenViking runtime absolute path", "OpenViking 运行时绝对路径")}
+              </label>
+              <div className="openviking-path-input-row">
+                <input
+                  id="openviking-runtime-path-input"
+                  type="text"
+                  value={runtimePathDraft}
+                  disabled={configDisabled}
+                  placeholder={l(
+                    "Enter the absolute path to the OpenViking runtime directory",
+                    "请输入 OpenViking 运行时目录的绝对路径",
+                  )}
+                  onChange={(event) => setRuntimePathDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") commitRuntimePath();
+                    if (event.key === "Escape") {
+                      setRuntimePathDraft(settings?.openVikingRuntimePath ?? "");
+                      setRuntimeConfigOpen(false);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="settings-action-button openviking-path-save"
+                  disabled={configDisabled || runtimePathDraft.trim() === (settings?.openVikingRuntimePath ?? "")}
+                  onClick={commitRuntimePath}
+                >
+                  <Save size={14} />
+                  {l("Save", "保存")}
+                </button>
+              </div>
               {snapshot?.runtime.error ? <small>{snapshot.runtime.error}</small> : null}
-            </label>
+            </div>
           ) : null}
         </div>
 
@@ -306,28 +333,41 @@ export function OpenVikingMemorySettings({
             </button>
           </div>
           {modelConfigOpen ? (
-            <label className="openviking-path-config" id="openviking-model-path-config">
-              <span>{l("Embedding model absolute path", "向量模型绝对路径")}</span>
-              <input
-                type="text"
-                value={modelPathDraft}
-                disabled={configDisabled}
-                placeholder={l(
-                  "Enter the absolute path to the GGUF model file",
-                  "请输入 GGUF 模型文件的绝对路径",
-                )}
-                onChange={(event) => setModelPathDraft(event.currentTarget.value)}
-                onBlur={commitModelPath}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                  if (event.key === "Escape") {
-                    setModelPathDraft(settings?.openVikingModelPath ?? "");
-                    setModelConfigOpen(false);
-                  }
-                }}
-              />
+            <div className="openviking-path-config" id="openviking-model-path-config">
+              <label htmlFor="openviking-model-path-input">
+                {l("Embedding model absolute path", "向量模型绝对路径")}
+              </label>
+              <div className="openviking-path-input-row">
+                <input
+                  id="openviking-model-path-input"
+                  type="text"
+                  value={modelPathDraft}
+                  disabled={configDisabled}
+                  placeholder={l(
+                    "Enter the absolute path to the GGUF model file",
+                    "请输入 GGUF 模型文件的绝对路径",
+                  )}
+                  onChange={(event) => setModelPathDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") commitModelPath();
+                    if (event.key === "Escape") {
+                      setModelPathDraft(settings?.openVikingModelPath ?? "");
+                      setModelConfigOpen(false);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="settings-action-button openviking-path-save"
+                  disabled={configDisabled || modelPathDraft.trim() === (settings?.openVikingModelPath ?? "")}
+                  onClick={commitModelPath}
+                >
+                  <Save size={14} />
+                  {l("Save", "保存")}
+                </button>
+              </div>
               {snapshot?.model.error ? <small>{snapshot.model.error}</small> : null}
-            </label>
+            </div>
           ) : null}
         </div>
       </div>

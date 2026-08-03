@@ -1026,13 +1026,31 @@
   border-top: 1px solid var(--border-subtle);
 }
 
-.openviking-path-config > span {
+.openviking-path-config > label {
   color: var(--text-muted);
   font-size: 10.5px;
   font-weight: 650;
 }
 
-.openviking-path-config > input {
+.openviking-path-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.openviking-path-input-row > input {
+  flex: 1;
+}
+
+.openviking-path-save {
+  flex: 0 0 auto;
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.openviking-path-config > input,
+.openviking-path-input-row > input {
   width: 100%;
   min-width: 0;
   height: 34px;
@@ -1051,8 +1069,19 @@
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+.openviking-path-input-row > input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .openviking-path-config > small {
   color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.openviking-config-warning {
+  color: var(--warning, #a16207);
   font-size: 10.5px;
   line-height: 1.4;
 }

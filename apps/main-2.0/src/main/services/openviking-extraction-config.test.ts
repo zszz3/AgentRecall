@@ -97,6 +97,6 @@ describe("resolveOpenVikingExtractionConfig", () => {
         },
       },
       codex: { activeModel: "" },
-    })).toThrow("custom OpenAI Chat providers only");
+    })).toThrow("requires an OpenAI Chat provider");
   });
 });

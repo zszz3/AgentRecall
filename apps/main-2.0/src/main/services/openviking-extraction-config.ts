@@ -35,7 +35,9 @@ export function resolveOpenVikingExtractionConfig(input: {
 
   const config = input.settings.summaryApiConfig;
   if (config.customApiFormat !== "openai_chat") {
-    throw new Error("OpenViking currently supports custom OpenAI Chat providers only.");
+    throw new Error(
+      "OpenViking memory extraction requires an OpenAI Chat provider. Switch the Summary provider to Codex or OpenAI Chat; OpenAI Responses is not supported.",
+    );
   }
   const model = config.customModel.trim();
   const apiBase = config.customBaseUrl.trim();
