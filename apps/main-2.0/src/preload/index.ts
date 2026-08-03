@@ -70,7 +70,7 @@ const api = {
     ipcRenderer.invoke("session:turns", sessionKey),
   getSessionTurn: (sessionKey: string, turnId: string): Promise<SessionTurnDetail | null> =>
     ipcRenderer.invoke("session:turn", sessionKey, turnId),
-  getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),
+  getLiveSessions: (fresh = false): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live", fresh),
   summarizeSession: (sessionKey: string): Promise<SessionSearchResult | null> =>
     ipcRenderer.invoke("session:summarize", sessionKey),
   summarizeMissingSessions: (): Promise<{ processed: number; failed: number; total: number }> =>
@@ -84,6 +84,8 @@ const api = {
   getStatsTrend: (options?: SessionStatsOptions): Promise<SessionStatsTrend> => ipcRenderer.invoke("stats:trend", options),
   getMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp:status"),
   setMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp:set-enabled", enabled),
+  getWorkflowMcpStatus: (): Promise<boolean> => ipcRenderer.invoke("mcp-workflow:status"),
+  setWorkflowMcpEnabled: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke("mcp-workflow:set-enabled", enabled),
   ...createQuotaApi(ipcRenderer),
   listTags: (options?: TagListOptions): Promise<string[]> => ipcRenderer.invoke("tags:list", options),
   listProjects: (options?: ProjectQueryOptions): Promise<ProjectSummary[]> => ipcRenderer.invoke("projects:list", options),

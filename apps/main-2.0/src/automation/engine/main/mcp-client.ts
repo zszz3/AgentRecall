@@ -4,14 +4,19 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerDefinition, McpToolDefinition } from "../shared/mcp/types";
 
-export async function discoverMcpTools(server: McpServerDefinition): Promise<McpToolDefinition[]> {
+export async function discoverMcpTools(
+  server: McpServerDefinition,
+  literalEnv?: Record<string, string>,
+): Promise<McpToolDefinition[]> {
   const client = new Client({ name: "agent-recall-v2", version: "0.1.0" });
   const transport = server.transport === "http"
-    ? new StreamableHTTPClientTransport(new URL(required(server.url, "HTTP URL")))
+    ? new StreamableHTTPClientTransport(new URL(required(server.url, "HTTP URL")), {
+        requestInit: { headers: resolvedHeaders(server) },
+      })
     : new StdioClientTransport({
         command: required(server.command, "command"),
         args: server.args,
-        env: Object.fromEntries(Object.entries(server.env).map(([key, envName]) => [key, process.env[envName] ?? ""])),
+        env: literalEnv ?? Object.fromEntries(Object.entries(server.env).map(([key, envName]) => [key, process.env[envName] ?? ""])),
       });
   try {
     await withTimeout(client.connect(transport as Transport), 10_000);
@@ -29,6 +34,15 @@ export async function discoverMcpTools(server: McpServerDefinition): Promise<Mcp
 function required(value: string | undefined, label: string): string {
   if (!value?.trim()) throw new Error(`MCP ${label} is required`);
   return value.trim();
+}
+
+// Header values reference host environment variable names, mirroring `env`.
+function resolvedHeaders(server: McpServerDefinition): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(server.headers ?? {})
+      .filter(([name, hostName]) => name.trim() && hostName.trim())
+      .map(([name, hostName]) => [name, process.env[hostName] ?? ""]),
+  );
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

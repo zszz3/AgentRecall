@@ -34,6 +34,7 @@ interface PendingClaudeProcess {
 }
 
 export interface LoadLiveSessionOptions {
+  fresh?: boolean;
   platform?: NodeJS.Platform;
   runner?: ProcessListRunner;
   now?: Date;
@@ -62,6 +63,7 @@ export function createCachedLiveSessionSnapshotLoader({
 }: CachedLiveSessionSnapshotLoaderOptions = {}): LiveSessionSnapshotLoader {
   const cache = new Map<string, { expiresAt: number; promise: Promise<LiveSessionSnapshot> }>();
   return (options: LoadLiveSessionOptions = {}) => {
+    if (options.fresh) return load(options);
     const key = liveSessionSnapshotCacheKey(options);
     const now = nowMs();
     const cached = cache.get(key);
@@ -125,6 +127,38 @@ export function detectLiveSessionsFromProcessLines(
   }
 
   return sessions;
+}
+
+function addUnresolvedPlainSessionGuards(
+  lines: string[],
+  sessions: LiveSession[],
+  options: LoadLiveSessionOptions,
+): LiveSession[] {
+  const result = [...sessions];
+  const resolvedPids = new Set(sessions.map((session) => session.pid));
+  const guardedFamilies = new Set(
+    sessions.filter((session) => session.rawId === "*").map((session) => session.family),
+  );
+  for (const line of lines) {
+    const entry = parseProcessLine(line);
+    if (!entry || resolvedPids.has(entry.pid)) continue;
+    const family = unresolvedPlainSessionFamily(splitCommandLine(entry.command));
+    if (!family || !liveSessionFamilyEnabled(family, options) || guardedFamilies.has(family)) continue;
+    guardedFamilies.add(family);
+    result.push({ family, rawId: "*", pid: entry.pid });
+  }
+  return result;
+}
+
+function liveSessionFamilyEnabled(family: LiveSessionFamily, options: LoadLiveSessionOptions): boolean {
+  if (family === "openclaw") return options.includeOpenClaw !== false;
+  if (family === "hermes") return options.includeHermes !== false;
+  if (family === "opencode") return options.includeOpenCode !== false;
+  if (family === "zcode") return options.includeZcode !== false;
+  if (family === "cursor") return options.includeCursor !== false;
+  if (family === "codebuddy") return options.includeCodeBuddy !== false;
+  if (family === "codewiz") return options.includeCodeWiz !== false;
+  return true;
 }
 
 function liveSessionSnapshotCacheKey(options: LoadLiveSessionOptions): string {
@@ -195,20 +229,21 @@ export async function loadLiveSessionSnapshot(options: LoadLiveSessionOptions = 
             includeCodeWiz: options.includeCodeWiz !== false,
           });
 
+    const sessions = detectLiveSessionsFromProcessLines(
+      lines,
+      codexSessionFilesByPid,
+      claudeSessionFilesByPid,
+      traeSessionIdsByPid,
+      qoderSessionIdsByPid,
+      openclawSessionFilesByPid,
+      cursorSessionFilesByPid,
+      codebuddySessionFilesByPid,
+      dbSessionIdsByPid,
+      codexAppSessionFilesByPid,
+    );
     return {
       generatedAt,
-      sessions: detectLiveSessionsFromProcessLines(
-        lines,
-        codexSessionFilesByPid,
-        claudeSessionFilesByPid,
-        traeSessionIdsByPid,
-        qoderSessionIdsByPid,
-        openclawSessionFilesByPid,
-        cursorSessionFilesByPid,
-        codebuddySessionFilesByPid,
-        dbSessionIdsByPid,
-        codexAppSessionFilesByPid,
-      ),
+      sessions: addUnresolvedPlainSessionGuards(lines, sessions, options),
     };
   } catch (error) {
     return {
@@ -636,6 +671,21 @@ function isPlainCodeBuddyCommand(tokens: string[]): boolean {
   }
 
   return false;
+}
+
+function unresolvedPlainSessionFamily(tokens: string[]): LiveSessionFamily | null {
+  const commandIndex = isNodeExecutable(tokens[0]) ? 1 : 0;
+  const token = tokens[commandIndex];
+  const family = executableFamily(token);
+  if (!family || family === "trae" || family === "qoder") return null;
+  const args = tokens.slice(commandIndex + 1);
+  const resumedId = family === "codex" || family === "tcodex" ? codexResumeId(args) : flagResumeId(args);
+  if (resumedId) return null;
+  if (family === "codex" || family === "tcodex") {
+    if (isCodexAppServerCommand(tokens) || isCodexDesktopProcess(token)) return null;
+    if (normalizedExecutableName(token) !== family) return null;
+  }
+  return family;
 }
 
 function isDbBackedCommand(tokens: string[]): boolean {
@@ -1221,7 +1271,8 @@ function splitCommandLine(command: string): string[] {
   let quote: '"' | "'" | null = null;
   let escaping = false;
 
-  for (const char of command) {
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
     if (escaping) {
       token += char;
       escaping = false;
@@ -1229,8 +1280,11 @@ function splitCommandLine(command: string): string[] {
     }
 
     if (char === "\\" && quote !== "'") {
-      escaping = true;
-      continue;
+      const next = command[index + 1];
+      if (next && (next === "\\" || next === '"' || next === "'" || /\s/.test(next))) {
+        escaping = true;
+        continue;
+      }
     }
 
     if ((char === '"' || char === "'") && (!quote || quote === char)) {

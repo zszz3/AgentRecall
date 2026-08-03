@@ -14,7 +14,7 @@ import {
 import { DEFAULT_SNAPSHOT } from "../../../../automation/engine/renderer/src/app/app-state";
 import type { AppSnapshot } from "../../../../automation/contracts";
 import type { AutomationApi } from "../../../../preload/automation";
-import type { AutomationHealth } from "../../../../shared/ipc/automation";
+import type { AutomationHealth, WorkflowSidebarSnapshot } from "../../../../shared/ipc/automation";
 import { AutomationStore } from "./automation-store";
 
 interface AutomationContextValue {
@@ -22,6 +22,9 @@ interface AutomationContextValue {
   snapshot: AppSnapshot;
   setSnapshot: Dispatch<SetStateAction<AppSnapshot>>;
   health: AutomationHealth;
+  workflowSidebar: WorkflowSidebarSnapshot;
+  workflowSidebarLoading: boolean;
+  detailsLoaded: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<AppSnapshot>;
@@ -45,13 +48,20 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
     setSnapshotState(next);
   }, [store]);
   const [health, setHealth] = useState<AutomationHealth>({ state: "initializing" });
+  const [workflowSidebar, setWorkflowSidebar] = useState<WorkflowSidebarSnapshot>({ workflows: [] });
+  const [workflowSidebarLoading, setWorkflowSidebarLoading] = useState(true);
+  const [detailsLoaded, setDetailsLoaded] = useState(false);
+  const detailsLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<AppSnapshot> => {
+    if (!detailsLoadedRef.current) setLoading(true);
     try {
       const next = await api.getSnapshot();
       setSnapshot(next);
+      detailsLoadedRef.current = true;
+      setDetailsLoaded(true);
       setHealth({ state: "ready" });
       setError(null);
       return next;
@@ -70,6 +80,8 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
     const unsubscribe = api.onSnapshot((next) => {
       if (!active) return;
       setSnapshot(next);
+      detailsLoadedRef.current = true;
+      setDetailsLoaded(true);
       setHealth({ state: "ready" });
       setError(null);
       setLoading(false);
@@ -88,7 +100,19 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
     void api.getHealth().then((next) => {
       if (active) setHealth(next);
     }).catch(() => undefined);
-    void refresh().catch(() => undefined);
+    void (async () => {
+      try {
+        const next = await api.getWorkflowSidebar();
+        if (active) setWorkflowSidebar(next);
+      } catch {
+        // The full snapshot remains the fallback when the lightweight query fails.
+      } finally {
+        if (active) {
+          setWorkflowSidebarLoading(false);
+          void refresh().catch(() => undefined);
+        }
+      }
+    })();
     return () => {
       active = false;
       unsubscribe();
@@ -101,11 +125,14 @@ export function AutomationProvider({ children }: { children: ReactNode }) {
     snapshot,
     setSnapshot,
     health,
+    workflowSidebar,
+    workflowSidebarLoading,
+    detailsLoaded,
     loading,
     error,
     refresh,
     store,
-  }), [api, error, health, loading, refresh, snapshot, store, setSnapshot]);
+  }), [api, detailsLoaded, error, health, loading, refresh, snapshot, store, setSnapshot, workflowSidebar, workflowSidebarLoading]);
 
   return <AutomationContext.Provider value={value}>{children}</AutomationContext.Provider>;
 }

@@ -43,11 +43,28 @@ function createFixture(dbPath: string): void {
   }
 }
 
+function createTaskIndexFixture(root: string): string {
+  const taskIndexDirectory = path.join(root, "v2");
+  fs.mkdirSync(taskIndexDirectory, { recursive: true });
+  const taskIndexPath = path.join(taskIndexDirectory, "tasks-index.sqlite");
+  const db = new DatabaseSync(taskIndexPath);
+  try {
+    db.exec("CREATE TABLE tasks (task_id TEXT PRIMARY KEY, title TEXT)");
+    db.prepare("INSERT INTO tasks (task_id, title) VALUES (?, ?), (?, ?)").run(
+      "sess-delete", "Delete me", "sess-keep", "Keep me",
+    );
+  } finally {
+    db.close();
+  }
+  return taskIndexPath;
+}
+
 describe("ZCode session writer", () => {
   it("deletes one session and all supported related records without touching other sessions", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-zcode-delete-"));
     const dbPath = databasePath(root);
     createFixture(dbPath);
+    const taskIndexPath = createTaskIndexFixture(root);
 
     expect(deleteZcodeSession(dbPath, "sess-delete")).toBe(true);
 
@@ -64,6 +81,12 @@ describe("ZCode session writer", () => {
       expect(db.prepare("SELECT COUNT(*) AS count FROM input_history WHERE session_id = ?").get("sess-keep")).toEqual({ count: 1 });
     } finally {
       db.close();
+    }
+    const taskIndex = new DatabaseSync(taskIndexPath);
+    try {
+      expect(taskIndex.prepare("SELECT task_id FROM tasks ORDER BY task_id").all()).toEqual([{ task_id: "sess-keep" }]);
+    } finally {
+      taskIndex.close();
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
@@ -82,6 +105,7 @@ describe("ZCode session writer", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-zcode-delete-many-"));
     const dbPath = databasePath(root);
     createFixture(dbPath);
+    const taskIndexPath = createTaskIndexFixture(root);
 
     expect(deleteZcodeSessions(dbPath, ["sess-delete", "sess-keep", "sess-delete"])).toEqual(["sess-delete", "sess-keep"]);
 
@@ -92,6 +116,50 @@ describe("ZCode session writer", () => {
       expect(db.prepare("SELECT session_id FROM part").all()).toEqual([]);
     } finally {
       db.close();
+    }
+    const taskIndex = new DatabaseSync(taskIndexPath);
+    try {
+      expect(taskIndex.prepare("SELECT task_id FROM tasks").all()).toEqual([]);
+    } finally {
+      taskIndex.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back the main database when the task index deletion fails", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-zcode-delete-rollback-"));
+    const dbPath = databasePath(root);
+    createFixture(dbPath);
+    const taskIndexPath = createTaskIndexFixture(root);
+    const taskIndex = new DatabaseSync(taskIndexPath);
+    try {
+      taskIndex.exec(`
+        PRAGMA journal_mode = WAL;
+        CREATE TRIGGER reject_task_delete
+        BEFORE DELETE ON tasks
+        BEGIN
+          SELECT RAISE(ABORT, 'task deletion rejected');
+        END;
+      `);
+    } finally {
+      taskIndex.close();
+    }
+
+    try {
+      expect(() => deleteZcodeSession(dbPath, "sess-delete")).toThrow("task deletion rejected");
+      const mainDatabase = new DatabaseSync(dbPath);
+      try {
+        expect(mainDatabase.prepare("SELECT id FROM session WHERE id = ?").get("sess-delete")).toEqual({ id: "sess-delete" });
+      } finally {
+        mainDatabase.close();
+      }
+      const remainingTaskIndex = new DatabaseSync(taskIndexPath);
+      try {
+        expect(remainingTaskIndex.prepare("SELECT task_id FROM tasks WHERE task_id = ?").get("sess-delete")).toEqual({ task_id: "sess-delete" });
+      } finally {
+        remainingTaskIndex.close();
+      }
+    } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

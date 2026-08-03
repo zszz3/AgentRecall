@@ -1,4 +1,5 @@
 import type {
+  OpenVikingDiagnosticsSnapshot,
   OpenVikingMemoryItem,
   OpenVikingMemorySnapshot,
   OpenVikingModelStatus,
@@ -20,6 +21,7 @@ import {
 
 export interface OpenVikingMemoryIpcService {
   snapshot(): Promise<OpenVikingMemorySnapshot>;
+  diagnostics(): Promise<OpenVikingDiagnosticsSnapshot>;
   chooseDirectory(): Promise<OpenVikingDirectoryPreview | null>;
   previewDirectory(rootPath: string): Promise<OpenVikingDirectoryPreview>;
   addWorkspace(rootPath: string): Promise<OpenVikingWorkspace>;
@@ -35,6 +37,7 @@ export interface OpenVikingMemoryIpcService {
   deleteWorkspace(workspaceId: string): Promise<void>;
   installRuntime(): Promise<OpenVikingRuntimeStatus>;
   startRuntime(): Promise<OpenVikingRuntimeStatus>;
+  restartRuntime(): Promise<OpenVikingRuntimeStatus>;
   stopRuntime(): Promise<OpenVikingRuntimeStatus>;
   installModel(model: "BAAI/bge-small-zh-v1.5"): Promise<OpenVikingModelStatus>;
 }
@@ -45,6 +48,7 @@ export function registerOpenVikingMemoryIpc(
 ): () => void {
   return combineIpcDisposers([
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.snapshot, () => service.snapshot()),
+    registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.diagnostics, () => service.diagnostics()),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.chooseDirectory, () => service.chooseDirectory()),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.previewDirectory, (_event, rootPath) =>
       service.previewDirectory(rootPath)),
@@ -72,6 +76,7 @@ export function registerOpenVikingMemoryIpc(
       service.deleteWorkspace(workspaceId)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.installRuntime, () => service.installRuntime()),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.startRuntime, () => service.startRuntime()),
+    registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.restartRuntime, () => service.restartRuntime()),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.stopRuntime, () => service.stopRuntime()),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.installModel, (_event, model) =>
       service.installModel(model)),

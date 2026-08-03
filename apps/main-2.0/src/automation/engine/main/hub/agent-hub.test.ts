@@ -4137,6 +4137,33 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     ]));
   });
 
+  test("reports the selected Provider as the model catalog source", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-provider-model-refresh-"));
+    const hub = new AgentHub({}, undefined, undefined, async () => ({
+      source: "openai_models",
+      models: [{ id: "deepseek-chat", label: "DeepSeek Chat" }],
+    }));
+    await hub.loadModelChannels(path.join(dir, "model-channels.json"));
+    await hub.saveModelChannels([{
+      id: "claude-deepseek",
+      agentId: "claude",
+      label: "Claude Code + DeepSeek",
+      presetId: "claude-code-deepseek",
+      providerName: "DeepSeek",
+      modelProvider: "deepseek-anthropic",
+      models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    }]);
+
+    const result = await hub.refreshModelCatalog("claude-deepseek");
+
+    expect(result).toMatchObject({
+      channelId: "claude-deepseek",
+      source: "openai_models",
+      providerLabel: "DeepSeek",
+      discoveredCount: 1,
+    });
+  });
+
   test("stores execution channel config in app state without rewriting the legacy channel file", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-channel-db-"));
     const dbPath = path.join(dir, "app.db");

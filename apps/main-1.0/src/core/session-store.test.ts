@@ -872,7 +872,56 @@ describe("SessionStore", () => {
     expect(store.getSession(sessionKey)).toBeNull();
   });
 
-  it("reads bulk deletion targets and deletes only explicit session records", () => {
+  it("deletes a Claude parent with indexed descendants and owned companion artifacts", () => {
+    const store = createInMemoryStore();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-claude-tree-delete-"));
+    const parentFile = path.join(root, "parent.jsonl");
+    const subagentsDir = path.join(root, "parent", "subagents");
+    const childFile = path.join(subagentsDir, "agent-child.jsonl");
+    const childMetadata = path.join(subagentsDir, "agent-child.meta.json");
+    const toolResultsDir = path.join(root, "parent", "tool-results");
+    fs.mkdirSync(subagentsDir, { recursive: true });
+    fs.mkdirSync(toolResultsDir, { recursive: true });
+    for (const filePath of [parentFile, childFile, childMetadata, path.join(toolResultsDir, "result.txt")]) {
+      fs.writeFileSync(filePath, "fixture", "utf8");
+    }
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "claude:parent", rawId: "parent", source: "claude-cli", filePath: parentFile,
+    }), messages);
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "claude:child", rawId: "child", source: "claude-cli", filePath: childFile,
+      isSubagent: true, parentSessionId: "parent",
+    }), messages);
+
+    try {
+      expect(store.deleteSession("claude:parent")).toBe(true);
+      expect(store.getSession("claude:parent")).toBeNull();
+      expect(store.getSession("claude:child")).toBeNull();
+      expect(fs.existsSync(parentFile)).toBe(false);
+      expect(fs.existsSync(path.join(root, "parent"))).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("finds orphaned subagent trees after an explicit record-only prune", () => {
+    const store = createInMemoryStore();
+    store.upsertIndexedSession(sampleSession({ sessionKey: "codex:parent", rawId: "parent" }), messages);
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "codex:child", rawId: "child", isSubagent: true, parentSessionId: "parent",
+    }), messages);
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "codex:grandchild", rawId: "grandchild", isSubagent: true, parentSessionId: "child",
+    }), messages);
+
+    expect(store.deleteSessionRecord("codex:parent")).toBe(true);
+    expect(store.getSessionDeletionTargets([], true)).toEqual([
+      expect.objectContaining({ cascadeRootSessionKey: "codex:child", sessionKey: "codex:child" }),
+      expect.objectContaining({ cascadeRootSessionKey: "codex:child", sessionKey: "codex:grandchild" }),
+    ]);
+  });
+
+  it("expands bulk deletion targets and records to the full descendant tree", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession({ sessionKey: "codex:parent", rawId: "parent" }), messages);
     store.upsertIndexedSession(
@@ -882,17 +931,24 @@ describe("SessionStore", () => {
     store.setFavorited("codex:parent", true);
 
     expect(store.getSessionDeletionTargets(["codex:child", "missing", "codex:parent"])).toEqual([
-      expect.objectContaining({ sessionKey: "codex:child", favorited: false, environmentKind: "local" }),
       expect.objectContaining({
+        cascadeRootSessionKey: "codex:child",
+        sessionKey: "codex:child",
+        favorited: false,
+        environmentKind: "local",
+      }),
+      expect.objectContaining({
+        cascadeRootSessionKey: "codex:parent",
         sessionKey: "codex:parent",
         favorited: true,
         lastActivityAt: Date.parse("2026-06-01T10:01:00Z"),
       }),
+      expect.objectContaining({ cascadeRootSessionKey: "codex:parent", sessionKey: "codex:child" }),
     ]);
 
-    expect(store.deleteSessionRecords(["codex:parent", "missing"])).toEqual(["codex:parent"]);
+    expect(store.deleteSessionRecords(["codex:parent", "missing"])).toEqual(["codex:parent", "codex:child"]);
     expect(store.getSession("codex:parent")).toBeNull();
-    expect(store.getSession("codex:child")).toMatchObject({ messageCount: messages.length, isSubagent: true });
+    expect(store.getSession("codex:child")).toBeNull();
   });
 
   it("uses the indexed title for display when first question is a long remote summary prompt", () => {

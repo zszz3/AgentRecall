@@ -1700,17 +1700,18 @@ function scanCodexSessionFile(filePath: string, base?: { offset: number; loaded:
   const visibleTraces = invalidRollback
     ? allTraceEvents
     : [...preamble.traceEvents, ...turns.flatMap((turn) => turn.traceEvents)];
+  const tokenEvents = new Map<string, TokenUsageEvent>();
+  for (const event of base?.loaded.tokenEvents ?? []) putTokenEvent(tokenEvents, event);
+  const newTokenRows = base
+    ? tokenRows.map((tokenRow) => ({ ...tokenRow, row: stripCodexCumulativeUsage(tokenRow.row) }))
+    : tokenRows;
+  for (const event of extractCodexTokenEvents(newTokenRows)) {
+    putTokenEvent(tokenEvents, event);
+  }
   return {
     meta,
     messages: visibleMessages.map((message, index) => ({ ...message, index })),
-    tokenEvents: [
-      ...(base?.loaded.tokenEvents ?? []),
-      ...extractCodexTokenEvents(
-        base
-          ? tokenRows.map((tokenRow) => ({ ...tokenRow, row: stripCodexCumulativeUsage(tokenRow.row) }))
-          : tokenRows,
-      ),
-    ],
+    tokenEvents: [...tokenEvents.values()],
     traceEvents: dedupeCodexTraceEvents(visibleTraces),
     codexIncrementalState: {
       historyMode: rollout.historyMode,

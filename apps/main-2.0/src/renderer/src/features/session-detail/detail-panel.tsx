@@ -30,6 +30,7 @@ import {
 } from "../../session-ui";
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
 import { TurnAccordion } from "./turn-accordion";
+import { MessageHead } from "./message-shell";
 import type { SessionFamily } from "../../../../core/session-family";
 import { canDeleteSessionLocally } from "../../../../core/session-environment";
 import { sessionSourceDescriptor } from "../../../../core/session-sources";
@@ -170,6 +171,8 @@ export function DetailPanel({
   backdropClassName = "",
   sessionFamily,
   onOpenFamilySession,
+  sessionFamilyLoadFailed = false,
+  onRetrySessionFamily,
 }: {
   session: SessionSearchResult;
   turns: SessionTurnSummary[] | null;
@@ -217,6 +220,8 @@ export function DetailPanel({
   backdropClassName?: string;
   sessionFamily: SessionFamily;
   onOpenFamilySession?: (sessionKey: string) => void;
+  sessionFamilyLoadFailed?: boolean;
+  onRetrySessionFamily?: () => void;
 }): ReactElement {
   const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
@@ -723,6 +728,8 @@ export function DetailPanel({
               family={sessionFamily}
               language={language}
               onOpen={onOpenFamilySession}
+              loadFailed={sessionFamilyLoadFailed}
+              onRetry={onRetrySessionFamily}
             />
           ) : null}
         </div>
@@ -763,23 +770,22 @@ function MessageBlock({
   }, [message.content, truncated, expanded, language]);
   const highlightTerms = useMemo(() => (highlight ? searchHighlightTerms(query) : []), [highlight, query]);
 
-  const useMarkdown = message.role === "assistant" && !highlight;
+  const useMarkdown = !highlight;
 
   return (
-    <div className={`message ${message.role} ${message.phase === "commentary" ? "commentary" : ""} ${highlight ? "match-context" : ""} ${target ? "match-target" : ""}`} data-message-index={message.index} data-timeline-key={timelineKey}>
-      <div className="message-head">
-        <strong>{message.role === "user" ? localize(language, "User", "用户") : localize(language, "Assistant", "助手")}</strong>
-        {message.phase === "commentary"
-          ? <span className="message-phase">{localize(language, "Process note", "过程说明")}</span>
-          : null}
-        <span>{formatMessageTime(message.timestamp)}</span>
-      </div>
+    <div className={`msg ${message.role} ${message.phase === "commentary" ? "commentary" : ""} ${highlight ? "match-context" : ""} ${target ? "match-target" : ""}`} data-message-index={message.index} data-timeline-key={timelineKey}>
+      <MessageHead
+        role={message.role}
+        phase={message.phase}
+        timestamp={message.timestamp}
+        language={language}
+      />
       {useMarkdown ? (
-        <div className="message-md">
+        <div className="msg-body">
           <Markdown text={content} language={language} />
         </div>
       ) : (
-        <pre>{highlight ? <HighlightedSearchText text={content} terms={highlightTerms} /> : content}</pre>
+        <pre className="msg-body msg-body-plain"><HighlightedSearchText text={content} terms={highlightTerms} /></pre>
       )}
       {(message.attachments?.length ?? 0) > 0 ? (
         <div className="message-attachments">

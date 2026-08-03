@@ -18,21 +18,25 @@ import {
 } from "./build-openviking-runtime.mjs";
 
 test("runtime patch forwards configured reasoning effort to Codex Responses", () => {
-  const source = [
-    "        response_kwargs: Dict[str, Any] = {",
-    '            "model": model,',
-    "        }",
-    '        tools = _convert_tools_for_responses(kwargs.get("tools"))',
-    "        if tools:",
-    '            response_kwargs["tools"] = tools',
-    "        stream = client.responses.create(**response_kwargs, stream=True)",
-    "",
-  ].join("\n");
+  for (const newline of ["\n", "\r\n"]) {
+    const source = [
+      "        response_kwargs: Dict[str, Any] = {",
+      '            "model": model,',
+      "        }",
+      '        tools = _convert_tools_for_responses(kwargs.get("tools"))',
+      "        if tools:",
+      '            response_kwargs["tools"] = tools',
+      "        stream = client.responses.create(**response_kwargs, stream=True)",
+      "",
+    ].join(newline);
 
-  const patched = patchCodexResponsesAdapter(source);
+    const patched = patchCodexResponsesAdapter(source);
 
-  assert.match(patched, /reasoning_effort = kwargs\.get\("reasoning_effort"\)/u);
-  assert.match(patched, /response_kwargs\["reasoning"\] = \{"effort": reasoning_effort\}/u);
+    assert.match(patched, /reasoning_effort = kwargs\.get\("reasoning_effort"\)/u);
+    assert.match(patched, /response_kwargs\["reasoning"\] = \{"effort": reasoning_effort\}/u);
+    assert.equal(patchCodexResponsesAdapter(patched), patched);
+    if (newline === "\r\n") assert.doesNotMatch(patched.replaceAll("\r\n", ""), /\n/u);
+  }
   assert.throws(
     () => patchCodexResponsesAdapter("unexpected source"),
     /unsupported OpenViking Codex adapter/u,
@@ -40,28 +44,32 @@ test("runtime patch forwards configured reasoning effort to Codex Responses", ()
 });
 
 test("runtime patch accepts and forwards configured VLM reasoning effort", () => {
-  const source = [
-    "    thinking: bool = Field(default=False, description=\"Enable thinking mode\")",
-    "",
-    "    def _build_vlm_config_dict_for_credential(self, credential):",
-    "        result = {",
-    '            "thinking": self.thinking,',
-    "        }",
-    "",
-    "    def _build_vlm_config_dict(self):",
-    "        result = {",
-    '            "thinking": self.thinking,',
-    "        }",
-    "",
-  ].join("\n");
+  for (const newline of ["\n", "\r\n"]) {
+    const source = [
+      "    thinking: bool = Field(default=False, description=\"Enable thinking mode\")",
+      "",
+      "    def _build_vlm_config_dict_for_credential(self, credential):",
+      "        result = {",
+      '            "thinking": self.thinking,',
+      "        }",
+      "",
+      "    def _build_vlm_config_dict(self):",
+      "        result = {",
+      '            "thinking": self.thinking,',
+      "        }",
+      "",
+    ].join(newline);
 
-  const patched = patchVlmReasoningEffortConfig(source);
+    const patched = patchVlmReasoningEffortConfig(source);
 
-  assert.match(patched, /reasoning_effort: str = Field\(default="low"/u);
-  assert.equal(
-    patched.match(/"reasoning_effort": self\.reasoning_effort/g)?.length,
-    2,
-  );
+    assert.match(patched, /reasoning_effort: str = Field\(default="low"/u);
+    assert.equal(
+      patched.match(/"reasoning_effort": self\.reasoning_effort/g)?.length,
+      2,
+    );
+    assert.equal(patchVlmReasoningEffortConfig(patched), patched);
+    if (newline === "\r\n") assert.doesNotMatch(patched.replaceAll("\r\n", ""), /\n/u);
+  }
   assert.throws(
     () => patchVlmReasoningEffortConfig("unexpected source"),
     /unsupported OpenViking VLM config/u,

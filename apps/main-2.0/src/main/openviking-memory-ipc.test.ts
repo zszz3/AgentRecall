@@ -56,6 +56,17 @@ function service(): OpenVikingMemoryIpcService & Record<keyof OpenVikingMemoryIp
       model: { installed: false, model: "BAAI/bge-small-zh-v1.5" as const },
       workspaces: [],
     })),
+    diagnostics: vi.fn(async () => ({
+      capturedAt: "2026-08-03T00:00:00.000Z",
+      runtime: {
+        status: { state: "stopped" as const, version: "0.4.11" },
+        health: "not-running" as const,
+        events: [],
+      },
+      model: { installed: true, model: "BAAI/bge-small-zh-v1.5" as const },
+      workspaces: [workspace],
+      tasks: [],
+    })),
     chooseDirectory: vi.fn(async () => null),
     previewDirectory: vi.fn(async (rootPath: string) => ({
       rootPath,
@@ -83,6 +94,7 @@ function service(): OpenVikingMemoryIpcService & Record<keyof OpenVikingMemoryIp
     deleteWorkspace: vi.fn(async () => undefined),
     installRuntime: vi.fn(async () => ({ state: "stopped" as const })),
     startRuntime: vi.fn(async () => ({ state: "running" as const })),
+    restartRuntime: vi.fn(async () => ({ state: "running" as const })),
     stopRuntime: vi.fn(async () => ({ state: "stopped" as const })),
     installModel: vi.fn(async () => ({
       installed: true,
@@ -99,6 +111,7 @@ describe("OpenViking memory IPC", () => {
     const event = {} as IpcMainInvokeEvent;
 
     await handlers.get(OPENVIKING_MEMORY_IPC.snapshot.channel)?.(event);
+    await handlers.get(OPENVIKING_MEMORY_IPC.diagnostics.channel)?.(event);
     await handlers.get(OPENVIKING_MEMORY_IPC.chooseDirectory.channel)?.(event);
     await handlers.get(OPENVIKING_MEMORY_IPC.previewDirectory.channel)?.(event, " /repo ");
     await handlers.get(OPENVIKING_MEMORY_IPC.addWorkspace.channel)?.(event, "/repo");
@@ -126,6 +139,7 @@ describe("OpenViking memory IPC", () => {
     await handlers.get(OPENVIKING_MEMORY_IPC.deleteWorkspace.channel)?.(event, "workspace-1");
     await handlers.get(OPENVIKING_MEMORY_IPC.installRuntime.channel)?.(event);
     await handlers.get(OPENVIKING_MEMORY_IPC.startRuntime.channel)?.(event);
+    await handlers.get(OPENVIKING_MEMORY_IPC.restartRuntime.channel)?.(event);
     await handlers.get(OPENVIKING_MEMORY_IPC.stopRuntime.channel)?.(event);
     await handlers.get(OPENVIKING_MEMORY_IPC.installModel.channel)?.(
       event,
@@ -175,6 +189,7 @@ describe("OpenViking memory IPC", () => {
     const api = createOpenVikingMemoryApi({ invoke });
 
     await api.getOpenVikingMemorySnapshot();
+    await api.getOpenVikingDiagnostics();
     await api.chooseOpenVikingDirectory();
     await api.previewOpenVikingDirectory("/repo");
     await api.addOpenVikingWorkspace("/repo");
@@ -190,6 +205,7 @@ describe("OpenViking memory IPC", () => {
     await api.deleteOpenVikingWorkspace("workspace-1");
     await api.installOpenVikingRuntime();
     await api.startOpenVikingRuntime();
+    await api.restartOpenVikingRuntime();
     await api.stopOpenVikingRuntime();
     await api.installOpenVikingModel("BAAI/bge-small-zh-v1.5");
 

@@ -36,23 +36,48 @@ export interface BuiltinSessionSearchDeps {
   writeRuntime(runtime: McpBuiltinRuntime): void;
 }
 
+/**
+ * Managed-server deps. `testEnv` supplies literal env values used only when
+ * testing the connection (the registry env model resolves values as host
+ * environment variable names, which does not fit servers that need literal
+ * values such as a bridge path or an in-memory token). `hubBindable: false`
+ * hides the server from per-Agent hub bindings.
+ */
+export interface ManagedMcpDeps extends BuiltinSessionSearchDeps {
+  testEnv?(): Record<string, string>;
+  hubBindable?: boolean;
+}
+
+/** Common surface of app-managed servers consumed by McpAutomationModule. */
+export interface ManagedMcp {
+  isBuiltinId(id: string): boolean;
+  resolve(): Promise<McpServerDefinition>;
+  saveDraft(server: McpServerDefinition): Promise<McpServerDefinition>;
+  recordTest(server: McpServerDefinition, tools: McpToolDefinition[], error?: string): Promise<McpServerDefinition>;
+  testEnv(): Record<string, string>;
+}
+
 function emptyRuntime(): McpBuiltinRuntime {
   const now = Date.now();
   return { tools: [], disabledTools: [], status: "untested", createdAt: now, updatedAt: now };
 }
 
 /**
- * Synthesizes the app-managed AgentRecall session-search MCP server. It is
- * never written to the user `mcp_servers` table; connection fields are fixed
- * and only the enable state and per-tool toggles are editable, mirrored into
- * app settings so the Settings dialog and the MCP page share one source of
- * truth.
+ * Base for app-managed MCP servers that are synthesized from app settings and a
+ * fixed launch config rather than stored in the user `mcp_servers` table.
+ * Connection fields are read-only; only enable state and per-tool toggles are
+ * editable, mirrored into app settings so the Settings dialog and the MCP page
+ * share one source of truth.
  */
-export class BuiltinSessionSearchServer {
-  constructor(private readonly deps: BuiltinSessionSearchDeps) {}
+export class ManagedMcpServer implements ManagedMcp {
+  constructor(protected readonly deps: ManagedMcpDeps) {}
 
   isBuiltinId(id: string): boolean {
     return id === this.deps.launchConfig().id;
+  }
+
+  testEnv(): Record<string, string> {
+    return this.deps.testEnv?.() ?? {};
   }
 
   async resolve(): Promise<McpServerDefinition> {
@@ -74,6 +99,7 @@ export class BuiltinSessionSearchServer {
       createdAt: runtime?.createdAt ?? Date.now(),
       updatedAt: runtime?.updatedAt ?? Date.now(),
       managed: true,
+      ...(this.deps.hubBindable === false ? { hubBindable: false } : {}),
     };
   }
 
@@ -119,5 +145,27 @@ export class BuiltinSessionSearchServer {
     else delete next.lastError;
     this.deps.writeRuntime(next);
     return this.resolve();
+  }
+}
+
+/**
+ * The app-managed AgentRecall session-search MCP server, registered into
+ * Claude Code / Codex / CodeBuddy configs and bindable to AgentRecall agents.
+ */
+export class BuiltinSessionSearchServer extends ManagedMcpServer {
+  constructor(deps: BuiltinSessionSearchDeps) {
+    super(deps);
+  }
+}
+
+/**
+ * The app-managed AgentRecall workflow MCP server. Enabled state maps to bulk
+ * registration into `~/.codex/config.toml` for configured Codex agents. It is
+ * not hub-bindable because its launch config needs literal env (bridge path and
+ * in-memory token) that do not fit the registry env-as-host-name model.
+ */
+export class BuiltinWorkflowMcpServer extends ManagedMcpServer {
+  constructor(deps: ManagedMcpDeps) {
+    super(deps);
   }
 }

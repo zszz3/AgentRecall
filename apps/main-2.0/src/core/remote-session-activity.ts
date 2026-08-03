@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 INACTIVITY_TIMEOUT_MS = ${LIVE_SESSION_INACTIVITY_TIMEOUT_MS}
+CLAUDE_SESSION_START_SKEW_MS = 2 * 60 * 1000
 READ_CHUNK_SIZE = 64 * 1024
 SESSION_ID_PATTERN = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$", re.IGNORECASE)
 proc_root = Path(os.environ.get("AGENT_RECALL_PROC_ROOT", "/proc"))
@@ -33,6 +34,32 @@ def codex_command_index(tokens):
     token = tokens[index]
     if normalized_executable(token) == "codex" or "@openai/codex" in token.lower():
       return index
+  return None
+
+def claude_command_index(tokens):
+  if not tokens:
+    return None
+  indexes = [1] if normalized_executable(tokens[0]) in {"node", "nodejs"} else [0]
+  for index in indexes:
+    if index >= len(tokens):
+      continue
+    token = tokens[index]
+    normalized = normalized_executable(token)
+    lower = token.lower()
+    if normalized in {"claude", "claude-code"} or "@anthropic-ai/claude" in lower or "claude-code" in lower:
+      return index
+  return None
+
+def flag_resume_id(args):
+  for index, arg in enumerate(args):
+    if arg in {"--resume", "-r"} and index + 1 < len(args):
+      raw_id = args[index + 1].strip()
+      if raw_id and not raw_id.startswith("-"):
+        return raw_id
+    if arg.startswith("--resume="):
+      raw_id = arg[len("--resume="):].strip()
+      if raw_id:
+        return raw_id
   return None
 
 def process_rows():
@@ -106,6 +133,60 @@ def open_files(pid):
     return paths
   return [line[1:] for line in output.splitlines() if line.startswith("n") and len(line) > 1]
 
+def process_cwd(pid):
+  try:
+    return os.readlink(proc_root / str(pid) / "cwd")
+  except Exception:
+    return None
+
+def process_started_at_ms(pid):
+  try:
+    stat_text = (proc_root / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
+    fields = stat_text.rsplit(")", 1)[1].split()
+    start_ticks = float(fields[19])
+    ticks_per_second = float(os.sysconf("SC_CLK_TCK"))
+    uptime_seconds = float((proc_root / "uptime").read_text().split()[0])
+    return time.time() * 1000 - uptime_seconds * 1000 + start_ticks * 1000 / ticks_per_second
+  except Exception:
+    return None
+
+def claude_session_id(file_name):
+  normalized = file_name.replace("\\", "/")
+  if "/.claude/projects/" not in normalized or not normalized.lower().endswith(".jsonl"):
+    return None
+  raw_id = normalized.rsplit("/", 1)[-1][:-len(".jsonl")].strip()
+  if "/subagents/" in normalized:
+    raw_id = re.sub(r"^agent-?", "", raw_id)
+  return raw_id or None
+
+def fallback_claude_session_id(pid):
+  cwd = process_cwd(pid)
+  if not cwd:
+    return None
+  project_dir = Path.home() / ".claude" / "projects" / re.sub(r"[^a-zA-Z0-9-]", "-", cwd)
+  try:
+    entries = [entry for entry in project_dir.iterdir() if entry.is_file() and entry.name.endswith(".jsonl")]
+  except Exception:
+    return None
+  started_at_ms = process_started_at_ms(pid)
+  candidates = []
+  for entry in entries:
+    try:
+      stat = entry.stat()
+    except Exception:
+      continue
+    created_at_ms = stat.st_ctime * 1000
+    modified_at_ms = stat.st_mtime * 1000
+    if started_at_ms is not None and max(created_at_ms, modified_at_ms) < started_at_ms - CLAUDE_SESSION_START_SKEW_MS:
+      continue
+    created_for_process = started_at_ms is None or created_at_ms >= started_at_ms - CLAUDE_SESSION_START_SKEW_MS
+    distance_ms = -modified_at_ms if started_at_ms is None else abs((created_at_ms if created_for_process else modified_at_ms) - started_at_ms)
+    candidates.append((0 if created_for_process else 1, distance_ms, entry.name[:-len(".jsonl")]))
+  if not candidates:
+    return None
+  candidates.sort()
+  return candidates[0][2]
+
 def reverse_lines(path):
   with path.open("rb") as handle:
     handle.seek(0, os.SEEK_END)
@@ -147,31 +228,54 @@ def agent_is_working(path):
   return False
 
 seen = set()
+
+def emit_session(family, raw_id, pid):
+  normalized = raw_id.strip() if isinstance(raw_id, str) else ""
+  key = (family, normalized)
+  if not normalized or key in seen:
+    return
+  seen.add(key)
+  print(json.dumps({"family": family, "rawId": normalized, "pid": pid}, separators=(",", ":")))
+
 for pid, tokens in process_rows():
   command_index = codex_command_index(tokens)
+  if command_index is not None:
+    args = tokens[command_index + 1:]
+    resumed_id = None
+    if "resume" in args:
+      resume_index = args.index("resume")
+      if resume_index + 1 < len(args):
+        raw_id = args[resume_index + 1].strip()
+        if raw_id and not raw_id.startswith("-"):
+          resumed_id = raw_id
+          emit_session("codex", raw_id, pid)
+    if "app-server" in args:
+      for file_name in open_files(pid):
+        if "/.codex/sessions/" not in file_name.replace("\\", "/"):
+          continue
+        match = SESSION_ID_PATTERN.search(file_name)
+        if match and agent_is_working(Path(file_name)):
+          emit_session("codex", match.group(1), pid)
+    elif resumed_id is None and normalized_executable(tokens[command_index]) == "codex":
+      emit_session("codex", "*", pid)
+
+  command_index = claude_command_index(tokens)
   if command_index is None:
     continue
   args = tokens[command_index + 1:]
-  if "resume" in args:
-    resume_index = args.index("resume")
-    if resume_index + 1 < len(args):
-      raw_id = args[resume_index + 1].strip()
-      if raw_id and not raw_id.startswith("-") and raw_id not in seen:
-        seen.add(raw_id)
-        print(json.dumps({"family": "codex", "rawId": raw_id, "pid": pid}, separators=(",", ":")))
-  if "app-server" not in args:
+  resumed_id = flag_resume_id(args)
+  if resumed_id:
+    emit_session("claude", resumed_id, pid)
     continue
-  for file_name in open_files(pid):
-    if "/.codex/sessions/" not in file_name.replace("\\", "/"):
-      continue
-    match = SESSION_ID_PATTERN.search(file_name)
-    if not match:
-      continue
-    raw_id = match.group(1)
-    if raw_id in seen or not agent_is_working(Path(file_name)):
-      continue
-    seen.add(raw_id)
-    print(json.dumps({"family": "codex", "rawId": raw_id, "pid": pid}, separators=(",", ":")))
+  open_session_ids = [raw_id for raw_id in (claude_session_id(file_name) for file_name in open_files(pid)) if raw_id]
+  if open_session_ids:
+    for raw_id in open_session_ids:
+      emit_session("claude", raw_id, pid)
+    continue
+  fallback_id = fallback_claude_session_id(pid)
+  if fallback_id:
+    emit_session("claude", fallback_id, pid)
+  emit_session("claude", "*", pid)
 `;
 
 const remoteScriptPayload = deflateRawSync(Buffer.from(REMOTE_CODEX_ACTIVITY_SCRIPT, "utf8")).toString("base64");
@@ -186,12 +290,16 @@ export async function loadRemoteLiveSessions(
 ): Promise<LiveSession[]> {
   const outputs = await Promise.all(
     environments
-      .filter((environment) => environment.kind === "ssh" && environment.enabled)
+      .filter((environment) => (environment.kind === "ssh" || environment.kind === "wsl") && environment.enabled)
       .map(async (environment) => {
         try {
           const output = await runRemoteCommand(environment, REMOTE_CODEX_ACTIVITY_COMMAND);
           return parseRemoteLiveSessions(output, environment.id);
-        } catch {
+        } catch (error) {
+          if (environment.kind === "wsl") {
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new Error(`Could not inspect live sessions in WSL environment ${environment.label}: ${detail}`);
+          }
           return [];
         }
       }),
@@ -216,11 +324,11 @@ function parseRemoteLiveSessions(output: string, environmentId: string): LiveSes
     if (!line.trim()) continue;
     try {
       const value = JSON.parse(line) as Record<string, unknown>;
-      if (value.family !== "codex" || typeof value.rawId !== "string") continue;
+      if ((value.family !== "codex" && value.family !== "claude") || typeof value.rawId !== "string") continue;
       if (typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0) continue;
       const rawId = value.rawId.trim();
       if (!rawId) continue;
-      sessions.push({ family: "codex", rawId, pid: value.pid, environmentId });
+      sessions.push({ family: value.family, rawId, pid: value.pid, environmentId });
     } catch {
       continue;
     }

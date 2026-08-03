@@ -1,6 +1,7 @@
 import type { IpcRenderer } from "electron";
 
 import type {
+  OpenVikingDiagnosticsSnapshot,
   OpenVikingMemoryItem,
   OpenVikingMemorySnapshot,
   OpenVikingModelStatus,
@@ -21,6 +22,8 @@ export function createOpenVikingMemoryApi(ipc: OpenVikingMemoryIpcRenderer) {
   return {
     getOpenVikingMemorySnapshot: (): Promise<OpenVikingMemorySnapshot> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.snapshot.channel),
+    getOpenVikingDiagnostics: (): Promise<OpenVikingDiagnosticsSnapshot> =>
+      ipc.invoke(OPENVIKING_MEMORY_IPC.diagnostics.channel),
     chooseOpenVikingDirectory: (): Promise<OpenVikingDirectoryPreview | null> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.chooseDirectory.channel),
     previewOpenVikingDirectory: (rootPath: string): Promise<OpenVikingDirectoryPreview> =>
@@ -61,6 +64,8 @@ export function createOpenVikingMemoryApi(ipc: OpenVikingMemoryIpcRenderer) {
       ipc.invoke(OPENVIKING_MEMORY_IPC.installRuntime.channel),
     startOpenVikingRuntime: (): Promise<OpenVikingRuntimeStatus> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.startRuntime.channel),
+    restartOpenVikingRuntime: (): Promise<OpenVikingRuntimeStatus> =>
+      ipc.invoke(OPENVIKING_MEMORY_IPC.restartRuntime.channel),
     stopOpenVikingRuntime: (): Promise<OpenVikingRuntimeStatus> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.stopRuntime.channel),
     installOpenVikingModel: (

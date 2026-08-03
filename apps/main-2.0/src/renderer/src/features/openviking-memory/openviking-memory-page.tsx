@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
+  Activity,
   BookOpen,
   ChevronDown,
   ChevronRight,
@@ -21,6 +22,7 @@ import type {
   OpenVikingMemorySnapshot,
   OpenVikingWorkspace,
 } from "../../../../core/openviking-memory";
+import { isOpenVikingMemoryTransient } from "../../../../core/openviking-memory-lifecycle";
 import type {
   OpenVikingDirectoryPreview,
   OpenVikingImportSessionPreview,
@@ -30,6 +32,9 @@ import {
   groupOpenVikingMemories,
   type OpenVikingMemoryCategory,
 } from "./openviking-memory-groups";
+import { OpenVikingRuntimeMonitor } from "./openviking-runtime-monitor";
+
+type MemoryView = "memory" | "runtime";
 
 type PageAction =
   | "choose"
@@ -55,6 +60,7 @@ export function OpenVikingMemoryPage({
   onOpenSettings: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const [activeView, setActiveView] = useState<MemoryView>("memory");
   const [snapshot, setSnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [preview, setPreview] = useState<OpenVikingDirectoryPreview | null>(null);
@@ -98,13 +104,7 @@ export function OpenVikingMemoryPage({
     void refresh().catch((cause) => setError(errorMessage(cause)));
   }, [enabled, refresh]);
 
-  const transient = Boolean(
-    action === "import"
-    || snapshot?.runtime.state === "installing"
-    || snapshot?.runtime.state === "starting"
-    || snapshot?.workspaces.some((workspace) =>
-      ["idle", "queued", "running"].includes(workspace.importState)),
-  );
+  const transient = isOpenVikingMemoryTransient(snapshot, action === "import");
 
   useEffect(() => {
     if (!enabled || !transient) return;
@@ -248,10 +248,19 @@ export function OpenVikingMemoryPage({
     setImportPickerWorkspace(null);
     browseRequestVersion.current += 1;
     setBrowseLoading(false);
+    setAction("import");
     setError(null);
     void window.sessionSearch.importOpenVikingWorkspace(target.id, selectedKeys)
       .catch((cause) => setError(errorMessage(cause)))
-      .finally(() => void refresh().catch((cause) => setError(errorMessage(cause))));
+      .finally(async () => {
+        try {
+          await refresh();
+        } catch (cause) {
+          setError(errorMessage(cause));
+        } finally {
+          setAction(null);
+        }
+      });
     void refresh().catch((cause) => setError(errorMessage(cause)));
   };
 
@@ -390,6 +399,28 @@ export function OpenVikingMemoryPage({
     );
   }
 
+  if (activeView === "runtime") {
+    return (
+      <div className="openviking-memory-page">
+        <header className="app-page-head openviking-page-head">
+          <div>
+            <h2>{l("Memory", "记忆")}</h2>
+            <p>{l(
+              "Observe and control the local OpenViking memory runtime.",
+              "观测并控制本机的 OpenViking 记忆服务。",
+            )}</p>
+          </div>
+        </header>
+        <OpenVikingMemoryTabs
+          activeView={activeView}
+          language={language}
+          onChange={setActiveView}
+        />
+        <OpenVikingRuntimeMonitor language={language} />
+      </div>
+    );
+  }
+
   return (
     <div className="openviking-memory-page">
       <header className="app-page-head openviking-page-head">
@@ -415,6 +446,12 @@ export function OpenVikingMemoryPage({
           </button>
         </div>
       </header>
+
+      <OpenVikingMemoryTabs
+        activeView={activeView}
+        language={language}
+        onChange={setActiveView}
+      />
 
       {!ready && snapshot ? (
         <section className="openviking-setup-notice">
@@ -780,6 +817,38 @@ export function OpenVikingMemoryPage({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function OpenVikingMemoryTabs({
+  activeView,
+  language,
+  onChange,
+}: {
+  activeView: MemoryView;
+  language: LanguageMode;
+  onChange: (view: MemoryView) => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  return (
+    <nav className="openviking-memory-tabs" aria-label={l("Memory views", "记忆视图")}>
+      <button
+        type="button"
+        className={activeView === "memory" ? "active" : ""}
+        aria-current={activeView === "memory" ? "page" : undefined}
+        onClick={() => onChange("memory")}
+      >
+        <BookOpen size={14} />{l("Memories", "记忆")}
+      </button>
+      <button
+        type="button"
+        className={activeView === "runtime" ? "active" : ""}
+        aria-current={activeView === "runtime" ? "page" : undefined}
+        onClick={() => onChange("runtime")}
+      >
+        <Activity size={14} />{l("Runtime monitor", "运行监控")}
+      </button>
+    </nav>
   );
 }
 

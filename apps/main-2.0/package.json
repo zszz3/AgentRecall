@@ -41,6 +41,7 @@
     "test:workflow-transaction": "vitest run src/automation/engine/shared/workflow-v2 src/automation/engine/main/workflows/v2 src/automation/engine/main/workflows/workflow-runtime.test.ts src/automation/engine/main/hub/agent-hub-workflow-activation.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-clone.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-restore.test.ts src/automation/engine/main/hub/workflow/agent-hub-workflow-v2.test.ts src/automation/engine/renderer/src/pages/workflow/WorkflowPage.test.tsx src/automation/engine/renderer/src/pages/workflow/WorkflowRunCenter.test.tsx",
     "test:watch": "vitest",
     "package:smoke": "npm run build && node scripts/package-smoke.mjs",
+    "release:preflight:openviking": "node scripts/verify-openviking-runtime-inputs.mjs",
     "release-note:check": "node scripts/release-notes.mjs check-range",
     "prepare": "npm run build:mcp && electron-vite build",
     "build:mcp": "node scripts/build-mcp-bundle.mjs",

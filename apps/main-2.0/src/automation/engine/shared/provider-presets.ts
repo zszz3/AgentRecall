@@ -16,6 +16,7 @@ export interface AgentProviderPreset {
   providerName?: string;
   modelProvider?: string;
   baseUrl?: string;
+  modelCatalogUrl?: string;
   wireApi?: string;
   apiFormat?: RuntimeProviderApiFormat;
   apiKeyField?: ClaudeApiKeyField;
@@ -578,8 +579,17 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
   },
 ];
 
+const PROVIDER_MODEL_CATALOG_URLS: Readonly<Record<string, string>> = {
+  "claude-code-deepseek": "https://api.deepseek.com/models",
+};
+
 export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
-  ...CC_SWITCH_PROVIDER_PRESETS,
+  ...CC_SWITCH_PROVIDER_PRESETS.map((preset) => ({
+    ...preset,
+    ...(PROVIDER_MODEL_CATALOG_URLS[preset.id]
+      ? { modelCatalogUrl: PROVIDER_MODEL_CATALOG_URLS[preset.id] }
+      : {}),
+  })),
   {
     id: CODEX_LOCAL_DEFAULT_PRESET_ID,
     label: "Default",

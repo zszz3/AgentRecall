@@ -182,12 +182,18 @@ export function SettingsDialog({
   const [summaryBatch, setSummaryBatch] = useState<{ running: boolean; message: string | null }>({ running: false, message: null });
   const [mcpEnabled, setMcpEnabled] = useState<boolean | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
+  const [workflowMcpEnabled, setWorkflowMcpEnabled] = useState<boolean | null>(null);
+  const [workflowMcpBusy, setWorkflowMcpBusy] = useState(false);
 
   useEffect(() => {
     void window.sessionSearch
       .getMcpStatus()
       .then(setMcpEnabled)
       .catch(() => setMcpEnabled(false));
+    void window.sessionSearch
+      .getWorkflowMcpStatus()
+      .then(setWorkflowMcpEnabled)
+      .catch(() => setWorkflowMcpEnabled(false));
   }, []);
 
   async function toggleMcp(next: boolean): Promise<void> {
@@ -198,6 +204,17 @@ export function SettingsDialog({
       // Leave the previous state; the toggle simply won't flip.
     } finally {
       setMcpBusy(false);
+    }
+  }
+
+  async function toggleWorkflowMcp(next: boolean): Promise<void> {
+    setWorkflowMcpBusy(true);
+    try {
+      setWorkflowMcpEnabled(await window.sessionSearch.setWorkflowMcpEnabled(next));
+    } catch {
+      // Leave the previous state; the toggle simply won't flip.
+    } finally {
+      setWorkflowMcpBusy(false);
     }
   }
 
@@ -798,8 +815,8 @@ export function SettingsDialog({
                   <h3>{l("MCP server", "MCP 服务")}</h3>
                   <p>
                     {l(
-                      "Let Claude Code / Codex search your past sessions over MCP (search_sessions, get_session). Registers the server in their configs; restart them to apply.",
-                      "让 Claude Code / Codex 通过 MCP 检索你的历史会话(search_sessions、get_session)。会注册到它们的配置中，重启后生效。",
+                      "Manage MCP servers that expose AgentRecall capabilities to your CLI agents. Restart the CLI to apply config changes.",
+                      "管理暴露给 CLI Agent 的 AgentRecall 能力 MCP。修改配置后重启对应 CLI 生效。",
                     )}
                   </p>
                 </header>
@@ -818,6 +835,23 @@ export function SettingsDialog({
                     checked={Boolean(mcpEnabled)}
                     disabled={mcpEnabled === null || mcpBusy}
                     onChange={(event) => void toggleMcp(event.currentTarget.checked)}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Enable workflow MCP", "启用工作流 MCP")}</span>
+                    <span className="settings-field-sub">
+                      {workflowMcpEnabled === null
+                        ? l("Checking...", "检查中...")
+                        : l("Default off. Registers the workflow MCP for configured Codex Agents.", "默认关闭。启用后为已配置的 Codex Agent 注册工作流 MCP。")}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(workflowMcpEnabled)}
+                    disabled={workflowMcpEnabled === null || workflowMcpBusy}
+                    onChange={(event) => void toggleWorkflowMcp(event.currentTarget.checked)}
                   />
                 </label>
               </section>

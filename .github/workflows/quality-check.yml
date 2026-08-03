@@ -16,6 +16,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      npm_config_audit: "false"
+      npm_config_cache: ${{ github.workspace }}/.ci-npm-cache
+      npm_config_fund: "false"
+      npm_config_prefer_offline: "true"
+      AGENT_RECALL_TEST_NPM_CACHE: ${{ github.workspace }}/.ci-npm-cache
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -40,22 +47,13 @@ jobs:
       - name: Validate release note
         run: node scripts/release-notes.mjs check-range "origin/${{ github.base_ref }}" HEAD
 
-      - name: Test
-        if: runner.os != 'Windows'
+      - name: Test complete application suites
+        if: runner.os == 'Linux'
         run: npm test
 
-      - name: Test update and install scripts (Windows)
-        if: runner.os == 'Windows'
+      - name: Test platform-specific scripts
+        if: runner.os != 'Linux'
         run: npm run test:scripts
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Smoke-test packaged V1 install
-        run: npm run package:smoke
-
-      - name: Smoke-test packaged V2 install
-        run: npm run package:smoke:v2
+      - name: Build and smoke-test packaged applications
+        run: npm run package:smoke:all

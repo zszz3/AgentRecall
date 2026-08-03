@@ -6,6 +6,7 @@ import {
   readFile,
   realpath,
   rename,
+  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
@@ -18,6 +19,7 @@ import {
   normalizeWorkspacePath,
   workspaceUserId,
   type OpenVikingImportActivity,
+  type OpenVikingImportTaskDiagnostics,
   type OpenVikingMemoryItem,
   type OpenVikingWorkspace,
 } from "../../core/openviking-memory";
@@ -173,6 +175,64 @@ export class OpenVikingMemoryService {
       const importActivity = this.importActivities.get(workspace.id);
       return importActivity ? { ...workspace, importActivity } : workspace;
     });
+  }
+
+  async listImportTaskDiagnostics(queryRemote: boolean): Promise<OpenVikingImportTaskDiagnostics[]> {
+    const workspaces = await this.options.store.listOpenVikingWorkspaces();
+    const tasks = (await Promise.all(
+      workspaces.map((workspace) => this.options.store.listOpenVikingImportTasks(workspace.id)),
+    ))
+      .flat()
+      .sort((left, right) => {
+        const activeDifference = Number(isActiveImportTask(right.state))
+          - Number(isActiveImportTask(left.state));
+        return activeDifference || right.updatedAt.localeCompare(left.updatedAt);
+      })
+      .slice(0, 200);
+
+    return Promise.all(tasks.map(async (task) => {
+      const diagnostic: OpenVikingImportTaskDiagnostics = {
+        id: task.id,
+        workspaceId: task.workspaceId,
+        sessionKey: task.sessionKey,
+        sessionTitle: task.sessionTitle,
+        position: task.position,
+        turnCount: task.payload.primary.length,
+        state: task.state,
+        attemptCount: task.attemptCount,
+        ...(task.remoteTaskId ? { remoteTaskId: task.remoteTaskId } : {}),
+        ...(task.lastError ? { lastError: diagnosticMessage(task.lastError) } : {}),
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      };
+      if (
+        !queryRemote
+        || !task.remoteTaskId
+        || !isActiveImportTask(task.state)
+        || !this.options.client.getTaskIfRunning
+      ) return diagnostic;
+
+      const auth = await this.options.credentials.get(task.workspaceId);
+      if (!auth) return diagnostic;
+      try {
+        const remoteTask = await this.options.client.getTaskIfRunning(auth, task.remoteTaskId);
+        if (!remoteTask) return diagnostic;
+        const remoteState = diagnosticString(remoteTask.status);
+        const remoteStage = diagnosticString(remoteTask.stage ?? remoteTask.phase);
+        const remoteError = diagnosticString(remoteTask.error);
+        return {
+          ...diagnostic,
+          ...(remoteState ? { remoteState } : {}),
+          ...(remoteStage ? { remoteStage } : {}),
+          ...(remoteError ? { remoteError } : {}),
+        };
+      } catch (error) {
+        return {
+          ...diagnostic,
+          remoteError: diagnosticMessage(error instanceof Error ? error.message : String(error)),
+        };
+      }
+    }));
   }
 
   async previewDirectory(inputPath: string): Promise<OpenVikingDirectoryPreview> {
@@ -888,6 +948,20 @@ export class OpenVikingMemoryService {
   }
 }
 
+function isActiveImportTask(state: OpenVikingImportTask["state"]): boolean {
+  return state === "queued" || state === "uploading" || state === "waiting";
+}
+
+function diagnosticString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim()
+    ? diagnosticMessage(value)
+    : undefined;
+}
+
+function diagnosticMessage(message: string): string {
+  return message.replace(/\s+/gu, " ").trim().slice(0, 500);
+}
+
 function sessionImportRevision(session: SessionSearchResult): string {
   return createHash("sha256")
     .update(JSON.stringify([
@@ -907,25 +981,37 @@ function importedTurnCheckpointKey(sourceTurnId: string, fingerprint: string): s
 
 export class OpenVikingWorkspaceCredentialStore implements OpenVikingCredentialStorePort {
   private readonly filePath: string;
+  private updateQueue: Promise<void> = Promise.resolve();
 
   constructor(rootDir: string) {
     this.filePath = path.join(path.resolve(rootDir), "workspace-credentials.json");
   }
 
   async get(workspaceId: string): Promise<OpenVikingWorkspaceAuth | null> {
+    await this.updateQueue;
     return (await this.read())[workspaceId] ?? null;
   }
 
-  async set(workspaceId: string, auth: OpenVikingWorkspaceAuth): Promise<void> {
-    const current = await this.read();
-    current[workspaceId] = auth;
-    await this.write(current);
+  set(workspaceId: string, auth: OpenVikingWorkspaceAuth): Promise<void> {
+    return this.enqueueUpdate(async () => {
+      const current = await this.read();
+      current[workspaceId] = auth;
+      await this.write(current);
+    });
   }
 
-  async delete(workspaceId: string): Promise<void> {
-    const current = await this.read();
-    delete current[workspaceId];
-    await this.write(current);
+  delete(workspaceId: string): Promise<void> {
+    return this.enqueueUpdate(async () => {
+      const current = await this.read();
+      delete current[workspaceId];
+      await this.write(current);
+    });
+  }
+
+  private enqueueUpdate(update: () => Promise<void>): Promise<void> {
+    const pending = this.updateQueue.then(update);
+    this.updateQueue = pending.catch(() => undefined);
+    return pending;
   }
 
   private async read(): Promise<Record<string, OpenVikingWorkspaceAuth>> {
@@ -939,13 +1025,17 @@ export class OpenVikingWorkspaceCredentialStore implements OpenVikingCredentialS
 
   private async write(value: Record<string, OpenVikingWorkspaceAuth>): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    const temporary = `${this.filePath}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await chmod(temporary, 0o600);
-    await rename(temporary, this.filePath);
+    const temporary = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await chmod(temporary, 0o600);
+      await rename(temporary, this.filePath);
+    } finally {
+      await rm(temporary, { force: true });
+    }
     await chmod(this.filePath, 0o600);
   }
 }

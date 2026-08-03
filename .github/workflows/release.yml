@@ -15,7 +15,7 @@ concurrency:
 jobs:
   openviking-runtime:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - runner: macos-15

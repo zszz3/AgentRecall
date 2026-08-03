@@ -1,4 +1,5 @@
 import type { AgentChannel, AgentModelOption } from "../../shared/types";
+import { AGENT_PROVIDER_PRESETS, type AgentProviderPreset } from "../../shared/provider-presets";
 import { execCli } from "../platform/cli-launcher";
 import { parseCodexModelCatalog } from "./model-config";
 
@@ -31,8 +32,22 @@ function isCodexOfficial(channel: AgentChannel): boolean {
   );
 }
 
+function providerPresetForChannel(channel: AgentChannel): AgentProviderPreset | undefined {
+  const selectedPreset = channel.presetId
+    ? AGENT_PROVIDER_PRESETS.find((preset) => preset.runtimeAgentId === channel.agentId && preset.id === channel.presetId)
+    : undefined;
+  if (selectedPreset) return selectedPreset;
+  if (!channel.modelProvider) return undefined;
+  return AGENT_PROVIDER_PRESETS.find(
+    (preset) => preset.runtimeAgentId === channel.agentId && preset.modelProvider === channel.modelProvider,
+  );
+}
+
 function openAiModelsUrl(channel: AgentChannel): string | undefined {
-  if (channel.agentId === "claude" || !channel.baseUrl || channel.isFullUrl || channel.apiFormat === "anthropic" || channel.apiFormat === "gemini_native") return undefined;
+  const providerCatalogUrl = providerPresetForChannel(channel)?.modelCatalogUrl?.trim();
+  if (providerCatalogUrl) return providerCatalogUrl;
+  if (!channel.baseUrl || channel.isFullUrl || channel.apiFormat === "anthropic" || channel.apiFormat === "gemini_native") return undefined;
+  if (channel.agentId === "claude" && channel.apiFormat !== "openai_chat" && channel.apiFormat !== "openai_responses") return undefined;
   const baseUrl = channel.baseUrl.replace(/\/+$/, "");
   return baseUrl.endsWith("/models") ? baseUrl : `${baseUrl}/models`;
 }

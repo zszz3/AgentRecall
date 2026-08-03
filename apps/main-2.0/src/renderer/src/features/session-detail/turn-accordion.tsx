@@ -19,6 +19,7 @@ import { HighlightedSearchText, searchHighlightTerms } from "../../search-highli
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { markdownPreview } from "../../markdown-preview";
+import { MessageHead } from "./message-shell";
 
 export interface TurnAccordionState {
   sessionKey: string;
@@ -243,23 +244,22 @@ function TurnMessageBlock({
     );
   }, [expanded, language, message.content, truncated]);
   const terms = useMemo(() => searchHighlightTerms(query), [query]);
-  const useMarkdown = message.role === "assistant" && terms.length === 0;
+  const useMarkdown = terms.length === 0;
 
   return (
-    <div className={`turn-message ${message.role} ${message.phase === "commentary" ? "commentary" : ""}`} data-message-index={message.sourceMessageIndex ?? undefined}>
-      <div className="turn-message-head">
-        <strong>{message.role === "user" ? localize(language, "User", "用户") : localize(language, "Assistant", "助手")}</strong>
-        {message.phase === "commentary"
-          ? <span className="message-phase">{localize(language, "Process note", "过程说明")}</span>
-          : null}
-        <span>{formatMessageTime(message.timestamp)}</span>
-      </div>
+    <div className={`msg ${message.role} ${message.phase === "commentary" ? "commentary" : ""}`} data-message-index={message.sourceMessageIndex ?? undefined}>
+      <MessageHead
+        role={message.role}
+        phase={message.phase}
+        timestamp={message.timestamp}
+        language={language}
+      />
       {useMarkdown ? (
-        <div className="turn-message-content">
+        <div className="msg-body">
           <Markdown text={content} language={language} />
         </div>
       ) : (
-        <pre>{terms.length > 0 ? <HighlightedSearchText text={content} terms={terms} /> : content}</pre>
+        <pre className="msg-body msg-body-plain"><HighlightedSearchText text={content} terms={terms} /></pre>
       )}
       {truncated ? (
         <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
@@ -280,35 +280,38 @@ function TurnSpanBlock({
 }): ReactElement {
   const elapsed = durationLabel(durationMs(span.startedAt, span.endedAt));
   return (
-    <details className={`turn-span ${span.status}`}>
-      <summary>
-        <span className="turn-span-name">
-          <span className="turn-span-status">{spanStatusSymbol(span.status)}</span>
-          <Wrench size={13} />
-          {span.name}
-          <span className="turn-span-status-label">{spanStatusLabel(span.status, language)}</span>
+    <details className={`msg tool ${span.status}`}>
+      <summary className="msg-tool-summary">
+        <span className="msg-avatar" aria-hidden>
+          <Wrench size={11} />
         </span>
-        <span className="turn-span-time">
-          {elapsed ? <span>{elapsed}</span> : null}
-          {span.startedAt ? <span>{formatMessageTime(span.startedAt)}</span> : null}
+        <span className="msg-head">
+          <strong>{span.name}</strong>
+          <span className="msg-tool-status">
+            {spanStatusSymbol(span.status)} {spanStatusLabel(span.status, language)}
+          </span>
+          <span className="msg-time">
+            {elapsed ? <span>{elapsed}</span> : null}
+            {span.startedAt ? <span>{formatMessageTime(span.startedAt)}</span> : null}
+          </span>
         </span>
       </summary>
-      <div className="turn-span-body">
-        {span.callId ? <code className="turn-span-call-id">{span.callId}</code> : null}
+      <div className="msg-tool-body">
+        {span.callId ? <code className="msg-tool-call-id">{span.callId}</code> : null}
         {span.input ? (
-          <details className="turn-span-payload">
+          <details className="msg-tool-payload">
             <summary>{localize(language, "Input", "输入")}</summary>
             <pre>{payloadText(span.input)}</pre>
           </details>
         ) : null}
         {span.output ? (
-          <details className="turn-span-payload">
+          <details className="msg-tool-payload">
             <summary>{localize(language, "Output", "输出")}</summary>
             <pre>{payloadText(span.output)}</pre>
           </details>
         ) : null}
         {span.error ? (
-          <div className="turn-span-error">
+          <div className="msg-tool-error">
             <AlertCircle size={13} />
             <pre>{span.error}</pre>
           </div>
@@ -334,7 +337,6 @@ function TurnDetailTimeline({
     <div className="turn-timeline">
       {timeline.map((item) => (
         <div key={item.key} className={`turn-timeline-item ${item.kind}`} data-timeline-key={item.key}>
-          <span className="turn-timeline-rail" aria-hidden />
           {item.kind === "message" ? (
             <TurnMessageBlock message={item.message} query={query} language={language} />
           ) : (

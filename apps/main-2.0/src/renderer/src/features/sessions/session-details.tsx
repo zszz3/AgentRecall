@@ -17,8 +17,21 @@ import {
 } from "../../session-ui";
 import { DetailPanel } from "../session-detail/detail-panel";
 
+const EMPTY_SESSION_FAMILY: SessionFamily = {
+  parent: null,
+  children: [],
+  truncated: false,
+};
+
+type SessionFamilyLoadState = {
+  sessionKey: string | null;
+  family: SessionFamily;
+  status: "idle" | "loading" | "ready" | "error";
+};
+
 export interface SessionDetailsActions {
   loadTurn(session: SessionSearchResult, turnId: string): Promise<SessionTurnDetail | null>;
+  openFamilySession(sessionKey: string): Promise<"opened" | "missing" | "failed">;
   closeLocal(): void;
   closeRemote(): void;
   rename(session: SessionSearchResult): void;
@@ -52,6 +65,7 @@ export function SessionDetails({
   revealLabel,
   showItermAction,
   summarizing,
+  familyRefreshVersion,
   actions,
 }: {
   detail: SessionSearchResult | null;
@@ -66,34 +80,49 @@ export function SessionDetails({
   revealLabel: string;
   showItermAction: boolean;
   summarizing: boolean;
+  familyRefreshVersion: number;
   actions: SessionDetailsActions;
 }): ReactElement | null {
   const l = (en: string, zh: string): string => language === "zh" ? zh : en;
-  const [sessionFamily, setSessionFamily] = useState<SessionFamily>({
-    parent: null,
-    children: [],
-    truncated: false,
+  const [familyState, setFamilyState] = useState<SessionFamilyLoadState>({
+    sessionKey: null,
+    family: EMPTY_SESSION_FAMILY,
+    status: "idle",
   });
+  const [familyRetryVersion, setFamilyRetryVersion] = useState(0);
 
   useEffect(() => {
     if (!detail) {
-      setSessionFamily({ parent: null, children: [], truncated: false });
+      setFamilyState({ sessionKey: null, family: EMPTY_SESSION_FAMILY, status: "idle" });
       return;
     }
+    const sessionKey = detail.sessionKey;
     let cancelled = false;
-    void window.sessionSearch.getSessionFamily(detail.sessionKey)
+    setFamilyState((current) => current.sessionKey === sessionKey
+      ? { ...current, status: "loading" }
+      : { sessionKey, family: EMPTY_SESSION_FAMILY, status: "loading" });
+    void window.sessionSearch.getSessionFamily(sessionKey)
       .then((family) => {
-        if (!cancelled) setSessionFamily(family);
+        if (!cancelled) setFamilyState({ sessionKey, family, status: "ready" });
       })
       .catch(() => {
-        if (!cancelled) setSessionFamily({ parent: null, children: [], truncated: false });
+        if (!cancelled) {
+          setFamilyState((current) => current.sessionKey === sessionKey
+            ? { ...current, status: "error" }
+            : current);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [detail?.sessionKey]);
+  }, [detail?.sessionKey, familyRefreshVersion, familyRetryVersion]);
 
   if (detail) {
+    const sessionFamily = familyState.sessionKey === detail.sessionKey
+      ? familyState.family
+      : EMPTY_SESSION_FAMILY;
+    const familyLoadFailed = familyState.sessionKey === detail.sessionKey
+      && familyState.status === "error";
     const canMigrate = detail.environmentKind !== "ssh" && supportsMigrationSource(detail.source);
     const migrationTitle = detail.environmentKind === "ssh"
       ? remoteMigrationTitle(language)
@@ -109,6 +138,13 @@ export function SessionDetails({
         matchedTurnId={matchedTurnId}
         onLoadTurn={(turnId) => actions.loadTurn(detail, turnId)}
         onMigrateTurn={canMigrate ? (turn) => actions.migrate(detail, turn) : undefined}
+        onOpenFamilySession={(sessionKey) => {
+          void actions.openFamilySession(sessionKey).then((result) => {
+            if (result === "missing") setFamilyRetryVersion((current) => current + 1);
+          });
+        }}
+        sessionFamilyLoadFailed={familyLoadFailed}
+        onRetrySessionFamily={() => setFamilyRetryVersion((current) => current + 1)}
         messages={[]}
         matchedContextMessages={[]}
         matchedMessageIndex={null}

@@ -95,11 +95,12 @@ export function patchCodexResponsesAdapter(source) {
   if (parts.length !== 2) {
     throw new Error("Cannot patch unsupported OpenViking Codex adapter.");
   }
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
   return [
     parts[0],
-    '        reasoning_effort = kwargs.get("reasoning_effort")\n',
-    "        if reasoning_effort:\n",
-    `            ${marker}\n`,
+    `        reasoning_effort = kwargs.get("reasoning_effort")${newline}`,
+    `        if reasoning_effort:${newline}`,
+    `            ${marker}${newline}`,
     anchor,
     parts[1],
   ].join("");
@@ -110,22 +111,26 @@ export function patchVlmReasoningEffortConfig(source) {
   const forwardingMarker = '            "reasoning_effort": self.reasoning_effort,';
   if (source.includes(fieldMarker) && source.split(forwardingMarker).length === 3) return source;
 
-  const thinkingField = /^    thinking: bool = Field\(.*\)$/mu;
+  const thinkingField = /^(    thinking: bool = Field\([^\r\n]*\))(\r?\n)/mu;
   if (!thinkingField.test(source)) {
     throw new Error("Cannot patch unsupported OpenViking VLM config.");
   }
-  const resultAnchor = '            "thinking": self.thinking,\n';
-  if (source.split(resultAnchor).length !== 3) {
+  const resultAnchor = /^(            "thinking": self\.thinking,)(\r?\n)/gmu;
+  if ([...source.matchAll(resultAnchor)].length !== 2) {
     throw new Error("Cannot patch unsupported OpenViking VLM config.");
   }
   return source
     .replace(
       thinkingField,
-      (line) => `${line}\n    reasoning_effort: str = Field(default="low", description="OpenAI reasoning effort")`,
+      (_line, field, newline) => [
+        field,
+        '    reasoning_effort: str = Field(default="low", description="OpenAI reasoning effort")',
+        "",
+      ].join(newline),
     )
     .replaceAll(
       resultAnchor,
-      `${resultAnchor}${forwardingMarker}\n`,
+      (_line, anchor, newline) => `${anchor}${newline}${forwardingMarker}${newline}`,
     );
 }
 

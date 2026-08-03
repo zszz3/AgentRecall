@@ -30,7 +30,7 @@ export function useMcpAgentBindings(
 
   const installedIds = useMemo(() => new Set(diagnostics.map((item) => item.catalogId)), [diagnostics]);
   const available = useMemo(() => MCP_CATALOG.filter((item) => !installedIds.has(item.id)), [installedIds]);
-  const customServers = useMemo(() => servers.filter((server) => server.enabled), [servers]);
+  const customServers = useMemo(() => servers.filter((server) => server.enabled && (server.hubBindable ?? true)), [servers]);
   const boundServerIds = useMemo(() => new Set(agent?.mcpBindings?.map((binding) => binding.serverId) ?? []), [agent?.mcpBindings]);
   const toggleServer = useCallback(async (serverId: string) => {
     if (!agent || !onSaveAgents) return;

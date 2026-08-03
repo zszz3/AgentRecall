@@ -83,6 +83,9 @@ function fixture(injectAgents = true) {
     handleMcpRequest: vi.fn(async () => ({ ok: true })),
   } as unknown as TeamChatService;
   const agents = {} as McpAgentManagementService;
+  const database = {
+    query: vi.fn(async () => ({ rows: [] })),
+  } as unknown as PostgresDatabase;
   const startBridge = vi.fn(async (_hub: AgentHub, _options: StartMcpBridgeOptions) => {
     calls.push("bridge");
     return {
@@ -96,7 +99,7 @@ function fixture(injectAgents = true) {
   });
   const service = new NativeAutomationService(
     {
-      database: {} as PostgresDatabase,
+      database,
       userDataPath: "/user-data",
       homePath: "/home/dev",
       appDataPath: "/app-data",
@@ -109,7 +112,18 @@ function fixture(injectAgents = true) {
       evaluations,
       teamChats,
       ...(injectAgents ? { agents } : {}),
-      loadBundledWorkflows: vi.fn(async () => [{ workflowId: "wf", title: "One", objective: "One", definition: {} as never }]),
+      loadBundledWorkflows: vi.fn(async () => [{
+        workflowId: "wf",
+        title: "One",
+        objective: "One",
+        definition: { workflowId: "wf", graphVersion: 1, objective: "One", nodes: [], edges: [] },
+      }]),
+      loadBundledWorkflowSummaries: vi.fn(async () => [{
+        workflowId: "wf",
+        title: "One",
+        objective: "One",
+        nodeCount: 0,
+      }]),
       startRouter: vi.fn(async () => {
         calls.push("router");
         return { host: "127.0.0.1", port: 1, baseUrl: "http://127.0.0.1:1", stop: async () => { calls.push("router-stop"); } };
@@ -126,6 +140,7 @@ function fixture(injectAgents = true) {
     evaluations,
     teamChats,
     startBridge,
+    database,
     emit: (value: AppSnapshot) => {
       current = value;
       listener?.({ kind: "snapshot", snapshot: value });
@@ -137,6 +152,20 @@ function fixture(injectAgents = true) {
 }
 
 describe("NativeAutomationService", () => {
+  it("loads Workflow sidebar summaries without preparing full automation state", async () => {
+    const { service, hub, database } = fixture();
+
+    const sidebar = await service.workflowSidebar();
+
+    expect(sidebar).toMatchObject({
+      activeWorkflowId: "wf",
+      workflows: [{ workflowId: "wf", sourceType: "official", nodeCount: 0 }],
+    });
+    expect(hub.loadModelChannels).not.toHaveBeenCalled();
+    expect(hub.loadPersistedState).not.toHaveBeenCalled();
+    expect(database.query).toHaveBeenCalledTimes(2);
+  });
+
   it("prepares the persisted snapshot without starting execution infrastructure", async () => {
     const { service, calls, teamChats } = fixture();
 

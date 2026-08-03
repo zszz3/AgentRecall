@@ -38,6 +38,7 @@ const servers: BoundMcpServer[] = [
       args: [],
       url: "https://example.test/mcp",
       env: {},
+      headers: { Authorization: "HOST_HTTP_TOKEN" },
       enabled: true,
       tools: [],
       status: "connected",
@@ -50,7 +51,7 @@ const servers: BoundMcpServer[] = [
 
 describe("runtime MCP configuration", () => {
   test("builds Codex overrides without exposing secret values in argv", () => {
-    const config = codexMcpLaunchConfig(servers, { HOST_API_TOKEN: "secret-value" });
+    const config = codexMcpLaunchConfig(servers, { HOST_API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" });
     const argv = config.args.join("\n");
 
     expect(argv).toContain("mcp_servers.agent_recall_");
@@ -58,20 +59,22 @@ describe("runtime MCP configuration", () => {
     expect(argv).toContain('env_vars=["API_TOKEN"]');
     expect(argv).toContain('enabled_tools=["read_file"]');
     expect(argv).toContain('url="https://example.test/mcp"');
+    expect(argv).toContain('env_http_headers={"Authorization" = "HOST_HTTP_TOKEN"}');
     expect(argv).not.toContain("secret-value");
-    expect(config.env).toMatchObject({ API_TOKEN: "secret-value" });
+    expect(argv).not.toContain("http-secret");
+    expect(config.env).toMatchObject({ API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" });
   });
 
   test("builds Claude and ACP server definitions for both transports", () => {
-    const claude = claudeMcpServers(servers, { HOST_API_TOKEN: "secret-value" });
+    const claude = claudeMcpServers(servers, { HOST_API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" });
     expect(Object.values(claude ?? {})).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: "node", args: ["server.js", "C:\\workspace"], env: { API_TOKEN: "secret-value" } }),
-      expect.objectContaining({ type: "http", url: "https://example.test/mcp" }),
+      expect.objectContaining({ type: "http", url: "https://example.test/mcp", headers: { Authorization: "http-secret" } }),
     ]));
 
-    expect(acpMcpServers(servers, { HOST_API_TOKEN: "secret-value" })).toEqual(expect.arrayContaining([
+    expect(acpMcpServers(servers, { HOST_API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" })).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: expect.stringMatching(/^agent_recall_/), command: "node", env: [{ name: "API_TOKEN", value: "secret-value" }] }),
-      expect.objectContaining({ type: "http", name: expect.stringMatching(/^agent_recall_/), url: "https://example.test/mcp", headers: [] }),
+      expect.objectContaining({ type: "http", name: expect.stringMatching(/^agent_recall_/), url: "https://example.test/mcp", headers: [{ name: "Authorization", value: "http-secret" }] }),
     ]));
   });
 

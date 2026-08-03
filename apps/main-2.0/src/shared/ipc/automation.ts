@@ -3,11 +3,13 @@ import type {
   TaskRun,
   WorkflowDraftState,
   WorkflowNodeConversation,
+  WorkflowSidebarItem,
   WorkflowStoreState,
 } from "../../automation/contracts";
 
 export const AUTOMATION_CHANNELS = {
   health: "automation:health",
+  workflowSidebar: "automation:workflow:sidebar",
   snapshot: "automation:snapshot",
   snapshotChanged: "automation:snapshot-changed",
   change: "automation:change",
@@ -125,4 +127,9 @@ export interface AutomationChange {
 export interface AutomationHealth {
   state: "idle" | "initializing" | "ready" | "error" | "stopped";
   error?: string;
+}
+
+export interface WorkflowSidebarSnapshot {
+  activeWorkflowId?: string;
+  workflows: WorkflowSidebarItem[];
 }

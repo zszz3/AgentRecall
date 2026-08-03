@@ -58,7 +58,7 @@ const api = {
     ipcRenderer.invoke("attachment:open", sessionKey, attachmentId),
   getTraceEvents: (sessionKey: string, options?: TraceEventQueryOptions): Promise<SessionTraceEvent[]> =>
     ipcRenderer.invoke("session:trace-events", sessionKey, options),
-  getLiveSessions: (): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live"),
+  getLiveSessions: (fresh = false): Promise<LiveSessionSnapshot> => ipcRenderer.invoke("sessions:live", fresh),
   summarizeSession: (sessionKey: string): Promise<SessionSearchResult | null> =>
     ipcRenderer.invoke("session:summarize", sessionKey),
   summarizeMissingSessions: (): Promise<{ processed: number; failed: number; total: number }> =>

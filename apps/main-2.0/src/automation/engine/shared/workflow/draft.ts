@@ -56,6 +56,18 @@ export interface WorkflowDraftState {
   updatedAt: number;
 }
 
+export interface WorkflowSidebarItem {
+  workflowId: string;
+  sourceType: ResourceSourceType;
+  title: string;
+  status: WorkflowStatus;
+  revision: number;
+  objective: string;
+  nodeCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface WorkflowStoreState {
   activeWorkflowId: string | undefined;
   workflows: WorkflowDraftState[];

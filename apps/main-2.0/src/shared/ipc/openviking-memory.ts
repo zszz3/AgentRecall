@@ -24,6 +24,7 @@ const memoryInput = z.object({
 
 export const OPENVIKING_MEMORY_IPC = {
   snapshot: defineIpcRequest("openviking-memory:snapshot", noInput),
+  diagnostics: defineIpcRequest("openviking-memory:diagnostics", noInput),
   chooseDirectory: defineIpcRequest("openviking-memory:choose-directory", noInput),
   previewDirectory: defineIpcRequest("openviking-memory:preview-directory", z.tuple([pathInput])),
   addWorkspace: defineIpcRequest("openviking-memory:add-workspace", z.tuple([pathInput])),
@@ -51,6 +52,7 @@ export const OPENVIKING_MEMORY_IPC = {
   deleteWorkspace: defineIpcRequest("openviking-memory:delete-workspace", z.tuple([workspaceIdInput])),
   installRuntime: defineIpcRequest("openviking-memory:install-runtime", noInput),
   startRuntime: defineIpcRequest("openviking-memory:start-runtime", noInput),
+  restartRuntime: defineIpcRequest("openviking-memory:restart-runtime", noInput),
   stopRuntime: defineIpcRequest("openviking-memory:stop-runtime", noInput),
   installModel: defineIpcRequest(
     "openviking-memory:install-model",

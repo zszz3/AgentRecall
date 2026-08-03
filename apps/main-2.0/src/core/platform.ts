@@ -113,6 +113,7 @@ export interface AppSettings {
   summarySource: "codex" | "claude" | "custom";
   summaryCodexModel: string;
   sessionSearchMcpEnabled: boolean;
+  workflowMcpEnabled: boolean;
   skillAiRuntimeId: string;
   skillSyncEnabled: boolean;
   skillSyncSupabaseUrl: string;
@@ -184,6 +185,7 @@ export const defaultSettings: AppSettings = {
   summarySource: "codex",
   summaryCodexModel: "",
   sessionSearchMcpEnabled: true,
+  workflowMcpEnabled: false,
   skillAiRuntimeId: "",
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",

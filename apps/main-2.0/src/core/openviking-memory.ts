@@ -95,6 +95,53 @@ export interface OpenVikingMemorySnapshot {
   workspaces: OpenVikingWorkspace[];
 }
 
+export type OpenVikingRuntimeHealth = "healthy" | "unhealthy" | "not-running" | "unknown";
+
+export interface OpenVikingRuntimeEvent {
+  id: string;
+  level: "info" | "warning" | "error";
+  type: "start" | "ready" | "stop" | "exit" | "error";
+  message: string;
+  createdAt: string;
+}
+
+export interface OpenVikingRuntimeDiagnostics {
+  status: OpenVikingRuntimeStatus;
+  health: OpenVikingRuntimeHealth;
+  pid?: number;
+  port?: number;
+  startedAt?: string;
+  uptimeSeconds?: number;
+  healthLatencyMs?: number;
+  events: OpenVikingRuntimeEvent[];
+}
+
+export interface OpenVikingImportTaskDiagnostics {
+  id: string;
+  workspaceId: string;
+  sessionKey: string;
+  sessionTitle: string;
+  position: number;
+  turnCount: number;
+  state: "queued" | "uploading" | "waiting" | "completed" | "failed";
+  attemptCount: number;
+  remoteTaskId?: string;
+  remoteState?: string;
+  remoteStage?: string;
+  remoteError?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OpenVikingDiagnosticsSnapshot {
+  capturedAt: string;
+  runtime: OpenVikingRuntimeDiagnostics;
+  model: OpenVikingModelStatus;
+  workspaces: OpenVikingWorkspace[];
+  tasks: OpenVikingImportTaskDiagnostics[];
+}
+
 export interface ImportTurnFingerprintInput {
   source: string;
   sessionId: string;

@@ -62,6 +62,13 @@ export class AutoStartingOpenVikingClient implements OpenVikingClientPort {
     return (await this.client()).getTask(auth, taskId);
   }
 
+  async getTaskIfRunning(
+    auth: OpenVikingWorkspaceAuth,
+    taskId: string,
+  ): Promise<JsonObject | null> {
+    return (await this.clientWithoutStarting()).getTask(auth, taskId);
+  }
+
   async searchMemories(
     auth: OpenVikingWorkspaceAuth,
     query: string,
@@ -87,6 +94,10 @@ export class AutoStartingOpenVikingClient implements OpenVikingClientPort {
 
   private async client(): Promise<OpenVikingClientPort> {
     await this.options.ensureRunning();
+    return this.clientWithoutStarting();
+  }
+
+  private async clientWithoutStarting(): Promise<OpenVikingClientPort> {
     const connection = await this.options.getConnection();
     const key = `${connection.baseUrl}\0${connection.rootApiKey}`;
     if (!this.cached || this.cached.key !== key) {

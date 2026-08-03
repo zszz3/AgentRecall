@@ -341,6 +341,11 @@ function harness(options: {
     appendMessages: vi.fn(async () => undefined),
     commitSession: vi.fn(async () => ({ taskId: "task-1" })),
     getTask: vi.fn(async () => ({ id: "task-1", status: "completed" })),
+    getTaskIfRunning: vi.fn(async () => ({
+      id: "task-1",
+      status: "processing",
+      stage: "extracting",
+    })),
     searchMemories: vi.fn(async () => []),
     readMemory: vi.fn(async () => ""),
     saveMemory: vi.fn(async (_auth, input) => ({
@@ -386,6 +391,57 @@ function harness(options: {
 }
 
 describe("OpenVikingMemoryService", () => {
+  it("reports sanitized local and remote import task diagnostics", async () => {
+    const currentWorkspace = workspace({ importState: "running" });
+    const { service, client, importTasks } = harness({ initialWorkspaces: [currentWorkspace] });
+    importTasks.set("task-1", {
+      id: "task-1",
+      position: 3,
+      workspaceId: currentWorkspace.id,
+      sessionKey: "codex:session-1",
+      sourceRevision: "revision-1",
+      sessionTitle: "Fix memory import",
+      payload: {
+        context: [{
+          sourceTurnId: "context:1",
+          fingerprint: "context-fingerprint",
+          user: "private context",
+          assistant: "private answer",
+        }],
+        primary: [{
+          sourceTurnId: "primary:1",
+          fingerprint: "primary-fingerprint",
+          user: "private prompt",
+          assistant: "private response",
+        }],
+      },
+      state: "waiting",
+      attemptCount: 2,
+      remoteTaskId: "remote-task-1",
+      lastError: null,
+      createdAt: "2026-08-03T01:00:00.000Z",
+      updatedAt: "2026-08-03T01:01:00.000Z",
+    });
+
+    const diagnostics = await service.listImportTaskDiagnostics(true);
+
+    expect(diagnostics).toEqual([expect.objectContaining({
+      id: "task-1",
+      workspaceId: "workspace-1",
+      sessionTitle: "Fix memory import",
+      turnCount: 1,
+      state: "waiting",
+      remoteState: "processing",
+      remoteStage: "extracting",
+    })]);
+    expect(JSON.stringify(diagnostics)).not.toContain("private prompt");
+    expect(JSON.stringify(diagnostics)).not.toContain("private context");
+    expect(client.getTaskIfRunning).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "workspace_abcd" }),
+      "remote-task-1",
+    );
+  });
+
   it("previews and adds a directory, then rejects an exact duplicate", async () => {
     const sessions = [session("codex:1"), session("claude:2", "claude-cli")];
     const { service, client, store } = harness({ sessions });
@@ -1143,7 +1199,7 @@ describe("OpenViking directory identity", () => {
 });
 
 describe("OpenVikingWorkspaceCredentialStore", () => {
-  it("persists workspace keys in an app-owned mode-0600 file", async () => {
+  it("serializes concurrent workspace key updates in its app-owned mode-0600 file", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-keys-"));
     tempRoots.push(root);
     await mkdir(root, { recursive: true });
@@ -1154,11 +1210,21 @@ describe("OpenVikingWorkspaceCredentialStore", () => {
       apiKey: "secret-key",
     };
 
-    await credentials.set("workspace-1", auth);
-    await expect(new OpenVikingWorkspaceCredentialStore(root).get("workspace-1")).resolves.toEqual(auth);
+    await Promise.all(Array.from({ length: 20 }, (_, index) => credentials.set(
+      `workspace-${index}`,
+      { ...auth, userId: `workspace_${index}`, apiKey: `secret-key-${index}` },
+    )));
+    const persisted = new OpenVikingWorkspaceCredentialStore(root);
+    await Promise.all(Array.from({ length: 20 }, (_, index) =>
+      expect(persisted.get(`workspace-${index}`)).resolves.toEqual({
+        ...auth,
+        userId: `workspace_${index}`,
+        apiKey: `secret-key-${index}`,
+      })));
     expect(await readFile(path.join(root, "workspace-credentials.json"), "utf8")).toContain("secret-key");
 
-    await credentials.delete("workspace-1");
-    await expect(credentials.get("workspace-1")).resolves.toBeNull();
+    await credentials.delete("workspace-0");
+    await expect(credentials.get("workspace-0")).resolves.toBeNull();
+    await expect(credentials.get("workspace-19")).resolves.toMatchObject({ apiKey: "secret-key-19" });
   });
 });

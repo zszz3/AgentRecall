@@ -368,7 +368,7 @@ export function useRuntimeConfigManager({
       syncChannelsFromSnapshot(result.snapshot.channels);
       setConfigDirty(false);
       setSnapshot(result.snapshot);
-      setConfigStatus(`Loaded ${result.discoveredCount} models from ${result.source === "codex_cli" ? "Codex CLI" : "Provider API"}`);
+      setConfigStatus(`Loaded ${result.discoveredCount} models from ${result.providerLabel}`);
     } catch (error) {
       setConfigStatus(error instanceof Error ? error.message : String(error));
     }

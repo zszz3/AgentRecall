@@ -1,11 +1,11 @@
 import type { MouseEvent } from "react";
-import { Copy, Download, GitBranch, LockKeyhole, Plus, SquarePen, Trash2, Upload, UserRound, X } from "lucide-react";
-import type { WorkflowDraftState, WorkflowReadinessResult } from "../../../../shared/types";
+import { Copy, Download, GitBranch, LoaderCircle, LockKeyhole, Plus, SquarePen, Trash2, Upload, UserRound, X } from "lucide-react";
+import type { WorkflowReadinessResult, WorkflowSidebarItem } from "../../../../shared/types";
 
 type MaybePromise = void | Promise<void>;
 
 interface WorkflowHistoryPanelProps {
-  workflows: WorkflowDraftState[];
+  workflows: WorkflowSidebarItem[];
   activeWorkflowId?: string | undefined;
   running?: boolean;
   contextMenu?: { workflowId: string; x: number; y: number } | undefined;
@@ -23,6 +23,9 @@ interface WorkflowHistoryPanelProps {
   onExportWorkflow?: (workflowId: string) => MaybePromise;
   readinessByWorkflowId?: Record<string, WorkflowReadinessResult>;
   portableBusy?: boolean;
+  sidebarLoading?: boolean;
+  detailsLoading?: boolean;
+  detailsAvailable?: boolean;
 }
 
 export function WorkflowHistoryPanel({
@@ -44,14 +47,18 @@ export function WorkflowHistoryPanel({
   onExportWorkflow,
   readinessByWorkflowId = {},
   portableBusy = false,
+  sidebarLoading = false,
+  detailsLoading = false,
+  detailsAvailable = true,
 }: WorkflowHistoryPanelProps) {
   const officialWorkflows = workflows.filter((workflow) => workflow.sourceType === "official");
   const userWorkflows = workflows.filter((workflow) => workflow.sourceType === "user");
-  const renderWorkflow = (workflow: WorkflowDraftState) => {
+  const renderWorkflow = (workflow: WorkflowSidebarItem) => {
     const official = workflow.sourceType === "official";
     return (
     <button
       key={workflow.workflowId}
+      disabled={!detailsAvailable}
       className={`workflow-history-card ${official ? "is-official" : "is-personal"} ${workflow.workflowId === activeWorkflowId ? "is-active" : ""}`}
       onClick={() => void onSelectWorkflow(workflow.workflowId)}
       onContextMenu={(event) => onOpenContextMenu?.(event, workflow.workflowId)}
@@ -61,12 +68,9 @@ export function WorkflowHistoryPanel({
         {official ? <span className="workflow-official-badge"><LockKeyhole size={10} />Official</span> : null}
         {!official && readinessByWorkflowId[workflow.workflowId]?.ready === false ? <span className="workflow-readiness-badge">待配置</span> : null}
       </div>
-      <span>{`${workflow.status} · ${workflow.definition.nodes.length} nodes · rev ${workflow.revision}`}</span>
+      <span>{`${workflow.status} · ${workflow.nodeCount} nodes · rev ${workflow.revision}`}</span>
       <small>
-        {workflow.objective ||
-          (workflow.definition.nodes.length > 0 || workflow.runProgress.length > 0 || Boolean(workflow.contextDocument || workflow.runContextDocument || workflow.finalReport)
-            ? "未保存目标"
-            : "未开始")}
+        {workflow.objective || (workflow.nodeCount > 0 ? "未保存目标" : "未开始")}
       </small>
     </button>
     );
@@ -75,20 +79,21 @@ export function WorkflowHistoryPanel({
     <section className="resource-panel workflow-list-panel">
       <div className="panel-header">
         <span>Workflows</span>
-        <GitBranch size={14} />
+        {detailsLoading ? <span title="Loading workflow details"><LoaderCircle className="is-spinning" size={14} aria-label="Loading workflow details" /></span> : <GitBranch size={14} />}
       </div>
       <div className="new-chat-menu-wrap">
-        <button className="new-chat-compact-btn" disabled={portableBusy} onClick={() => void onNewWorkflow()}>
+        <button className="new-chat-compact-btn" disabled={portableBusy || !detailsAvailable} onClick={() => void onNewWorkflow()}>
           <Plus size={13} />
           <span>New workflow</span>
         </button>
-        <button className="new-chat-compact-btn" disabled={portableBusy} onClick={() => void onImportWorkflow?.()}>
+        <button className="new-chat-compact-btn" disabled={portableBusy || !detailsAvailable} onClick={() => void onImportWorkflow?.()}>
           <Upload size={13} />
           <span>Import workflow</span>
         </button>
       </div>
       <div className="workflow-history-list" aria-label="Workflow history">
-        {workflows.length === 0 ? <div className="workflow-empty-history">No workflows yet</div> : null}
+        {sidebarLoading ? <div className="workflow-empty-history" role="status"><LoaderCircle className="is-spinning" size={14} /> Loading workflows...</div> : null}
+        {!sidebarLoading && workflows.length === 0 ? <div className="workflow-empty-history">No workflows yet</div> : null}
         {officialWorkflows.length > 0 ? (
           <section className="workflow-history-group is-official" aria-label="Official workflows">
             <header className="workflow-history-group-header">

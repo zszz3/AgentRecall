@@ -6165,6 +6165,8 @@ select:focus-visible {
 .bulk-delete-date small { color: var(--text-muted); }
 .bulk-delete-summary { display: flex; flex-wrap: wrap; gap: 6px; }
 .bulk-delete-summary span { padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-muted); font-size: 11px; }
+.delete-confirmation-field { display: grid; gap: 6px; margin: 12px 0 4px; color: var(--text-muted); font-size: 11.5px; }
+.delete-confirmation-field input { min-height: 34px; }
 
 .delete-skill-dialog .dialog-title,
 .delete-session-dialog .dialog-title {
@@ -8338,6 +8340,34 @@ body.overlay-open .sidebar {
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.subagent-load-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.subagent-load-error button {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.subagent-load-error button:hover {
+  background: var(--bg-secondary);
 }
 
 .subagent-parent {

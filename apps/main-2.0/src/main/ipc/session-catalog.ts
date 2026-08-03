@@ -33,7 +33,7 @@ export function registerSessionCatalogIpc(
     (_event, sessionKey: string, options?: TraceEventQueryOptions) =>
       service.getTraceEvents(sessionKey, options),
   );
-  ipc.handle("sessions:live", () => service.getLiveSessions());
+  ipc.handle("sessions:live", (_event, fresh = false) => service.getLiveSessions(fresh));
   ipc.handle("stats:get", (_event, options?: SessionStatsOptions) => service.getStats(options));
   ipc.handle("stats:trend", (_event, options?: SessionStatsOptions) => service.getStatsTrend(options));
   ipc.handle("tags:list", (_event, options?: TagListOptions) => service.listTags(options));

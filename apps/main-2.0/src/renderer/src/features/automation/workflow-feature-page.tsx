@@ -11,7 +11,7 @@ import { useAutomation, useAutomationStoreSnapshot } from "./automation-provider
 import type { WorkflowImportPreview } from "../../../../automation/contracts";
 
 export function WorkflowFeaturePage({ language }: { language: LanguageMode }): ReactElement {
-  const { api, setSnapshot, loading, error, refresh } = useAutomation();
+  const { api, setSnapshot, workflowSidebar, workflowSidebarLoading, detailsLoaded, loading, error, refresh } = useAutomation();
   const snapshot = useAutomationStoreSnapshot();
   const snapshotRef = useRef(snapshot);
   const workflows = useMemo(() => workflowService(), []);
@@ -36,6 +36,19 @@ export function WorkflowFeaturePage({ language }: { language: LanguageMode }): R
     },
   });
   const sidebar = manager.sidebarController;
+  const loadedSidebarWorkflows = useMemo(() => sidebar.workflows.map((workflow) => ({
+    workflowId: workflow.workflowId,
+    sourceType: workflow.sourceType ?? "user",
+    title: workflow.title,
+    status: workflow.status,
+    revision: workflow.revision,
+    objective: workflow.objective,
+    nodeCount: workflow.definition.nodes.length,
+    createdAt: workflow.createdAt,
+    updatedAt: workflow.updatedAt,
+  })), [sidebar.workflows]);
+  const visibleWorkflows = detailsLoaded ? loadedSidebarWorkflows : workflowSidebar.workflows;
+  const visibleActiveWorkflowId = detailsLoaded ? sidebar.activeWorkflowId : workflowSidebar.activeWorkflowId;
 
   return (
     <div className="automation-page automation-workflow-page" data-page="workflows" onClick={manager.closeSidebarContextMenu}>
@@ -45,16 +58,18 @@ export function WorkflowFeaturePage({ language }: { language: LanguageMode }): R
           <p>{localize(language, "Design, review, run, and intervene in reusable Agent workflows.", "设计、审核、运行并干预可复用的 Agent 工作流。")}</p>
         </div>
       </header>
-      <AutomationPageState loading={loading} error={error} language={language} onRetry={() => void refresh()}>
-        <div className="automation-workflow-shell">
+      <div className="automation-workflow-shell">
           <WorkflowHistoryPanel
-            workflows={sidebar.workflows}
-            activeWorkflowId={sidebar.activeWorkflowId}
-            running={sidebar.running}
-            contextMenu={sidebar.contextMenu}
-            renameDraft={sidebar.renameDraft}
+            workflows={visibleWorkflows}
+            activeWorkflowId={visibleActiveWorkflowId}
+            running={detailsLoaded && sidebar.running}
+            contextMenu={detailsLoaded ? sidebar.contextMenu : undefined}
+            renameDraft={detailsLoaded ? sidebar.renameDraft : undefined}
             readinessByWorkflowId={snapshot.workflowStore.readinessByWorkflowId}
             portableBusy={portableBusy}
+            sidebarLoading={workflowSidebarLoading}
+            detailsLoading={loading}
+            detailsAvailable={detailsLoaded}
             onNewWorkflow={sidebar.onNewWorkflow}
             onImportWorkflow={async () => {
               try {
@@ -110,6 +125,7 @@ export function WorkflowFeaturePage({ language }: { language: LanguageMode }): R
             }}
           />
           <section className="automation-workflow-detail" onClick={(event) => event.stopPropagation()}>
+            <AutomationPageState loading={loading} error={error} language={language} onRetry={() => void refresh()}>
             {(() => {
               const active = snapshot.workflowStore.workflows.find((workflow) => workflow.workflowId === snapshot.workflowStore.activeWorkflowId);
               const readiness = active ? snapshot.workflowStore.readinessByWorkflowId?.[active.workflowId] : undefined;
@@ -121,9 +137,9 @@ export function WorkflowFeaturePage({ language }: { language: LanguageMode }): R
               </aside>;
             })()}
             <WorkflowPage controller={manager.controller} />
+            </AutomationPageState>
           </section>
         </div>
-      </AutomationPageState>
       {importPreview ? (
         <section className="workflow-rename-overlay" role="dialog" aria-modal="true" aria-label="Import workflow preview">
           <div className="workflow-rename-modal workflow-import-preview" onClick={(event) => event.stopPropagation()}>

@@ -83,6 +83,18 @@
 
 ### 提交 Pull Request
 
+发布相关改动在提交前可以先运行本地预检：
+
+```bash
+# 快速检查发布所用的 macOS/Windows OpenViking wheel 是否仍兼容当前补丁
+npm run release:preflight:openviking
+
+# 完整检查 release note，并构建、隔离安装 V1/V2 发布包
+npm run release:preflight
+```
+
+修改 OpenViking 运行时构建、V2 依赖或发布流水线时，PR 会额外执行与正式发布相同的 macOS Arm、macOS Intel 和 Windows 运行时构建，但不会上传或发布产物。
+
 1. 提交前同步上游最新代码，解决冲突
 
    ```bash

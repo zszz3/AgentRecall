@@ -56,13 +56,14 @@ import type {
   McpInstalledEntry,
   McpSetupStatus,
 } from "../automation/engine/shared/mcp-config";
-import { AUTOMATION_CHANNELS, type AutomationChange, type AutomationHealth } from "../shared/ipc/automation";
+import { AUTOMATION_CHANNELS, type AutomationChange, type AutomationHealth, type WorkflowSidebarSnapshot } from "../shared/ipc/automation";
 
 export type AutomationIpcRenderer = Pick<IpcRenderer, "invoke" | "on" | "removeListener">;
 
 export function createAutomationApi(ipc: AutomationIpcRenderer) {
   return {
     getHealth: (): Promise<AutomationHealth> => ipc.invoke(AUTOMATION_CHANNELS.health),
+    getWorkflowSidebar: (): Promise<WorkflowSidebarSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowSidebar),
     getSnapshot: (): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.snapshot),
     saveModelChannels: (channels: AgentChannel[]): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.runtimeSaveChannels, channels),
     saveConfiguredAgents: (agents: ConfiguredAgent[]): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.runtimeSaveAgents, agents),

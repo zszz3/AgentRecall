@@ -91,9 +91,8 @@ import { SessionStore, type TraceEventQueryOptions } from "../core/session-store
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { buildSshArgs, readUserSshConfig } from "../core/ssh-config";
 import { listWslDistributions } from "../core/wsl";
-import { deleteWslSessionFile } from "../core/wsl-session-actions";
 import { SessionBulkDeleteService } from "./services/session-bulk-delete-service";
-import type { SessionBulkDeleteRequest } from "../core/session-bulk-delete";
+import { liveSessionDeleteKey, type SessionBulkDeleteRequest } from "../core/session-bulk-delete";
 import { AUTO_INDEX_REFRESH_INTERVAL_MS, INITIAL_INDEX_DELAY_MS } from "../core/refresh-policy";
 import { globalShortcutLabel, normalizeGlobalShortcut } from "../core/shortcuts";
 import {
@@ -1169,19 +1168,26 @@ function runIndexSync(): Promise<IndexStatus> {
 const loadCachedLocalLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader();
 const loadCachedLiveSessionSnapshot = createCachedLiveSessionSnapshotLoader({
   load: async (options) => {
-    const [snapshot, remoteSessions] = await Promise.all([
+    const [snapshot, remoteSnapshot] = await Promise.all([
       loadCachedLocalLiveSessionSnapshot(options),
       Promise.resolve()
         .then(() => loadRemoteLiveSessions(
           store.listEnvironments(),
-          (environment, remoteCommand) => sshCommandService.run(environment, remoteCommand, {
-            maxBuffer: 512 * 1024,
-            timeout: 10_000,
-          }),
+          (environment, remoteCommand) => environment.kind === "wsl"
+            ? runRemoteCommand(environment, remoteCommand, { maxBuffer: 512 * 1024, timeout: 10_000 })
+            : sshCommandService.run(environment, remoteCommand, { maxBuffer: 512 * 1024, timeout: 10_000 }),
         ))
-        .catch(() => []),
+        .then((sessions) => ({ sessions, error: null as string | null }))
+        .catch((error) => ({
+          sessions: [],
+          error: error instanceof Error ? error.message : String(error),
+        })),
     ]);
-    return { ...snapshot, sessions: [...snapshot.sessions, ...remoteSessions] };
+    return {
+      ...snapshot,
+      sessions: [...snapshot.sessions, ...remoteSnapshot.sessions],
+      ...(snapshot.error || remoteSnapshot.error ? { error: snapshot.error ?? remoteSnapshot.error ?? undefined } : {}),
+    };
   },
 });
 
@@ -1700,6 +1706,28 @@ function stopAutoIndexRefresh(): void {
 }
 
 function registerIpc(): void {
+  const loadConfiguredLiveSessions = (fresh = false) => loadCachedLiveSessionSnapshot({
+    fresh,
+    includeTrae: getSettings().includeTrae,
+    includeQoder: getSettings().includeQoder,
+    includeOpenClaw: getSettings().includeOpenClaw,
+    includeHermes: getSettings().includeHermes,
+    includeOpenCode: getSettings().includeOpenCode,
+    includeZcode: getSettings().includeZcode,
+    includeCursor: getSettings().includeCursorAgent,
+    includeCodeBuddy: getSettings().includeCodeBuddyCli,
+    includeCodeWiz: getSettings().includeCodeWizCli,
+  });
+  const withFreshLiveSessions = async (request: SessionBulkDeleteRequest): Promise<SessionBulkDeleteRequest> => {
+    const snapshot = await loadConfiguredLiveSessions(true);
+    if (snapshot.error) throw new Error("Live session detection failed. Deletion is disabled.");
+    const liveSessionKeys = new Set(request.liveSessionKeys);
+    for (const session of snapshot.sessions) liveSessionKeys.add(liveSessionDeleteKey(session));
+    return {
+      ...request,
+      liveSessionKeys: [...liveSessionKeys],
+    };
+  };
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
     if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
@@ -1755,19 +1783,7 @@ function registerIpc(): void {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     return store.getTraceEvents(sessionKey, options);
   });
-  ipcMain.handle("sessions:live", () =>
-    loadCachedLiveSessionSnapshot({
-      includeTrae: getSettings().includeTrae,
-      includeQoder: getSettings().includeQoder,
-      includeOpenClaw: getSettings().includeOpenClaw,
-      includeHermes: getSettings().includeHermes,
-      includeOpenCode: getSettings().includeOpenCode,
-      includeZcode: getSettings().includeZcode,
-      includeCursor: getSettings().includeCursorAgent,
-      includeCodeBuddy: getSettings().includeCodeBuddyCli,
-      includeCodeWiz: getSettings().includeCodeWizCli,
-    }),
-  );
+  ipcMain.handle("sessions:live", (_event, fresh = false) => loadConfiguredLiveSessions(fresh));
   ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
     await ensureRemoteSessionDetailsLoaded(sessionKey);
     const endpoint = await resolveSummaryEndpointFromSettings();
@@ -1977,8 +1993,8 @@ function registerIpc(): void {
   const sessionBulkDeleteService = new SessionBulkDeleteService(store);
   ipcMain.handle("session:bulk-delete-preview", (_event, request: SessionBulkDeleteRequest) =>
     sessionBulkDeleteService.preview(request));
-  ipcMain.handle("session:bulk-delete", (_event, request: SessionBulkDeleteRequest) =>
-    sessionBulkDeleteService.delete(request));
+  ipcMain.handle("session:bulk-delete", async (_event, request: SessionBulkDeleteRequest) =>
+    sessionBulkDeleteService.delete(await withFreshLiveSessions(request)));
   ipcMain.handle("session:delete", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
     if (session?.source === "pi-cli") {
@@ -1987,13 +2003,25 @@ function registerIpc(): void {
     if (session && !canDeleteSessionLocally(session)) {
       throw new Error("Cannot delete sessions stored on SSH remote environments.");
     }
-    if (!session || session.environmentKind !== "wsl") return store.deleteSession(sessionKey);
-    if (isSharedSessionSourceDatabase(session)) {
-      if (session.sourceAvailable === false) return store.deleteSessionRecord(sessionKey);
+    if (!session || session.environmentKind === "ssh") return store.deleteSession(sessionKey);
+    if (session.environmentKind === "wsl" && isSharedSessionSourceDatabase(session)) {
+      if (session.sourceAvailable === false) return store.deleteSessionRecords([sessionKey]).includes(sessionKey);
       throw new Error("Cannot delete shared source databases on WSL by removing the database file.");
     }
-    await deleteWslSessionFile(requireWslEnvironment(session), session.filePath);
-    return store.deleteSessionRecord(sessionKey);
+    const request = await withFreshLiveSessions({ sessionKeys: [sessionKey], liveSessionKeys: [] });
+    if (isSharedSessionSourceDatabase(session)) {
+      const preview = sessionBulkDeleteService.preview(request);
+      if (preview.skipped.some((issue) => issue.reason === "live")) {
+        throw new Error("A related session is currently live. Stop it before deleting this session tree.");
+      }
+      return store.deleteSession(sessionKey);
+    }
+    const result = await sessionBulkDeleteService.delete(request);
+    if (result.skipped.some((issue) => issue.reason === "live")) {
+      throw new Error("A related session is currently live. Stop it before deleting this session tree.");
+    }
+    if (result.failed[0]) throw new Error(result.failed[0].message);
+    return result.deletedSessionKeys.includes(sessionKey);
   });
   ipcMain.handle("index:refresh", () => runIndexSync());
   ipcMain.handle("index:status", () => indexStatus);

@@ -11,6 +11,7 @@ interface RawMcpEntry {
   args?: unknown;
   url?: unknown;
   env?: unknown;
+  headers?: unknown;
   disabledTools?: unknown;
 }
 
@@ -30,6 +31,16 @@ function asStringArray(value: unknown): string[] {
 function toEnvReferences(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.keys(value as Record<string, unknown>).map((key) => [key, key]));
+}
+
+/**
+ * Pasted configs usually carry literal header values (often secrets), which
+ * AgentRecall never persists. Import only the header names with an empty host
+ * environment reference for the user to fill in afterwards.
+ */
+function toHeaderReferences(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.keys(value as Record<string, unknown>).map((key) => [key, ""]));
 }
 
 function resolveTransport(entry: RawMcpEntry): McpTransport {
@@ -85,7 +96,8 @@ export function parseMcpServersJson(text: string): McpImportResult {
       ...(transport === "stdio" ? { command } : {}),
       args: transport === "stdio" ? asStringArray(entry.args) : [],
       ...(transport === "http" ? { url } : {}),
-      env: toEnvReferences(entry.env),
+      env: transport === "stdio" ? toEnvReferences(entry.env) : {},
+      ...(transport === "http" ? { headers: toHeaderReferences(entry.headers) } : {}),
       enabled: true,
       tools: [],
       disabledTools: asStringArray(entry.disabledTools),

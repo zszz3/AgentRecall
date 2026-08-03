@@ -22,6 +22,14 @@ test("exposes explicit root commands for both apps", () => {
   assert.match(root.scripts.test, /test:repo/);
   assert.match(root.scripts.test, /test:v1/);
   assert.match(root.scripts.test, /test:v2/);
+  assert.match(root.scripts["package:smoke:all"], /run-package-smokes\.mjs/);
+});
+
+test("runs independent V1 and V2 package smokes concurrently", async () => {
+  const smokeRunner = await readFile("scripts/run-package-smokes.mjs", "utf8");
+  assert.match(smokeRunner, /directory:\s*"apps\/main-1\.0"/);
+  assert.match(smokeRunner, /directory:\s*"apps\/main-2\.0"/);
+  assert.match(smokeRunner, /Promise\.allSettled\(applications\.map\(runPackageSmoke\)\)/);
 });
 
 test("installs app dependencies without changing the user's Claude statusline", async () => {

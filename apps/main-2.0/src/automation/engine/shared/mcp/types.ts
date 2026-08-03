@@ -14,6 +14,12 @@ export interface McpServerDefinition {
   args: string[];
   url?: string;
   env: Record<string, string>;
+  /**
+   * HTTP request headers sent to `http` transport servers. Values are host
+   * environment variable names resolved at launch time, mirroring `env`, so
+   * secrets such as Authorization tokens are never stored in the database.
+   */
+  headers?: Record<string, string>;
   enabled: boolean;
   tools: McpToolDefinition[];
   /**
@@ -33,6 +39,12 @@ export interface McpServerDefinition {
    * except for enable state and per-tool toggles.
    */
   managed?: boolean;
+  /**
+   * False hides this managed server from per-Agent hub bindings. Set when a
+   * server's launch config requires literal env values that do not fit the
+   * registry env model (values are resolved as host environment variable names).
+   */
+  hubBindable?: boolean;
 }
 
 export interface AgentMcpBinding {

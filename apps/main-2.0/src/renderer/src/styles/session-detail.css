@@ -455,81 +455,127 @@
   padding-bottom: 22px;
 }
 
-.message {
-  margin-bottom: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--message-bg);
+/* ------------------------------------------------------------------
+   Messages — shared by the Turns view and the full conversation view.
+   Two-column hanging indent: avatar gutter + content. No card borders;
+   role is carried by the avatar icon and the head line.
+   ------------------------------------------------------------------ */
+.msg {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  padding: 7px 0;
 }
 
-.message.user {
-  border-color: var(--message-user-border);
-  background: var(--message-user-bg);
+.msg-avatar {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--panel-active);
+  color: var(--text-muted);
 }
 
-.message-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--panel-subtle);
-  font-size: 11px;
-}
-
-.message-head strong {
-  font-size: 11.5px;
-  font-weight: 700;
-}
-
-.message.user .message-head strong {
+.msg.user .msg-avatar {
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
-.message.assistant .message-head strong {
+.msg.assistant .msg-avatar {
+  background: var(--codex-badge-bg);
   color: var(--codex-badge-text);
 }
 
-.message.commentary {
-  background: var(--panel-subtle);
+.msg-head {
+  display: flex;
+  min-height: 20px;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
 }
 
-.message-phase {
-  margin-right: auto;
+.msg-head strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg.user .msg-head strong {
+  color: var(--accent);
+}
+
+.msg.assistant .msg-head strong {
+  color: var(--codex-badge-text);
+}
+
+.msg-phase {
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
   padding: 1px 6px;
-  color: var(--text-muted) !important;
+  color: var(--text-muted);
   font-size: 9.5px;
-  font-variant-numeric: normal !important;
 }
 
-.message-head span {
+.msg-time {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
   color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
   font-variant-numeric: tabular-nums;
 }
 
-.message pre {
-  margin: 0;
-  padding: 10px;
+.msg-body {
+  grid-column: 2;
+  margin: 3px 0 0;
   color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.msg-body-plain {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
 }
 
-.message-md {
-  padding: 10px;
-  color: var(--text-dim);
-  font-size: 12px;
-  line-height: 1.55;
+/* Markdown collapses single newlines, but pasted user input relies on them. */
+.msg.user .msg-body .md-p {
+  white-space: pre-wrap;
 }
 
-.message-md .md-code {
-  font-size: 12px;
+.msg.user .msg-body {
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: var(--message-user-bg);
+}
+
+.msg.commentary .msg-body {
+  color: var(--text-muted);
+}
+
+.msg-body .md-code {
+  font-size: 11.5px;
+}
+
+.msg .message-attachments {
+  grid-column: 2;
+  margin-top: 7px;
+}
+
+.msg .expand-toggle {
+  grid-column: 2;
+  justify-self: start;
+  margin: 5px 0 0;
 }
 
 .trace-event {
@@ -878,7 +924,7 @@
 }
 
 .turn-card-detail {
-  padding: 10px 10px 11px 35px;
+  padding: 6px 10px 10px 12px;
   border-top: 1px solid var(--border-subtle);
   background: var(--panel-subtle);
 }
@@ -916,173 +962,88 @@
 
 .turn-timeline-item {
   position: relative;
-  padding: 0 0 8px 18px;
 }
 
-.turn-timeline-item:last-child {
-  padding-bottom: 0;
-}
-
-.turn-timeline-rail {
-  position: absolute;
-  top: 14px;
-  bottom: -8px;
-  left: 3px;
-  width: 1px;
-  background: var(--border-strong);
-}
-
-.turn-timeline-item:last-child .turn-timeline-rail {
-  display: none;
-}
-
+/* Continuous rail behind the avatar gutter ties a turn's entries together.
+   Starts below the 20px avatar (7px top padding + 20px + 2px gap). */
 .turn-timeline-item::before {
   position: absolute;
-  z-index: 1;
-  top: 12px;
-  left: 0;
-  width: 7px;
-  height: 7px;
-  border: 2px solid var(--panel-subtle);
-  border-radius: 50%;
-  background: var(--text-faint);
+  top: 29px;
+  bottom: 0;
+  left: 9px;
+  width: 1px;
+  background: var(--border-strong);
   content: "";
 }
 
-.turn-timeline-item.message::before {
-  background: var(--accent);
-}
-
-.turn-timeline-item.span::before {
-  background: var(--running-text);
-}
-
-.turn-message,
-.turn-span {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-bg);
-}
-
-.turn-message.user {
-  border-color: var(--message-user-border);
-  background: var(--message-user-bg);
-}
-
-.turn-message.commentary {
-  background: var(--panel-subtle);
-}
-
-.turn-message-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 9px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-faint);
-  font-size: 10.5px;
-}
-
-.turn-message-head strong {
-  color: var(--text-dim);
-  font-size: 11px;
-}
-
-.turn-message.user .turn-message-head strong {
-  color: var(--accent);
-}
-
-.turn-message pre,
-.turn-message-content {
-  margin: 0;
-  padding: 9px;
-  color: var(--text-dim);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.turn-span-status-label {
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  padding: 1px 6px;
-  color: var(--text-faint);
-  font-size: 9.5px;
-  font-weight: 500;
-}
-
-.turn-message pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--mono);
-}
-
-.turn-message-content .md-code {
-  font-size: 11.5px;
-}
-
-.turn-span > summary {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  cursor: pointer;
-  list-style: none;
-  padding: 0 9px;
-  color: var(--text-dim);
-  font-size: 11px;
-}
-
-.turn-span > summary::-webkit-details-marker,
-.turn-span-payload > summary::-webkit-details-marker {
+.turn-timeline-item:last-child::before {
   display: none;
 }
 
-.turn-span.failed {
-  border-color: var(--danger);
+/* Tool call rows keep the same avatar gutter, but as a block: a grid on
+   <details> would not place its children, since Chromium wraps everything
+   after <summary> in a ::details-content box. */
+.msg.tool {
+  display: block;
+  padding: 5px 0;
 }
 
-.turn-span-name,
-.turn-span-time {
-  display: inline-flex;
-  min-width: 0;
+.msg.tool > .msg-tool-summary {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
+  column-gap: 8px;
+  cursor: pointer;
+  list-style: none;
 }
 
-.turn-span-name {
-  overflow: hidden;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.msg.tool > .msg-tool-summary::-webkit-details-marker,
+.msg-tool-payload > summary::-webkit-details-marker {
+  display: none;
 }
 
-.turn-span-time {
-  flex: 0 0 auto;
-  color: var(--text-faint);
+.msg.tool .msg-avatar {
+  background: var(--running-bg);
+  color: var(--running-text);
+}
+
+.msg.tool .msg-head strong {
+  color: var(--text-dim);
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 
-.turn-span-status {
+.msg-tool-status {
+  flex: 0 0 auto;
   color: var(--success-text);
-  font-weight: 750;
+  font-size: 9.5px;
+  font-weight: 650;
 }
 
-.turn-span.failed .turn-span-status {
+.msg.tool.failed .msg-avatar {
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
-.turn-span-body {
-  display: grid;
-  gap: 6px;
-  padding: 7px 9px 9px;
-  border-top: 1px solid var(--border-subtle);
+.msg.tool.failed .msg-tool-status {
+  color: var(--danger);
 }
 
-.turn-span-call-id {
+.msg.tool.running .msg-tool-status {
+  color: var(--running-text);
+}
+
+.msg.tool.aborted .msg-tool-status {
+  color: var(--warning, #b7791f);
+}
+
+.msg-tool-body {
+  display: grid;
+  gap: 6px;
+  margin-left: 28px;
+}
+
+.msg-tool-call-id {
   overflow: hidden;
   color: var(--text-faint);
   font-size: 9.5px;
@@ -1090,14 +1051,14 @@
   white-space: nowrap;
 }
 
-.turn-span-payload {
+.msg-tool-payload {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: var(--panel-subtle);
+  background: var(--panel-bg);
 }
 
-.turn-span-payload > summary {
+.msg-tool-payload > summary {
   cursor: pointer;
   list-style: none;
   padding: 6px 8px;
@@ -1106,19 +1067,19 @@
   font-weight: 650;
 }
 
-.turn-span-payload > summary::before {
+.msg-tool-payload > summary::before {
   display: inline-block;
   margin-right: 5px;
   color: var(--text-faint);
-  content: "›";
+  content: "\203A";
 }
 
-.turn-span-payload[open] > summary::before {
+.msg-tool-payload[open] > summary::before {
   transform: rotate(90deg);
 }
 
-.turn-span-payload pre,
-.turn-span-error pre {
+.msg-tool-payload pre,
+.msg-tool-error pre {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1127,7 +1088,7 @@
   line-height: 1.5;
 }
 
-.turn-span-payload pre {
+.msg-tool-payload pre {
   max-height: 360px;
   overflow: auto;
   padding: 7px 8px;
@@ -1135,7 +1096,7 @@
   color: var(--text-muted);
 }
 
-.turn-span-error {
+.msg-tool-error {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
@@ -1146,7 +1107,7 @@
   color: var(--danger);
 }
 
-.turn-span-error pre {
+.msg-tool-error pre {
   color: inherit;
 }
 
@@ -1162,6 +1123,6 @@
   }
 
   .turn-card-detail {
-    padding-left: 20px;
+    padding-left: 10px;
   }
 }

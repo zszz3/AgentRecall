@@ -25,6 +25,9 @@
     "build": "npm --prefix apps/main-1.0 run build && npm --prefix apps/main-2.0 run build",
     "package:smoke": "npm --prefix apps/main-1.0 run package:smoke",
     "package:smoke:v2": "npm --prefix apps/main-2.0 run package:smoke",
+    "package:smoke:all": "node scripts/run-package-smokes.mjs",
+    "release:preflight": "npm run release-note:check && npm run package:smoke:all && npm run release:preflight:openviking",
+    "release:preflight:openviking": "npm --prefix apps/main-2.0 run release:preflight:openviking",
     "release-note:check": "node scripts/release-notes.mjs check-range"
   }
 }

@@ -1908,6 +1908,34 @@ select:focus-visible {
   border-top: 1px solid var(--border-subtle);
 }
 
+.subagent-load-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.subagent-load-error button {
+  margin-left: auto;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.subagent-load-error button:hover {
+  background: var(--panel-bg);
+}
+
 .subagent-parent {
   margin-bottom: 14px;
 }

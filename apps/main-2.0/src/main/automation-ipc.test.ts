@@ -5,7 +5,15 @@ import type { NativeAutomationService } from "./services/automation-service";
 import { McpAutomationModule } from "./services/mcp-automation-module";
 import { registerAutomationIpc } from "./ipc/automation";
 
-function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefined>, builtin?: { isBuiltinId: (id: string) => boolean; resolve: () => Promise<McpServerDefinition>; saveDraft: (server: McpServerDefinition) => Promise<McpServerDefinition>; recordTest: (server: McpServerDefinition, tools: McpToolDefinition[], error?: string) => Promise<McpServerDefinition> }) {
+type FakeBuiltin = {
+  isBuiltinId: (id: string) => boolean;
+  resolve: () => Promise<McpServerDefinition>;
+  saveDraft: (server: McpServerDefinition) => Promise<McpServerDefinition>;
+  recordTest: (server: McpServerDefinition, tools: McpToolDefinition[], error?: string) => Promise<McpServerDefinition>;
+  testEnv: () => Record<string, string>;
+};
+
+function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefined>, builtins?: FakeBuiltin[]) {
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const ipc = {
     handle: vi.fn((channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler)),
@@ -49,17 +57,19 @@ function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefi
     install: vi.fn(async () => ({})),
     uninstall: vi.fn(async () => ({})),
   };
+  const discoverTools = vi.fn(async () => []);
   const mcp = new McpAutomationModule({
     registry: registry as never,
     agents: mcpAgents as never,
     runtime: hub as never,
-    ...(builtin ? { builtin: builtin as never } : {}),
-    discoverTools: vi.fn(async () => []),
+    builtins: (builtins ?? []) as never,
+    discoverTools,
   });
   const service = {
     requirePrepared: vi.fn(async () => undefined),
     requireReady: vi.fn(async () => undefined),
     health: vi.fn(() => ({ state: "ready" })),
+    workflowSidebar: vi.fn(async () => ({ workflows: [{ workflowId: "workflow-1" }] })),
     snapshot: vi.fn(() => ({ workDir: "/repo" })),
     subscribe: vi.fn(() => () => undefined),
     subscribeChanges: vi.fn(() => () => undefined),
@@ -80,7 +90,7 @@ function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefi
   } as unknown as NativeAutomationService;
   registerAutomationIpc({ ipc: ipc as never, service, send: vi.fn(), pickDirectory });
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args);
-  return { handlers, invoke, hub, registry, evaluations, service };
+  return { handlers, invoke, hub, registry, evaluations, service, discoverTools };
 }
 
 describe("registerAutomationIpc", () => {
@@ -88,6 +98,37 @@ describe("registerAutomationIpc", () => {
     const { handlers } = setup();
     expect([...handlers.keys()].length).toBeGreaterThan(30);
     expect([...handlers.keys()].every((channel) => channel.startsWith("automation:"))).toBe(true);
+  });
+
+  it("keeps HTTP header references through the IPC schema for save and test", async () => {
+    const { invoke, registry } = setup();
+    const server: McpServerDefinition = {
+      id: "remote-http",
+      name: "Remote HTTP",
+      transport: "http",
+      args: [],
+      url: "https://example.test/mcp",
+      env: {},
+      headers: { Authorization: "HOST_HTTP_TOKEN" },
+      enabled: true,
+      tools: [],
+      disabledTools: [],
+      status: "untested",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    await invoke(AUTOMATION_CHANNELS.mcpSave, server);
+    expect(registry.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ headers: { Authorization: "HOST_HTTP_TOKEN" } }),
+    );
+
+    await invoke(AUTOMATION_CHANNELS.mcpTest, server);
+    expect(registry.recordTest).toHaveBeenCalledWith(
+      expect.objectContaining({ headers: { Authorization: "HOST_HTTP_TOKEN" } }),
+      [],
+      undefined,
+    );
   });
 
   it("validates portable Workflow identifiers and mapping payloads", async () => {
@@ -106,6 +147,18 @@ describe("registerAutomationIpc", () => {
     await expect(invoke(AUTOMATION_CHANNELS.snapshot)).resolves.toEqual({ workDir: "/repo" });
 
     expect(service.requirePrepared).toHaveBeenCalledOnce();
+    expect(service.requireReady).not.toHaveBeenCalled();
+  });
+
+  it("loads Workflow sidebar records without waiting for full state preparation", async () => {
+    const { invoke, service } = setup();
+
+    await expect(invoke(AUTOMATION_CHANNELS.workflowSidebar)).resolves.toEqual({
+      workflows: [{ workflowId: "workflow-1" }],
+    });
+
+    expect(service.workflowSidebar).toHaveBeenCalledOnce();
+    expect(service.requirePrepared).not.toHaveBeenCalled();
     expect(service.requireReady).not.toHaveBeenCalled();
   });
 
@@ -307,13 +360,58 @@ function createBuiltin() {
       disabledTools: server.disabledTools,
       status: "connected" as const,
     })),
+    testEnv: () => ({}),
+  };
+}
+
+const WORKFLOW_BUILTIN_ID = "agent-recall-workflow";
+
+function workflowBuiltinServer(): McpServerDefinition {
+  return {
+    id: WORKFLOW_BUILTIN_ID,
+    name: "AgentRecall Workflow",
+    transport: "stdio",
+    command: "node",
+    args: ["/out/mcp/workflow-entry.js"],
+    env: {},
+    enabled: true,
+    tools: [],
+    disabledTools: [],
+    status: "untested",
+    createdAt: 1,
+    updatedAt: 1,
+    managed: true,
+    hubBindable: false,
+  };
+}
+
+function createWorkflowBuiltin() {
+  return {
+    isBuiltinId: vi.fn((id: string) => id === WORKFLOW_BUILTIN_ID),
+    resolve: vi.fn(async () => workflowBuiltinServer()),
+    saveDraft: vi.fn(async (server: McpServerDefinition) => ({
+      ...workflowBuiltinServer(),
+      enabled: server.enabled,
+      tools: server.tools,
+      disabledTools: server.disabledTools,
+    })),
+    recordTest: vi.fn(async (server: McpServerDefinition, tools: McpToolDefinition[]) => ({
+      ...workflowBuiltinServer(),
+      tools,
+      disabledTools: server.disabledTools,
+      status: "connected" as const,
+    })),
+    testEnv: () => ({
+      AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/data/automation-mcp-bridge.json",
+      AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token",
+    }),
   };
 }
 
 describe("registerAutomationIpc with built-in session-search server", () => {
   it("merges the built-in server into the server list", async () => {
     const builtin = createBuiltin();
-    const { invoke } = setup(undefined, builtin);
+    const { invoke } = setup(undefined, [builtin]);
     const servers = await invoke(AUTOMATION_CHANNELS.mcpList) as McpServerDefinition[];
     expect(builtin.resolve).toHaveBeenCalled();
     expect(servers).toEqual([expect.objectContaining({ id: BUILTIN_ID, managed: true })]);
@@ -321,7 +419,7 @@ describe("registerAutomationIpc with built-in session-search server", () => {
 
   it("routes saves for the built-in server to settings, never the user registry", async () => {
     const builtin = createBuiltin();
-    const { invoke, registry } = setup(undefined, builtin);
+    const { invoke, registry } = setup(undefined, [builtin]);
     const saved = await invoke(AUTOMATION_CHANNELS.mcpSave, {
       ...builtinServer(),
       enabled: false,
@@ -335,15 +433,57 @@ describe("registerAutomationIpc with built-in session-search server", () => {
 
   it("tests the built-in server against its fixed launch config", async () => {
     const builtin = createBuiltin();
-    const { invoke } = setup(undefined, builtin);
+    const { invoke } = setup(undefined, [builtin]);
     await invoke(AUTOMATION_CHANNELS.mcpTest, builtinServer());
     expect(builtin.recordTest).toHaveBeenCalled();
   });
 
   it("rejects deleting the built-in server", async () => {
     const builtin = createBuiltin();
-    const { invoke, registry } = setup(undefined, builtin);
+    const { invoke, registry } = setup(undefined, [builtin]);
     await expect(invoke(AUTOMATION_CHANNELS.mcpDelete, BUILTIN_ID)).rejects.toThrow(/cannot be deleted/i);
+    expect(registry.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("registerAutomationIpc with built-in workflow server", () => {
+  it("merges the workflow built-in server into the server list", async () => {
+    const workflow = createWorkflowBuiltin();
+    const { invoke } = setup(undefined, [workflow]);
+    const servers = await invoke(AUTOMATION_CHANNELS.mcpList) as McpServerDefinition[];
+    expect(servers).toEqual([
+      expect.objectContaining({ id: WORKFLOW_BUILTIN_ID, managed: true, hubBindable: false }),
+    ]);
+  });
+
+  it("routes saves for the workflow built-in server to its settings toggle", async () => {
+    const workflow = createWorkflowBuiltin();
+    const { invoke, registry } = setup(undefined, [workflow]);
+    const saved = await invoke(AUTOMATION_CHANNELS.mcpSave, {
+      ...workflowBuiltinServer(),
+      enabled: false,
+    }) as McpServerDefinition;
+
+    expect(registry.upsert).not.toHaveBeenCalled();
+    expect(workflow.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ id: WORKFLOW_BUILTIN_ID }));
+    expect(saved).toMatchObject({ id: WORKFLOW_BUILTIN_ID, enabled: false });
+  });
+
+  it("tests the workflow server with literal bridge env instead of host env names", async () => {
+    const workflow = createWorkflowBuiltin();
+    const { invoke, discoverTools } = setup(undefined, [workflow]);
+    await invoke(AUTOMATION_CHANNELS.mcpTest, workflowBuiltinServer());
+    expect(discoverTools).toHaveBeenCalledWith(
+      expect.objectContaining({ id: WORKFLOW_BUILTIN_ID, env: {} }),
+      { AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/data/automation-mcp-bridge.json", AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token" },
+    );
+    expect(workflow.recordTest).toHaveBeenCalled();
+  });
+
+  it("rejects deleting the workflow built-in server", async () => {
+    const workflow = createWorkflowBuiltin();
+    const { invoke, registry } = setup(undefined, [workflow]);
+    await expect(invoke(AUTOMATION_CHANNELS.mcpDelete, WORKFLOW_BUILTIN_ID)).rejects.toThrow(/cannot be deleted/i);
     expect(registry.delete).not.toHaveBeenCalled();
   });
 });

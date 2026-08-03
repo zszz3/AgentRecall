@@ -70,6 +70,24 @@ describe("live session detection", () => {
     ]);
   });
 
+  it("guards unresolved Windows CLI families and preserves backslashes in command paths", async () => {
+    const snapshot = await loadLiveSessionSnapshot({
+      platform: "win32",
+      runner: async (command) => {
+        expect(command).toBe("powershell.exe");
+        return [
+          '321 "C:\\Users\\me\\AppData\\Roaming\\npm\\claude.exe"',
+          '322 "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js"',
+        ].join("\n");
+      },
+    });
+
+    expect(snapshot.sessions).toEqual([
+      { family: "claude", rawId: "*", pid: 321 },
+      { family: "codex", rawId: "*", pid: 322 },
+    ]);
+  });
+
   it("maps a plain running Codex process through its open session file", () => {
     expect(
       detectLiveSessionsFromProcessLines(
@@ -267,7 +285,10 @@ describe("live session detection", () => {
       },
     });
 
-    expect(snapshot.sessions).toEqual([{ family: "claude", rawId: "claude-existing-session", pid: 602 }]);
+    expect(snapshot.sessions).toEqual([
+      { family: "claude", rawId: "claude-existing-session", pid: 602 },
+      { family: "claude", rawId: "*", pid: 601 },
+    ]);
 
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -355,6 +376,7 @@ describe("live session detection", () => {
       expect(snapshot.sessions).toEqual([
         { family: "codex", rawId: firstSessionId, pid: 603 },
         { family: "codex", rawId: thirdSessionId, pid: 603 },
+        { family: "codex", rawId: "*", pid: 604 },
       ]);
       expect(lsofCalls.sort()).toEqual(["-p 603", "-p 604"]);
     } finally {
@@ -768,6 +790,17 @@ describe("live session detection", () => {
 
     now += 5001;
     await expect(cached({ includeTrae: false })).resolves.toMatchObject({ generatedAt: "snapshot-2" });
+    expect(calls).toBe(2);
+  });
+
+  it("bypasses the live session cache for deletion preflight", async () => {
+    let calls = 0;
+    const load = async () => ({ generatedAt: `snapshot-${++calls}`, sessions: [] });
+    const cached = createCachedLiveSessionSnapshotLoader({ load, ttlMs: 5000, nowMs: () => 1000 });
+
+    await expect(cached()).resolves.toMatchObject({ generatedAt: "snapshot-1" });
+    await expect(cached({ fresh: true })).resolves.toMatchObject({ generatedAt: "snapshot-2" });
+    await expect(cached()).resolves.toMatchObject({ generatedAt: "snapshot-1" });
     expect(calls).toBe(2);
   });
 });

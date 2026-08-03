@@ -245,8 +245,8 @@ export function McpPage({
                   {draft.managed ? (
                     <p className="workbench-form-note">
                       {zh
-                        ? "内置 Server，启动命令由「设置 → 会话检索 MCP」统一管理，此处只读。"
-                        : "Built-in server; its launch command is managed by Settings → Session search MCP and is read-only here."}
+                        ? "内置 Server，启动命令由 App 统一管理，此处只读。"
+                        : "Built-in server; its launch command is managed by the app and is read-only here."}
                     </p>
                   ) : null}
                   <div className="workbench-form-grid">
@@ -343,40 +343,53 @@ export function McpPage({
                     </div>
                   ) : null}
                 </WorkbenchSection>
-                {draft.managed ? null : (
+                {draft.managed ? null : (() => {
+                  const isHttp = draft.transport === "http";
+                  const references = isHttp ? (draft.headers ?? {}) : draft.env;
+                  const setReferences = (next: Record<string, string>) =>
+                    model.update(isHttp ? { ...draft, headers: next } : { ...draft, env: next });
+                  return (
                 <WorkbenchSection
-                  title={zh ? "环境变量引用" : "Environment references"}
+                  title={
+                    isHttp
+                      ? zh ? "请求头引用" : "Header references"
+                      : zh ? "环境变量引用" : "Environment references"
+                  }
                   description={
                     zh
-                      ? "右侧填写宿主机环境变量名，不在数据库中保存密钥值。"
-                      : "Reference host environment variable names; secret values are not stored."
+                      ? isHttp
+                        ? "左侧填写请求头名称（如 Authorization），右侧填写宿主机环境变量名，不在数据库中保存密钥值。"
+                        : "右侧填写宿主机环境变量名，不在数据库中保存密钥值。"
+                      : isHttp
+                        ? "Map header names (e.g. Authorization) to host environment variable names; secret values are not stored."
+                        : "Reference host environment variable names; secret values are not stored."
                   }
                   action={
                     <button
                       type="button"
                       className="control-btn compact secondary"
                       onClick={() =>
-                        model.update({
-                          ...draft,
-                          env: { ...draft.env, NEW_VARIABLE: "" },
+                        setReferences({
+                          ...references,
+                          [isHttp ? "Authorization" : "NEW_VARIABLE"]: "",
                         })
                       }
                     >
-                      + Variable
+                      {isHttp ? "+ Header" : "+ Variable"}
                     </button>
                   }
                 >
                   <div className="mcp-env-list">
-                    {Object.entries(draft.env).map(([key, value]) => (
+                    {Object.entries(references).map(([key, value]) => (
                       <div key={key}>
                         <input
-                          aria-label="Environment key"
+                          aria-label={isHttp ? "Header name" : "Environment key"}
                           value={key}
                           onChange={(event) => {
-                            const env = { ...draft.env };
-                            delete env[key];
-                            env[event.target.value] = value;
-                            model.update({ ...draft, env });
+                            const next = { ...references };
+                            delete next[key];
+                            next[event.target.value] = value;
+                            setReferences(next);
                           }}
                         />
                         <span>←</span>
@@ -385,25 +398,26 @@ export function McpPage({
                           value={value}
                           placeholder="HOST_ENV_NAME"
                           onChange={(event) =>
-                            model.update({
-                              ...draft,
-                              env: { ...draft.env, [key]: event.target.value },
-                            })
+                            setReferences({ ...references, [key]: event.target.value })
                           }
                         />
                         <button
                           className="icon-btn"
                           type="button"
                           aria-label={
-                            zh ? "删除环境变量" : "Delete environment variable"
+                            isHttp
+                              ? zh ? "删除请求头" : "Delete header"
+                              : zh ? "删除环境变量" : "Delete environment variable"
                           }
                           title={
-                            zh ? "删除环境变量" : "Delete environment variable"
+                            isHttp
+                              ? zh ? "删除请求头" : "Delete header"
+                              : zh ? "删除环境变量" : "Delete environment variable"
                           }
                           onClick={() => {
-                            const env = { ...draft.env };
-                            delete env[key];
-                            model.update({ ...draft, env });
+                            const next = { ...references };
+                            delete next[key];
+                            setReferences(next);
                           }}
                         >
                           <Trash2 size={12} />
@@ -412,7 +426,8 @@ export function McpPage({
                     ))}
                   </div>
                 </WorkbenchSection>
-                )}
+                  );
+                })()}
                 <WorkbenchSection
                   title={zh ? "已发现工具" : "Discovered tools"}
                   description={

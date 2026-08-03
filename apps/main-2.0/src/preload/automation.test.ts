@@ -29,6 +29,15 @@ describe("createAutomationApi", () => {
     expect(ipc.invoke).toHaveBeenCalledWith(AUTOMATION_CHANNELS.runtimeDeleteAgent, "agent-1");
   });
 
+  it("loads the lightweight Workflow sidebar through its own channel", async () => {
+    const ipc = { invoke: vi.fn(async () => ({ workflows: [] })), on: vi.fn(), removeListener: vi.fn() };
+    const api = createAutomationApi(ipc as never);
+
+    await api.getWorkflowSidebar();
+
+    expect(ipc.invoke).toHaveBeenCalledWith(AUTOMATION_CHANNELS.workflowSidebar);
+  });
+
   it("keeps portable Workflow file contents behind explicit IPC calls", async () => {
     const ipc = { invoke: vi.fn(async () => ({ ok: true })), on: vi.fn(), removeListener: vi.fn() };
     const api = createAutomationApi(ipc as never);

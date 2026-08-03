@@ -115,6 +115,7 @@ function runtimeHarness(root: string, options: {
   platform?: NodeJS.Platform;
   executablePath?: string;
   alive?: boolean;
+  healthy?: boolean;
   codexAuthBootstrapPath?: string;
   download?: (url: string, destination: string) => Promise<void>;
   child?: FakeChild;
@@ -127,6 +128,8 @@ function runtimeHarness(root: string, options: {
     env: NodeJS.ProcessEnv;
   }> = [];
   const healthCheck = vi.fn(async () => undefined);
+  const healthProbe = vi.fn(async () => options.healthy ?? true);
+  const killProcess = vi.fn();
   const service = new OpenVikingRuntimeService({
     rootDir: root,
     codexAuthBootstrapPath: options.codexAuthBootstrapPath
@@ -163,9 +166,11 @@ function runtimeHarness(root: string, options: {
       return child;
     },
     healthCheck,
+    healthProbe,
     isProcessAlive: () => options.alive ?? false,
+    killProcess,
   });
-  return { service, child, spawnCalls, healthCheck };
+  return { service, child, spawnCalls, healthCheck, healthProbe, killProcess };
 }
 
 describe("OpenVikingRuntimeService", () => {
@@ -202,7 +207,7 @@ describe("OpenVikingRuntimeService", () => {
 
   it("installs, starts and stops an app-owned loopback runtime", async () => {
     const root = await temporaryRoot();
-    const { service, child, spawnCalls, healthCheck } = runtimeHarness(root);
+    const { service, child, spawnCalls, healthCheck, healthProbe } = runtimeHarness(root);
 
     await expect(service.getStatus()).resolves.toMatchObject({ state: "not-installed" });
     await service.install(manifest());
@@ -271,10 +276,37 @@ describe("OpenVikingRuntimeService", () => {
       baseUrl: "http://127.0.0.1:21933",
       rootApiKey: config.server.root_api_key,
     });
+    const runtimeState = JSON.parse(await readFile(path.join(root, "runtime-state.json"), "utf8"));
+    expect(runtimeState).toMatchObject({
+      pid: 4242,
+      port: 21933,
+      startedAt: expect.stringMatching(/^2026-|^20\d{2}-/),
+    });
+    await expect(service.getDiagnostics()).resolves.toMatchObject({
+      status: { state: "running", version: "0.4.11", port: 21933 },
+      health: "healthy",
+      pid: 4242,
+      port: 21933,
+      startedAt: runtimeState.startedAt,
+      uptimeSeconds: expect.any(Number),
+      healthLatencyMs: expect.any(Number),
+      events: expect.arrayContaining([
+        expect.objectContaining({ type: "start" }),
+        expect.objectContaining({ type: "ready" }),
+      ]),
+    });
+    expect(healthProbe).toHaveBeenCalledWith("http://127.0.0.1:21933", config.server.root_api_key);
 
     await service.stop();
     expect(child.killed).toBe(true);
     await expect(service.getStatus()).resolves.toMatchObject({ state: "stopped" });
+    await expect(service.getDiagnostics()).resolves.toMatchObject({
+      health: "not-running",
+      events: expect.arrayContaining([
+        expect.objectContaining({ type: "stop", message: "OpenViking stopped." }),
+        expect.objectContaining({ type: "exit" }),
+      ]),
+    });
   });
 
   it("clears OpenViking data without removing installed components", async () => {
@@ -632,20 +664,28 @@ describe("OpenVikingRuntimeService", () => {
     },
   );
 
-  it("recovers a stale persisted PID as a stopped runtime", async () => {
+  it("does not trust or stop a live PID that fails the persisted runtime health probe", async () => {
     const root = await temporaryRoot();
     const runtime = path.join(root, "runtime", "0.4.11");
     await mkdir(path.join(runtime, "bin"), { recursive: true });
     await writeFile(path.join(runtime, "bin", "openviking-server"), "");
     await writeFile(path.join(root, "active-runtime.json"), JSON.stringify(manifest()));
     await writeFile(path.join(root, "runtime-state.json"), JSON.stringify({ pid: 99999, port: 21933 }));
-    const { service } = runtimeHarness(root, { alive: false });
+    const rootApiKey = "b".repeat(64);
+    await writeFile(path.join(root, "root-api-key"), `${rootApiKey}\n`);
+    const { service, healthProbe, killProcess } = runtimeHarness(root, {
+      alive: true,
+      healthy: false,
+    });
 
     await expect(service.getStatus()).resolves.toMatchObject({
       state: "stopped",
       version: "0.4.11",
     });
+    expect(healthProbe).toHaveBeenCalledWith("http://127.0.0.1:21933", rootApiKey);
     await expect(readFile(path.join(root, "runtime-state.json"), "utf8")).rejects.toThrow();
+    await service.stop();
+    expect(killProcess).not.toHaveBeenCalled();
   });
 
   it.runIf(process.platform !== "win32")(

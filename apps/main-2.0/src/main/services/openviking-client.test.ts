@@ -21,11 +21,13 @@ describe("OpenVikingGateway", () => {
   let closeServer: (() => Promise<void>) | undefined;
   let failure: { path: string; status: number; body: unknown } | undefined;
   let busyUserRegistryResponses = 0;
+  let manualContent = "";
 
   beforeEach(async () => {
     requests.length = 0;
     failure = undefined;
     busyUserRegistryResponses = 0;
+    manualContent = `<!-- agent-recall-title:${Buffer.from("Pinned title", "utf8").toString("base64url")} -->\nPinned body`;
     const server = createServer(async (request, response) => {
       const body = await readBody(request);
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -209,12 +211,16 @@ describe("OpenVikingGateway", () => {
       content: "Keep directory isolation",
     });
     expect(saved.id).toBe("viking://user/memories/manual/manual-1.md");
-    expect(requests.find((request) => request.path === "/api/v1/content/write")?.body).toMatchObject({
+    const writeBody = requests.find((request) => request.path === "/api/v1/content/write")?.body;
+    expect(writeBody).toMatchObject({
       uri: "viking://user/memories/manual/manual-1.md",
-      content: "Keep directory isolation",
       mode: "create",
       wait: true,
     });
+    expect(writeBody).toMatchObject({
+      content: expect.stringMatching(/^<!-- agent-recall-title:[A-Za-z0-9_-]+ -->\nKeep directory isolation$/u),
+    });
+    await expect(gateway.readMemory(auth, saved.id)).resolves.toBe("Keep directory isolation");
     await gateway.deleteMemory(auth, saved.id);
   });
 
@@ -264,7 +270,15 @@ describe("OpenVikingGateway", () => {
       apiKey: "workspace-key",
     };
 
-    await expect(gateway.searchMemories(auth, "", 3)).resolves.toEqual([
+    await expect(gateway.searchMemories(auth, "", 4)).resolves.toEqual([
+      {
+        id: "viking://user/memories/manual/manual-1.md",
+        workspaceId: "",
+        title: "Pinned title",
+        content: "Pinned body",
+        source: "manual",
+        updatedAt: "2026-07-25T12:00:00Z",
+      },
       {
         id: "viking://user/memories/experiences/newest.md",
         workspaceId: "",
@@ -289,9 +303,10 @@ describe("OpenVikingGateway", () => {
         source: "events",
       },
     ]);
-    expect(requests.slice(-2).map((request) => request.path)).toEqual([
+    expect(requests.slice(-3).map((request) => request.path)).toEqual([
       expect.stringContaining("/api/v1/fs/ls?"),
       "/api/v1/search/glob",
+      expect.stringContaining("/api/v1/content/read?"),
     ]);
   });
 
@@ -432,6 +447,13 @@ describe("OpenVikingGateway", () => {
         status: "ok",
         result: [
           {
+            name: "manual-1.md",
+            isDir: false,
+            rel_path: "manual/manual-1.md",
+            uri: "viking://user/memories/manual/manual-1.md",
+            modTime: "2026-07-25T12:00:00Z",
+          },
+          {
             name: "cases",
             isDir: true,
             rel_path: "cases",
@@ -460,18 +482,28 @@ describe("OpenVikingGateway", () => {
         status: "ok",
         result: {
           matches: [
+            "viking://user/memories/manual/manual-1.md",
             "viking://user/memories/cases/older.md",
             "viking://user/memories/events/2026/07/24/import_completed.md",
             "viking://user/memories/experiences/newest.md",
           ],
-          count: 3,
+          count: 4,
         },
       });
     }
     if (url.pathname === "/api/v1/content/read") {
-      return sendJson(response, 200, { status: "ok", result: "Use migration 4" });
+      return sendJson(response, 200, {
+        status: "ok",
+        result: url.searchParams.get("uri")?.includes("/manual/")
+          ? manualContent
+          : "Use migration 4",
+      });
     }
     if (url.pathname === "/api/v1/content/write") {
+      const body = requests.at(-1)?.body as { uri?: string; content?: string } | undefined;
+      if (body?.uri?.includes("/manual/") && typeof body.content === "string") {
+        manualContent = body.content;
+      }
       return sendJson(response, 200, { status: "ok", result: { task_id: "write-1" } });
     }
     if (url.pathname === "/api/v1/fs" && request.method === "DELETE") {

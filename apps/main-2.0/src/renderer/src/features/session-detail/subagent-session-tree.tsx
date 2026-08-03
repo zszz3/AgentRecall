@@ -19,14 +19,18 @@ export function SubagentSessionTree({
   family,
   language,
   onOpen,
+  loadFailed = false,
+  onRetry,
 }: {
   family: SessionFamily;
   language: LanguageMode;
   onOpen: (sessionKey: string) => void;
+  loadFailed?: boolean;
+  onRetry?: () => void;
 }): ReactElement | null {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const l = (en: string, zh: string) => localize(language, en, zh);
-  if (!family.parent && family.children.length === 0 && !family.truncated) return null;
+  if (!family.parent && family.children.length === 0 && !family.truncated && !loadFailed) return null;
 
   const toggle = (sessionKey: string): void => {
     setExpanded((current) => {
@@ -39,6 +43,16 @@ export function SubagentSessionTree({
 
   return (
     <section className="subagent-session-tree">
+      {loadFailed ? (
+        <div className="subagent-load-error" role="alert">
+          <span>{l("Failed to load subagents", "Subagent 加载失败")}</span>
+          {onRetry ? (
+            <button type="button" onClick={onRetry}>
+              {l("Retry", "重试")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {family.parent ? (
         <div className="subagent-parent">
           <span className="subagent-relation-label">

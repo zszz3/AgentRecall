@@ -22,6 +22,26 @@ function resolvedEnvironment(
 }
 
 /**
+ * Header entries whose header name and host environment reference are both
+ * filled in. Values stay as host variable names here; resolve them at the
+ * launch boundary so secrets never end up in persisted launch configs.
+ */
+function headerReferences(server: McpServerDefinition): [string, string][] {
+  return Object.entries(server.headers ?? {}).filter(
+    ([name, hostName]) => name.trim() && hostName.trim(),
+  );
+}
+
+function resolvedHeaders(
+  server: McpServerDefinition,
+  environment: NodeJS.ProcessEnv,
+): Record<string, string> {
+  return Object.fromEntries(
+    headerReferences(server).map(([name, hostName]) => [name, environment[hostName] ?? ""]),
+  );
+}
+
+/**
  * Combine the per-binding allowlist with the server-level disabled tools to
  * decide which tool names an Agent may actually use. `restricted` is false only
  * when every discovered tool is allowed (no allowlist and nothing disabled), in
@@ -60,6 +80,16 @@ export function codexMcpLaunchConfig(
       }
     } else if (server.transport === "http" && server.url?.trim()) {
       args.push("-c", `${prefix}.url=${JSON.stringify(server.url.trim())}`);
+      const headers = headerReferences(server);
+      if (headers.length > 0) {
+        // env_http_headers keeps secret values out of argv: Codex reads each
+        // header value from its own process environment at connect time.
+        args.push(
+          "-c",
+          `${prefix}.env_http_headers={${headers.map(([name, hostName]) => `${JSON.stringify(name)} = ${JSON.stringify(hostName)}`).join(", ")}}`,
+        );
+        for (const [, hostName] of headers) env[hostName] = environment[hostName] ?? "";
+      }
     } else {
       continue;
     }
@@ -94,9 +124,11 @@ export function claudeMcpServers(
         ...(tools ? { tools } : {}),
       };
     } else if (server.transport === "http" && server.url?.trim()) {
+      const headers = resolvedHeaders(server, environment);
       result[name] = {
         type: "http",
         url: server.url.trim(),
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
         ...(tools ? { tools } : {}),
       };
     }
@@ -119,7 +151,12 @@ export function acpMcpServers(
         env: Object.entries(resolvedEnvironment(server, environment)).map(([name, value]) => ({ name, value })),
       });
     } else if (server.transport === "http" && server.url?.trim()) {
-      result.push({ type: "http", name, url: server.url.trim(), headers: [] });
+      result.push({
+        type: "http",
+        name,
+        url: server.url.trim(),
+        headers: Object.entries(resolvedHeaders(server, environment)).map(([headerName, value]) => ({ name: headerName, value })),
+      });
     }
   }
   return result;

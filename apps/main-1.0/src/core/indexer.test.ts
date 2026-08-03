@@ -637,6 +637,41 @@ describe("indexer", () => {
     }
   });
 
+  it("deduplicates Codex token events when an appended tail repeats prior usage", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-token-tail-"));
+    const tokenCount = JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-06-01T10:02:00Z",
+      payload: {
+        type: "token_count",
+        info: {
+          model: "gpt-5.6-sol",
+          last_token_usage: {
+            input_tokens: 120,
+            cached_input_tokens: 20,
+            output_tokens: 30,
+            reasoning_output_tokens: 5,
+          },
+        },
+      },
+    });
+    try {
+      const filePath = writeCodexSession(homeDir, "codex-token-tail", "original question", "Token Tail");
+      fs.appendFileSync(filePath, `\n${tokenCount}`);
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+
+      fs.appendFileSync(filePath, `\n${tokenCount}`);
+      const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+
+      expect(warm).toMatchObject({ indexed: 1, error: null });
+      expect(store.getTokenEvents("codex:codex-token-tail")).toHaveLength(1);
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a Cursor conversation as cache when its row disappears from the shared database", async () => {
     const store = createInMemoryStore();
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-cursor-cache-"));

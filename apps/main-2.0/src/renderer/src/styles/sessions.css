@@ -844,7 +844,7 @@
 }
 
 .search-match-snippet mark,
-.message.match-context mark {
+.msg mark {
   border-radius: 2px;
   background: var(--accent-soft);
   color: var(--accent-bright);
@@ -861,15 +861,16 @@
   margin-top: 0;
 }
 
-.matched .message.match-context {
+.matched .msg.match-context {
   opacity: 0.78;
 }
 
-.matched .message.match-target {
-  border-color: var(--accent-line);
+.matched .msg.match-target {
+  border-radius: 7px;
+  padding-left: 8px;
   background: var(--accent-soft);
   opacity: 1;
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .row-tags {

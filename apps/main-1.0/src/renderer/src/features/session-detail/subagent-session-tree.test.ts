@@ -78,4 +78,17 @@ describe("SubagentSessionTree", () => {
 
     expect(html).toContain("还有更多子会话未展示");
   });
+
+  it("shows a retry action when subagent loading fails", () => {
+    const html = renderToStaticMarkup(createElement(SubagentSessionTree, {
+      family: { parent: null, children: [], truncated: false },
+      language: "zh",
+      onOpen: () => undefined,
+      loadFailed: true,
+      onRetry: () => undefined,
+    }));
+
+    expect(html).toContain("Subagent 加载失败");
+    expect(html).toContain("重试");
+  });
 });

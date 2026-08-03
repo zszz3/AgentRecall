@@ -1,6 +1,7 @@
 import { asRecord, asString } from "./persisted-values";
 import type { PostgresDatabase, PostgresQueryable } from "../../../../../core/postgres/database";
 import type { PersistedAppStateV5 } from "./agent-hub-persistence";
+import type { WorkflowSidebarItem } from "../../../shared/types";
 import type { AgentHubPersistedStore } from "./persisted-store";
 import { PostgresChatRepository } from "./postgres-chat-repository";
 import { PostgresWorkflowRepository } from "./postgres-workflow-repository";
@@ -59,6 +60,24 @@ export class PostgresAppStore implements AgentHubPersistedStore {
       settings.get("active_workflow_id") ?? undefined,
     );
     return payload;
+  }
+
+  async loadWorkflowSidebar(): Promise<{
+    activeWorkflowId?: string;
+    workflows: WorkflowSidebarItem[];
+  }> {
+    const [settingsResult, workflows] = await Promise.all([
+      this.database.query<{ value_text: string | null }>(
+        "select value_text from agent_recall.app_settings where key = $1",
+        ["active_workflow_id"],
+      ),
+      this.workflows.loadSidebar(this.database),
+    ]);
+    const activeWorkflowId = settingsResult.rows[0]?.value_text ?? undefined;
+    return {
+      ...(activeWorkflowId ? { activeWorkflowId } : {}),
+      workflows,
+    };
   }
 
   async save(payload: PersistedAppStateV5): Promise<void> {

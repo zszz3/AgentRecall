@@ -8,6 +8,9 @@ import {
 
 import type { OpenVikingMemoryItem } from "../../core/openviking-memory";
 
+const MANUAL_MEMORY_URI = /^viking:\/\/user\/memories\/manual\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.md$/u;
+const MANUAL_TITLE_PREFIX = /^<!-- agent-recall-title:([A-Za-z0-9_-]+) -->\r?\n/u;
+
 export interface OpenVikingWorkspaceAuth {
   accountId: string;
   userId: string;
@@ -40,6 +43,7 @@ export interface OpenVikingClientPort {
     keepRecentCount?: number,
   ): Promise<OpenVikingTaskRef>;
   getTask(auth: OpenVikingWorkspaceAuth, taskId: string): Promise<JsonObject | null>;
+  getTaskIfRunning?(auth: OpenVikingWorkspaceAuth, taskId: string): Promise<JsonObject | null>;
   searchMemories(
     auth: OpenVikingWorkspaceAuth,
     query: string,
@@ -181,6 +185,10 @@ export class OpenVikingGateway implements OpenVikingClientPort {
     return this.normalize(() => this.workspaceClient(auth).getTask(taskId));
   }
 
+  getTaskIfRunning(auth: OpenVikingWorkspaceAuth, taskId: string): Promise<JsonObject | null> {
+    return this.getTask(auth, taskId);
+  }
+
   async searchMemories(
     auth: OpenVikingWorkspaceAuth,
     query: string,
@@ -209,9 +217,22 @@ export class OpenVikingGateway implements OpenVikingClientPort {
           });
           if (memory) memories.push(memory);
         }
-        return memories
+        const selected = memories
           .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""))
           .slice(0, limit);
+        return Promise.all(selected.map(async (memory) => {
+          if (!MANUAL_MEMORY_URI.test(memory.id)) return memory;
+          try {
+            const stored = decodeManualMemory(await client.read(memory.id));
+            return {
+              ...memory,
+              title: stored.title || memory.title,
+              content: stored.content,
+            };
+          } catch {
+            return memory;
+          }
+        }));
       }
       const result = await client.find(query, {
         targetUri: "viking://user/memories",
@@ -224,7 +245,10 @@ export class OpenVikingGateway implements OpenVikingClientPort {
   }
 
   async readMemory(auth: OpenVikingWorkspaceAuth, uri: string): Promise<string> {
-    return this.normalize(() => this.workspaceClient(auth).read(uri));
+    return this.normalize(async () => {
+      const content = await this.workspaceClient(auth).read(uri);
+      return MANUAL_MEMORY_URI.test(uri) ? decodeManualMemory(content).content : content;
+    });
   }
 
   async saveMemory(
@@ -246,7 +270,10 @@ export class OpenVikingGateway implements OpenVikingClientPort {
         }
         uri = `viking://user/memories/manual/${id}.md`;
       }
-      await this.workspaceClient(auth).write(uri, input.content, {
+      const storedContent = MANUAL_MEMORY_URI.test(uri)
+        ? encodeManualMemory(input.title, input.content)
+        : input.content;
+      await this.workspaceClient(auth).write(uri, storedContent, {
         mode: existingUri ? "replace" : "create",
         wait: true,
       });
@@ -365,7 +392,14 @@ function normalizeMemory(value: unknown): OpenVikingMemoryItem | null {
   if (record.isDir === true || record.is_dir === true) return null;
   const id = stringValue(record.uri) || stringValue(record.id);
   if (!id) return null;
-  const name = stringValue(record.title)
+  const rawContent = stringValue(record.content)
+    || stringValue(record.abstract)
+    || stringValue(record.overview);
+  const stored = MANUAL_MEMORY_URI.test(id)
+    ? decodeManualMemory(rawContent)
+    : { title: "", content: rawContent };
+  const name = stored.title
+    || stringValue(record.title)
     || stringValue(record.name)
     || id.split("/").at(-1)
     || id;
@@ -378,11 +412,32 @@ function normalizeMemory(value: unknown): OpenVikingMemoryItem | null {
     id,
     workspaceId: "",
     title: name.replace(/\.md$/iu, ""),
-    content: stringValue(record.content) || stringValue(record.abstract) || stringValue(record.overview),
+    content: stored.content,
     ...(source ? { source } : {}),
     ...(typeof record.score === "number" ? { score: record.score } : {}),
     ...(updatedAt ? { updatedAt } : {}),
   };
+}
+
+function encodeManualMemory(title: string, content: string): string {
+  const normalizedTitle = title.trim();
+  if (!normalizedTitle) return content;
+  const encodedTitle = Buffer.from(normalizedTitle, "utf8").toString("base64url");
+  return `<!-- agent-recall-title:${encodedTitle} -->\n${content}`;
+}
+
+function decodeManualMemory(content: string): { title: string; content: string } {
+  const match = MANUAL_TITLE_PREFIX.exec(content);
+  if (!match) return { title: "", content };
+  try {
+    const title = Buffer.from(match[1], "base64url").toString("utf8").trim();
+    return {
+      title,
+      content: content.slice(match[0].length),
+    };
+  } catch {
+    return { title: "", content };
+  }
 }
 
 function stringValue(value: unknown): string {

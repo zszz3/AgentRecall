@@ -1,4 +1,5 @@
 import type { PostgresQueryable } from "../../../../../core/postgres/database";
+import type { WorkflowSidebarItem } from "../../../shared/types";
 import {
   asArray,
   asNumber,
@@ -12,6 +13,42 @@ import {
 import { jsonParameter, postgresJson, postgresTime } from "./postgres-values";
 
 export class PostgresWorkflowRepository {
+  async loadSidebar(database: PostgresQueryable): Promise<WorkflowSidebarItem[]> {
+    const result = await database.query(`
+      select
+        id,
+        source_type,
+        title,
+        status,
+        revision,
+        objective,
+        case
+          when jsonb_typeof(definition -> 'nodes') = 'array'
+            then jsonb_array_length(definition -> 'nodes')
+          else 0
+        end as node_count,
+        created_at,
+        updated_at
+      from agent_recall.workflows
+      order by created_at desc, id
+    `);
+
+    return result.rows.map((value) => {
+      const row = asRecord(value);
+      return {
+        workflowId: asString(row.id),
+        sourceType: row.source_type === "official" ? "official" : "user",
+        title: asString(row.title),
+        status: asString(row.status) as WorkflowSidebarItem["status"],
+        revision: asNumber(row.revision),
+        objective: asString(row.objective),
+        nodeCount: asNumber(row.node_count),
+        createdAt: postgresTime(row.created_at),
+        updatedAt: postgresTime(row.updated_at),
+      };
+    });
+  }
+
   async load(
     database: PostgresQueryable,
     activeWorkflowId: string | undefined,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BuiltinSessionSearchServer, type BuiltinSessionSearchDeps, type McpBuiltinRuntime } from "./mcp-builtin-server";
+import { BuiltinSessionSearchServer, BuiltinWorkflowMcpServer, type BuiltinSessionSearchDeps, type McpBuiltinRuntime } from "./mcp-builtin-server";
 import type { McpServerDefinition } from "../shared/mcp/types";
 
 const FIXED_CONFIG = {
@@ -145,5 +145,64 @@ describe("BuiltinSessionSearchServer", () => {
     const draft: McpServerDefinition = { ...(await server.resolve()), disabledTools: ["tag_session"] };
     const tested = await server.recordTest(draft, [{ name: "tag_session", inputSchema: {} }]);
     expect(tested.disabledTools).toEqual(["tag_session"]);
+  });
+});
+
+const WORKFLOW_LAUNCH = {
+  id: "agent-recall-workflow",
+  name: "AgentRecall Workflow",
+  command: "node",
+  args: ["/out/mcp/workflow-entry.js"],
+};
+
+describe("BuiltinWorkflowMcpServer", () => {
+  it("resolves a managed, non-hub-bindable server with empty env and default-off state", async () => {
+    const deps = createDeps({ isEnabled: () => false, launchConfig: () => WORKFLOW_LAUNCH });
+    const server = new BuiltinWorkflowMcpServer({ ...deps, hubBindable: false });
+    const resolved = await server.resolve();
+    expect(resolved.id).toBe("agent-recall-workflow");
+    expect(resolved.name).toBe("AgentRecall Workflow");
+    expect(resolved.enabled).toBe(false);
+    expect(resolved.env).toEqual({});
+    expect(resolved.managed).toBe(true);
+    expect(resolved.hubBindable).toBe(false);
+    expect(server.isBuiltinId("agent-recall-workflow")).toBe(true);
+    expect(server.isBuiltinId("mcp-123")).toBe(false);
+  });
+
+  it("exposes literal bridge env only for testing", async () => {
+    const deps = createDeps({ launchConfig: () => WORKFLOW_LAUNCH });
+    const server = new BuiltinWorkflowMcpServer({
+      ...deps,
+      hubBindable: false,
+      testEnv: () => ({
+        AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/data/automation-mcp-bridge.json",
+        AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token",
+      }),
+    });
+    expect(server.testEnv()).toEqual({
+      AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/data/automation-mcp-bridge.json",
+      AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token",
+    });
+  });
+
+  it("routes enable changes through the settings toggle", async () => {
+    const deps = createDeps({ launchConfig: () => WORKFLOW_LAUNCH });
+    const server = new BuiltinWorkflowMcpServer({ ...deps, hubBindable: false });
+    await server.saveDraft({ ...(await server.resolve()), enabled: false });
+    expect(deps.setEnabled).toHaveBeenCalledWith(false);
+    expect((await server.resolve()).enabled).toBe(false);
+  });
+
+  it("records a successful test into its runtime cache", async () => {
+    const deps = createDeps({ launchConfig: () => WORKFLOW_LAUNCH });
+    const server = new BuiltinWorkflowMcpServer({ ...deps, hubBindable: false });
+    const tested = await server.recordTest(await server.resolve(), [
+      { name: "workflow_create", inputSchema: {} },
+      { name: "workflow_run", inputSchema: {} },
+    ]);
+    expect(tested.status).toBe("connected");
+    expect(tested.tools.map((tool) => tool.name)).toEqual(["workflow_create", "workflow_run"]);
+    expect((deps.readRuntime() as McpBuiltinRuntime).status).toBe("connected");
   });
 });

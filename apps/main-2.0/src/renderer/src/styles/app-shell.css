@@ -181,7 +181,7 @@
   -webkit-app-region: no-drag;
 }
 
-.app-page-head > div {
+.app-page-head > div:first-child {
   display: grid;
   gap: 3px;
   width: 100%;

@@ -84,4 +84,24 @@ describe("PostgreSQL MCP registry", () => {
     const [stored] = await store.list();
     expect(stored?.disabledTools).toEqual(["write_file"]);
   });
+
+  it("round-trips HTTP header references without storing secret values", async () => {
+    await store.upsert({
+      id: "remote",
+      name: "Remote search",
+      transport: "http",
+      args: [],
+      url: "https://example.test/mcp",
+      env: {},
+      headers: { Authorization: "HOST_HTTP_TOKEN" },
+      enabled: true,
+      tools: [],
+      status: "untested",
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+
+    const [stored] = await store.list();
+    expect(stored?.headers).toEqual({ Authorization: "HOST_HTTP_TOKEN" });
+  });
 });

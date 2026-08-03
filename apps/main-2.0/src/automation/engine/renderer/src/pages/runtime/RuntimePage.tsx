@@ -63,7 +63,7 @@ const CONFIG_TEXT = {
     enabled: "启用",
     models: "模型",
     addModel: "添加模型",
-    refreshModels: "刷新模型目录",
+    refreshModels: "探测模型",
   },
   en: {
     save: "Save config",
@@ -82,7 +82,7 @@ const CONFIG_TEXT = {
     enabled: "Enabled",
     models: "Models",
     addModel: "Add model",
-    refreshModels: "Refresh models",
+    refreshModels: "Detect models",
   },
 } as const;
 
@@ -162,6 +162,7 @@ export function RuntimePage({
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const [providerQuery, setProviderQuery] = useState("");
   const [runtimePickerOpen, setRuntimePickerOpen] = useState(false);
+  const [refreshingModelChannelId, setRefreshingModelChannelId] = useState<string>();
   const firstRuntimeChoiceRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (runtimePickerOpen) firstRuntimeChoiceRef.current?.focus();
@@ -331,6 +332,15 @@ export function RuntimePage({
             : [...channel.models, { id: modelId, label: modelId }]
         : channel.models.filter((model) => model.id !== previousModelId),
     }));
+  };
+  const detectModels = async (channelId: string): Promise<void> => {
+    if (!onRefreshModels || refreshingModelChannelId) return;
+    setRefreshingModelChannelId(channelId);
+    try {
+      await onRefreshModels(channelId);
+    } finally {
+      setRefreshingModelChannelId(undefined);
+    }
   };
 
   return (
@@ -683,14 +693,15 @@ export function RuntimePage({
                   <span>{language === "zh" ? "模型 ID 与显示名称" : "Model ID and display name"}</span>
                   <div className="config-plugin-actions">
                     <button
-                      className="icon-btn"
+                      className="control-btn compact secondary"
                       type="button"
-                      aria-label="Refresh model catalog"
+                      aria-label={configText.refreshModels}
                       title={configText.refreshModels}
-                      disabled={!onRefreshModels}
-                      onClick={() => void onRefreshModels?.(selectedRuntimeChannelRecord.id)}
+                      disabled={!onRefreshModels || refreshingModelChannelId === selectedRuntimeChannelRecord.id}
+                      onClick={() => void detectModels(selectedRuntimeChannelRecord.id)}
                     >
-                      <RefreshCw size={13} />
+                      <RefreshCw size={13} className={refreshingModelChannelId === selectedRuntimeChannelRecord.id ? "is-spinning" : undefined} />
+                      <span>{configText.refreshModels}</span>
                     </button>
                     <button className="control-btn compact secondary" onClick={() => onAddModel(selectedRuntimeChannelRecord.id)}>
                       <Plus size={13} />

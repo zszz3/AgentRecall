@@ -1,5 +1,10 @@
 import type { IndexStatus } from "../../core/indexer";
-import type { SessionBulkDeletePreview, SessionBulkDeleteRequest, SessionBulkDeleteResult } from "../../core/session-bulk-delete";
+import {
+  liveSessionDeleteKey,
+  type SessionBulkDeletePreview,
+  type SessionBulkDeleteRequest,
+  type SessionBulkDeleteResult,
+} from "../../core/session-bulk-delete";
 import {
   canDeleteSessionLocally,
   isLocalSessionEnvironment,
@@ -41,11 +46,10 @@ export interface SessionCatalogServiceDependencies {
     offset: number,
     limit: number,
   ): Promise<SessionMessage[]>;
-  loadLiveSessions(): Promise<LiveSessionSnapshot>;
+  loadLiveSessions(fresh?: boolean): Promise<LiveSessionSnapshot>;
   refreshIndex(): Promise<IndexStatus>;
   getIndexStatus(): IndexStatus;
   setCustomTitle(sessionKey: string, title: string | null): Promise<void>;
-  deleteWslSession(environment: SessionEnvironment, filePath: string): Promise<void>;
 }
 
 /**
@@ -122,8 +126,8 @@ export class SessionCatalogService {
     return this.dependencies.store.getTraceEvents(sessionKey, options);
   }
 
-  getLiveSessions(): Promise<LiveSessionSnapshot> {
-    return this.dependencies.loadLiveSessions();
+  getLiveSessions(fresh = false): Promise<LiveSessionSnapshot> {
+    return this.dependencies.loadLiveSessions(fresh);
   }
 
   getStats(options?: SessionStatsOptions): Promise<SessionStats> {
@@ -189,28 +193,48 @@ export class SessionCatalogService {
       throw new Error("Cannot delete sessions stored on SSH remote environments.");
     }
     if (session?.environmentKind === "ssh") {
-      return this.dependencies.store.deleteSessionRecord(sessionKey);
+      return (await this.dependencies.store.deleteSessionRecords([sessionKey])).includes(sessionKey);
     }
-    if (!session || session.environmentKind !== "wsl") {
-      return this.dependencies.store.deleteSession(sessionKey);
-    }
-    if (isSharedSessionSourceDatabase(session)) {
+    if (session?.environmentKind === "wsl" && isSharedSessionSourceDatabase(session)) {
       if (session.sourceAvailable === false) {
-        return this.dependencies.store.deleteSessionRecord(sessionKey);
+        return (await this.dependencies.store.deleteSessionRecords([sessionKey])).includes(sessionKey);
       }
       throw new Error("Cannot delete shared source databases on WSL by removing the database file.");
     }
-    const environment = await this.dependencies.requireWslEnvironment(session);
-    await this.dependencies.deleteWslSession(environment, session.filePath);
-    return this.dependencies.store.deleteSessionRecord(sessionKey);
+    if (!session) return false;
+    const request = await this.withFreshLiveSessions({ sessionKeys: [sessionKey], liveSessionKeys: [] });
+    if (isSharedSessionSourceDatabase(session)) {
+      const preview = await this.bulkDelete.preview(request);
+      if (preview.skipped.some((issue) => issue.reason === "live")) {
+        throw new Error("A related session is currently live. Stop it before deleting this session tree.");
+      }
+      return this.dependencies.store.deleteSession(sessionKey);
+    }
+    const result = await this.bulkDelete.delete(request);
+    if (result.skipped.some((issue) => issue.reason === "live")) {
+      throw new Error("A related session is currently live. Stop it before deleting this session tree.");
+    }
+    if (result.failed[0]) throw new Error(result.failed[0].message);
+    return result.deletedSessionKeys.includes(sessionKey);
   }
 
   previewBulkDelete(request: SessionBulkDeleteRequest): Promise<SessionBulkDeletePreview> {
     return this.bulkDelete.preview(request);
   }
 
-  bulkDeleteSessions(request: SessionBulkDeleteRequest): Promise<SessionBulkDeleteResult> {
-    return this.bulkDelete.delete(request);
+  async bulkDeleteSessions(request: SessionBulkDeleteRequest): Promise<SessionBulkDeleteResult> {
+    return this.bulkDelete.delete(await this.withFreshLiveSessions(request));
+  }
+
+  private async withFreshLiveSessions(request: SessionBulkDeleteRequest): Promise<SessionBulkDeleteRequest> {
+    const snapshot = await this.dependencies.loadLiveSessions(true);
+    if (snapshot.error) throw new Error("Live session detection failed. Deletion is disabled.");
+    const liveSessionKeys = new Set(request.liveSessionKeys);
+    for (const session of snapshot.sessions) liveSessionKeys.add(liveSessionDeleteKey(session));
+    return {
+      ...request,
+      liveSessionKeys: [...liveSessionKeys],
+    };
   }
 
   refreshIndex(): Promise<IndexStatus> {

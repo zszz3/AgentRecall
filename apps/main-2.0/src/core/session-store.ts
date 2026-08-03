@@ -1,8 +1,7 @@
-import * as fs from "node:fs";
-
 import { deleteHermesSession } from "./hermes-session-writer";
 import { isLocalSessionStorage } from "./session-environment";
-import { deleteZcodeSession } from "./zcode-session-writer";
+import { deleteLocalSessionSources } from "./session-source-delete";
+import { deleteZcodeSessions } from "./zcode-session-writer";
 import {
   readSessionSourceArtifacts,
   type SessionSourceArtifact,
@@ -218,28 +217,36 @@ export class SessionStore {
 
   async deleteSession(sessionKey: string): Promise<boolean> {
     await this.ready;
-    const target = await this.sessions.getSessionDeletionTarget(sessionKey);
+    const targets = await this.sessions.getSessionDeletionTargets([sessionKey]);
+    const target = targets.find((item) => item.sessionKey === sessionKey);
     if (!target) return false;
     if (target.source === "pi-cli") throw new Error("Pi session source files are read-only.");
     if (target.source === "zcode-cli") {
-      const sourceDeleted = deleteZcodeSession(target.filePath, target.rawId);
-      const indexDeleted = await this.sessions.deleteSessionRecord(sessionKey);
-      return sourceDeleted || indexDeleted;
+      const idsByFilePath = new Map<string, string[]>();
+      if (target.sourceAvailable) {
+        for (const item of targets.filter((item) => item.sourceAvailable)) {
+          const rawIds = idsByFilePath.get(item.filePath) ?? [];
+          rawIds.push(item.rawId);
+          idsByFilePath.set(item.filePath, rawIds);
+        }
+      }
+      for (const [filePath, rawIds] of idsByFilePath) deleteZcodeSessions(filePath, rawIds);
+      return (await this.sessions.deleteSessionRecords(targets.map((item) => item.sessionKey), false)).includes(sessionKey);
     }
     if (target.source === "hermes") {
-      if (!target.sourceAvailable) return this.sessions.deleteSessionRecord(sessionKey);
-      const sourceDeleted = deleteHermesSession(target.filePath, target.rawId);
-      const indexDeleted = await this.sessions.deleteSessionRecord(sessionKey);
-      return sourceDeleted || indexDeleted;
+      if (target.sourceAvailable) deleteHermesSession(target.filePath, target.rawId);
+      return (await this.sessions.deleteSessionRecords(targets.map((item) => item.sessionKey), false)).includes(sessionKey);
     }
     if (target.source === "opencode-cli") throw new Error("Cannot delete shared OpenCode source database.");
     if (target.source === "codewiz-cli") throw new Error("Cannot delete shared CodeWiz source database.");
     if (target.source === "cursor-agent" && /(^|[\\/])state\.vscdb$/iu.test(target.filePath)) {
-      if (!target.sourceAvailable) return this.sessions.deleteSessionRecord(sessionKey);
+      if (!target.sourceAvailable) {
+        return (await this.sessions.deleteSessionRecords(targets.map((item) => item.sessionKey), false)).includes(sessionKey);
+      }
       throw new Error("Cannot delete shared Cursor source database.");
     }
-    deleteSessionSourceFile(target.filePath);
-    return this.sessions.deleteSessionRecord(sessionKey);
+    if (target.sourceAvailable) deleteLocalSessionSources(targets.filter((item) => item.sourceAvailable));
+    return (await this.sessions.deleteSessionRecords(targets.map((item) => item.sessionKey), false)).includes(sessionKey);
   }
 
   async deleteSessionRecord(sessionKey: string): Promise<boolean> {
@@ -247,14 +254,17 @@ export class SessionStore {
     return this.sessions.deleteSessionRecord(sessionKey);
   }
 
-  async getSessionDeletionTargets(sessionKeys: readonly string[]): Promise<SessionBulkDeleteTarget[]> {
+  async getSessionDeletionTargets(
+    sessionKeys: readonly string[],
+    includeOrphanedSubagents = false,
+  ): Promise<SessionBulkDeleteTarget[]> {
     await this.ready;
-    return this.sessions.getSessionDeletionTargets(sessionKeys);
+    return this.sessions.getSessionDeletionTargets(sessionKeys, includeOrphanedSubagents);
   }
 
-  async deleteSessionRecords(sessionKeys: readonly string[]): Promise<string[]> {
+  async deleteSessionRecords(sessionKeys: readonly string[], expandDescendants = true): Promise<string[]> {
     await this.ready;
-    return this.sessions.deleteSessionRecords(sessionKeys);
+    return this.sessions.deleteSessionRecords(sessionKeys, expandDescendants);
   }
 
   async migrateSessionKeyPreservingUserState(
@@ -799,17 +809,4 @@ export class SessionStore {
     await this.ready;
     return findSessionFamily(this.database, sessionKey);
   }
-}
-
-function deleteSessionSourceFile(filePath: string): void {
-  const normalized = filePath.trim();
-  if (!normalized) throw new Error("Session source file path is missing.");
-  try {
-    const stat = fs.lstatSync(normalized);
-    if (stat.isDirectory()) throw new Error("Refusing to delete a directory as a session file.");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  fs.rmSync(normalized, { force: true });
 }

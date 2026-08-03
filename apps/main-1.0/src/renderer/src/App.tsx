@@ -33,7 +33,7 @@ import { canDeleteSessionLocally } from "../../core/session-environment";
 import type { SessionSyncHookStatus } from "../../core/session-sync-queue";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type { TraceEventQueryOptions } from "../../core/session-store";
-import type { SessionBulkDeletePreview, SessionBulkDeleteRequest } from "../../core/session-bulk-delete";
+import { liveSessionDeleteKey, type SessionBulkDeletePreview, type SessionBulkDeleteRequest } from "../../core/session-bulk-delete";
 import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../core/skill-sync";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../core/skill-manager";
 import type {
@@ -95,6 +95,7 @@ import type {
 } from "./app-types";
 import { ApiConfigDialog } from "./features/providers/api-config-dialog";
 import { DetailPanel } from "./features/session-detail/detail-panel";
+import { useSessionFamily, type FamilySessionOpenResult } from "./features/session-detail/use-session-family";
 import { SessionMigrationDialog, SessionMigrationLaunchFailedDialog } from "./components/session-migration-dialog";
 import { BulkDeleteDialog, CommandDialog, DeleteSessionDialog, DeleteTagDialog } from "./components/session-dialogs";
 import { SkillsDialog } from "./features/skills/skills-dialog";
@@ -327,11 +328,14 @@ export function App(): ReactElement {
   const [migrationProgress, setMigrationProgress] = useState<SessionMigrationProgress | null>(null);
   const [deleteTagName, setDeleteTagName] = useState<string | null>(null);
   const [deleteSessionCandidate, setDeleteSessionCandidate] = useState<SessionSearchResult | null>(null);
+  const [deleteSessionCascadeCount, setDeleteSessionCascadeCount] = useState<number | null>(null);
+  const [deleteSessionBlockedMessage, setDeleteSessionBlockedMessage] = useState<string | null>(null);
+  const deleteSessionPreviewId = useRef(0);
   const [deletingSession, setDeletingSession] = useState(false);
   const [bulkSelectedKeys, setBulkSelectedKeys] = useState<Set<string>>(() => new Set());
   const [bulkSelectionActive, setBulkSelectionActive] = useState(false);
   const [bulkDeleteDialog, setBulkDeleteDialog] = useState<{
-    mode: "selection" | "cleanup";
+    mode: "selection" | "cleanup" | "orphans";
     dateValue: string;
     request: SessionBulkDeleteRequest | null;
     preview: SessionBulkDeletePreview | null;
@@ -356,7 +360,7 @@ export function App(): ReactElement {
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
-  const [sessionFamily, setSessionFamily] = useState<SessionFamily>(EMPTY_SESSION_FAMILY);
+  const [sessionFamilyRefreshVersion, setSessionFamilyRefreshVersion] = useState(0);
   const [rulesSnapshot, setRulesSnapshot] = useState<RulesSyncSnapshot | null>(null);
   const [memoriesSnapshot, setMemoriesSnapshot] = useState<MemoriesSyncSnapshot | null>(null);
   const [apiConfigOpen, setApiConfigOpen] = useState(false);
@@ -845,20 +849,6 @@ export function App(): ReactElement {
     if (savedSearchesOpen) loadSavedSearches();
   }, [savedSearchesOpen, loadSavedSearches]);
 
-  useEffect(() => {
-    if (!detail) {
-      setSessionFamily(EMPTY_SESSION_FAMILY);
-      return;
-    }
-    let cancelled = false;
-    void window.sessionSearch.getSessionFamily(detail.sessionKey).catch(() => EMPTY_SESSION_FAMILY).then((family) => {
-      if (!cancelled) setSessionFamily(family);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail?.sessionKey]);
-
   const applyQueryBuilder = useCallback((state: QueryBuilderState) => {
     setSource(state.source ?? "all");
     setTag(state.tag);
@@ -1021,6 +1011,7 @@ export function App(): ReactElement {
       setIndexStatus((current) => coalesceIndexStatusForRender(current, nextStatus));
       setRefreshFeedback((current) => reduceIndexFeedback(current, { type: "index-status", status: nextStatus }));
       if (!nextStatus.running) {
+        setSessionFamilyRefreshVersion((current) => current + 1);
         void load();
         void loadSidebarMetadata();
         void loadStats();
@@ -1045,6 +1036,7 @@ export function App(): ReactElement {
     });
     const offOpenSession = window.sessionSearch.onOpenSession((sessionKey) => setSelectedKey(sessionKey));
     const offEnvironments = window.sessionSearch.onEnvironmentsUpdated((nextEnvironments) => {
+      setSessionFamilyRefreshVersion((current) => current + 1);
       setEnvironments(nextEnvironments);
       setEnvironmentId((current) =>
         current !== "all" && !nextEnvironments.some((environment) => environment.id === current) ? "all" : current,
@@ -1433,16 +1425,42 @@ export function App(): ReactElement {
   function requestDeleteSession(session: SessionSearchResult): void {
     setContextMenu(null);
     setDeleteSessionCandidate(session);
+    setDeleteSessionCascadeCount(null);
+    setDeleteSessionBlockedMessage(null);
+    const previewId = ++deleteSessionPreviewId.current;
+    void freshLiveKeysForBulkDelete()
+      .then((liveSessionKeys) => window.sessionSearch.previewBulkDelete({
+        sessionKeys: [session.sessionKey],
+        liveSessionKeys,
+        protectFavorites: false,
+      }))
+      .then((preview) => {
+        if (deleteSessionPreviewId.current !== previewId) return;
+        setDeleteSessionCascadeCount(preview.expandedCount);
+        if (preview.skipped.some((issue) => issue.reason === "live")) {
+          setDeleteSessionBlockedMessage(t(
+            "A related session is currently live. Stop it before deleting this session tree.",
+            "关联会话正在运行，请先停止后再删除整棵会话树。",
+          ));
+        }
+      })
+      .catch((error) => {
+        if (deleteSessionPreviewId.current === previewId) {
+          setDeleteSessionBlockedMessage(error instanceof Error ? error.message : String(error));
+        }
+      });
   }
 
   async function confirmDeleteSession(): Promise<void> {
-    if (!deleteSessionCandidate || deletingSession) return;
+    if (!deleteSessionCandidate || deletingSession || deleteSessionCascadeCount === null || deleteSessionBlockedMessage) return;
     const session = deleteSessionCandidate;
     setDeletingSession(true);
     setActionStatus({ kind: "running", message: t("Deleting session...", "正在删除会话...") });
     try {
       const removed = await window.sessionSearch.deleteSession(session.sessionKey);
       setDeleteSessionCandidate(null);
+      setDeleteSessionCascadeCount(null);
+      setDeleteSessionBlockedMessage(null);
       if (removed) {
         if (detail?.sessionKey === session.sessionKey) closeDetail();
         setSelectedKey((current) => (current === session.sessionKey ? null : current));
@@ -1461,7 +1479,17 @@ export function App(): ReactElement {
         await load();
       }
     } catch (error) {
-      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      const message = rawMessage === "A related session is currently live. Stop it before deleting this session tree."
+        ? t(rawMessage, "关联会话正在运行，请先停止后再删除整棵会话树。")
+        : rawMessage === "Live session detection failed. Deletion is disabled."
+        ? t(rawMessage, "Live 会话检测失败，删除操作已禁用。")
+        : rawMessage;
+      if (
+        rawMessage === "A related session is currently live. Stop it before deleting this session tree."
+        || rawMessage === "Live session detection failed. Deletion is disabled."
+      ) setDeleteSessionBlockedMessage(message);
+      setActionStatus({ kind: "error", message });
     } finally {
       setDeletingSession(false);
     }
@@ -1509,10 +1537,9 @@ export function App(): ReactElement {
   }
 
   async function freshLiveKeysForBulkDelete(): Promise<string[]> {
-    const snapshot = await window.sessionSearch.getLiveSessions();
-    setLiveSessions(snapshot);
-    if (snapshot.error) throw new Error(t("Live session detection failed. Bulk deletion is disabled.", "Live 会话检测失败，批量删除已禁用。"));
-    return snapshot.sessions.map((session) => `${session.family}:${session.rawId}`);
+    const snapshot = await window.sessionSearch.getLiveSessions(true);
+    if (snapshot.error) throw new Error(t("Live session detection failed. Deletion is disabled.", "Live 会话检测失败，删除操作已禁用。"));
+    return snapshot.sessions.map(liveSessionDeleteKey);
   }
 
   async function previewSelectedSessions(): Promise<void> {
@@ -1546,6 +1573,27 @@ export function App(): ReactElement {
     setBulkDeleteDialog({ mode: "cleanup", dateValue: formatDateInput(date), request: null, preview: null, favoriteCount: 0 });
   }
 
+  async function openOrphanCleanup(): Promise<void> {
+    if (bulkDeleteBusy) return;
+    setBulkDeleteDialog({ mode: "orphans", dateValue: "", request: null, preview: null, favoriteCount: 0 });
+    setBulkDeleteBusy(true);
+    try {
+      const request: SessionBulkDeleteRequest = {
+        sessionKeys: [],
+        liveSessionKeys: await freshLiveKeysForBulkDelete(),
+        includeOrphanedSubagents: true,
+        protectFavorites: false,
+      };
+      const preview = await window.sessionSearch.previewBulkDelete(request);
+      setBulkDeleteDialog((current) => current?.mode === "orphans" ? { ...current, request, preview } : current);
+    } catch (error) {
+      setBulkDeleteDialog(null);
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBulkDeleteBusy(false);
+    }
+  }
+
   async function previewDateCleanup(): Promise<void> {
     if (!bulkDeleteDialog?.dateValue || bulkDeleteBusy) return;
     setBulkDeleteBusy(true);
@@ -1573,8 +1621,7 @@ export function App(): ReactElement {
     setBulkDeleteBusy(true);
     setActionStatus({ kind: "running", message: t("Deleting sessions...", "正在批量删除会话...") });
     try {
-      const request = { ...bulkDeleteDialog.request, liveSessionKeys: await freshLiveKeysForBulkDelete() };
-      const result = await window.sessionSearch.bulkDeleteSessions(request);
+      const result = await window.sessionSearch.bulkDeleteSessions(bulkDeleteDialog.request);
       if (detail && result.deletedSessionKeys.includes(detail.sessionKey)) closeDetail();
       setBulkSelectedKeys((current) => {
         const next = new Set(current);
@@ -1999,11 +2046,36 @@ export function App(): ReactElement {
   );
   const handleRowRename = useCallback((session: SessionSearchResult) => rowHandlersRef.current.beginRename(session), []);
   const handleRowFavorite = useCallback((session: SessionSearchResult) => void rowHandlersRef.current.toggleFavorite(session), []);
-  const openFamilySession = useCallback((sessionKey: string) => {
-    void window.sessionSearch.getSession(sessionKey).then((session) => {
-      if (session) void rowHandlersRef.current.openDetail(session);
-    });
-  }, []);
+  const openFamilySessionAction = useCallback(async (sessionKey: string): Promise<FamilySessionOpenResult> => {
+    try {
+      const session = await window.sessionSearch.getSession(sessionKey);
+      if (!session) {
+        setActionStatus({
+          kind: "error",
+          message: t(
+            "This related session is no longer available. The subagent list has been refreshed.",
+            "关联会话已不存在，Subagent 列表已刷新。",
+          ),
+        });
+        return "missing";
+      }
+      await rowHandlersRef.current.openDetail(session);
+      return "opened";
+    } catch (error) {
+      setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      return "failed";
+    }
+  }, [t]);
+  const {
+    family: sessionFamily,
+    loadFailed: sessionFamilyLoadFailed,
+    retry: retrySessionFamily,
+    open: openFamilySession,
+  } = useSessionFamily({
+    sessionKey: detail?.sessionKey ?? null,
+    refreshVersion: sessionFamilyRefreshVersion,
+    onOpen: openFamilySessionAction,
+  });
   const handleRowContextMenu = useCallback((event: ReactMouseEvent, session: SessionSearchResult) => {
     event.preventDefault();
     setSelectedKey(session.sessionKey);
@@ -2174,6 +2246,7 @@ export function App(): ReactElement {
                 <button type="button" onClick={exitBulkSelection} title={t("Exit multi-select", "退出多选")} aria-label={t("Exit multi-select", "退出多选")}><X size={13} /></button>
               ) : null}
               <button type="button" onClick={openDateCleanup}><CalendarDays size={13} />{t("Clean up", "按日期清理")}</button>
+              <button type="button" onClick={() => void openOrphanCleanup()}><Trash2 size={13} />{t("Orphans", "孤儿清理")}</button>
             </div>
             {selected ? <span className="selected-path">{selected.projectPath || selected.rawId}</span> : null}
           </div>
@@ -2216,6 +2289,8 @@ export function App(): ReactElement {
           onClose={closeDetail}
           sessionFamily={sessionFamily}
           onOpenFamilySession={openFamilySession}
+          sessionFamilyLoadFailed={sessionFamilyLoadFailed}
+          onRetrySessionFamily={retrySessionFamily}
           onShowMore={() => void loadMoreMessages()}
           onRename={() => beginRename(detail)}
           onAddTag={() => beginAddTag(detail)}
@@ -2410,11 +2485,19 @@ export function App(): ReactElement {
       {deleteSessionCandidate ? (
         <DeleteSessionDialog
           session={deleteSessionCandidate}
+          cascadeCount={deleteSessionCascadeCount}
+          blockedMessage={deleteSessionBlockedMessage}
           language={language}
           deleting={deletingSession}
           onConfirm={() => void confirmDeleteSession()}
           onCancel={() => {
-            if (!deletingSession) setDeleteSessionCandidate(null);
+            if (!deletingSession) {
+              deleteSessionPreviewId.current += 1;
+              setDeleteSessionCandidate(null);
+              closeDetail();
+              setDeleteSessionCascadeCount(null);
+              setDeleteSessionBlockedMessage(null);
+            }
           }}
         />
       ) : null}

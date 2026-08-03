@@ -160,12 +160,15 @@ export class SessionStore {
     return this.sessions.deleteSessionRecord(sessionKey);
   }
 
-  getSessionDeletionTargets(sessionKeys: readonly string[]): SessionBulkDeleteTarget[] {
-    return this.sessions.getSessionDeletionTargets(sessionKeys);
+  getSessionDeletionTargets(
+    sessionKeys: readonly string[],
+    includeOrphanedSubagents = false,
+  ): SessionBulkDeleteTarget[] {
+    return this.sessions.getSessionDeletionTargets(sessionKeys, includeOrphanedSubagents);
   }
 
-  deleteSessionRecords(sessionKeys: readonly string[]): string[] {
-    return this.sessions.deleteSessionRecords(sessionKeys);
+  deleteSessionRecords(sessionKeys: readonly string[], expandDescendants = true): string[] {
+    return this.sessions.deleteSessionRecords(sessionKeys, expandDescendants);
   }
 
   setSessionSourceAvailable(sessionKey: string, available: boolean): void {

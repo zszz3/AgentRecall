@@ -135,6 +135,7 @@ export interface SessionsPageActions {
   selectAllMatching(): void;
   deleteSelected(): void;
   openDateCleanup(): void;
+  openOrphanCleanup(): void;
 }
 
 export function SessionsPage({
@@ -318,6 +319,7 @@ export function SessionsPage({
               <button type="button" onClick={actions.exitBulkSelection} title={l("Exit multi-select", "退出多选")} aria-label={l("Exit multi-select", "退出多选")}><X size={13} /></button>
             ) : null}
             <button type="button" onClick={actions.openDateCleanup}><CalendarDays size={13} />{l("Clean up", "按日期清理")}</button>
+            <button type="button" onClick={actions.openOrphanCleanup}><Trash2 size={13} />{l("Orphans", "孤儿清理")}</button>
           </div>
           {model.selected
             ? <span className="selected-path">

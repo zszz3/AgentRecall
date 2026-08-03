@@ -16,16 +16,23 @@ const SESSION_RELATED_TABLES = [
   "input_history",
 ] as const;
 
-function tableExists(db: DatabaseSyncType, tableName: string): boolean {
+type DatabaseSchema = "main" | "zcode_tasks";
+
+function tableExists(db: DatabaseSyncType, tableName: string, schema: DatabaseSchema = "main"): boolean {
   return Boolean(
     db
-      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+      .prepare(`SELECT 1 FROM ${schema}.sqlite_master WHERE type = 'table' AND name = ? LIMIT 1`)
       .get(tableName),
   );
 }
 
-function hasColumn(db: DatabaseSyncType, tableName: string, columnName: string): boolean {
-  return (db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: unknown }>).some(
+function hasColumn(
+  db: DatabaseSyncType,
+  tableName: string,
+  columnName: string,
+  schema: DatabaseSchema = "main",
+): boolean {
+  return (db.prepare(`PRAGMA ${schema}.table_info(${tableName})`).all() as Array<{ name?: unknown }>).some(
     (column) => column.name === columnName,
   );
 }
@@ -68,24 +75,27 @@ export function deleteZcodeSessions(dbPath: string, sessionIds: readonly string[
     if (!tableExists(db, "session") || !hasColumn(db, "session", "id")) {
       throw new Error("ZCode database schema is incompatible.");
     }
+    const taskIndexAttached = attachZcodeTaskIndex(db, normalizedPath);
 
     db.exec("BEGIN IMMEDIATE");
     try {
       const existingIds = selectExistingSessionIds(db, normalizedIds);
-      if (existingIds.length === 0) {
-        db.exec("COMMIT");
-        return [];
-      }
-
-      for (const tableName of SESSION_RELATED_TABLES) {
-        if (tableExists(db, tableName) && hasColumn(db, tableName, "session_id")) {
-          for (const ids of chunks(existingIds, 500)) {
-            db.prepare(`DELETE FROM ${tableName} WHERE session_id IN (${ids.map(() => "?").join(", ")})`).run(...ids);
+      if (existingIds.length > 0) {
+        for (const tableName of SESSION_RELATED_TABLES) {
+          if (tableExists(db, tableName) && hasColumn(db, tableName, "session_id")) {
+            for (const ids of chunks(existingIds, 500)) {
+              db.prepare(`DELETE FROM ${tableName} WHERE session_id IN (${ids.map(() => "?").join(", ")})`).run(...ids);
+            }
           }
         }
+        for (const ids of chunks(existingIds, 500)) {
+          db.prepare(`DELETE FROM session WHERE id IN (${ids.map(() => "?").join(", ")})`).run(...ids);
+        }
       }
-      for (const ids of chunks(existingIds, 500)) {
-        db.prepare(`DELETE FROM session WHERE id IN (${ids.map(() => "?").join(", ")})`).run(...ids);
+      if (taskIndexAttached) {
+        for (const ids of chunks(normalizedIds, 500)) {
+          db.prepare(`DELETE FROM zcode_tasks.tasks WHERE task_id IN (${ids.map(() => "?").join(", ")})`).run(...ids);
+        }
       }
       db.exec("COMMIT");
       return existingIds;
@@ -96,6 +106,21 @@ export function deleteZcodeSessions(dbPath: string, sessionIds: readonly string[
   } finally {
     db.close();
   }
+}
+
+function attachZcodeTaskIndex(db: DatabaseSyncType, dbPath: string): boolean {
+  const zcodeRoot = path.dirname(path.dirname(path.dirname(dbPath)));
+  const taskIndexPath = path.join(zcodeRoot, "v2", "tasks-index.sqlite");
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(taskIndexPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  if (!stat.isFile()) throw new Error("ZCode task index path is not a regular file.");
+  db.prepare("ATTACH DATABASE ? AS zcode_tasks").run(taskIndexPath);
+  return tableExists(db, "tasks", "zcode_tasks") && hasColumn(db, "tasks", "task_id", "zcode_tasks");
 }
 
 function selectExistingSessionIds(db: DatabaseSyncType, sessionIds: readonly string[]): string[] {

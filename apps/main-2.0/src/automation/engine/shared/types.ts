@@ -18,7 +18,7 @@ import type { RuntimeConversation } from "./runtime/conversation";
 import type { RuntimeUsage } from "../../../shared/runtime/usage";
 import type { WorkflowNodeConversation } from "./workflow-v2/conversation";
 import type { ConfiguredAgent } from "./agent/types";
-import type { WorkflowDraftState, WorkflowGrillMessage, WorkflowStoreState } from "./workflow/draft";
+import type { WorkflowDraftState, WorkflowGrillMessage, WorkflowSidebarItem, WorkflowStoreState } from "./workflow/draft";
 import type {
   WorkflowArtifactReference,
   WorkflowEvent,
@@ -42,7 +42,7 @@ export type { RuntimeUsage } from "../../../shared/runtime/usage";
 export type { AgentRevision, AgentType, ConfiguredAgent } from "./agent/types";
 export type { AgentMcpBinding, McpServerDefinition, McpToolDefinition, McpTransport } from "./mcp/types";
 export type { EvaluationCaseResult, EvaluationDataset, EvaluationDatasetItem, EvaluationEvaluator, EvaluationExperiment, EvaluationRun, EvaluationRunPage, EvaluationRunSummary, EvaluationScore, EvaluatorKind, ListEvaluationRunsRequest } from "./evaluation/types";
-export type { WorkflowDraftState, WorkflowGrillMessage, WorkflowStoreState } from "./workflow/draft";
+export type { WorkflowDraftState, WorkflowGrillMessage, WorkflowSidebarItem, WorkflowStoreState } from "./workflow/draft";
 export type {
   ConfirmWorkflowImportRequest,
   WorkflowExportResult,
@@ -116,6 +116,7 @@ export interface AgentModelOption {
 export interface ModelCatalogRefreshResult {
   channelId: string;
   source: "codex_cli" | "openai_models";
+  providerLabel: string;
   discoveredCount: number;
   snapshot: AppSnapshot;
 }
