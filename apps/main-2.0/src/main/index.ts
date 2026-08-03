@@ -539,6 +539,10 @@ const skillService = new SkillService({
   getStore: () => store,
   getSettings,
   getHookSetup: loadSkillUsageHookSetup,
+  getEvaluationService: () => {
+    if (!automationService) throw new Error("Runtime is not ready.");
+    return automationService.evaluations;
+  },
   libraryRoot: path.join(app.getPath("userData"), "skills"),
   skillsShCachePath: path.join(app.getPath("userData"), "cache", "skills-sh.json"),
   homeDir: app.getPath("home"),

@@ -153,6 +153,8 @@ export class EvaluationStore {
         agentId: String(row.agent_id),
         repetitions: Number(row.repetitions),
         evaluatorIds: evaluators.rows.map((item) => item.evaluator_id),
+        skillName: row.skill_name != null ? String(row.skill_name) : null,
+        skillHash: row.skill_hash != null ? String(row.skill_hash) : null,
         createdAt: timestamp(row.created_at),
         updatedAt: timestamp(row.updated_at),
       };
@@ -163,13 +165,15 @@ export class EvaluationStore {
     await this.database.transaction(async (transaction) => {
       await transaction.query(
         `insert into agent_recall.evaluation_experiments (
-          id, name, dataset_id, agent_id, repetitions, created_at, updated_at
-        ) values ($1, $2, $3, $4, $5, $6, $7)
+          id, name, dataset_id, agent_id, repetitions, skill_name, skill_hash, created_at, updated_at
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         on conflict (id) do update set
           name = excluded.name,
           dataset_id = excluded.dataset_id,
           agent_id = excluded.agent_id,
           repetitions = excluded.repetitions,
+          skill_name = excluded.skill_name,
+          skill_hash = excluded.skill_hash,
           updated_at = excluded.updated_at`,
         [
           value.id,
@@ -177,6 +181,8 @@ export class EvaluationStore {
           value.datasetId,
           value.agentId,
           value.repetitions,
+          value.skillName ?? null,
+          value.skillHash ?? null,
           new Date(value.createdAt),
           new Date(value.updatedAt),
         ],

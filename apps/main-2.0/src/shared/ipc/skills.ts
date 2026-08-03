@@ -39,6 +39,23 @@ const triggersQueryInput = z
     }).strict().optional()]),
   ])
   .transform((input): [{ skill?: string; limit?: number }] => [input[0] ?? {}]);
+const evalSuiteCreateInput = z.tuple([
+  z.object({
+    skill: z.string().trim().min(1).max(200),
+    name: z.string().trim().min(1).max(200),
+    agentId: z.string().trim().min(1).max(512),
+    evaluatorIds: z.array(z.string().trim().min(1).max(512)).max(20),
+    repetitions: z.number().int().min(1).max(5),
+    cases: z.array(
+      z.object({
+        input: z.string().trim().min(1).max(32_768),
+        expectedOutput: z.string().max(32_768).optional(),
+      }).strict(),
+    ).min(1).max(50),
+  }).strict(),
+]);
+const skillNameInput = z.tuple([z.string().trim().min(1).max(200)]);
+const evalSuiteIdInput = z.tuple([z.string().trim().min(1).max(512)]);
 
 export const SKILLS_IPC = {
   list: defineIpcRequest("skills:list", noInput),
@@ -69,4 +86,7 @@ export const SKILLS_IPC = {
   getEvalDetail: defineIpcRequest("skills:eval-detail", z.tuple([z.string().trim().min(1).max(200)])),
   getEvalFindings: defineIpcRequest("skills:eval-findings", z.tuple([z.string().trim().min(1).max(200)])),
   getEvalFindingCounts: defineIpcRequest("skills:eval-finding-counts", noInput),
+  listEvalSuites: defineIpcRequest("skills:eval-suites", skillNameInput),
+  createEvalSuite: defineIpcRequest("skills:eval-suite-create", evalSuiteCreateInput),
+  runEvalSuite: defineIpcRequest("skills:eval-suite-run", evalSuiteIdInput),
 } as const;

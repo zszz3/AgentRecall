@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { Beaker, CheckCircle2, ChevronDown, ChevronRight, EyeOff, Link2Off, Lock, MousePointerClick, RefreshCw, Settings2 } from "lucide-react";
+import { AlertTriangle, Beaker, CheckCircle2, ChevronDown, ChevronRight, EyeOff, Link2Off, Lock, MousePointerClick, Play, Plus, RefreshCw, Settings2, Trash2, X } from "lucide-react";
 
 import type { SkillTriggerLink } from "../../../../core/session-store";
 import type { SkillFinding } from "../../../../core/skill-eval-findings";
-import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem } from "../../../../main/services/skill-service";
+import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem, SkillEvalSuite, CreateSkillEvalSuiteInput } from "../../../../main/services/skill-service";
+import type { EvaluationEvaluator, ConfiguredAgent } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
 import { EvaluationFeaturePage } from "../automation/evaluation-feature-page";
@@ -222,6 +223,7 @@ export function EvalPage({
                   ) : (
                     <>
                       <FindingsCard language={language} findings={findings} onOpenSession={onOpenSession} />
+                      <EvalSuitesCard language={language} skill={selected.skill} />
                       <SignalsCard language={language} item={selected} detail={detail} />
                       <VersionsCard language={language} detail={detail} />
                       <TriggersCard
@@ -399,6 +401,315 @@ function formatDuration(value: number | null): string {
   const seconds = value / 1000;
   if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
   return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+}
+
+// Skill regression evaluation (phase four). Cases are the specification the user
+// defines ("given this input, expect this output"); runs executed through the
+// automation engine are the evidence. The card stays mounted for suites are fetched
+// for the selected skill and runs are attributed to the then-current skill hash.
+function EvalSuitesCard({
+  language,
+  skill,
+}: {
+  language: LanguageMode;
+  skill: string;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [suites, setSuites] = useState<SkillEvalSuite[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setSuites(await window.sessionSearch.listSkillEvalSuites(skill));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, [skill]);
+
+  useEffect(() => {
+    setSuites(null);
+    void reload();
+  }, [reload]);
+
+  const run = useCallback(async (suiteId: string) => {
+    setRunningId(suiteId);
+    setError(null);
+    try {
+      await window.sessionSearch.runSkillEvalSuite(suiteId);
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRunningId(null);
+    }
+  }, [reload]);
+
+  return (
+    <div className="eval-card eval-suites-card">
+      <header>
+        <h4>{l("Regression evaluation", "回归评测")}</h4>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {suites !== null && suites.length > 0 ? (
+            <span className="eval-evidence-tag">{l(`${suites.length} suite(s)`, `${suites.length} 个方案`)}</span>
+          ) : null}
+          <button type="button" className="eval-create-button" onClick={() => setCreateOpen(true)}>
+            <Plus size={13} />{l("New suite", "新建方案")}
+          </button>
+        </div>
+      </header>
+
+      {error ? <p className="eval-error" role="alert">{error}</p> : null}
+
+      {suites === null ? (
+        <p className="eval-muted">{l("Loading...", "加载中...")}</p>
+      ) : suites.length === 0 ? (
+        <p className="eval-muted">{l(
+          "No regression suite yet. Define cases once re-run this skill after it changes.",
+          "还没有回归评测方案。定义测试用例，就能在该 Skill 改动后重跑验证。",
+        )}</p>
+      ) : (
+        <ul className="eval-suite-list">
+          {suites.map((suite) => (
+            <li key={suite.id} className="eval-suite-item">
+              <div className="eval-suite-row-main">
+                <span className="eval-suite-name-name">{suite.name}</span>
+                <span className="eval-muted">{l(`${suite.caseCount} cases`, `${suite.caseCount} 个用例`)}</span>
+                {suite.drifted ? (
+                  <span className="eval-badge eval-badge-warn" title={l(
+                    "The skill version changed since the last run.",
+                    "该 Skill 自上次运行后版本已变化。",
+                  )}>
+                    <AlertTriangle size={11} />{l("Version drifted", "版本已变化")}
+                  </span>
+                ) : suite.skillHash ? (
+                  <span className="eval-badge eval-badge-dim">
+                    <CheckCircle2 size={11} />{l("Current version", "当前版本")}
+                  </span>
+                ) : null}
+              </div>
+              <div className="eval-suite-row-sub">
+                <span className="eval-muted">
+                  {suite.lastRun
+                    ? `${l("Last run", "上次运行")} ${formatRelativeTime(suite.lastRun.startedAt)} · ${l("pass", "通过")} ${suite.lastRun.passRate != null ? Math.round(suite.lastRun.passRate * 100) : "—"}%`
+                    : l("Never run", "从未运行")}
+                  {" · "}×{suite.repetitions}
+                </span>
+                <button
+                  type="button"
+                  className="eval-run-button"
+                  disabled={runningId === suite.id}
+                  onClick={() => void run(suite.id)}
+                >
+                  <Play size={12} />
+                  {runningId === suite.id ? l("Running...", "运行中...") : l("Run", "运行")}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {createOpen ? (
+        <CreateSuiteDialog
+          language={language}
+          skill={skill}
+          onClose={() => setCreateOpen(false)}
+          onCreated={() => {
+            setCreateOpen(false);
+            void reload();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function CreateSuiteDialog({
+  language,
+  skill,
+  onClose,
+  onCreated,
+}: {
+  language: LanguageMode;
+  skill: string;
+  onClose: () => void;
+  onCreated: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [name, setName] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [repetitions, setRepetitions] = useState(1);
+  const [evaluatorIds, setEvaluatorIds] = useState<string[]>([]);
+  const [cases, setCases] = useState<Array<{ input: string; expectedOutput: string }>>([
+    { input: "", expectedOutput: "" },
+  ]);
+  const [evaluators, setEvaluators] = useState<EvaluationEvaluator[]>([]);
+  const [agents, setAgents] = useState<ConfiguredAgent[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [nextEvaluators, snapshot] = await Promise.all([
+          window.sessionSearch.automation.listEvaluationEvaluators(),
+          window.sessionSearch.automation.getSnapshot(),
+        ]);
+        if (cancelled) return;
+        setEvaluators(nextEvaluators.filter((item) => item.enabled));
+        setAgents(snapshot.configuredAgents);
+        if (snapshot.configuredAgents[0]) setAgentId(snapshot.configuredAgents[0].id);
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const input: CreateSkillEvalSuiteInput = {
+        skill,
+        name,
+        agentId,
+        evaluatorIds,
+        repetitions,
+        cases: cases
+          .filter((item) => item.input.trim())
+          .map((item) => ({
+            input: item.input,
+            ...(item.expectedOutput.trim() ? { expectedOutput: item.expectedOutput } : {}),
+          })),
+      };
+      await window.sessionSearch.createSkillEvalSuite(input);
+      onCreated();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setSaving(false);
+    }
+  }, [skill, name, agentId, evaluatorIds, repetitions, cases, onCreated]);
+
+  const canSave = name.trim() && agentId && cases.some((item) => item.input.trim());
+
+  return (
+    <div className="eval-suite-dialog-backdrop" onClick={onClose}>
+      <div className="eval-suite-dialog" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <h4>{l("New regression suite", "新建回归方案")} · {skill}</h4>
+          <button type="button" onClick={onClose} aria-label={l("Close", "关闭")}>
+            <X size={15} />
+          </button>
+        </header>
+
+        {error ? <p className="eval-error" role="alert">{error}</p> : null}
+
+        <label className="eval-suite-field">
+          <span>{l("Suite name", "方案名称")}</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder={l("e.g. Basic feature regression", "如：基础功能回归")} />
+        </label>
+
+        <label className="eval-suite-field">
+          <span>{l("Execution Agent", "执行 Agent")}</span>
+          <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
+            {agents.length === 0 ? <option value="">{l("No configured Agent", "暂无已配置 Agent")}</option> : null}
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="eval-suite-field">
+          <span>{l("Evaluators", "评分器")}</span>
+          <div className="eval-suite-evaluators">
+            {evaluators.length === 0 ? (
+              <p className="eval-muted">{l(
+                "No evaluators yet. Create one in the Experiments tab first.",
+                "还没有评分器。请先在实验页创建。",
+              )}</p>
+            ) : evaluators.map((evaluator) => {
+              const checked = evaluatorIds.includes(evaluator.id);
+              return (
+                <label key={evaluator.id} className="eval-suite-evaluator-option">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => setEvaluatorIds((ids) => event.target.checked
+                      ? [...ids, evaluator.id]
+                      : ids.filter((id) => id !== evaluator.id))}
+                  />
+                  {evaluator.name}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <label className="eval-suite-field">
+          <span>{l("Repetitions per case", "每个用例重复次数")}</span>
+          <select value={repetitions} onChange={(event) => setRepetitions(Number(event.target.value))}>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <option key={value} value={value}>{value}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="eval-suite-field">
+          <div className="eval-suite-cases-header">
+            <span>{l("Test cases", "测试用例")}</span>
+            <button type="button" onClick={() => setCases((items) => [...items, { input: "", expectedOutput: "" }])}>
+              <Plus size={12} />{l("Case", "用例")}
+            </button>
+          </div>
+          {cases.map((item, index) => (
+            <div key={index} className="eval-suite-case-row">
+              <textarea
+                value={item.input}
+                placeholder={l(`Use ${skill} to: ...`, `使用 ${skill} 处理：...`)}
+                onChange={(event) => setCases((items) => items.map((value, i) => i === index ? { ...value, input: event.target.value } : value))}
+              />
+              <textarea
+                value={item.expectedOutput}
+                placeholder={l("Expected output (optional)", "期望输出（可选）")}
+                onChange={(event) => setCases((items) => items.map((value, i) => i === index ? { ...value, expectedOutput: event.target.value } : value))}
+              />
+              <button
+                type="button"
+                aria-label={l("Remove case", "删除用例")}
+                disabled={cases.length <= 1}
+                onClick={() => setCases((items) => items.filter((_, i) => i !== index))}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <footer>
+          <button type="button" className="eval-suite-cancel" onClick={onClose}>{l("Cancel", "取消")}</button>
+          <button
+            type="button"
+            className="eval-suite-save"
+            disabled={!canSave || saving}
+            onClick={() => void save()}
+          >
+            {saving ? l("Saving...", "保存中...") : l("Create", "创建")}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
 }
 
 function formatRatio(value: number | null): string {
