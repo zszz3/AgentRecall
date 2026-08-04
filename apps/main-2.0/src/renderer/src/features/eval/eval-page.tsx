@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactElement } from "react";
-import { AlertTriangle, Beaker, CheckCircle2, ChevronDown, ChevronRight, EyeOff, Link2Off, Lock, MousePointerClick, Play, Plus, RefreshCw, Settings2, Trash2, X } from "lucide-react";
+import { AlertTriangle, Beaker, CheckCircle2, ChevronDown, ChevronRight, EyeOff, Link2Off, Lock, MousePointerClick, Pencil, Play, Plus, RefreshCw, Settings2, Trash2, X } from "lucide-react";
 
 import type { SkillTriggerLink } from "../../../../core/session-store";
 import type { SkillFinding } from "../../../../core/skill-eval-findings";
-import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem, SkillEvalSuite, CreateSkillEvalSuiteInput } from "../../../../main/services/skill-service";
+import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem, SkillEvalSuite } from "../../../../main/services/skill-service";
 import type { EvaluationEvaluator, ConfiguredAgent } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
@@ -417,8 +417,10 @@ function EvalSuitesCard({
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [suites, setSuites] = useState<SkillEvalSuite[] | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  // null = closed; editing null = creating a new suite.
+  const [dialog, setDialog] = useState<{ editing: SkillEvalSuite | null } | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -447,6 +449,24 @@ function EvalSuitesCard({
     }
   }, [reload]);
 
+  const remove = useCallback(async (suite: SkillEvalSuite) => {
+    const confirmed = window.confirm(l(
+      `Delete suite "${suite.name}" and its run history?`,
+      `删除方案「${suite.name}」及其运行历史？`,
+    ));
+    if (!confirmed) return;
+    setDeletingId(suite.id);
+    setError(null);
+    try {
+      await window.sessionSearch.deleteSkillEvalSuite(suite.id);
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDeletingId(null);
+    }
+  }, [l, reload]);
+
   return (
     <div className="eval-card eval-suites-card">
       <header>
@@ -455,7 +475,7 @@ function EvalSuitesCard({
           {suites !== null && suites.length > 0 ? (
             <span className="eval-evidence-tag">{l(`${suites.length} suite(s)`, `${suites.length} 个方案`)}</span>
           ) : null}
-          <button type="button" className="eval-create-button" onClick={() => setCreateOpen(true)}>
+          <button type="button" className="eval-create-button" onClick={() => setDialog({ editing: null })}>
             <Plus size={13} />{l("New suite", "新建方案")}
           </button>
         </div>
@@ -506,19 +526,37 @@ function EvalSuitesCard({
                   <Play size={12} />
                   {runningId === suite.id ? l("Running...", "运行中...") : l("Run", "运行")}
                 </button>
+                <button
+                  type="button"
+                  className="eval-run-button"
+                  aria-label={l(`Edit suite ${suite.name}`, `编辑方案 ${suite.name}`)}
+                  onClick={() => setDialog({ editing: suite })}
+                >
+                  <Pencil size={12} />{l("Edit", "编辑")}
+                </button>
+                <button
+                  type="button"
+                  className="eval-run-button eval-suite-delete"
+                  aria-label={l(`Delete suite ${suite.name}`, `删除方案 ${suite.name}`)}
+                  disabled={deletingId === suite.id}
+                  onClick={() => void remove(suite)}
+                >
+                  <Trash2 size={12} />{deletingId === suite.id ? l("Deleting...", "删除中...") : l("Delete", "删除")}
+                </button>
               </div>
             </li>
           ))}
         </ul>
       )}
 
-      {createOpen ? (
+      {dialog ? (
         <CreateSuiteDialog
           language={language}
           skill={skill}
-          onClose={() => setCreateOpen(false)}
-          onCreated={() => {
-            setCreateOpen(false);
+          editing={dialog.editing}
+          onClose={() => setDialog(null)}
+          onSaved={() => {
+            setDialog(null);
             void reload();
           }}
         />
@@ -530,20 +568,26 @@ function EvalSuitesCard({
 function CreateSuiteDialog({
   language,
   skill,
+  editing,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   language: LanguageMode;
   skill: string;
+  editing: SkillEvalSuite | null;
   onClose: () => void;
-  onCreated: () => void;
+  onSaved: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [name, setName] = useState("");
-  const [agentId, setAgentId] = useState("");
-  const [repetitions, setRepetitions] = useState(1);
-  const [useBuiltinJudge, setUseBuiltinJudge] = useState(true);
-  const [evaluatorIds, setEvaluatorIds] = useState<string[]>([]);
+  const [name, setName] = useState(editing?.name ?? "");
+  const [agentId, setAgentId] = useState(editing?.agentId ?? "");
+  const [repetitions, setRepetitions] = useState(editing?.repetitions ?? 1);
+  const [useBuiltinJudge, setUseBuiltinJudge] = useState(
+    editing ? editing.evaluatorIds.some((id) => id.startsWith("builtin-judge-")) : true,
+  );
+  const [evaluatorIds, setEvaluatorIds] = useState<string[]>(
+    editing ? editing.evaluatorIds.filter((id) => !id.startsWith("builtin-judge-")) : [],
+  );
   const [cases, setCases] = useState<Array<{ input: string; expectedOutput: string }>>([
     { input: "", expectedOutput: "" },
   ]);
@@ -565,9 +609,17 @@ function CreateSuiteDialog({
         // not have to manage by hand.
         setEvaluators(nextEvaluators.filter((item) => item.enabled && !item.id.startsWith("builtin-judge-")));
         setAgents(snapshot.configuredAgents);
-        const preferred = snapshot.configuredAgents.find((agent) => agent.managed)
-          ?? snapshot.configuredAgents[0];
-        if (preferred) setAgentId(preferred.id);
+        if (!editing) {
+          const preferred = snapshot.configuredAgents.find((agent) => agent.managed)
+            ?? snapshot.configuredAgents[0];
+          if (preferred) setAgentId(preferred.id);
+        }
+        if (editing) {
+          const savedCases = await window.sessionSearch.getSkillEvalSuiteCases(editing.id);
+          if (!cancelled && savedCases.length > 0) {
+            setCases(savedCases.map((item) => ({ input: item.input, expectedOutput: item.expectedOutput ?? "" })));
+          }
+        }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -575,33 +627,45 @@ function CreateSuiteDialog({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [editing]);
 
   const save = useCallback(async () => {
     setSaving(true);
     setError(null);
     try {
-      const input: CreateSkillEvalSuiteInput = {
-        skill,
-        name,
-        agentId,
-        evaluatorIds,
-        useBuiltinJudge,
-        repetitions,
-        cases: cases
-          .filter((item) => item.input.trim())
-          .map((item) => ({
-            input: item.input,
-            ...(item.expectedOutput.trim() ? { expectedOutput: item.expectedOutput } : {}),
-          })),
-      };
-      await window.sessionSearch.createSkillEvalSuite(input);
-      onCreated();
+      const caseList = cases
+        .filter((item) => item.input.trim())
+        .map((item) => ({
+          input: item.input,
+          ...(item.expectedOutput.trim() ? { expectedOutput: item.expectedOutput } : {}),
+        }));
+      if (editing) {
+        await window.sessionSearch.updateSkillEvalSuite({
+          id: editing.id,
+          name,
+          agentId,
+          evaluatorIds,
+          useBuiltinJudge,
+          repetitions,
+          cases: caseList,
+        });
+      } else {
+        await window.sessionSearch.createSkillEvalSuite({
+          skill,
+          name,
+          agentId,
+          evaluatorIds,
+          useBuiltinJudge,
+          repetitions,
+          cases: caseList,
+        });
+      }
+      onSaved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setSaving(false);
     }
-  }, [skill, name, agentId, evaluatorIds, useBuiltinJudge, repetitions, cases, onCreated]);
+  }, [editing, skill, name, agentId, evaluatorIds, useBuiltinJudge, repetitions, cases, onSaved]);
 
   const canSave = name.trim() && agentId && cases.some((item) => item.input.trim())
     && (useBuiltinJudge || evaluatorIds.length > 0);
@@ -610,7 +674,7 @@ function CreateSuiteDialog({
     <div className="eval-suite-dialog-backdrop" onClick={onClose}>
       <div className="eval-suite-dialog" onClick={(event) => event.stopPropagation()}>
         <header>
-          <h4>{l("New regression suite", "新建回归方案")} · {skill}</h4>
+          <h4>{editing ? l("Edit regression suite", "编辑回归方案") : l("New regression suite", "新建回归方案")} · {skill}</h4>
           <button type="button" onClick={onClose} aria-label={l("Close", "关闭")}>
             <X size={15} />
           </button>
@@ -728,7 +792,7 @@ function CreateSuiteDialog({
             disabled={!canSave || saving}
             onClick={() => void save()}
           >
-            {saving ? l("Saving...", "保存中...") : l("Create", "创建")}
+            {saving ? l("Saving...", "保存中...") : editing ? l("Save", "保存") : l("Create", "创建")}
           </button>
         </footer>
       </div>

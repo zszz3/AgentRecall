@@ -7,7 +7,7 @@ import type { SkillDiffSnapshot } from "../core/skill-diff";
 import type { RemoteSkill, SkillSyncBatchResult, SkillSyncInstallResult, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../core/skill-sync";
 import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SkillTriggerLink } from "../core/session-store";
-import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput } from "../main/services/skill-service";
+import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput, UpdateSkillEvalSuiteInput, SkillEvalSuiteCase } from "../main/services/skill-service";
 import type { SkillFinding } from "../core/skill-eval-findings";
 import type { EvaluationRun } from "../automation/contracts";
 import { SKILLS_IPC } from "../shared/ipc/skills";
@@ -60,6 +60,9 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
     getSkillEvalFindingCounts: (): Promise<{ skill: string; low: number; medium: number }[]> => ipc.invoke(SKILLS_IPC.getEvalFindingCounts.channel),
     listSkillEvalSuites: (skill: string): Promise<SkillEvalSuite[]> => ipc.invoke(SKILLS_IPC.listEvalSuites.channel, skill),
     createSkillEvalSuite: (input: CreateSkillEvalSuiteInput): Promise<SkillEvalSuite> => ipc.invoke(SKILLS_IPC.createEvalSuite.channel, input),
+    updateSkillEvalSuite: (input: UpdateSkillEvalSuiteInput): Promise<SkillEvalSuite> => ipc.invoke(SKILLS_IPC.updateEvalSuite.channel, input),
+    deleteSkillEvalSuite: (experimentId: string): Promise<void> => ipc.invoke(SKILLS_IPC.deleteEvalSuite.channel, experimentId),
+    getSkillEvalSuiteCases: (experimentId: string): Promise<SkillEvalSuiteCase[]> => ipc.invoke(SKILLS_IPC.getEvalSuiteCases.channel, experimentId),
     runSkillEvalSuite: (experimentId: string): Promise<EvaluationRun> => ipc.invoke(SKILLS_IPC.runEvalSuite.channel, experimentId),
   };
 }

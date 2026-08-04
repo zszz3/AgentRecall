@@ -449,6 +449,11 @@
   cursor: not-allowed;
 }
 
+.eval-suite-delete:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger, #d64545) 55%, transparent);
+  color: var(--danger, #d64545);
+}
+
 .eval-suite-list {
   display: flex;
   flex-direction: column;

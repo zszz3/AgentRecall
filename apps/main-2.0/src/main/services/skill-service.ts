@@ -104,6 +104,16 @@ export interface CreateSkillEvalSuiteInput {
   cases: SkillEvalSuiteCase[];
 }
 
+export interface UpdateSkillEvalSuiteInput {
+  id: string;
+  name: string;
+  agentId: string;
+  evaluatorIds: string[];
+  useBuiltinJudge: boolean;
+  repetitions: number;
+  cases: SkillEvalSuiteCase[];
+}
+
 export interface SkillEvalSuiteLastRun {
   id: string;
   startedAt: number;
@@ -937,12 +947,12 @@ export class SkillService {
     if (!input.agentId.trim()) throw new Error("An execution Agent is required.");
     if (input.cases.length === 0) throw new Error("At least one case is required.");
     const evaluations = this.requireEvaluationService();
-    const evaluatorIds = [...input.evaluatorIds];
-    if (input.useBuiltinJudge) {
-      const builtin = await evaluations.ensureBuiltinJudge(input.agentId.trim());
-      if (!evaluatorIds.includes(builtin.id)) evaluatorIds.unshift(builtin.id);
-    }
-    if (evaluatorIds.length === 0) throw new Error("At least one evaluator is required.");
+    const evaluatorIds = await this.resolveSuiteEvaluators(
+      evaluations,
+      input.agentId.trim(),
+      input.evaluatorIds,
+      input.useBuiltinJudge,
+    );
     const now = this.dependencies.now();
     const dataset = await evaluations.saveDataset({
       id: `dataset-${now}`,
@@ -986,6 +996,106 @@ export class SkillService {
       updatedAt: experiment.updatedAt,
       lastRun: null,
     };
+  }
+
+  async getSkillEvalSuiteCases(experimentId: string): Promise<SkillEvalSuiteCase[]> {
+    this.requireEvalEnabled();
+    const id = experimentId.trim();
+    if (!id) throw new Error("An evaluation suite id is required.");
+    const evaluations = this.requireEvaluationService();
+    const experiment = (await evaluations.listExperiments()).find((item) => item.id === id);
+    if (!experiment) throw new Error(`Evaluation suite not found: ${id}`);
+    const dataset = (await evaluations.listDatasets()).find((item) => item.id === experiment.datasetId);
+    if (!dataset) throw new Error(`Evaluation dataset not found: ${experiment.datasetId}`);
+    return dataset.items.map((item) => ({
+      input: item.input,
+      ...(item.expectedOutput !== undefined && item.expectedOutput !== null
+        ? { expectedOutput: item.expectedOutput }
+        : {}),
+    }));
+  }
+
+  async updateSkillEvalSuite(input: UpdateSkillEvalSuiteInput): Promise<SkillEvalSuite> {
+    this.requireEvalEnabled();
+    const id = input.id.trim();
+    if (!id) throw new Error("An evaluation suite id is required.");
+    if (!input.name.trim()) throw new Error("A suite name is required.");
+    if (!input.agentId.trim()) throw new Error("An execution Agent is required.");
+    if (input.cases.length === 0) throw new Error("At least one case is required.");
+    const evaluations = this.requireEvaluationService();
+    const experiment = (await evaluations.listExperiments()).find((item) => item.id === id);
+    if (!experiment) throw new Error(`Evaluation suite not found: ${id}`);
+    const dataset = (await evaluations.listDatasets()).find((item) => item.id === experiment.datasetId);
+    if (!dataset) throw new Error(`Evaluation dataset not found: ${experiment.datasetId}`);
+    const evaluatorIds = await this.resolveSuiteEvaluators(
+      evaluations,
+      input.agentId.trim(),
+      input.evaluatorIds,
+      input.useBuiltinJudge,
+    );
+    const now = this.dependencies.now();
+    // Item ids are preserved positionally so past runs stay joinable by
+    // dataset item; only appended cases get fresh ids.
+    await evaluations.saveDataset({
+      ...dataset,
+      name: input.name.trim(),
+      description: experiment.skillName ?? dataset.description,
+      items: input.cases.map((value, index) => ({
+        id: dataset.items[index]?.id ?? `case-${now}-${index}`,
+        input: value.input,
+        ...(value.expectedOutput !== undefined ? { expectedOutput: value.expectedOutput } : {}),
+        metadata: dataset.items[index]?.metadata ?? {},
+        sequence: index,
+      })),
+      updatedAt: now,
+    });
+    await evaluations.saveExperiment({
+      ...experiment,
+      name: input.name.trim(),
+      agentId: input.agentId.trim(),
+      evaluatorIds,
+      repetitions: Math.max(1, Math.min(5, Math.floor(input.repetitions))),
+      updatedAt: now,
+    });
+    const skill = (experiment.skillName ?? "").trim();
+    const suites = skill ? await this.getSkillEvalSuites(skill) : [];
+    const updated = suites.find((item) => item.id === id);
+    if (!updated) throw new Error(`Evaluation suite not found: ${id}`);
+    return updated;
+  }
+
+  async deleteSkillEvalSuite(experimentId: string): Promise<void> {
+    this.requireEvalEnabled();
+    const id = experimentId.trim();
+    if (!id) throw new Error("An evaluation suite id is required.");
+    const evaluations = this.requireEvaluationService();
+    const experiment = (await evaluations.listExperiments()).find((item) => item.id === id);
+    if (!experiment) throw new Error(`Evaluation suite not found: ${id}`);
+    const runs = await evaluations.listRuns({ experimentId: id, limit: 100 });
+    for (const run of runs.items) await evaluations.deleteRun(run.id);
+    await evaluations.deleteExperiment(id);
+    const datasetShared = (await evaluations.listExperiments()).some(
+      (item) => item.datasetId === experiment.datasetId,
+    );
+    if (!datasetShared) await evaluations.deleteDataset(experiment.datasetId);
+  }
+
+  // A suite holds at most one built-in judge, and it must match the execution
+  // agent's channel. Custom evaluators pass through untouched; a stale
+  // built-in id from a previous channel is replaced, not kept.
+  private async resolveSuiteEvaluators(
+    evaluations: EvaluationService,
+    agentId: string,
+    selectedIds: string[],
+    useBuiltinJudge: boolean,
+  ): Promise<string[]> {
+    const evaluatorIds = selectedIds.filter((item) => !item.startsWith("builtin-judge-"));
+    if (useBuiltinJudge) {
+      const builtin = await evaluations.ensureBuiltinJudge(agentId);
+      if (!evaluatorIds.includes(builtin.id)) evaluatorIds.unshift(builtin.id);
+    }
+    if (evaluatorIds.length === 0) throw new Error("At least one evaluator is required.");
+    return evaluatorIds;
   }
 
   async runSkillEvalSuite(experimentId: string): Promise<EvaluationRun> {
