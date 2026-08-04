@@ -454,6 +454,135 @@
   color: var(--danger, #d64545);
 }
 
+.eval-suite-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eval-suite-runs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.eval-suite-runs-toggle:hover {
+  color: var(--accent);
+}
+
+.eval-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eval-run-item {
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.eval-run-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eval-run-cases {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.eval-run-case {
+  border-top: 1px dashed var(--border-strong);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eval-run-case-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eval-run-case-title {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.eval-run-text summary {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.eval-run-text pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-bg) 85%, var(--accent) 4%);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.eval-run-score {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.eval-run-score header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eval-run-score-name {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.eval-run-score-reason {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+
+.eval-run-score-criteria {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--danger, #d64545);
+}
+
 .eval-suite-list {
   display: flex;
   flex-direction: column;

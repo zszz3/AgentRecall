@@ -9,7 +9,7 @@ import type { SkillUsageRefreshStatus } from "../core/skill-usage";
 import type { SkillTriggerLink } from "../core/session-store";
 import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite, CreateSkillEvalSuiteInput, UpdateSkillEvalSuiteInput, SkillEvalSuiteCase } from "../main/services/skill-service";
 import type { SkillFinding } from "../core/skill-eval-findings";
-import type { EvaluationRun } from "../automation/contracts";
+import type { EvaluationRun, EvaluationRunSummary } from "../automation/contracts";
 import { SKILLS_IPC } from "../shared/ipc/skills";
 
 export type SkillsIpcRenderer = Pick<IpcRenderer, "invoke">;
@@ -64,6 +64,7 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
     deleteSkillEvalSuite: (experimentId: string): Promise<void> => ipc.invoke(SKILLS_IPC.deleteEvalSuite.channel, experimentId),
     getSkillEvalSuiteCases: (experimentId: string): Promise<SkillEvalSuiteCase[]> => ipc.invoke(SKILLS_IPC.getEvalSuiteCases.channel, experimentId),
     runSkillEvalSuite: (experimentId: string): Promise<{ runId: string }> => ipc.invoke(SKILLS_IPC.runEvalSuite.channel, experimentId),
+    getSkillEvalSuiteRuns: (experimentId: string): Promise<EvaluationRunSummary[]> => ipc.invoke(SKILLS_IPC.getEvalSuiteRuns.channel, experimentId),
     getSkillEvalRun: (runId: string): Promise<EvaluationRun | null> => ipc.invoke(SKILLS_IPC.getEvalRun.channel, runId),
     cancelSkillEvalRun: (runId: string): Promise<void> => ipc.invoke(SKILLS_IPC.cancelEvalRun.channel, runId),
   };

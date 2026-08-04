@@ -327,6 +327,29 @@ describe("SkillService skill regression suites (phase four)", () => {
     expect(evaluations.cancelRun).toHaveBeenCalledWith("run-1");
   });
 
+  it("lists a suite's runs newest-first and rejects suites not bound to a skill", async () => {
+    const fixture = suiteFixtureMocks();
+    fixture.evaluations.listRuns = vi.fn(async () => ({
+      items: [{ id: "run-2" }, { id: "run-1" }],
+      total: 2,
+      offset: 0,
+      limit: 10,
+    })) as never;
+    const service = makeService(true, fixture.evaluations);
+
+    await expect(service.getSkillEvalSuiteRuns("missing")).rejects.toThrow("Evaluation suite not found");
+    await expect(service.getSkillEvalSuiteRuns("experiment-1")).resolves.toEqual([
+      { id: "run-2" },
+      { id: "run-1" },
+    ]);
+    expect(fixture.evaluations.listRuns).toHaveBeenCalledWith({ experimentId: "experiment-1", limit: 10 });
+
+    fixture.listExperiments.mockResolvedValueOnce([
+      { ...fixture.experiment, id: "generic-1", skillName: null },
+    ]);
+    await expect(service.getSkillEvalSuiteRuns("generic-1")).rejects.toThrow("not bound to a skill");
+  });
+
   it("rejects when the experiment is missing or not skill-bound", async () => {
     const evaluations = makeEvaluationServiceMock({
       listExperiments: vi.fn(async () => [

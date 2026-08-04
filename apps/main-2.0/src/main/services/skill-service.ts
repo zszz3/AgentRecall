@@ -72,7 +72,7 @@ import {
   INITIAL_SKILL_USAGE_REFRESH_DELAY_MS,
 } from "../../core/refresh-policy";
 import type { ProjectSummary } from "../../core/types";
-import type { EvaluationRun } from "../../automation/contracts";
+import type { EvaluationRun, EvaluationRunSummary } from "../../automation/contracts";
 import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
 import type { EvaluationService } from "./evaluation-service";
 
@@ -1133,6 +1133,21 @@ export class SkillService {
     const id = runId.trim();
     if (!id) throw new Error("A run id is required.");
     return (await this.requireEvaluationService().getRun(id)) ?? null;
+  }
+
+  // Newest-first summaries of a suite's runs, for the run history drill-down.
+  async getSkillEvalSuiteRuns(experimentId: string): Promise<EvaluationRunSummary[]> {
+    this.requireEvalEnabled();
+    const id = experimentId.trim();
+    if (!id) throw new Error("An evaluation suite id is required.");
+    const evaluations = this.requireEvaluationService();
+    const experiment = (await evaluations.listExperiments()).find((item) => item.id === id);
+    if (!experiment) throw new Error(`Evaluation suite not found: ${id}`);
+    if (!(experiment.skillName ?? "").trim()) {
+      throw new Error("This evaluation suite is not bound to a skill.");
+    }
+    const page = await evaluations.listRuns({ experimentId: id, limit: 10 });
+    return page.items;
   }
 
   cancelSkillEvalRun(runId: string): void {

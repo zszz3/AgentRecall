@@ -109,6 +109,7 @@ export const SKILLS_IPC = {
   deleteEvalSuite: defineIpcRequest("skills:eval-suite-delete", evalIdInput),
   getEvalSuiteCases: defineIpcRequest("skills:eval-suite-cases", evalIdInput),
   runEvalSuite: defineIpcRequest("skills:eval-suite-run", evalIdInput),
+  getEvalSuiteRuns: defineIpcRequest("skills:eval-suite-runs", evalIdInput),
   getEvalRun: defineIpcRequest("skills:eval-run-get", evalIdInput),
   cancelEvalRun: defineIpcRequest("skills:eval-run-cancel", evalIdInput),
 } as const;

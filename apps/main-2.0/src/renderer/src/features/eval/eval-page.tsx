@@ -5,7 +5,7 @@ import { AlertTriangle, Beaker, CheckCircle2, ChevronDown, ChevronRight, EyeOff,
 import type { SkillTriggerLink } from "../../../../core/session-store";
 import type { SkillFinding } from "../../../../core/skill-eval-findings";
 import type { SkillEvalDetail, SkillEvalOverview, SkillEvalOverviewItem, SkillEvalSuite } from "../../../../main/services/skill-service";
-import type { EvaluationEvaluator, ConfiguredAgent } from "../../../../automation/contracts";
+import type { EvaluationEvaluator, EvaluationRun, EvaluationRunSummary, ConfiguredAgent } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
 import { EvaluationFeaturePage } from "../automation/evaluation-feature-page";
@@ -605,6 +605,7 @@ function EvalSuitesCard({
                   <Trash2 size={12} />{deletingId === suite.id ? l("Deleting...", "删除中...") : l("Delete", "删除")}
                 </button>
               </div>
+              <SuiteRunsSection language={language} suite={suite} />
             </li>
           ))}
         </ul>
@@ -935,6 +936,174 @@ function FindingsCard({
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+// Run history drill-down for one suite: summaries first, then per-case evidence
+// (input / output / every evaluator's score, reason and failedCriteria).
+function SuiteRunsSection({
+  language,
+  suite,
+}: {
+  language: LanguageMode;
+  suite: SkillEvalSuite;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [open, setOpen] = useState(false);
+  const [runs, setRuns] = useState<EvaluationRunSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+
+  const toggle = useCallback(() => {
+    setOpen((value) => !value);
+    if (!open && runs === null) {
+      void (async () => {
+        try {
+          setRuns(await window.sessionSearch.getSkillEvalSuiteRuns(suite.id));
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
+      })();
+    }
+  }, [open, runs, suite.id]);
+
+  return (
+    <div className="eval-suite-runs">
+      <button type="button" className="eval-suite-runs-toggle" onClick={toggle}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {l("Run history", "运行历史")}
+        {runs !== null && runs.length > 0 ? ` · ${runs.length}` : ""}
+      </button>
+      {open ? (
+        error ? <p className="eval-error" role="alert">{error}</p>
+        : runs === null ? <p className="eval-muted">{l("Loading...", "加载中...")}</p>
+        : runs.length === 0 ? <p className="eval-muted">{l("No runs yet.", "还没有运行记录。")}</p>
+        : (
+          <ul className="eval-run-list">
+            {runs.map((run) => (
+              <li key={run.id} className="eval-run-item">
+                <button
+                  type="button"
+                  className="eval-run-row"
+                  onClick={() => setExpandedRunId((current) => current === run.id ? null : run.id)}
+                >
+                  {expandedRunId === run.id ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  <span className={`eval-badge ${run.status === "completed" ? "eval-badge-current" : run.status === "running" || run.status === "pending" ? "eval-badge-dim" : "eval-badge-warn"}`}>
+                    {runStatusText(language, run.status)}
+                  </span>
+                  <span className="eval-muted">{formatRelativeTime(run.startedAt)}</span>
+                  {run.passRate != null ? (
+                    <span>{l("pass", "通过")} {Math.round(run.passRate * 100)}%</span>
+                  ) : null}
+                  {run.failedResultCount > 0 ? (
+                    <span className="eval-badge eval-badge-warn">{l(`${run.failedResultCount} failed`, `${run.failedResultCount} 条失败`)}</span>
+                  ) : null}
+                </button>
+                {expandedRunId === run.id ? <RunCaseDetail language={language} runId={run.id} /> : null}
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function runStatusText(language: LanguageMode, status: string): string {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (status === "completed") return l("Completed", "完成");
+  if (status === "failed") return l("Failed", "失败");
+  if (status === "cancelled") return l("Cancelled", "已取消");
+  if (status === "running") return l("Running", "运行中");
+  return l("Pending", "等待中");
+}
+
+function RunCaseDetail({
+  language,
+  runId,
+}: {
+  language: LanguageMode;
+  runId: string;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const [run, setRun] = useState<EvaluationRun | null>(null);
+  const [evaluatorNames, setEvaluatorNames] = useState<Map<string, string>>(new Map());
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [nextRun, evaluators] = await Promise.all([
+          window.sessionSearch.getSkillEvalRun(runId),
+          window.sessionSearch.automation.listEvaluationEvaluators(),
+        ]);
+        if (cancelled) return;
+        setRun(nextRun);
+        setEvaluatorNames(new Map(evaluators.map((item) => [item.id, item.name])));
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  if (error) return <p className="eval-error" role="alert">{error}</p>;
+  if (!run) return <p className="eval-muted">{l("Loading...", "加载中...")}</p>;
+  if (run.error) return <p className="eval-error" role="alert">{run.error}</p>;
+
+  return (
+    <div className="eval-run-cases">
+      {run.results.length === 0 ? (
+        <p className="eval-muted">{l("No case results were recorded.", "没有记录到用例结果。")}</p>
+      ) : run.results.map((result, index) => {
+        const passed = !result.error && result.scores.length > 0 && result.scores.every((score) => score.passed);
+        return (
+          <div key={result.id} className="eval-run-case">
+            <header className="eval-run-case-header">
+              <span className="eval-run-case-title">{l(`Case ${index + 1}`, `用例 ${index + 1}`)}{run.results.filter((item) => item.datasetItemId === result.datasetItemId).length > 1 ? ` · #${result.repetition}` : ""}</span>
+              <span className={`eval-badge ${passed ? "eval-badge-current" : "eval-badge-warn"}`}>
+                {passed ? l("Passed", "通过") : l("Failed", "未通过")}
+              </span>
+              <span className="eval-muted">{formatDuration(result.durationMs)}</span>
+            </header>
+            {result.error ? <p className="eval-error">{result.error}</p> : null}
+            <details className="eval-run-text">
+              <summary>{l("Input", "输入")}</summary>
+              <pre>{result.input}</pre>
+            </details>
+            {result.expectedOutput ? (
+              <details className="eval-run-text">
+                <summary>{l("Expected output", "期望输出")}</summary>
+                <pre>{result.expectedOutput}</pre>
+              </details>
+            ) : null}
+            <details className="eval-run-text" open={result.scores.some((score) => !score.passed)}>
+              <summary>{l("Actual output", "实际输出")}</summary>
+              <pre>{result.output || l("(empty)", "（空）")}</pre>
+            </details>
+            {result.scores.map((score) => (
+              <div key={score.evaluatorId} className="eval-run-score">
+                <header>
+                  <span className="eval-run-score-name">{evaluatorNames.get(score.evaluatorId) ?? score.evaluatorId}</span>
+                  <span className={`eval-badge ${score.passed ? "eval-badge-current" : "eval-badge-warn"}`}>
+                    {score.score.toFixed(2)}{score.passed ? "" : ` · ${l("below threshold", "未达标")}`}
+                  </span>
+                </header>
+                {score.reason ? <p className="eval-run-score-reason">{score.reason}</p> : null}
+                {score.failedCriteria && score.failedCriteria.length > 0 ? (
+                  <ul className="eval-run-score-criteria">
+                    {score.failedCriteria.map((criteria) => <li key={criteria}>{criteria}</li>)}
+                  </ul>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
