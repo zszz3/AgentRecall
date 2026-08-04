@@ -76,6 +76,9 @@ export interface EvaluationRun {
   experimentId: string;
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   agentRevisionId?: string;
+  // SKILL.md fingerprint of the version that executed; null for generic
+  // (non-skill) experiments and runs recorded before attribution existed.
+  skillHash?: string | null;
   startedAt: number;
   finishedAt?: number;
   averageScore?: number;

@@ -1305,4 +1305,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         WHERE skill_name IS NOT NULL;
     `,
   ],
+}, {
+  version: 26,
+  name: "attribute evaluation runs to the skill version that executed them",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_runs
+        ADD COLUMN IF NOT EXISTS skill_hash text;
+    `,
+  ],
 }];

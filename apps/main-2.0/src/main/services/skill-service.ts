@@ -1129,7 +1129,8 @@ export class SkillService {
     if (experiment.evaluatorIds.some((id) => id.startsWith("builtin-judge-"))) {
       await evaluations.ensureBuiltinJudge(experiment.agentId);
     }
-    const runId = await evaluations.startExperiment(id);
+    // Attribute the run to the version that actually executes it.
+    const runId = await evaluations.startExperiment(id, { skillHash: currentHash });
     return { runId };
   }
 

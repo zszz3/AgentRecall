@@ -157,7 +157,10 @@ export class EvaluationService {
   // persisted before execution starts and updated after every case, so
   // clients can poll progress and cancel cooperatively. Returns the run id
   // immediately.
-  async startExperiment(experimentId: string): Promise<string> {
+  async startExperiment(
+    experimentId: string,
+    options: { skillHash?: string | null } = {},
+  ): Promise<string> {
     const input = await this.prepareExperimentRun(experimentId);
     const runId = `eval-run-${Date.now()}`;
     const controller = new AbortController();
@@ -167,6 +170,7 @@ export class EvaluationService {
       experimentId,
       status: "running",
       ...(input.agentRevisionId ? { agentRevisionId: input.agentRevisionId } : {}),
+      ...(options.skillHash ? { skillHash: options.skillHash } : {}),
       startedAt: Date.now(),
       results: [],
     });
@@ -175,6 +179,7 @@ export class EvaluationService {
         await runEvaluation({
           ...input,
           runId,
+          ...(options.skillHash ? { skillHash: options.skillHash } : {}),
           signal: controller.signal,
           onRunUpdate: async (run) => {
             await this.dependencies.store.saveRun(run);

@@ -954,19 +954,47 @@ function SuiteRunsSection({
   const [runs, setRuns] = useState<EvaluationRunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [baseRunId, setBaseRunId] = useState("");
+  const [compareRunId, setCompareRunId] = useState("");
+  const [comparison, setComparison] = useState<{ base: EvaluationRun; compare: EvaluationRun } | null>(null);
+  const [comparing, setComparing] = useState(false);
 
   const toggle = useCallback(() => {
     setOpen((value) => !value);
     if (!open && runs === null) {
       void (async () => {
         try {
-          setRuns(await window.sessionSearch.getSkillEvalSuiteRuns(suite.id));
+          const nextRuns = await window.sessionSearch.getSkillEvalSuiteRuns(suite.id);
+          setRuns(nextRuns);
+          // Default to comparing the two newest runs.
+          if (nextRuns.length >= 2) {
+            setCompareRunId(nextRuns[0].id);
+            setBaseRunId(nextRuns[1].id);
+          }
         } catch (cause) {
           setError(cause instanceof Error ? cause.message : String(cause));
         }
       })();
     }
   }, [open, runs, suite.id]);
+
+  const compare = useCallback(async () => {
+    if (!baseRunId || !compareRunId || baseRunId === compareRunId) return;
+    setComparing(true);
+    setError(null);
+    try {
+      const [base, compareRun] = await Promise.all([
+        window.sessionSearch.getSkillEvalRun(baseRunId),
+        window.sessionSearch.getSkillEvalRun(compareRunId),
+      ]);
+      if (!base || !compareRun) throw new Error("Run not found.");
+      setComparison({ base, compare: compareRun });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setComparing(false);
+    }
+  }, [baseRunId, compareRunId]);
 
   return (
     <div className="eval-suite-runs">
@@ -980,7 +1008,49 @@ function SuiteRunsSection({
         : runs === null ? <p className="eval-muted">{l("Loading...", "加载中...")}</p>
         : runs.length === 0 ? <p className="eval-muted">{l("No runs yet.", "还没有运行记录。")}</p>
         : (
-          <ul className="eval-run-list">
+          <>
+            {runs.length >= 2 ? (
+              <div className="eval-run-compare-bar">
+                <label>
+                  <span>{l("Base run", "基准运行")}</span>
+                  <select value={baseRunId} onChange={(event) => setBaseRunId(event.target.value)}>
+                    {runs.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        {formatRelativeTime(run.startedAt)}{run.skillHash ? ` · ${run.skillHash.slice(0, 8)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="eval-muted">→</span>
+                <label>
+                  <span>{l("Compare run", "对比运行")}</span>
+                  <select value={compareRunId} onChange={(event) => setCompareRunId(event.target.value)}>
+                    {runs.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        {formatRelativeTime(run.startedAt)}{run.skillHash ? ` · ${run.skillHash.slice(0, 8)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="eval-run-button"
+                  disabled={comparing || !baseRunId || !compareRunId || baseRunId === compareRunId}
+                  onClick={() => void compare()}
+                >
+                  {comparing ? l("Comparing...", "对比中...") : l("Compare", "对比")}
+                </button>
+              </div>
+            ) : null}
+            {comparison ? (
+              <RunComparison
+                language={language}
+                base={comparison.base}
+                compare={comparison.compare}
+                onClose={() => setComparison(null)}
+              />
+            ) : null}
+            <ul className="eval-run-list">
             {runs.map((run) => (
               <li key={run.id} className="eval-run-item">
                 <button
@@ -1004,6 +1074,7 @@ function SuiteRunsSection({
               </li>
             ))}
           </ul>
+          </>
         )
       ) : null}
     </div>
@@ -1101,6 +1172,107 @@ function RunCaseDetail({
                 ) : null}
               </div>
             ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Side-by-side comparison of two runs of the same suite. Case results pair by
+// dataset item + repetition; the view presents per-case facts (score deltas,
+// both outputs) and never turns them into advice.
+function RunComparison({
+  language,
+  base,
+  compare,
+  onClose,
+}: {
+  language: LanguageMode;
+  base: EvaluationRun;
+  compare: EvaluationRun;
+  onClose: () => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const caseScore = (result: { scores: Array<{ score: number }> } | undefined): number | null => {
+    if (!result || result.scores.length === 0) return null;
+    return result.scores.reduce((sum, score) => sum + score.score, 0) / result.scores.length;
+  };
+  const pairKey = (result: { datasetItemId: string; repetition: number }) =>
+    `${result.datasetItemId}:${result.repetition}`;
+  const baseByKey = new Map(base.results.map((result) => [pairKey(result), result]));
+  const compareByKey = new Map(compare.results.map((result) => [pairKey(result), result]));
+  const keys = [
+    ...base.results.map(pairKey),
+    ...compare.results.map(pairKey).filter((key) => !baseByKey.has(key)),
+  ];
+  const sameVersion = Boolean(base.skillHash && base.skillHash === compare.skillHash);
+  const totalDelta = base.averageScore != null && compare.averageScore != null
+    ? compare.averageScore - base.averageScore
+    : null;
+
+  return (
+    <div className="eval-run-comparison">
+      <header className="eval-run-comparison-header">
+        <span className="eval-run-case-title">{l("Run comparison", "运行对比")}</span>
+        {sameVersion ? (
+          <span className="eval-badge eval-badge-dim">{l("Same skill version", "同一 Skill 版本")}</span>
+        ) : (
+          <span className="eval-badge eval-badge-current">
+            {(base.skillHash ?? "?").slice(0, 8)} → {(compare.skillHash ?? "?").slice(0, 8)}
+          </span>
+        )}
+        {totalDelta != null ? (
+          <span className={`eval-badge ${totalDelta >= 0 ? "eval-badge-current" : "eval-badge-warn"}`}>
+            {l("avg score", "平均分")} {totalDelta >= 0 ? "+" : ""}{totalDelta.toFixed(2)}
+          </span>
+        ) : null}
+        <button type="button" className="eval-run-button" onClick={onClose} aria-label={l("Close comparison", "关闭对比")}>
+          <X size={12} />{l("Close", "关闭")}
+        </button>
+      </header>
+      {keys.length === 0 ? (
+        <p className="eval-muted">{l("Neither run recorded case results.", "两次运行都没有用例结果。")}</p>
+      ) : keys.map((key) => {
+        const baseResult = baseByKey.get(key);
+        const compareResult = compareByKey.get(key);
+        const present = baseResult ?? compareResult;
+        if (!present) return null;
+        const baseScore = caseScore(baseResult);
+        const compareScore = caseScore(compareResult);
+        const delta = baseScore != null && compareScore != null ? compareScore - baseScore : null;
+        return (
+          <div key={key} className="eval-run-case">
+            <header className="eval-run-case-header">
+              <span className="eval-run-case-title">
+                {present.input.length > 60 ? `${present.input.slice(0, 60)}…` : present.input}
+              </span>
+              {delta != null ? (
+                <span className={`eval-badge ${delta > 0 ? "eval-badge-current" : delta < 0 ? "eval-badge-warn" : "eval-badge-dim"}`}>
+                  {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                </span>
+              ) : !baseResult ? (
+                <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行存在")}</span>
+              ) : (
+                <span className="eval-badge eval-badge-dim">{l("Not re-run", "未在对比运行中重跑")}</span>
+              )}
+            </header>
+            <div className="eval-run-compare-columns">
+              <details className="eval-run-text">
+                <summary>
+                  {l("Base output", "基准输出")}
+                  {baseScore != null ? ` · ${baseScore.toFixed(2)}` : ""}
+                </summary>
+                <pre>{baseResult ? baseResult.output || l("(empty)", "（空）") : l("(not run)", "（未运行）")}</pre>
+              </details>
+              <details className="eval-run-text">
+                <summary>
+                  {l("Compare output", "对比输出")}
+                  {compareScore != null ? ` · ${compareScore.toFixed(2)}` : ""}
+                </summary>
+                <pre>{compareResult ? compareResult.output || l("(empty)", "（空）") : l("(not run)", "（未运行）")}</pre>
+              </details>
+            </div>
           </div>
         );
       })}

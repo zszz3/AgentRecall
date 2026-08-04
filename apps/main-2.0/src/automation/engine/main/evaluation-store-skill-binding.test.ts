@@ -117,4 +117,53 @@ describe("PostgreSQL evaluation store skill binding (phase four)", () => {
     expect(experiments).toHaveLength(1);
     expect(experiments[0].skillHash).toBe("new-hash");
   });
+
+  it("attributes runs to the executing skill version and keeps the first attribution", async () => {
+    const now = Date.now();
+    await store.saveDataset({
+      id: "dataset-4",
+      name: "cases",
+      description: "",
+      items: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    await store.saveExperiment({
+      id: "experiment-4",
+      name: "suite",
+      datasetId: "dataset-4",
+      agentId: "agent-1",
+      evaluatorIds: [],
+      repetitions: 1,
+      skillName: "review",
+      skillHash: "hash-a",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await store.saveRun({
+      id: "run-1",
+      experimentId: "experiment-4",
+      status: "running",
+      skillHash: "hash-a",
+      startedAt: now,
+      results: [],
+    });
+    // Later snapshots of the same run carry no hash; the original attribution
+    // must survive the upsert.
+    await store.saveRun({
+      id: "run-1",
+      experimentId: "experiment-4",
+      status: "completed",
+      startedAt: now,
+      finishedAt: now + 100,
+      results: [],
+    });
+
+    const run = await store.getRun("run-1");
+    expect(run?.status).toBe("completed");
+    expect(run?.skillHash).toBe("hash-a");
+
+    const page = await store.listRuns({ experimentId: "experiment-4" });
+    expect(page.items[0].skillHash).toBe("hash-a");
+  });
 });

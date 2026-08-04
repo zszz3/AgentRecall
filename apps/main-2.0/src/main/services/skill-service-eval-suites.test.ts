@@ -264,7 +264,9 @@ describe("SkillService skill regression suites (phase four)", () => {
       const refreshed = (evaluations.saveExperiment as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(refreshed.skillHash).not.toBe("stale-hash");
       expect(refreshed.skillHash).toMatch(/^[0-9a-f]{64}$/);
-      expect(evaluations.startExperiment).toHaveBeenCalledWith("experiment-1");
+      expect(evaluations.startExperiment).toHaveBeenCalledWith("experiment-1", {
+        skillHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -302,7 +304,9 @@ describe("SkillService skill regression suites (phase four)", () => {
       const started = await service.runSkillEvalSuite("experiment-1");
 
       expect(evaluations.saveExperiment).not.toHaveBeenCalled();
-      expect(evaluations.startExperiment).toHaveBeenCalledWith("experiment-1");
+      expect(evaluations.startExperiment).toHaveBeenCalledWith("experiment-1", {
+        skillHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
       // The run executes in the background; callers get the id immediately.
       expect(started).toEqual({ runId: "run-1" });
     } finally {

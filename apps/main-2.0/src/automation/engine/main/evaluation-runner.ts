@@ -17,6 +17,8 @@ export async function runEvaluation(input: {
   // Stable id assigned before execution starts so callers can persist and poll
   // the run immediately; generated when omitted (blocking legacy path).
   runId?: string;
+  // Skill version fingerprint attributed to every snapshot of this run.
+  skillHash?: string | null;
   // Cooperative cancellation. Checked between cases and forwarded to the
   // executor; an aborted run finalizes as "cancelled" with partial results.
   signal?: AbortSignal;
@@ -46,6 +48,7 @@ export async function runEvaluation(input: {
       experimentId: input.experiment.id,
       status,
       ...(input.agentRevisionId ? { agentRevisionId: input.agentRevisionId } : {}),
+      ...(input.skillHash ? { skillHash: input.skillHash } : {}),
       startedAt,
       ...(status === "running" ? {} : { finishedAt: Date.now() }),
       averageScore: values.length

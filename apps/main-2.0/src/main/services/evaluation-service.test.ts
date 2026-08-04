@@ -224,11 +224,11 @@ describe("EvaluationService", () => {
     it("startExperiment persists a running row immediately and completes in the background", async () => {
       const { service, store } = fixture();
 
-      const runId = await service.startExperiment("experiment-1");
+      const runId = await service.startExperiment("experiment-1", { skillHash: "hash-a" });
 
       expect(runId).toMatch(/^eval-run-/);
       const savedRuns = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
-      expect(savedRuns[0]).toMatchObject({ id: runId, status: "running", results: [] });
+      expect(savedRuns[0]).toMatchObject({ id: runId, status: "running", skillHash: "hash-a", results: [] });
       await vi.waitFor(() => {
         const calls = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
         expect(calls.some((run) => run.id === runId && run.status === "completed")).toBe(true);
@@ -236,6 +236,9 @@ describe("EvaluationService", () => {
       const final = await service.getRun(runId);
       expect(final?.status).toBe("completed");
       expect(final?.results).toHaveLength(1);
+      // Attribution rides along every snapshot, so the last one carries it too.
+      const lastSaved = savedRuns[savedRuns.length - 1];
+      expect(lastSaved.skillHash).toBe("hash-a");
     });
 
     it("cancelRun aborts the active run, which finalizes as cancelled", async () => {
