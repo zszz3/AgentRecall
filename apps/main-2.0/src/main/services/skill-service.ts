@@ -887,11 +887,17 @@ export class SkillService {
     const bound = experiments.filter(
       (item) => (item.skillName ?? "").trim().toLowerCase() === name.toLowerCase(),
     );
-    const suites: SkillEvalSuite[] = [];
-    for (const experiment of bound) {
-      const runsPage = await evaluations.listRuns({ experimentId: experiment.id, limit: 1 });
-      const last = runsPage.items[0] ?? null;
-      suites.push({
+    // Independent per-suite run lookups are issued concurrently to keep the
+    // card snappy when a skill has many suites.
+    const lastRuns = await Promise.all(
+      bound.map(async (experiment) => {
+        const runsPage = await evaluations.listRuns({ experimentId: experiment.id, limit: 1 });
+        return runsPage.items[0] ?? null;
+      }),
+    );
+    const suites: SkillEvalSuite[] = bound.map((experiment, index) => {
+      const last = lastRuns[index];
+      return {
         id: experiment.id,
         name: experiment.name,
         skill: name,
@@ -914,8 +920,8 @@ export class SkillService {
               averageScore: last.averageScore ?? null,
             }
           : null,
-      });
-    }
+      };
+    });
     return suites.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 

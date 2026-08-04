@@ -405,8 +405,8 @@ function formatDuration(value: number | null): string {
 
 // Skill regression evaluation (phase four). Cases are the specification the user
 // defines ("given this input, expect this output"); runs executed through the
-// automation engine are the evidence. The card stays mounted for suites are fetched
-// for the selected skill and runs are attributed to the then-current skill hash.
+// automation engine are the evidence. Suites are fetched for the selected skill,
+// and each run is attributed to the then-current skill hash.
 function EvalSuitesCard({
   language,
   skill,
@@ -416,20 +416,16 @@ function EvalSuitesCard({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [suites, setSuites] = useState<SkillEvalSuite[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
   const reload = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       setSuites(await window.sessionSearch.listSkillEvalSuites(skill));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoading(false);
     }
   }, [skill]);
 
@@ -479,7 +475,7 @@ function EvalSuitesCard({
           {suites.map((suite) => (
             <li key={suite.id} className="eval-suite-item">
               <div className="eval-suite-row-main">
-                <span className="eval-suite-name-name">{suite.name}</span>
+                <span className="eval-suite-item-name">{suite.name}</span>
                 <span className="eval-muted">{l(`${suite.caseCount} cases`, `${suite.caseCount} 个用例`)}</span>
                 {suite.drifted ? (
                   <span className="eval-badge eval-badge-warn" title={l(
