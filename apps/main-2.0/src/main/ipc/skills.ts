@@ -45,7 +45,9 @@ export interface SkillsIpcService {
   updateSkillEvalSuite(input: UpdateSkillEvalSuiteInput): Promise<SkillEvalSuite>;
   deleteSkillEvalSuite(experimentId: string): Promise<void>;
   getSkillEvalSuiteCases(experimentId: string): Promise<SkillEvalSuiteCase[]>;
-  runSkillEvalSuite(experimentId: string): Promise<EvaluationRun>;
+  runSkillEvalSuite(experimentId: string): Promise<{ runId: string }>;
+  getSkillEvalRun(runId: string): Promise<EvaluationRun | null>;
+  cancelSkillEvalRun(runId: string): void;
 }
 
 export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcService): () => void {
@@ -84,5 +86,7 @@ export function registerSkillsIpc(ipc: IpcMainRegistrar, service: SkillsIpcServi
     registerIpcHandler(ipc, SKILLS_IPC.deleteEvalSuite, (_event, experimentId) => service.deleteSkillEvalSuite(experimentId)),
     registerIpcHandler(ipc, SKILLS_IPC.getEvalSuiteCases, (_event, experimentId) => service.getSkillEvalSuiteCases(experimentId)),
     registerIpcHandler(ipc, SKILLS_IPC.runEvalSuite, (_event, experimentId) => service.runSkillEvalSuite(experimentId)),
+    registerIpcHandler(ipc, SKILLS_IPC.getEvalRun, (_event, runId) => service.getSkillEvalRun(runId)),
+    registerIpcHandler(ipc, SKILLS_IPC.cancelEvalRun, (_event, runId) => service.cancelSkillEvalRun(runId)),
   ]);
 }

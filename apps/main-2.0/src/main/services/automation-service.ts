@@ -271,8 +271,8 @@ export class NativeAutomationService {
     this.evaluations = dependencies.evaluations ?? new EvaluationService({
       store: new EvaluationStore(options.database),
       agents: () => this.hubInstance.snapshot().configuredAgents,
-      executeAgent: (configuredAgentId, prompt) =>
-        this.configuredAgentExecutor.runOneShot({ configuredAgentId, prompt }),
+      executeAgent: (configuredAgentId, prompt, signal) =>
+        this.configuredAgentExecutor.runOneShot({ configuredAgentId, prompt }, undefined, signal),
     });
     this.teamChat = dependencies.teamChats ?? new TeamChatService({
       storeFactory: () => new PostgresTeamChatStore(options.database),

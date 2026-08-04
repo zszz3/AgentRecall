@@ -14,21 +14,57 @@ export async function runEvaluation(input: {
   dataset: EvaluationDataset;
   evaluators: EvaluationEvaluator[];
   agentRevisionId?: string;
-  execute: (agentId: string, prompt: string) => Promise<ExecutionResult>;
+  // Stable id assigned before execution starts so callers can persist and poll
+  // the run immediately; generated when omitted (blocking legacy path).
+  runId?: string;
+  // Cooperative cancellation. Checked between cases and forwarded to the
+  // executor; an aborted run finalizes as "cancelled" with partial results.
+  signal?: AbortSignal;
+  // Receives a snapshot at start ("running"), after every finished case, and
+  // at the end, so persistence and progress polling share one source of truth.
+  onRunUpdate?: (run: EvaluationRun) => Promise<void>;
+  execute: (
+    agentId: string,
+    prompt: string,
+    signal?: AbortSignal,
+  ) => Promise<ExecutionResult>;
   executeJudge?: (
     runtimeId: string,
     prompt: string,
   ) => Promise<ExecutionResult>;
 }): Promise<EvaluationRun> {
   const startedAt = Date.now();
-  const runId = `eval-run-${startedAt}`;
+  const runId = input.runId ?? `eval-run-${startedAt}`;
   const results: EvaluationCaseResult[] = [];
-  for (const item of input.dataset.items) {
-    for (
-      let repetition = 1;
-      repetition <= Math.max(1, Math.min(5, input.experiment.repetitions));
-      repetition += 1
-    ) {
+  const repetitions = Math.max(1, Math.min(5, input.experiment.repetitions));
+  const snapshot = (status: EvaluationRun["status"]): EvaluationRun => {
+    const allScores = results.flatMap((result) => result.scores);
+    const values = allScores.map((item) => item.score);
+    const passed = allScores.filter((item) => item.passed).length;
+    return {
+      id: runId,
+      experimentId: input.experiment.id,
+      status,
+      ...(input.agentRevisionId ? { agentRevisionId: input.agentRevisionId } : {}),
+      startedAt,
+      ...(status === "running" ? {} : { finishedAt: Date.now() }),
+      averageScore: values.length
+        ? values.reduce((left, right) => left + right, 0) / values.length
+        : 0,
+      minimumScore: values.length ? Math.min(...values) : 0,
+      passRate: allScores.length ? passed / allScores.length : 0,
+      totalDurationMs: Date.now() - startedAt,
+      results: [...results],
+    };
+  };
+  const publish = async (status: EvaluationRun["status"]) => {
+    if (!input.onRunUpdate) return;
+    await input.onRunUpdate(snapshot(status));
+  };
+  await publish("running");
+  outer: for (const item of input.dataset.items) {
+    for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+      if (input.signal?.aborted) break outer;
       const caseId = `${runId}:${item.id}:${repetition}`;
       let output = "";
       let durationMs = 0;
@@ -37,32 +73,36 @@ export async function runEvaluation(input: {
         const executed = await input.execute(
           input.experiment.agentId,
           item.input,
+          input.signal,
         );
         output = executed.output;
         durationMs = executed.durationMs;
       } catch (cause) {
         error = cause instanceof Error ? cause.message : String(cause);
       }
-      const scores = await Promise.all(
-        input.evaluators
-          .filter(
-            (evaluator) =>
-              input.experiment.evaluatorIds.includes(evaluator.id) &&
-              evaluator.enabled,
-          )
-          .map((evaluator) =>
-            score(
-              evaluator,
-              item.input,
-              item.expectedOutput,
-              typeof item.metadata.context === "string"
-                ? item.metadata.context
-                : undefined,
-              output,
-              input.executeJudge,
-            ),
-          ),
-      );
+      // An abort mid-case leaves no meaningful output to judge.
+      const scores = input.signal?.aborted
+        ? []
+        : await Promise.all(
+            input.evaluators
+              .filter(
+                (evaluator) =>
+                  input.experiment.evaluatorIds.includes(evaluator.id) &&
+                  evaluator.enabled,
+              )
+              .map((evaluator) =>
+                score(
+                  evaluator,
+                  item.input,
+                  item.expectedOutput,
+                  typeof item.metadata.context === "string"
+                    ? item.metadata.context
+                    : undefined,
+                  output,
+                  input.executeJudge,
+                ),
+              ),
+          );
       results.push({
         id: caseId,
         runId,
@@ -77,29 +117,16 @@ export async function runEvaluation(input: {
         durationMs,
         scores,
       });
+      await publish("running");
     }
   }
-  const allScores = results.flatMap((result) => result.scores);
-  const values = allScores.map((result) => result.score);
-  const passed = allScores.filter((result) => result.passed).length;
-  const finishedAt = Date.now();
-  return {
-    id: runId,
-    experimentId: input.experiment.id,
-    status: results.some((result) => result.error) ? "failed" : "completed",
-    ...(input.agentRevisionId
-      ? { agentRevisionId: input.agentRevisionId }
-      : {}),
-    startedAt,
-    finishedAt,
-    averageScore: values.length
-      ? values.reduce((left, right) => left + right, 0) / values.length
-      : 0,
-    minimumScore: values.length ? Math.min(...values) : 0,
-    passRate: allScores.length ? passed / allScores.length : 0,
-    totalDurationMs: finishedAt - startedAt,
-    results,
-  };
+  const finalStatus: EvaluationRun["status"] = input.signal?.aborted
+    ? "cancelled"
+    : results.some((result) => result.error)
+      ? "failed"
+      : "completed";
+  await publish(finalStatus);
+  return snapshot(finalStatus);
 }
 
 async function score(

@@ -26,7 +26,11 @@ function agent(overrides: Partial<ConfiguredAgent> = {}): ConfiguredAgent {
   };
 }
 
-function fixture(options: { dataset?: EvaluationDataset; agents?: ConfiguredAgent[] } = {}) {
+function fixture(options: {
+  dataset?: EvaluationDataset;
+  agents?: ConfiguredAgent[];
+  executeAgent?: ReturnType<typeof vi.fn>;
+} = {}) {
   const experiment: EvaluationExperiment = {
     id: "experiment-1",
     name: "Regression",
@@ -69,6 +73,10 @@ function fixture(options: { dataset?: EvaluationDataset; agents?: ConfiguredAgen
     deleteExperiment: vi.fn(),
     listRuns: vi.fn(async () => []),
     saveRun,
+    getRun: vi.fn(async (id: string) => {
+      const saved = saveRun.mock.calls.map((call) => call[0]).filter((run) => run.id === id);
+      return saved[saved.length - 1];
+    }),
     deleteRun: vi.fn(),
     close: vi.fn(),
   } as unknown as EvaluationStore;
@@ -76,7 +84,7 @@ function fixture(options: { dataset?: EvaluationDataset; agents?: ConfiguredAgen
     agent(),
     agent({ id: "judge-agent", name: "Judge", channelId: "judge-channel", currentRevisionId: undefined }),
   ];
-  const executeAgent = vi.fn(async (agentId: string) => ({
+  const executeAgent = options.executeAgent ?? vi.fn(async (agentId: string) => ({
     output: agentId === "judge-agent" ? '{"score":0.9,"reason":"clear"}' : "subject output",
     durationMs: 5,
   }));
@@ -102,7 +110,7 @@ describe("EvaluationService", () => {
 
     const run = await service.runExperiment("experiment-1");
 
-    expect(executeAgent).toHaveBeenNthCalledWith(1, "target-agent", "Explain the result");
+    expect(executeAgent).toHaveBeenNthCalledWith(1, "target-agent", "Explain the result", undefined);
     expect(executeAgent).toHaveBeenNthCalledWith(2, "judge-agent", expect.stringContaining("subject output"));
     expect(saveRun).toHaveBeenCalledWith(expect.objectContaining({
       experimentId: "experiment-1",
@@ -183,6 +191,53 @@ describe("EvaluationService", () => {
     it("rejects an unknown execution agent", async () => {
       const { service } = fixture();
       await expect(service.ensureBuiltinJudge("missing-agent")).rejects.toThrow(/Evaluation Agent not found/);
+    });
+  });
+
+  describe("run lifecycle", () => {
+    it("startExperiment persists a running row immediately and completes in the background", async () => {
+      const { service, store } = fixture();
+
+      const runId = await service.startExperiment("experiment-1");
+
+      expect(runId).toMatch(/^eval-run-/);
+      const savedRuns = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+      expect(savedRuns[0]).toMatchObject({ id: runId, status: "running", results: [] });
+      await vi.waitFor(() => {
+        const calls = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+        expect(calls.some((run) => run.id === runId && run.status === "completed")).toBe(true);
+      });
+      const final = await service.getRun(runId);
+      expect(final?.status).toBe("completed");
+      expect(final?.results).toHaveLength(1);
+    });
+
+    it("cancelRun aborts the active run, which finalizes as cancelled", async () => {
+      const { service, store } = fixture({
+        executeAgent: vi.fn(async (agentId: string, _prompt: string, signal?: AbortSignal) => {
+          if (agentId !== "target-agent") {
+            return { output: '{"score":0.9,"reason":"clear"}', durationMs: 1 };
+          }
+          // Block until the abort signal fires, like a real agent conversation.
+          return new Promise<never>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(new Error("Run cancelled")));
+          });
+        }),
+      });
+
+      const runId = await service.startExperiment("experiment-1");
+      service.cancelRun(runId);
+
+      await vi.waitFor(() => {
+        const calls = (store.saveRun as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+        expect(calls.some((run) => run.id === runId && run.status === "cancelled")).toBe(true);
+      });
+    });
+
+    it("startExperiment validates the experiment before persisting anything", async () => {
+      const { service, store } = fixture();
+      await expect(service.startExperiment("missing")).rejects.toThrow(/experiment not found/i);
+      expect(store.saveRun).not.toHaveBeenCalled();
     });
   });
 });

@@ -416,7 +416,13 @@ function EvalSuitesCard({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [suites, setSuites] = useState<SkillEvalSuite[] | null>(null);
-  const [runningId, setRunningId] = useState<string | null>(null);
+  const [activeRun, setActiveRun] = useState<{
+    suiteId: string;
+    runId: string;
+    done: number;
+    total: number;
+    status: string;
+  } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // null = closed; editing null = creating a new suite.
@@ -436,18 +442,59 @@ function EvalSuitesCard({
     void reload();
   }, [reload]);
 
-  const run = useCallback(async (suiteId: string) => {
-    setRunningId(suiteId);
+  const run = useCallback(async (suite: SkillEvalSuite) => {
     setError(null);
     try {
-      await window.sessionSearch.runSkillEvalSuite(suiteId);
-      await reload();
+      const { runId } = await window.sessionSearch.runSkillEvalSuite(suite.id);
+      setActiveRun({
+        suiteId: suite.id,
+        runId,
+        done: 0,
+        total: suite.caseCount * suite.repetitions,
+        status: "running",
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setRunningId(null);
     }
-  }, [reload]);
+  }, []);
+
+  // The run executes in the main process; poll its persisted snapshot for
+  // progress and stop once it reaches a terminal status.
+  const activeRunId = activeRun?.runId ?? null;
+  useEffect(() => {
+    if (!activeRunId) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const run = await window.sessionSearch.getSkillEvalRun(activeRunId);
+          if (cancelled || !run) return;
+          setActiveRun((current) => current && current.runId === run.id
+            ? { ...current, done: run.results.length, status: run.status }
+            : current);
+          if (run.status !== "running") {
+            clearInterval(timer);
+            await reload();
+          }
+        } catch {
+          // Polling is best-effort; the next tick retries.
+        }
+      })();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeRunId, reload]);
+
+  const cancelRun = useCallback(async () => {
+    if (!activeRun) return;
+    try {
+      await window.sessionSearch.cancelSkillEvalRun(activeRun.runId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [activeRun]);
 
   const remove = useCallback(async (suite: SkillEvalSuite) => {
     const confirmed = window.confirm(l(
@@ -517,15 +564,29 @@ function EvalSuitesCard({
                     : l("Never run", "从未运行")}
                   {" · "}×{suite.repetitions}
                 </span>
-                <button
-                  type="button"
-                  className="eval-run-button"
-                  disabled={runningId === suite.id}
-                  onClick={() => void run(suite.id)}
-                >
-                  <Play size={12} />
-                  {runningId === suite.id ? l("Running...", "运行中...") : l("Run", "运行")}
-                </button>
+                {activeRun && activeRun.suiteId === suite.id && activeRun.status === "running" ? (
+                  <>
+                    <span className="eval-evidence-tag">
+                      {l(`Running ${activeRun.done}/${activeRun.total}`, `运行中 ${activeRun.done}/${activeRun.total}`)}
+                    </span>
+                    <button
+                      type="button"
+                      className="eval-run-button eval-suite-delete"
+                      onClick={() => void cancelRun()}
+                    >
+                      <X size={12} />{l("Cancel", "取消")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="eval-run-button"
+                    disabled={Boolean(activeRun && activeRun.status === "running")}
+                    onClick={() => void run(suite)}
+                  >
+                    <Play size={12} />{l("Run", "运行")}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="eval-run-button"

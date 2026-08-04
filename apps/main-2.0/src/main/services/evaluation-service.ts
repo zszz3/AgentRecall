@@ -13,6 +13,7 @@ import type { EvaluationStore } from "../../automation/engine/main/evaluation-st
 export type EvaluationAgentExecution = (
   configuredAgentId: string,
   prompt: string,
+  signal?: AbortSignal,
 ) => Promise<{ output: string; durationMs: number }>;
 
 // Rubric for auto-provisioned judges. The runner appends the JSON return
@@ -42,6 +43,10 @@ export interface EvaluationServiceDependencies {
 }
 
 export class EvaluationService {
+  // Live controllers keyed by run id, so a polling client can cancel a
+  // background run cooperatively.
+  private readonly activeRuns = new Map<string, AbortController>();
+
   constructor(private readonly dependencies: EvaluationServiceDependencies) {}
 
   listDatasets(): Promise<EvaluationDataset[]> {
@@ -128,7 +133,62 @@ export class EvaluationService {
     return this.dependencies.store.deleteRun(id);
   }
 
+  // Blocking execution used by the Experiments workbench: the run is
+  // persisted once, after every case has finished.
   async runExperiment(experimentId: string): Promise<EvaluationRun> {
+    const input = await this.prepareExperimentRun(experimentId);
+    const run = await runEvaluation(input);
+    return this.dependencies.store.saveRun(run);
+  }
+
+  // Background execution used by skill regression suites: the run row is
+  // persisted before execution starts and updated after every case, so
+  // clients can poll progress and cancel cooperatively. Returns the run id
+  // immediately.
+  async startExperiment(experimentId: string): Promise<string> {
+    const input = await this.prepareExperimentRun(experimentId);
+    const runId = `eval-run-${Date.now()}`;
+    const controller = new AbortController();
+    this.activeRuns.set(runId, controller);
+    await this.dependencies.store.saveRun({
+      id: runId,
+      experimentId,
+      status: "running",
+      ...(input.agentRevisionId ? { agentRevisionId: input.agentRevisionId } : {}),
+      startedAt: Date.now(),
+      results: [],
+    });
+    void (async () => {
+      try {
+        await runEvaluation({
+          ...input,
+          runId,
+          signal: controller.signal,
+          onRunUpdate: async (run) => {
+            await this.dependencies.store.saveRun(run);
+          },
+        });
+      } catch (cause) {
+        await this.persistFailedRun(runId, experimentId, cause);
+      } finally {
+        this.activeRuns.delete(runId);
+      }
+    })();
+    return runId;
+  }
+
+  cancelRun(runId: string): void {
+    this.activeRuns.get(runId)?.abort();
+  }
+
+  private async prepareExperimentRun(experimentId: string): Promise<{
+    experiment: EvaluationExperiment;
+    dataset: EvaluationDataset;
+    evaluators: EvaluationEvaluator[];
+    agentRevisionId?: string;
+    execute: EvaluationAgentExecution;
+    executeJudge: (runtimeId: string, prompt: string) => ReturnType<EvaluationAgentExecution>;
+  }> {
     const experiment = (await this.dependencies.store.listExperiments()).find(
       (item) => item.id === experimentId,
     );
@@ -169,7 +229,7 @@ export class EvaluationService {
       }
       judgesByRuntime.set(runtimeId, judge);
     }
-    const run = await runEvaluation({
+    return {
       experiment,
       dataset,
       evaluators,
@@ -186,11 +246,33 @@ export class EvaluationService {
         }
         return this.dependencies.executeAgent(judge.id, prompt);
       },
-    });
-    return this.dependencies.store.saveRun(run);
+    };
+  }
+
+  private async persistFailedRun(
+    runId: string,
+    experimentId: string,
+    cause: unknown,
+  ): Promise<void> {
+    const existing = await this.dependencies.store.getRun(runId);
+    try {
+      await this.dependencies.store.saveRun({
+        id: runId,
+        experimentId,
+        status: "failed",
+        startedAt: existing?.startedAt ?? Date.now(),
+        finishedAt: Date.now(),
+        error: cause instanceof Error ? cause.message : String(cause),
+        results: existing?.results ?? [],
+      });
+    } catch {
+      // The run row stays "running" only if persistence itself is broken.
+    }
   }
 
   close(): void {
+    for (const controller of this.activeRuns.values()) controller.abort();
+    this.activeRuns.clear();
     this.dependencies.store.close();
   }
 }

@@ -72,7 +72,7 @@ const evalSuiteUpdateInput = z.tuple([
   }).strict(),
 ]);
 const skillNameInput = z.tuple([z.string().trim().min(1).max(200)]);
-const evalSuiteIdInput = z.tuple([z.string().trim().min(1).max(512)]);
+const evalIdInput = z.tuple([z.string().trim().min(1).max(512)]);
 
 export const SKILLS_IPC = {
   list: defineIpcRequest("skills:list", noInput),
@@ -106,7 +106,9 @@ export const SKILLS_IPC = {
   listEvalSuites: defineIpcRequest("skills:eval-suites", skillNameInput),
   createEvalSuite: defineIpcRequest("skills:eval-suite-create", evalSuiteCreateInput),
   updateEvalSuite: defineIpcRequest("skills:eval-suite-update", evalSuiteUpdateInput),
-  deleteEvalSuite: defineIpcRequest("skills:eval-suite-delete", evalSuiteIdInput),
-  getEvalSuiteCases: defineIpcRequest("skills:eval-suite-cases", evalSuiteIdInput),
-  runEvalSuite: defineIpcRequest("skills:eval-suite-run", evalSuiteIdInput),
+  deleteEvalSuite: defineIpcRequest("skills:eval-suite-delete", evalIdInput),
+  getEvalSuiteCases: defineIpcRequest("skills:eval-suite-cases", evalIdInput),
+  runEvalSuite: defineIpcRequest("skills:eval-suite-run", evalIdInput),
+  getEvalRun: defineIpcRequest("skills:eval-run-get", evalIdInput),
+  cancelEvalRun: defineIpcRequest("skills:eval-run-cancel", evalIdInput),
 } as const;

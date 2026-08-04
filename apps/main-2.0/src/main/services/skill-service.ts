@@ -1098,7 +1098,9 @@ export class SkillService {
     return evaluatorIds;
   }
 
-  async runSkillEvalSuite(experimentId: string): Promise<EvaluationRun> {
+  // Starts the suite run in the background and returns its id immediately;
+  // clients poll getSkillEvalRun for progress and may cancel at any time.
+  async runSkillEvalSuite(experimentId: string): Promise<{ runId: string }> {
     this.requireEvalEnabled();
     const id = experimentId.trim();
     if (!id) throw new Error("An evaluation suite id is required.");
@@ -1122,7 +1124,22 @@ export class SkillService {
         updatedAt: this.dependencies.now(),
       });
     }
-    return evaluations.runExperiment(id);
+    const runId = await evaluations.startExperiment(id);
+    return { runId };
+  }
+
+  async getSkillEvalRun(runId: string): Promise<EvaluationRun | null> {
+    this.requireEvalEnabled();
+    const id = runId.trim();
+    if (!id) throw new Error("A run id is required.");
+    return (await this.requireEvaluationService().getRun(id)) ?? null;
+  }
+
+  cancelSkillEvalRun(runId: string): void {
+    this.requireEvalEnabled();
+    const id = runId.trim();
+    if (!id) throw new Error("A run id is required.");
+    this.requireEvaluationService().cancelRun(id);
   }
 
   // Same invariant as skillMarkdownHash in bin/skill-usage-record.cjs and

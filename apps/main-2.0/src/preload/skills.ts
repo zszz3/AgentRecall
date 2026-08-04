@@ -63,7 +63,9 @@ export function createSkillsApi(ipc: SkillsIpcRenderer) {
     updateSkillEvalSuite: (input: UpdateSkillEvalSuiteInput): Promise<SkillEvalSuite> => ipc.invoke(SKILLS_IPC.updateEvalSuite.channel, input),
     deleteSkillEvalSuite: (experimentId: string): Promise<void> => ipc.invoke(SKILLS_IPC.deleteEvalSuite.channel, experimentId),
     getSkillEvalSuiteCases: (experimentId: string): Promise<SkillEvalSuiteCase[]> => ipc.invoke(SKILLS_IPC.getEvalSuiteCases.channel, experimentId),
-    runSkillEvalSuite: (experimentId: string): Promise<EvaluationRun> => ipc.invoke(SKILLS_IPC.runEvalSuite.channel, experimentId),
+    runSkillEvalSuite: (experimentId: string): Promise<{ runId: string }> => ipc.invoke(SKILLS_IPC.runEvalSuite.channel, experimentId),
+    getSkillEvalRun: (runId: string): Promise<EvaluationRun | null> => ipc.invoke(SKILLS_IPC.getEvalRun.channel, runId),
+    cancelSkillEvalRun: (runId: string): Promise<void> => ipc.invoke(SKILLS_IPC.cancelEvalRun.channel, runId),
   };
 }
 

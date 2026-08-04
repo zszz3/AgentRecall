@@ -19,7 +19,9 @@ function makeEvaluationServiceMock(overrides: Record<string, unknown> = {}) {
     listRuns: vi.fn(async () => ({ items: [], total: 0, offset: 0, limit: 1 })),
     saveDataset: vi.fn(async (value: unknown) => value),
     saveExperiment: vi.fn(async (value: unknown) => value),
-    runExperiment: vi.fn(async (id: string) => ({ id, status: "completed", results: [] })),
+    startExperiment: vi.fn(async () => "run-1"),
+    getRun: vi.fn(async () => null),
+    cancelRun: vi.fn(),
     ensureBuiltinJudge: vi.fn(async (agentId: string) => ({ id: `builtin-judge-${agentId}` })),
     ...overrides,
   };
@@ -262,7 +264,7 @@ describe("SkillService skill regression suites (phase four)", () => {
       const refreshed = (evaluations.saveExperiment as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(refreshed.skillHash).not.toBe("stale-hash");
       expect(refreshed.skillHash).toMatch(/^[0-9a-f]{64}$/);
-      expect(evaluations.runExperiment).toHaveBeenCalledWith("experiment-1");
+      expect(evaluations.startExperiment).toHaveBeenCalledWith("experiment-1");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -297,13 +299,32 @@ describe("SkillService skill regression suites (phase four)", () => {
         skills: [{ name: "review", path: path.join(root, "review", "SKILL.md") }],
       } as never);
 
-      await service.runSkillEvalSuite("experiment-1");
+      const started = await service.runSkillEvalSuite("experiment-1");
 
       expect(evaluations.saveExperiment).not.toHaveBeenCalled();
-      expect(evaluations.runExperiment).toHaveBeenCalledWith("experiment-1");
+      expect(evaluations.startExperiment).toHaveBeenCalledWith("experiment-1");
+      // The run executes in the background; callers get the id immediately.
+      expect(started).toEqual({ runId: "run-1" });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("exposes run polling and cancellation behind the Eval gate", async () => {
+    const evaluations = makeEvaluationServiceMock({
+      getRun: vi.fn(async (id: string) => id === "run-1"
+        ? { id: "run-1", status: "running", results: [] }
+        : null),
+    });
+    const gated = makeService(false, evaluations);
+    await expect(gated.getSkillEvalRun("run-1")).rejects.toThrow("Eval is disabled");
+    expect(() => gated.cancelSkillEvalRun("run-1")).toThrow("Eval is disabled");
+
+    const service = makeService(true, evaluations);
+    await expect(service.getSkillEvalRun("run-1")).resolves.toMatchObject({ id: "run-1" });
+    await expect(service.getSkillEvalRun("missing")).resolves.toBeNull();
+    service.cancelSkillEvalRun("run-1");
+    expect(evaluations.cancelRun).toHaveBeenCalledWith("run-1");
   });
 
   it("rejects when the experiment is missing or not skill-bound", async () => {
@@ -431,15 +452,24 @@ describe("SkillService skill regression suites (phase four)", () => {
       createdAt: 1,
       updatedAt: 1,
     };
+    const listExperiments = vi.fn(async () => [experiment]);
+    const listDatasets = vi.fn(async () => [dataset]);
+    const deleteRun = vi.fn(async () => true);
+    const deleteExperiment = vi.fn(async () => true);
+    const deleteDataset = vi.fn(async () => true);
     return {
       experiment,
       dataset,
+      listExperiments,
+      deleteRun,
+      deleteExperiment,
+      deleteDataset,
       evaluations: makeEvaluationServiceMock({
-        listExperiments: vi.fn(async () => [experiment]),
-        listDatasets: vi.fn(async () => [dataset]),
-        deleteRun: vi.fn(async () => true),
-        deleteExperiment: vi.fn(async () => true),
-        deleteDataset: vi.fn(async () => true),
+        listExperiments,
+        listDatasets,
+        deleteRun,
+        deleteExperiment,
+        deleteDataset,
       }),
     };
   }
@@ -508,29 +538,29 @@ describe("SkillService skill regression suites (phase four)", () => {
 
   it("deletes a suite with its runs and orphaned dataset", async () => {
     const fixture = suiteFixtureMocks();
-    (fixture.evaluations.listRuns as ReturnType<typeof vi.fn>).mockResolvedValue({
+    fixture.evaluations.listRuns = vi.fn(async () => ({
       items: [{ id: "run-1" }, { id: "run-2" }],
       total: 2,
       offset: 0,
       limit: 100,
-    });
+    })) as never;
     // Mirror the real store: after deleteExperiment the listing no longer
     // contains it, so the dataset is seen as orphaned.
-    (fixture.evaluations.listExperiments as ReturnType<typeof vi.fn>)
+    fixture.listExperiments
       .mockResolvedValueOnce([fixture.experiment])
       .mockResolvedValueOnce([]);
     const service = makeService(true, fixture.evaluations);
 
     await service.deleteSkillEvalSuite("experiment-1");
 
-    expect(fixture.evaluations.deleteRun).toHaveBeenCalledTimes(2);
-    expect(fixture.evaluations.deleteExperiment).toHaveBeenCalledWith("experiment-1");
-    expect(fixture.evaluations.deleteDataset).toHaveBeenCalledWith("dataset-1");
+    expect(fixture.deleteRun).toHaveBeenCalledTimes(2);
+    expect(fixture.deleteExperiment).toHaveBeenCalledWith("experiment-1");
+    expect(fixture.deleteDataset).toHaveBeenCalledWith("dataset-1");
   });
 
   it("keeps a dataset shared with another experiment when deleting a suite", async () => {
     const fixture = suiteFixtureMocks();
-    (fixture.evaluations.listExperiments as ReturnType<typeof vi.fn>)
+    fixture.listExperiments
       .mockResolvedValueOnce([fixture.experiment])
       .mockResolvedValueOnce([
         { ...fixture.experiment, id: "experiment-2", datasetId: "dataset-1" },
@@ -539,7 +569,7 @@ describe("SkillService skill regression suites (phase four)", () => {
 
     await service.deleteSkillEvalSuite("experiment-1");
 
-    expect(fixture.evaluations.deleteExperiment).toHaveBeenCalledWith("experiment-1");
-    expect(fixture.evaluations.deleteDataset).not.toHaveBeenCalled();
+    expect(fixture.deleteExperiment).toHaveBeenCalledWith("experiment-1");
+    expect(fixture.deleteDataset).not.toHaveBeenCalled();
   });
 });
