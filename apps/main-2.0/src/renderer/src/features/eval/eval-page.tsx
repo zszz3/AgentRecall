@@ -924,8 +924,8 @@ function FindingsCard({
                 </button>
                 {isExpanded ? (
                   <div className="eval-finding-body">
-                    <p>{f.observation}</p>
-                    <p className="eval-finding-repair">{f.repairDirection}</p>
+                    <p>{l(f.observation.en, f.observation.zh)}</p>
+                    <p className="eval-finding-repair">{l(f.repairDirection.en, f.repairDirection.zh)}</p>
                     {f.evidence.spanIds && f.evidence.spanIds.length > 0 ? (
                       <p className="eval-muted">{l("Evidence spans:", "证据 span：")} {f.evidence.spanIds.slice(0, 3).join(", ")}</p>
                     ) : null}

@@ -1124,6 +1124,11 @@ export class SkillService {
         updatedAt: this.dependencies.now(),
       });
     }
+    // Sync the built-in judge to its managed definition right before use, so
+    // suites created under an older rubric pick up the current one.
+    if (experiment.evaluatorIds.some((id) => id.startsWith("builtin-judge-"))) {
+      await evaluations.ensureBuiltinJudge(experiment.agentId);
+    }
     const runId = await evaluations.startExperiment(id);
     return { runId };
   }

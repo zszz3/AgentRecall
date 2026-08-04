@@ -345,7 +345,7 @@ describe("SkillService skill regression suites (phase four)", () => {
     expect(fixture.evaluations.listRuns).toHaveBeenCalledWith({ experimentId: "experiment-1", limit: 10 });
 
     fixture.listExperiments.mockResolvedValueOnce([
-      { ...fixture.experiment, id: "generic-1", skillName: null },
+      { ...fixture.experiment, id: "generic-1", skillName: "" },
     ]);
     await expect(service.getSkillEvalSuiteRuns("generic-1")).rejects.toThrow("not bound to a skill");
   });

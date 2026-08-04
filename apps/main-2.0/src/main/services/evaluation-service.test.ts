@@ -7,7 +7,7 @@ import type {
   EvaluationRun,
 } from "../../automation/contracts";
 import type { EvaluationStore } from "../../automation/engine/main/evaluation-store";
-import { EvaluationService } from "./evaluation-service";
+import { BUILTIN_JUDGE_PROMPT, EvaluationService } from "./evaluation-service";
 
 function agent(overrides: Partial<ConfiguredAgent> = {}): ConfiguredAgent {
   return {
@@ -168,12 +168,13 @@ describe("EvaluationService", () => {
       expect(store.saveEvaluator).toHaveBeenCalledWith(expect.objectContaining({ id: "builtin-judge-codex-main" }));
     });
 
-    it("reuses an existing built-in judge instead of saving a duplicate", async () => {
+    it("reuses an existing built-in judge matching the managed definition", async () => {
       const { service, store } = fixture();
       const existing: EvaluationEvaluator = {
         id: "builtin-judge-codex-main",
         name: "Built-in Judge (codex-main)",
         kind: "llm_judge",
+        prompt: BUILTIN_JUDGE_PROMPT,
         runtimeId: "codex-main",
         threshold: 0.6,
         enabled: true,
@@ -186,6 +187,31 @@ describe("EvaluationService", () => {
 
       expect(judge).toBe(existing);
       expect(store.saveEvaluator).not.toHaveBeenCalled();
+    });
+
+    it("syncs a drifted built-in judge back to the managed definition", async () => {
+      const { service, store } = fixture();
+      const stale: EvaluationEvaluator = {
+        id: "builtin-judge-codex-main",
+        name: "Built-in Judge (codex-main)",
+        kind: "llm_judge",
+        prompt: "old english-only rubric",
+        runtimeId: "codex-main",
+        threshold: 0.6,
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      (store.listEvaluators as ReturnType<typeof vi.fn>).mockResolvedValue([stale]);
+
+      const judge = await service.ensureBuiltinJudge("target-agent");
+
+      expect(judge.prompt).toBe(BUILTIN_JUDGE_PROMPT);
+      expect(judge.createdAt).toBe(1);
+      expect(store.saveEvaluator).toHaveBeenCalledWith(expect.objectContaining({
+        id: "builtin-judge-codex-main",
+        prompt: BUILTIN_JUDGE_PROMPT,
+      }));
     });
 
     it("rejects an unknown execution agent", async () => {

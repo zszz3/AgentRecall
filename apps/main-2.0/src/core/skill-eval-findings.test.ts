@@ -254,15 +254,23 @@ describe("evaluateSkillFindings", () => {
           severity: "low" as const,
           evidenceStrength: "Present" as const,
           sampleSize: 0,
-          observation: "This skill 导致 errors",
-          repairDirection: "You should fix it",
+          observation: {
+            en: "This skill causes errors",
+            zh: "这个技能导致错误",
+          },
+          repairDirection: {
+            en: "You should fix it",
+            zh: "你应该修复它",
+          },
           evidence: {},
         },
       ];
       const violations = assertFindingWording(fakeFindings);
       expect(violations.length).toBeGreaterThan(0);
       expect(violations.some((v) => v.includes("导致"))).toBe(true);
+      expect(violations.some((v) => v.includes("causal wording"))).toBe(true);
       expect(violations.some((v) => v.includes("Consider checking"))).toBe(true);
+      expect(violations.some((v) => v.includes("建议检查"))).toBe(true);
     });
   });
 

@@ -17,8 +17,9 @@ export type EvaluationAgentExecution = (
 ) => Promise<{ output: string; durationMs: number }>;
 
 // Rubric for auto-provisioned judges. The runner appends the JSON return
-// contract (score/reason/evidence/failedCriteria) on its own.
-const BUILTIN_JUDGE_PROMPT = `You are an impartial evaluator judging an AI agent's response to a task.
+// contract (score/reason/evidence/failedCriteria) on its own. Exported so the
+// managed-definition sync in ensureBuiltinJudge and its tests share one source.
+export const BUILTIN_JUDGE_PROMPT = `You are an impartial evaluator judging an AI agent's response to a task.
 
 Task given to the agent:
 {{input}}
@@ -34,7 +35,9 @@ Judge the response on:
 2. Accuracy — are the stated facts correct and consistent with the expected outcome when one is provided?
 3. Quality — is the response complete, actionable, and free of irrelevant filler?
 
-Score from 0 (failed completely) to 1 (fully accomplished). Be strict about task completion, but fair about wording differences. When no expected outcome is provided, judge completion and quality only.`;
+Score from 0 (failed completely) to 1 (fully accomplished). Be strict about task completion, but fair about wording differences. When no expected outcome is provided, judge completion and quality only.
+
+Write the reason, evidence and failedCriteria fields in Chinese (简体中文).`;
 
 export interface EvaluationServiceDependencies {
   store: EvaluationStore;
@@ -63,26 +66,35 @@ export class EvaluationService {
 
   // Idempotently provisions the built-in LLM judge bound to the execution
   // agent's own channel, so skill regression suites never require the user to
-  // configure a separate judge runtime first. One judge per channel; the
-  // stable id makes repeat calls a no-op.
+  // configure a separate judge runtime first. The judge is code-managed: one
+  // per channel, and a persisted definition that drifted from the code (e.g.
+  // an older rubric) is synced back on the next call.
   async ensureBuiltinJudge(configuredAgentId: string): Promise<EvaluationEvaluator> {
     const agent = this.dependencies.agents().find((item) => item.id === configuredAgentId);
     if (!agent) throw new Error(`Evaluation Agent not found: ${configuredAgentId}`);
     const id = `builtin-judge-${agent.channelId}`;
+    const name = `Built-in Judge (${agent.channelId})`;
     const existing = (await this.dependencies.store.listEvaluators()).find(
       (item) => item.id === id,
     );
-    if (existing) return existing;
+    if (
+      existing
+      && existing.prompt === BUILTIN_JUDGE_PROMPT
+      && existing.name === name
+      && existing.runtimeId === agent.channelId
+    ) {
+      return existing;
+    }
     const now = Date.now();
     return this.dependencies.store.saveEvaluator({
       id,
-      name: `Built-in Judge (${agent.channelId})`,
+      name,
       kind: "llm_judge",
       prompt: BUILTIN_JUDGE_PROMPT,
       runtimeId: agent.channelId,
       threshold: 0.6,
       enabled: true,
-      createdAt: now,
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
   }
