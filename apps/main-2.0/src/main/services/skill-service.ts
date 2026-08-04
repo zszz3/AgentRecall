@@ -96,6 +96,10 @@ export interface CreateSkillEvalSuiteInput {
   name: string;
   agentId: string;
   evaluatorIds: string[];
+  // When true the service provisions (or reuses) the built-in LLM judge bound
+  // to the execution agent's channel, so users never need to configure a
+  // judge runtime before their first run.
+  useBuiltinJudge: boolean;
   repetitions: number;
   cases: SkillEvalSuiteCase[];
 }
@@ -933,6 +937,12 @@ export class SkillService {
     if (!input.agentId.trim()) throw new Error("An execution Agent is required.");
     if (input.cases.length === 0) throw new Error("At least one case is required.");
     const evaluations = this.requireEvaluationService();
+    const evaluatorIds = [...input.evaluatorIds];
+    if (input.useBuiltinJudge) {
+      const builtin = await evaluations.ensureBuiltinJudge(input.agentId.trim());
+      if (!evaluatorIds.includes(builtin.id)) evaluatorIds.unshift(builtin.id);
+    }
+    if (evaluatorIds.length === 0) throw new Error("At least one evaluator is required.");
     const now = this.dependencies.now();
     const dataset = await evaluations.saveDataset({
       id: `dataset-${now}`,
@@ -954,7 +964,7 @@ export class SkillService {
       name: input.name.trim(),
       datasetId: dataset.id,
       agentId: input.agentId,
-      evaluatorIds: input.evaluatorIds,
+      evaluatorIds,
       repetitions: Math.max(1, Math.min(5, Math.floor(input.repetitions))),
       skillName: name,
       skillHash: currentHash,

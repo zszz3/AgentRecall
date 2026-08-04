@@ -45,6 +45,7 @@ const evalSuiteCreateInput = z.tuple([
     name: z.string().trim().min(1).max(200),
     agentId: z.string().trim().min(1).max(512),
     evaluatorIds: z.array(z.string().trim().min(1).max(512)).max(20),
+    useBuiltinJudge: z.boolean(),
     repetitions: z.number().int().min(1).max(5),
     cases: z.array(
       z.object({

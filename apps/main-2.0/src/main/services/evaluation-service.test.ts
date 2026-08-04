@@ -62,7 +62,7 @@ function fixture(options: { dataset?: EvaluationDataset; agents?: ConfiguredAgen
     saveDataset: vi.fn(),
     deleteDataset: vi.fn(),
     listEvaluators: vi.fn(async () => [evaluator]),
-    saveEvaluator: vi.fn(),
+    saveEvaluator: vi.fn(async (value: EvaluationEvaluator) => value),
     deleteEvaluator: vi.fn(),
     listExperiments: vi.fn(async () => [experiment]),
     saveExperiment: vi.fn(),
@@ -141,5 +141,48 @@ describe("EvaluationService", () => {
 
     await expect(service.runExperiment("experiment-1")).resolves.toMatchObject({ passRate: 1 });
     expect(executeAgent).toHaveBeenCalledWith("judge-agent", expect.any(String));
+  });
+
+  describe("ensureBuiltinJudge", () => {
+    it("provisions an llm_judge bound to the execution agent's channel", async () => {
+      const { service, store } = fixture();
+
+      const judge = await service.ensureBuiltinJudge("target-agent");
+
+      expect(judge.id).toBe("builtin-judge-codex-main");
+      expect(judge).toMatchObject({
+        kind: "llm_judge",
+        runtimeId: "codex-main",
+        enabled: true,
+      });
+      expect(judge.prompt).toContain("{{input}}");
+      expect(judge.prompt).toContain("{{output}}");
+      expect(store.saveEvaluator).toHaveBeenCalledWith(expect.objectContaining({ id: "builtin-judge-codex-main" }));
+    });
+
+    it("reuses an existing built-in judge instead of saving a duplicate", async () => {
+      const { service, store } = fixture();
+      const existing: EvaluationEvaluator = {
+        id: "builtin-judge-codex-main",
+        name: "Built-in Judge (codex-main)",
+        kind: "llm_judge",
+        runtimeId: "codex-main",
+        threshold: 0.6,
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      (store.listEvaluators as ReturnType<typeof vi.fn>).mockResolvedValue([existing]);
+
+      const judge = await service.ensureBuiltinJudge("target-agent");
+
+      expect(judge).toBe(existing);
+      expect(store.saveEvaluator).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown execution agent", async () => {
+      const { service } = fixture();
+      await expect(service.ensureBuiltinJudge("missing-agent")).rejects.toThrow(/Evaluation Agent not found/);
+    });
   });
 });

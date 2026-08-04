@@ -542,6 +542,7 @@ function CreateSuiteDialog({
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
   const [repetitions, setRepetitions] = useState(1);
+  const [useBuiltinJudge, setUseBuiltinJudge] = useState(true);
   const [evaluatorIds, setEvaluatorIds] = useState<string[]>([]);
   const [cases, setCases] = useState<Array<{ input: string; expectedOutput: string }>>([
     { input: "", expectedOutput: "" },
@@ -560,9 +561,13 @@ function CreateSuiteDialog({
           window.sessionSearch.automation.getSnapshot(),
         ]);
         if (cancelled) return;
-        setEvaluators(nextEvaluators.filter((item) => item.enabled));
+        // The built-in judge covers auto-provisioned ones, which users should
+        // not have to manage by hand.
+        setEvaluators(nextEvaluators.filter((item) => item.enabled && !item.id.startsWith("builtin-judge-")));
         setAgents(snapshot.configuredAgents);
-        if (snapshot.configuredAgents[0]) setAgentId(snapshot.configuredAgents[0].id);
+        const preferred = snapshot.configuredAgents.find((agent) => agent.managed)
+          ?? snapshot.configuredAgents[0];
+        if (preferred) setAgentId(preferred.id);
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -581,6 +586,7 @@ function CreateSuiteDialog({
         name,
         agentId,
         evaluatorIds,
+        useBuiltinJudge,
         repetitions,
         cases: cases
           .filter((item) => item.input.trim())
@@ -595,9 +601,10 @@ function CreateSuiteDialog({
       setError(cause instanceof Error ? cause.message : String(cause));
       setSaving(false);
     }
-  }, [skill, name, agentId, evaluatorIds, repetitions, cases, onCreated]);
+  }, [skill, name, agentId, evaluatorIds, useBuiltinJudge, repetitions, cases, onCreated]);
 
-  const canSave = name.trim() && agentId && cases.some((item) => item.input.trim());
+  const canSave = name.trim() && agentId && cases.some((item) => item.input.trim())
+    && (useBuiltinJudge || evaluatorIds.length > 0);
 
   return (
     <div className="eval-suite-dialog-backdrop" onClick={onClose}>
@@ -619,22 +626,37 @@ function CreateSuiteDialog({
         <label className="eval-suite-field">
           <span>{l("Execution Agent", "执行 Agent")}</span>
           <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
-            {agents.length === 0 ? <option value="">{l("No configured Agent", "暂无已配置 Agent")}</option> : null}
+            {agents.length === 0 ? <option value="">{l("No execution Agent detected", "未检测到可用 Agent")}</option> : null}
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>{agent.name}</option>
             ))}
           </select>
+          {agents.length === 0 ? (
+            <p className="eval-muted">{l(
+              "Install an agent runtime such as Claude Code or Codex, then reopen this dialog.",
+              "请先安装 Claude Code 或 Codex 等 Agent 运行时，再重新打开此对话框。",
+            )}</p>
+          ) : null}
         </label>
 
         <div className="eval-suite-field">
           <span>{l("Evaluators", "评分器")}</span>
           <div className="eval-suite-evaluators">
-            {evaluators.length === 0 ? (
+            <label className="eval-suite-evaluator-option">
+              <input
+                type="checkbox"
+                checked={useBuiltinJudge}
+                onChange={(event) => setUseBuiltinJudge(event.target.checked)}
+              />
+              {l("Built-in LLM Judge (recommended)", "内置 LLM Judge（推荐）")}
+            </label>
+            {useBuiltinJudge ? (
               <p className="eval-muted">{l(
-                "No evaluators yet. Create one in the Experiments tab first.",
-                "还没有评分器。请先在实验页创建。",
+                "Judges each case with the execution Agent's own model. No setup needed; scores may be lenient about style.",
+                "用执行 Agent 同款模型逐条评审，无需任何配置；对文风差异可能偏宽松。",
               )}</p>
-            ) : evaluators.map((evaluator) => {
+            ) : null}
+            {evaluators.map((evaluator) => {
               const checked = evaluatorIds.includes(evaluator.id);
               return (
                 <label key={evaluator.id} className="eval-suite-evaluator-option">
@@ -649,6 +671,12 @@ function CreateSuiteDialog({
                 </label>
               );
             })}
+            {!useBuiltinJudge && evaluators.length === 0 ? (
+              <p className="eval-muted">{l(
+                "Select at least one evaluator, or keep the built-in judge enabled.",
+                "请至少选择一个评分器，或保持内置 Judge 勾选。",
+              )}</p>
+            ) : null}
           </div>
         </div>
 

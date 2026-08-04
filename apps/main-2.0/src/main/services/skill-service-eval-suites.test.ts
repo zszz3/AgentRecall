@@ -20,6 +20,7 @@ function makeEvaluationServiceMock(overrides: Record<string, unknown> = {}) {
     saveDataset: vi.fn(async (value: unknown) => value),
     saveExperiment: vi.fn(async (value: unknown) => value),
     runExperiment: vi.fn(async (id: string) => ({ id, status: "completed", results: [] })),
+    ensureBuiltinJudge: vi.fn(async (agentId: string) => ({ id: `builtin-judge-${agentId}` })),
     ...overrides,
   };
 }
@@ -58,6 +59,7 @@ describe("SkillService skill regression suites (phase four)", () => {
         name: "suite",
         agentId: "agent-1",
         evaluatorIds: [],
+        useBuiltinJudge: false,
         repetitions: 1,
         cases: [{ input: "hello" }],
       }),
@@ -94,6 +96,7 @@ describe("SkillService skill regression suites (phase four)", () => {
         name: "basic regression",
         agentId: "agent-1",
         evaluatorIds: ["eval-1", "eval-2"],
+        useBuiltinJudge: false,
         repetitions: 3,
         cases: [
           { input: "case one" },
@@ -136,6 +139,7 @@ describe("SkillService skill regression suites (phase four)", () => {
         name: "suite",
         agentId: "agent-1",
         evaluatorIds: [],
+        useBuiltinJudge: true,
         repetitions: 1,
         cases: [],
       }),
@@ -147,10 +151,23 @@ describe("SkillService skill regression suites (phase four)", () => {
         name: " ",
         agentId: "agent-1",
         evaluatorIds: [],
+        useBuiltinJudge: true,
         repetitions: 1,
         cases: [{ input: "hello" }],
       }),
     ).rejects.toThrow("A suite name is required.");
+
+    await expect(
+      service.createSkillEvalSuite({
+        skill: "review",
+        name: "suite",
+        agentId: "agent-1",
+        evaluatorIds: [],
+        useBuiltinJudge: false,
+        repetitions: 1,
+        cases: [{ input: "hello" }],
+      }),
+    ).rejects.toThrow("At least one evaluator is required.");
 
     const root = installSkillFixture("review", "x");
     try {
@@ -162,6 +179,7 @@ describe("SkillService skill regression suites (phase four)", () => {
         name: "suite",
         agentId: "agent-1",
         evaluatorIds: [],
+        useBuiltinJudge: true,
         repetitions: 99,
         cases: [{ input: "hello" }],
       });
@@ -181,12 +199,35 @@ describe("SkillService skill regression suites (phase four)", () => {
       name: "suite",
       agentId: "agent-1",
       evaluatorIds: [],
+      useBuiltinJudge: true,
       repetitions: 1,
       cases: [{ input: "hello" }],
     });
     expect(suite.skillHash).toBeNull();
     expect(suite.currentHash).toBeNull();
     expect(suite.drifted).toBe(false);
+  });
+
+  it("provisions the built-in judge on the execution agent's channel when requested", async () => {
+    const evaluations = makeEvaluationServiceMock();
+    const service = makeService(true, evaluations);
+    vi.spyOn(service, "listSkills").mockResolvedValue({ skills: [] } as never);
+
+    const suite = await service.createSkillEvalSuite({
+      skill: "review",
+      name: "suite",
+      agentId: "agent-1",
+      evaluatorIds: ["eval-custom"],
+      useBuiltinJudge: true,
+      repetitions: 1,
+      cases: [{ input: "hello" }],
+    });
+
+    expect(evaluations.ensureBuiltinJudge).toHaveBeenCalledWith("agent-1");
+    const experimentArg = (evaluations.saveExperiment as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    // Built-in judge leads so it reads as the primary scoring signal.
+    expect(experimentArg.evaluatorIds).toEqual(["builtin-judge-agent-1", "eval-custom"]);
+    expect(suite.evaluatorIds).toContain("builtin-judge-agent-1");
   });
 
   // ── runSkillEvalSuite ──────────────────────────────────────────────
