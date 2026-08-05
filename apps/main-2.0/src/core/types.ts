@@ -220,6 +220,10 @@ export interface CodexIncrementalState {
   historyMode: CodexHistoryMode;
   messageProvenance: CodexMessageProvenance[];
   activeTurnIds: string[];
+  agentPath?: string | null;
+  pendingInterAgentCommunication?: {
+    triggerTurn: boolean;
+  };
 }
 
 export type SessionTurnStatus = "running" | "completed" | "failed" | "aborted";
@@ -617,6 +621,7 @@ export interface CodexConversationLine {
     forked_from_id?: string;
     thread_source?: string;
     parent_thread_id?: string;
+    agent_path?: string;
     source?:
       | string
       | {

@@ -24,6 +24,7 @@ import type {
   McpServerDefinition,
 } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
+import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages/mcp/mcp-tools";
 import type { InstalledSkill } from "../../../../core/skill-manager";
 import type { OpenVikingMemorySnapshot } from "../../../../core/openviking-memory";
 import type { TeamChatRoomSummary } from "../../../../shared/team-chat";
@@ -643,7 +644,7 @@ export function WorkbenchPage({
             rows={(mcpServers ?? []).slice(0, 3).map((server) => ({
               id: server.id,
               title: server.name,
-              detail: `${server.status} · ${server.tools.length} tools`,
+              detail: `${server.status} · ${toolCountLabel(server, l("tools", "个工具"))}`,
             }))}
             empty={mcpServers === null
               ? l("Loading MCP servers…", "正在加载 MCP…")

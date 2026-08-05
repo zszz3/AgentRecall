@@ -35,6 +35,7 @@ import type { SessionFamily } from "../../../../core/session-family";
 import { canDeleteSessionLocally } from "../../../../core/session-environment";
 import { sessionSourceDescriptor } from "../../../../core/session-sources";
 import { SubagentSessionTree } from "./subagent-session-tree";
+import { collaborationMessageMetadata } from "./collaboration-message";
 
 export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
@@ -865,6 +866,7 @@ function TraceEventBlock({ event, language, timelineKey }: { event: SessionTrace
   const truncated = Boolean(event.detail) && event.detail.length > TRACE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
   const durationText = traceDurationLabel(event.attributes);
+  const collaboration = collaborationMessageMetadata(event.attributes);
   const detail = useMemo(() => {
     if (!event.detail) return localize(language, "No detail captured.", "没有记录详情。");
     const readable = traceDetailText(event.detail);
@@ -884,6 +886,9 @@ function TraceEventBlock({ event, language, timelineKey }: { event: SessionTrace
       </summary>
       <div className="trace-meta">
         {event.eventType ? <span>{event.eventType}</span> : null}
+        {collaboration?.author || collaboration?.recipient
+          ? <span>{collaboration.author || "?"} → {collaboration.recipient || "?"}</span>
+          : null}
         {durationText ? <span className="trace-duration">{durationText}</span> : null}
         {event.callId ? <span>{event.callId}</span> : null}
       </div>

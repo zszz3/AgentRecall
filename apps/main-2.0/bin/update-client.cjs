@@ -436,6 +436,19 @@ function formatManualUpdateFallback(version) {
 }
 
 function formatUpdateError(error, fallback = "未知错误") {
+  const missingExecutable = error && typeof error === "object" ? String(error.path || "") : "";
+  const errorMessage = error && typeof error === "object" ? String(error.message || "") : "";
+  if (
+    error
+    && typeof error === "object"
+    && error.code === "ENOENT"
+    && (
+      /(?:^|[/\\])npm(?:\.cmd)?$/i.test(missingExecutable)
+      || /\bspawn(?:Sync)?\s+npm(?:\.cmd)?\s+ENOENT\b/i.test(errorMessage)
+    )
+  ) {
+    return "应用进程找不到 npm。请在终端中手动运行更新命令。";
+  }
   const candidates = error && typeof error === "object"
     ? [error.stderr, error.stdout, error.message, error]
     : [error];
@@ -513,6 +526,33 @@ function updateProgress(version, phase, values = {}) {
   return { phase, version, ...values };
 }
 
+function resolveNpmCommand(options = {}) {
+  if (options.npmCommand) return options.npmCommand;
+  const platform = options.platform || process.platform;
+  const executableName = platform === "win32" ? "npm.cmd" : "npm";
+  if (platform === "win32") return executableName;
+  const nodePath = options.nodePath;
+  if (nodePath && path.isAbsolute(nodePath)) {
+    const adjacentNpm = path.join(path.dirname(nodePath), executableName);
+    if (fs.existsSync(adjacentNpm)) return adjacentNpm;
+  }
+  return executableName;
+}
+
+function npmSubprocessEnvironment(environment = process.env, nodePath) {
+  const result = { ...environment };
+  if (nodePath && path.isAbsolute(nodePath)) {
+    const nodeDirectory = path.dirname(nodePath);
+    const pathKey = Object.keys(result).find((key) => key.toLowerCase() === "path") || "PATH";
+    const pathEntries = String(result[pathKey] || "")
+      .split(path.delimiter)
+      .filter(Boolean);
+    result[pathKey] = [nodeDirectory, ...pathEntries.filter((entry) => entry !== nodeDirectory)].join(path.delimiter);
+  }
+  delete result.ELECTRON_RUN_AS_NODE;
+  return result;
+}
+
 async function downloadUpdatePackage(manifest, archivePath, options = {}) {
   const response = await fetchWithTimeout(
     options.fetchImpl || globalThis.fetch,
@@ -562,7 +602,7 @@ async function downloadUpdatePackage(manifest, archivePath, options = {}) {
 
 async function stageUpdate(manifest, options = {}) {
   const parsed = parseUpdateManifest(manifest);
-  const packagePath = options.packagePath || globalPackageRoot({ npmCommand: options.npmCommand });
+  const packagePath = options.packagePath || packageRoot();
   const stageRoot = options.stageRoot
     || path.join(path.dirname(packagePath), `.agent-recall-stage-${process.pid}-${randomUUID()}`);
   const archivePath = path.join(stageRoot, parsed.package.name);
@@ -581,14 +621,13 @@ async function stageUpdate(manifest, options = {}) {
     options.onProgress?.(updateProgress(parsed.version, "staging", {
       message: "正在安装到临时目录…",
     }));
-    const npmCommand = options.npmCommand || (process.platform === "win32" ? "npm.cmd" : "npm");
+    const npmCommand = resolveNpmCommand(options);
     const registry = options.registry || process.env.AGENT_RECALL_NPM_REGISTRY || DEFAULT_NPM_REGISTRY;
     const installEnvironment = {
-      ...process.env,
+      ...npmSubprocessEnvironment(process.env, options.nodePath),
       AGENT_RECALL_STAGING_INSTALL: "1",
       AGENT_RECALL_STAGE_ROOT: stageRoot,
     };
-    delete installEnvironment.ELECTRON_RUN_AS_NODE;
     try {
       await (options.execFileImpl || execFileAsync)(npmCommand, [
         "install",
@@ -1193,14 +1232,21 @@ async function waitForProcessExit(pid, timeoutMs) {
   throw new Error("The running AgentRecall process did not exit in time.");
 }
 
-function globalCommandPath() {
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  const prefix = execFileSync(npmCommand, ["prefix", "-g"], { encoding: "utf8", shell: process.platform === "win32" }).trim();
-  return process.platform === "win32" ? path.join(prefix, "agent-recall-v2.cmd") : path.join(prefix, "bin", "agent-recall-v2");
+function globalCommandPath(options = {}) {
+  const platform = options.platform || process.platform;
+  const environment = { ...process.env, ...options.env };
+  const nodePath = options.nodePath || environment.AGENT_RECALL_NODE_PATH;
+  const npmCommand = resolveNpmCommand({ npmCommand: options.npmCommand, nodePath, platform });
+  const prefix = (options.execFileSyncImpl || execFileSync)(npmCommand, ["prefix", "-g"], {
+    encoding: "utf8",
+    shell: platform === "win32",
+    env: npmSubprocessEnvironment(environment, nodePath),
+  }).trim();
+  return platform === "win32" ? path.join(prefix, "agent-recall-v2.cmd") : path.join(prefix, "bin", "agent-recall-v2");
 }
 
 function launchInstalledApp(options = {}) {
-  const command = options.command || globalCommandPath();
+  const command = options.command || globalCommandPath(options);
   const environment = { ...process.env, ...options.env, AGENT_RECALL_NO_UPDATE_CHECK: "1" };
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = (options.spawnImpl || spawn)(command, options.args || ["--no-update-check"], {

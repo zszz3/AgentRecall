@@ -103,15 +103,37 @@ export function applyServerConfigJson(
   if (transport === "http" && !url) {
     throw new Error(zh ? 'http Server 需要 "url"。' : 'An http server requires "url".');
   }
+  // The registry only persists disabled names that exist in the discovered
+  // tool catalog, so entries that would be silently pruned on save are
+  // rejected here with an actionable message instead.
+  const disabledTools =
+    entry.disabledTools === undefined
+      ? (server.disabledTools ?? [])
+      : asStringArray(entry.disabledTools);
+  if (entry.disabledTools !== undefined && disabledTools.length > 0) {
+    if (server.tools.length === 0) {
+      throw new Error(
+        zh
+          ? "该 Server 还没有已发现的工具，disabledTools 保存时会被清空。请先测试连接，再配置 disabledTools。"
+          : "This server has no discovered tools yet, so disabledTools would be cleared on save. Run a connection test first.",
+      );
+    }
+    const known = new Set(server.tools.map((tool) => tool.name));
+    const unknown = disabledTools.filter((name) => !known.has(name));
+    if (unknown.length > 0) {
+      throw new Error(
+        zh
+          ? `disabledTools 包含未发现的工具，保存时会被忽略：${unknown.join("、")}。`
+          : `disabledTools lists tools that were not discovered and would be dropped on save: ${unknown.join(", ")}.`,
+      );
+    }
+  }
   const next: McpServerDefinition = {
     ...server,
     transport,
     args: transport === "stdio" ? asStringArray(entry.args) : [],
     env: transport === "stdio" ? toStringRecord(entry.env) : {},
-    disabledTools:
-      entry.disabledTools === undefined
-        ? (server.disabledTools ?? [])
-        : asStringArray(entry.disabledTools),
+    disabledTools,
   };
   if (transport === "stdio") {
     next.command = command;

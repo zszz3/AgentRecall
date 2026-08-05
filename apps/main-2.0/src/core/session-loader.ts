@@ -96,6 +96,7 @@ interface CodexSessionMeta {
   originator?: string;
   isSubagent: boolean;
   parentSessionId: string | null;
+  agentPath?: string | null;
   historyMode?: CodexHistoryMode;
 }
 
@@ -109,6 +110,9 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
     const structuredParent = structuredSource?.subagent?.thread_spawn?.parent_thread_id;
     const legacyParent = line.payload.thread_source === "subagent" ? line.payload.parent_thread_id : undefined;
     const parentSessionId = structuredParent || legacyParent || null;
+    const agentPath = line.payload.agent_path
+      || structuredSource?.subagent?.thread_spawn?.agent_path
+      || (parentSessionId === null ? "/root" : null);
     return {
       id: line.payload.id,
       projectPath: line.payload.cwd || "",
@@ -118,6 +122,7 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
       originator: line.payload.originator,
       isSubagent: parentSessionId !== null,
       parentSessionId,
+      agentPath,
       historyMode: (line.payload as { history_mode?: unknown }).history_mode === "paginated" ? "paginated" : "legacy",
     };
   }
@@ -130,6 +135,7 @@ export function parseCodexSessionMetaLine(parsed: unknown): CodexSessionMeta | n
       gitBranch: line.git?.branch,
       isSubagent: false,
       parentSessionId: null,
+      agentPath: "/root",
       historyMode: "legacy",
     };
   }
@@ -155,6 +161,7 @@ function findCodexSessionMeta(
     if (!result.originator) result.originator = parsed.originator;
     result.isSubagent ||= parsed.isSubagent;
     if (!result.parentSessionId) result.parentSessionId = parsed.parentSessionId;
+    if (!result.agentPath) result.agentPath = parsed.agentPath;
     if (parsed.historyMode === "paginated") result.historyMode = "paginated";
   }
   return result;
@@ -361,7 +368,7 @@ function extractCodexResponseTrace(
   ) {
     const output = payloadType === "tool_search_output"
       ? { status: unknownField(payload, "status"), tools: unknownField(payload, "tools") }
-      : unknownField(payload, "output");
+      : parseMaybeJson(unknownField(payload, "output"));
     const safeOutput = sanitizeCodexTraceValue(output);
     const eventType =
       payloadType === "function_call_output" ? "codex.function_call"
@@ -557,6 +564,8 @@ function extractCodexMessages(rows: unknown[]): {
   messageProvenance: Array<{ messageIndex: number; sourceRecordId: string | null }>;
   historyMode: CodexHistoryMode;
   activeTurnIds: string[];
+  agentPath: string | null;
+  pendingInterAgentCommunication: { triggerTurn: boolean } | null;
 } {
   const adapter = getAdapter("codex");
   const rollout = new CodexRolloutAccumulator();
@@ -617,6 +626,8 @@ function extractCodexMessages(rows: unknown[]): {
     messageProvenance,
     historyMode: rollout.historyMode,
     activeTurnIds: rollout.getActiveTurnIds(),
+    agentPath: rollout.agentPath,
+    pendingInterAgentCommunication: rollout.getPendingInterAgentCommunication(),
   };
 }
 
@@ -1001,6 +1012,10 @@ export function loadCodexSessionRows(
     historyMode: meta.historyMode ?? extracted.historyMode,
     messageProvenance: extracted.messageProvenance,
     activeTurnIds: extracted.activeTurnIds,
+    ...(extracted.agentPath === undefined || extracted.agentPath === "/root" ? {} : { agentPath: extracted.agentPath }),
+    ...(extracted.pendingInterAgentCommunication
+      ? { pendingInterAgentCommunication: extracted.pendingInterAgentCommunication }
+      : {}),
   });
 }
 
@@ -1104,6 +1119,9 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
   const rollout = new CodexRolloutAccumulator(base ? {
     historyMode: base.loaded.codexIncrementalState?.historyMode ?? "legacy",
     activeTurnIds: base.loaded.codexIncrementalState?.activeTurnIds ?? [],
+    agentPath: base.loaded.codexIncrementalState?.agentPath
+      ?? (base.loaded.session.isSubagent ? null : "/root"),
+    pendingInterAgentCommunication: base.loaded.codexIncrementalState?.pendingInterAgentCommunication,
     sourceTurnIds: [
       ...allMessages.map((message) => message.sourceTurnId),
       ...allTraceEvents.map((event) => event.sourceTurnId),
@@ -1138,6 +1156,8 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
     originator: base.loaded.session.source === "codex-app" ? "Codex Desktop" : undefined,
     isSubagent: base.loaded.session.isSubagent ?? false,
     parentSessionId: base.loaded.session.parentSessionId ?? null,
+    agentPath: base.loaded.codexIncrementalState?.agentPath
+      ?? (base.loaded.session.isSubagent ? null : "/root"),
     historyMode: base.loaded.codexIncrementalState?.historyMode ?? "legacy",
   } : null;
   let invalidRollback = false;
@@ -1155,6 +1175,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
           originator: meta.originator || parsedMeta.originator,
           isSubagent: meta.isSubagent || parsedMeta.isSubagent,
           parentSessionId: meta.parentSessionId || parsedMeta.parentSessionId,
+          agentPath: meta.agentPath || parsedMeta.agentPath,
           historyMode: meta.historyMode === "paginated" || parsedMeta.historyMode === "paginated" ? "paginated" : "legacy",
         } : parsedMeta;
       }
@@ -1273,6 +1294,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
       if (!meta) return null;
       const visibleMessages = invalidRollback ? allMessages : [...preamble.messages, ...turns.flatMap((turn) => turn.messages)];
       const visibleTraces = invalidRollback ? allTraceEvents : [...preamble.traceEvents, ...turns.flatMap((turn) => turn.traceEvents)];
+      const pendingInterAgentCommunication = rollout.getPendingInterAgentCommunication();
       const tokenEvents = new Map<string, TokenUsageEvent>();
       for (const event of base?.loaded.tokenEvents ?? []) putTokenEvent(tokenEvents, event);
       const newTokenRows = base
@@ -1293,6 +1315,10 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
             sourceRecordId: messageProvenance.get(message) ?? null,
           })),
           activeTurnIds: rollout.getActiveTurnIds(),
+          ...(rollout.agentPath === undefined || rollout.agentPath === "/root" ? {} : { agentPath: rollout.agentPath }),
+          ...(pendingInterAgentCommunication
+            ? { pendingInterAgentCommunication }
+            : {}),
         },
         committedOffset,
       };

@@ -71,6 +71,25 @@ describe("MCP JSON editing", () => {
     expect(next.disabledTools).toEqual(["read_file"]);
   });
 
+  test("rejects disabledTools entries that would be pruned on save", () => {
+    expect(() =>
+      applyServerConfigJson(server(), JSON.stringify({ command: "node", disabledTools: ["missing"] })),
+    ).toThrow(/not discovered/);
+    const untested = server({ tools: [], disabledTools: [] });
+    expect(() =>
+      applyServerConfigJson(untested, JSON.stringify({ command: "node", disabledTools: ["read_file"] })),
+    ).toThrow(/connection test/);
+  });
+
+  test("accepts clearing disabledTools or a valid subset", () => {
+    expect(
+      applyServerConfigJson(server(), JSON.stringify({ command: "node", disabledTools: [] })).disabledTools,
+    ).toEqual([]);
+    expect(
+      applyServerConfigJson(server(), JSON.stringify({ command: "node", disabledTools: ["read_file"] })).disabledTools,
+    ).toEqual(["read_file"]);
+  });
+
   test("rejects invalid input with actionable errors", () => {
     expect(() => applyServerConfigJson(server(), "   ")).toThrow(/JSON to apply/);
     expect(() => applyServerConfigJson(server(), "not json")).toThrow(SyntaxError);

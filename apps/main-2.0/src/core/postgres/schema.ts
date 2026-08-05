@@ -1307,6 +1307,23 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
   ],
 }, {
   version: 26,
+  name: "reindex sessions after stale Codex turn attribution fix",
+  statements: [
+    `
+      UPDATE agent_recall.sessions
+      SET
+        content_indexed_mtime_ms = 0,
+        content_indexed_size = 0
+      WHERE EXISTS (
+        SELECT 1
+        FROM agent_recall.session_turns turns
+        WHERE turns.session_key = sessions.session_key
+          AND turns.derivation_version < 4
+      );
+    `,
+  ],
+}, {
+  version: 27,
   name: "attribute evaluation runs to the skill version that executed them",
   statements: [
     `

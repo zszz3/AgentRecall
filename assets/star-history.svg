@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title description" viewBox="0 0 900 480">
   <title id="title">AgentRecall Star History</title>
-  <desc id="description">GitHub star count history from Jun 1, 2026 to Aug 4, 2026, reaching 594 stars.</desc>
+  <desc id="description">GitHub star count history from Jun 1, 2026 to Aug 4, 2026, reaching 693 stars.</desc>
   <defs>
     <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#54aeff" stop-opacity="0.36" />
@@ -14,22 +14,18 @@
 
   <g fill="none" stroke="#d8dee4" stroke-width="1">
     <path d="M72 400H840" />
-    <path d="M72 346H840" />
-    <path d="M72 292H840" />
+    <path d="M72 319H840" />
     <path d="M72 238H840" />
-    <path d="M72 184H840" />
-    <path d="M72 130H840" />
+    <path d="M72 157H840" />
     <path d="M72 76H840" />
   </g>
 
   <g fill="#57606a" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12">
     <text x="58" y="404" text-anchor="end">0</text>
-    <text x="58" y="350" text-anchor="end">100</text>
-    <text x="58" y="296" text-anchor="end">200</text>
-    <text x="58" y="242" text-anchor="end">300</text>
-    <text x="58" y="188" text-anchor="end">400</text>
-    <text x="58" y="134" text-anchor="end">500</text>
-    <text x="58" y="80" text-anchor="end">600</text>
+    <text x="58" y="323" text-anchor="end">200</text>
+    <text x="58" y="242" text-anchor="end">400</text>
+    <text x="58" y="161" text-anchor="end">600</text>
+    <text x="58" y="80" text-anchor="end">800</text>
     <text x="72" y="429" text-anchor="middle">Jun 1</text>
     <text x="264" y="429" text-anchor="middle">Jun 17</text>
     <text x="456" y="429" text-anchor="middle">Jul 3</text>
@@ -37,8 +33,8 @@
     <text x="840" y="429" text-anchor="middle">Aug 4</text>
   </g>
 
-  <path fill="url(#area)" d="M72,397.8 L84,397.3 L96,387 L108,376.8 L120,375.2 L132,374.1 L144,373 L156,373 L168,372.5 L180,371.4 L192,369.2 L204,367.6 L216,367.6 L228,366 L240,364.4 L252,364.4 L264,363.8 L276,363.3 L288,363.3 L300,362.7 L312,361.7 L324,361.7 L336,361.1 L348,361.1 L360,360.6 L372,357.3 L384,357.3 L396,354.6 L408,350.3 L420,349.2 L432,347.6 L444,344.9 L456,343.8 L468,343.3 L480,343.3 L492,343.3 L504,342.2 L516,339.5 L528,334.1 L540,323.9 L552,321.7 L564,321.7 L576,318.5 L588,316.3 L600,314.7 L612,312 L624,312 L636,311.4 L648,293.6 L660,295.8 L672,292 L684,275.8 L696,267.2 L708,251.5 L720,224.5 L732,212.6 L744,194.8 L756,173.2 L768,153.2 L780,132.2 L792,119.2 L804,96 L816,82.5 L828,79.2 L840,79.2 L840,400 L72,400 Z" />
-  <polyline fill="none" stroke="#0969da" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="72,397.8 84,397.3 96,387 108,376.8 120,375.2 132,374.1 144,373 156,373 168,372.5 180,371.4 192,369.2 204,367.6 216,367.6 228,366 240,364.4 252,364.4 264,363.8 276,363.3 288,363.3 300,362.7 312,361.7 324,361.7 336,361.1 348,361.1 360,360.6 372,357.3 384,357.3 396,354.6 408,350.3 420,349.2 432,347.6 444,344.9 456,343.8 468,343.3 480,343.3 492,343.3 504,342.2 516,339.5 528,334.1 540,323.9 552,321.7 564,321.7 576,318.5 588,316.3 600,314.7 612,312 624,312 636,311.4 648,293.6 660,295.8 672,292 684,275.8 696,267.2 708,251.5 720,224.5 732,212.6 744,194.8 756,173.2 768,153.2 780,132.2 792,119.2 804,96 816,82.5 828,79.2 840,79.2" />
-  <circle fill="#0969da" stroke="#ffffff" cx="840" cy="79.2" r="5" stroke-width="2" />
-  <text fill="#1f2328" x="828" y="70.2" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="600">594</text>
+  <path fill="url(#area)" d="M72,398.4 L84,398 L96,390.3 L108,382.6 L120,381.4 L132,380.6 L144,379.8 L156,379.8 L168,379.3 L180,378.5 L192,376.9 L204,375.7 L216,375.7 L228,374.5 L240,373.3 L252,373.3 L264,372.9 L276,372.5 L288,372.5 L300,372.1 L312,371.2 L324,371.2 L336,370.8 L348,370.8 L360,370.4 L372,368 L384,368 L396,366 L408,362.7 L420,361.9 L432,360.7 L444,358.7 L456,357.9 L468,357.5 L480,357.5 L492,357.5 L504,356.7 L516,354.6 L528,350.6 L540,342.9 L552,341.3 L564,341.3 L576,338.8 L588,337.2 L600,336 L612,334 L624,334 L636,333.6 L648,320.2 L660,321.8 L672,319 L684,306.9 L696,300.4 L708,288.6 L720,268.4 L732,259.5 L744,246.1 L756,229.9 L768,214.9 L780,199.1 L792,189.4 L804,172 L816,161.9 L828,159.4 L840,119.3 L840,400 L72,400 Z" />
+  <polyline fill="none" stroke="#0969da" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="72,398.4 84,398 96,390.3 108,382.6 120,381.4 132,380.6 144,379.8 156,379.8 168,379.3 180,378.5 192,376.9 204,375.7 216,375.7 228,374.5 240,373.3 252,373.3 264,372.9 276,372.5 288,372.5 300,372.1 312,371.2 324,371.2 336,370.8 348,370.8 360,370.4 372,368 384,368 396,366 408,362.7 420,361.9 432,360.7 444,358.7 456,357.9 468,357.5 480,357.5 492,357.5 504,356.7 516,354.6 528,350.6 540,342.9 552,341.3 564,341.3 576,338.8 588,337.2 600,336 612,334 624,334 636,333.6 648,320.2 660,321.8 672,319 684,306.9 696,300.4 708,288.6 720,268.4 732,259.5 744,246.1 756,229.9 768,214.9 780,199.1 792,189.4 804,172 816,161.9 828,159.4 840,119.3" />
+  <circle fill="#0969da" stroke="#ffffff" cx="840" cy="119.3" r="5" stroke-width="2" />
+  <text fill="#1f2328" x="828" y="110.3" text-anchor="end" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="600">693</text>
 </svg>

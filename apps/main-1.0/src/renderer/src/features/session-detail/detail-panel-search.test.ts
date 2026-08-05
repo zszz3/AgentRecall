@@ -267,6 +267,48 @@ describe("detail panel conversation search", () => {
     expect(container.querySelector(".trace-status-label")?.textContent).toBe("已完成");
   });
 
+  it("shows only the Agent route outside the structured message detail", async () => {
+    await act(async () => root.render(createElement(DetailPanel, {
+      ...props,
+      traceEvents: [{
+        index: 0,
+        kind: "event",
+        source: "codex",
+        title: "Agent message",
+        detail: JSON.stringify({
+          message: {
+            type: "agent_message",
+            content: [{ type: "encrypted_content", encrypted_content: "ciphertext" }],
+          },
+          direction: "incoming",
+          triggerTurn: false,
+          messageType: "final_answer",
+        }, null, 2),
+        timestamp: "2026-07-29T00:00:03.000Z",
+        eventType: "codex.collaboration.message",
+        status: "completed",
+        sourceTurnId: "turn-1",
+        attributes: {
+          collaboration: {
+            author: "/root/worker",
+            recipient: "/root",
+            direction: "incoming",
+            triggerTurn: false,
+            messageType: "final_answer",
+          },
+        },
+      }],
+    })));
+
+    expect(container.querySelector(".trace-head")?.textContent).not.toContain("收到");
+    expect(container.querySelector(".trace-meta")?.textContent).toContain("/root/worker → /root");
+    expect(container.querySelector(".trace-meta")?.textContent).not.toContain("FINAL_ANSWER");
+    expect(container.querySelector(".trace-meta")?.textContent).not.toContain("不触发新 turn");
+    expect(container.querySelector(".trace-event pre")?.textContent).toContain('"triggerTurn": false');
+    expect(container.querySelector(".trace-event pre")?.textContent).toContain('"encrypted_content": "ciphertext"');
+    expect(container.querySelector(".trace-event pre")?.textContent).not.toContain("消息正文已加密");
+  });
+
   it("omits delete and remote-save actions for read-only Pi sessions", async () => {
     await act(async () => root.render(createElement(DetailPanel, {
       ...props,

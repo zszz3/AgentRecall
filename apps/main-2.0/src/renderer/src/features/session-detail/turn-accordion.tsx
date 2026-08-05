@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { AlertCircle, ArrowRightLeft, ChevronDown, ChevronRight, Clock3, LoaderCircle, RotateCw, Wrench } from "lucide-react";
+import { AlertCircle, ArrowRightLeft, BotMessageSquare, ChevronDown, ChevronRight, Clock3, LoaderCircle, RotateCw, Wrench } from "lucide-react";
 
 import { formatMessageTime } from "../../../../core/format-session";
 import { tracePresentation } from "../../../../core/trace-presentation";
@@ -20,6 +20,7 @@ import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { markdownPreview } from "../../markdown-preview";
 import { MessageHead } from "./message-shell";
+import { collaborationMessageMetadata } from "./collaboration-message";
 
 export interface TurnAccordionState {
   sessionKey: string;
@@ -279,11 +280,15 @@ function TurnSpanBlock({
   language: LanguageMode;
 }): ReactElement {
   const elapsed = durationLabel(durationMs(span.startedAt, span.endedAt));
+  const collaboration = collaborationMessageMetadata(span.attributes);
+  const eventType = typeof span.attributes.eventType === "string" ? span.attributes.eventType : "";
+  const agentRelated = eventType.startsWith("codex.collaboration.") || span.name.startsWith("collaboration.");
+  const SpanIcon = agentRelated ? BotMessageSquare : Wrench;
   return (
     <details className={`msg tool ${span.status}`}>
       <summary className="msg-tool-summary">
         <span className="msg-avatar" aria-hidden>
-          <Wrench size={11} />
+          <SpanIcon size={agentRelated ? 13 : 11} />
         </span>
         <span className="msg-head">
           <strong>{span.name}</strong>
@@ -298,6 +303,9 @@ function TurnSpanBlock({
       </summary>
       <div className="msg-tool-body">
         {span.callId ? <code className="msg-tool-call-id">{span.callId}</code> : null}
+        {collaboration?.author || collaboration?.recipient
+          ? <code className="msg-tool-call-id">{collaboration.author || "?"} → {collaboration.recipient || "?"}</code>
+          : null}
         {span.input ? (
           <details className="msg-tool-payload">
             <summary>{localize(language, "Input", "输入")}</summary>

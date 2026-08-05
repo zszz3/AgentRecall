@@ -18,6 +18,7 @@ import { McpAgentBindings } from "./McpAgentBindings";
 import { McpToolPreview } from "./McpToolPreview";
 import { McpJsonImport } from "./McpJsonImport";
 import { McpJsonEdit } from "./McpJsonEdit";
+import { McpReferenceEditor } from "./McpReferenceEditor";
 import { toolCountLabel } from "./mcp-tools";
 import type { ConfiguredAgent } from "../../../../shared/types";
 import type { McpToolDefinition } from "../../../../shared/mcp/types";
@@ -356,91 +357,21 @@ export function McpPage({
                     </div>
                   ) : null}
                 </WorkbenchSection>
-                {draft.managed ? null : (() => {
-                  const isHttp = draft.transport === "http";
-                  const references = isHttp ? (draft.headers ?? {}) : draft.env;
-                  const setReferences = (next: Record<string, string>) =>
-                    model.update(isHttp ? { ...draft, headers: next } : { ...draft, env: next });
-                  return (
-                <WorkbenchSection
-                  title={
-                    isHttp
-                      ? zh ? "请求头引用" : "Header references"
-                      : zh ? "环境变量引用" : "Environment references"
-                  }
-                  description={
-                    zh
-                      ? isHttp
-                        ? "左侧填写请求头名称（如 Authorization），右侧填写宿主机环境变量名，不在数据库中保存密钥值。"
-                        : "右侧填写宿主机环境变量名，不在数据库中保存密钥值。"
-                      : isHttp
-                        ? "Map header names (e.g. Authorization) to host environment variable names; secret values are not stored."
-                        : "Reference host environment variable names; secret values are not stored."
-                  }
-                  action={
-                    <button
-                      type="button"
-                      className="control-btn compact secondary"
-                      onClick={() =>
-                        setReferences({
-                          ...references,
-                          [isHttp ? "Authorization" : "NEW_VARIABLE"]: "",
-                        })
-                      }
-                    >
-                      {isHttp ? "+ Header" : "+ Variable"}
-                    </button>
-                  }
-                >
-                  <div className="mcp-env-list">
-                    {Object.entries(references).map(([key, value]) => (
-                      <div key={key}>
-                        <input
-                          aria-label={isHttp ? "Header name" : "Environment key"}
-                          value={key}
-                          onChange={(event) => {
-                            const next = { ...references };
-                            delete next[key];
-                            next[event.target.value] = value;
-                            setReferences(next);
-                          }}
-                        />
-                        <span>←</span>
-                        <input
-                          aria-label="Host environment variable"
-                          value={value}
-                          placeholder="HOST_ENV_NAME"
-                          onChange={(event) =>
-                            setReferences({ ...references, [key]: event.target.value })
-                          }
-                        />
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          aria-label={
-                            isHttp
-                              ? zh ? "删除请求头" : "Delete header"
-                              : zh ? "删除环境变量" : "Delete environment variable"
-                          }
-                          title={
-                            isHttp
-                              ? zh ? "删除请求头" : "Delete header"
-                              : zh ? "删除环境变量" : "Delete environment variable"
-                          }
-                          onClick={() => {
-                            const next = { ...references };
-                            delete next[key];
-                            setReferences(next);
-                          }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </WorkbenchSection>
-                  );
-                })()}
+                {draft.managed ? null : (
+                  <McpReferenceEditor
+                    key={draft.id}
+                    language={language}
+                    isHttp={draft.transport === "http"}
+                    references={draft.transport === "http" ? (draft.headers ?? {}) : draft.env}
+                    onChange={(next) =>
+                      model.update(
+                        draft.transport === "http"
+                          ? { ...draft, headers: next }
+                          : { ...draft, env: next },
+                      )
+                    }
+                  />
+                )}
                 <WorkbenchSection
                   title={zh ? "已发现工具" : "Discovered tools"}
                   description={

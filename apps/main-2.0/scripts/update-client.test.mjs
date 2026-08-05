@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFileCallback);
@@ -28,6 +29,21 @@ async function electronFixtureExec(command, args, options) {
   return { stdout: "v42.3.0\n", stderr: "" };
 }
 
+async function installStagedPackageFixture(stageRoot, packageName, version) {
+  const installed = path.join(stageRoot, "node_modules", packageName);
+  await mkdir(path.join(installed, "out", "main"), { recursive: true });
+  await mkdir(path.join(installed, "bin"), { recursive: true });
+  await mkdir(path.join(stageRoot, "node_modules", "electron"), { recursive: true });
+  await writeFile(path.join(installed, "package.json"), JSON.stringify({ name: packageName, version }), "utf8");
+  await writeFile(path.join(installed, "out", "main", "index.js"), "", "utf8");
+  await writeFile(path.join(installed, "bin", "agent-recall.cjs"), "", "utf8");
+  await writeFile(
+    path.join(stageRoot, "node_modules", "electron", "package.json"),
+    JSON.stringify({ version: "42.3.0" }),
+    "utf8",
+  );
+}
+
 const require = createRequire(import.meta.url);
 const mutableFsPromises = require("node:fs/promises");
 const launcherSource = await readFile(new URL("../bin/agent-recall.cjs", import.meta.url), "utf8");
@@ -45,6 +61,7 @@ const {
   formatUpdateError,
   formatManualUpdateFallback,
   formatUpdateNotice,
+  globalCommandPath,
   installUpdate,
   isElectronRuntimeReady,
   launchInstalledApp,
@@ -66,7 +83,14 @@ test("streams package bytes and reports monotonic download progress while stagin
   const directory = await temporaryDirectory("agent-recall-update-stage-");
   const stageRoot = path.join(directory, "stage");
   const packagePath = path.join(directory, "live", "agent-recall-v2");
+  const binDirectory = path.join(directory, "Program Files", "nodejs");
+  const nodePath = path.join(binDirectory, process.platform === "win32" ? "node.exe" : "node");
+  const npmPath = path.join(binDirectory, process.platform === "win32" ? "npm.cmd" : "npm");
+  await mkdir(binDirectory, { recursive: true });
+  await writeFile(nodePath, "", "utf8");
+  await writeFile(npmPath, "", "utf8");
   const progress = [];
+  let npmInvocation = null;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(bytes.subarray(0, 5));
@@ -82,20 +106,11 @@ test("streams package bytes and reports monotonic download progress while stagin
     }),
     stageRoot,
     packagePath,
+    nodePath,
     statusPath: path.join(directory, "status.json"),
-    execFileImpl: async (_command, _args, options) => {
-      const installed = path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "agent-recall-v2");
-      await mkdir(path.join(installed, "out", "main"), { recursive: true });
-      await mkdir(path.join(installed, "bin"), { recursive: true });
-      await mkdir(path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "electron"), { recursive: true });
-      await writeFile(path.join(installed, "package.json"), JSON.stringify({ name: "agent-recall-v2", version: value.version }), "utf8");
-      await writeFile(path.join(installed, "out", "main", "index.js"), "", "utf8");
-      await writeFile(path.join(installed, "bin", "agent-recall.cjs"), "", "utf8");
-      await writeFile(
-        path.join(options.env.AGENT_RECALL_STAGE_ROOT, "node_modules", "electron", "package.json"),
-        JSON.stringify({ version: "42.3.0" }),
-        "utf8",
-      );
+    execFileImpl: async (command, args, options) => {
+      npmInvocation = { command, args, options };
+      await installStagedPackageFixture(options.env.AGENT_RECALL_STAGE_ROOT, "agent-recall-v2", value.version);
       return { stdout: "", stderr: "" };
     },
     ensureElectronImpl: async ({ packagePath: installed, runtimeSourcePath }) => {
@@ -109,6 +124,12 @@ test("streams package bytes and reports monotonic download progress while stagin
   });
 
   assert.equal(staged.stagedPackagePath, path.join(stageRoot, "node_modules", "agent-recall-v2"));
+  assert.equal(staged.livePackagePath, packagePath);
+  assert.equal(npmInvocation.command, process.platform === "win32" ? "npm.cmd" : npmPath);
+  assert.equal(npmInvocation.options.shell, process.platform === "win32");
+  const npmPathKey = Object.keys(npmInvocation.options.env).find((key) => key.toLowerCase() === "path");
+  assert.ok(npmPathKey);
+  assert.equal(npmInvocation.options.env[npmPathKey].split(path.delimiter)[0], binDirectory);
   assert.deepEqual(
     progress.filter((event) => event.phase === "downloading").map((event) => event.percent),
     [50, 100],
@@ -116,6 +137,91 @@ test("streams package bytes and reports monotonic download progress while stagin
   assert.deepEqual(
     progress.map((event) => event.phase),
     ["downloading", "downloading", "verifying", "staging", "validating"],
+  );
+});
+
+test("resolves the live V2 package without running npm root -g", async () => {
+  const bytes = Buffer.from("synthetic update package");
+  const value = manifest();
+  value.package.sha256 = createHash("sha256").update(bytes).digest("hex");
+  const directory = await temporaryDirectory("agent-recall-update-live-root-");
+  const stageRoot = path.join(directory, "stage");
+  const packagePath = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+  const npmCommand = path.join(directory, "missing", process.platform === "win32" ? "npm.cmd" : "npm");
+  let installInvoked = false;
+
+  const staged = await stageUpdate(value, {
+    fetchImpl: async () => new Response(bytes, {
+      status: 200,
+      headers: { "content-length": String(bytes.length) },
+    }),
+    stageRoot,
+    npmCommand,
+    statusPath: path.join(directory, "status.json"),
+    execFileImpl: async (command, _args, options) => {
+      installInvoked = true;
+      assert.equal(command, npmCommand);
+      await installStagedPackageFixture(options.env.AGENT_RECALL_STAGE_ROOT, "agent-recall-v2", value.version);
+      return { stdout: "", stderr: "" };
+    },
+    ensureElectronImpl: async ({ runtimeSourcePath }) => {
+      assert.equal(runtimeSourcePath, packagePath);
+    },
+  });
+
+  assert.equal(installInvoked, true);
+  assert.equal(staged.livePackagePath, packagePath);
+});
+
+test("formats a missing npm executable as an actionable update error", () => {
+  assert.equal(
+    formatUpdateError(Object.assign(new Error("spawn npm ENOENT"), { code: "ENOENT", path: "npm" })),
+    "应用进程找不到 npm。请在终端中手动运行更新命令。",
+  );
+});
+
+test("resolves the installed V2 launcher through npm next to the stable Node executable", async () => {
+  const directory = await temporaryDirectory("agent-recall-update-global-command-");
+  const binDirectory = path.join(directory, "Program Files", "nodejs");
+  const nodePath = path.join(binDirectory, process.platform === "win32" ? "node.exe" : "node");
+  const npmPath = path.join(binDirectory, process.platform === "win32" ? "npm.cmd" : "npm");
+  const prefix = path.join(directory, "prefix");
+  const inputPathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") || "PATH";
+  let npmInvocation = null;
+  await mkdir(binDirectory, { recursive: true });
+  await writeFile(nodePath, "", "utf8");
+  await writeFile(npmPath, "", "utf8");
+
+  const originalPath = process.env[inputPathKey];
+  let command;
+  process.env[inputPathKey] = "";
+  try {
+    command = globalCommandPath({
+      env: {
+        [inputPathKey]: "",
+        AGENT_RECALL_NODE_PATH: nodePath,
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+      execFileSyncImpl: (executable, args, options) => {
+        npmInvocation = { executable, args, options };
+        return `${prefix}\n`;
+      },
+    });
+  } finally {
+    if (originalPath === undefined) delete process.env[inputPathKey];
+    else process.env[inputPathKey] = originalPath;
+  }
+
+  assert.equal(npmInvocation.executable, process.platform === "win32" ? "npm.cmd" : npmPath);
+  assert.deepEqual(npmInvocation.args, ["prefix", "-g"]);
+  assert.equal(npmInvocation.options.shell, process.platform === "win32");
+  assert.equal(npmInvocation.options.env[inputPathKey].split(path.delimiter)[0], binDirectory);
+  assert.equal(npmInvocation.options.env.ELECTRON_RUN_AS_NODE, undefined);
+  assert.equal(
+    command,
+    process.platform === "win32"
+      ? path.join(prefix, "agent-recall-v2.cmd")
+      : path.join(prefix, "bin", "agent-recall-v2"),
   );
 });
 

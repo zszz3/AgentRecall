@@ -18,6 +18,52 @@ import {
 import { TRACE_DETAIL_PREVIEW_MAX_CHARS } from "./trace-detail";
 
 describe("Codex session loading", () => {
+  it("keeps an empty send_message function output distinct from its input", () => {
+    const loaded = loadCodexSessionRows("/tmp/codex-send-message.jsonl", [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-04T03:33:15.000Z",
+        payload: { id: "codex-send-message", cwd: "/repo" },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T03:33:17.788Z",
+        payload: {
+          type: "function_call",
+          name: "send_message",
+          namespace: "collaboration",
+          arguments: JSON.stringify({ target: "/root", message: "task result" }),
+          call_id: "call-send-message",
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-04T03:33:17.790Z",
+        payload: {
+          type: "sub_agent_activity",
+          event_id: "call-send-message",
+          agent_thread_id: "child-thread",
+          agent_path: "/root",
+          kind: "interacted",
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T03:33:17.939Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-send-message",
+          output: "",
+        },
+      },
+    ]);
+
+    const sendMessage = loaded?.traceEvents?.find((event) => event.callId === "call-send-message");
+    expect(sendMessage?.attributes?.input).toEqual({ target: "/root", message: "task result" });
+    expect(sendMessage?.attributes?.output).toBe("");
+    expect(sendMessage?.attributes?.output).not.toEqual(sendMessage?.attributes?.input);
+  });
+
   it("preserves Codex message phases and normalizes turn lifecycle metadata", () => {
     const rows = [
       {
@@ -153,6 +199,239 @@ describe("Codex session loading", () => {
         payload: { id: "ordinary-fork", forked_from_id: "some-session", originator: "codex-tui", session_id: "ordinary-fork" },
       }),
     ).toMatchObject({ isSubagent: false, parentSessionId: null });
+  });
+
+  it("keeps Codex Agent message metadata and encrypted content together in structured output", () => {
+    const loaded = loadCodexSessionRows("/tmp/codex-agent-messages.jsonl", [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-04T03:00:00Z",
+        payload: { id: "child", cwd: "/repo", agent_path: "/root/worker", thread_source: "subagent", parent_thread_id: "parent" },
+      },
+      { type: "inter_agent_communication_metadata", timestamp: "2026-08-04T03:00:01Z", payload: { trigger_turn: true } },
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T03:00:01Z",
+        payload: {
+          type: "agent_message",
+          id: "new-task",
+          author: "/root",
+          recipient: "/root/worker",
+          content: [
+            { type: "input_text", text: "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n" },
+            { type: "encrypted_content", encrypted_content: "must-not-index-encrypted-task" },
+          ],
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-1" },
+        },
+      },
+      { type: "inter_agent_communication_metadata", timestamp: "2026-08-04T03:00:02Z", payload: { trigger_turn: false } },
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T03:00:02Z",
+        payload: {
+          type: "agent_message",
+          id: "outgoing-message",
+          author: "/root/worker",
+          recipient: "/root",
+          content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/worker\nPayload:\n检查完成" }],
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-1" },
+        },
+      },
+    ]);
+
+    const messages = loaded?.traceEvents?.filter((event) => event.eventType === "codex.collaboration.message") ?? [];
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      title: "Agent message",
+      sourceTurnId: "turn-1",
+      attributes: {
+        collaboration: {
+          author: "/root",
+          recipient: "/root/worker",
+          direction: "incoming",
+          triggerTurn: true,
+          messageType: "new_task",
+        },
+      },
+    });
+    expect(messages[1]).toMatchObject({
+      attributes: {
+        collaboration: {
+          direction: "outgoing",
+          triggerTurn: false,
+          messageType: "final_answer",
+        },
+      },
+    });
+    expect(JSON.parse(messages[0]?.detail ?? "")).toMatchObject({
+      direction: "incoming",
+      triggerTurn: true,
+      messageType: "new_task",
+      message: {
+        type: "agent_message",
+        author: "/root",
+        recipient: "/root/worker",
+        content: [
+          { type: "input_text" },
+          { type: "encrypted_content", encrypted_content: "must-not-index-encrypted-task" },
+        ],
+      },
+    });
+    expect(JSON.parse(messages[1]?.detail ?? "")).toMatchObject({
+      direction: "outgoing",
+      triggerTurn: false,
+      messageType: "final_answer",
+    });
+  });
+
+  it("keeps pending inter-agent metadata across incremental Codex reads", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-agent-message-"));
+    const filePath = path.join(root, "sessions", "2026", "08", "04", "rollout.jsonl");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, [
+      JSON.stringify({ type: "session_meta", timestamp: "2026-08-04T03:00:00Z", payload: { id: "parent", cwd: "/repo" } }),
+      JSON.stringify({ type: "inter_agent_communication_metadata", timestamp: "2026-08-04T03:00:01Z", payload: { trigger_turn: false } }),
+      "",
+    ].join("\n"));
+
+    try {
+      const initial = loadCodexSessionFile(filePath);
+      if (!initial) throw new Error("expected initial Codex session");
+      const offset = fs.statSync(filePath).size;
+      fs.appendFileSync(filePath, `${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-08-04T03:00:02Z",
+        payload: {
+          type: "agent_message",
+          id: "child-result",
+          author: "/root/worker",
+          recipient: "/root",
+          content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/worker\nPayload:\nDone" }],
+        },
+      })}\n`);
+
+      const incremental = [...loadCodexSessionsIterator(root, undefined, {
+        incrementalCodexSessions: new Map([[filePath, { offset, loaded: initial }]]),
+      })][0];
+      expect(incremental?.traceEvents?.find((event) => event.eventType === "codex.collaboration.message")).toMatchObject({
+        attributes: { collaboration: { direction: "incoming", triggerTurn: false, messageType: "final_answer" } },
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps unknown Agent message direction across incremental reads for subagents without agent_path", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-null-agent-path-"));
+    const filePath = path.join(root, "sessions", "2026", "08", "04", "rollout.jsonl");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const agentMessage = {
+      type: "response_item",
+      timestamp: "2026-08-04T03:00:01Z",
+      payload: {
+        type: "agent_message",
+        id: "from-root",
+        author: "/root",
+        recipient: "/root/worker",
+        content: [{ type: "input_text", text: "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nGo" }],
+      },
+    };
+    fs.writeFileSync(filePath, [
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-08-04T03:00:00Z",
+        payload: { id: "child", cwd: "/repo", thread_source: "subagent", parent_thread_id: "parent" },
+      }),
+      JSON.stringify(agentMessage),
+      "",
+    ].join("\n"));
+
+    try {
+      const initial = loadCodexSessionFile(filePath);
+      if (!initial) throw new Error("expected initial Codex session");
+      expect(initial.session.isSubagent).toBe(true);
+      expect(initial.codexIncrementalState?.agentPath).toBeNull();
+      expect(initial.traceEvents?.find((event) => event.eventType === "codex.collaboration.message")).toMatchObject({
+        attributes: { collaboration: { direction: "unknown", author: "/root", recipient: "/root/worker" } },
+      });
+
+      const offset = fs.statSync(filePath).size;
+      fs.appendFileSync(filePath, `${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-08-04T03:00:02Z",
+        payload: {
+          type: "agent_message",
+          id: "to-root",
+          author: "/root/worker",
+          recipient: "/root",
+          content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/worker\nPayload:\nDone" }],
+        },
+      })}\n`);
+
+      const incremental = [...loadCodexSessionsIterator(root, undefined, {
+        incrementalCodexSessions: new Map([[filePath, { offset, loaded: initial }]]),
+      })][0];
+      const messages = incremental?.traceEvents?.filter((event) => event.eventType === "codex.collaboration.message") ?? [];
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toMatchObject({
+        attributes: { collaboration: { direction: "unknown", author: "/root", recipient: "/root/worker" } },
+      });
+      expect(messages[1]).toMatchObject({
+        attributes: { collaboration: { direction: "unknown", author: "/root/worker", recipient: "/root" } },
+      });
+      expect(incremental?.codexIncrementalState?.agentPath).toBeNull();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps resolved Agent message direction across incremental reads when subagent has agent_path", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-agent-path-"));
+    const filePath = path.join(root, "sessions", "2026", "08", "04", "rollout.jsonl");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, [
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-08-04T03:00:00Z",
+        payload: {
+          id: "child",
+          cwd: "/repo",
+          agent_path: "/root/worker",
+          thread_source: "subagent",
+          parent_thread_id: "parent",
+        },
+      }),
+      "",
+    ].join("\n"));
+
+    try {
+      const initial = loadCodexSessionFile(filePath);
+      if (!initial) throw new Error("expected initial Codex session");
+      expect(initial.codexIncrementalState?.agentPath).toBe("/root/worker");
+
+      const offset = fs.statSync(filePath).size;
+      fs.appendFileSync(filePath, `${JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-08-04T03:00:01Z",
+        payload: {
+          type: "agent_message",
+          id: "from-root",
+          author: "/root",
+          recipient: "/root/worker",
+          content: [{ type: "input_text", text: "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nGo" }],
+        },
+      })}\n`);
+
+      const incremental = [...loadCodexSessionsIterator(root, undefined, {
+        incrementalCodexSessions: new Map([[filePath, { offset, loaded: initial }]]),
+      })][0];
+      expect(incremental?.traceEvents?.find((event) => event.eventType === "codex.collaboration.message")).toMatchObject({
+        attributes: { collaboration: { direction: "incoming", author: "/root", recipient: "/root/worker" } },
+      });
+      expect(incremental?.codexIncrementalState?.agentPath).toBe("/root/worker");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("skips unchanged source files before parsing JSONL", () => {
@@ -1262,6 +1541,105 @@ describe("Codex session loading", () => {
     expect(JSON.stringify(loaded?.messages)).not.toContain("不能进入对话");
   });
 
+  it("reattributes assistant messages that keep a completed Codex turn passthrough id", () => {
+    const userItem = (turnId: string, id: string, text: string, timestamp: string) => ({
+      type: "event_msg",
+      timestamp,
+      payload: {
+        type: "item_completed",
+        turn_id: turnId,
+        completed_at_ms: Date.parse(timestamp),
+        item: {
+          type: "UserMessage",
+          id,
+          content: [{ type: "text", text }],
+        },
+      },
+    });
+    const rows = [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-04T06:00:00Z",
+        payload: { id: "codex-stale-passthrough", cwd: "/repo", history_mode: "paginated" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-04T06:00:01Z",
+        payload: { type: "task_started", turn_id: "turn-old" },
+      },
+      userItem("turn-old", "user-old", "先定路线", "2026-08-04T06:00:02Z"),
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T06:00:30Z",
+        payload: {
+          type: "message",
+          id: "assistant-old",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "先确认第一点？" }],
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-old" },
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-04T06:01:00Z",
+        payload: { type: "task_complete", turn_id: "turn-old" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-04T06:14:00Z",
+        payload: { type: "task_started", turn_id: "turn-new" },
+      },
+      userItem("turn-new", "user-new", "可以", "2026-08-04T06:14:01Z"),
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T06:14:20Z",
+        payload: {
+          type: "message",
+          id: "assistant-stale",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "第一部分建议采用控制面拆分。" }],
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-old" },
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-04T06:14:40Z",
+        payload: { type: "task_complete", turn_id: "turn-new" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-04T06:15:00Z",
+        payload: { type: "task_started", turn_id: "turn-newer" },
+      },
+      userItem("turn-newer", "user-newer", "认可", "2026-08-04T06:15:01Z"),
+      {
+        type: "response_item",
+        timestamp: "2026-08-04T06:15:20Z",
+        payload: {
+          type: "message",
+          id: "assistant-stale-2",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "第二部分建议逐级优化导入。" }],
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-old" },
+        },
+      },
+    ];
+
+    const loaded = loadCodexSessionRows("/tmp/codex-stale-passthrough.jsonl", rows);
+
+    expect(loaded?.messages).toMatchObject([
+      { role: "user", content: "先定路线", sourceTurnId: "turn-old" },
+      { role: "assistant", content: "先确认第一点？", sourceTurnId: "turn-old" },
+      { role: "user", content: "可以", sourceTurnId: "turn-new" },
+      { role: "assistant", content: "第一部分建议采用控制面拆分。", sourceTurnId: "turn-new" },
+      { role: "user", content: "认可", sourceTurnId: "turn-newer" },
+      { role: "assistant", content: "第二部分建议逐级优化导入。", sourceTurnId: "turn-newer" },
+    ]);
+  });
+
   it("normalizes completed Codex tools by strong item id and omits opaque payloads", () => {
     const rows: unknown[] = [
       {
@@ -1596,7 +1974,14 @@ describe("Codex session loading", () => {
     ]));
     expect(serialized).toContain("Review complete");
     expect(serialized).toContain("permissionProfile");
-    expect(serialized).not.toMatch(/must-not-index/);
+    expect(serialized).toContain("must-not-index-agent-message");
+    expect(serialized).not.toContain("must-not-index-raw-reasoning");
+    expect(serialized).not.toContain("must-not-index-encrypted-reasoning");
+    expect(serialized).not.toContain("must-not-index-legacy-raw");
+    expect(serialized).not.toContain("must-not-index-item-raw");
+    expect(serialized).not.toContain("must-not-index-collab-prompt");
+    expect(serialized).not.toContain("must-not-index-goal-private-state");
+    expect(serialized).not.toContain("must-not-index-world-state");
   });
 
   it("caps large Codex trace details during loading", () => {
