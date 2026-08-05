@@ -128,6 +128,7 @@ export const codexAdapter: FormatAdapter = {
     if (line.type === "response_item" && line.payload?.type === "message" && line.payload.role) {
       if (line.payload.role !== "user" && line.payload.role !== "assistant") return null;
       const parsed = extractContentBlocks(line.payload.content);
+      if (line.payload.role === "user") parsed.text = stripCodexInjectedNoise(parsed.text);
       if (!parsed.text) return null;
       return {
         role: line.payload.role,
@@ -140,6 +141,7 @@ export const codexAdapter: FormatAdapter = {
     if (line.type === "message" && line.role && line.content) {
       if (line.role !== "user" && line.role !== "assistant") return null;
       const parsed = extractContentBlocks(line.content);
+      if (line.role === "user") parsed.text = stripCodexInjectedNoise(parsed.text);
       if (!parsed.text) return null;
       return {
         role: line.role,
@@ -232,6 +234,17 @@ export function extractCursorUserQuery(text: string): string {
     ? queryMatch[1].trim()
     : text.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "").trim();
   return stripCursorInjectedNoise(extracted);
+}
+
+/**
+ * Strip Codex collaboration notifications injected as user-role input_text
+ * blocks, while retaining any real user prompt in the same message.
+ */
+export function stripCodexInjectedNoise(text: string): string {
+  return text
+    .replace(/<subagent_notification\b[^>]*>[\s\S]*?<\/subagent_notification>\s*/gi, "")
+    .replace(/<task-notification\b[^>]*>[\s\S]*?<\/task-notification>\s*/gi, "")
+    .trim();
 }
 
 function timestampFromCursorRaw(raw: unknown): string {

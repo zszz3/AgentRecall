@@ -50,6 +50,35 @@ describe("format adapters", () => {
     ).toBeNull();
   });
 
+  it("strips Codex subagent notifications from user messages", () => {
+    const notification = `<subagent_notification>
+{"agent_path":"/root/researcher","status":{"completed":"done"}}
+</subagent_notification>`;
+    const mixed = `${notification}\n重启服务后我来验证`;
+
+    expect(
+      codexAdapter.parseLine({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: mixed }],
+        },
+      }),
+    ).toMatchObject({ role: "user", content: "重启服务后我来验证" });
+
+    expect(
+      codexAdapter.parseLine({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: notification }],
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("keeps explicit image attachments without treating tool paths as files", () => {
     const parsed = codexAdapter.parseLine({
       type: "response_item",
