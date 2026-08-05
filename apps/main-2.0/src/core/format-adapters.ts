@@ -221,10 +221,17 @@ function genericAdapter(format: SessionFormat): FormatAdapter {
   };
 }
 
+/** Strip Cursor-injected XML that can land inside user_query / bubble text. */
+export function stripCursorInjectedNoise(text: string): string {
+  return text.replace(/<subagent_notification>[\s\S]*?<\/subagent_notification>\s*/gi, "").trim();
+}
+
 export function extractCursorUserQuery(text: string): string {
   const queryMatch = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
-  if (queryMatch) return queryMatch[1].trim();
-  return text.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "").trim();
+  const extracted = queryMatch
+    ? queryMatch[1].trim()
+    : text.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "").trim();
+  return stripCursorInjectedNoise(extracted);
 }
 
 function timestampFromCursorRaw(raw: unknown): string {

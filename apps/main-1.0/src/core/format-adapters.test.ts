@@ -216,6 +216,35 @@ describe("format adapters", () => {
     });
   });
 
+  it("strips Cursor subagent_notification noise from user_query while keeping real text", () => {
+    const mixed = `<user_query>
+<subagent_notification>
+{"agent_path":"abc","status":{"completed":"done"}}
+</subagent_notification> 我审核一下你刚刚写的，你重启一下服务
+</user_query>`;
+    expect(extractCursorUserQuery(mixed)).toBe("我审核一下你刚刚写的，你重启一下服务");
+    expect(
+      cursorAdapter.parseLine({
+        role: "user",
+        message: { content: [{ type: "text", text: mixed }] },
+      }),
+    ).toMatchObject({ role: "user", content: "我审核一下你刚刚写的，你重启一下服务" });
+
+    const onlyNoise = `<user_query>
+<subagent_notification>
+{"agent_path":"abc","status":{"completed":"done"}}
+</subagent_notification>
+</user_query>`;
+    expect(extractCursorUserQuery(onlyNoise)).toBe("");
+    expect(isMeaningfulUserMessage(extractCursorUserQuery(onlyNoise))).toBe(false);
+    expect(
+      cursorAdapter.parseLine({
+        role: "user",
+        message: { content: [{ type: "text", text: onlyNoise }] },
+      }),
+    ).toBeNull();
+  });
+
   it("decodes Cursor workspace slugs and subagent paths", () => {
     const pathMap = new Map([
       ["Users-mac-myProject-agent-recall", "/Users/mac/myProject/agent-recall"],

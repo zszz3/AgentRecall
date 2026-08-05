@@ -2,7 +2,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
-import { cleanTitle, cursorTimestampFromRow, getAdapter, isMeaningfulUserMessage } from "./format-adapters";
+import {
+  cleanTitle,
+  cursorTimestampFromRow,
+  extractCursorUserQuery,
+  getAdapter,
+  isMeaningfulUserMessage,
+} from "./format-adapters";
 import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 import {
   CodexRolloutAccumulator,
@@ -3231,7 +3237,8 @@ function loadCursorComposerMetadata(stateDbPath: string): Map<string, CursorComp
         const role = type === 1 ? "user" : type === 2 ? "assistant" : null;
         if (!role) continue;
         const plainText = stringField(bubble, "text").trim();
-        const content = plainText || extractText(parseJsonText(stringField(bubble, "richText"))).trim();
+        const rawContent = plainText || extractText(parseJsonText(stringField(bubble, "richText"))).trim();
+        const content = role === "user" ? extractCursorUserQuery(rawContent) : rawContent;
         if (!content || (role === "user" && !isMeaningfulUserMessage(content))) continue;
         const drafts = messageDrafts.get(composerId) ?? new Map<string, CursorBubbleDraft>();
         drafts.set(bubbleId, {
