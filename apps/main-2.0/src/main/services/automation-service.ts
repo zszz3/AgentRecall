@@ -389,6 +389,26 @@ export class NativeAutomationService {
   private async prepareInternal(): Promise<void> {
     await this.hubInstance.loadModelChannels(this.paths.channelsPath);
     await this.hubInstance.loadPersistedState(this.appStore);
+    const defaultCodexChannel = this.hubInstance.snapshot().channels.find((channel) => (
+      channel.id === "codex-openai"
+      && channel.agentId === "codex"
+      && (
+        (
+          channel.modelProvider === "openai"
+          && !channel.baseUrl
+          && !channel.httpHeaders
+          && !channel.environment
+        )
+        || (channel.presetId === "codex-default" && !channel.apiFormat)
+      )
+    ));
+    if (defaultCodexChannel) {
+      try {
+        await this.hubInstance.importRuntimeLocalConfig("codex", defaultCodexChannel.id);
+      } catch (error) {
+        console.warn("Failed to import the local Codex configuration for the default channel:", error);
+      }
+    }
     this.hubInstance.setMcpServers(await this.registryInstance.list());
     this.hubInstance.ensureBundledWorkflows(await this.bundledWorkflows());
   }

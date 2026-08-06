@@ -41,6 +41,7 @@ function fixture(injectAgents = true) {
   const hub = {
     loadModelChannels: vi.fn(async () => { calls.push("channels"); }),
     loadPersistedState: vi.fn(async () => { calls.push("database"); }),
+    importRuntimeLocalConfig: vi.fn(async () => undefined),
     ensureBundledWorkflows: vi.fn(() => { calls.push("bundled"); }),
     setMcpServers: vi.fn(() => { calls.push("mcp"); }),
     setWorkflowMcpDiscoveryPath: vi.fn(() => { calls.push("discovery"); }),
@@ -174,6 +175,46 @@ describe("NativeAutomationService", () => {
     expect(calls).toEqual(["channels", "database", "mcp", "bundled"]);
     expect(teamChats.connect).not.toHaveBeenCalled();
     expect(service.health()).toEqual({ state: "idle" });
+  });
+
+  it("imports the local Codex config for the untouched official default channel", async () => {
+    const { service, hub, emit } = fixture();
+    emit({
+      ...snapshot(),
+      channels: [{
+        id: "codex-openai",
+        agentId: "codex",
+        label: "Codex OpenAI",
+        modelProvider: "openai",
+        providerName: "OpenAI",
+        models: [{ id: "default", label: "Default" }],
+      }],
+    });
+
+    await service.requirePrepared();
+
+    expect(hub.importRuntimeLocalConfig).toHaveBeenCalledWith("codex", "codex-openai");
+  });
+
+  it("repairs a previously imported default Codex channel without an API format", async () => {
+    const { service, hub, emit } = fixture();
+    emit({
+      ...snapshot(),
+      channels: [{
+        id: "codex-openai",
+        agentId: "codex",
+        label: "Codex OpenAI",
+        presetId: "codex-default",
+        modelProvider: "custom",
+        baseUrl: "http://127.0.0.1:15721/v1",
+        wireApi: "responses",
+        models: [{ id: "default", label: "Default" }],
+      }],
+    });
+
+    await service.requirePrepared();
+
+    expect(hub.importRuntimeLocalConfig).toHaveBeenCalledWith("codex", "codex-openai");
   });
 
   it("reports planning write tools without reading child-only environment variables", async () => {

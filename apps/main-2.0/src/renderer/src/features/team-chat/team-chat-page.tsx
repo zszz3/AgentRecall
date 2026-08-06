@@ -60,6 +60,7 @@ interface StudioAgentOption {
   runtimeAgentId: string;
   modelId: string;
   description: string;
+  available: boolean;
 }
 
 interface MemberContextMenu {
@@ -192,19 +193,32 @@ export function TeamChatPage({
 
   selectedRoomIdRef.current = selectedRoomId;
 
+  const studioAgents = useMemo<StudioAgentOption[]>(() => {
+    const availableRuntimeIds = new Set(
+      snapshot.runtimes.filter((runtime) => runtime.available).map((runtime) => runtime.id),
+    );
+    return snapshot.configuredAgents.map((agent) => ({
+      ...agent,
+      available: availableRuntimeIds.has(agent.runtimeAgentId),
+    }));
+  }, [snapshot.configuredAgents, snapshot.runtimes]);
+  const availableConfiguredAgentIds = useMemo(
+    () => new Set(studioAgents.filter((agent) => agent.available).map((agent) => agent.id)),
+    [studioAgents],
+  );
+
   const mentionContext = useMemo(
     () => activeMentionContext(composer, composerCursor),
     [composer, composerCursor],
   );
   const mentionCandidates = useMemo(() => {
     if (!mentionMenuOpen || !mentionContext || !activeRoom) return [];
-    const available = new Set(snapshot.configuredAgents.map((agent) => agent.id));
     const query = mentionContext.query.trim().toLocaleLowerCase();
     if (mentionContext.query.endsWith(" ") && activeRoom.agents.some(
       (member) => member.displayName.toLocaleLowerCase() === query,
     )) return [];
     return activeRoom.agents
-      .filter((member) => member.enabled && available.has(member.configuredAgentId))
+      .filter((member) => member.enabled && availableConfiguredAgentIds.has(member.configuredAgentId))
       .filter((member) => !query || member.displayName.toLocaleLowerCase().includes(query))
       .sort((left, right) => {
         const leftStarts = left.displayName.toLocaleLowerCase().startsWith(query) ? 0 : 1;
@@ -212,7 +226,7 @@ export function TeamChatPage({
         return leftStarts - rightStarts || left.position - right.position;
       })
       .slice(0, 6);
-  }, [activeRoom, mentionContext, mentionMenuOpen, snapshot.configuredAgents]);
+  }, [activeRoom, availableConfiguredAgentIds, mentionContext, mentionMenuOpen]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -222,11 +236,10 @@ export function TeamChatPage({
   // separately, so deleting an "@name" also withdraws that recipient.
   const targetMemberIds = useMemo(() => {
     if (!activeRoom) return [];
-    const availableConfiguredAgents = new Set(snapshot.configuredAgents.map((agent) => agent.id));
     const routable = activeRoom.agents.filter((member) =>
-      member.enabled && availableConfiguredAgents.has(member.configuredAgentId));
+      member.enabled && availableConfiguredAgentIds.has(member.configuredAgentId));
     return resolveMentionedMemberIds(composer, routable);
-  }, [activeRoom, composer, snapshot.configuredAgents]);
+  }, [activeRoom, availableConfiguredAgentIds, composer]);
 
   const loadRooms = useCallback(async (preferredRoomId?: string): Promise<void> => {
     setLoadingRooms(true);
@@ -736,8 +749,7 @@ export function TeamChatPage({
                   <div className="team-chat-recipient-picker" aria-label={l("Message recipients", "消息收件员工")}>
                     <span>{l("To", "发送给")}</span>
                     {activeRoom.agents.map((member) => {
-                      const available = snapshot.configuredAgents
-                        .some((agent) => agent.id === member.configuredAgentId);
+                      const available = availableConfiguredAgentIds.has(member.configuredAgentId);
                       const selected = targetMemberIds.includes(member.agentId);
                       return (
                         <button
@@ -821,7 +833,7 @@ export function TeamChatPage({
                 <button
                   type="button"
                   onClick={() => setAddEmployeeOpen(true)}
-                  disabled={snapshot.configuredAgents.length === 0 || activeRoom.agents.length >= 24}
+                  disabled={availableConfiguredAgentIds.size === 0 || activeRoom.agents.length >= 24}
                   title={l("Add employee", "添加员工")}
                   aria-label={l("Add employee", "添加员工")}
                 >
@@ -831,9 +843,7 @@ export function TeamChatPage({
             </div>
             <div className="team-chat-member-list">
               {activeRoom?.agents.map((member) => {
-                const available = snapshot.configuredAgents.some(
-                  (agent) => agent.id === member.configuredAgentId,
-                );
+                const available = availableConfiguredAgentIds.has(member.configuredAgentId);
                 const continuity = member.hasActiveConversation
                   ? l("Persistent context", "持续会话")
                   : member.continuationAvailable
@@ -906,7 +916,7 @@ export function TeamChatPage({
       {createOpen ? (
         <CreateRoomDialog
           language={language}
-          agents={snapshot.configuredAgents}
+          agents={studioAgents}
           defaultWorkDir={snapshot.workDir}
           onPickDirectory={(defaultPath) => automationApi.pickDirectory(defaultPath)}
           onCreate={async (request) => {
@@ -921,7 +931,7 @@ export function TeamChatPage({
       {addEmployeeOpen && activeRoom ? (
         <AddRoomEmployeeDialog
           language={language}
-          agents={snapshot.configuredAgents}
+          agents={studioAgents}
           existingNames={activeRoom.agents.map((member) => member.displayName)}
           onAdd={addRoomEmployee}
           onClose={() => setAddEmployeeOpen(false)}
@@ -983,14 +993,15 @@ function CreateRoomDialog({
   onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
+  const initialAgent = agents.find((agent) => agent.available) ?? agents[0];
   const [name, setName] = useState("");
   const [workDir, setWorkDir] = useState(defaultWorkDir);
   const employeeSequence = useRef(1);
-  const [employees, setEmployees] = useState<DraftStudioEmployee[]>(() => agents[0]
+  const [employees, setEmployees] = useState<DraftStudioEmployee[]>(() => initialAgent
     ? [{
         localId: "employee-1",
-        configuredAgentId: agents[0].id,
-        displayName: agents[0].name,
+        configuredAgentId: initialAgent.id,
+        displayName: initialAgent.name,
       }]
     : []);
   const [busy, setBusy] = useState(false);
@@ -998,7 +1009,9 @@ function CreateRoomDialog({
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    if (!name.trim() || employees.length === 0 || employees.some((employee) => !employee.displayName.trim()) || busy) return;
+    if (!name.trim() || employees.length === 0 || employees.some((employee) =>
+      !employee.displayName.trim() || !agents.find((agent) => agent.id === employee.configuredAgentId)?.available
+    ) || busy) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -1017,7 +1030,7 @@ function CreateRoomDialog({
   };
 
   const addEmployee = (): void => {
-    const agent = agents[0];
+    const agent = agents.find((candidate) => candidate.available);
     if (!agent) return;
     employeeSequence.current += 1;
     setEmployees((current) => [...current, {
@@ -1056,6 +1069,7 @@ function CreateRoomDialog({
             <span>{employees.length}/24</span>
           </div>
           {agents.length === 0 ? <p className="team-chat-no-agents">{l("Configure an Agent in Runtime first.", "请先在 Runtime 中配置 Agent。")}</p> : null}
+          {agents.length > 0 && !agents.some((agent) => agent.available) ? <p className="team-chat-no-agents">{l("No configured Runtime is currently available.", "当前没有可用的 Runtime 配置。")}</p> : null}
           <div className="team-chat-employee-roster">
             {employees.map((employee) => {
               const selectedAgent = agents.find((agent) => agent.id === employee.configuredAgentId);
@@ -1106,8 +1120,8 @@ function CreateRoomDialog({
                         }}
                       >
                         {agents.map((agent) => (
-                          <option key={agent.id} value={agent.id}>
-                            {agent.name}
+                          <option key={agent.id} value={agent.id} disabled={!agent.available}>
+                            {agent.name}{agent.available ? "" : l(" (Unavailable)", "（不可用）")}
                           </option>
                         ))}
                       </select>
@@ -1134,7 +1148,7 @@ function CreateRoomDialog({
                 </article>
               );
             })}
-            {agents.length > 0 ? (
+            {agents.some((agent) => agent.available) ? (
               <button
                 className="team-chat-add-employee"
                 type="button"
@@ -1151,7 +1165,7 @@ function CreateRoomDialog({
         {error ? <div className="team-chat-dialog-error" role="alert">{error}</div> : null}
         <footer>
           <button type="button" onClick={onClose} disabled={busy}>{l("Cancel", "取消")}</button>
-          <button className="primary" type="submit" disabled={busy || !name.trim() || employees.length === 0 || employees.some((employee) => !employee.displayName.trim())}>
+          <button className="primary" type="submit" disabled={busy || !name.trim() || employees.length === 0 || employees.some((employee) => !employee.displayName.trim() || !agents.find((agent) => agent.id === employee.configuredAgentId)?.available)}>
             {busy ? <LoaderCircle className="spin" size={14} /> : null}{l("Create room", "创建房间")}
           </button>
         </footer>
@@ -1174,9 +1188,10 @@ function AddRoomEmployeeDialog({
   onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [configuredAgentId, setConfiguredAgentId] = useState(agents[0]?.id ?? "");
+  const initialAgent = agents.find((agent) => agent.available) ?? agents[0];
+  const [configuredAgentId, setConfiguredAgentId] = useState(initialAgent?.id ?? "");
   const [displayName, setDisplayName] = useState(() =>
-    nextStudioEmployeeName(agents[0]?.name ?? "Employee", existingNames));
+    nextStudioEmployeeName(initialAgent?.name ?? "Employee", existingNames));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const selectedAgent = agents.find((agent) => agent.id === configuredAgentId);
@@ -1184,7 +1199,7 @@ function AddRoomEmployeeDialog({
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     const name = displayName.trim();
-    if (!configuredAgentId || !name || busy) return;
+    if (!configuredAgentId || !name || !selectedAgent?.available || busy) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -1243,7 +1258,9 @@ function AddRoomEmployeeDialog({
             }}
           >
             {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>{agent.name}</option>
+              <option key={agent.id} value={agent.id} disabled={!agent.available}>
+                {agent.name}{agent.available ? "" : l(" (Unavailable)", "（不可用）")}
+              </option>
             ))}
           </select>
         </label>
@@ -1259,7 +1276,7 @@ function AddRoomEmployeeDialog({
           <button className="team-chat-dialog-cancel" type="button" onClick={onClose} disabled={busy}>
             {l("Cancel", "取消")}
           </button>
-          <button className="primary team-chat-dialog-confirm" type="submit" disabled={busy || !displayName.trim() || !configuredAgentId}>
+          <button className="primary team-chat-dialog-confirm" type="submit" disabled={busy || !displayName.trim() || !configuredAgentId || !selectedAgent?.available}>
             {busy ? <LoaderCircle className="spin" size={14} /> : null}
             {!busy ? <Plus size={14} /> : null}
             {l("Add employee", "添加员工")}

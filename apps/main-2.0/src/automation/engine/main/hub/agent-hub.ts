@@ -424,6 +424,7 @@ export class AgentHub {
   private readonly workflowRunStateService: WorkflowRunStateService;
   private readonly workflowContextService: WorkflowContextService;
   private readonly executables: Record<AgentId, string>;
+  private readonly allowWindowsCodexDesktopFallback: boolean;
   private readonly workflowRuntime: WorkflowRuntime;
   private readonly workflowStore: WorkflowStore;
   private readonly modelCatalogDiscoverer: ModelCatalogDiscoverer;
@@ -435,6 +436,7 @@ export class AgentHub {
     modelCatalogDiscoverer: ModelCatalogDiscoverer = discoverChannelModels,
     private readonly workflowMessageProvider?: WorkflowMessageProvider,
   ) {
+    this.allowWindowsCodexDesktopFallback = executables.codex === undefined && process.env.CODEX_PATH === undefined;
     this.executables = resolveRuntimeExecutables(executables);
     this.modelCatalogDiscoverer = modelCatalogDiscoverer;
     this.runtimeDrivers =
@@ -638,8 +640,11 @@ export class AgentHub {
   }
 
   async initialize(): Promise<void> {
-    const runtimes = await detectAgentRuntimes(this.executables);
+    const runtimes = await detectAgentRuntimes(this.executables, {
+      allowWindowsCodexDesktopFallback: this.allowWindowsCodexDesktopFallback,
+    });
     for (const runtime of runtimes) {
+      if (runtime.available) this.executables[runtime.id] = runtime.command;
       this.runtimes.set(runtime.id, {
         ...runtime,
         command: runtime.command || this.executables[runtime.id],
@@ -1063,8 +1068,11 @@ export class AgentHub {
   }
 
   async refreshAgents(): Promise<AppSnapshot> {
-    const runtimes = await detectAgentRuntimes();
+    const runtimes = await detectAgentRuntimes(this.executables, {
+      allowWindowsCodexDesktopFallback: this.allowWindowsCodexDesktopFallback,
+    });
     for (const runtime of runtimes) {
+      if (runtime.available) this.executables[runtime.id] = runtime.command;
       this.runtimes.set(runtime.id, runtime);
     }
     this.emit();

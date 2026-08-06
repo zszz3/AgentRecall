@@ -76,8 +76,13 @@ function applyCodexConfig(channel: AgentChannel, config: CodexDefaultConfig): Ag
   else delete next.providerName;
   if (config.baseUrl) next.baseUrl = config.baseUrl;
   else delete next.baseUrl;
-  if (config.wireApi) next.wireApi = config.wireApi;
-  else delete next.wireApi;
+  if (config.wireApi) {
+    next.wireApi = config.wireApi;
+    next.apiFormat = config.wireApi === "responses" ? "openai_responses" : "openai_chat";
+  } else {
+    delete next.wireApi;
+    delete next.apiFormat;
+  }
   if (config.modelCatalogJson) next.modelCatalogJson = config.modelCatalogJson;
   else delete next.modelCatalogJson;
   if (config.modelReasoningEffort) next.modelReasoningEffort = config.modelReasoningEffort;
