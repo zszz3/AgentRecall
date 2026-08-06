@@ -39,14 +39,10 @@ import { parseTeamChatMentions, removeMentionFromText, resolveMentionedMemberIds
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { useAutomationDetails } from "../automation/automation-provider";
-
-interface StreamDraft {
-  dispatchId: string;
-  rootMessageId: string;
-  agentId: string;
-  agentName: string;
-  content: string;
-}
+import {
+  orderTeamChatTranscript,
+  type TeamChatStreamDraft,
+} from "./team-chat-transcript";
 
 interface DraftStudioEmployee {
   localId: string;
@@ -180,7 +176,7 @@ export function TeamChatPage({
   const [mentionIndex, setMentionIndex] = useState(0);
   const [sending, setSending] = useState(false);
   const [activeRootMessageId, setActiveRootMessageId] = useState<string>();
-  const [streams, setStreams] = useState<Record<string, StreamDraft>>({});
+  const [streams, setStreams] = useState<Record<string, TeamChatStreamDraft>>({});
   const [resettingAgentIds, setResettingAgentIds] = useState<Set<string>>(() => new Set());
   const [removingAgentIds, setRemovingAgentIds] = useState<Set<string>>(() => new Set());
   const [memberContextMenu, setMemberContextMenu] = useState<MemberContextMenu>();
@@ -205,6 +201,10 @@ export function TeamChatPage({
   const availableConfiguredAgentIds = useMemo(
     () => new Set(studioAgents.filter((agent) => agent.available).map((agent) => agent.id)),
     [studioAgents],
+  );
+  const transcriptItems = useMemo(
+    () => orderTeamChatTranscript(messages, Object.values(streams)),
+    [messages, streams],
   );
 
   const mentionContext = useMemo(
@@ -725,20 +725,19 @@ export function TeamChatPage({
                       <span>{l("Send a room message, or mention a Runtime when it should act.", "发送房间消息；需要 Runtime 行动时再 @它。")}</span>
                     </div>
                   ) : null}
-                  {messages.map((message) => (
+                  {transcriptItems.map((item) => item.kind === "message" ? (
                     <TeamChatMessageCard
-                      key={message.id}
-                      message={message}
-                      member={activeRoom.agents.find((member) => member.agentId === message.senderAgentId)}
-                      recipient={activeRoom.agents.find((member) => member.agentId === message.recipientMemberId)}
+                      key={item.message.id}
+                      message={item.message}
+                      member={activeRoom.agents.find((member) => member.agentId === item.message.senderAgentId)}
+                      recipient={activeRoom.agents.find((member) => member.agentId === item.message.recipientMemberId)}
                       language={language}
                     />
-                  ))}
-                  {Object.values(streams).map((stream) => (
+                  ) : (
                     <StreamMessageCard
-                      key={stream.dispatchId}
-                      stream={stream}
-                      member={activeRoom.agents.find((member) => member.agentId === stream.agentId)}
+                      key={item.stream.dispatchId}
+                      stream={item.stream}
+                      member={activeRoom.agents.find((member) => member.agentId === item.stream.agentId)}
                       language={language}
                     />
                   ))}
@@ -1314,7 +1313,7 @@ function TeamChatMessageCard({
   );
 }
 
-function StreamMessageCard({ stream, member, language }: { stream: StreamDraft; member?: TeamChatRoomAgent; language: LanguageMode }): ReactElement {
+function StreamMessageCard({ stream, member, language }: { stream: TeamChatStreamDraft; member?: TeamChatRoomAgent; language: LanguageMode }): ReactElement {
   return (
     <article className="team-chat-message is-agent is-streaming">
       <header><strong>{stream.agentName}</strong>{member ? <span className="team-chat-runtime-badge">{member.runtimeId}</span> : null}<span>{localize(language, "Running…", "正在执行…")}</span></header>
@@ -1327,7 +1326,7 @@ function handleTeamChatEvent(event: TeamChatEvent, handlers: {
   selectedRoomId?: string;
   setConnection: (status: TeamChatConnectionStatus) => void;
   setMessages: React.Dispatch<React.SetStateAction<TeamChatMessage[]>>;
-  setStreams: React.Dispatch<React.SetStateAction<Record<string, StreamDraft>>>;
+  setStreams: React.Dispatch<React.SetStateAction<Record<string, TeamChatStreamDraft>>>;
   setActiveRootMessageId: React.Dispatch<React.SetStateAction<string | undefined>>;
   refreshRooms: () => void;
   refreshActiveRoom: (roomId: string) => void;
