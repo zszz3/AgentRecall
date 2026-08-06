@@ -48,12 +48,7 @@ jobs:
         run: node scripts/release-notes.mjs check-range "origin/${{ github.base_ref }}" HEAD
 
       - name: Test complete application suites
-        if: runner.os == 'Linux'
         run: npm test
-
-      - name: Test platform-specific scripts
-        if: runner.os != 'Linux'
-        run: npm run test:scripts
 
       - name: Build and smoke-test packaged applications
         run: npm run package:smoke:all
