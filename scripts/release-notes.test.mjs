@@ -109,7 +109,8 @@ test("workflows require branch notes and publish accumulated changes every day o
   assert.match(qualityWorkflow, /ELECTRON_SKIP_BINARY_DOWNLOAD:\s*["']1["']/);
   assert.match(qualityWorkflow, /npm_config_cache:\s*\$\{\{ github\.workspace \}\}\/\.ci-npm-cache/);
   assert.match(qualityWorkflow, /AGENT_RECALL_TEST_NPM_CACHE:\s*\$\{\{ github\.workspace \}\}\/\.ci-npm-cache/);
-  assert.match(qualityWorkflow, /- name: Test complete application suites\s+run: npm test/);
+  assert.match(qualityWorkflow, /- name: Test complete application suites\s+if: runner\.os == 'Linux'\s+run: npm test/);
+  assert.match(qualityWorkflow, /- name: Test platform-specific scripts\s+if: runner\.os != 'Linux'\s+run: npm run test:scripts/);
   assert.doesNotMatch(qualityWorkflow, /- name: Typecheck\r?\n/u);
   assert.doesNotMatch(qualityWorkflow, /- name: Build\r?\n/u);
   assert.match(qualityWorkflow, /- name: Build and smoke-test packaged applications/);
