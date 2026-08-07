@@ -8,7 +8,7 @@ import type {
   SessionTurnMessage,
   SessionTurnSummary,
 } from "../types";
-import { stripSubagentNotificationNoise } from "../format-adapters";
+import { isMeaningfulUserMessage, stripSubagentNotificationNoise } from "../format-adapters";
 import { normalizeSessionTraceStatus } from "../trace-presentation";
 import type { PostgresDatabase } from "./database";
 import {
@@ -259,7 +259,7 @@ export class PostgresSessionTurnRepository {
       `,
       [sessionKey, Math.max(0, offset), Math.max(0, limit)],
     );
-    return result.rows.map((row) => {
+    return result.rows.map((row): SessionMessage => {
       const attachments = attachmentsFromMetadata(row.metadata);
       return {
         role: row.role,
@@ -269,7 +269,7 @@ export class PostgresSessionTurnRepository {
         ...messageFieldsFromMetadata(row.metadata),
         ...(attachments ? { attachments } : {}),
       };
-    });
+    }).filter((message) => message.role !== "user" || isMeaningfulUserMessage(message.content));
   }
 
   async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {

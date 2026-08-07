@@ -129,7 +129,7 @@ export const codexAdapter: FormatAdapter = {
       if (line.payload.role !== "user" && line.payload.role !== "assistant") return null;
       const parsed = extractContentBlocks(line.payload.content);
       if (line.payload.role === "user") parsed.text = stripCodexInjectedNoise(parsed.text);
-      if (!parsed.text) return null;
+      if (!parsed.text || (line.payload.role === "user" && !isMeaningfulUserMessage(parsed.text))) return null;
       return {
         role: line.payload.role,
         content: parsed.text,
@@ -142,7 +142,7 @@ export const codexAdapter: FormatAdapter = {
       if (line.role !== "user" && line.role !== "assistant") return null;
       const parsed = extractContentBlocks(line.content);
       if (line.role === "user") parsed.text = stripCodexInjectedNoise(parsed.text);
-      if (!parsed.text) return null;
+      if (!parsed.text || (line.role === "user" && !isMeaningfulUserMessage(parsed.text))) return null;
       return {
         role: line.role,
         content: parsed.text,
@@ -233,7 +233,8 @@ export function extractCursorUserQuery(text: string): string {
   const extracted = queryMatch
     ? queryMatch[1].trim()
     : text.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "").trim();
-  return stripCursorInjectedNoise(extracted);
+  const cleaned = stripCursorInjectedNoise(extracted);
+  return isCursorSubagentFollowUpInstruction(cleaned) ? "" : cleaned;
 }
 
 /**
@@ -273,7 +274,7 @@ export const cursorAdapter: FormatAdapter = {
     if (!content) return null;
     if (role === "user") {
       content = extractCursorUserQuery(content);
-      if (!content) return null;
+      if (!content || !isMeaningfulUserMessage(content)) return null;
     }
     return {
       role,
@@ -356,6 +357,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
 export function isMeaningfulUserMessage(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
+  if (isCursorSubagentFollowUpInstruction(trimmed)) return false;
   if (/^#\s*(AGENTS|CLAUDE)\.md/i.test(trimmed)) return false;
   if (
     /^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-caveat|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]/.test(
@@ -370,6 +372,12 @@ export function isMeaningfulUserMessage(text: string): boolean {
   if (/^The beginning of the above subagent result is already visible/.test(trimmed)) return false;
   if (/^<system_notification>/.test(trimmed)) return false;
   return true;
+}
+
+function isCursorSubagentFollowUpInstruction(text: string): boolean {
+  return /^Perform any necessary follow-up actions in response to the subagent completion above\.\s*If no follow-up work is needed, no further action is required\./i.test(
+    text.trim(),
+  );
 }
 
 export function cleanTitle(text: string): string {

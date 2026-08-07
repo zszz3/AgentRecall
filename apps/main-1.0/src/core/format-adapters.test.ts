@@ -274,6 +274,18 @@ describe("format adapters", () => {
     ).toBeNull();
   });
 
+  it("drops Cursor's system follow-up instruction from user_query", () => {
+    const followUp = "Perform any necessary follow-up actions in response to the subagent completion above. If no follow-up work is needed, no further action is required. If you mention an agent or subagent in your response, link it with the `[Name](id)` Don't use generic label such as `[agent]`, `[worker]`, or `[subagent]`.";
+    const raw = `<timestamp>Friday</timestamp>\n<user_query>${followUp}</user_query>`;
+
+    expect(extractCursorUserQuery(raw)).toBe("");
+    expect(isMeaningfulUserMessage(followUp)).toBe(false);
+    expect(cursorAdapter.parseLine({
+      role: "user",
+      message: { content: [{ type: "text", text: raw }] },
+    })).toBeNull();
+  });
+
   it("decodes Cursor workspace slugs and subagent paths", () => {
     const pathMap = new Map([
       ["Users-mac-myProject-agent-recall", "/Users/mac/myProject/agent-recall"],

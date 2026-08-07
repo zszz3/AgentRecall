@@ -29,4 +29,19 @@ describe("Codex format adapter", () => {
       }),
     ).toBeNull();
   });
+
+  it("drops Cursor's system follow-up instruction from user messages", () => {
+    const followUp = "Perform any necessary follow-up actions in response to the subagent completion above. If no follow-up work is needed, no further action is required.";
+
+    expect(
+      codexAdapter.parseLine({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: followUp }],
+        },
+      }),
+    ).toBeNull();
+  });
 });

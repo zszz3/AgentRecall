@@ -7,7 +7,7 @@ import { codexTaskWorkspaceDate } from "../project-identity";
 import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS } from "../refresh-policy";
 import { truncateTraceDetail } from "../trace-detail";
 import { normalizeSessionTraceStatus } from "../trace-presentation";
-import { stripSubagentNotificationNoise } from "../format-adapters";
+import { isMeaningfulUserMessage, stripSubagentNotificationNoise } from "../format-adapters";
 import type {
   CodexIncrementalState,
   IndexedSession,
@@ -1292,14 +1292,14 @@ export class SessionsStore {
         source_turn_id: string | null;
         phase: string | null;
       }>
-    ).map((row) => ({
+    ).map((row): SessionMessage => ({
       index: row.message_index,
       role: row.role,
       content: row.role === "user" ? stripSubagentNotificationNoise(row.content) : row.content,
       timestamp: row.timestamp,
       ...(row.source_turn_id ? { sourceTurnId: row.source_turn_id } : {}),
       ...(row.phase === "commentary" || row.phase === "final_answer" ? { phase: row.phase } : {}),
-    }));
+    })).filter((message) => message.role !== "user" || isMeaningfulUserMessage(message.content));
     if (messages.length === 0) return messages;
     const messageIndexes = new Set(messages.map((message) => message.index));
     const attachments = this.db.prepare(

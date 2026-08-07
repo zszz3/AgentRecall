@@ -70,6 +70,35 @@ describe("SessionStore PostgreSQL facade", () => {
     ]);
   });
 
+  it("drops cached user messages that become system noise or empty after filtering", async () => {
+    const store = createStore();
+
+    await store.upsertIndexedSession(indexedSession(), [
+      {
+        role: "user",
+        content: "Perform any necessary follow-up actions in response to the subagent completion above. If no follow-up work is needed, no further action is required.",
+        timestamp: "2026-07-20T08:00:00.000Z",
+        index: 0,
+      },
+      {
+        role: "user",
+        content: "<subagent_notification>{\"status\":{\"completed\":\"done\"}}</subagent_notification>",
+        timestamp: "2026-07-20T08:00:01.000Z",
+        index: 1,
+      },
+      {
+        role: "assistant",
+        content: "done",
+        timestamp: "2026-07-20T08:00:02.000Z",
+        index: 2,
+      },
+    ]);
+
+    await expect(store.getMessages("codex:session-a")).resolves.toEqual([
+      expect.objectContaining({ role: "assistant", content: "done" }),
+    ]);
+  });
+
   it("removes NUL characters from message and trace text before indexing", async () => {
     const store = createStore();
 
