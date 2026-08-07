@@ -55,6 +55,21 @@ const messages: SessionMessage[] = [
 ];
 
 describe("SessionStore PostgreSQL facade", () => {
+  it("strips cached subagent notifications when loading user messages", async () => {
+    const store = createStore();
+
+    await store.upsertIndexedSession(indexedSession(), [{
+      role: "user",
+      content: "<subagent_notification>{\"status\":{\"completed\":\"done\"}}</subagent_notification>\nreal prompt",
+      timestamp: "2026-07-20T08:00:00.000Z",
+      index: 0,
+    }]);
+
+    await expect(store.getMessages("codex:session-a")).resolves.toEqual([
+      expect.objectContaining({ content: "real prompt" }),
+    ]);
+  });
+
   it("removes NUL characters from message and trace text before indexing", async () => {
     const store = createStore();
 

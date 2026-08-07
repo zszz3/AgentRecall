@@ -96,6 +96,27 @@ describe("SessionsStore", () => {
     }
   });
 
+  it("strips cached subagent notifications when loading user messages", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const session = indexedSession();
+      store.upsertIndexedSession(session, [{
+        role: "user",
+        content: "<subagent_notification>{\"status\":{\"completed\":\"done\"}}</subagent_notification>\nreal prompt",
+        timestamp: "2026-07-30T08:00:00.000Z",
+        index: 0,
+      }]);
+
+      expect(store.getMessages(session.sessionKey)).toMatchObject([
+        { content: "real prompt" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("normalizes legacy trace statuses when reading SQLite rows", () => {
     const db = new DatabaseSync(":memory:");
     try {

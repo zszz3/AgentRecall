@@ -8,6 +8,7 @@ import type {
   SessionTurnMessage,
   SessionTurnSummary,
 } from "../types";
+import { stripSubagentNotificationNoise } from "../format-adapters";
 import { normalizeSessionTraceStatus } from "../trace-presentation";
 import type { PostgresDatabase } from "./database";
 import {
@@ -262,7 +263,7 @@ export class PostgresSessionTurnRepository {
       const attachments = attachmentsFromMetadata(row.metadata);
       return {
         role: row.role,
-        content: row.content,
+        content: row.role === "user" ? stripSubagentNotificationNoise(row.content) : row.content,
         timestamp: isoValue(row.occurred_at),
         index: numberValue(row.source_message_index),
         ...messageFieldsFromMetadata(row.metadata),

@@ -225,7 +225,7 @@ function genericAdapter(format: SessionFormat): FormatAdapter {
 
 /** Strip Cursor-injected XML that can land inside user_query / bubble text. */
 export function stripCursorInjectedNoise(text: string): string {
-  return text.replace(/<subagent_notification>[\s\S]*?<\/subagent_notification>\s*/gi, "").trim();
+  return stripSubagentNotificationNoise(text);
 }
 
 export function extractCursorUserQuery(text: string): string {
@@ -241,6 +241,15 @@ export function extractCursorUserQuery(text: string): string {
  * blocks, while retaining any real user prompt in the same message.
  */
 export function stripCodexInjectedNoise(text: string): string {
+  return stripSubagentNotificationNoise(text);
+}
+
+/**
+ * Strip agent collaboration notifications from persisted or incoming user text.
+ * This is shared by adapters and storage reads so cached pre-fix messages cannot
+ * leak the notification back into conversation bubbles.
+ */
+export function stripSubagentNotificationNoise(text: string): string {
   return text
     .replace(/<subagent_notification\b[^>]*>[\s\S]*?<\/subagent_notification>\s*/gi, "")
     .replace(/<task-notification\b[^>]*>[\s\S]*?<\/task-notification>\s*/gi, "")
