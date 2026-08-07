@@ -29,6 +29,7 @@ import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatu
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { createIndexProgressPublisher } from "./index-progress";
 import { createSessionIndexFailureLogger } from "./session-index-failure-log";
+import { createStartupTaskScheduler } from "./startup-tasks";
 import {
   type SessionJsonExportFormat,
 } from "../core/format-session";
@@ -320,6 +321,7 @@ let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
 let openVikingHookStateFlusher: OpenVikingHookStateFlusher | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
+const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
 let postgresRuntime: PostgresRuntime | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
 let quickSearchWindow: BrowserWindow | null = null;
@@ -2661,20 +2663,20 @@ app.whenReady().then(async () => {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
   }
   const initialIndexSettled = new Promise<void>((resolve) => {
-    setTimeout(() => {
+    startupTasks.schedule(INITIAL_INDEX_DELAY_MS, () => {
       void runIndexSync().then(() => resolve(), () => resolve());
-    }, INITIAL_INDEX_DELAY_MS);
+    });
   });
   startAutoIndexRefresh();
-  void initialIndexSettled.then(() => skillService.startUsageRefresh());
-  setTimeout(() => {
-    void initialIndexSettled.then(() => remoteSessionService.startQueue());
-  }, INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS);
-  setTimeout(() => {
-    void initialIndexSettled.then(() => providerService.restoreCodexChatProxy());
-  }, INITIAL_PROVIDER_RESTORE_DELAY_MS);
-  setTimeout(() => {
-    void initialIndexSettled.then(async () => {
+  startupTasks.whenSettled(initialIndexSettled, () => skillService.startUsageRefresh());
+  startupTasks.schedule(INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS, () => {
+    startupTasks.whenSettled(initialIndexSettled, () => remoteSessionService.startQueue());
+  });
+  startupTasks.schedule(INITIAL_PROVIDER_RESTORE_DELAY_MS, () => {
+    startupTasks.whenSettled(initialIndexSettled, () => providerService.restoreCodexChatProxy());
+  });
+  startupTasks.schedule(INITIAL_OPENVIKING_RUNTIME_DELAY_MS, () => {
+    startupTasks.whenSettled(initialIndexSettled, async () => {
       try {
         await refreshOpenVikingHookManifest();
         reconcileOpenVikingMemoryHooks(getSettings());
@@ -2683,8 +2685,8 @@ app.whenReady().then(async () => {
         console.error(`Failed to configure OpenViking memory hooks: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
-  }, INITIAL_OPENVIKING_RUNTIME_DELAY_MS);
-  void initialIndexSettled.then(() => appUpdateService.scheduleInitialCheck());
+  });
+  startupTasks.whenSettled(initialIndexSettled, () => appUpdateService.scheduleInitialCheck());
 }).catch(async (error) => {
   console.error(`Failed to start AgentRecall: ${error instanceof Error ? error.message : String(error)}`);
   await postgresDatabase?.close().catch(() => undefined);
@@ -2707,6 +2709,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (automationQuitStarted) return;
   automationQuitStarted = true;
+  startupTasks.cancelAll();
   installedRuntimeMonitor?.stop();
   openVikingHookStateFlusher?.stop();
   stopAutoIndexRefresh();
