@@ -2632,6 +2632,7 @@ app.whenReady().then(async () => {
   void installedRuntimeMonitor?.start();
   postgresRuntimeStartup = startPostgresRuntime({ userDataPath: app.getPath("userData") });
   postgresRuntime = await postgresRuntimeStartup;
+  if (automationQuitStarted) return;
   postgresDatabase = PostgresDatabase.connect(postgresRuntime.connectionUrl, {
     migrations: POSTGRES_MIGRATIONS,
   });
@@ -2656,6 +2657,7 @@ app.whenReady().then(async () => {
   }
   await providerService.migrateLegacyKeys();
   await pruneDisabledOptionalSources(getSettings());
+  if (automationQuitStarted) return;
   automationService = createAutomationService();
   registerIpc();
   quotaService.start();
