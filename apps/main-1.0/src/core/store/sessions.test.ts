@@ -96,6 +96,57 @@ describe("SessionsStore", () => {
     }
   });
 
+  it("strips cached subagent notifications when loading user messages", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const session = indexedSession();
+      store.upsertIndexedSession(session, [{
+        role: "user",
+        content: "<subagent_notification>{\"status\":{\"completed\":\"done\"}}</subagent_notification>\nreal prompt",
+        timestamp: "2026-07-30T08:00:00.000Z",
+        index: 0,
+      }]);
+
+      expect(store.getMessages(session.sessionKey)).toMatchObject([
+        { content: "real prompt" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("drops cached user messages that become system noise or empty after filtering", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const session = indexedSession();
+      store.upsertIndexedSession(session, [
+        {
+          role: "user",
+          content: "Perform any necessary follow-up actions in response to the subagent completion above. If no follow-up work is needed, no further action is required.",
+          timestamp: "2026-07-30T08:00:00.000Z",
+          index: 0,
+        },
+        {
+          role: "user",
+          content: "<subagent_notification>{\"status\":{\"completed\":\"done\"}}</subagent_notification>",
+          timestamp: "2026-07-30T08:00:01.000Z",
+          index: 1,
+        },
+        { role: "assistant", content: "done", timestamp: "2026-07-30T08:00:02.000Z", index: 2 },
+      ]);
+
+      expect(store.getMessages(session.sessionKey)).toEqual([
+        expect.objectContaining({ role: "assistant", content: "done" }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("normalizes legacy trace statuses when reading SQLite rows", () => {
     const db = new DatabaseSync(":memory:");
     try {

@@ -128,7 +128,8 @@ export const codexAdapter: FormatAdapter = {
     if (line.type === "response_item" && line.payload?.type === "message" && line.payload.role) {
       if (line.payload.role !== "user" && line.payload.role !== "assistant") return null;
       const parsed = extractContentBlocks(line.payload.content);
-      if (!parsed.text) return null;
+      if (line.payload.role === "user") parsed.text = stripCodexInjectedNoise(parsed.text);
+      if (!parsed.text || (line.payload.role === "user" && !isMeaningfulUserMessage(parsed.text))) return null;
       return {
         role: line.payload.role,
         content: parsed.text,
@@ -140,7 +141,8 @@ export const codexAdapter: FormatAdapter = {
     if (line.type === "message" && line.role && line.content) {
       if (line.role !== "user" && line.role !== "assistant") return null;
       const parsed = extractContentBlocks(line.content);
-      if (!parsed.text) return null;
+      if (line.role === "user") parsed.text = stripCodexInjectedNoise(parsed.text);
+      if (!parsed.text || (line.role === "user" && !isMeaningfulUserMessage(parsed.text))) return null;
       return {
         role: line.role,
         content: parsed.text,
@@ -221,10 +223,38 @@ function genericAdapter(format: SessionFormat): FormatAdapter {
   };
 }
 
+/** Strip Cursor-injected XML that can land inside user_query / bubble text. */
+export function stripCursorInjectedNoise(text: string): string {
+  return stripSubagentNotificationNoise(text);
+}
+
 export function extractCursorUserQuery(text: string): string {
   const queryMatch = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
-  if (queryMatch) return queryMatch[1].trim();
-  return text.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "").trim();
+  const extracted = queryMatch
+    ? queryMatch[1].trim()
+    : text.replace(/<timestamp>[\s\S]*?<\/timestamp>\s*/gi, "").trim();
+  const cleaned = stripCursorInjectedNoise(extracted);
+  return isCursorSubagentFollowUpInstruction(cleaned) ? "" : cleaned;
+}
+
+/**
+ * Strip Codex collaboration notifications injected as user-role input_text
+ * blocks, while retaining any real user prompt in the same message.
+ */
+export function stripCodexInjectedNoise(text: string): string {
+  return stripSubagentNotificationNoise(text);
+}
+
+/**
+ * Strip agent collaboration notifications from persisted or incoming user text.
+ * This is shared by adapters and storage reads so cached pre-fix messages cannot
+ * leak the notification back into conversation bubbles.
+ */
+export function stripSubagentNotificationNoise(text: string): string {
+  return text
+    .replace(/<subagent_notification\b[^>]*>[\s\S]*?<\/subagent_notification>\s*/gi, "")
+    .replace(/<task-notification\b[^>]*>[\s\S]*?<\/task-notification>\s*/gi, "")
+    .trim();
 }
 
 function timestampFromCursorRaw(raw: unknown): string {
@@ -244,7 +274,7 @@ export const cursorAdapter: FormatAdapter = {
     if (!content) return null;
     if (role === "user") {
       content = extractCursorUserQuery(content);
-      if (!content) return null;
+      if (!content || !isMeaningfulUserMessage(content)) return null;
     }
     return {
       role,
@@ -327,6 +357,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
 export function isMeaningfulUserMessage(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
+  if (isCursorSubagentFollowUpInstruction(trimmed)) return false;
   if (/^#\s*(AGENTS|CLAUDE)\.md/i.test(trimmed)) return false;
   if (
     /^<(system-reminder|environment_context|command-message|command-name|command-args|task-notification|local-command-caveat|local-command-stdout|local-command-stderr|user-prompt-submit-hook|bash-input|bash-stdout|bash-stderr)[\s>]/.test(
@@ -341,6 +372,12 @@ export function isMeaningfulUserMessage(text: string): boolean {
   if (/^The beginning of the above subagent result is already visible/.test(trimmed)) return false;
   if (/^<system_notification>/.test(trimmed)) return false;
   return true;
+}
+
+function isCursorSubagentFollowUpInstruction(text: string): boolean {
+  return /^Perform any necessary follow-up actions in response to the subagent completion above\.\s*If no follow-up work is needed, no further action is required\./i.test(
+    text.trim(),
+  );
 }
 
 export function cleanTitle(text: string): string {
