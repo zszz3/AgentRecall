@@ -58,6 +58,12 @@ function summaryFromCustomClaude(config: ClaudeApiConfig | undefined, base: ApiC
 
 function buildSummaryDraftFromSettings(settings: AppSettings | null): ApiConfig {
   const base = settings?.summaryApiConfig ?? { ...defaultApiConfig };
+  if (
+    settings?.summarySource === "custom"
+    && (base.customBaseUrl.trim() || base.customModel.trim() || base.customApiKey.trim())
+  ) {
+    return base;
+  }
   const codex = summaryFromCustomCodex(settings?.apiConfig, base);
   if (codex) {
     return {

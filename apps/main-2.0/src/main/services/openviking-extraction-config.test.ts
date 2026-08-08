@@ -131,17 +131,26 @@ describe("resolveOpenVikingExtractionConfig", () => {
     })).toThrow("Claude CLI cannot be used");
   });
 
-  it("rejects custom OpenAI Responses Providers", () => {
-    expect(() => resolveOpenVikingExtractionConfig({
+  it("maps a custom OpenAI Responses Provider", () => {
+    expect(resolveOpenVikingExtractionConfig({
       settings: {
         ...defaultSettings,
         summarySource: "custom",
         summaryApiConfig: {
           ...defaultSettings.summaryApiConfig,
           customApiFormat: "openai_responses",
+          customBaseUrl: "https://example.com/v1",
+          customApiKey: "secret",
+          customModel: "responses-model",
         },
       },
       codex: { activeModel: "" },
-    })).toThrow("custom OpenAI Chat providers only");
+    })).toEqual({
+      provider: "openai-codex",
+      model: "responses-model",
+      api_base: "https://example.com/v1",
+      api_key: "secret",
+      reasoning_effort: "medium",
+    });
   });
 });
