@@ -1019,6 +1019,25 @@ export function ProviderPage({
                       onChange={(event) => updateDraftSummaryApiConfig({ customBaseUrl: event.currentTarget.value })}
                     />
                   </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("API format", "API 格式")}</span>
+                      <span className="settings-field-sub">
+                        {l("Choose the request protocol supported by this endpoint.", "选择该接口实际支持的请求协议。")}
+                      </span>
+                    </div>
+                    <select
+                      aria-label={l("Summary API format", "摘要 API 格式")}
+                      value={draftSummaryApiConfig.customApiFormat}
+                      disabled={!settings || saving}
+                      onChange={(event) => updateDraftSummaryApiConfig({
+                        customApiFormat: event.currentTarget.value as ApiConfig["customApiFormat"],
+                      })}
+                    >
+                      <option value="openai_chat">OpenAI Chat Completions</option>
+                      <option value="openai_responses">OpenAI Responses API</option>
+                    </select>
+                  </label>
                   <div className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Model", "模型")}</span>

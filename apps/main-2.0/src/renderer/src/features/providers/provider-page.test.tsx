@@ -38,6 +38,7 @@ describe("ProviderPage summary settings", () => {
   });
 
   it("keeps a saved summary API key when Codex also uses a custom provider", async () => {
+    const onSettingsChange = vi.fn();
     const settings = {
       ...defaultSettings,
       summarySource: "custom" as const,
@@ -64,7 +65,7 @@ describe("ProviderPage summary settings", () => {
         settings={settings}
         language="en"
         feedback={null}
-        onSettingsChange={vi.fn()}
+        onSettingsChange={onSettingsChange}
         onApplyToCodex={vi.fn()}
         onApplyToClaude={vi.fn()}
       />,
@@ -80,5 +81,19 @@ describe("ProviderPage summary settings", () => {
       .toBe("https://summary.example/v1");
     expect(container.querySelector<HTMLInputElement>('input[placeholder="deepseek-v4-flash"]')?.value)
       .toBe("summary-model");
+
+    const formatSelect = container.querySelector<HTMLSelectElement>('select[aria-label="Summary API format"]');
+    expect(formatSelect?.value).toBe("openai_responses");
+    await act(async () => {
+      formatSelect!.value = "openai_chat";
+      formatSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const saveButton = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Save summary settings"));
+    expect(saveButton).toBeDefined();
+    await act(async () => saveButton!.click());
+    expect(onSettingsChange).toHaveBeenCalledWith(expect.objectContaining({
+      summaryApiConfig: expect.objectContaining({ customApiFormat: "openai_chat" }),
+    }));
   });
 });
