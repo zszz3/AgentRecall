@@ -2382,7 +2382,11 @@ function registerIpc(): void {
     let failed = 0;
     let next = 0;
     const sendProgress = (): void => {
-      event.sender.send("summary:progress", { processed, failed, total });
+      try {
+        event.sender.send("summary:progress", { processed, failed, total });
+      } catch {
+        // The window can be destroyed mid-batch; progress delivery must not abort it.
+      }
     };
     sendProgress();
     // A few in parallel so a large backlog finishes in reasonable wall time; each
