@@ -73,6 +73,10 @@ export class SessionCatalogService {
     return this.dependencies.store.searchSessionPage(this.dependencies.visibleSearchOptions(options));
   }
 
+  async findByRawId(rawId: string): Promise<SessionSearchResult | null> {
+    return this.dependencies.store.findByRawId(rawId);
+  }
+
   async get(sessionKey: string): Promise<SessionSearchResult | null> {
     await this.dependencies.store.markOpened(sessionKey);
     return this.dependencies.store.getSession(sessionKey);

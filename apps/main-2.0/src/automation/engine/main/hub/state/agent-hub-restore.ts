@@ -11,7 +11,8 @@ import type { WorkflowNodeInputRequest } from "../../../shared/workflow/run";
 import type { WorkflowV2ScriptParameterDef } from "../../../shared/workflow-v2/definition";
 import type { WorkflowNodeMessage } from "../../../shared/workflow-v2/conversation";
 import { isWorkflowV2NodeAcceptanceReport, isWorkflowV2ScriptExecutionReceipt } from "../../../shared/workflow-v2/packets";
-import { isWorkflowV2HumanIntervention } from "../../../shared/workflow-v2/review";
+import { isWorkflowV2HumanIntervention, isWorkflowV2ReviewTraceEntry } from "../../../shared/workflow-v2/review";
+import { isWorkflowV2ReviewAttemptRecord } from "../../../shared/workflow-v2/storage";
 import {
   asArray,
   asNumber,
@@ -141,6 +142,14 @@ export function restoreWorkflowRunProgressItem(raw: unknown): WorkflowRunProgres
     .map((message) => restoreWorkflowNodeHistoryMessage(message))
     .filter((message): message is WorkflowNodeMessage => Boolean(message));
   if (messages.length > 0) item.messages = messages;
+  const reviewMessages = asArray(record.reviewMessages)
+    .map((message) => restoreWorkflowNodeHistoryMessage(message))
+    .filter((message): message is WorkflowNodeMessage => Boolean(message));
+  if (reviewMessages.length > 0) item.reviewMessages = reviewMessages;
+  const reviewHistory = asArray(record.reviewHistory).filter(isWorkflowV2ReviewAttemptRecord);
+  if (reviewHistory.length > 0) item.reviewHistory = structuredClone(reviewHistory);
+  const reviewTrace = asArray(record.reviewTrace).filter(isWorkflowV2ReviewTraceEntry);
+  if (reviewTrace.length > 0) item.reviewTrace = structuredClone(reviewTrace);
   return item;
 }
 
@@ -153,8 +162,15 @@ function restoreWorkflowNodeHistoryMessage(raw: unknown): WorkflowNodeMessage | 
   const message: WorkflowNodeMessage = { id, role, content, at: asNumber(record.at, Date.now()) };
   const name = asOptionalString(record.name);
   if (name) message.name = name;
+  const eventType = asOptionalString(record.eventType);
+  if (eventType && isChatEventType(eventType)) message.eventType = eventType;
   const event = restoreEvent(record.event);
-  if (event) message.event = event;
+  if (event) {
+    if ((event.type === "approval_request" || event.type === "user_input_request") && event.requestState === "live") {
+      event.requestState = "expired";
+    }
+    message.event = event;
+  }
   return message;
 }
 

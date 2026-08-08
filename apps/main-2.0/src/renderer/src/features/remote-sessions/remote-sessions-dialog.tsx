@@ -20,7 +20,7 @@ import { SupabaseSetupGuide } from "../../components/supabase-setup-guide";
 const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
 type RemoteSourceFilter = "all" | RemoteSessionAgent;
 type RestoreDestination = "local" | "source";
-const SOURCE_FILTERS: RemoteSourceFilter[] = ["all", ...RESTORE_TARGETS, "hermes"];
+const SOURCE_FILTERS: RemoteSourceFilter[] = ["all", ...RESTORE_TARGETS, "hermes", "pi"];
 const REMOTE_SESSION_PAGE_SIZE = 50;
 
 export type SessionPrimaryAction = "upload" | "view" | "restore" | "resolve";
@@ -556,7 +556,9 @@ function RemoteOperationStatus({
 }
 
 function remoteSourceLabel(source: RemoteSessionAgent): string {
-  return source === "hermes" ? "Hermes" : migrationAgentLabel(source);
+  if (source === "hermes") return "Hermes";
+  if (source === "pi") return "Pi";
+  return migrationAgentLabel(source);
 }
 
 function SessionCopyCard({

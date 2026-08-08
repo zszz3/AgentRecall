@@ -43,8 +43,12 @@ export function applyWorkflowDraftPatch(input: {
 }): WorkflowDraftState {
   const { current, patch } = input;
   const resetRunState = Boolean(patch.resetRunState && current.status !== "running");
-  const nextConfiguredAgentId = input.normalizeConfiguredAgentId(undefined);
-  const nextModelId = input.normalizeModelId(nextConfiguredAgentId, undefined);
+  const nextConfiguredAgentId = patch.configuredAgentId !== undefined
+    ? input.normalizeConfiguredAgentId(patch.configuredAgentId)
+    : current.configuredAgentId;
+  const nextModelId = patch.configuredAgentId !== undefined || patch.modelId !== undefined
+    ? input.normalizeModelId(nextConfiguredAgentId, patch.modelId ?? current.modelId)
+    : current.modelId;
   const nextReviewerConfiguredAgentId = patch.reviewerConfiguredAgentId !== undefined
     ? input.normalizeConfiguredAgentId(patch.reviewerConfiguredAgentId)
     : current.reviewerConfiguredAgentId;

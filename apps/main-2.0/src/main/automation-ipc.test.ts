@@ -23,6 +23,7 @@ function setup(pickDirectory?: (defaultPath?: string) => Promise<string | undefi
     updateConfiguredAgents: vi.fn((value, _options?: { detectDeletedManagedAgents?: boolean }) => ({ configuredAgents: value })),
     createWorkflowDraft: vi.fn((value) => ({ workflowDraft: value })),
     sendWorkflowDraftReply: vi.fn(async (value) => ({ workflowDraft: value })),
+    applyWorkflowReviewToManager: vi.fn(async (value) => ({ workflowDraft: value })),
     setMcpServers: vi.fn(),
     listConfiguredAgents: vi.fn(() => [{
       id: "agent-1", name: "Agent", description: "", runtimeAgentId: "codex", channelId: "codex-openai",
@@ -280,6 +281,21 @@ describe("registerAutomationIpc", () => {
       reply: "x".repeat(200_001),
     })).rejects.toThrow(/too big|too long|maximum/i);
     expect(hub.sendWorkflowDraftReply).not.toHaveBeenCalled();
+  });
+
+  it("validates and delegates Review-to-Manager requests", async () => {
+    const { invoke, hub } = setup();
+
+    await expect(invoke(AUTOMATION_CHANNELS.workflowReviewApplyToManager, {
+      workflowId: "wf-1",
+      reviewedRevision: 3,
+    })).resolves.toEqual({ workflowDraft: { workflowId: "wf-1", reviewedRevision: 3 } });
+    expect(hub.applyWorkflowReviewToManager).toHaveBeenCalledWith({ workflowId: "wf-1", reviewedRevision: 3 });
+
+    await expect(invoke(AUTOMATION_CHANNELS.workflowReviewApplyToManager, {
+      workflowId: "wf-1",
+      reviewedRevision: 0,
+    })).rejects.toThrow();
   });
 
   it("validates and delegates Evaluation datasets", async () => {

@@ -66,6 +66,26 @@ describe("workflowMcpLaunchConfig", () => {
     });
   });
 
+  test("binds Review scope to an immutable Revision", () => {
+    const config = workflowMcpLaunchConfig({
+      discoveryPath: "C:/app/mcp-bridge.json",
+      workflowId: "wf-review",
+      reviewRevision: 4,
+      managedToken: "managed-token",
+    }, {
+      cwd: process.cwd(),
+      mainBundlePath: path.join(process.cwd(), "missing", "index.js"),
+      serverScriptPath: path.join(process.cwd(), "src", "mcp", "workflow-entry.ts"),
+    });
+
+    expect(config?.env).toMatchObject({
+      AGENT_RECALL_WORKFLOW_ID: "wf-review",
+      AGENT_RECALL_WORKFLOW_REVIEW_REVISION: "4",
+      AGENT_RECALL_WORKFLOW_MCP_SCOPE: "review",
+      AGENT_RECALL_WORKFLOW_MCP_TOKEN: "managed-token",
+    });
+  });
+
   test("combines workflow and studio scope in one managed MCP launch", () => {
     const serverScriptPath = path.join(
       process.cwd(),

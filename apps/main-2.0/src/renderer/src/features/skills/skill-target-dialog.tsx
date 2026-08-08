@@ -2,15 +2,14 @@ import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { Check, Link2, ShieldAlert, X } from "lucide-react";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
+import { AGENT_SKILL_REGISTRY } from "../../../../core/agent-skill-registry";
 import { localize, type LanguageMode } from "../../language";
 
-const TARGET_LABELS: Record<SkillInstallTarget, string> = {
-  codex: "Codex",
-  claude: "Claude Code",
-  codebuddy: "CodeBuddy",
-  qoder: "Qoder",
-  trae: "Trae",
-};
+const TARGET_LABELS: Record<SkillInstallTarget, string> = Object.fromEntries(
+  AGENT_SKILL_REGISTRY
+    .filter((entry) => entry.installTarget !== null)
+    .map((entry) => [entry.installTarget!, entry.label]),
+) as Record<SkillInstallTarget, string>;
 
 export function SkillTargetDialog({
   open,
@@ -68,7 +67,7 @@ export function SkillTargetDialog({
         <header className="managed-skill-dialog-head">
           <div>
             <h3 id="skill-target-dialog-title">{l("Install Skill", "安装 Skill")}</h3>
-            <p>{l(`Choose which agents can use “${skill.name}”.`, `选择哪些 Agent 可以使用“${skill.name}”。`)}</p>
+            <p>{l("Select agents to install to. A path already occupied by another Skill will be overwritten when selected.", "选择要安装的 Agent。若该位置已存在同名 Skill，勾选后将被覆盖。")}</p>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label={l("Close", "关闭")}><X size={16} /></button>
         </header>
@@ -85,9 +84,9 @@ export function SkillTargetDialog({
                 className={`${checked ? "selected" : ""} ${conflict ? "conflict" : ""}`}
                 role="checkbox"
                 aria-checked={checked}
-                disabled={busy || saving || conflict}
+                disabled={busy || saving}
                 title={conflict
-                  ? l(`An existing ${label} Skill occupies this path.`, `${label} 中已有同名 Skill。`)
+                  ? l(`Overwrite the existing ${label} Skill at this path.`, `覆盖 ${label} 中已有的同名 Skill。`)
                   : installation.path}
                 onClick={() => setSelected((current) => {
                   const next = new Set(current);
@@ -97,11 +96,11 @@ export function SkillTargetDialog({
                 })}
               >
                 <span className="managed-skill-target-option-icon">
-                  {conflict ? <ShieldAlert size={15} /> : checked ? <Check size={15} /> : <Link2 size={15} />}
+                  {checked ? <Check size={15} /> : conflict ? <ShieldAlert size={15} /> : <Link2 size={15} />}
                 </span>
                 <span>
                   <strong>{label}</strong>
-                  <small>{conflict ? l("Path conflict", "路径冲突") : checked ? l("Selected", "已选择") : l("Not selected", "未选择")}</small>
+                  <small>{checked ? l("Selected", "已选择") : conflict ? l("Path conflict", "路径冲突") : l("Not selected", "未选择")}</small>
                 </span>
               </button>
             );
@@ -113,7 +112,7 @@ export function SkillTargetDialog({
           <span>{l(`${selected.size} agents selected`, `已选择 ${selected.size} 个 Agent`)}</span>
           <button type="button" onClick={onClose} disabled={saving}>{l("Cancel", "取消")}</button>
           <button type="button" className="primary" onClick={() => void save()} disabled={busy || saving}>
-            {saving ? l("Saving…", "正在保存…") : l("Save installation", "保存安装")}
+            {saving ? l("Saving…", "正在保存…") : l("Save", "保存")}
           </button>
         </footer>
       </section>

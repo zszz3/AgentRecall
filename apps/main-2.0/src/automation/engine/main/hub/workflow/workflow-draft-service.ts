@@ -10,6 +10,7 @@ export class WorkflowDraftService {
     maxWorkflowCount: number;
     createWorkflowId: () => string;
     now: () => number;
+    defaultConfiguredAgentId: () => string;
     normalizeConfiguredAgentId: (configuredAgentId: string | undefined) => string;
     normalizeModelId: (configuredAgentId: string | undefined, modelId: string | undefined) => string;
     cloneDraft: (draft: WorkflowDraftState) => WorkflowDraftState;
@@ -38,10 +39,11 @@ export class WorkflowDraftService {
     if (this.deps.store.workflowCount() >= this.deps.maxWorkflowCount) return this.deps.snapshot();
     const now = this.deps.now();
     const workflowId = this.deps.createWorkflowId();
-    const configuredAgentId = this.deps.normalizeConfiguredAgentId(undefined);
-    const modelId = this.deps.normalizeModelId(configuredAgentId, undefined);
-    const reviewerConfiguredAgentId = this.deps.normalizeConfiguredAgentId(input.reviewerConfiguredAgentId ?? configuredAgentId);
-    const reviewerModelId = this.deps.normalizeModelId(reviewerConfiguredAgentId, input.reviewerModelId ?? (reviewerConfiguredAgentId === configuredAgentId ? modelId : undefined));
+    const configuredAgentId = this.deps.normalizeConfiguredAgentId(input.configuredAgentId)
+      || this.deps.defaultConfiguredAgentId();
+    const modelId = this.deps.normalizeModelId(configuredAgentId, input.modelId);
+    const reviewerConfiguredAgentId = this.deps.normalizeConfiguredAgentId(input.reviewerConfiguredAgentId);
+    const reviewerModelId = this.deps.normalizeModelId(reviewerConfiguredAgentId, input.reviewerModelId);
     const workflow = this.deps.cloneDraft({
       workflowId,
       sourceType: "user",

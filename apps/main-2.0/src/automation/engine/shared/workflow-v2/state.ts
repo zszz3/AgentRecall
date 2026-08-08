@@ -1,6 +1,6 @@
 import type { WorkflowV2Definition } from "./definition";
 import type { WorkflowV2NodeValidationResult } from "./definition";
-import type { WorkflowV2HumanIntervention, WorkflowV2ReviewVerdict } from "./review";
+import type { WorkflowV2HumanIntervention, WorkflowV2ReviewAttemptRecord, WorkflowV2ReviewVerdict } from "./review";
 
 export type WorkflowV2NodeExecutionState =
   | "blocked"
@@ -11,6 +11,7 @@ export type WorkflowV2NodeExecutionState =
   | "paused"
   | "skipped"
   | "completed"
+  | "completed_with_override"
   | "failed";
 export type WorkflowV2RunExecutionStatus = "running" | "paused" | "completed" | "failed";
 
@@ -28,6 +29,9 @@ export interface WorkflowV2RunNodeState {
   lastError?: string;
   validation?: WorkflowV2NodeValidationResult;
   reviewVerdict?: WorkflowV2ReviewVerdict;
+  reviewAttempt?: number;
+  reviewInfrastructureAttempt?: number;
+  reviewHistory?: WorkflowV2ReviewAttemptRecord[];
   intervention?: WorkflowV2HumanIntervention;
 }
 
@@ -76,6 +80,8 @@ export function createWorkflowV2RunState(input: {
           blockedBy,
           resourceLocks: [...(node.resourceLocks ?? [])],
           attempt: 0,
+          reviewAttempt: 0,
+          reviewHistory: [],
         } satisfies WorkflowV2RunNodeState,
       ];
     }),

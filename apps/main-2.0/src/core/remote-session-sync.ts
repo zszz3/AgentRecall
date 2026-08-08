@@ -16,7 +16,7 @@ import type {
 
 export const REMOTE_SESSION_TABLE = "agent_session_remote_sessions";
 export const REMOTE_SESSION_BUCKET = "agent-session-remote";
-const REMOTE_SESSION_AGENTS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "hermes"] as const satisfies readonly RemoteSessionAgent[];
+const REMOTE_SESSION_AGENTS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "hermes", "pi"] as const satisfies readonly RemoteSessionAgent[];
 const REMOTE_SESSION_AGENT_CHECK_SQL = REMOTE_SESSION_AGENTS.map((agent) => `'${agent}'`).join(", ");
 const REMOTE_SESSION_SOURCE_OBJECT_MAX_BYTES = 5 * 1024 * 1024;
 const REMOTE_SESSION_SOURCE_COMPRESSION_MIN_BYTES = 64 * 1024;
@@ -892,7 +892,6 @@ function sessionSyncStateFromOverview(
 function localSessionOverviewMatchesRemote(local: SessionSearchResult, remote: RemoteSessionListItem): boolean {
   return remote.sourceSource === local.source
     && remote.title === local.displayTitle
-    && remote.updatedAt === integerTimestamp(local.lastActivityAt)
     && remote.messageCount === local.messageCount
     && remote.aiSummary === local.aiSummary
     && sameTags(remote.tags, local.tags);
@@ -1322,8 +1321,8 @@ export class SupabaseRemoteSessionClient {
 
   private async deleteStorageObject(key: string): Promise<void> {
     const response = await this.storageRequest(key, { method: "DELETE" });
-    if (response.status === 404) return;
     const body = await readResponseBody(response);
+    if (isMissingStorageObjectError(response.status, body)) return;
     if (!response.ok) throw new Error(supabaseErrorMessage(response.status, body));
   }
 
@@ -1734,6 +1733,18 @@ function isMissingTableError(status: number, body: unknown): boolean {
     code === "PGRST205" ||
     (typeof message === "string" && /table|relation/i.test(message) && /not found|does not exist/i.test(message))
   );
+}
+
+function isMissingStorageObjectError(status: number, body: unknown): boolean {
+  if (status === 404) return true;
+  if (!body || typeof body !== "object") return false;
+  const error = body as { statusCode?: unknown; error?: unknown; message?: unknown };
+  const responseStatus = typeof error.statusCode === "string"
+    ? Number.parseInt(error.statusCode, 10)
+    : error.statusCode;
+  return responseStatus === 404
+    || (typeof error.error === "string" && error.error.toLowerCase() === "not_found")
+    || (typeof error.message === "string" && /^object not found\.?$/i.test(error.message.trim()));
 }
 
 function isMissingSchemaColumnError(body: unknown): boolean {

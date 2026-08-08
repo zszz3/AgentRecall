@@ -12,6 +12,7 @@ interface UseWorkflowRunnerOptions {
   workflows: WorkflowService;
   workflowId: string | undefined;
   workflowContextDocument: string;
+  reviewEnabled: boolean;
 }
 
 export interface WorkflowRunnerController {
@@ -23,6 +24,7 @@ export function useWorkflowRunner({
   workflows,
   workflowId,
   workflowContextDocument,
+  reviewEnabled,
 }: UseWorkflowRunnerOptions): WorkflowRunnerController {
   const runWorkflowInternal = useCallback(async (targetWorkflow?: WorkflowDraftState, transactionApprovalMode?: "batch" | "per_operation"): Promise<RunWorkflowResult> => {
     const targetWorkflowId = targetWorkflow?.workflowId ?? workflowId;
@@ -33,6 +35,7 @@ export function useWorkflowRunner({
     const result = await workflows.runWorkflow({
       workflowId: targetWorkflowId,
       contextDocument: targetWorkflow?.contextDocument ?? workflowContextDocument,
+      reviewEnabled,
       ...(transactionApprovalMode ? { transactionApprovalMode } : {}),
     });
     return {
@@ -40,7 +43,7 @@ export function useWorkflowRunner({
       ...(result.runId ? { workflowRunId: result.runId } : {}),
       ...(result.error ? { error: result.error } : {}),
     };
-  }, [workflowContextDocument, workflowId, workflows]);
+  }, [reviewEnabled, workflowContextDocument, workflowId, workflows]);
 
   const runWorkflow = useCallback(async (): Promise<void> => {
     await runWorkflowInternal();

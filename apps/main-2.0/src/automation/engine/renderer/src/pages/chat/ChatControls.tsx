@@ -22,6 +22,7 @@ interface ChatControlsProps {
   workDir: string;
   runtimes: AgentRuntime[];
   showAgentControls?: boolean;
+  showModelControl?: boolean;
   onSelectConfiguredAgent: (configuredAgentId: string) => MaybePromise;
   onSelectModel?: (modelId: string) => MaybePromise;
   onChooseWorkDir: () => MaybePromise;
@@ -37,6 +38,7 @@ export function ChatControls({
   workDir,
   runtimes,
   showAgentControls = true,
+  showModelControl = true,
   onSelectConfiguredAgent,
   onSelectModel = () => undefined,
   onChooseWorkDir,
@@ -61,38 +63,44 @@ export function ChatControls({
 
   return (
     <div className="composer-controls">
-      {showAgentControls ? <><label className="composer-select-wrap" title={configTitle}>
-        {selectedAgent ? <span className={`runtime-dot ${agentAccent(runtimeId)}`} /> : null}
-        <select
-          className="composer-select"
-          aria-label="Configured agent"
-          value={selectedAgent?.id ?? ""}
-          disabled={selectsDisabled || configuredAgents.length === 0}
-          onChange={(event) => void onSelectConfiguredAgent(event.currentTarget.value)}
-        >
-          <option value="" disabled>Select Agent</option>
-          {configuredAgents.map((agent) => (
-            <option key={agent.id} value={agent.id}>
-              {agent.name || agent.id}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="composer-select-wrap" title={configTitle}>
-        <select
-          className="composer-select"
-          aria-label="Agent model"
-          value={selectedModelId}
-          disabled={selectsDisabled || !selectedChannel}
-          onChange={(event) => void onSelectModel(event.currentTarget.value)}
-        >
-          {modelOptions.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label || model.id}
-            </option>
-          ))}
-        </select>
-      </label></> : null}
+      {showAgentControls ? (
+        <>
+          <label className="composer-select-wrap" title={configTitle}>
+            {selectedAgent ? <span className={`runtime-dot ${agentAccent(runtimeId)}`} /> : null}
+            <select
+              className="composer-select"
+              aria-label="Configured agent"
+              value={selectedAgent?.id ?? ""}
+              disabled={selectsDisabled || configuredAgents.length === 0}
+              onChange={(event) => void onSelectConfiguredAgent(event.currentTarget.value)}
+            >
+              <option value="" disabled>Select Agent</option>
+              {configuredAgents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name || agent.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          {showModelControl ? (
+            <label className="composer-select-wrap" title={configTitle}>
+              <select
+                className="composer-select"
+                aria-label="Agent model"
+                value={selectedModelId}
+                disabled={selectsDisabled || !selectedChannel}
+                onChange={(event) => void onSelectModel(event.currentTarget.value)}
+              >
+                {modelOptions.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label || model.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </>
+      ) : null}
       <button
         className="workdir-picker composer-workdir-picker"
         onClick={() => void onChooseWorkDir()}

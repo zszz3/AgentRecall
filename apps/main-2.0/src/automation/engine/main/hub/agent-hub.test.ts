@@ -70,6 +70,34 @@ function addConfiguredAgents(hub: AgentHub, agents: ConfiguredAgent[]): void {
   hub.updateConfiguredAgents([...hub.snapshot().configuredAgents, ...agents]);
 }
 
+test("Runtime Review MCP binding exposes only requested tools declared read-only", () => {
+  const hub = new AgentHub();
+  addConfiguredAgents(hub, [{
+    ...configuredAgent("review-agent"),
+    mcpBindings: [{ serverId: "evidence", toolAllowlist: [] }],
+  }]);
+  hub.setMcpServers([{
+    id: "evidence",
+    name: "Evidence",
+    transport: "http",
+    args: [],
+    url: "https://example.test/mcp",
+    env: {},
+    enabled: true,
+    tools: [
+      { name: "search", inputSchema: {}, readOnly: true },
+      { name: "publish", inputSchema: {} },
+    ],
+    status: "connected",
+    createdAt: 1,
+    updatedAt: 1,
+  }]);
+
+  const bindings = (hub as any).boundMcpServersForAgent("review-agent", ["search", "publish"]);
+
+  expect(bindings).toEqual([expect.objectContaining({ toolAllowlist: ["search"] })]);
+});
+
 function createV2Workflow(hub: AgentHub, input: any): any {
   const configuredAgentId = input.configuredAgentId === TEST_CODEX_AGENT_ID
     ? TEST_CODEX_AGENT_ID
@@ -205,7 +233,7 @@ function createHubWithClaudeOneShot(
   const options: RuntimeAgentExecutorFactoryOptions = {
     executables: resolvedExecutables,
     channelById: (channelId) => (hub as any).channelById(channelId),
-    mcpServersForAgent: (configuredAgentId) => (hub as any).boundMcpServersForAgent(configuredAgentId),
+    mcpServersForAgent: (configuredAgentId, allowedMcpTools) => (hub as any).boundMcpServersForAgent(configuredAgentId, allowedMcpTools),
     ...(workflowMcpDiscoveryPath ? { workflowMcpDiscoveryPath } : {}),
   };
   const defaultDrivers = createRuntimeDriverRegistry(options);
@@ -946,18 +974,19 @@ describe("AgentHub chat sessions", () => {
     }
   });
 
-  test("keeps Workflow execution unconfigured and reports all remaining references", () => {
+  test("keeps Workflow generation and review Agents independent and reports all remaining references", () => {
     const hub = new AgentHub();
     addConfiguredAgents(hub, [configuredAgent("worker", { name: "Worker" })]);
     const workflow = hub.createWorkflowDraft({ configuredAgentId: "worker" }).workflowDraft!;
-    expect(workflow.configuredAgentId).toBe("");
+    expect(workflow.configuredAgentId).toBe("worker");
     const patched = hub.patchWorkflowDraft({
       workflowId: workflow.workflowId,
-      configuredAgentId: "worker",
-      modelId: "worker-model",
+      reviewerConfiguredAgentId: "worker",
+      reviewerModelId: "worker-model",
     }).workflowDraft!;
-    expect(patched.configuredAgentId).toBe("");
-    expect(patched.modelId).toBe("");
+    expect(patched.configuredAgentId).toBe("worker");
+    expect(patched.reviewerConfiguredAgentId).toBe("worker");
+    expect(patched.reviewerModelId).toBe("default");
 
     hub.createChat("worker");
     const task = (hub as any).createTaskState({ prompt: "Use worker", configuredAgentId: "worker" });
@@ -967,8 +996,38 @@ describe("AgentHub chat sessions", () => {
     expect(() => hub.updateConfiguredAgents(
       before.filter((agent) => agent.id !== "worker"),
       { detectDeletedManagedAgents: true },
-    )).toThrow(/Chat.*Task/);
+    )).toThrow(/Chat.*Task.*Workflow/);
     expect(hub.snapshot().configuredAgents).toEqual(before);
+  });
+
+  test("accepts one schema-valid Review tool submission for the active Revision", () => {
+    const hub = new AgentHub();
+    addConfiguredAgents(hub, [configuredAgent("reviewer", { name: "Reviewer" })]);
+    const workflow = hub.createWorkflowDraft({ reviewerConfiguredAgentId: "reviewer" }).workflowDraft!;
+    hub.patchWorkflowDraft({
+      workflowId: workflow.workflowId,
+      generationReview: {
+        status: "reviewing",
+        reviewerConfiguredAgentId: "reviewer",
+        reviewerModelId: "default",
+        reviewedRevision: workflow.revision,
+        updatedAt: 1,
+      },
+    });
+
+    const accepted = hub.submitWorkflowReview({
+      workflowId: workflow.workflowId,
+      reviewedRevision: workflow.revision,
+      value: { verdict: "approve", summary: "Ready", findings: [], scriptRisks: {}, suggestions: [] },
+    });
+    const duplicate = hub.submitWorkflowReview({
+      workflowId: workflow.workflowId,
+      reviewedRevision: workflow.revision,
+      value: { verdict: "approve", summary: "Ready", findings: [], scriptRisks: {}, suggestions: [] },
+    });
+
+    expect(accepted).toMatchObject({ ok: true, accepted: true, reviewedRevision: workflow.revision });
+    expect(duplicate).toMatchObject({ ok: false, error: expect.stringContaining("already been submitted") });
   });
 
   test("allows deleting every configured agent without forcing a default agent back", () => {
@@ -3498,6 +3557,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     const created = hub.createWorkflowDraft({ reviewerConfiguredAgentId: TEST_CODEX_AGENT_ID });
     const workflowId = created.workflowDraft?.workflowId;
     expect(workflowId).toBeTruthy();
+    expect(created.workflowDraft?.configuredAgentId).toBe(TEST_CODEX_AGENT_ID);
 
     const first = await hub.sendWorkflowDraftReply({
       workflowId: workflowId!,
@@ -3544,11 +3604,96 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     expect(calls.filter((call) => call.method === "thread/start")).toHaveLength(1);
     expect(calls.filter((call) => call.method === "thread/resume")).toHaveLength(0);
     expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(2);
+    expect(calls.filter((call) => call.method === "turn/start").every((call) => {
+      const prompt = call.params.input[0].text as string;
+      return prompt.includes("Configured Agent runtime catalog")
+        && prompt.includes(`\"configuredAgentId\": \"${TEST_CODEX_AGENT_ID}\"`)
+        && prompt.includes("Assign an explicit configuredAgentId");
+    })).toBe(true);
     expect((calls.find((call) => call.method === "process/argv")?.params.args as string[]).join("\n"))
       .not.toContain("mcp_servers.agent_recall");
   });
 
-  test("rejects a one-shot-only reviewer runtime in the Workflow planning dialog", async () => {
+  test("hands a Review result to the Manager as a sourced user message and replaces the same draft", async () => {
+    const hub = new AgentHub({ codex: "missing-codex-for-test", claude: "missing-claude-for-test" });
+    const created = hub.createWorkflowDraft({ configuredAgentId: TEST_CODEX_AGENT_ID, reviewerConfiguredAgentId: TEST_CODEX_AGENT_ID });
+    const workflowId = created.workflowDraft!.workflowId;
+    const firstDefinition = {
+      workflowId,
+      graphVersion: 1,
+      objective: "Answer with evidence",
+      nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm" as const, executionMode: "one-shot" as const, configuredAgentId: TEST_CODEX_AGENT_ID, prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }],
+      edges: [],
+      transactionPolicy: createDirectWorkflowTransactionPolicy(),
+    };
+    expect(hub.materializeWorkflowDraft(workflowId, { title: "Evidence answer", objective: firstDefinition.objective, definition: firstDefinition }).ok).toBe(true);
+    const reviewed = hub.snapshot().workflowDraft!;
+    hub.patchWorkflowDraft({
+      workflowId,
+      generationReview: {
+        status: "changes_requested",
+        reviewerConfiguredAgentId: reviewed.reviewerConfiguredAgentId,
+        reviewerModelId: reviewed.reviewerModelId,
+        reviewedRevision: reviewed.revision,
+        result: {
+          verdict: "revise",
+          reviewedRevision: reviewed.revision,
+          summary: "答案缺少证据字段。",
+          findings: [{ severity: "blocking", nodeIds: ["answer"], summary: "缺少证据", failurePath: "节点只能返回答案。", requiredChange: "增加 evidence 输出。" }],
+          scriptRisks: {},
+          suggestions: [],
+        },
+        updatedAt: 1,
+      },
+    });
+    const reviewedWithoutManager = hub.snapshot().workflowDraft!;
+    hub.updateWorkflowDraft({ ...reviewedWithoutManager, configuredAgentId: "", modelId: "" });
+    let managerPrompt = "";
+    vi.spyOn(hub as any, "askWorkflowDraftAgent").mockImplementation(async (...args: unknown[]) => {
+      const request = args[0] as { prompt: string; configuredAgentId: string };
+      expect(request.configuredAgentId).toBeTruthy();
+      const onEvent = args[1] as ((event: { requestId: string; type: "delta" | "tool_call"; content: string; name?: string }) => void) | undefined;
+      managerPrompt = request.prompt;
+      const requestId = (args[0] as { requestId: string }).requestId;
+      onEvent?.({ requestId, type: "delta", content: "正在修改工作流。" });
+      onEvent?.({ requestId, type: "tool_call", name: "workflow_create", content: "Submitting revised definition" });
+      expect(hub.snapshot().workflowDraft).toMatchObject({ revision: reviewed.revision, generationReview: { reviewedRevision: reviewed.revision } });
+      const revisedDefinition = structuredClone(hub.snapshot().workflowDraft!.definition);
+      revisedDefinition.nodes[0]!.outputFields.push({ key: "evidence", required: true });
+      const result = hub.materializeWorkflowDraft(workflowId, { title: "Evidence answer", objective: revisedDefinition.objective, definition: revisedDefinition });
+      expect(result.ok).toBe(true);
+      return { content: "已根据 Review Agent 结果更新工作流。" };
+    });
+
+    const next = await hub.applyWorkflowReviewToManager({ workflowId, reviewedRevision: reviewed.revision });
+
+    expect(next.workflowStore.workflows.filter((workflow) => workflow.workflowId === workflowId)).toHaveLength(1);
+    expect(next.workflowDraft?.configuredAgentId).toBeTruthy();
+    expect(next.workflowDraft?.definition.nodes[0]?.outputFields).toContainEqual({ key: "evidence", required: true });
+    expect(next.workflowDraft?.generationReview).toBeUndefined();
+    expect(next.workflowDraft?.messages.at(-2)).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("来自 Review Agent"),
+      events: [expect.objectContaining({ type: "handoff", metadata: expect.objectContaining({ kind: "review_result", reviewedRevision: reviewed.revision, verdict: "revise" }) })],
+    });
+    expect(next.workflowDraft?.messages.at(-1)).toMatchObject({ role: "assistant", content: "已根据 Review Agent 结果更新工作流。" });
+    expect(managerPrompt).toContain("Apply the user's requested change");
+    expect(managerPrompt).toContain("必须调用 workflow_create");
+  });
+
+  test("does not Review or hand Review results to the Manager for official Workflows", async () => {
+    const hub = new AgentHub({ codex: "missing-codex-for-test", claude: "missing-claude-for-test" });
+    const workflowId = hub.createWorkflowDraft({ configuredAgentId: TEST_CODEX_AGENT_ID }).workflowDraft!.workflowId;
+    const current = hub.snapshot().workflowDraft!;
+    hub.updateWorkflowDraft({ ...current, sourceType: "official", topologyLocked: true });
+
+    const reviewed = await hub.reviewWorkflow({ workflowId, expectedRevision: current.revision, reviewEnabled: true });
+    expect(reviewed.workflowDraft?.generationReview).toBeUndefined();
+    const handedOff = await hub.applyWorkflowReviewToManager({ workflowId, reviewedRevision: current.revision });
+    expect(handedOff.workflowDraft?.messages).toEqual([]);
+  });
+
+  test("rejects a one-shot-only generation runtime in the Workflow planning dialog", async () => {
     const hub = new AgentHub({
       codex: "missing-codex-for-test",
       claude: "missing-claude-for-test",
@@ -3573,7 +3718,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       version: "test",
       available: true,
     });
-    const workflowId = hub.createWorkflowDraft({ reviewerConfiguredAgentId: TEST_CODEX_AGENT_ID }).workflowDraft!.workflowId;
+    const workflowId = hub.createWorkflowDraft({ configuredAgentId: TEST_CODEX_AGENT_ID }).workflowDraft!.workflowId;
 
     const snapshot = await hub.sendWorkflowDraftReply({ workflowId, reply: "Plan this task." });
 

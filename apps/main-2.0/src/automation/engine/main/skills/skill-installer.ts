@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { cp, lstat, mkdir, readdir, readFile, readlink, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { bundledSkillAssetsFor } from "../../shared/bundled-skill-library";
 import { parseSkillMarkdown } from "../../shared/online-skills";
 import { SKILL_TEMPLATES } from "../../shared/skill-templates";
 import type {
@@ -83,6 +84,19 @@ function bundledSkillSourceDir(template: SkillTemplate): string | undefined {
 
 function pathExistsSync(filePath: string): boolean {
   return existsSync(filePath);
+}
+
+async function writeEmbeddedSkillSource(template: SkillTemplate, sourceDir: string): Promise<void> {
+  const assets = bundledSkillAssetsFor(template.id);
+  await mkdir(sourceDir, { recursive: true });
+  const skillAsset = assets.find((asset) => asset.relativePath === "SKILL.md");
+  await writeFile(path.join(sourceDir, "SKILL.md"), skillAsset?.contents ?? `${template.prompt.trim()}\n`, "utf8");
+  for (const asset of assets) {
+    if (asset.relativePath === "SKILL.md") continue;
+    const targetPath = path.join(sourceDir, asset.relativePath);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, asset.contents, "utf8");
+  }
 }
 
 async function assertOwnedSymlink(linkPath: string, sourceDir: string): Promise<void> {
@@ -184,8 +198,7 @@ export async function installBundledSkill(request: InstallSkillRequest, homeDir:
     if (bundledSourceDir) {
       await cp(bundledSourceDir, sourceDir, { recursive: true });
     } else {
-      await mkdir(sourceDir, { recursive: true });
-      await writeFile(sourcePath, `${template.prompt.trim()}\n`, "utf8");
+      await writeEmbeddedSkillSource(template, sourceDir);
     }
   }
   await mkdir(path.dirname(linkPath), { recursive: true });

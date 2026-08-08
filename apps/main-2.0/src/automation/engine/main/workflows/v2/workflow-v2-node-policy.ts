@@ -1,7 +1,7 @@
 import type { AppSnapshot, WorkflowV2InterventionAction } from "../../../shared/types";
 import { DEFAULT_MODEL_ID } from "../../../shared/models";
 import type { WorkflowDraftState } from "../../../shared/workflow/draft";
-import type { WorkflowV2ContextBudget, WorkflowV2LLMNode, WorkflowV2OutputFieldDef, WorkflowV2ScriptNode } from "../../../shared/workflow-v2/definition";
+import type { WorkflowV2ContextBudget, WorkflowV2LLMNode, WorkflowV2OutputFieldDef, WorkflowV2ReviewGate, WorkflowV2ScriptNode } from "../../../shared/workflow-v2/definition";
 import type { WorkflowV2ResultPacket, WorkflowV2TaskPacket } from "../../../shared/workflow-v2/planning";
 import { isValidWorkflowV2ContextBudget, isValidWorkflowV2CostBudget } from "../../../shared/workflow-v2/validation";
 
@@ -47,13 +47,22 @@ export function workflowV2ExecutionEnvironment(input: {
 
 export function workflowV2ReviewerPolicy(
   node: WorkflowV2LLMNode | WorkflowV2ScriptNode,
+  review: boolean | WorkflowV2ReviewGate | undefined,
   forceIndependentReview = false,
 ): Record<string, unknown> {
+  const reviewEligible = node.execModel === "llm";
+  const gate = reviewEligible && typeof review === "object" ? review : undefined;
+  const reviewEnabled = reviewEligible && (gate !== undefined || review === true);
   return {
-    judgeDimensions: node.execModel === "llm" ? node.judgeDimensions ?? [] : [],
-    requiresIndependentReview: node.execModel === "llm" && node.role !== "reviewer"
-      && (forceIndependentReview || (node.judgeDimensions?.length ?? 0) > 0),
-    forceIndependentReview,
+    reviewEnabled,
+    ...(gate ? { gate: structuredClone(gate) } : {}),
+    judgeDimensions: reviewEligible ? gate?.judgeDimensions ?? node.judgeDimensions ?? [] : [],
+    reviewLevel: reviewEligible ? gate?.reviewLevel ?? node.reviewLevel ?? "none" : "none",
+    reviewMaxRetries: reviewEligible ? gate?.maxQualityRetries ?? node.reviewMaxRetries ?? 2 : 0,
+    requiresIndependentReview: reviewEnabled && node.role !== "reviewer"
+      && (gate !== undefined || (node.reviewLevel !== undefined && node.reviewLevel !== "none"
+        && (forceIndependentReview || (node.judgeDimensions?.length ?? 0) > 0))),
+    forceIndependentReview: reviewEligible && forceIndependentReview,
   };
 }
 
@@ -69,6 +78,8 @@ export function workflowV2InterventionResolutionReason(
   if (action === "replan") return `Keep the run stopped and create a new graph revision for ${nodeTitle}.`;
   if (action === "increase_review_strength") return `Rerun ${nodeTitle} with mandatory independent review.`;
   if (action === "approve_once") return `Approve one execution of dangerous script ${nodeTitle}.`;
+  if (action === "rerun_all") return `Supersede this run and restart the Workflow from its first node.`;
+  if (action === "accept_last_result") return `Accept the latest candidate for ${nodeTitle} with an explicit human override.`;
   return `Reject dangerous script ${nodeTitle}.`;
 }
 

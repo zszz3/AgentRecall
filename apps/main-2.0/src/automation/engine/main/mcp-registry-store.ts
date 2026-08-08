@@ -100,13 +100,14 @@ export class McpRegistryStore {
     for (const [sequence, tool] of tools.entries()) {
       await transaction.query(
         `insert into agent_recall.mcp_tools (
-          server_id, name, description, input_schema, sequence
-        ) values ($1, $2, $3, $4::jsonb, $5)`,
+          server_id, name, description, input_schema, read_only, sequence
+        ) values ($1, $2, $3, $4::jsonb, $5, $6)`,
         [
           serverId,
           tool.name,
           tool.description ?? null,
           JSON.stringify(tool.inputSchema),
+          tool.readOnly === true,
           sequence,
         ],
       );
@@ -135,6 +136,7 @@ export class McpRegistryStore {
         name: String(tool.name),
         ...(tool.description ? { description: String(tool.description) } : {}),
         inputSchema: jsonRecord(tool.input_schema),
+        ...(tool.read_only === true ? { readOnly: true } : {}),
       })),
       disabledTools: jsonArray(row.disabled_tools),
       status: row.status as McpServerDefinition["status"],

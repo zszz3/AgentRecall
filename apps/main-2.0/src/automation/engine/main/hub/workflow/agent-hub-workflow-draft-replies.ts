@@ -31,6 +31,8 @@ export async function dispatchWorkflowDraftReply(input: {
   reply: string;
   activeRequest: ActiveWorkflowDraftRequest | undefined;
   thinkingMessage: string;
+  userMessageEvents?: WorkflowDraftState["messages"][number]["events"];
+  startingOverride?: boolean;
   cloneDraft: (draft: WorkflowDraftState) => WorkflowDraftState;
   activateWorkflow: (workflowId: string) => void;
   storeWorkflow: (workflow: WorkflowDraftState) => void;
@@ -58,6 +60,8 @@ export async function dispatchWorkflowDraftReply(input: {
     workflow: input.workflow,
     reply: text,
     thinkingMessage: input.thinkingMessage,
+    ...(input.userMessageEvents ? { userMessageEvents: input.userMessageEvents } : {}),
+    ...(input.startingOverride !== undefined ? { startingOverride: input.startingOverride } : {}),
     cloneDraft: input.cloneDraft,
   });
   input.storeWorkflow(started.next);
@@ -101,7 +105,6 @@ export function reduceWorkflowDraftReplyEvent(input: {
       type: "delta",
       workflow: input.cloneDraft({
         ...input.workflow,
-        revision: input.workflow.revision + 1,
         messages: input.replaceMessage(
           input.workflow.messages,
           input.activeRequest.assistantMessageId,
@@ -168,7 +171,6 @@ export function reduceWorkflowDraftReplyEvent(input: {
       type: "event",
       workflow: input.cloneDraft({
         ...input.workflow,
-        revision: input.workflow.revision + 1,
         messages,
         updatedAt: input.now ?? Date.now(),
       }),

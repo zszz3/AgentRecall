@@ -66,6 +66,7 @@ export const AUTOMATION_CHANNELS = {
   workflowExport: "automation:workflow:export",
   workflowConfirm: "automation:workflow:confirm",
   workflowReview: "automation:workflow:review",
+  workflowReviewApplyToManager: "automation:workflow:review-apply-to-manager",
   workflowReviewInterrupt: "automation:workflow:review-interrupt",
   workflowRun: "automation:workflow:run",
   workflowPauseNode: "automation:workflow:pause-node",

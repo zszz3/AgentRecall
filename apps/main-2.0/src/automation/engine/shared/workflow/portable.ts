@@ -50,8 +50,6 @@ export interface WorkflowPortableFileV1 {
     executionDefaults: {
       configuredAgentId: string;
       modelId: string;
-      reviewerConfiguredAgentId: string;
-      reviewerModelId: string;
     };
     definition: WorkflowV2Definition;
     rootOrigin?: WorkflowOfficialOriginSnapshot;
@@ -107,4 +105,5 @@ export type WorkflowPortableErrorCode =
   | "WORKFLOW_IMPORT_PERSIST_FAILED"
   | "WORKFLOW_EXPORT_SOURCE_NOT_FOUND"
   | "WORKFLOW_EXPORT_OFFICIAL_FORBIDDEN"
+  | "WORKFLOW_EXPORT_DEFINITION_INVALID"
   | "WORKFLOW_EXPORT_WRITE_FAILED";

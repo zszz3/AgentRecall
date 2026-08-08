@@ -26,6 +26,7 @@ import {
   type SkillsShEntry,
   type SkillsShPage,
 } from "../../core/skills-sh";
+import { AGENT_SKILL_REGISTRY } from "../../core/agent-skill-registry";
 import {
   deleteInstalledSkill,
   installRemoteSkillLocally,
@@ -207,6 +208,7 @@ export interface ManagedSkillLibraryPort {
   list(): ManagedSkillsSnapshot;
   listImportCandidates(projectDirs: string[]): InstalledSkillsSnapshot;
   importLocalSkill(skillPath: string, projectDirs?: string[]): ManagedSkillImportResult;
+  ensureBuiltinSkills(bundledSkillsPath: string): void;
   importFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
   replaceFiles(input: ManagedSkillFileImport): ManagedSkillImportResult;
   updateTargets(managedId: string, targets: SkillInstallTarget[]): ManagedSkill;
@@ -292,7 +294,7 @@ const defaultTimers = {
 };
 
 function isSkillUsageAgent(agent: SkillAgent): agent is SkillUsageAgent {
-  return agent === "codex" || agent === "claude" || agent === "qoder";
+  return AGENT_SKILL_REGISTRY.some((entry) => entry.id === agent && entry.hasSkillUsage);
 }
 
 export class SkillService {
@@ -416,6 +418,10 @@ export class SkillService {
       },
       files: detail.files,
     });
+  }
+
+  ensureBuiltinSkills(bundledSkillsPath: string): void {
+    this.managedLibrary?.ensureBuiltinSkills(bundledSkillsPath);
   }
 
   async refreshUsage(): Promise<SkillUsageRefreshStatus> {

@@ -466,9 +466,19 @@ function stripYamlScalar(value: string): string {
 function dedupeSkills(skills: InstalledSkill[]): InstalledSkill[] {
   const byPath = new Map<string, InstalledSkill>();
   for (const skill of skills) {
-    byPath.set(normalizePathKey(skill.path), skill);
+    // Resolve symlinks so a skill reachable through multiple agent roots
+    // (e.g. ~/.claude/skills/x -> ~/.agents/skills/x) counts once.
+    byPath.set(realPathKey(skill.path), skill);
   }
   return [...byPath.values()];
+}
+
+function realPathKey(filePath: string): string {
+  try {
+    return fs.realpathSync(filePath);
+  } catch {
+    return normalizePathKey(filePath);
+  }
 }
 
 function dedupeRootConfigs(roots: SkillRootConfig[]): SkillRootConfig[] {

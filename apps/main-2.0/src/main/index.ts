@@ -29,6 +29,7 @@ import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatu
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { createIndexProgressPublisher } from "./index-progress";
 import { createSessionIndexFailureLogger } from "./session-index-failure-log";
+import { createStartupTaskScheduler } from "./startup-tasks";
 import {
   type SessionJsonExportFormat,
 } from "../core/format-session";
@@ -321,7 +322,9 @@ let openVikingHookManifestService: OpenVikingHookManifestService | null = null;
 let openVikingHookStateFlusher: OpenVikingHookStateFlusher | null = null;
 let automationQuitReady = false;
 let automationQuitStarted = false;
+const startupTasks = createStartupTaskScheduler(() => automationQuitStarted);
 let postgresRuntime: PostgresRuntime | null = null;
+let postgresRuntimeStartup: Promise<PostgresRuntime> | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
 let quickSearchWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -462,6 +465,14 @@ function bundledAutomationWorkflowsPath(): string {
   const candidates = [
     path.join(app.getAppPath(), "assets", "automation", "bundled-workflows"),
     path.join(app.getAppPath(), "src", "automation", "engine", "shared", "bundled-workflows"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+}
+
+function bundledSkillsPath(): string {
+  const candidates = [
+    path.join(app.getAppPath(), "assets", "bundled-skills"),
+    path.join(app.getAppPath(), "src", "automation", "engine", "shared", "bundled-skills"),
   ];
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
 }
@@ -641,6 +652,12 @@ const skillService = new SkillService({
   now: () => Date.now(),
   logError: (message) => console.error(message),
 });
+
+try {
+  skillService.ensureBuiltinSkills(bundledSkillsPath());
+} catch (error) {
+  console.error(`Failed to seed built-in Skills: ${error instanceof Error ? error.message : String(error)}`);
+}
 
 const remoteSessionAccess = new RemoteSessionAccess({
   getStore: () => store,
@@ -2371,7 +2388,11 @@ function registerIpc(): void {
     let failed = 0;
     let next = 0;
     const sendProgress = (): void => {
-      event.sender.send("summary:progress", { processed, failed, total });
+      try {
+        event.sender.send("summary:progress", { processed, failed, total });
+      } catch {
+        // The window can be destroyed mid-batch; progress delivery must not abort it.
+      }
     };
     sendProgress();
     // A few in parallel so a large backlog finishes in reasonable wall time; each
@@ -2633,7 +2654,9 @@ if (!app.requestSingleInstanceLock()) {
 app.whenReady().then(async () => {
   await appUpdateService.registerRunningProcess();
   void installedRuntimeMonitor?.start();
-  postgresRuntime = await startPostgresRuntime({ userDataPath: app.getPath("userData") });
+  postgresRuntimeStartup = startPostgresRuntime({ userDataPath: app.getPath("userData") });
+  postgresRuntime = await postgresRuntimeStartup;
+  if (automationQuitStarted) return;
   postgresDatabase = PostgresDatabase.connect(postgresRuntime.connectionUrl, {
     migrations: POSTGRES_MIGRATIONS,
   });
@@ -2658,6 +2681,7 @@ app.whenReady().then(async () => {
   }
   await providerService.migrateLegacyKeys();
   await pruneDisabledOptionalSources(getSettings());
+  if (automationQuitStarted) return;
   automationService = createAutomationService();
   registerIpc();
   quotaService.start();
@@ -2678,20 +2702,20 @@ app.whenReady().then(async () => {
     console.error(`Global shortcut ${globalShortcutLabel(shortcut)} could not be registered.`);
   }
   const initialIndexSettled = new Promise<void>((resolve) => {
-    setTimeout(() => {
+    startupTasks.schedule(INITIAL_INDEX_DELAY_MS, () => {
       void runIndexSync().then(() => resolve(), () => resolve());
-    }, INITIAL_INDEX_DELAY_MS);
+    });
   });
   startAutoIndexRefresh();
-  void initialIndexSettled.then(() => skillService.startUsageRefresh());
-  setTimeout(() => {
-    void initialIndexSettled.then(() => remoteSessionService.startQueue());
-  }, INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS);
-  setTimeout(() => {
-    void initialIndexSettled.then(() => providerService.restoreCodexChatProxy());
-  }, INITIAL_PROVIDER_RESTORE_DELAY_MS);
-  setTimeout(() => {
-    void initialIndexSettled.then(async () => {
+  startupTasks.whenSettled(initialIndexSettled, () => skillService.startUsageRefresh());
+  startupTasks.schedule(INITIAL_SESSION_SYNC_QUEUE_START_DELAY_MS, () => {
+    startupTasks.whenSettled(initialIndexSettled, () => remoteSessionService.startQueue());
+  });
+  startupTasks.schedule(INITIAL_PROVIDER_RESTORE_DELAY_MS, () => {
+    startupTasks.whenSettled(initialIndexSettled, () => providerService.restoreCodexChatProxy());
+  });
+  startupTasks.schedule(INITIAL_OPENVIKING_RUNTIME_DELAY_MS, () => {
+    startupTasks.whenSettled(initialIndexSettled, async () => {
       try {
         await refreshOpenVikingHookManifest();
         reconcileOpenVikingMemoryHooks(getSettings());
@@ -2700,8 +2724,8 @@ app.whenReady().then(async () => {
         console.error(`Failed to configure OpenViking memory hooks: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
-  }, INITIAL_OPENVIKING_RUNTIME_DELAY_MS);
-  void initialIndexSettled.then(() => appUpdateService.scheduleInitialCheck());
+  });
+  startupTasks.whenSettled(initialIndexSettled, () => appUpdateService.scheduleInitialCheck());
 }).catch(async (error) => {
   console.error(`Failed to start AgentRecall: ${error instanceof Error ? error.message : String(error)}`);
   await postgresDatabase?.close().catch(() => undefined);
@@ -2724,6 +2748,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (automationQuitStarted) return;
   automationQuitStarted = true;
+  startupTasks.cancelAll();
   installedRuntimeMonitor?.stop();
   openVikingHookStateFlusher?.stop();
   stopAutoIndexRefresh();
@@ -2745,6 +2770,11 @@ app.on("before-quit", (event) => {
     openVikingHookManifestService?.clear() ?? Promise.resolve(),
     openVikingRuntimeService?.stop() ?? Promise.resolve(),
   ]).then(async () => {
+    // Quit can land while startPostgresRuntime is still in flight; adopt the
+    // pending startup so the embedded database is stopped instead of orphaned.
+    if (!postgresRuntime && postgresRuntimeStartup) {
+      postgresRuntime = await postgresRuntimeStartup.catch(() => null);
+    }
     await postgresDatabase?.close().catch((error) => {
       console.error(`Failed to close AgentRecall data store: ${error instanceof Error ? error.message : String(error)}`);
     });

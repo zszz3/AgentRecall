@@ -9,9 +9,10 @@ import {
   type SkillManagerOptions,
   type SkillSource,
 } from "./skill-manager";
+import { AGENT_SKILL_REGISTRY, SKILL_INSTALL_TARGETS, agentInstallTargetDir, type SkillInstallTarget } from "./agent-skill-registry";
 
-export type SkillInstallTarget = "codex" | "claude" | "codebuddy" | "qoder" | "trae";
-export type ManagedSkillOriginKind = "local" | "skills-sh" | "remote";
+export type { SkillInstallTarget } from "./agent-skill-registry";
+export type ManagedSkillOriginKind = "local" | "skills-sh" | "remote" | "builtin";
 export type ManagedSkillTargetState = "installed" | "not-installed" | "conflict";
 
 export interface ManagedSkillOrigin {
@@ -64,6 +65,42 @@ interface ManagedSkillMetadata {
   origin: ManagedSkillOrigin;
 }
 
+export interface AgentRecallBuiltinSkillDefinition {
+  /** Directory name under assets/bundled-skills/. */
+  id: string;
+  /** Managed library directory name after import. */
+  installId: string;
+  sourceUrl: string;
+}
+
+export const AGENT_RECALL_BUILTIN_SKILLS: AgentRecallBuiltinSkillDefinition[] = [
+  {
+    id: "brainstorming",
+    installId: "brainstorming",
+    sourceUrl: "https://github.com/obra/superpowers/tree/main/skills/brainstorming",
+  },
+  {
+    id: "grill-me",
+    installId: "grill-me",
+    sourceUrl: "https://github.com/mattpocock/skills/tree/main/skills/grill-me",
+  },
+  {
+    id: "systematic-debugging",
+    installId: "systematic-debugging",
+    sourceUrl: "https://github.com/obra/superpowers/tree/main/skills/systematic-debugging",
+  },
+  {
+    id: "test-driven-development",
+    installId: "test-driven-development",
+    sourceUrl: "https://github.com/obra/superpowers/tree/main/skills/test-driven-development",
+  },
+  {
+    id: "verification-before-completion",
+    installId: "verification-before-completion",
+    sourceUrl: "https://github.com/obra/superpowers/tree/main/skills/verification-before-completion",
+  },
+];
+
 export interface ManagedSkillLibraryOptions {
   libraryRoot: string;
   homeDir: string;
@@ -72,7 +109,7 @@ export interface ManagedSkillLibraryOptions {
   now?: () => number;
 }
 
-const INSTALL_TARGETS: SkillInstallTarget[] = ["codex", "claude", "codebuddy", "qoder", "trae"];
+const INSTALL_TARGETS: SkillInstallTarget[] = [...SKILL_INSTALL_TARGETS];
 
 export class ManagedSkillLibrary {
   private readonly libraryRoot: string;
@@ -143,6 +180,26 @@ export class ManagedSkillLibrary {
     });
   }
 
+  ensureBuiltinSkills(bundledSkillsPath: string): void {
+    for (const definition of AGENT_RECALL_BUILTIN_SKILLS) {
+      const sourceDir = path.join(bundledSkillsPath, definition.id);
+      if (!fs.existsSync(path.join(sourceDir, "SKILL.md"))) continue;
+      const managedId = safeManagedSkillId(definition.installId);
+      const targetPath = this.managedSkillDirectory(managedId);
+      // Idempotent: skip when the built-in skill is already present.
+      if (fs.existsSync(targetPath)) continue;
+      try {
+        this.importDirectory(managedId, sourceDir, {
+          kind: "builtin",
+          label: "AgentRecall",
+          url: definition.sourceUrl,
+        });
+      } catch {
+        // A failed built-in import must not block startup; retried next launch.
+      }
+    }
+  }
+
   importFiles(input: ManagedSkillFileImport): ManagedSkillImportResult {
     const managedId = safeManagedSkillId(input.suggestedId);
     const validated = input.files.map((file) => ({ ...file, relativePath: safeRelativeSkillPath(file.relativePath) }));
@@ -182,11 +239,6 @@ export class ManagedSkillLibrary {
       throw new Error("Unknown Skill installation target.");
     }
     const current = new Map(skill.installations.map((installation) => [installation.target, installation]));
-    for (const target of requestedTargets) {
-      if (current.get(target)?.state === "conflict") {
-        throw new Error(`Refusing to overwrite the existing ${target} Skill directory.`);
-      }
-    }
 
     // Preflight every requested target before removing any existing owned link.
     for (const target of INSTALL_TARGETS) {
@@ -207,6 +259,20 @@ export class ManagedSkillLibrary {
       } else if (requested && installation.state === "not-installed") {
         fs.mkdirSync(path.dirname(installation.path), { recursive: true });
         fs.symlinkSync(skill.directoryPath, installation.path, managedSkillLinkType(this.platform));
+      } else if (requested && installation.state === "conflict") {
+        // User explicitly chose to overwrite a conflicting path. Replace the
+        // existing entry only when it is a symlink AgentRecall can safely
+        // remove; a real directory is left alone and stays reported as a
+        // conflict until the user clears it manually.
+        try {
+          if (fs.lstatSync(installation.path).isSymbolicLink()) {
+            fs.unlinkSync(installation.path);
+            fs.mkdirSync(path.dirname(installation.path), { recursive: true });
+            fs.symlinkSync(skill.directoryPath, installation.path, managedSkillLinkType(this.platform));
+          }
+        } catch {
+          // Path vanished between scan and write; treat as unreachable and skip.
+        }
       }
     }
     return this.requireManagedSkill(managedId);
@@ -357,11 +423,7 @@ export class ManagedSkillLibrary {
   }
 
   private installTargetPath(managedId: string, target: SkillInstallTarget): string {
-    if (target === "codex") return path.join(this.codexHome, "skills", managedId);
-    if (target === "claude") return path.join(this.homeDir, ".claude", "skills", managedId);
-    if (target === "codebuddy") return path.join(this.homeDir, ".codebuddy", "skills", managedId);
-    if (target === "qoder") return path.join(this.homeDir, ".qoder", "skills", managedId);
-    return path.join(this.homeDir, ".trae", "skills", managedId);
+    return path.join(agentInstallTargetDir(target, this.homeDir, this.codexHome), managedId);
   }
 }
 
@@ -370,12 +432,12 @@ export function managedSkillLinkType(platform: NodeJS.Platform): "dir" | "juncti
 }
 
 function localSkillSourceLabel(source: SkillSource): string {
-  if (source.startsWith("claude")) return "Claude Code";
-  if (source.startsWith("codebuddy")) return "CodeBuddy";
-  if (source.startsWith("qoder")) return "Qoder";
-  if (source.startsWith("trae")) return "Trae";
-  if (source === "codex-shared") return "Shared";
-  return "Codex";
+  if (source === "codex-shared" || source === "codex-system") return source === "codex-shared" ? "Shared" : "Codex System";
+  if (source.startsWith("codex")) return "Codex";
+  const agentName = source.split("-")[0];
+  const entry = AGENT_SKILL_REGISTRY.find((candidate) => candidate.id === agentName);
+  if (entry) return entry.label;
+  return agentName;
 }
 
 function safeManagedSkillId(value: string): string {
@@ -430,7 +492,7 @@ function directoryContentHash(directoryPath: string): string {
 function isManagedSkillOrigin(value: unknown): value is ManagedSkillOrigin {
   if (!value || typeof value !== "object") return false;
   const origin = value as Partial<ManagedSkillOrigin>;
-  return (origin.kind === "local" || origin.kind === "skills-sh" || origin.kind === "remote")
+  return (origin.kind === "local" || origin.kind === "skills-sh" || origin.kind === "remote" || origin.kind === "builtin")
     && typeof origin.label === "string";
 }
 

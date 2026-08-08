@@ -79,7 +79,7 @@ export function extractWorkflowOutputDocumentsForPlan(plan: WorkflowStoragePlan,
 
 export function workflowRunProgressSummary(progress: WorkflowRunProgressItem[]): string {
   if (progress.length === 0) return "Not started";
-  const completed = progress.filter((item) => item.status === "completed").length;
+  const completed = progress.filter((item) => item.status === "completed" || item.status === "completed_with_override").length;
   const running = progress.filter((item) => item.status === "running").length;
   const failed = progress.filter((item) => item.status === "failed").length;
   const queued = progress.filter((item) => item.status === "queued").length;
@@ -95,6 +95,7 @@ export function workflowRunProgressSummary(progress: WorkflowRunProgressItem[]):
 
 export function workflowRunStatusLabel(status: WorkflowRunNodeStatus): string {
   if (status === "completed") return "completed";
+  if (status === "completed_with_override") return "accepted with override";
   if (status === "running") return "running";
   if (status === "failed") return "failed";
   if (status === "paused") return "paused";

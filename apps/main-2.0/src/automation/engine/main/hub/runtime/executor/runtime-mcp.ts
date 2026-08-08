@@ -97,6 +97,18 @@ export function codexMcpLaunchConfig(
     if (restricted) {
       args.push("-c", `${prefix}.enabled_tools=[${[...allowed].map((name) => JSON.stringify(name)).join(", ")}]`);
     }
+    // Unknown or mutating external MCP tools must ask Codex for approval so
+    // the native request is routed through RuntimeApprovalBroker. Only tools
+    // explicitly declared read-only by the MCP server may run automatically.
+    args.push("-c", `${prefix}.default_tools_approval_mode=${JSON.stringify("prompt")}`);
+    for (const tool of server.tools) {
+      if (allowed.has(tool.name) && tool.readOnly === true) {
+        args.push(
+          "-c",
+          `${prefix}.tools.${tool.name}.approval_mode=${JSON.stringify("approve")}`,
+        );
+      }
+    }
   }
   return { args, env };
 }

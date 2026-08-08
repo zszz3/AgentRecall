@@ -5,6 +5,7 @@ import type { WorkflowV2Plan } from "../../../shared/workflow-v2/planning";
 import type { WorkflowV2DurableNodeControlState } from "../../../shared/workflow-v2/storage";
 import type { WorkflowTransactionState } from "../../../shared/workflow-v2/transaction";
 import type { ExecuteWorkflowV2Checkpoint } from "./workflow-v2-executor";
+import type { WorkflowRunProgressItem } from "../../../shared/workflow/run";
 
 export interface WorkflowV2RecoveryOverride {
   modelProfile?: WorkflowV2ModelProfile;
@@ -24,6 +25,7 @@ export interface ExecuteWorkflowV2RunInput {
   baseWorkflowContextDocument: string;
   storagePlanDocument: string;
   initialCheckpoint?: ExecuteWorkflowV2Checkpoint;
+  initialProgress?: WorkflowRunProgressItem[];
   initialNodeControl?: Record<string, WorkflowV2DurableNodeControlState>;
   initialDurableEventCount?: number;
   initialTransaction?: WorkflowTransactionState;

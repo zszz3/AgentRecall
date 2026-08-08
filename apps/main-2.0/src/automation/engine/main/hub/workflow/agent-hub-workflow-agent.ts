@@ -73,6 +73,7 @@ export function buildWorkflowAgentExecution<TResolved extends {
 }): {
   requestId: string;
   planningWorkflowId?: string;
+  workflowReviewRevision?: number;
   configuredAgentId: string;
   developerInstructions: string;
   runtimeId: AgentId;
@@ -106,6 +107,7 @@ export function buildWorkflowAgentExecution<TResolved extends {
   return {
     requestId: input.request.requestId ?? input.createRequestId(),
     ...(input.request.planningWorkflowId ? { planningWorkflowId: input.request.planningWorkflowId } : {}),
+    ...(input.request.workflowReviewRevision ? { workflowReviewRevision: input.request.workflowReviewRevision } : {}),
     ...(input.request.agentRecallMcp
       ? { agentRecallMcp: structuredClone(input.request.agentRecallMcp) }
       : {}),

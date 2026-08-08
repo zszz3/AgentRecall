@@ -35,6 +35,21 @@ const skillMetadataFiles = import.meta.glob<string>("./bundled-skills/*/metadata
   import: "default",
   query: "?raw",
 });
+const directSkillAssetFiles = import.meta.glob<string>("./bundled-skills/*/*", {
+  eager: true,
+  import: "default",
+  query: "?raw",
+});
+const nestedSkillAssetFiles = import.meta.glob<string>("./bundled-skills/*/**/*", {
+  eager: true,
+  import: "default",
+  query: "?raw",
+});
+
+export interface BundledSkillAsset {
+  relativePath: string;
+  contents: string;
+}
 
 function skillIdFromPath(filePath: string): string {
   const match = filePath.match(/\.\/bundled-skills\/([^/]+)\/[^/]+$/);
@@ -44,6 +59,18 @@ function skillIdFromPath(filePath: string): string {
 
 function sourcePathFor(filePath: string): string {
   return `src/shared/${filePath.replace(/^\.\//, "")}`;
+}
+
+export function bundledSkillAssetsFor(skillId: string): BundledSkillAsset[] {
+  const prefix = `./bundled-skills/${skillId}/`;
+  const assets = new Map<string, string>();
+  for (const [filePath, contents] of Object.entries({ ...directSkillAssetFiles, ...nestedSkillAssetFiles })) {
+    if (!filePath.startsWith(prefix)) continue;
+    assets.set(filePath.slice(prefix.length), contents);
+  }
+  return [...assets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([relativePath, contents]) => ({ relativePath, contents }));
 }
 
 function normalizeNewlines(markdown: string): string {

@@ -43,9 +43,7 @@ export interface WorkflowDraftController {
   updateWorkflowDefinition: (definition: WorkflowV2Definition) => Promise<void>;
   selectWorkflow: (workflowId: string) => Promise<void>;
   selectConfiguredAgent: (configuredAgentId: string) => Promise<void>;
-  selectModel: (modelId: string) => Promise<void>;
   selectReviewerConfiguredAgent: (configuredAgentId: string) => Promise<void>;
-  selectReviewerModel: (modelId: string) => Promise<void>;
   setWorkflowObjective: Dispatch<SetStateAction<string>>;
   setWorkflowReply: Dispatch<SetStateAction<string>>;
 }
@@ -164,24 +162,6 @@ export function useWorkflowDraft({
     setSnapshot(next);
   }, [resetWorkflowLocalDraft, setSnapshot, snapshotRef, workflows]);
 
-  const buildWorkflowDefinition = useCallback(async (objectiveOverride?: string): Promise<void> => {
-    const workflow = await ensureActiveWorkflow();
-    if (!workflow) return;
-    const objective = (objectiveOverride ?? workflowObjectiveInput).trim();
-    const definition = { ...structuredClone(workflow.definition), objective };
-    const next = await workflows.patchDraft({
-      workflowId: workflow.workflowId,
-      title: workflow.title || objective || "Untitled workflow",
-      objective,
-      definition,
-      error: null,
-      resetRunState: true,
-      runtimeConversation: null,
-      finalReport: null,
-    });
-    setSnapshot(next);
-  }, [ensureActiveWorkflow, setSnapshot, workflowObjectiveInput, workflows]);
-
   const sendWorkflowReply = useCallback(async (textOverride?: string): Promise<void> => {
     const workflow = await ensureActiveWorkflow();
     if (!workflow) return;
@@ -211,6 +191,15 @@ export function useWorkflowDraft({
     }
   }, [ensureActiveWorkflow, setSnapshot, workflowGrillBusy, workflowObjectiveInput, workflowReplyInput, workflows]);
 
+  const buildWorkflowDefinition = useCallback(async (additionalContext?: string): Promise<void> => {
+    const context = additionalContext?.trim();
+    const request = [
+      ...(context ? [`补充信息：${context}`] : []),
+      "现有信息已经足够。请立即基于本次 Workflow 的目标和完整对话上下文生成完整、可执行的工作流；必须调用 workflow_create，用当前 workflowId 提交完整定义。不要继续提问，不要只输出建议或 JSON 文本。",
+    ].join("\n\n");
+    await sendWorkflowReply(request);
+  }, [sendWorkflowReply]);
+
   const updateWorkflowNode = useCallback(async (nodeId: string, update: Partial<WorkflowV2Node>): Promise<void> => {
     const workflow = await ensureActiveWorkflow();
     if (!workflow) return;
@@ -218,6 +207,12 @@ export function useWorkflowDraft({
       ...structuredClone(workflow.definition),
       nodes: workflow.definition.nodes.map((node) => (node.id === nodeId ? { ...node, ...update } as WorkflowV2Node : node)),
     };
+    if (workflow.topologyLocked) {
+      const result = await workflows.updateWorkflow({ workflowId: workflow.workflowId, expectedRevision: workflow.revision, definition });
+      if (!result.ok) throw new Error(result.error ?? "Workflow node route could not be updated.");
+      setSnapshot(await workflows.selectWorkflow(workflow.workflowId));
+      return;
+    }
     const next = await workflows.patchDraft({
       workflowId: workflow.workflowId,
       objective: workflow.objective,
@@ -256,17 +251,6 @@ export function useWorkflowDraft({
     setSnapshot(next);
   }, [channels, configuredAgents, ensureActiveWorkflow, setSnapshot, workflows]);
 
-  const selectModel = useCallback(async (modelId: string): Promise<void> => {
-    const workflow = await ensureActiveWorkflow();
-    if (!workflow) return;
-    const next = await workflows.patchDraft({
-      workflowId: workflow.workflowId,
-      modelId,
-      error: null,
-    });
-    setSnapshot(next);
-  }, [ensureActiveWorkflow, setSnapshot, workflows]);
-
   const updateWorkflowDefinition = useCallback(async (definition: WorkflowV2Definition): Promise<void> => {
     const workflow = await ensureActiveWorkflow();
     if (!workflow) return;
@@ -285,14 +269,10 @@ export function useWorkflowDraft({
     setSnapshot(await workflows.patchDraft({ workflowId: workflow.workflowId, reviewerConfiguredAgentId: configuredAgentId, reviewerModelId, error: null }));
   }, [channels, configuredAgents, ensureActiveWorkflow, setSnapshot, workflows]);
 
-  const selectReviewerModel = useCallback(async (reviewerModelId: string): Promise<void> => {
-    const workflow = await ensureActiveWorkflow();
-    if (!workflow) return;
-    setSnapshot(await workflows.patchDraft({ workflowId: workflow.workflowId, reviewerModelId, error: null }));
-  }, [ensureActiveWorkflow, setSnapshot, workflows]);
-
-  const workflowConfiguredAgentId = "";
-  const workflowModelId = "";
+  const workflowConfiguredAgentId = activeWorkflow?.configuredAgentId ?? "";
+  const workflowModelId = workflowConfiguredAgentId
+    ? configuredAgentModelId(workflowConfiguredAgentId, activeWorkflow?.modelId, configuredAgents, channels)
+    : "";
   const workflowReviewerConfiguredAgentId = activeWorkflow?.reviewerConfiguredAgentId ?? "";
   const workflowReviewerModelId = workflowReviewerConfiguredAgentId
     ? configuredAgentModelId(workflowReviewerConfiguredAgentId, activeWorkflow?.reviewerModelId, configuredAgents, channels)
@@ -330,9 +310,7 @@ export function useWorkflowDraft({
       updateWorkflowDefinition,
       selectWorkflow,
       selectConfiguredAgent,
-      selectModel,
       selectReviewerConfiguredAgent,
-      selectReviewerModel,
       setWorkflowObjective,
       setWorkflowReply,
     }),
@@ -344,9 +322,7 @@ export function useWorkflowDraft({
       resetWorkflowLocalDraft,
       resetWorkflowSession,
       selectConfiguredAgent,
-      selectModel,
       selectReviewerConfiguredAgent,
-      selectReviewerModel,
       selectWorkflow,
       sendWorkflowReply,
       stopWorkflowGrill,

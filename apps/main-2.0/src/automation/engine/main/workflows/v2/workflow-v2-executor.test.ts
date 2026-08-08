@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createWorkflowV2InlineScriptSpec, type WorkflowV2Definition, type WorkflowV2LLMNode } from "../../../shared/workflow-v2/definition";
+import { createWorkflowV2InlineScriptSpec, type WorkflowV2Definition, type WorkflowV2LLMNode, type WorkflowV2ScriptNode } from "../../../shared/workflow-v2/definition";
 import type { WorkflowV2WorkerOutput } from "../../../shared/workflow-v2/packets";
 import { createWorkflowV2RunState } from "../../../shared/workflow-v2/state";
 import { buildWorkflowV2Plan } from "./workflow-v2-planner";
@@ -974,12 +974,45 @@ describe("workflow-v2 executor", () => {
     expect(result.workerOutputs).toEqual([]);
   });
 
+  test("does not offer llm-only intervention actions when script validation requires a human", async () => {
+    const pausedDefinition = definition();
+    const scriptNode = pausedDefinition.nodes[1] as WorkflowV2ScriptNode;
+    pausedDefinition.nodes = [{
+      ...scriptNode,
+      onError: "ask_human",
+    }];
+    pausedDefinition.edges = [];
+    const plan = await buildWorkflowV2Plan({ definition: pausedDefinition, approvedBy: "tester", now: 5_150 });
+
+    const result = await executeWorkflowV2Plan({
+      plan,
+      runLlmNode: async () => {
+        throw new Error("llm runner should not be called");
+      },
+      executeScript: async ({ node }) => ({
+        nodeId: node.id,
+        summary: "incomplete",
+        outputs: {},
+        proposals: [],
+      }),
+    });
+
+    expect(result.runState.status).toBe("paused");
+    expect(result.runState.nodes.verify?.intervention).toMatchObject({
+      nodeId: "verify",
+      source: "validation",
+      allowedActions: ["continue", "skip", "replan"],
+    });
+  });
+
   test("requires an independent structured reviewer for semantic judge dimensions", async () => {
     const reviewedDefinition = definition();
+    reviewedDefinition.reviewEnabled = true;
     const draftNode = reviewedDefinition.nodes[0] as WorkflowV2LLMNode;
     reviewedDefinition.nodes = [{
       ...draftNode,
-      judgeDimensions: [{ key: "quality", passThreshold: "must" }],
+      reviewLevel: "high",
+      judgeDimensions: [{ key: "quality", description: "The draft must be complete and correct." }],
     }];
     reviewedDefinition.edges = [];
     const plan = await buildWorkflowV2Plan({ definition: reviewedDefinition, approvedBy: "tester", now: 5_200 });
@@ -1007,7 +1040,13 @@ describe("workflow-v2 executor", () => {
             reasons: ["Quality evidence is sufficient."],
             riskLevel: "low",
             confidence: "high",
+            qualityLevel: "high",
+            dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "Complete and correct.", evidence: ["Reviewed candidate"] }],
           },
+          trace: [
+            { id: "review-request", kind: "request", at: 5_201, content: "Review the candidate" },
+            { id: "review-response", kind: "response", at: 5_202, content: "Accepted" },
+          ],
         };
       },
       onNodeAccepted: async () => { acceptanceOrder.push("materialize"); },
@@ -1017,21 +1056,28 @@ describe("workflow-v2 executor", () => {
     expect(result.runState.nodes.draft?.reviewVerdict?.decision).toBe("accept");
     expect(reviewerInputs).toHaveLength(1);
     expect(reviewerInputs[0]).not.toContain("executor self-assessment");
+    expect(result.runState.nodes.draft?.reviewHistory?.[0]?.candidate.proposals).toEqual([
+      { kind: "continue", reason: "executor self-assessment" },
+    ]);
+    expect(result.runState.nodes.draft?.reviewHistory?.[0]?.trace?.map((entry) => entry.kind)).toEqual(["request", "response"]);
     expect(acceptanceOrder).toEqual(["review", "materialize"]);
   });
 
   test("requeues a reviewer rejection and accepts a later corrected attempt", async () => {
     const reviewedDefinition = definition();
+    reviewedDefinition.reviewEnabled = true;
     const draftNode = reviewedDefinition.nodes[0] as WorkflowV2LLMNode;
     reviewedDefinition.nodes = [{
       ...draftNode,
-      judgeDimensions: [{ key: "quality", passThreshold: "must" }],
-      maxRetry: 1,
+      reviewLevel: "medium",
+      reviewMaxRetries: 1,
+      judgeDimensions: [{ key: "quality", description: "The draft must be complete and correct." }],
     }];
     reviewedDefinition.edges = [];
     const plan = await buildWorkflowV2Plan({ definition: reviewedDefinition, approvedBy: "tester", now: 5_300 });
     let runnerAttempts = 0;
     let reviewAttempts = 0;
+    const rejectedAttempts: Array<{ attempt: number; summary: string }> = [];
 
     const result = await executeWorkflowV2Plan({
       plan,
@@ -1057,8 +1103,13 @@ describe("workflow-v2 executor", () => {
             requiredFixes: reviewAttempts === 1 ? ["Correct the draft."] : [],
             riskLevel: "medium",
             confidence: "high",
+            qualityLevel: reviewAttempts === 1 ? "low" : "medium",
+            dimensionResults: [{ key: "quality", qualityLevel: reviewAttempts === 1 ? "low" : "medium", reason: reviewAttempts === 1 ? "Incomplete." : "Corrected.", evidence: ["Reviewed candidate"] }],
           },
         };
+      },
+      onReviewRetry: async ({ attempt, output }) => {
+        rejectedAttempts.push({ attempt, summary: output.summary });
       },
     });
 
@@ -1066,6 +1117,134 @@ describe("workflow-v2 executor", () => {
     expect(reviewAttempts).toBe(2);
     expect(result.runState.status).toBe("completed");
     expect(result.workerOutputs[0]?.outputs).toEqual({ draft: "revision 2" });
+    expect(result.runState.nodes.draft?.reviewHistory).toHaveLength(2);
+    expect(result.runState.nodes.draft?.reviewAttempt).toBe(2);
+    expect(rejectedAttempts).toEqual([{ attempt: 1, summary: "draft 1" }]);
+  });
+
+  test("pauses an exhausted quality review with only full-rerun and last-result actions", async () => {
+    const reviewedDefinition = definition();
+    reviewedDefinition.reviewEnabled = true;
+    const draftNode = reviewedDefinition.nodes[0] as WorkflowV2LLMNode;
+    reviewedDefinition.nodes = [{
+      ...draftNode,
+      reviewLevel: "high",
+      reviewMaxRetries: 0,
+      judgeDimensions: [{ key: "quality", description: "The draft must be complete and correct." }],
+    }];
+    reviewedDefinition.edges = [];
+    const plan = await buildWorkflowV2Plan({ definition: reviewedDefinition, approvedBy: "tester", now: 5_350 });
+    let reviewCalls = 0;
+    const result = await executeWorkflowV2Plan({
+      plan,
+      runLlmNode: async ({ node }) => ({
+        nodeId: node.id,
+        summary: "Candidate",
+        outputs: { draft: "incomplete" },
+        proposals: [{ kind: "retry", reason: "executor requested retry" }],
+      }),
+      executeScript: async () => { throw new Error("script runner should not be called"); },
+      reviewNodeOutput: async () => {
+        reviewCalls += 1;
+        return {
+          reviewerNodeId: "out-of-graph-reviewer",
+          verdict: {
+            decision: "reject",
+            reasons: ["Incomplete."],
+            requiredFixes: ["Complete the draft."],
+            riskLevel: "medium",
+            confidence: "high",
+            qualityLevel: "medium",
+            dimensionResults: [{ key: "quality", qualityLevel: "medium", reason: "Incomplete.", evidence: ["candidate"] }],
+          },
+        };
+      },
+    });
+    expect(reviewCalls).toBe(1);
+    expect(result.runState.nodes.draft).toMatchObject({
+      status: "paused",
+      reviewAttempt: 1,
+      intervention: { source: "review_rejection", allowedActions: ["rerun_all", "accept_last_result"] },
+    });
+    expect(result.runState.nodes.draft?.reviewHistory).toHaveLength(1);
+    expect(result.runState.nodes.draft?.intervention?.lastCandidate?.proposals).toEqual([
+      { kind: "retry", reason: "executor requested retry" },
+    ]);
+  });
+
+  test("does not call the Reviewer while Workflow Review is disabled", async () => {
+    const reviewedDefinition = definition();
+    const draftNode = reviewedDefinition.nodes[0] as WorkflowV2LLMNode;
+    reviewedDefinition.nodes = [{ ...draftNode, reviewLevel: "high", judgeDimensions: [{ key: "quality", description: "The draft must be correct." }] }];
+    reviewedDefinition.edges = [];
+    const plan = await buildWorkflowV2Plan({ definition: reviewedDefinition, approvedBy: "tester", now: 5_375 });
+    let reviewCalls = 0;
+    const result = await executeWorkflowV2Plan({
+      plan,
+      runLlmNode: async ({ node }) => ({ nodeId: node.id, summary: "Candidate", outputs: { draft: "accepted without Review" }, proposals: [] }),
+      executeScript: async () => { throw new Error("script runner should not be called"); },
+      reviewNodeOutput: async () => { reviewCalls += 1; throw new Error("Reviewer should not run"); },
+    });
+    expect(reviewCalls).toBe(0);
+    expect(result.runState.status).toBe("completed");
+  });
+
+  test("does not nest an independent review around a reviewer node", async () => {
+    const reviewedDefinition = definition();
+    reviewedDefinition.reviewEnabled = true;
+    reviewedDefinition.nodes = [{
+      ...reviewedDefinition.nodes[0]!,
+      role: "reviewer",
+      reviewLevel: "high",
+      judgeDimensions: [{ key: "quality", description: "The review result must be evidence-based." }],
+    }];
+    reviewedDefinition.edges = [];
+    const plan = await buildWorkflowV2Plan({ definition: reviewedDefinition, approvedBy: "tester", now: 5_380 });
+    let reviewCalls = 0;
+
+    const result = await executeWorkflowV2Plan({
+      plan,
+      forceIndependentReviewNodeIds: new Set(["draft"]),
+      runLlmNode: async ({ node }) => ({ nodeId: node.id, summary: "Review complete", outputs: { draft: "findings" }, proposals: [] }),
+      executeScript: async () => { throw new Error("script runner should not be called"); },
+      reviewNodeOutput: async () => { reviewCalls += 1; throw new Error("reviewer nodes must not trigger nested review"); },
+    });
+
+    expect(reviewCalls).toBe(0);
+    expect(result.runState.status).toBe("completed");
+  });
+
+  test("never reviews script nodes even when a legacy plan contains Review fields", async () => {
+    const reviewedDefinition = definition();
+    reviewedDefinition.reviewEnabled = true;
+    const plan = await buildWorkflowV2Plan({ definition: reviewedDefinition, approvedBy: "tester", now: 5_390 });
+    plan.definition.nodes[1] = {
+      ...plan.definition.nodes[1]!,
+      reviewLevel: "high",
+      reviewMaxRetries: 0,
+      judgeDimensions: [{ key: "quality", description: "The verification must be supported by runtime evidence." }],
+    };
+    let reviewCalls = 0;
+
+    const result = await executeWorkflowV2Plan({
+      plan,
+      runLlmNode: async ({ node }) => ({ nodeId: node.id, summary: "Draft", outputs: { draft: "content" }, evidence: ["source-1"], proposals: [] }),
+      executeScript: async ({ node }) => ({
+        nodeId: node.id,
+        summary: "Verified",
+        outputs: { verification: true },
+        proposals: [],
+        acceptance: { outcome: "clean", issues: [], changedPaths: ["result.md"], operationIds: ["operation-1"] },
+        scriptReceipt: { exitCode: 0, signal: null, timedOut: false, stderrSummary: "", stdoutDigest: "stdout", operationDigest: "operation", effectState: "workspace_changed" },
+      }),
+      reviewNodeOutput: async () => { reviewCalls += 1; throw new Error("Script nodes must not be reviewed"); },
+    });
+
+    expect(reviewCalls).toBe(0);
+    expect(result.workerOutputs.find((output) => output.nodeId === "verify")).toMatchObject({
+      acceptance: { outcome: "clean" },
+      scriptReceipt: { exitCode: 0 },
+    });
   });
 
   test("projects a supervisor pause through the unified intervention contract", async () => {
@@ -1247,6 +1426,105 @@ describe("workflow-v2 executor", () => {
     expect(result.workerOutputs.map((output) => output.nodeId)).toEqual(["draft", "verify"]);
   });
 
+  test("resumes downstream work from a result accepted with human override", async () => {
+    const plan = await buildWorkflowV2Plan({ definition: definition(), approvedBy: "tester", now: 6_150 });
+    let runState = createWorkflowV2RunState({ definition: plan.definition });
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "draft", status: "running", now: 6_160 });
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "draft", status: "completed_with_override", now: 6_170 });
+    const calls: string[] = [];
+
+    const result = await executeWorkflowV2Plan({
+      plan,
+      initialCheckpoint: {
+        runState,
+        workerOutputs: [{
+          nodeId: "draft",
+          summary: "Candidate accepted by a human",
+          outputs: { draft: "const accepted = true;" },
+          proposals: [],
+        }],
+      },
+      runLlmNode: async () => {
+        calls.push("llm");
+        throw new Error("overridden llm node must not rerun");
+      },
+      executeScript: async ({ node, upstreamOutputs }) => {
+        calls.push("script");
+        expect(upstreamOutputs[0]?.summary).toBe("Candidate accepted by a human");
+        return {
+          nodeId: node.id,
+          summary: "Verified overridden candidate",
+          outputs: { verification: true },
+          proposals: [],
+        };
+      },
+    });
+
+    expect(calls).toEqual(["script"]);
+    expect(result.runState.status).toBe("completed");
+    expect(result.runState.nodes.draft?.status).toBe("completed_with_override");
+  });
+
+  test("resumes the persisted Review Gate candidate without rerunning its executor", async () => {
+    const reviewDefinition = definition();
+    reviewDefinition.nodes = [reviewDefinition.nodes[0]!];
+    reviewDefinition.edges = [];
+    reviewDefinition.reviewGates = [{ id: "review-draft", targetNodeId: "draft", configuredAgentId: "review-agent", reviewLevel: "high", judgeDimensions: [{ key: "quality", description: "Must be correct." }], maxQualityRetries: 2 }];
+    const plan = await buildWorkflowV2Plan({ definition: reviewDefinition, approvedBy: "tester", now: 6_200 });
+    let runState = createWorkflowV2RunState({ definition: plan.definition });
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "draft", status: "running", now: 6_210 });
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "draft", status: "awaiting_review", now: 6_220, reviewInfrastructureAttempt: 2 });
+    const infrastructureAttempts: number[] = [];
+
+    const result = await executeWorkflowV2Plan({
+      plan,
+      initialCheckpoint: { runState, workerOutputs: [{ nodeId: "draft", summary: "Persisted candidate", outputs: { draft: "ready" }, proposals: [] }] },
+      runLlmNode: async () => { throw new Error("executor must not rerun while resuming Review Gate"); },
+      executeScript: async () => { throw new Error("script should not run"); },
+      reviewNodeOutput: async (input, context) => {
+        expect(input.result.summary).toBe("Persisted candidate");
+        expect(context?.initialInfrastructureAttempt).toBe(2);
+        await context?.onInfrastructureAttempt(3);
+        infrastructureAttempts.push(3);
+        return { reviewerNodeId: "review-agent", verdict: { decision: "accept", reasons: ["通过"], riskLevel: "low", confidence: "high", qualityLevel: "high", dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "正确", evidence: ["candidate"] }] } };
+      },
+    });
+
+    expect(infrastructureAttempts).toEqual([3]);
+    expect(result.runState.status).toBe("completed");
+    expect(result.workerOutputs).toEqual([expect.objectContaining({ nodeId: "draft", summary: "Persisted candidate" })]);
+  });
+
+  test("replays a durably recorded Review Gate verdict without reviewing the candidate twice", async () => {
+    const reviewDefinition = definition();
+    reviewDefinition.nodes = [reviewDefinition.nodes[0]!];
+    reviewDefinition.edges = [];
+    reviewDefinition.reviewGates = [{ id: "review-draft", targetNodeId: "draft", configuredAgentId: "review-agent", reviewLevel: "high", judgeDimensions: [{ key: "quality", description: "Must be correct." }], maxQualityRetries: 2 }];
+    const plan = await buildWorkflowV2Plan({ definition: reviewDefinition, approvedBy: "tester", now: 6_250 });
+    const candidate = { nodeId: "draft", summary: "Persisted accepted candidate", outputs: { draft: "ready" }, proposals: [] };
+    let runState = createWorkflowV2RunState({ definition: plan.definition });
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "draft", status: "running", now: 6_251 });
+    runState = transitionWorkflowV2NodeState(runState, {
+      nodeId: "draft",
+      status: "awaiting_review",
+      now: 6_252,
+      reviewInfrastructureAttempt: 3,
+      reviewVerdict: { decision: "accept", reasons: ["通过"], riskLevel: "low", confidence: "high", qualityLevel: "high", dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "正确", evidence: ["candidate"] }] },
+      reviewRecord: { gateId: "review-draft", reviewerConfiguredAgentId: "review-agent", reviewAttempt: 1, candidate, verdict: { decision: "accept", reasons: ["通过"], riskLevel: "low", confidence: "high", qualityLevel: "high", dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "正确", evidence: ["candidate"] }] }, requiredLevel: "high", passed: true, reviewedAt: 6_252 },
+    });
+
+    const result = await executeWorkflowV2Plan({
+      plan,
+      initialCheckpoint: { runState, workerOutputs: [candidate] },
+      runLlmNode: async () => { throw new Error("executor must not rerun"); },
+      executeScript: async () => { throw new Error("script must not run"); },
+      reviewNodeOutput: async () => { throw new Error("durably recorded verdict must not be requested twice"); },
+    });
+
+    expect(result.runState.status).toBe("completed");
+    expect(result.runState.nodes.draft?.reviewHistory).toHaveLength(1);
+  });
+
   test("rejects a checkpoint whose identity does not match the frozen plan", async () => {
     const plan = await buildWorkflowV2Plan({ definition: definition(), approvedBy: "tester", now: 6_200 });
     const runState = createWorkflowV2RunState({ definition: plan.definition });
@@ -1264,9 +1542,10 @@ describe("workflow-v2 executor", () => {
     })).rejects.toThrow("identity does not match");
   });
 
-  test("forces independent review for a node without authored judge dimensions", async () => {
+  test("forces an enabled configured node through independent review", async () => {
     const reviewDefinition = definition();
-    reviewDefinition.nodes = [reviewDefinition.nodes[0]!];
+    reviewDefinition.reviewEnabled = true;
+    reviewDefinition.nodes = [{ ...reviewDefinition.nodes[0]!, reviewLevel: "low", judgeDimensions: [{ key: "quality", description: "The result must be usable." }] }];
     reviewDefinition.edges = [];
     const plan = await buildWorkflowV2Plan({ definition: reviewDefinition, approvedBy: "tester", now: 6_300 });
     let reviewCalls = 0;
@@ -1294,6 +1573,8 @@ describe("workflow-v2 executor", () => {
             reasons: ["Strengthened review passed."],
             riskLevel: "low",
             confidence: "high",
+            qualityLevel: "high",
+            dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "Usable result.", evidence: ["test evidence"] }],
           },
         };
       },

@@ -9,7 +9,7 @@ const agent: ConfiguredAgent = {
 };
 const server: McpServerDefinition = {
   id: "server-a", name: "Server", transport: "stdio", command: "synthetic", args: [], env: {}, enabled: true,
-  tools: [{ name: "search", inputSchema: {} }], status: "connected", createdAt: 1, updatedAt: 1,
+  tools: [{ name: "search", inputSchema: {}, readOnly: true }], status: "connected", createdAt: 1, updatedAt: 1,
 };
 
 function workflow(): Pick<WorkflowDraftState, "configuredAgentId" | "modelId" | "reviewerConfiguredAgentId" | "reviewerModelId" | "definition"> {
@@ -22,6 +22,7 @@ function workflow(): Pick<WorkflowDraftState, "configuredAgentId" | "modelId" | 
       workflowId: "wf-ready",
       graphVersion: 1,
       objective: "Ready",
+      reviewEnabled: true,
       nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", configuredAgentId: "agent-a", prompt: "Answer", outputFields: [{ key: "answer" }], requiredTools: ["search"] }],
       edges: [],
     },
@@ -33,9 +34,26 @@ describe("workflow readiness", () => {
     expect(inspectWorkflowReadiness({ workflow: workflow(), configuredAgents: [agent], channels: [channel], mcpServers: [server] })).toEqual({ ready: true, issues: [] });
   });
 
+  test("does not require a reviewer while Review is disabled", () => {
+    const draft = workflow();
+    draft.definition.reviewEnabled = false;
+    draft.reviewerConfiguredAgentId = "";
+    draft.reviewerModelId = "";
+
+    expect(inspectWorkflowReadiness({ workflow: draft, configuredAgents: [agent], channels: [channel], mcpServers: [server] })).toEqual({ ready: true, issues: [] });
+  });
+
   test("treats an empty MCP allowlist as all server tools, matching runtime routing", () => {
     const unrestrictedAgent = { ...agent, mcpBindings: [{ serverId: "server-a", toolAllowlist: [] }] };
     expect(inspectWorkflowReadiness({ workflow: workflow(), configuredAgents: [unrestrictedAgent], channels: [channel], mcpServers: [server] })).toEqual({ ready: true, issues: [] });
+  });
+
+  test("checks each Review Gate Agent without a separate tool route", () => {
+    const draft = workflow();
+    draft.definition.reviewEnabled = false;
+    draft.definition.reviewGates = [{ id: "review-answer", targetNodeId: "answer", configuredAgentId: "missing-reviewer", reviewLevel: "high", judgeDimensions: [{ key: "quality", description: "Check quality." }], maxQualityRetries: 2 }];
+    const result = inspectWorkflowReadiness({ workflow: draft, configuredAgents: [agent], channels: [channel], mcpServers: [server] });
+    expect(result.issues).toEqual([expect.objectContaining({ code: "AGENT_MISSING", scope: "reviewer", nodeId: "answer", configuredAgentId: "missing-reviewer" })]);
   });
 
   test("reports missing dependencies without guessing by display name", () => {

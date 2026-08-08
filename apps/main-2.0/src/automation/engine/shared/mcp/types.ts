@@ -4,6 +4,8 @@ export interface McpToolDefinition {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  /** True only when the MCP server explicitly declares readOnlyHint. */
+  readOnly?: boolean;
 }
 
 export interface McpServerDefinition {

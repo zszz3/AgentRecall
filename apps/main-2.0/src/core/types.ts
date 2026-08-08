@@ -90,7 +90,7 @@ export interface SessionMessageEvent {
 
 export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor";
 export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex";
-export type RemoteSessionAgent = MigrationAgent | "hermes";
+export type RemoteSessionAgent = MigrationAgent | "hermes" | "pi";
 export type SessionMigrationStrategy = "complete" | "ai-compressed" | "locally-truncated";
 export type SessionMigrationStage = "reading" | "compressing" | "writing" | "indexing" | "launching";
 

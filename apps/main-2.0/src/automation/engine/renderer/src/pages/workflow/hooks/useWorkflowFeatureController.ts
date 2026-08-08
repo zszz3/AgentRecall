@@ -12,6 +12,8 @@ interface UseWorkflowFeatureControllerOptions {
   draft: WorkflowDraftController;
   runner: WorkflowRunnerController;
   language: "en" | "zh";
+  globalReviewEnabled: boolean;
+  runtimeReviewEnabled: boolean;
   onChooseWorkDir: () => Promise<void>;
   onRefresh: () => Promise<void>;
   onReadOutputFile?: WorkflowController["onReadOutputFile"];
@@ -31,6 +33,8 @@ export function useWorkflowFeatureController({
   draft,
   runner,
   language,
+  globalReviewEnabled,
+  runtimeReviewEnabled,
   onChooseWorkDir,
   onRefresh,
   onReadOutputFile,
@@ -73,6 +77,8 @@ export function useWorkflowFeatureController({
       reviewerConfiguredAgentId: draft.workflowReviewerConfiguredAgentId,
       reviewerModelId: draft.workflowReviewerModelId,
       generationReview: activeWorkflow?.generationReview,
+      reviewFeatureEnabled: globalReviewEnabled && activeWorkflow?.sourceType !== "official" && activeWorkflow?.topologyLocked !== true,
+      runtimeReviewFeatureEnabled: runtimeReviewEnabled && activeWorkflow?.sourceType !== "official" && activeWorkflow?.topologyLocked !== true,
       runtimes: snapshot.runtimes,
       channels: snapshot.channels,
       configuredAgents: snapshot.configuredAgents,
@@ -88,7 +94,7 @@ export function useWorkflowFeatureController({
       ...(activeWorkflow?.workflowV2Plan ? { workflowV2Plan: activeWorkflow.workflowV2Plan } : {}),
       runs: workflowRuns,
       runHistoryConversations,
-      nodeTasks: snapshot.tasks.filter((task) => draft.workflowRunProgress.some((item) => item.taskId === task.id)),
+      nodeTasks: snapshot.tasks.filter((task) => draft.workflowRunProgress.some((item) => item.taskId === task.id || item.reviewTaskId === task.id)),
       nodeConversations,
       onObjectiveChange: draft.setWorkflowObjective,
       onPauseNode: async (nodeId: string) => {
@@ -202,23 +208,22 @@ export function useWorkflowFeatureController({
       onSelectConfiguredAgent: (configuredAgentId: string) => {
         void draft.selectConfiguredAgent(configuredAgentId);
       },
-      onSelectModel: (modelId: string) => {
-        void draft.selectModel(modelId);
-      },
       onSelectReviewerConfiguredAgent: (configuredAgentId: string) => {
         void draft.selectReviewerConfiguredAgent(configuredAgentId);
       },
-      onSelectReviewerModel: (modelId: string) => {
-        void draft.selectReviewerModel(modelId);
-      },
     onReviewWorkflow: async () => {
         if (!draft.workflowId || !activeWorkflow) return;
-        setSnapshot(await workflows.reviewWorkflow({ workflowId: draft.workflowId, expectedRevision: activeWorkflow.revision }));
+        setSnapshot(await workflows.reviewWorkflow({ workflowId: draft.workflowId, expectedRevision: activeWorkflow.revision, reviewEnabled: globalReviewEnabled }));
     },
     onInterruptWorkflowReview: async () => {
       if (!draft.workflowId) return;
       setSnapshot(await workflows.interruptWorkflowReview({ workflowId: draft.workflowId }));
     },
+      onApplyReviewToManager: async () => {
+        const review = activeWorkflow?.generationReview;
+        if (!draft.workflowId || draft.workflowRunning || !review?.result) return;
+        setSnapshot(await workflows.applyReviewToManager({ workflowId: draft.workflowId, reviewedRevision: review.result.reviewedRevision }));
+      },
       onBuildDefinition: (objective?: string) => {
         void draft.buildWorkflowDefinition(objective);
       },
@@ -273,6 +278,9 @@ export function useWorkflowFeatureController({
       onResolveRuntimeApproval,
       onRefresh,
       runner,
+      globalReviewEnabled,
+      runtimeReviewEnabled,
+      activeWorkflow?.generationReview,
       setSnapshot,
       snapshot.channels,
       snapshot.configuredAgents,

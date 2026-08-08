@@ -10,7 +10,10 @@ import type { LiveSession, LiveSessionFamily, LiveSessionSnapshot } from "./type
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => import("node:sqlite").DatabaseSync };
 const CLAUDE_SESSION_START_SKEW_MS = 2 * 60 * 1000;
-const CODEX_LIFECYCLE_READ_CHUNK_SIZE = 64 * 1024;
+const CODEX_LIFECYCLE_READ_CHUNK_SIZE = 1024 * 1024;
+const CODEX_LIFECYCLE_MAX_LINE_SIZE = 512 * 1024;
+const CODEX_LIFECYCLE_MAX_READ_SIZE = 8 * 1024 * 1024;
+const CODEX_RECENT_ACTIVITY_FALLBACK_MS = 2 * 60 * 1000;
 
 type ProcessListRunner = (command: string, args: string[]) => Promise<string>;
 type LiveSessionSnapshotLoader = (options?: LoadLiveSessionOptions) => Promise<LiveSessionSnapshot>;
@@ -762,30 +765,53 @@ function isCodexAgentWorking(sessionFile: string, nowMs: number): boolean {
   let fileDescriptor: number | null = null;
   try {
     fileDescriptor = fs.openSync(sessionFile, "r");
-    const fileStat = fs.fstatSync(fileDescriptor);
-    if (nowMs - fileStat.mtimeMs >= LIVE_SESSION_INACTIVITY_TIMEOUT_MS) return false;
-    let position = fileStat.size;
+    const stat = fs.fstatSync(fileDescriptor);
+    if (nowMs - stat.mtimeMs >= LIVE_SESSION_INACTIVITY_TIMEOUT_MS) return false;
+    let position = stat.size;
+    const earliestPosition = Math.max(0, stat.size - CODEX_LIFECYCLE_MAX_READ_SIZE);
     let partialLine = Buffer.alloc(0);
+    let skippingOversizedLine = false;
 
-    while (position > 0) {
-      const bytesToRead = Math.min(CODEX_LIFECYCLE_READ_CHUNK_SIZE, position);
+    while (position > earliestPosition) {
+      const bytesToRead = Math.min(
+        CODEX_LIFECYCLE_READ_CHUNK_SIZE,
+        position - earliestPosition,
+      );
       position -= bytesToRead;
       const chunk = Buffer.allocUnsafe(bytesToRead);
       fs.readSync(fileDescriptor, chunk, 0, bytesToRead, position);
-      const content = Buffer.concat([chunk, partialLine]);
+      const content = partialLine.length > 0
+        ? Buffer.concat([chunk, partialLine])
+        : chunk;
       let lineEnd = content.length;
+      let skipCurrentLine = skippingOversizedLine;
 
       for (let index = content.length - 1; index >= 0; index--) {
         if (content[index] !== 0x0a) continue;
-        const state = codexAgentWorkingStateFromLine(content.subarray(index + 1, lineEnd).toString("utf8"));
-        if (state !== null) return state;
+        const line = content.subarray(index + 1, lineEnd);
+        if (!skipCurrentLine && line.length <= CODEX_LIFECYCLE_MAX_LINE_SIZE) {
+          const state = codexAgentWorkingStateFromLine(line.toString("utf8"));
+          if (state !== null) return state;
+        }
+        skipCurrentLine = false;
         lineEnd = index;
       }
 
-      partialLine = Buffer.from(content.subarray(0, lineEnd));
+      const leadingPartial = content.subarray(0, lineEnd);
+      if (skipCurrentLine || leadingPartial.length > CODEX_LIFECYCLE_MAX_LINE_SIZE) {
+        partialLine = Buffer.alloc(0);
+        skippingOversizedLine = true;
+      } else {
+        partialLine = Buffer.from(leadingPartial);
+        skippingOversizedLine = false;
+      }
     }
 
-    return codexAgentWorkingStateFromLine(partialLine.toString("utf8")) ?? false;
+    if (!skippingOversizedLine && partialLine.length <= CODEX_LIFECYCLE_MAX_LINE_SIZE) {
+      const state = codexAgentWorkingStateFromLine(partialLine.toString("utf8"));
+      if (state !== null) return state;
+    }
+    return nowMs - stat.mtimeMs <= CODEX_RECENT_ACTIVITY_FALLBACK_MS;
   } catch {
     return false;
   } finally {

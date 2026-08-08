@@ -67,6 +67,7 @@ export type {
   CreateWorkflowDraftRequest,
   PatchWorkflowDraftRequest,
   SendWorkflowDraftReplyRequest,
+  ApplyWorkflowReviewToManagerRequest,
   UpdateWorkflowRequest,
   AppendWorkflowContextRequest,
   AppendWorkflowRunContextRequest,
@@ -342,10 +343,12 @@ export interface RuntimeRequest {
   runtimeConfig: RuntimeConfig;
   runtimeConversation?: RuntimeConversation;
   planningWorkflowId?: string;
+  workflowReviewRevision?: number;
   workflowRunId?: string;
   workflowNodeId?: string;
   agentRecallMcp?: AgentRecallMcpContext;
   workflowNodeExecutionId?: string;
+  allowedMcpTools?: string[];
 }
 
 export interface RuntimeResumeCapabilities {
@@ -478,9 +481,11 @@ export interface RunTaskRequest {
   continuationPolicy?: RuntimeContinuationPolicy;
   runtimeConversation?: RuntimeConversation;
   planningWorkflowId?: string;
+  workflowReviewRevision?: number;
   workflowRunId?: string;
   workflowNodeId?: string;
   workflowNodeExecutionId?: string;
+  allowedMcpTools?: string[];
 }
 
 export interface WorkflowAgentRequest extends RuntimeRequest {
@@ -816,7 +821,7 @@ export type {
   WorkflowV2NodeRole,
   WorkflowV2NodeTemplate,
   WorkflowV2OutputFieldDef,
-  WorkflowV2PassThreshold,
+  WorkflowV2ReviewLevel,
   WorkflowV2ScriptLanguage,
   WorkflowV2ScriptRiskLevel,
   WorkflowV2ScriptCapability,

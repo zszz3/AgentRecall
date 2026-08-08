@@ -15,8 +15,8 @@ vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class {
     async connect(): Promise<void> {}
-    async listTools(): Promise<{ tools: Array<{ name: string; inputSchema: unknown }> }> {
-      return { tools: [{ name: "tool_a", inputSchema: {} }] };
+    async listTools(): Promise<{ tools: Array<{ name: string; inputSchema: unknown; annotations: { readOnlyHint: boolean } }> }> {
+      return { tools: [{ name: "tool_a", inputSchema: {}, annotations: { readOnlyHint: true } }] };
     }
     async close(): Promise<void> {}
   },
@@ -49,7 +49,7 @@ describe("discoverMcpTools", () => {
     expect(stdioArgs[0]).toMatchObject({
       env: { AGENT_RECALL_WORKFLOW_MCP_BRIDGE: "/tmp/automation-mcp-bridge.json", AGENT_RECALL_WORKFLOW_MCP_TOKEN: "secret-token" },
     });
-    expect(tools).toEqual([{ name: "tool_a", inputSchema: {} }]);
+    expect(tools).toEqual([{ name: "tool_a", inputSchema: {}, readOnly: true }]);
   });
 
   it("resolves env values as host variable names by default", async () => {

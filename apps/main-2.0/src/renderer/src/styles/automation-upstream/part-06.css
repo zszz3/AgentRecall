@@ -506,4 +506,199 @@
 .agent-mcp-tools { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 7px; padding: 8px 0 0 24px; }
 
 .agent-mcp-tools label { display: flex; min-width: 0; align-items: center; gap: 6px; overflow-wrap: anywhere; font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: 11px; }
+
+/* ── Workflow Node Drawer ── */
+
+.workflow-node-drawer {
+  position: fixed;
+  z-index: 68;
+  top: 74px;
+  right: 16px;
+  bottom: 16px;
+  width: min(440px, calc(100vw - 32px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: -12px 20px 54px rgba(0, 0, 0, .24), 0 0 0 1px rgba(255, 255, 255, .025) inset;
+  backdrop-filter: blur(18px);
+}
+
+.workflow-node-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workflow-node-drawer-header h3 {
+  margin: 0;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-node-drawer-role {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 680;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.workflow-node-drawer-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 16px 18px;
+}
+
+.workflow-node-drawer-section {
+  padding: 14px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+}
+
+.workflow-node-drawer-section:last-child {
+  border-bottom: 0;
+}
+
+.workflow-node-drawer-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.workflow-node-drawer-section-head strong {
+  font-size: 12px;
+}
+
+.workflow-node-drawer-section-head small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.workflow-node-drawer-empty {
+  padding: 24px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.workflow-node-drawer-collapse {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.workflow-node-drawer-collapse:hover {
+  color: var(--accent);
+}
+
+.workflow-node-drawer-collapse strong {
+  font-size: 12px;
+}
+
+.workflow-node-drawer-collapse small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.workflow-node-drawer-prompt {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workflow-node-drawer-prompt p {
+  margin: 0;
+}
+
+.workflow-node-output-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-node-output-field {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.workflow-node-output-field-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-node-output-field-head code {
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.workflow-node-output-field-head em.required {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--danger) 14%, var(--bg));
+  color: var(--danger);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 680;
+  text-transform: uppercase;
+}
+
+.workflow-node-output-field-head span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.workflow-node-output-field p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.workflow-node-drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+}
+
+.workflow-node-drawer-footer span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+@media (max-width: 820px) {
+  .workflow-node-drawer { top: 8px; right: 8px; bottom: 8px; width: calc(100vw - 16px); border-radius: 14px; }
+}
 }

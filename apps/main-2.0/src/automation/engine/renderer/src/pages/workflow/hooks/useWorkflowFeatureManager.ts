@@ -13,6 +13,8 @@ interface UseWorkflowFeatureManagerOptions {
   snapshotRef: React.MutableRefObject<AppSnapshot>;
   setSnapshot: (snapshot: AppSnapshot) => void;
   language: "en" | "zh";
+  globalReviewEnabled: boolean;
+  runtimeReviewEnabled: boolean;
   onChooseWorkDir: () => Promise<void>;
   onRefresh: () => Promise<void>;
   onReadOutputFile?: (filePath: string) => Promise<LocalFilePreview>;
@@ -35,6 +37,8 @@ export function useWorkflowFeatureManager({
   snapshotRef,
   setSnapshot,
   language,
+  globalReviewEnabled,
+  runtimeReviewEnabled,
   onChooseWorkDir,
   onRefresh,
   onReadOutputFile,
@@ -84,6 +88,7 @@ export function useWorkflowFeatureManager({
     workflows,
     workflowId: draft.workflowId,
     workflowContextDocument: draft.workflowContextDocument,
+    reviewEnabled: runtimeReviewEnabled,
   });
   const controller = useWorkflowFeatureController({
     snapshot,
@@ -92,6 +97,8 @@ export function useWorkflowFeatureManager({
     draft,
     runner,
     language,
+    globalReviewEnabled,
+    runtimeReviewEnabled,
     onChooseWorkDir,
     onRefresh,
     onReadOutputFile,

@@ -25,6 +25,7 @@ export async function discoverMcpTools(
       name: tool.name,
       ...(tool.description ? { description: tool.description } : {}),
       inputSchema: tool.inputSchema as Record<string, unknown>,
+      ...(tool.annotations?.readOnlyHint === true ? { readOnly: true } : {}),
     }));
   } finally {
     await client.close().catch(() => undefined);

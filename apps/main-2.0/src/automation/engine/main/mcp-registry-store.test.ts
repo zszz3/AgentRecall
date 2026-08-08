@@ -34,6 +34,7 @@ describe("PostgreSQL MCP registry", () => {
       tools: [{
         name: "read_file",
         description: "Read a file",
+        readOnly: true,
         inputSchema: {
           type: "object",
           properties: { path: { type: "string" } },
@@ -52,6 +53,7 @@ describe("PostgreSQL MCP registry", () => {
         tools: [
           expect.objectContaining({
             name: "read_file",
+            readOnly: true,
             inputSchema: expect.objectContaining({ type: "object" }),
           }),
         ],

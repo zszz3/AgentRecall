@@ -156,7 +156,7 @@ export const SESSION_SOURCE_REGISTRY = {
     id: "pi-cli", label: "Pi", format: "pi", family: "pi", uiFamily: "other", statsGroup: null,
     optionalSetting: "includePi", pendingKey: "pi", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
-    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+    capabilities: { live: false, resume: false, migrate: false, sessionSync: true, openApp: false },
   },
 } as const satisfies Record<SessionSource, SessionSourceDescriptor>;
 
@@ -183,5 +183,6 @@ export function sessionSourceLabel(source: SessionSource): string {
 
 export function remoteSessionAgentForSource(source: SessionSource): RemoteSessionAgent | null {
   if (source === "hermes") return "hermes";
+  if (source === "pi-cli") return "pi";
   return sessionSourceDescriptor(source).migrationAgent;
 }

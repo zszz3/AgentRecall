@@ -2766,6 +2766,42 @@ select:focus-visible {
   gap: 7px;
 }
 
+.export-markdown-menu {
+  position: relative;
+}
+
+.export-markdown-options {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 210px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.detail-actions .export-markdown-options button {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 0;
+  text-align: left;
+}
+
+.export-markdown-options small {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .detail-summary {
   padding: 10px 18px;
   border-bottom: 1px solid var(--border-subtle);

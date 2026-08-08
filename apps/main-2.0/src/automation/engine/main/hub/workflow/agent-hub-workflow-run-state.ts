@@ -23,6 +23,7 @@ export function startWorkflowRunState(input: {
   if (input.request.transactionApprovalMode && workflowV2Plan.definition.transactionPolicy) {
     workflowV2Plan.definition.transactionPolicy.approvalMode = input.request.transactionApprovalMode;
   }
+  if (input.request.reviewEnabled !== undefined) workflowV2Plan.definition.reviewEnabled = input.request.reviewEnabled;
 
   return {
     nextRun: {
@@ -30,6 +31,7 @@ export function startWorkflowRunState(input: {
       workflowId: input.workflow.workflowId,
       status: "running",
       triggerSource: input.request.triggerSource ?? "manual",
+      ...(input.request.parentRunId ? { parentRunId: input.request.parentRunId } : {}),
       ...(input.request.configurationSnapshot ? { configurationSnapshot: structuredClone(input.request.configurationSnapshot) } : {}),
       workflowV2Plan,
       progress: [],

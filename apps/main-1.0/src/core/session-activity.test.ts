@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -146,6 +146,62 @@ describe("live session detection", () => {
       { family: "codex", rawId: "22222222-2222-4222-8222-222222222222", pid: 223 },
     ]);
     fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("bounds Codex lifecycle scans to the recent tail of large session files", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-large-"));
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    const sessionFile = path.join(
+      root,
+      ".codex",
+      "sessions",
+      "2026",
+      "08",
+      "06",
+      `rollout-2026-08-06T12-00-00-${sessionId}.jsonl`,
+    );
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+    fs.writeFileSync(sessionFile, [
+      JSON.stringify({ type: "event_msg", payload: { type: "task_started" } }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          output: `data:image/png;base64,${"x".repeat(9 * 1024 * 1024)}`,
+        },
+      }),
+    ].join("\n") + "\n");
+    fs.utimesSync(sessionFile, now, now);
+
+    const mutableFs = require("node:fs") as typeof import("node:fs");
+    const originalReadSync = mutableFs.readSync;
+    let bytesRead = 0;
+    mutableFs.readSync = ((...args: unknown[]) => {
+      const result = Reflect.apply(originalReadSync, mutableFs, args) as number;
+      bytesRead += result;
+      return result;
+    }) as typeof mutableFs.readSync;
+    syncBuiltinESMExports();
+
+    try {
+      const snapshot = await loadLiveSessionSnapshot({
+        platform: "darwin",
+        now,
+        runner: async (command) => {
+          if (command === "/bin/ps") return "223 /opt/homebrew/bin/codex";
+          if (command === "lsof") return `${sessionFile}\n`;
+          return "";
+        },
+      });
+
+      expect(snapshot.sessions).toEqual([{ family: "codex", rawId: sessionId, pid: 223 }]);
+      expect(bytesRead).toBeLessThanOrEqual(8 * 1024 * 1024);
+    } finally {
+      mutableFs.readSync = originalReadSync;
+      syncBuiltinESMExports();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("does not treat Codex helper processes as independent sessions", () => {

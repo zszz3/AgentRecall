@@ -55,10 +55,12 @@ export function OpenVikingMemoryPage({
   language,
   enabled,
   onOpenSettings,
+  onViewSession,
 }: {
   language: LanguageMode;
   enabled: boolean;
   onOpenSettings: () => void;
+  onViewSession?: (rawId: string) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [activeView, setActiveView] = useState<MemoryView>("memory");
@@ -691,13 +693,25 @@ export function OpenVikingMemoryPage({
                         </footer>
                         {details?.evidence.length ? (
                           <div className="openviking-memory-evidence">
-                            <strong>{l("Evidence history", "证据记录")}</strong>
+                            <strong>{l("Evidence", "证据")}</strong>
                             {details.evidence.slice(0, 4).map((evidence) => (
-                              <span key={evidence.id}>
-                                {evidence.sourceAgent ?? l("Unknown agent", "未知 Agent")}
-                                {evidence.sourceSessionId ? ` · ${evidence.sourceSessionId}` : ""}
-                                {evidence.remoteTaskId ? ` · ${evidence.remoteTaskId}` : ""}
-                              </span>
+                              <button
+                                key={evidence.id}
+                                type="button"
+                                className="openviking-evidence-item"
+                                disabled={!evidence.sourceSessionId || !onViewSession}
+                                title={evidence.sourceSessionId ? l("View session", "查看会话") : undefined}
+                                onClick={() => evidence.sourceSessionId && onViewSession?.(evidence.sourceSessionId)}
+                              >
+                                <em>{evidence.sourceAgent === "claude" ? "Claude Code" : evidence.sourceAgent === "codex" ? "Codex" : evidence.sourceAgent ?? l("Unknown", "未知")}</em>
+                                <span>
+                                  {evidence.sourceTurnIds.length > 0
+                                    ? l(`${evidence.sourceTurnIds.length} turns`, `${evidence.sourceTurnIds.length} 个 turn`)
+                                    : null}
+                                </span>
+                                {evidence.sourceSessionId ? <code title={evidence.sourceSessionId}>{evidence.sourceSessionId.slice(0, 8)}</code> : null}
+                                <small>{new Date(evidence.createdAt).toLocaleDateString(language === "zh" ? "zh-CN" : "en", { month: "short", day: "numeric" })}</small>
+                              </button>
                             ))}
                           </div>
                         ) : null}

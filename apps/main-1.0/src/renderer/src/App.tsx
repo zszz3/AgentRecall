@@ -1846,11 +1846,11 @@ export function App(): ReactElement {
     }, 1800);
   }
 
-  async function exportMarkdown(sessionKey: string): Promise<void> {
+  async function exportMarkdown(sessionKey: string, includeToolTrace: boolean): Promise<void> {
     setContextMenu(null);
     setActionStatus({ kind: "running", message: t("Exporting markdown...", "正在导出 Markdown...") });
     try {
-      const exported = await window.sessionSearch.exportMarkdown(sessionKey);
+      const exported = await window.sessionSearch.exportMarkdown(sessionKey, { includeToolTrace });
       if (!exported) {
         setActionStatus(null);
         return;
@@ -2513,7 +2513,7 @@ export function App(): ReactElement {
           onCopyMarkdown={() =>
             void runAction(t("Copying markdown", "正在复制 Markdown"), () => window.sessionSearch.copyMarkdown(detail.sessionKey), t("Markdown copied.", "Markdown 已复制。"))
           }
-          onExportMarkdown={() => void exportMarkdown(detail.sessionKey)}
+          onExportMarkdown={(includeToolTrace) => void exportMarkdown(detail.sessionKey, includeToolTrace)}
           onExportJson={() => void exportJson(detail.sessionKey)}
           onCopyPlain={() =>
             void runAction(t("Copying plain text", "正在复制纯文本"), () => window.sessionSearch.copyPlainText(detail.sessionKey), t("Plain text copied.", "纯文本已复制。"))
@@ -2611,7 +2611,7 @@ export function App(): ReactElement {
           onCopyMarkdown={() =>
             void runAction(t("Copying markdown", "正在复制 Markdown"), () => window.sessionSearch.copyMarkdown(contextMenu.session.sessionKey), t("Markdown copied.", "Markdown 已复制。"))
           }
-          onExportMarkdown={() => void exportMarkdown(contextMenu.session.sessionKey)}
+          onExportMarkdown={(includeToolTrace) => void exportMarkdown(contextMenu.session.sessionKey, includeToolTrace)}
           onExportJson={() => void exportJson(contextMenu.session.sessionKey)}
           onDelete={() => requestDeleteSession(contextMenu.session)}
           onReveal={() =>
@@ -2935,7 +2935,7 @@ function ContextMenu({
   onMigrate: () => void;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
-  onExportMarkdown: () => void;
+  onExportMarkdown: (includeToolTrace: boolean) => void;
   onExportJson: () => void;
   onDelete: () => void;
   onReveal: () => void;
@@ -2995,8 +2995,11 @@ function ContextMenu({
         </button>
       ) : null}
       <button onClick={onCopyMarkdown}>{l("Copy Markdown", "复制 Markdown")}</button>
-      <button onClick={onExportMarkdown}>
-        <Download size={14} /> {l("Export Markdown", "导出 Markdown")}
+      <button onClick={() => onExportMarkdown(false)}>
+        <Download size={14} /> {l("Export Markdown (No Tool Trace)", "导出 Markdown（不含 Tool Trace）")}
+      </button>
+      <button onClick={() => onExportMarkdown(true)}>
+        <Download size={14} /> {l("Export Markdown (With Tool Trace)", "导出 Markdown（包含 Tool Trace）")}
       </button>
       <button onClick={onExportJson}>
         <Download size={14} /> {l("Export JSON", "导出 JSON")}

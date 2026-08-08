@@ -90,6 +90,15 @@ async function runtimeWithPersistedCurrentProcess(
   });
 }
 
+async function persistedRuntimeFixture(root: string): Promise<void> {
+  const runtime = path.join(root, "runtime", "0.4.11");
+  await mkdir(path.join(runtime, "bin"), { recursive: true });
+  await writeFile(path.join(runtime, "bin", "openviking-server"), "");
+  await writeFile(path.join(root, "active-runtime.json"), JSON.stringify(manifest()));
+  await writeFile(path.join(root, "runtime-state.json"), JSON.stringify({ pid: 99999, port: 21933 }));
+  await writeFile(path.join(root, "root-api-key"), `${"b".repeat(64)}\n`);
+}
+
 class FakeChild extends EventEmitter {
   pid = 4242;
   exitCode: number | null = null;
@@ -119,6 +128,8 @@ function runtimeHarness(root: string, options: {
   codexAuthBootstrapPath?: string;
   download?: (url: string, destination: string) => Promise<void>;
   child?: FakeChild;
+  isProcessAlive?: (pid: number) => boolean;
+  stopTimeoutMs?: number;
 } = {}) {
   const child = options.child ?? new FakeChild();
   const spawnCalls: Array<{
@@ -130,6 +141,7 @@ function runtimeHarness(root: string, options: {
   const healthCheck = vi.fn(async () => undefined);
   const healthProbe = vi.fn(async () => options.healthy ?? true);
   const killProcess = vi.fn();
+  const forceKillProcess = vi.fn();
   const service = new OpenVikingRuntimeService({
     rootDir: root,
     codexAuthBootstrapPath: options.codexAuthBootstrapPath
@@ -167,10 +179,12 @@ function runtimeHarness(root: string, options: {
     },
     healthCheck,
     healthProbe,
-    isProcessAlive: () => options.alive ?? false,
+    isProcessAlive: options.isProcessAlive ?? (() => options.alive ?? false),
     killProcess,
+    forceKillProcess,
+    ...(options.stopTimeoutMs === undefined ? {} : { stopTimeoutMs: options.stopTimeoutMs }),
   });
-  return { service, child, spawnCalls, healthCheck, healthProbe, killProcess };
+  return { service, child, spawnCalls, healthCheck, healthProbe, killProcess, forceKillProcess };
 }
 
 describe("OpenVikingRuntimeService", () => {
@@ -690,6 +704,88 @@ describe("OpenVikingRuntimeService", () => {
     await expect(readFile(path.join(root, "runtime-state.json"), "utf8")).rejects.toThrow();
     await service.stop();
     expect(killProcess).not.toHaveBeenCalled();
+  });
+
+  it("terminates a healthy persisted runtime with SIGTERM alone", async () => {
+    const root = await temporaryRoot();
+    await persistedRuntimeFixture(root);
+    let alive = true;
+    const { service, killProcess, forceKillProcess } = runtimeHarness(root, {
+      isProcessAlive: () => alive,
+      stopTimeoutMs: 100,
+    });
+    killProcess.mockImplementation(() => {
+      alive = false;
+    });
+
+    await service.stop();
+    expect(killProcess).toHaveBeenCalledWith(99999);
+    expect(forceKillProcess).not.toHaveBeenCalled();
+    await expect(readFile(path.join(root, "runtime-state.json"), "utf8")).rejects.toThrow();
+    await expect(service.getStatus()).resolves.toMatchObject({ state: "stopped" });
+  });
+
+  it("escalates to SIGKILL when the persisted runtime ignores SIGTERM", async () => {
+    const root = await temporaryRoot();
+    await persistedRuntimeFixture(root);
+    let alive = true;
+    const { service, killProcess, forceKillProcess } = runtimeHarness(root, {
+      isProcessAlive: () => alive,
+      stopTimeoutMs: 100,
+    });
+    forceKillProcess.mockImplementation(() => {
+      alive = false;
+    });
+
+    await service.stop();
+    expect(killProcess).toHaveBeenCalledWith(99999);
+    expect(forceKillProcess).toHaveBeenCalledWith(99999);
+    await expect(readFile(path.join(root, "runtime-state.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("records a warning when the persisted runtime survives forced termination", async () => {
+    const root = await temporaryRoot();
+    await persistedRuntimeFixture(root);
+    const { service, killProcess, forceKillProcess } = runtimeHarness(root, {
+      isProcessAlive: () => true,
+      stopTimeoutMs: 100,
+    });
+
+    await service.stop();
+    expect(killProcess).toHaveBeenCalledWith(99999);
+    expect(forceKillProcess).toHaveBeenCalledWith(99999);
+    const diagnostics = await service.getDiagnostics();
+    expect(diagnostics.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        level: "warning",
+        type: "stop",
+        message: expect.stringContaining("did not exit after forced termination"),
+      }),
+    ]));
+  }, 10_000);
+
+  it("waits for the owned runtime child to exit after escalating to SIGKILL", async () => {
+    const root = await temporaryRoot();
+    const child = new FakeChild(false);
+    const signals: Array<string | undefined> = [];
+    child.kill = ((signal?: string) => {
+      signals.push(signal);
+      if (signal === "SIGKILL") {
+        setTimeout(() => child.finishExit(), 30);
+      }
+      return true;
+    }) as FakeChild["kill"];
+    const { service } = runtimeHarness(root, { child, stopTimeoutMs: 100 });
+    await service.install(manifest());
+    await service.start({
+      embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+      vlm: { provider: "openai-codex", model: "gpt-5.4" },
+    });
+
+    await service.stop();
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(child.exitCode).toBe(0);
+    await expect(service.getStatus()).resolves.toMatchObject({ state: "stopped" });
   });
 
   it.runIf(process.platform !== "win32")(

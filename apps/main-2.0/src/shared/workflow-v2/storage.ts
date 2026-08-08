@@ -4,10 +4,12 @@ import { isWorkflowV2WorkerOutput, type WorkflowV2WorkerOutput } from "./packets
 import type { WorkflowV2Plan } from "./planning";
 import type {
   WorkflowV2InterventionAction,
+  WorkflowV2ReviewAttemptRecord,
   WorkflowV2ReviewVerdict,
 } from "./review";
 import {
   isWorkflowV2InterventionAction,
+  isWorkflowV2ReviewTraceEntry,
   isWorkflowV2ReviewVerdict,
 } from "./review";
 import type { WorkflowV2RunState } from "./state";
@@ -258,6 +260,9 @@ function isPersistedExecutionState(
     const node = nodes[nodeId];
     if (!isRecord(node) || node.nodeId !== nodeId || !isNonEmptyString(node.title)) return false;
     if (!isNodeExecutionStatus(node.status) || !isNonNegativeSafeInteger(node.attempt)) return false;
+    if (node.reviewAttempt !== undefined && !isNonNegativeSafeInteger(node.reviewAttempt)) return false;
+    if (node.reviewInfrastructureAttempt !== undefined && !isNonNegativeSafeInteger(node.reviewInfrastructureAttempt)) return false;
+    if (node.reviewHistory !== undefined && (!Array.isArray(node.reviewHistory) || !node.reviewHistory.every(isWorkflowV2ReviewAttemptRecord))) return false;
     return [node.dependsOn, node.dependents, node.blockedBy, node.resourceLocks].every(
       (items) => Array.isArray(items) && items.every((item) => typeof item === "string"),
     );
@@ -340,8 +345,20 @@ function isNodeExecutionStatus(value: unknown): boolean {
     || value === "paused"
     || value === "skipped"
     || value === "completed"
+    || value === "completed_with_override"
     || value === "failed"
   );
+}
+
+export function isWorkflowV2ReviewAttemptRecord(value: unknown): value is WorkflowV2ReviewAttemptRecord {
+  return isRecord(value)
+    && isPositiveSafeInteger(value.reviewAttempt)
+    && isWorkflowV2WorkerOutput(value.candidate)
+    && isWorkflowV2ReviewVerdict(value.verdict)
+    && (value.requiredLevel === "low" || value.requiredLevel === "medium" || value.requiredLevel === "high")
+    && typeof value.passed === "boolean"
+    && isNonNegativeFinite(value.reviewedAt)
+    && (value.trace === undefined || (Array.isArray(value.trace) && value.trace.every(isWorkflowV2ReviewTraceEntry)));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

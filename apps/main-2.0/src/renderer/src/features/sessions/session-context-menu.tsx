@@ -67,7 +67,7 @@ export function SessionContextMenu({
   onMigrate(): void;
   onCopyResume(): void;
   onCopyMarkdown(): void;
-  onExportMarkdown(): void;
+  onExportMarkdown(includeToolTrace: boolean): void;
   onExportJson(): void;
   onDelete(): void;
   onReveal(): void;
@@ -143,8 +143,11 @@ export function SessionContextMenu({
         </button>
       ) : null}
       <button onClick={onCopyMarkdown}>{l("Copy Markdown", "复制 Markdown")}</button>
-      <button onClick={onExportMarkdown}>
-        <Download size={14} /> {l("Export Markdown", "导出 Markdown")}
+      <button onClick={() => onExportMarkdown(false)}>
+        <Download size={14} /> {l("Export Markdown (No Tool Trace)", "导出 Markdown（不含 Tool Trace）")}
+      </button>
+      <button onClick={() => onExportMarkdown(true)}>
+        <Download size={14} /> {l("Export Markdown (With Tool Trace)", "导出 Markdown（包含 Tool Trace）")}
       </button>
       <button onClick={onExportJson}>
         <Download size={14} /> {l("Export JSON", "导出 JSON")}

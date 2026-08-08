@@ -20,6 +20,7 @@ export function registerSessionCatalogIpc(
   ipc.handle("search:sessions", (_event, options: SearchOptions) => service.search(options));
   ipc.handle("search:session-page", (_event, options: SearchOptions) => service.searchPage(options));
   ipc.handle("session:get", (_event, sessionKey: string) => service.get(sessionKey));
+  ipc.handle("session:find-by-raw-id", (_event, rawId: string) => service.findByRawId(rawId));
   ipc.handle("session:turns", (_event, sessionKey: string) => service.listTurns(sessionKey));
   ipc.handle("session:turn", (_event, sessionKey: string, turnId: string) =>
     service.getTurn(sessionKey, turnId));

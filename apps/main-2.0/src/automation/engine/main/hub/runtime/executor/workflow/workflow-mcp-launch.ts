@@ -22,6 +22,7 @@ export interface WorkflowMcpBinding {
   runId?: string;
   nodeId?: string;
   executionId?: string;
+  reviewRevision?: number;
   managedToken?: string;
   scope?: WorkflowMcpScope;
   studioToken?: string;
@@ -48,7 +49,9 @@ export function workflowMcpLaunchConfig(
   const { discoveryPath, workflowId } = binding;
   if (!discoveryPath || (!workflowId && !binding.studioToken)) return undefined;
   const scope: WorkflowMcpScope = binding.scope
-    ?? (binding.runId && binding.nodeId ? "node_execution" : "planning");
+    ?? (binding.runId && binding.nodeId && binding.reviewRevision
+      ? "runtime_review"
+      : binding.runId && binding.nodeId ? "node_execution" : binding.reviewRevision ? "review" : "planning");
   const mainBundlePath = options.mainBundlePath ?? fileURLToPath(import.meta.url);
   const compiledServer = [
     process.env.AGENT_RECALL_WORKFLOW_MCP_SERVER,
@@ -69,6 +72,7 @@ export function workflowMcpLaunchConfig(
         ...(binding.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: binding.runId } : {}),
         ...(binding.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: binding.nodeId } : {}),
         ...(binding.executionId ? { AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: binding.executionId } : {}),
+        ...(binding.reviewRevision ? { AGENT_RECALL_WORKFLOW_REVIEW_REVISION: String(binding.reviewRevision) } : {}),
         ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
         ...(binding.studioToken ? { AGENT_RECALL_STUDIO_TOKEN: binding.studioToken } : {}),
         ELECTRON_RUN_AS_NODE: "1",
@@ -96,6 +100,7 @@ export function workflowMcpLaunchConfig(
       ...(binding.runId ? { AGENT_RECALL_WORKFLOW_RUN_ID: binding.runId } : {}),
       ...(binding.nodeId ? { AGENT_RECALL_WORKFLOW_NODE_ID: binding.nodeId } : {}),
       ...(binding.executionId ? { AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: binding.executionId } : {}),
+      ...(binding.reviewRevision ? { AGENT_RECALL_WORKFLOW_REVIEW_REVISION: String(binding.reviewRevision) } : {}),
       ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
       ...(binding.studioToken ? { AGENT_RECALL_STUDIO_TOKEN: binding.studioToken } : {}),
       ELECTRON_RUN_AS_NODE: "1",

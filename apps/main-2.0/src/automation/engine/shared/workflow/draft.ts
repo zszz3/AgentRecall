@@ -15,7 +15,7 @@ export interface WorkflowGrillMessage {
 
 export interface WorkflowGrillEvent {
   id: string;
-  type: "tool_call" | "tool_result" | "approval_request" | "approval_response";
+  type: "tool_call" | "tool_result" | "approval_request" | "approval_response" | "handoff";
   content: string;
   timestamp: number;
   name?: string;

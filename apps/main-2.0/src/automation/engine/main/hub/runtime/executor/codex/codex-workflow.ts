@@ -45,6 +45,7 @@ export async function runCodexWorkflow(
     runId: input.workflowRunId,
     nodeId: input.workflowNodeId,
     executionId: input.workflowNodeExecutionId,
+    reviewRevision: input.workflowReviewRevision,
     ...(input.planningWorkflowId ? { managedToken: options.workflowMcpManagedToken?.() } : {}),
     studioToken: input.agentRecallMcp?.studioToken,
   });

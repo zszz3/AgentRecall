@@ -345,6 +345,25 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     const workflow = hub.snapshot().workflowStore.workflows.find((item) => item.workflowId === workflowId);
     return workflow ? { ok: true, workflow } : { ok: false, error: `Workflow ${workflowId} was not found.` };
   }
+  if (route === "/mcp/workflow/review/submit") {
+    const workflowId = asString(record.workflowId) ?? "";
+    const reviewedRevision = typeof record.reviewedRevision === "number" && Number.isSafeInteger(record.reviewedRevision)
+      ? record.reviewedRevision
+      : 0;
+    if (!workflowId || reviewedRevision < 1) return { ok: false, error: "workflow_review_submit requires a bound Workflow and Revision." };
+    const { workflowId: _workflowId, reviewedRevision: _reviewedRevision, ...value } = record;
+    return hub.submitWorkflowReview({ workflowId, reviewedRevision, value });
+  }
+  if (route === "/mcp/workflow/review-gate/submit") {
+    const workflowId = asString(record.workflowId) ?? "";
+    const runId = asString(record.runId) ?? "";
+    const executionId = asString(record.executionId) ?? "";
+    if (!workflowId || !runId || !executionId) {
+      return { ok: false, error: "workflow_review_gate_submit requires a bound Workflow, Run, and review execution." };
+    }
+    const { workflowId: _workflowId, runId: _runId, executionId: _executionId, ...value } = record;
+    return hub.submitWorkflowReviewGate({ workflowId, runId, executionId, value });
+  }
   if (route === "/mcp/workflow/create") {
     const workflowId = asString(record.workflowId) ?? "";
     if (!workflowId) return { ok: false, error: "workflow_create requires workflowId." };

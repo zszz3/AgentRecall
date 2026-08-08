@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type MouseEvent, type ReactElement } from "react";
-import { Bot, CheckCircle2, CircleStop, FileInput, GitBranch, History, Maximize2, Pencil, Play, RefreshCw, Send, ShieldAlert, Wand2, X } from "lucide-react";
+import { Bot, CheckCircle2, CircleStop, FileInput, FolderOpen, GitBranch, History, Maximize2, Pencil, Play, RefreshCw, Send, ShieldAlert, Wand2, X } from "lucide-react";
 import { DEFAULT_MODEL_ID, modelDisplayLabel } from "../../../../shared/models";
 import { WORKFLOW_TOTAL_QUESTION_COUNT } from "../../../../shared/workflow-agent";
 import { validateWorkflowV2Definition } from "../../../../shared/workflow-v2/validation";
@@ -58,10 +58,11 @@ const WorkflowTranscriptMessage = memo(function WorkflowTranscriptMessage({ mess
   workflowId?: string;
   onResolveApproval?: WorkflowController["onResolveRuntimeApproval"];
 }) {
+  const reviewHandoff = message.events?.find((event) => event.type === "handoff" && event.metadata?.kind === "review_result");
   return <div className={`cli-message ${message.role}`}>
     <div className="cli-agent-line">
       {message.role === "assistant" ? <span className={`runtime-dot ${agentAccent(workflowRuntimeId)}`} /> : null}
-      <span>{message.role === "assistant" ? "Workflow agent" : "You"}</span>
+      <span>{message.role === "assistant" ? "Workflow agent" : reviewHandoff ? "Review Agent result" : "You"}</span>
     </div>
     {message.role === "user" ? <div className="cli-markdown"><Markdown text={message.content} /></div> : (
       <div className={`cli-markdown ${running && message.content === WORKFLOW_THINKING_MESSAGE ? "is-streaming" : ""}`}>
@@ -98,6 +99,8 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   const reviewerConfiguredAgentId = source.reviewerConfiguredAgentId;
   const reviewerModelId = source.reviewerModelId ?? DEFAULT_MODEL_ID;
   const generationReview = source.generationReview;
+  const reviewFeatureEnabled = source.reviewFeatureEnabled === true;
+  const runtimeReviewFeatureEnabled = source.runtimeReviewFeatureEnabled === true;
   const runtimes = source.runtimes;
   const channels = source.channels;
   const configuredAgents = source.configuredAgents ?? [];
@@ -129,10 +132,9 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   const onRejectNodeCompletion = source.onRejectNodeCompletion;
   const onInterruptNodeConversation = source.onInterruptNodeConversation;
   const onSelectConfiguredAgent = source.onSelectConfiguredAgent;
-  const onSelectModel = source.onSelectModel ?? (() => undefined);
   const onSelectReviewerConfiguredAgent = source.onSelectReviewerConfiguredAgent;
-  const onSelectReviewerModel = source.onSelectReviewerModel ?? (() => undefined);
   const onReviewWorkflow = source.onReviewWorkflow;
+  const onApplyReviewToManager = source.onApplyReviewToManager;
   const onBuildDefinition = source.onBuildDefinition;
   const onSendReply = source.onSendReply;
   const onUpdateDefinition = source.onUpdateDefinition;
@@ -148,6 +150,7 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   const workflowText = WORKFLOW_TEXT[language];
   const validation = validateWorkflowV2Definition(definition);
   const workflowConfirmed = revision !== undefined && confirmedRevision === revision;
+  const runtimeReviewBlocked = (definition.reviewGates?.length ?? 0) > 0 && !runtimeReviewFeatureEnabled;
   const runOwnsInput = Boolean(activeRunId && (!source.activeRunStatus || source.activeRunStatus === "running" || source.activeRunStatus === "waiting_for_user"));
   const canEditDefinition = !runOwnsInput && !topologyLocked && !running;
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
@@ -161,17 +164,21 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   }, [generationReview?.status]);
 
   useEffect(() => {
+    if (!reviewFeatureEnabled) setReviewDrawerOpen(false);
+  }, [reviewFeatureEnabled]);
+
+  useEffect(() => {
     setRunCenterOpen(false);
     setSelectedHistoryRunId(undefined);
   }, [workflowId]);
   const workflowStarted = messages.length > 0;
   const grillComplete = Math.max(0, messages.filter((message) => message.role === "user").length - 1) >= WORKFLOW_TOTAL_QUESTION_COUNT;
   const runtimeMap = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
-  const workflowConfiguredAgent = configuredAgentById(reviewerConfiguredAgentId, configuredAgents);
+  const workflowConfiguredAgent = configuredAgentById(configuredAgentId, configuredAgents);
   const workflowChannel = resolveConfiguredAgentChannel(workflowConfiguredAgent, channels);
   const workflowRuntimeId = configuredAgentRuntimeId(workflowConfiguredAgent, workflowChannel);
   const workflowRuntime = runtimeMap.get(workflowRuntimeId) ?? fallbackRuntime(workflowRuntimeId);
-  const workflowModel = configuredAgentModel(workflowConfiguredAgent, workflowChannel, reviewerModelId);
+  const workflowModel = configuredAgentModel(workflowConfiguredAgent, workflowChannel, modelId);
   const workflowConfigTitle = [
     workflowConfiguredAgent?.name,
     workflowChannel?.label,
@@ -180,6 +187,22 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   ]
     .filter(Boolean)
     .join(" · ");
+  const reviewerConfiguredAgent = configuredAgentById(reviewerConfiguredAgentId, configuredAgents);
+  const reviewerChannel = resolveConfiguredAgentChannel(reviewerConfiguredAgent, channels);
+  const reviewerRuntimeId = configuredAgentRuntimeId(reviewerConfiguredAgent, reviewerChannel);
+  const reviewerRuntime = runtimeMap.get(reviewerRuntimeId) ?? fallbackRuntime(reviewerRuntimeId);
+  const reviewerReady = Boolean(reviewerConfiguredAgent && reviewerChannel && reviewerRuntime.available);
+  const reviewDisabledReason = running
+    ? "Review is unavailable while the workflow is running."
+    : !validation.valid
+      ? validation.errors[0] ?? "The workflow definition is invalid."
+      : !reviewerConfiguredAgent
+        ? "Select a Review Agent before starting review."
+        : !reviewerChannel
+          ? "The selected Review Agent has no execution configuration."
+          : !reviewerRuntime.available
+            ? `The ${reviewerRuntime.label} runtime is unavailable.`
+            : undefined;
   const runProgressByNodeId = new Map(runProgress.map((item) => [item.nodeId, item]));
   const runProgressVisible = runProgress.length > 0;
   const contextDocumentVisible = contextDocument.trim().length > 0;
@@ -212,11 +235,15 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   const openNodeProgress = openNodeId ? runProgressByNodeId.get(openNodeId) : undefined;
   const openNodeTaskId = openNodeId ? runProgressByNodeId.get(openNodeId)?.taskId : undefined;
   const openNodeTask = nodeTasks.find((task) => task.id === openNodeTaskId);
+  const openNodeReviewTaskId = openNodeId ? runProgressByNodeId.get(openNodeId)?.reviewTaskId : undefined;
+  const openNodeReviewTask = nodeTasks.find((task) => task.id === openNodeReviewTaskId);
   const nodeAgentSessions = graph.nodes.filter((node) => node.execModel === "llm").map((node) => {
     const conversation = nodeConversations.find((candidate) => candidate.nodeId === node.id);
     const taskId = runProgressByNodeId.get(node.id)?.taskId;
     const task = taskId ? nodeTasks.find((candidate) => candidate.id === taskId) : undefined;
-    return { nodeId: node.id, nodeTitle: node.title, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}) };
+    const reviewTaskId = runProgressByNodeId.get(node.id)?.reviewTaskId;
+    const reviewTask = reviewTaskId ? nodeTasks.find((candidate) => candidate.id === reviewTaskId) : undefined;
+    return { nodeId: node.id, nodeTitle: node.title, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}), ...(reviewTask ? { reviewTask } : {}) };
   });
   const nodePositionProps = {};
 
@@ -311,11 +338,16 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
     const nodeAgentName = nodeAgentConfig?.name || nodeAgentId || "Unconfigured";
     // Nodes store a raw id; the card is a user surface, so show the readable name instead.
     const nodeModelId = node.execModel === "llm" ? modelDisplayLabel(node.modelId ?? nodeAgentConfig?.modelId) : "script";
-    const canConfigureNodeAgent = node.execModel === "llm" && canEditDefinition;
+    const canConfigureNodeAgent = node.execModel === "llm" && !runOwnsInput && !running;
     const nodeAgentRow =
       node.execModel === "llm" ? (
         <div className="workflow-node-agent-row" title={`Agent: ${nodeAgentName} · Model: ${nodeModelId}`}>
-          {canConfigureNodeAgent ? <WorkflowNodeAgentSelect nodeTitle={node.title} {...(node.configuredAgentId ? { configuredAgentId: node.configuredAgentId } : {})} configuredAgents={configuredAgents} onSelect={(selectedAgentId) => source.onUpdateNode(node.id, { configuredAgentId: selectedAgentId, modelId: undefined } as Partial<WorkflowV2Node>)} /> : <><span className="workflow-node-agent-name">{nodeAgentName}</span><span className="workflow-node-agent-model">{nodeModelId}</span></>}
+          {canConfigureNodeAgent ? <WorkflowNodeAgentSelect
+            nodeTitle={node.title}
+            {...(node.configuredAgentId ? { configuredAgentId: node.configuredAgentId } : {})}
+            configuredAgents={configuredAgents}
+            onSelect={(selectedAgentId) => source.onUpdateNode(node.id, { configuredAgentId: selectedAgentId, modelId: undefined } as Partial<WorkflowV2Node>)}
+          /> : <><span className="workflow-node-agent-name">{nodeAgentName}</span><span className="workflow-node-agent-model">{nodeModelId}</span></>}
         </div>
       ) : null;
 
@@ -386,7 +418,8 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
               disabled={running}
               title={workDir || workflowText.noWorkDir}
             >
-              {workDir || workflowText.noWorkDir}
+              <FolderOpen size={13} />
+              <span>{workDir || workflowText.noWorkDir}</span>
             </button>
           </div>
         </div>
@@ -406,6 +439,7 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
         {...(onCleanupRunMaterials ? { onCleanupRunMaterials } : {})}
         {...(activeRunId ? { writableRunId: activeRunId } : {})}
         {...(onResolveIntervention ? { onResolveIntervention } : {})}
+        {...(source.onResolveRuntimeApproval ? { onResolveRuntimeApproval: source.onResolveRuntimeApproval } : {})}
         onSelectRun={setSelectedHistoryRunId}
         onClose={() => setRunCenterOpen(false)}
       />
@@ -430,7 +464,7 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
         </button>
       ) : null}
 
-      {graphVisible && onReviewWorkflow ? <WorkflowReviewDrawer
+      {graphVisible && reviewFeatureEnabled && onReviewWorkflow ? <WorkflowReviewDrawer
         open={reviewDrawerOpen}
         {...(generationReview ? { review: generationReview } : {})}
         reviewerControls={<ChatControls
@@ -443,12 +477,15 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
           workDir={workDir}
           runtimes={runtimes}
           onSelectConfiguredAgent={onSelectReviewerConfiguredAgent}
-          onSelectModel={onSelectReviewerModel}
+          showModelControl={false}
           onChooseWorkDir={onChooseWorkDir}
         />}
-        canReview={validation.valid && !running}
+        canReview={validation.valid && !running && reviewerReady}
         canInterrupt={generationReview?.status === "reviewing"}
+        canApplyReview={Boolean(generationReview?.result && !running && onApplyReviewToManager)}
+        {...(reviewDisabledReason ? { reviewDisabledReason } : {})}
         onReview={() => void onReviewWorkflow()}
+        onApplyReview={() => onApplyReviewToManager?.()}
         onInterrupt={() => void source.onInterruptWorkflowReview?.()}
         onClose={() => setReviewDrawerOpen(false)}
       /> : null}
@@ -587,27 +624,39 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
       /> : null}
 
       {revisionEditorNodeId && onReviseRun ? <WorkflowRevisionDialog nodeId={revisionEditorNodeId} definition={definition} onRevise={onReviseRun} onClose={() => setRevisionEditorNodeId(undefined)} /> : null}
-      {draftEditorOpen && onUpdateDefinition ? <WorkflowDraftEditorDialog definition={definition} configuredAgents={configuredAgents} onSave={onUpdateDefinition} onClose={() => setDraftEditorOpen(false)} /> : null}
+      {draftEditorOpen && onUpdateDefinition ? <WorkflowDraftEditorDialog definition={definition} configuredAgents={configuredAgents} runtimeReviewEnabled={runtimeReviewFeatureEnabled} onSave={onUpdateDefinition} onClose={() => setDraftEditorOpen(false)} /> : null}
 
-      {openNodeGraphNode ? <WorkflowNodeSurface
-        node={openNodeGraphNode}
-        editable={canEditDefinition}
-        onUpdateNode={(update) => source.onUpdateNode(openNodeGraphNode.id, update)}
-        {...(openNodeConversation ? { conversation: openNodeConversation } : {})}
-        {...(openNodeTask ? { task: openNodeTask } : {})}
-        sessions={nodeAgentSessions}
-        {...(openNodeId ? { selectedNodeId: openNodeId } : {})}
-        {...(openNodeProgress ? { progress: openNodeProgress } : {})}
-        {...(onSubmitScriptInput && openNodeId ? { onSubmitScriptInput: (values: Record<string, unknown>) => onSubmitScriptInput(openNodeId, values) } : {})}
-        {...(onResolveIntervention && openNodeId ? { onResolveScriptApproval: (action: "approve_once" | "reject") => onResolveIntervention(openNodeId, action) } : {})}
-        onSelectNode={setOpenNodeId}
-        onClose={() => { dismissedNodeSurfaceRunIdRef.current = activeRunId; setOpenNodeId(undefined); }}
-        {...(onSendNodeMessage && openNodeConversation ? { onSend: (message: string) => onSendNodeMessage(openNodeConversation.conversationId, message) } : {})}
-        {...(onCompleteNodeConversation && openNodeConversation ? { onConfirm: () => onCompleteNodeConversation(openNodeConversation.conversationId) } : {})}
-        {...(onRejectNodeCompletion && openNodeConversation ? { onReject: (instruction: string) => onRejectNodeCompletion(openNodeConversation.conversationId, instruction) } : {})}
-        {...(onInterruptNodeConversation && openNodeConversation ? { onInterrupt: () => onInterruptNodeConversation(openNodeConversation.conversationId) } : {})}
-        {...(source.onResolveRuntimeApproval ? { onResolveRuntimeApproval: source.onResolveRuntimeApproval } : {})}
-      /> : null}
+      {openNodeGraphNode ? (() => {
+        const resolvedAgentId = openNodeGraphNode.execModel === "llm" ? openNodeGraphNode.configuredAgentId ?? "" : "";
+        const resolvedAgentConfig = configuredAgentById(resolvedAgentId, configuredAgents);
+        const resolvedAgentLabel = resolvedAgentConfig?.name || resolvedAgentId || undefined;
+        const resolvedModelLabel = openNodeGraphNode.execModel === "llm"
+          ? openNodeGraphNode.modelId ?? resolvedAgentConfig?.modelId ?? undefined
+          : undefined;
+        return <WorkflowNodeSurface
+          node={openNodeGraphNode}
+          editable={canEditDefinition}
+          onUpdateNode={(update) => source.onUpdateNode(openNodeGraphNode.id, update)}
+          agentLabel={resolvedAgentLabel}
+          modelLabel={resolvedModelLabel}
+          {...(openNodeConversation ? { conversation: openNodeConversation } : {})}
+          {...(openNodeTask ? { task: openNodeTask } : {})}
+          {...(openNodeReviewTask ? { reviewTask: openNodeReviewTask } : {})}
+          reviewEnabled={definition.reviewGates?.some((gate) => gate.targetNodeId === openNodeGraphNode.id) === true}
+          sessions={nodeAgentSessions}
+          {...(openNodeId ? { selectedNodeId: openNodeId } : {})}
+          {...(openNodeProgress ? { progress: openNodeProgress } : {})}
+          {...(onSubmitScriptInput && openNodeId ? { onSubmitScriptInput: (values: Record<string, unknown>) => onSubmitScriptInput(openNodeId, values) } : {})}
+          {...(onResolveIntervention && openNodeId ? { onResolveScriptApproval: (action: "approve_once" | "reject") => onResolveIntervention(openNodeId, action) } : {})}
+          onSelectNode={setOpenNodeId}
+          onClose={() => { dismissedNodeSurfaceRunIdRef.current = activeRunId; setOpenNodeId(undefined); }}
+          {...(onSendNodeMessage && openNodeConversation ? { onSend: (message: string) => onSendNodeMessage(openNodeConversation.conversationId, message) } : {})}
+          {...(onCompleteNodeConversation && openNodeConversation ? { onConfirm: () => onCompleteNodeConversation(openNodeConversation.conversationId) } : {})}
+          {...(onRejectNodeCompletion && openNodeConversation ? { onReject: (instruction: string) => onRejectNodeCompletion(openNodeConversation.conversationId, instruction) } : {})}
+          {...(onInterruptNodeConversation && openNodeConversation ? { onInterrupt: () => onInterruptNodeConversation(openNodeConversation.conversationId) } : {})}
+          {...(source.onResolveRuntimeApproval ? { onResolveRuntimeApproval: source.onResolveRuntimeApproval } : {})}
+        />;
+      })() : null}
 
       {!runOwnsInput && !topologyLocked ? <section className="composer workflow-composer">
         <div className="composer-box">
@@ -623,16 +672,16 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
           />
           <div className="composer-footer">
             <ChatControls
-              configuredAgentId={reviewerConfiguredAgentId}
-              modelId={reviewerModelId}
+              configuredAgentId={configuredAgentId}
+              modelId={modelId}
               configuredAgents={configuredAgents}
               channels={channels}
               locked={composerLocked}
               running={running}
               workDir={workDir}
               runtimes={runtimes}
-              onSelectConfiguredAgent={onSelectReviewerConfiguredAgent}
-              onSelectModel={onSelectReviewerModel}
+              onSelectConfiguredAgent={onSelectConfiguredAgent}
+              showModelControl={false}
               onChooseWorkDir={onChooseWorkDir}
             />
             <div className="workflow-composer-actions">
@@ -667,7 +716,7 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
               <span>Stop workflow</span>
             </button>
           ) : graphVisible ? <div className="workflow-command-cluster">
-            {onReviewWorkflow ? (
+            {reviewFeatureEnabled && onReviewWorkflow ? (
               <button
                 className={`control-btn workflow-review-trigger is-${generationReview?.status ?? "not_reviewed"}`}
                 onClick={() => setReviewDrawerOpen(true)}
@@ -692,7 +741,8 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
               </select>
             </label> : null}
             {workflowV2Plan && !workflowV2Plan.definition.transactionPolicy ? <span className="workflow-transaction-compatibility-warning" role="status">{language === "zh" ? "兼容 direct 模式：此旧 Workflow 不保证回滚。" : "Compatibility direct mode: this legacy workflow has no rollback guarantee."}</span> : null}
-            <button className="send-btn workflow-run-action" onClick={() => void onRunWorkflow(workflowV2Plan?.definition.transactionPolicy?.approvalMode === "user_choice" ? transactionApprovalMode : undefined)} disabled={!validation.valid || !workflowConfirmed || running}>
+            {runtimeReviewBlocked ? <span className="workflow-transaction-compatibility-warning" role="status">{language === "zh" ? "此 Workflow 包含 Review Gate，请先在设置中开启运行时审查。" : "Enable Runtime Review in Settings before running this Workflow with Review Gates."}</span> : null}
+            <button className="send-btn workflow-run-action" title={runtimeReviewBlocked ? "Enable Runtime Review in Settings" : undefined} onClick={() => void onRunWorkflow(workflowV2Plan?.definition.transactionPolicy?.approvalMode === "user_choice" ? transactionApprovalMode : undefined)} disabled={!validation.valid || !workflowConfirmed || running || runtimeReviewBlocked}>
               <Play size={14} />
               <span>{workflowText.runWorkflow}</span>
             </button>

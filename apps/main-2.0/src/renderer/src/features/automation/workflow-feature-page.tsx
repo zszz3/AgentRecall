@@ -10,7 +10,15 @@ import { AutomationPageState } from "./automation-page-state";
 import { useAutomationDetails, useAutomationStoreSnapshot } from "./automation-provider";
 import type { WorkflowImportPreview } from "../../../../automation/contracts";
 
-export function WorkflowFeaturePage({ language }: { language: LanguageMode }): ReactElement {
+export function WorkflowFeaturePage({
+  language,
+  globalReviewEnabled,
+  runtimeReviewEnabled,
+}: {
+  language: LanguageMode;
+  globalReviewEnabled: boolean;
+  runtimeReviewEnabled: boolean;
+}): ReactElement {
   const { api, setSnapshot, workflowSidebar, workflowSidebarLoading, detailsLoaded, loading, error, refresh } = useAutomationDetails();
   const snapshot = useAutomationStoreSnapshot();
   const snapshotRef = useRef(snapshot);
@@ -28,6 +36,8 @@ export function WorkflowFeaturePage({ language }: { language: LanguageMode }): R
     snapshotRef,
     setSnapshot,
     language,
+    globalReviewEnabled,
+    runtimeReviewEnabled,
     onChooseWorkDir: async () => setSnapshot(await api.chooseWorkDir()),
     onRefresh: async () => { await refresh(); },
     onReadOutputFile: api.readLocalFile,

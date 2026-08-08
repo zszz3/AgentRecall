@@ -10,6 +10,7 @@ import type {
 } from "../../../shared/types";
 import type { AgentChannel, ConfiguredAgent } from "../../../shared/types";
 import { DEFAULT_MODEL_ID, isModelForChannel } from "../../../shared/models";
+import { migrateWorkflowV2ReviewGates } from "../../../shared/workflow-v2/review-gates";
 import { validateWorkflowV2Definition } from "../../../shared/workflow-v2/validation";
 import { analyzeWorkflowV2Script, maximumWorkflowV2ScriptRisk } from "../../workflows/v2/workflow-v2-script-analysis";
 
@@ -57,25 +58,39 @@ export function portableFileFromWorkflow(workflow: WorkflowDraftState): {
   }
   const sanitized = sanitizeWorkflowPortableDefinition(workflow.definition);
   const rootOrigin = workflow.origin?.rootOrigin;
-  return {
-    file: {
-      format: "agentrecall.workflow",
-      schemaVersion: 1,
-      workflow: {
-        workflowId: workflow.workflowId,
-        revision: workflow.revision,
-        title: workflow.title,
-        objective: workflow.objective,
-        executionDefaults: {
-          configuredAgentId: workflow.configuredAgentId,
-          modelId: workflow.modelId,
-          reviewerConfiguredAgentId: workflow.reviewerConfiguredAgentId,
-          reviewerModelId: workflow.reviewerModelId,
-        },
-        definition: sanitized.definition,
-        ...(rootOrigin ? { rootOrigin: portableRootOrigin(rootOrigin) } : {}),
+  const file: WorkflowPortableFileV1 = {
+    format: "agentrecall.workflow",
+    schemaVersion: 1,
+    workflow: {
+      workflowId: workflow.workflowId,
+      revision: workflow.revision,
+      title: workflow.title,
+      objective: workflow.objective,
+      executionDefaults: {
+        configuredAgentId: workflow.configuredAgentId,
+        modelId: workflow.modelId,
       },
+      definition: sanitized.definition,
+      ...(rootOrigin ? { rootOrigin: portableRootOrigin(rootOrigin) } : {}),
     },
+  };
+  let parsed;
+  try {
+    parsed = parseWorkflowPortableFile(JSON.stringify(file));
+  } catch (error) {
+    throw new WorkflowPortableError(
+      "WORKFLOW_EXPORT_DEFINITION_INVALID",
+      `Blank or invalid Workflow drafts cannot be exported. Complete the Workflow definition first. ${error instanceof Error ? error.message : ""}`.trim(),
+    );
+  }
+  if (parsed.definitionErrors.length > 0) {
+    throw new WorkflowPortableError(
+      "WORKFLOW_EXPORT_DEFINITION_INVALID",
+      `Blank or invalid Workflow drafts cannot be exported. Complete the Workflow definition first. ${parsed.definitionErrors[0]}`,
+    );
+  }
+  return {
+    file: parsed.file,
     removedSecretValueCount: sanitized.removedSecretValueCount,
   };
 }
@@ -113,6 +128,10 @@ export function parseWorkflowPortableFile(content: string): {
     ["configuredAgentId", "modelId", "reviewerConfiguredAgentId", "reviewerModelId"],
     "execution defaults",
   );
+  const legacyReviewerConfiguredAgentId = executionDefaults.reviewerConfiguredAgentId === undefined
+    ? ""
+    : stringValue(executionDefaults.reviewerConfiguredAgentId, "reviewerConfiguredAgentId");
+  if (executionDefaults.reviewerModelId !== undefined) stringValue(executionDefaults.reviewerModelId, "reviewerModelId");
   const workflowId = requiredString(workflow.workflowId, "workflow.workflowId");
   const revision = positiveInteger(workflow.revision, "workflow.revision");
   const title = requiredString(workflow.title, "workflow.title");
@@ -136,15 +155,16 @@ export function parseWorkflowPortableFile(content: string): {
       executionDefaults: {
         configuredAgentId: stringValue(executionDefaults.configuredAgentId, "configuredAgentId"),
         modelId: stringValue(executionDefaults.modelId, "modelId"),
-        reviewerConfiguredAgentId: requiredString(executionDefaults.reviewerConfiguredAgentId, "reviewerConfiguredAgentId"),
-        reviewerModelId: requiredString(executionDefaults.reviewerModelId, "reviewerModelId"),
       },
       definition: structuredClone(definition),
       ...(rootOrigin ? { rootOrigin } : {}),
     },
   };
   const sanitized = sanitizeWorkflowPortableDefinition(file.workflow.definition);
-  file.workflow.definition = sanitized.definition;
+  file.workflow.definition = migrateWorkflowV2ReviewGates(
+    sanitized.definition,
+    legacyReviewerConfiguredAgentId,
+  );
   let validation;
   try {
     validation = validateWorkflowV2Definition(file.workflow.definition);
@@ -242,10 +262,6 @@ export function applyWorkflowImportMappings(input: {
     defaults.configuredAgentId = workflowRoute.configuredAgentId;
     defaults.modelId = workflowRoute.modelId;
   }
-  const reviewerRoute = mapRoute(defaults.reviewerConfiguredAgentId, defaults.reviewerModelId);
-  defaults.reviewerConfiguredAgentId = reviewerRoute.configuredAgentId;
-  defaults.reviewerModelId = reviewerRoute.modelId;
-
   for (const node of next.workflow.definition.nodes) {
     if (node.execModel !== "llm") continue;
     const sourceAgentId = node.configuredAgentId ?? sourceWorkflowAgentId;
@@ -254,6 +270,13 @@ export function applyWorkflowImportMappings(input: {
     const route = mapRoute(sourceAgentId, sourceModelId);
     if (node.configuredAgentId) node.configuredAgentId = route.configuredAgentId;
     if (node.modelId) node.modelId = route.modelId;
+  }
+  for (const gate of next.workflow.definition.reviewGates ?? []) {
+    const targetAgentId = agentMappings[gate.configuredAgentId] ?? gate.configuredAgentId;
+    if (agentMappings[gate.configuredAgentId] && !agents.has(targetAgentId)) {
+      throw new WorkflowPortableError("WORKFLOW_IMPORT_MAPPING_INVALID", `Mapped Review Gate Agent ${targetAgentId} is unavailable.`);
+    }
+    gate.configuredAgentId = targetAgentId;
   }
   return next;
 }

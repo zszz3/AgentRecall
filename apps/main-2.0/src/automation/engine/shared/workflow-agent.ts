@@ -56,7 +56,8 @@ export const WORKFLOW_V2_DEFINITION_TEMPLATE = `{
       "outputFields": [{ "key": "echoed", "required": true }]
     }
   ],
-  "edges": []
+  "edges": [],
+  "reviewGates": []
 }`;
 
 function workflowTaskSnippet(objective: string): string {
@@ -93,6 +94,11 @@ export function buildWorkflowAgentPrompt({ workflowId, objective }: WorkflowAgen
     "- Do not invent a choice between strict script behavior and immediate executability when the runtime already supports typed script input. Build the directly executable script workflow.",
     "- Do not use an LLM node for copying, echoing, renaming, mapping, selecting, or serializing already available values unless reasoning is genuinely required.",
     "- Each LLM node requires prompt and outputFields; each script node requires executable source, typed parameters, declared capabilities, Manager risk with rationale, effectMode, idempotency, stderrPolicy, and outputFields.",
+    "- Every LLM node must explicitly set configuredAgentId to an ID from the current AgentRecall Configured Agent runtime catalog supplied below. Select the best fit for that node's responsibility and tool needs; never invent an Agent ID. Do not set configuredAgentId on script nodes.",
+    "- Model Runtime Review as definition.reviewGates, never as reviewer DAG nodes and never with review back-edges. Review Gates may target only LLM/Agent nodes, never script nodes. One Agent node may have at most one Review Gate.",
+    "- Assess every LLM/Agent node's criticality. Attach a Review Gate to every critical Agent node that requires runtime quality enforcement. A single Gate must contain all required review dimensions for that node; judgeDimensions is mandatory and must be non-empty.",
+    "- Every Review Gate must explicitly set configuredAgentId to an available Configured Agent chosen independently for that node, reviewLevel=low|medium|high, and maxQualityRetries from 0 to 5 (default 2). Reviewer tool use follows that Agent's normal bindings and routes permission-requiring operations through the Approval Broker.",
+    "- Runtime Review Gate Agents are read-only and must not modify the workspace or external systems. Do not target a reviewer-role node, and do not create nested Review Gates. Using the same Agent as the target executor is allowed only when no better route exists and reduces review independence.",
     "- Every script input must be declared exactly once in parameters with its location, valueType, source, required flag, and source binding. For a finite set of permitted scalar values, declare enum so the request editor can render a select control and the runtime can validate the value. Never hide required inputs inside prompts, code literals, or ambient state.",
     "- When a script parameter consumes a direct upstream node output, declare source=upstream, set upstreamNodeId to that direct predecessor node id, and set upstreamOutputKey to an exact key declared by the predecessor's outputFields. Do not duplicate an available upstream value as source=user.",
     "- For every LLM-to-script handoff, make the LLM prompt populate the exact outputFields key consumed by the script and declare the output field valueType. The output valueType must match every downstream parameter bound to that output. Downstream bindings read outputs[upstreamOutputKey], never the LLM summary.",
@@ -129,6 +135,7 @@ export function buildWorkflowRevisionPrompt(input: { workflowId: string; revisio
     `Revise the existing mutable Workflow ${input.workflowId} at revision ${input.revision}.`,
     "Apply the user's requested change to the current definition, then call workflow_create with the exact workflowId and the complete revised WorkflowV2Definition.",
     "Do not create another Workflow, do not return the definition only as prose, and preserve unaffected behavior.",
+    "Preserve Review Gates as attached control-plane definitions, not DAG nodes. Only LLM/Agent nodes have Review Gate criticality; script nodes are deterministic and must never receive a Gate. Any changed critical LLM/Agent node must retain or receive one explicit Gate with a configured Agent and non-empty review dimensions; never create nested review.",
     "Current WorkflowV2Definition:",
     JSON.stringify(input.definition, null, 2),
     "User requested change:",

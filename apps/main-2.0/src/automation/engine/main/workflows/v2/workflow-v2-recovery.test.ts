@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { WorkflowV2Definition } from "../../../shared/workflow-v2/definition";
 import { createWorkflowV2RunState } from "../../../shared/workflow-v2/state";
+import { sanitizeWorkflowTransactionValue } from "../../../shared/workflow-v2/transaction";
 import {
   WORKFLOW_V2_STORAGE_SCHEMA_VERSION,
   type WorkflowV2CacheEntryMetadata,
@@ -10,6 +11,7 @@ import {
 import { buildWorkflowV2Plan } from "./workflow-v2-planner";
 import { transitionWorkflowV2NodeState } from "./workflow-v2-scheduler";
 import {
+  acceptedWorkflowV2WorkerOutputs,
   buildWorkflowV2FinalReport,
   buildWorkflowV2RecoveryPreview,
   buildWorkflowV2RecoveryPlan,
@@ -32,6 +34,19 @@ function definition(): WorkflowV2Definition {
     edges: [{ fromNodeId: "first", toNodeId: "second" }],
   };
 }
+
+test("keeps an unreviewed paused candidate out of accepted report outputs", () => {
+  const runState = createWorkflowV2RunState({ definition: definition() });
+  const paused = transitionWorkflowV2NodeState(runState, { nodeId: "first", status: "paused", now: 2 });
+
+  expect(acceptedWorkflowV2WorkerOutputs(paused, [{ nodeId: "first", summary: "Unreviewed candidate", outputs: { value: "draft" }, proposals: [] }])).toEqual([]);
+});
+
+test("redacts quoted secret fields embedded in Review trace text", () => {
+  const trace = 'Reviewer input:\n{"token":"secret-token","answer":"safe"}';
+
+  expect(sanitizeWorkflowTransactionValue(trace)).toBe('Reviewer input:\n{"token":"[REDACTED]","answer":"safe"}');
+});
 
 async function persisted(): Promise<WorkflowV2PersistedRunState> {
   const workflow = definition();
@@ -166,6 +181,7 @@ describe("workflow-v2 recovery", () => {
     const runState = createWorkflowV2RunState({ definition: definition() });
     runState.status = "completed";
     for (const nodeId of runState.nodeOrder) runState.nodes[nodeId]!.status = "completed";
+    runState.nodes.first!.status = "completed_with_override";
 
     const preview = buildWorkflowV2RecoveryPreview({ transaction, operations: [], runState });
 
@@ -398,6 +414,24 @@ describe("workflow-v2 recovery", () => {
       expect.objectContaining({ nodeId: "first", action: "reuse", cachedOutput: state.workerOutputs[0] }),
       expect.objectContaining({ nodeId: "second", action: "resume", checkpoint: "checkpoint-2" }),
     ]);
+  });
+
+  test("reuses a result accepted with human override under the same graph version", async () => {
+    const state = await persisted();
+    state.runState.nodes.first!.status = "completed_with_override";
+
+    const recovery = buildWorkflowV2RecoveryPlan({
+      persisted: state,
+      targetDefinition: definition(),
+      targetFingerprints: new Map(),
+      cacheEntries: new Map(),
+    });
+
+    expect(recovery.decisions[0]).toMatchObject({
+      nodeId: "first",
+      action: "reuse",
+      cachedOutput: state.workerOutputs[0],
+    });
   });
 
   test("reuses changed-graph work only with an exact target fingerprint", async () => {

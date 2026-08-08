@@ -165,6 +165,7 @@ export function LocalSkillsTab({
                 <option value="all">{l("All sources", "全部来源")}</option>
                 <option value="codex">Codex</option>
                 <option value="claude">Claude Code</option>
+                <option value="pi">Pi</option>
                 <option value="shared">{l("Shared", "共享")}</option>
                 <option value="project">{l("Project", "项目")}</option>
               </select>
@@ -216,7 +217,6 @@ export function LocalSkillsTab({
                       <strong title={skill.name}>{skill.name}</strong>
                       <span>{skillSourceLabel(skill.source)}</span>
                     </div>
-                    <p>{skill.description || l("No description", "暂无说明")}</p>
                     <div className="skill-library-row-meta local-skill-row-meta">
                       <span title={skill.path}>{l(`Used ${skill.usageCount ?? 0} times`, `使用 ${skill.usageCount ?? 0} 次`)}</span>
                       {managed ? <em>{l("In this app", "已在本 App")}</em> : null}

@@ -1,4 +1,4 @@
-export type WorkflowMcpScope = "planning" | "node_execution";
+export type WorkflowMcpScope = "planning" | "review" | "runtime_review" | "node_execution";
 export type WorkflowMcpToolDecision = "allow" | "approval_required" | "deny";
 
 export const WORKFLOW_MCP_SERVER_NAMES = ["agent_recall", "agent_recall_workflow"] as const;
@@ -59,9 +59,19 @@ const NODE_EXECUTION_ALLOWED = new Set([
   "workflow_node_complete",
 ]);
 
+const REVIEW_ALLOWED = new Set([
+  "workflow_review_submit",
+]);
+
+const RUNTIME_REVIEW_ALLOWED = new Set([
+  "workflow_review_gate_submit",
+]);
+
 const KNOWN_TOOLS = new Set([
   ...PLANNING_ALLOWED,
   ...PLANNING_APPROVAL_REQUIRED,
+  ...REVIEW_ALLOWED,
+  ...RUNTIME_REVIEW_ALLOWED,
   ...NODE_EXECUTION_ALLOWED,
 ]);
 const STUDIO_TOOLS = new Set<string>(STUDIO_MCP_TOOL_NAMES);
@@ -71,6 +81,8 @@ export function workflowMcpToolDecision(
   toolName: string,
 ): WorkflowMcpToolDecision {
   if (scope === "node_execution") return NODE_EXECUTION_ALLOWED.has(toolName) ? "allow" : "deny";
+  if (scope === "runtime_review") return RUNTIME_REVIEW_ALLOWED.has(toolName) ? "allow" : "deny";
+  if (scope === "review") return REVIEW_ALLOWED.has(toolName) ? "allow" : "deny";
   if (PLANNING_ALLOWED.has(toolName)) return "allow";
   return PLANNING_APPROVAL_REQUIRED.has(toolName) ? "approval_required" : "deny";
 }
@@ -109,14 +121,19 @@ function scopedMcpToolNameFromIdentifier(
 
 export function workflowMcpScopeFromEnvironment(environment: NodeJS.ProcessEnv): WorkflowMcpScope {
   if (environment.AGENT_RECALL_WORKFLOW_MCP_SCOPE === "node_execution") return "node_execution";
+  if (environment.AGENT_RECALL_WORKFLOW_MCP_SCOPE === "runtime_review") return "runtime_review";
+  if (environment.AGENT_RECALL_WORKFLOW_MCP_SCOPE === "review") return "review";
   return "planning";
 }
 
 export function workflowMcpScopeForContext(context: {
   planningWorkflowId?: string;
+  workflowReviewRevision?: number;
   workflowRunId?: string;
   workflowNodeId?: string;
 }): WorkflowMcpScope | undefined {
+  if (context.workflowRunId && context.workflowNodeId && context.workflowReviewRevision) return "runtime_review";
   if (context.workflowRunId && context.workflowNodeId) return "node_execution";
+  if (context.planningWorkflowId && context.workflowReviewRevision) return "review";
   return context.planningWorkflowId ? "planning" : undefined;
 }

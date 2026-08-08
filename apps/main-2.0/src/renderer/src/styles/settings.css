@@ -513,6 +513,12 @@
   background: var(--panel-subtle);
 }
 
+.update-v1-import {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 560px);
+}
+
 .v1-import-copy {
   display: grid;
   gap: 5px;

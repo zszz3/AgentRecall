@@ -53,6 +53,9 @@ export function WorkflowHistoryPanel({
 }: WorkflowHistoryPanelProps) {
   const officialWorkflows = workflows.filter((workflow) => workflow.sourceType === "official");
   const userWorkflows = workflows.filter((workflow) => workflow.sourceType === "user");
+  const contextWorkflow = contextMenu ? workflows.find((workflow) => workflow.workflowId === contextMenu.workflowId) : undefined;
+  const contextWorkflowCannotExport = contextWorkflow?.sourceType === "user"
+    && (!contextWorkflow.objective.trim() || contextWorkflow.nodeCount === 0);
   const renderWorkflow = (workflow: WorkflowSidebarItem) => {
     const official = workflow.sourceType === "official";
     return (
@@ -122,7 +125,7 @@ export function WorkflowHistoryPanel({
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
-          {workflows.find((workflow) => workflow.workflowId === contextMenu.workflowId)?.sourceType === "official" ? (
+          {contextWorkflow?.sourceType === "official" ? (
             <button type="button" className="agent-context-menu-item" disabled={portableBusy} onClick={() => void onCloneWorkflow?.(contextMenu.workflowId)}>
               <Copy size={13} />
               <span>Clone to my workflows</span>
@@ -133,7 +136,7 @@ export function WorkflowHistoryPanel({
                 <SquarePen size={13} />
                 <span>Rename workflow</span>
               </button>
-              <button type="button" className="agent-context-menu-item" disabled={portableBusy} onClick={() => void onExportWorkflow?.(contextMenu.workflowId)}>
+              <button type="button" className="agent-context-menu-item" disabled={portableBusy || contextWorkflowCannotExport} title={contextWorkflowCannotExport ? "Complete the Workflow objective and graph before export." : undefined} onClick={() => void onExportWorkflow?.(contextMenu.workflowId)}>
                 <Download size={13} />
                 <span>Export workflow</span>
               </button>

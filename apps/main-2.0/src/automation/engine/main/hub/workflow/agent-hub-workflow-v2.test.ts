@@ -102,6 +102,23 @@ describe("workflow-v2 planner boundary", () => {
     expect(started.nextRun.workflowV2Plan.definition.transactionPolicy?.approvalMode).toBe("per_operation");
     expect(workflow.workflowV2Plan!.definition.transactionPolicy?.approvalMode).toBe("user_choice");
   });
+
+  test("freezes the global review setting into the run plan", () => {
+    const workflow = workflowForRunState();
+    workflow.definition.reviewEnabled = false;
+    workflow.workflowV2Plan!.definition.reviewEnabled = false;
+
+    const started = startWorkflowRunState({
+      workflow,
+      request: { workflowId: workflow.workflowId, reviewEnabled: true },
+      runId: "run-review",
+      cloneDraft: structuredClone,
+      now: 2,
+    });
+
+    expect(started.nextRun.workflowV2Plan.definition.reviewEnabled).toBe(true);
+    expect(workflow.workflowV2Plan!.definition.reviewEnabled).toBe(false);
+  });
   test("builds a frozen workflow-v2 plan through the hub boundary", async () => {
     const hub = new AgentHub({ codex: "missing-codex-for-test", claude: "missing-claude-for-test" });
 

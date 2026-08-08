@@ -15,6 +15,10 @@ export function startWorkflowRun(input: { request: RunWorkflowRequest; deps: Wor
   if ((!isWorkflowRunTerminalStatus(workflow.status) && workflow.status !== "draft") || hasRunningRun) return { ok: false, workflowId: workflow.workflowId, error: "Workflow is already running." };
   if (!workflow.workflowV2Plan) return { ok: false, workflowId: workflow.workflowId, error: "Workflow V2 plan is required. Legacy workflow execution is no longer supported." };
   if (workflow.confirmedRevision !== workflow.revision) return { ok: false, workflowId: workflow.workflowId, revision: workflow.revision, error: "Workflow must be confirmed before starting a run." };
+  const reviewGates = workflow.workflowV2Plan.definition.reviewGates ?? [];
+  if (reviewGates.length > 0 && input.request.reviewEnabled !== true) {
+    return { ok: false, workflowId: workflow.workflowId, error: "Enable Runtime Review before running a Workflow that contains Review Gates, or remove the Gates and confirm the Workflow again." };
+  }
   const transactionPolicy = workflow.workflowV2Plan.definition.transactionPolicy;
   const configuredApprovalMode = transactionPolicy?.defaultMode === "direct" ? undefined : transactionPolicy?.approvalMode;
   const requestedApprovalMode = input.request.transactionApprovalMode
@@ -26,15 +30,15 @@ export function startWorkflowRun(input: { request: RunWorkflowRequest; deps: Wor
     return { ok: false, workflowId: workflow.workflowId, error: "The requested approval mode does not match the confirmed workflow policy." };
   }
   const effectiveApprovalMode = configuredApprovalMode === "user_choice" ? requestedApprovalMode : configuredApprovalMode;
-  const runPlan = effectiveApprovalMode && workflow.workflowV2Plan.definition.transactionPolicy
-    ? {
-        ...workflow.workflowV2Plan,
-        definition: {
-          ...workflow.workflowV2Plan.definition,
-          transactionPolicy: { ...workflow.workflowV2Plan.definition.transactionPolicy, approvalMode: effectiveApprovalMode },
-        },
-      }
-    : workflow.workflowV2Plan;
+  const effectiveReviewEnabled = reviewGates.length > 0 || (input.request.reviewEnabled ?? workflow.workflowV2Plan.definition.reviewEnabled === true);
+  const runDefinition = {
+    ...workflow.workflowV2Plan.definition,
+    reviewEnabled: effectiveReviewEnabled,
+    ...(effectiveApprovalMode && workflow.workflowV2Plan.definition.transactionPolicy
+      ? { transactionPolicy: { ...workflow.workflowV2Plan.definition.transactionPolicy, approvalMode: effectiveApprovalMode } }
+      : {}),
+  };
+  const runPlan = { ...workflow.workflowV2Plan, definition: runDefinition };
   const planError = workflowV2PlanValidationError({ ...workflow, workflowV2Plan: runPlan }, runPlan);
   if (planError) return { ok: false, workflowId: workflow.workflowId, error: planError };
   const initialContextDocument = input.request.contextDocument ?? workflow.contextDocument;
@@ -44,8 +48,10 @@ export function startWorkflowRun(input: { request: RunWorkflowRequest; deps: Wor
     workflowId: workflow.workflowId,
     contextDocument: initialContextDocument,
     ...(input.request.triggerSource ? { triggerSource: input.request.triggerSource } : {}),
+    ...(input.request.parentRunId ? { parentRunId: input.request.parentRunId } : {}),
     ...(configurationSnapshot ? { configurationSnapshot } : {}),
     ...(effectiveApprovalMode ? { transactionApprovalMode: effectiveApprovalMode } : {}),
+    reviewEnabled: effectiveReviewEnabled,
   };
   const started = input.deps.startWorkflowRun(startRequest);
   if (!started.ok || !started.runId) return started;

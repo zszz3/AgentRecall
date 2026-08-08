@@ -42,6 +42,7 @@ export async function executeWorkflowV2BrokeredScript(input: ExecuteWorkflowV2Sc
   try {
     for (const [index, operation] of operations.entries()) {
       if (operation.plan.mode !== transactionMode) throw new Error("Brokered operation mode does not match the frozen workflow transaction mode.");
+      if (input.requireReversibleOperations && !operation.reversible) throw new Error("Review-gated brokered operations must be reversible so rejected attempts can be compensated safely.");
       if (transactionMode === "strict_atomic" && !operation.reversible) throw new Error("Strict atomic brokered operations must be reversible.");
       if (operation.reversible && input.node.script.compensationAdapter !== operation.kind) throw new Error(`Reversible ${operation.kind} brokered operations require the ${operation.kind} compensation adapter.`);
       const prepared = await broker.prepare({

@@ -199,7 +199,13 @@ export function isWorkflowDraftMessageRole(value: unknown): value is WorkflowDra
 }
 
 export function isWorkflowRunNodeStatus(value: unknown): value is WorkflowRunNodeStatus {
-  return value === "queued" || value === "running" || value === "paused" || value === "awaiting_input" || value === "completed" || value === "failed";
+  return value === "queued"
+    || value === "running"
+    || value === "paused"
+    || value === "awaiting_input"
+    || value === "completed"
+    || value === "completed_with_override"
+    || value === "failed";
 }
 
 export function isScheduledWorkflowRunStatus(value: unknown): value is ScheduledWorkflowRunStatus {

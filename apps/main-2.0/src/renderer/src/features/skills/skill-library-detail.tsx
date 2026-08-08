@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
-import { AlertTriangle, CheckCircle2, Copy, FolderOpen, Settings2, Trash2 } from "lucide-react";
+import { AlertTriangle, Copy, FolderOpen, Settings2, Trash2 } from "lucide-react";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
 import type { RemoteSkill, RemoteSkillGroup, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
 import { localize, type LanguageMode } from "../../language";
@@ -78,26 +78,23 @@ export function SkillLibraryDetail({
             <p>{skill.description || l("No description", "暂无说明")}</p>
           </div>
           <div className="managed-skill-actions">
+            <button
+              type="button"
+              className={`managed-skill-install-action ${conflictCount > 0 ? "warning" : installedCount > 0 ? "installed" : ""}`}
+              onClick={() => setTargetDialogOpen(true)}
+              disabled={busy || targetBusy}
+              title={l("Manage installation", "管理安装")}
+            >
+              <Settings2 size={14} />
+              <span>{l("Install", "安装")}</span>
+            </button>
             <button type="button" onClick={() => onCopyPath(skill.path)} title={l("Copy path", "复制路径")} aria-label={l("Copy path", "复制路径")}><Copy size={14} /></button>
             <button type="button" onClick={() => onReveal(skill.directoryPath)} title={l(`Show in ${revealLabel}`, `在 ${revealLabel} 中显示`)} aria-label={l(`Show in ${revealLabel}`, `在 ${revealLabel} 中显示`)}><FolderOpen size={14} /></button>
-            <button type="button" className="danger" onClick={() => onRequestDelete(skill)} title={l("Delete from library", "从 Skill 库删除")} aria-label={l("Delete from library", "从 Skill 库删除")}><Trash2 size={14} /></button>
+            {skill.origin.kind !== "builtin" ? (
+              <button type="button" className="danger" onClick={() => onRequestDelete(skill)} title={l("Delete from library", "从 Skill 库删除")} aria-label={l("Delete from library", "从 Skill 库删除")}><Trash2 size={14} /></button>
+            ) : null}
           </div>
         </header>
-
-        <section className="managed-skill-target-section">
-          <div className="managed-skill-section-label">
-            <span>{l("Available in", "安装到")}</span>
-            <small>{l("Choose which agents can use this Skill.", "选择哪些 Agent 可以使用这个 Skill。")}</small>
-          </div>
-          <button type="button" className="managed-skill-target-summary" onClick={() => setTargetDialogOpen(true)} disabled={busy || targetBusy}>
-            <span className={installedCount > 0 ? "installed" : ""}>
-              <CheckCircle2 size={15} />
-              {installedCount > 0 ? l(`${installedCount} agents installed`, `已安装到 ${installedCount} 个 Agent`) : l("Not installed", "尚未安装")}
-            </span>
-            {conflictCount > 0 ? <small><AlertTriangle size={13} />{l(`${conflictCount} conflicts`, `${conflictCount} 个冲突`)}</small> : null}
-            <strong><Settings2 size={14} />{l("Manage installation", "管理安装")}</strong>
-          </button>
-        </section>
 
         <section className="managed-skill-document">
           <div className="managed-skill-document-head">

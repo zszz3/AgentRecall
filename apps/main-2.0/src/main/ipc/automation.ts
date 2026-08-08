@@ -2,6 +2,7 @@ import type { IpcMain } from "electron";
 import { z } from "zod";
 import type {
   AgentChannel,
+  ApplyWorkflowReviewToManagerRequest,
   ConfiguredAgent,
   ConfirmWorkflowRequest,
   CreateWorkflowDraftRequest,
@@ -134,8 +135,9 @@ const evaluationRunListSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
 }).strict();
 const workflowIdSchema = z.object({ workflowId: idSchema });
-const workflowRequestSchema = workflowIdSchema.passthrough();
-const workflowReviewSchema = workflowIdSchema.extend({ expectedRevision: z.number().int().nonnegative() }).passthrough();
+const workflowRequestSchema = workflowIdSchema.extend({ reviewEnabled: z.boolean().optional() }).passthrough();
+const workflowReviewSchema = workflowIdSchema.extend({ expectedRevision: z.number().int().nonnegative(), reviewEnabled: z.boolean().optional() }).passthrough();
+const workflowReviewApplySchema = workflowIdSchema.extend({ reviewedRevision: z.number().int().positive() }).strict();
 const workflowNodeSchema = workflowIdSchema.extend({ runId: idSchema, nodeId: idSchema }).passthrough();
 const workflowStopSchema = workflowIdSchema.extend({ runId: idSchema }).passthrough();
 const workflowReviseSchema = workflowNodeSchema.extend({
@@ -365,6 +367,7 @@ export function registerAutomationIpc({
   ready(AUTOMATION_CHANNELS.workflowExport, (value: unknown) => service.portableWorkflows.exportWorkflow(idSchema.parse(value)));
   ready(AUTOMATION_CHANNELS.workflowConfirm, (value: unknown) => service.workflows.confirmWorkflow(workflowRequestSchema.parse(value) as ConfirmWorkflowRequest));
   ready(AUTOMATION_CHANNELS.workflowReview, (value: unknown) => service.workflows.reviewWorkflow(workflowReviewSchema.parse(value) as ReviewWorkflowRequest));
+  ready(AUTOMATION_CHANNELS.workflowReviewApplyToManager, (value: unknown) => service.workflows.applyWorkflowReviewToManager(workflowReviewApplySchema.parse(value) as ApplyWorkflowReviewToManagerRequest));
   ready(AUTOMATION_CHANNELS.workflowReviewInterrupt, (value: unknown) => service.workflows.interruptWorkflowReview(workflowRequestSchema.parse(value) as InterruptWorkflowReviewRequest));
   ready(AUTOMATION_CHANNELS.workflowRun, (value: unknown) => service.workflows.runWorkflow(workflowRequestSchema.parse(value) as RunWorkflowRequest));
   ready(AUTOMATION_CHANNELS.workflowPauseNode, (value: unknown) => service.workflows.pauseWorkflowNode(workflowNodeSchema.parse(value) as PauseWorkflowNodeRequest));

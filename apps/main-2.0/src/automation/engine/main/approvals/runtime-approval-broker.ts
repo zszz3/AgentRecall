@@ -33,6 +33,7 @@ export class RuntimeApprovalBroker {
   private readonly pending = new Map<string, PendingApproval>();
   private readonly allowedFileWriteRootsByOwner = new Map<string, Set<string>>();
   private readonly workspaceOnlyOwners = new Set<string>();
+  private readonly readOnlyOwners = new Set<string>();
 
   constructor(private readonly timeoutMs = 5 * 60_000) {}
 
@@ -59,6 +60,16 @@ export class RuntimeApprovalBroker {
         metadata: { approvalMode: "workflow_output_whitelist" },
       });
       return Promise.resolve("approved");
+    }
+    if (this.readOnlyOwners.has(input.ownerId)) {
+      input.emit({
+        type: "approval_response",
+        requestId,
+        decision: "rejected",
+        content: "Rejected because Runtime Review Gate Agents are read-only.",
+        metadata: { approvalMode: "workflow_review_read_only" },
+      });
+      return Promise.resolve("rejected");
     }
     if (this.workspaceOnlyOwners.has(input.ownerId)) {
       input.emit({
@@ -107,6 +118,10 @@ export class RuntimeApprovalBroker {
     this.workspaceOnlyOwners.add(ownerId);
   }
 
+  restrictToReadOnly(ownerId: string): void {
+    this.readOnlyOwners.add(ownerId);
+  }
+
   allowWorkflowOutputWrites(ownerId: string, workDir: string, workflowId: string, runId: string): void {
     this.allowFileWritesWithin(ownerId, path.resolve(workDir, workflowStoragePlanFor(workflowId, runId).outputDir));
   }
@@ -136,6 +151,7 @@ export class RuntimeApprovalBroker {
   cancelOwner(ownerId: string): void {
     this.allowedFileWriteRootsByOwner.delete(ownerId);
     this.workspaceOnlyOwners.delete(ownerId);
+    this.readOnlyOwners.delete(ownerId);
     for (const [requestId, pending] of this.pending) {
       if (pending.ownerId !== ownerId) continue;
       this.resolve({ ownerId, requestId, decision: "rejected" });
@@ -145,6 +161,7 @@ export class RuntimeApprovalBroker {
   cancelAll(): void {
     this.allowedFileWriteRootsByOwner.clear();
     this.workspaceOnlyOwners.clear();
+    this.readOnlyOwners.clear();
     for (const [requestId, pending] of [...this.pending]) {
       this.resolve({ ownerId: pending.ownerId, requestId, decision: "rejected" });
     }

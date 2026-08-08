@@ -59,6 +59,16 @@ describe("formatSessionMarkdown", () => {
     expect(markdown).toContain("stdout:");
   });
 
+  it("omits Tool Trace when the export option excludes it", () => {
+    const markdown = formatSessionMarkdown(session, messages, traceEvents, {
+      includeToolTrace: false,
+    });
+
+    expect(markdown).toContain("I will run them.");
+    expect(markdown).not.toContain("## Tool Trace");
+    expect(markdown).not.toContain("shell_command · npm test");
+  });
+
   it("omits hidden lifecycle traces while retaining Turn summaries", () => {
     const markdown = formatSessionMarkdown(session, messages, [
       {

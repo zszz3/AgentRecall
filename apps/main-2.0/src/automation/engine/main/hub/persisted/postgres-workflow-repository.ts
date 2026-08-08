@@ -162,6 +162,7 @@ export class PostgresWorkflowRepository {
         startedAt: postgresTime(row.started_at),
       };
       optional(run, "finalReport", row.final_report);
+      optional(run, "parentRunId", row.parent_run_id);
       if (row.finished_at !== null && row.finished_at !== undefined) {
         run.finishedAt = postgresTime(row.finished_at);
       }
@@ -274,11 +275,11 @@ export class PostgresWorkflowRepository {
     const runId = asString(run.runId);
     await database.query(
       `insert into agent_recall.workflow_runs (
-        id, workflow_id, workflow_v2_plan, status, trigger_source,
+        id, workflow_id, workflow_v2_plan, status, trigger_source, parent_run_id,
         configuration_snapshot, context_document, final_report, started_at,
         finished_at, last_error
       ) values (
-        $1, $2, $3::jsonb, $4, $5, $6::jsonb, $7, $8, $9, $10, $11
+        $1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12
       )`,
       [
         runId,
@@ -286,6 +287,7 @@ export class PostgresWorkflowRepository {
         jsonParameter(run.workflowV2Plan),
         asString(run.status),
         isWorkflowTriggerSource(run.triggerSource) ? run.triggerSource : "manual",
+        asOptionalString(run.parentRunId) ?? null,
         jsonParameter(run.configurationSnapshot),
         asString(run.contextDocument),
         asOptionalString(run.finalReport) ?? null,
@@ -368,10 +370,10 @@ async function insertProgress(
   await database.query(
     `insert into agent_recall.${table} (
       ${ownerColumn}, node_id, title, status, detail, task_id, input_request,
-      input_summary, intervention, messages, outputs, telemetry, sequence
+      input_summary, intervention, messages, outputs, telemetry, review_history, sequence
     ) values (
       $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb,
-      $10::jsonb, $11::jsonb, $12::jsonb, $13
+      $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14
     )`,
     [
       ownerId,
@@ -386,6 +388,7 @@ async function insertProgress(
       jsonParameter(item.messages),
       jsonParameter(item.outputs),
       jsonParameter(item.telemetry),
+      jsonParameter(item.reviewHistory),
       sequence,
     ],
   );
@@ -421,6 +424,7 @@ function mapProgress(rows: RecordValue[]): RecordValue[] {
     optional(item, "messages", postgresJson(row.messages));
     optional(item, "outputs", postgresJson(row.outputs));
     optional(item, "telemetry", postgresJson(row.telemetry));
+    optional(item, "reviewHistory", postgresJson(row.review_history));
     return item;
   });
 }

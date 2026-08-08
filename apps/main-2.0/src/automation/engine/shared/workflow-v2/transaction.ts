@@ -159,7 +159,7 @@ export interface WorkflowTransactionState {
 }
 
 export type WorkflowOperationKind = "file" | "http" | "message" | "git" | "database" | "other";
-export type WorkflowOperationState = "planned" | "applying" | "applied" | "compensating" | "compensated" | "unknown";
+export type WorkflowOperationState = "planned" | "discarded" | "applying" | "applied" | "compensating" | "compensated" | "unknown";
 
 export class WorkflowOperationTransitionError extends Error {
   readonly code = "WORKFLOW_OPERATION_INVALID_TRANSITION";
@@ -328,6 +328,7 @@ export const WORKFLOW_TRANSACTION_EVENT_TYPES = [
   "preflight_passed",
   "preflight_blocked",
   "operation_planned",
+  "operation_discarded",
   "operation_started",
   "operation_applied",
   "operation_unknown",
@@ -420,10 +421,11 @@ const approvalModes = new Set<WorkflowTransactionPolicy["approvalMode"]>(["batch
 const transactionStatuses = new Set<WorkflowTransactionStatus>(["active", "waiting_for_user", "committing", "committed", "rolling_back", "rolled_back", "partially_rolled_back", "recovery_required"]);
 const operationKinds = new Set<WorkflowOperationKind>(["file", "http", "message", "git", "database", "other"]);
 const commitPlanStepKinds = new Set<WorkflowCommitPlanStepKind>(["reversible_external", "workspace", "irreversible_external"]);
-const operationStates = new Set<WorkflowOperationState>(["planned", "applying", "applied", "compensating", "compensated", "unknown"]);
+const operationStates = new Set<WorkflowOperationState>(["planned", "discarded", "applying", "applied", "compensating", "compensated", "unknown"]);
 const recoveryActions = new Set<WorkflowRecoveryAction>(["continue", "rollback_savepoint", "compensate_all", "keep_state", "abandon"]);
 const operationTransitions: Record<WorkflowOperationState, ReadonlySet<WorkflowOperationState>> = {
-  planned: new Set(["applying"]),
+  planned: new Set(["discarded", "applying"]),
+  discarded: new Set(),
   applying: new Set(["applied", "unknown"]),
   applied: new Set(["compensating"]),
   compensating: new Set(["compensated", "unknown"]),
@@ -461,6 +463,7 @@ function sanitizeString(value: string): string {
     }
   }
   return value
+    .replace(/(["'](?:authorization|cookie|credential|password|passwd|secret|token|api.?key|private.?key)["']\s*:\s*["'])[^"'\r\n]*(["'])/gi, "$1[REDACTED]$2")
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [REDACTED]")
     .replace(/([?&][^=&#]*(?:authorization|credential|password|secret|token|key)[^=&#]*=)[^&#\s]*/gi, "$1[REDACTED]")
     .replace(/\b((?:x[-_])?(?:api[-_]?key|auth[-_]?token|client[-_]?secret|authorization|cookie|password|private[-_]?key)\s*[:=]\s*)[^,;\r\n]+/gi, "$1[REDACTED]");

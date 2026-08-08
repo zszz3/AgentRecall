@@ -1,6 +1,7 @@
 import type { InstalledSkill, SkillSource } from "../../core/skill-manager";
+import { AGENT_SKILL_REGISTRY } from "../../core/agent-skill-registry";
 
-export type SkillSourceFilter = "all" | "codex" | "claude" | "shared" | "project";
+export type SkillSourceFilter = "all" | "codex" | "claude" | "pi" | "shared" | "project";
 export type SkillSortKey = "usage" | "usage-asc" | "name" | "updated";
 
 export function filterInstalledSkills(skills: InstalledSkill[], query: string, sourceFilter: SkillSourceFilter): InstalledSkill[] {
@@ -29,19 +30,21 @@ function byName(a: InstalledSkill, b: InstalledSkill): number {
 
 export function skillSourceLabel(source: SkillSource): string {
   if (source === "agent-recall-v2") return "AgentRecall";
-  if (source === "codex-user") return "Codex";
   if (source === "codex-system") return "Codex System";
   if (source === "codex-shared") return "Shared";
-  if (source === "codex-project") return "Codex Project";
   if (source === "claude-project") return "Project";
   if (source === "claude-plugin") return "Claude Plugin";
-  return "Claude Code";
+  const agentName = source.split("-")[0];
+  const entry = AGENT_SKILL_REGISTRY.find((candidate) => candidate.id === agentName);
+  if (entry) return entry.label;
+  return agentName;
 }
 
 function matchesSourceFilter(skill: InstalledSkill, sourceFilter: SkillSourceFilter): boolean {
   if (sourceFilter === "all") return true;
   if (sourceFilter === "codex") return skill.agent === "codex";
   if (sourceFilter === "claude") return skill.agent === "claude";
+  if (sourceFilter === "pi") return skill.agent === "pi";
   if (sourceFilter === "shared") return skill.source === "codex-shared";
   return skill.source === "claude-project" || skill.source === "codex-project";
 }

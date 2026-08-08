@@ -132,7 +132,12 @@ describe("Workflow V2 AgentHub durable restore", () => {
       objective: "Plan a workflow",
       definition: { workflowId, graphVersion: 1, objective: "", nodes: [], edges: [] },
       messages: [
-        { id: "message-1", role: "user", content: "Plan a workflow" },
+        {
+          id: "message-1",
+          role: "user",
+          content: "Plan a workflow",
+          events: [{ id: "handoff-1", type: "handoff", content: "Review result", timestamp: 1, metadata: { kind: "review_result", reviewedRevision: 4 } }],
+        },
         {
           id: "message-2",
           role: "assistant",
@@ -165,8 +170,13 @@ describe("Workflow V2 AgentHub durable restore", () => {
       topologyLocked: true,
       status: "draft",
       objective: "Plan a workflow",
+      reviewerConfiguredAgentId: "default-agent",
+      reviewerModelId: "default",
     });
     expect(restored?.messages).toHaveLength(2);
+    expect(restored?.messages[0]?.events).toEqual([
+      expect.objectContaining({ type: "handoff", metadata: { kind: "review_result", reviewedRevision: 4 } }),
+    ]);
     expect(restored?.messages[1]?.events).toEqual([
       expect.objectContaining({
         type: "approval_request",
@@ -174,6 +184,176 @@ describe("Workflow V2 AgentHub durable restore", () => {
         requestState: "expired",
       }),
     ]);
+  });
+
+  test("restores Review Gate history and expires live reviewer approvals", async () => {
+    const input = await fixture();
+    input.run.progress[0] = {
+      ...input.run.progress[0]!,
+      reviewTaskId: "review-task-that-cannot-survive-restart",
+      reviewMessages: [{
+        id: "review-approval",
+        role: "system",
+        content: "Approval pending",
+        at: 1_200,
+        eventType: "approval_request",
+        event: { id: "event-1", type: "approval_request", content: "Allow MCP write?", timestamp: 1_200, requestId: "approval-1", requestState: "live" },
+      }],
+      reviewTrace: [{ id: "trace-1", kind: "approval_request", at: 1_200, content: "Allow MCP write?", infrastructureAttempt: 1 }],
+      reviewHistory: [{
+        reviewAttempt: 1,
+        candidate: { nodeId: "draft", summary: "Draft persisted", outputs: { draft: "const durable = true;" }, proposals: [] },
+        verdict: { decision: "accept", reasons: ["Complete."], riskLevel: "low", confidence: "high", qualityLevel: "high", dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "Complete.", evidence: ["draft"] }] },
+        requiredLevel: "high",
+        passed: true,
+        reviewedAt: 1_250,
+      }],
+    };
+
+    const restored = restoreWorkflowRun(input.run);
+
+    expect(restored?.progress[0]?.reviewTaskId).toBeUndefined();
+    expect(restored?.progress[0]?.reviewHistory).toHaveLength(1);
+    expect(restored?.progress[0]?.reviewTrace).toHaveLength(1);
+    expect(restored?.progress[0]?.reviewMessages?.[0]?.event).toMatchObject({ requestState: "expired" });
+    expect(restored?.progress[0]?.reviewMessages?.[0]?.eventType).toBe("approval_request");
+  });
+
+  test("preserves an explicitly unconfigured Review Agent", () => {
+    const workflowId = "workflow-without-reviewer";
+    const restored = restoreWorkflowDraft({
+      workflowId,
+      title: "Workflow without reviewer",
+      status: "draft",
+      revision: 1,
+      configuredAgentId: "generation-agent",
+      modelId: "generation-model",
+      reviewerConfiguredAgentId: "",
+      reviewerModelId: "",
+      objective: "Keep generation and review routes independent",
+      definition: definition(workflowId),
+      messages: [],
+      reply: "",
+      runProgress: [],
+      runContextDocument: "",
+      contextDocument: "",
+      runIds: [],
+      createdAt: 1,
+      updatedAt: 2,
+    }, {
+      restoreRuntimeConversation: () => undefined,
+      cloneWorkflowDraft: (draft) => structuredClone(draft),
+    });
+
+    expect(restored).toMatchObject({
+      configuredAgentId: "generation-agent",
+      modelId: "generation-model",
+      reviewerConfiguredAgentId: "",
+      reviewerModelId: "",
+    });
+  });
+
+  test("restores a user workflow after removing a persisted Review Gate from a script node", () => {
+    const workflowId = "workflow-with-script-review";
+    const workflowDefinition = definition(workflowId);
+    workflowDefinition.reviewGates = [{
+      id: "review-verify",
+      targetNodeId: "verify",
+      configuredAgentId: TEST_AGENT_ID,
+      reviewLevel: "high",
+      judgeDimensions: [{ key: "quality", description: "Check the script result." }],
+      maxQualityRetries: 2,
+    }];
+
+    const restored = restoreWorkflowDraft({
+      workflowId,
+      sourceType: "user",
+      title: "Workflow with script review",
+      status: "draft",
+      revision: 3,
+      configuredAgentId: TEST_AGENT_ID,
+      modelId: "default",
+      reviewerConfiguredAgentId: TEST_AGENT_ID,
+      reviewerModelId: "default",
+      objective: workflowDefinition.objective,
+      definition: workflowDefinition,
+      messages: [],
+      reply: "",
+      runProgress: [],
+      runContextDocument: "",
+      contextDocument: "",
+      runIds: [],
+      createdAt: 1,
+      updatedAt: 2,
+    }, {
+      restoreRuntimeConversation: () => undefined,
+      cloneWorkflowDraft: (draft) => structuredClone(draft),
+    });
+
+    expect(restored).toMatchObject({ workflowId, revision: 4 });
+    expect(restored?.definition.reviewGates).toEqual([]);
+  });
+
+  test("restores an official workflow with only its persisted script Review Gate removed", () => {
+    const workflowId = "official-workflow-with-script-review";
+    const workflowDefinition = definition(workflowId);
+    workflowDefinition.reviewGates = [
+      {
+        id: "review-draft",
+        targetNodeId: "draft",
+        configuredAgentId: TEST_AGENT_ID,
+        reviewLevel: "medium",
+        judgeDimensions: [{ key: "quality", description: "Check the draft." }],
+        maxQualityRetries: 2,
+      },
+      {
+        id: "review-verify",
+        targetNodeId: "verify",
+        configuredAgentId: TEST_AGENT_ID,
+        reviewLevel: "high",
+        judgeDimensions: [{ key: "quality", description: "Check the script result." }],
+        maxQualityRetries: 2,
+      },
+    ];
+
+    const restored = restoreWorkflowDraft({
+      workflowId,
+      sourceType: "official",
+      topologyLocked: true,
+      title: "Official workflow with script review",
+      status: "approved",
+      revision: 7,
+      confirmedRevision: 7,
+      configuredAgentId: TEST_AGENT_ID,
+      modelId: "default",
+      reviewerConfiguredAgentId: TEST_AGENT_ID,
+      reviewerModelId: "default",
+      objective: workflowDefinition.objective,
+      definition: workflowDefinition,
+      workflowV2Plan: { stale: true },
+      messages: [],
+      reply: "",
+      runProgress: [],
+      runContextDocument: "",
+      contextDocument: "",
+      runIds: [],
+      createdAt: 1,
+      updatedAt: 2,
+    }, {
+      restoreRuntimeConversation: () => undefined,
+      cloneWorkflowDraft: (draft) => structuredClone(draft),
+    });
+
+    expect(restored).toMatchObject({
+      workflowId,
+      sourceType: "official",
+      topologyLocked: true,
+      revision: 8,
+    });
+    expect(restored).not.toHaveProperty("confirmedRevision");
+    expect(restored).not.toHaveProperty("workflowV2Plan");
+    expect(restored?.definition.reviewGates).toEqual([workflowDefinition.reviewGates[0]]);
+    expect(restored?.definition.nodes).toEqual(workflowDefinition.nodes);
   });
 
   test("skips one invalid workflow without clearing valid workflow history", () => {
@@ -219,6 +399,21 @@ describe("Workflow V2 AgentHub durable restore", () => {
         requestedAt: 1_400,
       },
     });
+    state.nodes.draft!.reviewHistory = [{
+      reviewAttempt: 1,
+      candidate: { nodeId: "draft", summary: "Draft persisted", outputs: { draft: "const durable = true;" }, proposals: [] },
+      verdict: {
+        decision: "accept",
+        reasons: ["Evidence is sufficient."],
+        riskLevel: "low",
+        confidence: "high",
+        qualityLevel: "high",
+        dimensionResults: [{ key: "quality", qualityLevel: "high", reason: "Complete.", evidence: ["draft"] }],
+      },
+      requiredLevel: "high",
+      passed: true,
+      reviewedAt: 1_250,
+    }];
     input.persisted.runState = state;
     input.persisted.workerOutputs = [{
       nodeId: "draft",
@@ -234,7 +429,7 @@ describe("Workflow V2 AgentHub durable restore", () => {
       finishedAt: undefined,
       lastError: undefined,
       progress: [
-        { nodeId: "draft", status: "completed", detail: "Draft persisted" },
+        { nodeId: "draft", status: "completed", detail: "Draft persisted", reviewHistory: [expect.objectContaining({ reviewAttempt: 1, reviewedAt: 1_250 })] },
         {
           nodeId: "verify",
           status: "paused",
@@ -246,6 +441,44 @@ describe("Workflow V2 AgentHub durable restore", () => {
     });
     expect(restored?.workflow).toMatchObject({ status: "waiting_for_user", error: undefined });
     expect(restored?.run.finalReport).toBeUndefined();
+  });
+
+  test("does not resurrect a stopped run from its superseded paused checkpoint", async () => {
+    const input = await fixture();
+    input.persisted.runState = transitionWorkflowV2NodeState(
+      transitionWorkflowV2NodeState(input.persisted.runState, { nodeId: "draft", status: "running", now: 1_100 }),
+      {
+        nodeId: "draft",
+        status: "paused",
+        now: 1_200,
+        intervention: {
+          nodeId: "draft",
+          source: "review_rejection",
+          reason: "Superseded by a full rerun.",
+          allowedActions: ["rerun_all", "accept_last_result"],
+          requestedAt: 1_200,
+        },
+      },
+    );
+    input.run.status = "stopped";
+    input.run.finishedAt = 1_300;
+    input.run.finalReport = "Superseded by a full rerun.";
+    input.persisted.nodeControl.draft = {
+      extensionCount: 0,
+      interventionResolution: {
+        action: "rerun_all",
+        reason: "Superseded by a full rerun.",
+        resolvedAt: 1_300,
+      },
+    };
+
+    const restored = reconcileWorkflowV2RunFromDurableState({ ...input, updateWorkflowProjection: false });
+
+    expect(restored?.run).toMatchObject({
+      status: "stopped",
+      finishedAt: 1_300,
+      finalReport: "Superseded by a full rerun.",
+    });
   });
 
   test("restores a paused script input request as typed awaiting input", async () => {

@@ -1722,3 +1722,57 @@
     text-align: left;
   }
 }
+
+.openviking-memory-evidence {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.openviking-memory-evidence > strong {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-faint);
+}
+
+.openviking-evidence-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 10.5px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.openviking-evidence-item:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.openviking-evidence-item:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.openviking-evidence-item em {
+  font-style: normal;
+  font-weight: 620;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+
+.openviking-evidence-item code {
+  font-size: 9.5px;
+  color: var(--text-faint);
+  background: none;
+  padding: 0;
+}

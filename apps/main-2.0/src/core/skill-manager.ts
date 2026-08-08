@@ -4,23 +4,16 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { skillSyncFilesFromMetadata, type RemoteSkill, type SkillSyncFile } from "./skill-sync";
 
-export type SkillAgent = "codex" | "claude" | "codebuddy" | "qoder" | "trae";
-export type SkillPortableScope = "agent-recall-v2" | "codex-user" | "claude-user" | "qoder-user" | "shared";
-export type SkillSource =
-  | "agent-recall-v2"
-  | "codex-user"
-  | "codex-system"
-  | "codex-shared"
-  | "codex-project"
-  | "claude-user"
-  | "claude-project"
-  | "claude-plugin"
-  | "codebuddy-user"
-  | "codebuddy-project"
-  | "qoder-user"
-  | "qoder-project"
-  | "trae-user"
-  | "trae-project";
+import {
+  AGENT_SKILL_REGISTRY,
+  agentSkillDir,
+  type SkillAgent,
+  type SkillInstallTarget,
+  type SkillPortableScope,
+  type SkillSource,
+} from "./agent-skill-registry";
+
+export type { SkillAgent, SkillInstallTarget, SkillPortableScope, SkillSource } from "./agent-skill-registry";
 
 export interface InstalledSkill {
   id: string;
@@ -109,38 +102,27 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
   const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(homeDir, ".codex");
   const projectDirs = dedupePaths(options.projectDirs ?? [process.cwd()]);
   const defaultRoots: SkillRootConfig[] = [
-    { agent: "codex", source: "codex-user", path: path.join(codexHome, "skills") },
-    { agent: "codex", source: "codex-system", path: path.join(codexHome, "skills", ".system") },
-    { agent: "codex", source: "codex-shared", path: path.join(homeDir, ".agents", "skills") },
-    { agent: "claude", source: "claude-user", path: path.join(homeDir, ".claude", "skills") },
-    { agent: "codebuddy", source: "codebuddy-user", path: path.join(homeDir, ".codebuddy", "skills") },
-    { agent: "qoder", source: "qoder-user", path: path.join(homeDir, ".qoder", "skills") },
-    { agent: "trae", source: "trae-user", path: path.join(homeDir, ".trae", "skills") },
-    ...projectDirs.map((projectDir): SkillRootConfig => ({
-      agent: "codex",
-      source: "codex-project",
-      path: path.join(projectDir, ".codex", "skills"),
-    })),
-    ...projectDirs.map((projectDir): SkillRootConfig => ({
-      agent: "claude",
-      source: "claude-project",
-      path: path.join(projectDir, ".claude", "skills"),
-    })),
-    ...projectDirs.map((projectDir): SkillRootConfig => ({
-      agent: "codebuddy",
-      source: "codebuddy-project",
-      path: path.join(projectDir, ".codebuddy", "skills"),
-    })),
-    ...projectDirs.map((projectDir): SkillRootConfig => ({
-      agent: "qoder",
-      source: "qoder-project",
-      path: path.join(projectDir, ".qoder", "skills"),
-    })),
-    ...projectDirs.map((projectDir): SkillRootConfig => ({
-      agent: "trae",
-      source: "trae-project",
-      path: path.join(projectDir, ".trae", "skills"),
-    })),
+    ...AGENT_SKILL_REGISTRY.flatMap((entry) => {
+      const roots: SkillRootConfig[] = [];
+      if (!entry.hasUserSource || !entry.skillDir) return roots;
+      const dir = agentSkillDir(entry.id, homeDir);
+      if (!dir) return roots;
+      if (entry.id === "codex") {
+        roots.push({ agent: "codex", source: "codex-user", path: path.join(codexHome, "skills") });
+        roots.push({ agent: "codex", source: "codex-system", path: path.join(codexHome, "skills", ".system") });
+        roots.push({ agent: "codex", source: "codex-shared", path: path.join(homeDir, ".agents", "skills") });
+      } else {
+        roots.push({ agent: entry.id, source: `${entry.id}-user` as SkillSource, path: dir });
+      }
+      if (entry.hasProjectSource) {
+        roots.push(...projectDirs.map((projectDir): SkillRootConfig => ({
+          agent: entry.id,
+          source: `${entry.id}-project` as SkillSource,
+          path: path.join(projectDir, entry.skillDir!),
+        })));
+      }
+      return roots;
+    }),
   ];
   const roots: SkillRootConfig[] = [
     ...(options.managedRoot
@@ -189,10 +171,10 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
 
 export function portableScopeForSkillSource(source: SkillSource): SkillPortableScope | null {
   if (source === "agent-recall-v2") return "agent-recall-v2";
-  if (source === "codex-user") return "codex-user";
-  if (source === "claude-user") return "claude-user";
-  if (source === "qoder-user") return "qoder-user";
   if (source === "codex-shared") return "shared";
+  for (const entry of AGENT_SKILL_REGISTRY) {
+    if (entry.portableScope && source === `${entry.id}-user`) return entry.portableScope;
+  }
   return null;
 }
 
@@ -225,7 +207,12 @@ function isCandidateProjectDir(projectDir: string, homeDir: string): boolean {
   const normalized = normalizePathKey(projectDir);
   const normalizedHome = normalizePathKey(homeDir);
   if (normalized === normalizedHome) return false;
-  return ![".codex", ".claude", ".agents", ".codebuddy", ".qoder", ".trae"].some((dirName) => normalized === path.join(normalizedHome, dirName) || normalized.startsWith(`${path.join(normalizedHome, dirName)}${path.sep}`));
+  const reservedDirs = [
+    ".codex",
+    ".agents",
+    ...AGENT_SKILL_REGISTRY.flatMap((entry) => (entry.skillDir ? [entry.skillDir.split("/")[0]] : [])),
+  ];
+  return !reservedDirs.some((dirName) => normalized === path.join(normalizedHome, dirName) || normalized.startsWith(`${path.join(normalizedHome, dirName)}${path.sep}`));
 }
 
 export function deleteInstalledSkill(skillPath: string, options: SkillManagerOptions = {}): DeleteInstalledSkillResult {
@@ -296,9 +283,14 @@ function skillRootForPortableScope(
     if (!options.managedRoot) throw new Error("AgentRecall managed Skill root is required.");
     return options.managedRoot;
   }
-  if (scope === "codex-user") return path.join(options.codexHome, "skills");
-  if (scope === "claude-user") return path.join(options.homeDir, ".claude", "skills");
-  if (scope === "qoder-user") return path.join(options.homeDir, ".qoder", "skills");
+  if (scope === "shared") return path.join(options.homeDir, ".agents", "skills");
+  for (const entry of AGENT_SKILL_REGISTRY) {
+    if (entry.portableScope === scope && entry.skillDir) {
+      return entry.id === "codex"
+        ? path.join(options.codexHome, "skills")
+        : path.join(options.homeDir, entry.skillDir);
+    }
+  }
   return path.join(options.homeDir, ".agents", "skills");
 }
 
@@ -497,11 +489,23 @@ function stripYamlScalar(value: string): string {
 }
 
 function dedupeSkills(skills: InstalledSkill[]): InstalledSkill[] {
-  const byPath = new Map<string, InstalledSkill>();
+  const byName = new Map<string, InstalledSkill>();
   for (const skill of skills) {
-    byPath.set(normalizePathKey(skill.path), skill);
+    const existing = byName.get(skill.name);
+    if (!existing || skillSourcePriority(skill.source) < skillSourcePriority(existing.source)) {
+      byName.set(skill.name, skill);
+    }
   }
-  return [...byPath.values()];
+  return [...byName.values()];
+}
+
+// Prefer the most "authoritative" copy of a same-named skill: user-level
+// sources win over shared, which win over project/plugin copies.
+function skillSourcePriority(source: SkillSource): number {
+  if (source === "agent-recall-v2") return 0;
+  if (source.endsWith("-user")) return 1;
+  if (source === "codex-shared" || source === "codex-system") return 2;
+  return 3;
 }
 
 function dedupeRootConfigs(roots: SkillRootConfig[]): SkillRootConfig[] {
@@ -559,7 +563,8 @@ function walkForNestedSkillProjectDirs(rootDir: string, maxDepth: number): strin
 }
 
 function hasProjectSkillRoot(projectDir: string): boolean {
-  return [".claude", ".codex", ".codebuddy", ".qoder", ".trae"]
+  return AGENT_SKILL_REGISTRY
+    .flatMap((entry) => (entry.hasProjectSource && entry.skillDir ? [entry.skillDir.split("/")[0]] : []))
     .some((agentDir) => fs.existsSync(path.join(projectDir, agentDir, "skills")));
 }
 

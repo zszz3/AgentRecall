@@ -9,6 +9,7 @@ import {
   formatSessionMarkdown,
   formatSessionPlainText,
   type SessionJsonExportFormat,
+  type SessionMarkdownExportOptions,
 } from "../../core/format-session";
 import {
   getResumeCommand,
@@ -181,8 +182,11 @@ export class SessionCommandService {
     ));
   }
 
-  async exportMarkdown(sessionKey: string): Promise<boolean> {
-    const content = await this.loadExportContent(sessionKey);
+  async exportMarkdown(
+    sessionKey: string,
+    options?: SessionMarkdownExportOptions,
+  ): Promise<boolean> {
+    const content = await this.loadExportContent(sessionKey, options?.includeToolTrace !== false);
     if (!content) return false;
     const exportPath = await this.dependencies.chooseMarkdownPath(
       exportFileName(content.session, "md"),
@@ -190,7 +194,9 @@ export class SessionCommandService {
     if (!exportPath) return false;
     await this.dependencies.writeTextFile(
       exportPath,
-      formatSessionMarkdown(content.session, content.messages, content.traceEvents),
+      formatSessionMarkdown(content.session, content.messages, content.traceEvents, {
+        includeToolTrace: options?.includeToolTrace !== false,
+      }),
     );
     return true;
   }
@@ -236,13 +242,18 @@ export class SessionCommandService {
     return { route: "resume" };
   }
 
-  private async loadExportContent(sessionKey: string): Promise<SessionExportContent | null> {
+  private async loadExportContent(
+    sessionKey: string,
+    includeToolTrace = true,
+  ): Promise<SessionExportContent | null> {
     await this.dependencies.remoteAccess.ensureDetails(sessionKey);
     const session = await this.dependencies.store.getSession(sessionKey);
     if (!session) return null;
     const [messages, traceEvents] = await Promise.all([
       this.dependencies.store.getAllMessages(sessionKey),
-      this.dependencies.store.getTraceEvents(sessionKey),
+      includeToolTrace
+        ? this.dependencies.store.getTraceEvents(sessionKey)
+        : Promise.resolve([]),
     ]);
     return { session, messages, traceEvents };
   }

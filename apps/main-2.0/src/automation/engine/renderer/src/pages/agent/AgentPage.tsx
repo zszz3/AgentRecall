@@ -26,7 +26,6 @@ function configTextFor(language: Language) {
         description: "组装 Agent 的名称、描述、执行配置和标签。",
         save: "保存",
         name: "名称",
-        config: "配置",
         runtime: "Runtime",
         model: "模型",
         reasoning: "推理强度",
@@ -41,7 +40,6 @@ function configTextFor(language: Language) {
         description: "Assemble agent profiles, execution config, and tags.",
         save: "Save",
         name: "Name",
-        config: "Config",
         runtime: "Runtime",
         model: "Model",
         reasoning: "Reasoning",
@@ -83,11 +81,6 @@ export function AgentPage({
     : DEFAULT_MODEL_ID;
   const selectedAgentModel = selectedAgentModels.find((model) => model.id === selectedAgentModelId);
   const reasoningEfforts = selectedAgentModel?.reasoningEfforts ?? [];
-  const runtimes = [...new Set(channels.map((channel) => channel.agentId))];
-  const runtimeChannels = selectedConfiguredAgent
-    ? channels.filter((channel) => channel.agentId === selectedConfiguredAgent.runtimeAgentId)
-    : [];
-
   return (
     <section className="agent-page">
       <header className="config-header">
@@ -174,28 +167,6 @@ export function AgentPage({
                       <span>{configText.runtime}</span>
                       <select
                         aria-label="Agent runtime"
-                        value={selectedConfiguredAgent.runtimeAgentId}
-                        onChange={(event) => {
-                          const runtimeAgentId = event.currentTarget.value as AgentChannel["agentId"];
-                          const channel = channels.find((item) => item.agentId === runtimeAgentId);
-                          if (!channel) return;
-                          onUpdateConfiguredAgent(selectedConfiguredAgent.id, (item) => withReasoningEffort({
-                            ...item,
-                            runtimeAgentId,
-                            channelId: channel.id,
-                            modelId: DEFAULT_MODEL_ID,
-                          }, undefined));
-                        }}
-                      >
-                        {runtimes.map((runtime) => (
-                          <option key={runtime} value={runtime}>{agentLabel(runtime)}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="config-field">
-                      <span>{configText.config}</span>
-                      <select
-                        aria-label="Agent execution config"
                         value={selectedAgentChannel?.id ?? ""}
                         onChange={(event) => {
                           const channel = channels.find((item) => item.id === event.currentTarget.value);
@@ -208,7 +179,7 @@ export function AgentPage({
                           }, undefined));
                         }}
                       >
-                        {runtimeChannels.map((channel) => (
+                        {channels.map((channel) => (
                           <option key={channel.id} value={channel.id}>
                             {`${channel.label || channel.id} · ${agentLabel(channel.agentId)}`}
                           </option>

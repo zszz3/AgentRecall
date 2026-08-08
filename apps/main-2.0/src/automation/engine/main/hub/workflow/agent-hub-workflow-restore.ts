@@ -37,6 +37,7 @@ import {
 import { cloneWorkflowV2Plan } from "../../../shared/workflow-v2/planning";
 import type { WorkflowV2Definition } from "../../../shared/workflow-v2/definition";
 import { validateWorkflowV2Definition } from "../../../shared/workflow-v2/validation";
+import { migrateWorkflowV2ReviewGates } from "../../../shared/workflow-v2/review-gates";
 import type { WorkflowV2PersistedRunState } from "../../../shared/workflow-v2/storage";
 import {
   isWorkflowOperationRecord,
@@ -47,7 +48,7 @@ import {
   type WorkflowRecoveryPreview,
 } from "../../../shared/workflow-v2/transaction";
 import type { WorkflowV2RunNodeState } from "../../../shared/workflow-v2/state";
-import { buildWorkflowV2FinalReport } from "../../workflows/v2/workflow-v2-recovery";
+import { acceptedWorkflowV2WorkerOutputs, buildWorkflowV2FinalReport } from "../../workflows/v2/workflow-v2-recovery";
 import { projectWorkflowV2PausedNodeInteraction } from "../../workflows/v2/workflow-v2-node-interaction";
 
 function restoreWorkflowV2Plan(raw: unknown): WorkflowV2Plan | undefined {
@@ -67,7 +68,7 @@ function restoreWorkflowGrillEvent(raw: unknown): WorkflowGrillEvent | undefined
   const record = asRecord(raw);
   if (!record) return undefined;
   const type = record.type;
-  if (type !== "tool_call" && type !== "tool_result" && type !== "approval_request" && type !== "approval_response") return undefined;
+  if (type !== "tool_call" && type !== "tool_result" && type !== "approval_request" && type !== "approval_response" && type !== "handoff") return undefined;
   const event: WorkflowGrillEvent = {
     id: asOptionalString(record.id) ?? randomUUID(),
     type,
@@ -181,8 +182,33 @@ export function restoreWorkflowDraft(
   if (!record || "agentSessionId" in record) return undefined;
   const definitionRecord = asRecord(record.definition);
   if (!definitionRecord) return undefined;
-  const definition = structuredClone(definitionRecord) as unknown as WorkflowV2Definition;
-  const workflowId = asOptionalString(record.workflowId) ?? definition.workflowId;
+  const legacyDefinition = structuredClone(definitionRecord) as unknown as WorkflowV2Definition;
+  const workflowId = asOptionalString(record.workflowId) ?? legacyDefinition.workflowId;
+  const reviewerConfiguredAgentId = Object.hasOwn(record, "reviewerConfiguredAgentId")
+    ? asOptionalString(record.reviewerConfiguredAgentId) ?? ""
+    : asOptionalString(record.configuredAgentId) ?? "";
+  const reviewerModelId = Object.hasOwn(record, "reviewerModelId")
+    ? asOptionalString(record.reviewerModelId) ?? ""
+    : asOptionalString(record.modelId) ?? "";
+  const officialWorkflow = record.sourceType === "official" || record.topologyLocked === true;
+  const scriptNodeIds = new Set(Array.isArray(legacyDefinition.nodes)
+    ? legacyDefinition.nodes.filter((node) => node?.execModel === "script").map((node) => node.id)
+    : []);
+  const hasScriptReviewGate = Array.isArray(legacyDefinition.reviewGates)
+    && legacyDefinition.reviewGates.some((gate) => gate && typeof gate === "object" && scriptNodeIds.has(gate.targetNodeId));
+  const requiresReviewGateMigration = !officialWorkflow && (legacyDefinition.reviewEnabled !== undefined
+    || legacyDefinition.nodes?.some((node) => node.reviewLevel !== undefined || node.reviewMaxRetries !== undefined || node.judgeDimensions !== undefined) === true
+    || hasScriptReviewGate);
+  const migratedDefinition = requiresReviewGateMigration
+    ? migrateWorkflowV2ReviewGates(legacyDefinition, reviewerConfiguredAgentId)
+    : legacyDefinition;
+  const definition = hasScriptReviewGate
+    ? {
+      ...migratedDefinition,
+      reviewGates: migratedDefinition.reviewGates?.filter((gate) => !scriptNodeIds.has(gate.targetNodeId)),
+    }
+    : migratedDefinition;
+  const definitionChangedOnRestore = requiresReviewGateMigration || hasScriptReviewGate;
   const planningDraft = restoreWorkflowDraftStatus(record.status) === "draft"
     && Array.isArray(definition.nodes)
     && definition.nodes.length === 0
@@ -193,19 +219,27 @@ export function restoreWorkflowDraft(
     && Number.isSafeInteger(definition.graphVersion)
     && definition.graphVersion > 0
     && typeof definition.objective === "string";
-  if (!planningDraft && !validateWorkflowV2Definition(definition).valid) return undefined;
+  if (!planningDraft) {
+    const definitionToValidate = hasScriptReviewGate
+      ? {
+        ...legacyDefinition,
+        reviewGates: legacyDefinition.reviewGates?.filter((gate) => !scriptNodeIds.has(gate.targetNodeId)),
+      }
+      : requiresReviewGateMigration ? legacyDefinition : definition;
+    if (!validateWorkflowV2Definition(definitionToValidate).valid) return undefined;
+  }
   const finalReport = asOptionalString(record.finalReport);
   const restoredRuntimeConversation = record.runtimeConversation === undefined
     ? undefined
     : deps.restoreRuntimeConversation(record.runtimeConversation);
   if (record.runtimeConversation !== undefined && !restoredRuntimeConversation) return undefined;
-  const restoredWorkflowV2Plan = record.workflowV2Plan === undefined
+  const restoredWorkflowV2Plan = record.workflowV2Plan === undefined || definitionChangedOnRestore
     ? undefined
     : restoreWorkflowV2Plan(record.workflowV2Plan);
-  if (record.workflowV2Plan !== undefined && !restoredWorkflowV2Plan) return undefined;
+  if (record.workflowV2Plan !== undefined && !definitionChangedOnRestore && !restoredWorkflowV2Plan) return undefined;
   if (workflowId !== definition.workflowId) return undefined;
   const origin = restoreWorkflowOrigin(record.origin);
-  const confirmedRevision = Number.isSafeInteger(record.confirmedRevision) && Number(record.confirmedRevision) > 0 ? Number(record.confirmedRevision) : undefined;
+  const confirmedRevision = !definitionChangedOnRestore && Number.isSafeInteger(record.confirmedRevision) && Number(record.confirmedRevision) > 0 ? Number(record.confirmedRevision) : undefined;
   const generationReview = restoreGenerationReview(record.generationReview);
   return deps.cloneWorkflowDraft({
     workflowId,
@@ -213,13 +247,13 @@ export function restoreWorkflowDraft(
     topologyLocked: record.sourceType === "official" || record.topologyLocked === true,
     title: asOptionalString(record.title) ?? definition.objective ?? "Untitled workflow",
     status: restoreWorkflowDraftStatus(record.status),
-    revision: Math.max(1, Math.floor(asNumber(record.revision, 1))),
+    revision: Math.max(1, Math.floor(asNumber(record.revision, 1))) + (definitionChangedOnRestore ? 1 : 0),
     ...(confirmedRevision !== undefined ? { confirmedRevision } : {}),
     ...(origin ? { origin } : {}),
     configuredAgentId: asOptionalString(record.configuredAgentId) ?? "",
     modelId: asOptionalString(record.modelId) ?? "",
-    reviewerConfiguredAgentId: asOptionalString(record.reviewerConfiguredAgentId) ?? asOptionalString(record.configuredAgentId) ?? "",
-    reviewerModelId: asOptionalString(record.reviewerModelId) ?? asOptionalString(record.modelId) ?? "",
+    reviewerConfiguredAgentId,
+    reviewerModelId,
     objective: asOptionalString(record.objective) ?? definition.objective,
     definition,
     ...(asOptionalString(record.workDir) ? { workDir: asOptionalString(record.workDir) as string } : {}),
@@ -308,6 +342,7 @@ export function restoreWorkflowRun(raw: unknown): WorkflowRunState | undefined {
     workflowId,
     status: restoreWorkflowRunStatus(record.status),
     ...(record.triggerSource === "manual" || record.triggerSource === "scheduled" || record.triggerSource === "mcp" || record.triggerSource === "recovery" || record.triggerSource === "rerun" ? { triggerSource: record.triggerSource } : {}),
+    ...(asOptionalString(record.parentRunId) ? { parentRunId: asOptionalString(record.parentRunId)! } : {}),
     ...(configuration && asOptionalString(configuration.configuredAgentId) ? { configurationSnapshot: {
       configuredAgentId: asOptionalString(configuration.configuredAgentId)!,
       ...(asOptionalString(configuration.runtimeId) ? { runtimeId: asOptionalString(configuration.runtimeId) } : {}),
@@ -365,6 +400,7 @@ export function reconcileWorkflowV2RunFromDurableState(input: {
     if (output) progressItem.outputs = structuredClone(output.outputs);
     if (output?.acceptance) progressItem.acceptance = structuredClone(output.acceptance);
     if (output?.scriptReceipt) progressItem.scriptReceipt = structuredClone(output.scriptReceipt);
+    if (node.reviewHistory?.length) progressItem.reviewHistory = structuredClone(node.reviewHistory);
     if (node.intervention) {
       Object.assign(progressItem, projectWorkflowV2PausedNodeInteraction({
         nodeId,
@@ -394,14 +430,21 @@ export function reconcileWorkflowV2RunFromDurableState(input: {
   }
 
   const durableStatus = input.persisted.runState.status;
-  const status = durableStatus === "completed"
-    ? "completed"
-    : durableStatus === "failed"
-      ? "failed"
-      : "waiting_for_user";
-  const finalReport = status === "completed" || status === "failed"
-    ? input.persisted.finalReport ?? buildWorkflowV2FinalReport(input.persisted.plan, input.persisted.workerOutputs, durableStatus, input.persisted.recoveryDecisions, input.operations)
-    : undefined;
+  const hasTerminalInterventionResolution = Object.values(input.persisted.nodeControl).some((control) =>
+    control.interventionResolution?.action === "rerun_all" || control.interventionResolution?.action === "replan");
+  const preserveStoppedRun = input.run.status === "stopped" && hasTerminalInterventionResolution;
+  const status = preserveStoppedRun
+    ? "stopped"
+    : durableStatus === "completed"
+      ? "completed"
+      : durableStatus === "failed"
+        ? "failed"
+        : "waiting_for_user";
+  const finalReport = preserveStoppedRun
+    ? input.run.finalReport
+    : status === "completed" || status === "failed"
+      ? input.persisted.finalReport ?? buildWorkflowV2FinalReport(input.persisted.plan, acceptedWorkflowV2WorkerOutputs(input.persisted.runState, input.persisted.workerOutputs), durableStatus, input.persisted.recoveryDecisions, input.operations)
+      : undefined;
   const lastError = status === "failed"
     ? progress.find((item) => item.status === "failed")?.detail ?? "Workflow V2 run failed before app restart."
     : undefined;
@@ -410,7 +453,11 @@ export function reconcileWorkflowV2RunFromDurableState(input: {
     status,
     progress,
     events,
-    finishedAt: status === "completed" || status === "failed" ? input.persisted.savedAt : undefined,
+    finishedAt: status === "completed" || status === "failed"
+      ? input.persisted.savedAt
+      : preserveStoppedRun
+        ? input.run.finishedAt ?? input.persisted.savedAt
+        : undefined,
     lastError,
     ...(input.persisted.transaction ? { transaction: structuredClone(input.persisted.transaction) } : {}),
     ...(input.operations ? { operations: structuredClone(input.operations) } : {}),
@@ -438,6 +485,7 @@ export function reconcileWorkflowV2RunFromDurableState(input: {
 }
 
 function publicWorkflowV2NodeStatus(node: WorkflowV2RunNodeState): WorkflowRunProgressItem["status"] {
+  if (node.status === "completed_with_override") return "completed_with_override";
   if (node.status === "completed" || node.status === "skipped") return "completed";
   if (node.status === "failed") return "failed";
   if (node.status === "paused" || node.status === "running" || node.status === "validating" || node.status === "awaiting_review") {
@@ -448,6 +496,7 @@ function publicWorkflowV2NodeStatus(node: WorkflowV2RunNodeState): WorkflowRunPr
 
 function publicWorkflowV2NodeDetail(node: WorkflowV2RunNodeState, outputSummary: string | undefined): string {
   if (node.status === "completed") return outputSummary ?? "Completed before app restart";
+  if (node.status === "completed_with_override") return outputSummary ?? "Accepted by human override before app restart";
   if (node.status === "skipped") return "Skipped before app restart";
   if (node.status === "failed") return node.lastError ?? "Failed before app restart";
   if (node.status === "paused") {

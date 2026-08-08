@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
 
+const require = createRequire(import.meta.url);
 const root = JSON.parse(await readFile("package.json", "utf8"));
 const v1 = JSON.parse(await readFile("apps/main-1.0/package.json", "utf8"));
 const v2 = JSON.parse(await readFile("apps/main-2.0/package.json", "utf8"));
@@ -23,6 +25,13 @@ test("exposes explicit root commands for both apps", () => {
   assert.match(root.scripts.test, /test:v1/);
   assert.match(root.scripts.test, /test:v2/);
   assert.match(root.scripts["package:smoke:all"], /run-package-smokes\.mjs/);
+});
+
+test("keeps PostCSS discovery inside each app", () => {
+  for (const appDirectory of ["main-1.0", "main-2.0"]) {
+    const config = require(`../apps/${appDirectory}/postcss.config.cjs`);
+    assert.deepEqual(config, { plugins: {} });
+  }
 });
 
 test("runs independent V1 and V2 package smokes concurrently", async () => {

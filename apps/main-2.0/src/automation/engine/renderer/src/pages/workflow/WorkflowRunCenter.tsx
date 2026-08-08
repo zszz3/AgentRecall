@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CalendarClock, CheckCircle2, ChevronRight, CircleAlert, CircleStop, Clock3, GitBranch, History, LockKeyhole, MessageSquareText, X } from "lucide-react";
-import type { RegisteredArtifact, WorkflowRunState, WorkflowStatus } from "../../../../shared/types";
+import type { ApprovalDecision, ChatEvent, RegisteredArtifact, WorkflowRunState, WorkflowStatus } from "../../../../shared/types";
 import type { WorkflowRunFilters, } from "./workflow-run-center-model";
 import { filterWorkflowRuns, getWorkflowErrorCode, getWorkflowRunDuration, getWorkflowRunTimeline, getWorkflowRunTimelineBounds, getWorkflowRunTimelineSegmentStyle } from "./workflow-run-center-model";
 import type { WorkflowRunTimelineSegment, WorkflowRunTriggerSource } from "../../../../shared/workflow/run";
@@ -9,6 +9,8 @@ import type { WorkflowNodeConversation } from "../../../../shared/workflow-v2/co
 import type { WorkflowNodeMessage } from "../../../../shared/workflow/run";
 import type { WorkflowRecoveryAction } from "../../../../shared/workflow-v2/transaction";
 import type { WorkflowV2InterventionAction } from "../../../../shared/workflow-v2/review";
+import { WorkflowReviewTrace } from "./WorkflowReviewTrace";
+import { ChatEventMessage } from "../chat/chat-event-display";
 
 interface WorkflowRunCenterProps {
   runs: WorkflowRunState[];
@@ -28,6 +30,7 @@ interface WorkflowRunCenterProps {
   onCleanupRunMaterials?: (runId: string) => void | Promise<void>;
   writableRunId?: string;
   onResolveIntervention?: (nodeId: string, action: WorkflowV2InterventionAction, reason?: string) => void | Promise<void>;
+  onResolveRuntimeApproval?: (ownerId: string, requestId: string, decision: ApprovalDecision) => void | Promise<void>;
 }
 
 const STATUS_LABELS: Record<WorkflowStatus, { en: string; zh: string }> = {
@@ -121,7 +124,7 @@ function runIcon(status: WorkflowStatus) {
 }
 
 function nodeStatusIcon(status: WorkflowRunState["progress"][number]["status"]) {
-  if (status === "completed") return CheckCircle2;
+  if (status === "completed" || status === "completed_with_override") return CheckCircle2;
   if (status === "failed" || status === "awaiting_input") return CircleAlert;
   if (status === "paused") return CircleStop;
   return Clock3;
@@ -175,7 +178,7 @@ export function WorkflowRunCenter(props: WorkflowRunCenterProps) {
   return <WorkflowRunCenterOpen {...props} />;
 }
 
-function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loading = false, error, selectedRunId, language = "en", onSelectRun, onClose, onResolveRecovery, onRefreshRecovery, onResolveConflict, onResolveUnknownOperation, onCleanupRunMaterials, writableRunId, onResolveIntervention }: WorkflowRunCenterProps) {
+function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loading = false, error, selectedRunId, language = "en", onSelectRun, onClose, onResolveRecovery, onRefreshRecovery, onResolveConflict, onResolveUnknownOperation, onCleanupRunMaterials, writableRunId, onResolveIntervention, onResolveRuntimeApproval }: WorkflowRunCenterProps) {
   const [activeRunId, setActiveRunId] = useState<string | undefined>(selectedRunId);
   const [statusFilter, setStatusFilter] = useState<WorkflowStatus | "all">("all");
   const [sourceFilter, setSourceFilter] = useState<WorkflowRunTriggerSource | "all">("all");
@@ -423,7 +426,7 @@ function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loadi
                 {selectedArtifacts.length > 0 ? <section className="workflow-run-center-section workflow-run-center-artifacts"><header><GitBranch size={14} /><strong>{labels.artifacts}</strong></header><div className="workflow-run-center-artifact-list">{selectedArtifacts.map((artifact) => <article key={artifact.id}><strong>{artifact.title}</strong><small>{artifact.kind === "file" ? artifactFileName(artifact.path) : artifact.kind === "url" ? artifactUrlPreview(artifact.url) : "text"}</small>{artifact.description ? <p>{artifact.description}</p> : null}{artifact.kind === "text" && artifact.content ? <pre>{artifact.content.slice(0, 4000)}</pre> : null}</article>)}</div></section> : null}
                 <section className="workflow-run-center-section">
                   <header><GitBranch size={14} /><strong>{labels.config}</strong></header>
-                  <div className="workflow-run-center-config-grid"><span><b>{labels.approvedBy}</b>{selectedRun.workflowV2Plan.approvedBy || "—"}</span><span><b>{labels.nodes}</b>{selectedRun.workflowV2Plan.nodes.length}</span><span><b>{language === "zh" ? "上下文预算" : "Context budget"}</b>{selectedRun.workflowV2Plan.budget.context.maxContextTokens ?? "—"}</span><span><b>{labels.agent}</b>{selectedRun.configurationSnapshot?.configuredAgentId ?? "—"}</span><span><b>{labels.agentRevision}</b>{selectedRun.configurationSnapshot?.agentRevision ?? "—"}</span><span><b>{labels.runtime}</b>{selectedRun.configurationSnapshot?.runtimeId ?? "—"}</span><span><b>{labels.channel}</b>{selectedRun.configurationSnapshot?.channelId ?? "—"}</span><span><b>{labels.model}</b>{selectedRun.configurationSnapshot?.modelId ?? "—"}</span></div>
+                  <div className="workflow-run-center-config-grid"><span><b>{labels.approvedBy}</b>{selectedRun.workflowV2Plan.approvedBy || "—"}</span><span><b>{labels.nodes}</b>{selectedRun.workflowV2Plan.nodes.length}</span><span><b>{language === "zh" ? "上下文预算" : "Context budget"}</b>{selectedRun.workflowV2Plan.budget.context.maxContextTokens ?? "—"}</span><span><b>{language === "zh" ? "上一次运行" : "Parent run"}</b>{selectedRun.parentRunId ?? "—"}</span><span><b>{labels.agent}</b>{selectedRun.configurationSnapshot?.configuredAgentId ?? "—"}</span><span><b>{labels.agentRevision}</b>{selectedRun.configurationSnapshot?.agentRevision ?? "—"}</span><span><b>{labels.runtime}</b>{selectedRun.configurationSnapshot?.runtimeId ?? "—"}</span><span><b>{labels.channel}</b>{selectedRun.configurationSnapshot?.channelId ?? "—"}</span><span><b>{labels.model}</b>{selectedRun.configurationSnapshot?.modelId ?? "—"}</span></div>
                 </section>
                 <section className="workflow-run-center-section">
                   <header><CalendarClock size={14} /><strong>{labels.timeline}</strong></header>
@@ -434,6 +437,18 @@ function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loadi
                       const eventError = [...events].reverse().find((event) => event.error)?.error;
                       const conversation = selectedConversationsByNodeId.get(node.nodeId);
                       const messages = conversation?.messages.length ? conversation.messages : progress?.messages ?? [];
+                      const hasLiveApproval = messages.some((message) => {
+                        const event = message.event as Partial<ChatEvent> | undefined;
+                        return event?.type === "approval_request" && event.requestState === "live";
+                      });
+                      const approvalOwnerId = conversation
+                        ? `workflow-node:${conversation.workflowId}:${conversation.runId}:${conversation.nodeId}`
+                        : progress?.taskId;
+                      const reviewMessages = progress?.reviewMessages ?? [];
+                      const reviewHasLiveApproval = reviewMessages.some((message) => {
+                        const event = message.event as Partial<ChatEvent> | undefined;
+                        return event?.type === "approval_request" && event.requestState === "live";
+                      });
                       const telemetry = progress?.telemetry ?? conversation?.telemetry;
                       const timelineSegments = selectedTimeline.get(node.nodeId) ?? [];
                       return (
@@ -452,6 +467,10 @@ function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loadi
                               <span><b>{labels.attempts}</b>{telemetry?.attempt ?? "—"}</span>
                               <span><b>{labels.duration}</b>{formatNodeDuration(telemetry)}</span>
                               <span><b>{labels.cost}</b>{formatCost(telemetry, language)}</span>
+                              <span><b>{language === "zh" ? "模型调用" : "Model calls"}</b>{formatMetric(telemetry?.modelCalls)}</span>
+                              <span><b>{language === "zh" ? "审查调用" : "Review calls"}</b>{formatMetric(telemetry?.reviewModelCalls)}</span>
+                              <span><b>{language === "zh" ? "质量尝试" : "Quality attempts"}</b>{formatMetric(telemetry?.reviewQualityAttempts)}</span>
+                              <span><b>{language === "zh" ? "审查通道尝试" : "Review channel attempts"}</b>{formatMetric(telemetry?.reviewInfrastructureAttempts)}</span>
                             </div>
                             <div className="workflow-run-center-node-token-usage">
                               <strong>{labels.tokenUsage}</strong>
@@ -474,6 +493,39 @@ function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loadi
                           {eventError ? <p className="is-error">{getWorkflowErrorCode(eventError)} · {eventError}</p> : null}
                           {progress?.inputSummary ? <details className="workflow-run-center-node-outputs"><summary>{labels.inputSummary}</summary><pre>{JSON.stringify(progress.inputSummary, null, 2)}</pre></details> : null}
                           {progress?.outputs ? <details className="workflow-run-center-node-outputs"><summary>{labels.outputs}</summary><pre>{JSON.stringify(progress.outputs, null, 2)}</pre></details> : null}
+                          {reviewMessages.length ? <details className="workflow-run-center-messages" open={reviewHasLiveApproval}>
+                            <summary><MessageSquareText size={13} /><span>{language === "zh" ? "实时 Review Gate" : "Live Review Gate"}</span><em>{reviewMessages.length}</em></summary>
+                            <div className="workflow-run-center-message-list">
+                              {reviewMessages.map((message) => <article key={message.id} className={`is-${message.role}${message.eventType ? ` is-${message.eventType}` : ""}`}>
+                                <header><strong>{messageLabel(message, language)}</strong><time>{formatDate(message.at, language)}</time></header>
+                                {message.event && progress?.reviewTaskId
+                                  ? <ChatEventMessage
+                                      event={message.event as ChatEvent}
+                                      ownerId={progress.reviewTaskId}
+                                      onResolveApproval={selectedRun.runId === writableRunId ? onResolveRuntimeApproval : undefined}
+                                    />
+                                  : <p>{message.content}</p>}
+                              </article>)}
+                            </div>
+                          </details> : null}
+                          {progress?.reviewHistory?.length ? <details className="workflow-run-center-node-outputs" open={progress.intervention?.source === "review_rejection" || progress.intervention?.source === "review_escalation"}>
+                            <summary>{language === "zh" ? "质量审查历史" : "Quality review history"} · {progress.reviewHistory.length}</summary>
+                            <div className="workflow-run-center-events">{progress.reviewHistory.map((review) => <details key={review.reviewAttempt}>
+                              <summary>#{review.reviewAttempt} · {review.verdict.qualityLevel}/{review.requiredLevel} · {review.passed ? (language === "zh" ? "通过" : "passed") : (language === "zh" ? "未通过" : "failed")} · {new Date(review.reviewedAt).toLocaleString()}</summary>
+                              {review.gateId || review.reviewerConfiguredAgentId ? <span><b>Review Gate</b>{review.gateId ?? "—"} · Agent {review.reviewerConfiguredAgentId ?? "—"}</span> : null}
+                              <strong>{language === "zh" ? "候选结果" : "Candidate result"}</strong>
+                              <pre>{JSON.stringify(review.candidate, null, 2)}</pre>
+                              {review.verdict.dimensionResults.map((dimension) => <span key={dimension.key}><b>{dimension.key}: {dimension.qualityLevel}</b>{dimension.reason}{dimension.evidence.length ? ` · ${dimension.evidence.join("; ")}` : ""}</span>)}
+                              {review.trace?.length ? <details className="workflow-run-center-review-trace">
+                                <summary>{language === "zh" ? "审查全过程" : "Full review process"} · {review.trace.length}</summary>
+                                <WorkflowReviewTrace trace={review.trace} language={language} />
+                              </details> : null}
+                            </details>)}</div>
+                          </details> : null}
+                          {progress?.intervention?.reviewTrace?.length ? <details className="workflow-run-center-node-outputs" open>
+                            <summary>{language === "zh" ? "失败的审查全过程" : "Failed review process"} · {progress.intervention.reviewTrace.length}</summary>
+                            <WorkflowReviewTrace trace={progress.intervention.reviewTrace} language={language} />
+                          </details> : null}
                           {progress?.acceptance ? <details className="workflow-run-center-node-outputs" open={progress.acceptance.outcome !== "clean"}>
                             <summary>{language === "zh" ? "节点验收" : "Node acceptance"} · {progress.acceptance.outcome}</summary>
                             <div className="workflow-run-center-events">
@@ -493,13 +545,14 @@ function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loadi
                             </div>
                           </details> : null}
                           {progress?.intervention && selectedRun.runId === writableRunId && onResolveIntervention ? <div className="workflow-run-center-node-actions">
-                            <input value={nodeActionReason} maxLength={2_000} onChange={(event) => setNodeActionReason(event.currentTarget.value)} placeholder={language === "zh" ? "处理依据（可选）" : "Decision reason (optional)"} />
+                            {!progress.intervention.allowedActions.includes("accept_last_result") ? <input value={nodeActionReason} maxLength={2_000} onChange={(event) => setNodeActionReason(event.currentTarget.value)} placeholder={language === "zh" ? "处理依据（可选）" : "Decision reason (optional)"} /> : null}
                             <div>{progress.intervention.allowedActions.map((action) => <button key={action} type="button" disabled={nodeActionBusy} onClick={() => {
-                              if (!window.confirm(language === "zh" ? `确认对节点 ${progress.title} 执行 ${action}？` : `Confirm ${action} for node ${progress.title}?`)) return;
+                              const isReviewResolution = action === "rerun_all" || action === "accept_last_result";
+                              if (!isReviewResolution && !window.confirm(language === "zh" ? `确认对节点 ${progress.title} 执行 ${action}？` : `Confirm ${action} for node ${progress.title}?`)) return;
                               setNodeActionBusy(true);
                               setNodeActionError(undefined);
-                              void Promise.resolve(onResolveIntervention(progress.nodeId, action, nodeActionReason.trim() || undefined)).then(() => setNodeActionReason("")).catch((nodeActionFailure) => setNodeActionError(nodeActionFailure instanceof Error ? nodeActionFailure.message : String(nodeActionFailure))).finally(() => setNodeActionBusy(false));
-                            }}>{action === "continue" ? (language === "zh" ? "继续/重试" : "Continue / retry") : action}</button>)}</div>
+                              void Promise.resolve(onResolveIntervention(progress.nodeId, action, isReviewResolution ? undefined : nodeActionReason.trim() || undefined)).then(() => setNodeActionReason("")).catch((nodeActionFailure) => setNodeActionError(nodeActionFailure instanceof Error ? nodeActionFailure.message : String(nodeActionFailure))).finally(() => setNodeActionBusy(false));
+                            }}>{action === "continue" ? (language === "zh" ? "继续/重试" : "Continue / retry") : action === "rerun_all" ? (language === "zh" ? "全部节点重新运行" : "Rerun all nodes") : action === "accept_last_result" ? (language === "zh" ? "采用最后一次结果" : "Accept last result") : action}</button>)}</div>
                             {nodeActionError ? <p className="is-error">{nodeActionError}</p> : null}
                           </div> : null}
                           {selectedRun.recovery?.availableActions.includes("rollback_savepoint") && selectedRun.runId === writableRunId && onResolveRecovery && selectedRun.recovery.uncertainNodeIds.includes(node.nodeId) ? <div className="workflow-run-center-node-actions">
@@ -517,12 +570,18 @@ function WorkflowRunCenterOpen({ runs, conversations = [], artifacts = [], loadi
                               {events.map((event, index) => <span key={`${event.type}-${event.at}-${index}`}>{eventLabel(event.type, language)} · {formatDate(event.at, language)}{event.attempt ? ` · #${event.attempt}` : ""}{event.detail ? ` · ${event.detail}` : ""}{event.question ? ` · ${event.question}` : ""}{event.answer ? ` · ${event.answer}` : ""}{event.intervention ? ` · ${event.intervention.source}${event.intervention.reviewVerdict ? ` · ${event.intervention.reviewVerdict.decision}` : ""}` : ""}</span>)}
                             </div>
                           ) : <small className="workflow-run-center-no-events">{selectedProgressByNodeId.has(node.nodeId) ? labels.noEvents : labels.notStarted}</small>}
-                          {messages.length > 0 ? <details className="workflow-run-center-messages">
+                          {messages.length > 0 ? <details className="workflow-run-center-messages" open={hasLiveApproval}>
                             <summary><MessageSquareText size={13} /><span>{labels.messages}</span><em>{messages.length}</em></summary>
                             <div className="workflow-run-center-message-list">
                               {messages.map((message) => <article key={message.id} className={`is-${message.role}${message.eventType ? ` is-${message.eventType}` : ""}`}>
                                 <header><strong>{messageLabel(message, language)}</strong><time>{formatDate(message.at, language)}</time></header>
-                                <p>{message.content}</p>
+                                {message.event && approvalOwnerId
+                                  ? <ChatEventMessage
+                                      event={message.event as ChatEvent}
+                                      ownerId={approvalOwnerId}
+                                      onResolveApproval={selectedRun.runId === writableRunId ? onResolveRuntimeApproval : undefined}
+                                    />
+                                  : <p>{message.content}</p>}
                               </article>)}
                             </div>
                           </details> : null}

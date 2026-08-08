@@ -183,4 +183,29 @@ describe("workflow-v2 scheduler", () => {
     expect(runState.nodes.review).toMatchObject({ status: "blocked", blockedBy: ["implement"] });
     expect(listWorkflowV2RunnableNodeIds(runState)).toEqual([]);
   });
+
+  test("clears a resolved intervention when a node is accepted with an override", () => {
+    let runState = createWorkflowV2RunState({ definition: definition(), maxParallelNodes: 1 });
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "plan", status: "running", now: 10 });
+    runState = transitionWorkflowV2NodeState(runState, {
+      nodeId: "plan",
+      status: "paused",
+      now: 11,
+      error: "Review quality was below the required level.",
+      intervention: {
+        nodeId: "plan",
+        source: "review_rejection",
+        reason: "Review quality was below the required level.",
+        allowedActions: ["rerun_all", "accept_last_result"],
+        requestedAt: 11,
+      },
+    });
+
+    runState = transitionWorkflowV2NodeState(runState, { nodeId: "plan", status: "completed_with_override", now: 12 });
+
+    expect(runState.nodes.plan).toMatchObject({ status: "completed_with_override", finishedAt: 12 });
+    expect(runState.nodes.plan?.intervention).toBeUndefined();
+    expect(runState.nodes.plan?.lastError).toBeUndefined();
+    expect(runState.nodes.implement).toMatchObject({ status: "ready", blockedBy: [] });
+  });
 });

@@ -719,7 +719,7 @@ function applyTransactionLedgerState(
 
   transaction.operationCount = operations.length;
   transaction.unknownOperationCount = operations.filter((operation) => operation.state === "unknown").length;
-  transaction.irreversibleOperationCount = operations.filter((operation) => !operation.reversible && operation.state !== "compensated").length;
+  transaction.irreversibleOperationCount = operations.filter((operation) => !operation.reversible && operation.state !== "compensated" && operation.state !== "discarded").length;
   transaction.updatedAt = Math.max(transaction.updatedAt, updatedAt);
   if (transaction.unknownOperationCount > 0) transaction.status = "recovery_required";
   transaction.retentionUntil = Math.max(transaction.retentionUntil, transaction.updatedAt);

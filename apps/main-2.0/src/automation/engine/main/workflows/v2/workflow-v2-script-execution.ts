@@ -14,7 +14,7 @@ export function authorizeWorkflowV2Script(input: { node: WorkflowV2ScriptNode; p
   return { analysis, governance, permission: decideWorkflowV2ScriptPermission({ managerRisk: governance.managerRisk, reviewerRisk: governance.reviewerRisk, staticRisk: governance.staticRisk, confirmed: input.confirmed }) };
 }
 
-export async function executeAuthorizedWorkflowV2Script(input: { deps: WorkflowRuntimeDependencies; node: WorkflowV2ScriptNode; workDir: string; upstreamOutputs: readonly WorkflowV2ResultPacket[]; timeoutMs: number; inputs: Record<string, unknown>; authorization: Parameters<WorkflowRuntimeDependencies["executeWorkflowV2Script"]>[0]["authorization"]; transactionMode: Parameters<WorkflowRuntimeDependencies["executeWorkflowV2Script"]>[0]["transactionMode"]; controller: AbortController }): Promise<WorkflowV2ScriptWorkerOutput> {
+export async function executeAuthorizedWorkflowV2Script(input: { deps: WorkflowRuntimeDependencies; node: WorkflowV2ScriptNode; workDir: string; upstreamOutputs: readonly WorkflowV2ResultPacket[]; timeoutMs: number; inputs: Record<string, unknown>; authorization: Parameters<WorkflowRuntimeDependencies["executeWorkflowV2Script"]>[0]["authorization"]; transactionMode: Parameters<WorkflowRuntimeDependencies["executeWorkflowV2Script"]>[0]["transactionMode"]; requireReversibleOperations?: boolean; controller: AbortController }): Promise<WorkflowV2ScriptWorkerOutput> {
   const execute = input.node.script.effectMode === "brokered_external"
     ? input.deps.executeWorkflowV2BrokeredScript
     : input.deps.executeWorkflowV2Script;
@@ -36,7 +36,7 @@ export async function executeAuthorizedWorkflowV2Script(input: { deps: WorkflowR
     }, input.timeoutMs);
   });
   try {
-    return await Promise.race([execute({ node: input.node, workDir: input.workDir, upstreamOutputs: input.upstreamOutputs, signal: input.controller.signal, timeoutMs: input.timeoutMs, inputs: Object.freeze(structuredClone(input.inputs)), authorization: input.authorization, transactionMode: input.transactionMode }), deadline]);
+    return await Promise.race([execute({ node: input.node, workDir: input.workDir, upstreamOutputs: input.upstreamOutputs, signal: input.controller.signal, timeoutMs: input.timeoutMs, inputs: Object.freeze(structuredClone(input.inputs)), authorization: input.authorization, transactionMode: input.transactionMode, ...(input.requireReversibleOperations ? { requireReversibleOperations: true } : {}) }), deadline]);
   } finally {
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }

@@ -11,6 +11,7 @@ import {
   Download,
   Folder,
   Gauge,
+  GitBranch,
   Info,
   Keyboard,
   Languages,
@@ -60,13 +61,13 @@ export type SettingsSection =
   | "shortcut"
   | "connections"
   | "sources"
-  | "import"
   | "usage"
   | "ai"
   | "memory"
   | "remote"
   | "skills"
   | "eval"
+  | "workflow"
   | "appearance"
   | "about";
 
@@ -375,10 +376,6 @@ export function SettingsDialog({
               <Folder size={15} />
               <span>{l("Optional sources", "可选来源")}</span>
             </button>
-            <button className={activeSection === "import" ? "active" : ""} onClick={() => setActiveSection("import")}>
-              <Download size={15} />
-              <span>{l("Import V1 data", "导入 V1 数据")}</span>
-            </button>
             <button className={activeSection === "usage" ? "active" : ""} onClick={() => setActiveSection("usage")}>
               <Gauge size={15} />
               <span>{l("Usage limits", "剩余额度")}</span>
@@ -402,6 +399,10 @@ export function SettingsDialog({
             <button className={activeSection === "eval" ? "active" : ""} onClick={() => setActiveSection("eval")}>
               <Beaker size={15} />
               <span>{l("Eval", "Eval")}</span>
+            </button>
+            <button className={activeSection === "workflow" ? "active" : ""} onClick={() => setActiveSection("workflow")}>
+              <GitBranch size={15} />
+              <span>Workflow</span>
             </button>
             <button className={activeSection === "appearance" ? "active" : ""} onClick={() => setActiveSection("appearance")}>
               <Sun size={15} />
@@ -750,40 +751,6 @@ export function SettingsDialog({
                     onChange={(event) => onSettingsChange({ includeQoder: event.currentTarget.checked })}
                   />
                 </label>
-              </section>
-            ) : null}
-            {activeSection === "import" ? (
-              <section className="settings-pane">
-                <header className="settings-pane-head">
-                  <h3>{l("Import from AgentRecall V1", "从 AgentRecall V1 导入")}</h3>
-                  <p>{l(
-                    "Bring V1 session settings, connections, cached conversations, user labels, and cloud sync bindings into V2.",
-                    "将 V1 的会话设置、连接、缓存对话、用户标记和云端同步关系迁移到 V2。",
-                  )}</p>
-                </header>
-                <div className="v1-import-card">
-                  <div className="v1-import-copy">
-                    <strong>{l("Merge safely into V2", "安全合并到 V2")}</strong>
-                    <span>{l(
-                      "Existing V2 conversations and their labels are kept. Session-related settings are updated from V1; saved passwords are not copied.",
-                      "已有 V2 会话及其标记会被保留；会话相关设置会按 V1 更新，已保存的密码不会复制。",
-                    )}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="settings-action-button v1-import-button"
-                    disabled={v1ImportState.running}
-                    onClick={() => void importV1Data()}
-                  >
-                    {v1ImportState.running ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
-                    {v1ImportState.running ? l("Importing...", "正在导入...") : l("Import V1 data", "一键导入 V1 数据")}
-                  </button>
-                </div>
-                {v1ImportState.message ? (
-                  <div className={`v1-import-result ${v1ImportState.kind ?? ""}`} role="status" aria-live="polite">
-                    {v1ImportState.message}
-                  </div>
-                ) : null}
               </section>
             ) : null}
             {activeSection === "usage" ? (
@@ -1227,6 +1194,50 @@ export function SettingsDialog({
                 </label>
               </section>
             ) : null}
+            {activeSection === "workflow" ? (
+              <section className="settings-pane">
+                <header className="settings-pane-head">
+                  <h3>Workflow</h3>
+                  <p>{l("Control workflow review before and during execution independently.", "分别控制工作流运行前和运行中的审查能力。")}</p>
+                </header>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Global Review", "全局 Review")}</span>
+                    <span className="settings-field-sub">
+                      {l(
+                        "Show the adversarial review action for user workflows before they run.",
+                        "为用户 Workflow 显示运行前的对抗审查入口。",
+                      )}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.workflowGlobalReviewEnabled)}
+                    disabled={!settings}
+                    onChange={(event) => onSettingsChange({ workflowGlobalReviewEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("Runtime Review", "运行时 Review")}</span>
+                    <span className="settings-field-sub">
+                      {l(
+                        "Review configured critical Agent nodes in user workflows and retry results that miss their quality threshold.",
+                        "用户 Workflow 运行时审查已配置的关键节点，未达到质量门槛时自动重试。",
+                      )}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.workflowRuntimeReviewEnabled)}
+                    disabled={!settings}
+                    onChange={(event) => onSettingsChange({ workflowRuntimeReviewEnabled: event.currentTarget.checked })}
+                  />
+                </label>
+              </section>
+            ) : null}
             {activeSection === "appearance" ? (
               <section className="settings-pane">
                 <header className="settings-pane-head">
@@ -1445,6 +1456,31 @@ export function SettingsDialog({
                     />
                   </label>
                 ) : null}
+                <div className="update-v1-import">
+                  <div className="v1-import-card">
+                    <div className="v1-import-copy">
+                      <strong>{l("V1 data migration", "V1 数据迁移")}</strong>
+                      <span>{l(
+                        "Import V1 session settings, connections, cached conversations, user labels, and cloud bindings. Existing V2 conversations are kept, and saved passwords are not copied.",
+                        "导入 V1 的会话设置、连接、缓存对话、用户标记和云端同步关系；已有 V2 会话会被保留，已保存的密码不会复制。",
+                      )}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-action-button v1-import-button"
+                      disabled={v1ImportState.running}
+                      onClick={() => void importV1Data()}
+                    >
+                      {v1ImportState.running ? <RefreshCw size={14} className="spin" /> : <Download size={14} />}
+                      {v1ImportState.running ? l("Importing...", "正在导入...") : l("Import V1 data", "一键导入 V1 数据")}
+                    </button>
+                  </div>
+                  {v1ImportState.message ? (
+                    <div className={`v1-import-result ${v1ImportState.kind ?? ""}`} role="status" aria-live="polite">
+                      {v1ImportState.message}
+                    </div>
+                  ) : null}
+                </div>
               </section>
             ) : null}
           </div>

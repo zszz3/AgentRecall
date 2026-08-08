@@ -79,6 +79,7 @@ export class WorkflowV2OperationBroker {
   async apply<TPlan, TReceipt>(input: WorkflowOperationBrokerApplyInput<TPlan>): Promise<TReceipt> {
     const operation = await this.prepare(input);
     if (operation.state === "applied") return operation.receipt as TReceipt;
+    if (operation.state === "discarded") throw new Error(`Workflow operation ${operation.operationId} was discarded after a rejected attempt and cannot be applied.`);
     return this.applyPrepared<TReceipt>({ workflowId: input.workflowId, runId: input.runId, operationId: operation.operationId, signal: input.signal });
   }
 

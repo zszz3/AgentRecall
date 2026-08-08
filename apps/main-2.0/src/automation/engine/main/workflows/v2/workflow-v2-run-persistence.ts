@@ -10,6 +10,7 @@ import {
 import type { WorkflowV2StorePort } from "../workflow-runtime-ports";
 import type { ExecuteWorkflowV2Checkpoint } from "./workflow-v2-executor";
 import { createWorkflowV2RunState } from "../../../shared/workflow-v2/state";
+import { workflowV2ReviewGateForNode } from "../../../shared/workflow-v2/review-gates";
 import { createWorkflowV2NodeCacheFingerprint } from "./workflow-v2-recovery";
 import { resolveWorkflowNodeAgent, workflowV2ExecutionEnvironment, workflowV2ReviewerPolicy } from "./workflow-v2-node-policy";
 import type { WorkflowV2RecoveryOverride } from "./workflow-v2-execution-contract";
@@ -424,7 +425,8 @@ export class WorkflowV2RunPersistence {
       if (this.cachedNodeIds.has(output.nodeId)) continue;
       const node = this.input.plan.definition.nodes.find((item) => item.id === output.nodeId);
       const planNode = this.input.plan.nodes.find((item) => item.nodeId === output.nodeId);
-      if (!node || !planNode || checkpoint.runState.nodes[output.nodeId]?.status !== "completed") continue;
+      const nodeStatus = checkpoint.runState.nodes[output.nodeId]?.status;
+      if (!node || !planNode || (nodeStatus !== "completed" && nodeStatus !== "completed_with_override")) continue;
       const recoveryOverride = this.input.recoveryOverrides?.get(output.nodeId);
       const effectivePlanNode = recoveryOverride?.modelProfile ? { ...planNode, modelProfile: recoveryOverride.modelProfile } : planNode;
       const upstreamOutputs = this.input.plan.definition.edges
@@ -450,7 +452,12 @@ export class WorkflowV2RunPersistence {
             configuredAgentId: agentRoute.configuredAgentId,
             modelId: agentRoute.modelId,
           }),
-          reviewerPolicy: workflowV2ReviewerPolicy(node, recoveryOverride?.forceIndependentReview === true),
+          reviewerPolicy: workflowV2ReviewerPolicy(
+            node,
+            workflowV2ReviewGateForNode(this.input.plan.definition, node.id)
+              ?? this.input.plan.definition.reviewEnabled === true,
+            recoveryOverride?.forceIndependentReview === true,
+          ),
         }),
         output: structuredClone(output),
         savedAt: Date.now(),
@@ -495,6 +502,7 @@ export class WorkflowV2RunPersistence {
 }
 
 function operationEventType(state: WorkflowOperationState): string | undefined {
+  if (state === "discarded") return "operation_discarded";
   if (state === "applying") return "operation_started";
   if (state === "applied") return "operation_applied";
   if (state === "unknown") return "operation_unknown";

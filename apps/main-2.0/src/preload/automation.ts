@@ -1,6 +1,7 @@
 import type { IpcRenderer } from "electron";
 import type {
   AgentChannel,
+  ApplyWorkflowReviewToManagerRequest,
   AgentTestEvent,
   AgentTestResult,
   AppSnapshot,
@@ -121,6 +122,7 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
     exportWorkflow: (workflowId: string): Promise<WorkflowExportResult> => ipc.invoke(AUTOMATION_CHANNELS.workflowExport, workflowId),
     confirmWorkflow: (request: ConfirmWorkflowRequest): Promise<WorkflowOperationResult> => ipc.invoke(AUTOMATION_CHANNELS.workflowConfirm, request),
     reviewWorkflow: (request: ReviewWorkflowRequest): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowReview, request),
+    applyWorkflowReviewToManager: (request: ApplyWorkflowReviewToManagerRequest): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowReviewApplyToManager, request),
     interruptWorkflowReview: (request: InterruptWorkflowReviewRequest): Promise<AppSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowReviewInterrupt, request),
     runWorkflow: (request: RunWorkflowRequest): Promise<WorkflowOperationResult> => ipc.invoke(AUTOMATION_CHANNELS.workflowRun, request),
     pauseWorkflowNode: (request: PauseWorkflowNodeRequest): Promise<WorkflowOperationResult> => ipc.invoke(AUTOMATION_CHANNELS.workflowPauseNode, request),

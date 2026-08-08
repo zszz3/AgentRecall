@@ -4,6 +4,10 @@ import { tracePresentation } from "./trace-presentation";
 
 export type SessionJsonExportFormat = "openai_chat" | "openai_responses" | "anthropic";
 
+export interface SessionMarkdownExportOptions {
+  includeToolTrace: boolean;
+}
+
 const EXPORTED_MODEL_PLACEHOLDER = "YOUR_MODEL";
 
 export function formatRelativeTime(ts: number): string {
@@ -62,6 +66,7 @@ export function formatSessionMarkdown(
   session: SessionSearchResult | IndexedSession,
   messages: SessionMessage[],
   traceEvents: SessionTraceEvent[] = [],
+  options: SessionMarkdownExportOptions = { includeToolTrace: true },
 ): string {
   const title = "displayTitle" in session ? session.displayTitle : session.firstQuestion || session.originalTitle;
   const source = sessionSourceLabel(session.source);
@@ -78,7 +83,8 @@ export function formatSessionMarkdown(
     const time = formatMessageTime(message.timestamp);
     return [`## ${time ? `${role} (${time})` : role}`, "", message.content, "", "---", ""];
   });
-  return [...header, ...body, ...formatTraceMarkdown(traceEvents)].join("\n");
+  const trace = options.includeToolTrace ? formatTraceMarkdown(traceEvents) : [];
+  return [...header, ...body, ...trace].join("\n");
 }
 
 export function formatSessionPlainText(

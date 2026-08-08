@@ -21,7 +21,7 @@ const servers: BoundMcpServer[] = [
       env: { API_TOKEN: "HOST_API_TOKEN" },
       enabled: true,
       tools: [
-        { name: "read_file", inputSchema: {} },
+        { name: "read_file", inputSchema: {}, readOnly: true },
         { name: "write_file", inputSchema: {} },
       ],
       status: "connected",
@@ -58,11 +58,27 @@ describe("runtime MCP configuration", () => {
     expect(argv).toContain('command="node"');
     expect(argv).toContain('env_vars=["API_TOKEN"]');
     expect(argv).toContain('enabled_tools=["read_file"]');
+    expect(argv).toContain('default_tools_approval_mode="prompt"');
+    expect(argv).toContain('tools.read_file.approval_mode="approve"');
+    expect(argv).not.toContain('tools.write_file.approval_mode="approve"');
     expect(argv).toContain('url="https://example.test/mcp"');
     expect(argv).toContain('env_http_headers={"Authorization" = "HOST_HTTP_TOKEN"}');
     expect(argv).not.toContain("secret-value");
     expect(argv).not.toContain("http-secret");
     expect(config.env).toMatchObject({ API_TOKEN: "secret-value", HOST_HTTP_TOKEN: "http-secret" });
+  });
+
+  test("routes writable Codex MCP tools through approval while auto-approving declared read-only tools", () => {
+    const bindings: BoundMcpServer[] = [{
+      ...servers[0]!,
+      toolAllowlist: [],
+    }];
+
+    const argv = codexMcpLaunchConfig(bindings, { HOST_API_TOKEN: "secret-value" }).args.join("\n");
+
+    expect(argv).toContain('default_tools_approval_mode="prompt"');
+    expect(argv).toContain('tools.read_file.approval_mode="approve"');
+    expect(argv).not.toContain('tools.write_file.approval_mode="approve"');
   });
 
   test("builds Claude and ACP server definitions for both transports", () => {

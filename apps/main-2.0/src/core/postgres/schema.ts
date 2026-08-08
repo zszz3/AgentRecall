@@ -1466,4 +1466,26 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS skill_hash text;
     `,
   ],
+}, {
+  version: 30,
+  name: "persist Workflow review history and full-rerun lineage",
+  statements: [
+    `
+      ALTER TABLE agent_recall.workflow_runs
+        ADD COLUMN IF NOT EXISTS parent_run_id text;
+      ALTER TABLE agent_recall.workflow_run_progress
+        ADD COLUMN IF NOT EXISTS review_history jsonb;
+      ALTER TABLE agent_recall.workflow_run_nodes
+        ADD COLUMN IF NOT EXISTS review_history jsonb;
+    `,
+  ],
+}, {
+  version: 31,
+  name: "persist MCP tool read-only declarations",
+  statements: [
+    `
+      ALTER TABLE agent_recall.mcp_tools
+        ADD COLUMN IF NOT EXISTS read_only boolean NOT NULL DEFAULT false;
+    `,
+  ],
 }];

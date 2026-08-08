@@ -8,6 +8,7 @@ import type { TraceEventQueryOptions } from "../core/session-store";
 import type { SessionBulkDeletePreview, SessionBulkDeleteRequest, SessionBulkDeleteResult } from "../core/session-bulk-delete";
 import type { SshConfigHost } from "../core/ssh-config";
 import type { SessionContextComponents } from "../core/session-context-components";
+import type { SessionMarkdownExportOptions } from "../core/format-session";
 import type {
   EnvironmentUpsertInput,
   LiveSessionSnapshot,
@@ -120,7 +121,8 @@ const api = {
   openNativeApp: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:open-app", sessionKey),
   revealSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:reveal", sessionKey),
   copyMarkdown: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-markdown", sessionKey),
-  exportMarkdown: (sessionKey: string): Promise<boolean> => ipcRenderer.invoke("command:export-markdown", sessionKey),
+  exportMarkdown: (sessionKey: string, options: SessionMarkdownExportOptions): Promise<boolean> =>
+    ipcRenderer.invoke("command:export-markdown", sessionKey, options),
   exportJson: (sessionKey: string): Promise<{
     exported: boolean;
     fidelity?: "exact-trace" | "reconstructed" | "normalized";

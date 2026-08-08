@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { AgentHub } from "./agent-hub";
 import { createWorkflowV2InlineScriptSpec } from "../../shared/workflow-v2/definition";
 import { createStrictWorkflowTransactionPolicy } from "../../shared/workflow-v2/transaction";
@@ -6,6 +6,32 @@ import { createStrictWorkflowTransactionPolicy } from "../../shared/workflow-v2/
 const TEST_AGENT_ID = "runtime-agent:codex-openai";
 
 describe("AgentHub workflow materialization", () => {
+  test("rejects locked topology changes sent through the draft patch endpoint", () => {
+    const hub = new AgentHub();
+    hub.ensureBundledWorkflows([{
+      workflowId: "bundled-patch-test",
+      title: "Bundled patch test",
+      objective: "Keep the official topology locked",
+      definition: {
+        workflowId: "bundled-patch-test",
+        graphVersion: 1,
+        objective: "Keep the official topology locked",
+        nodes: [{ id: "answer", kind: "answer", title: "Answer", execModel: "llm", executionMode: "one-shot", prompt: "Answer.", outputFields: [{ key: "answer", required: true }] }],
+        edges: [],
+      },
+    }]);
+    const before = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-patch-test")!;
+    const changedDefinition = structuredClone(before.definition);
+    changedDefinition.nodes[0]!.title = "Changed through patch";
+
+    hub.patchWorkflowDraft({ workflowId: before.workflowId, definition: changedDefinition });
+
+    const after = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === before.workflowId)!;
+    expect(after.definition).toEqual(before.definition);
+    expect(after.revision).toBe(before.revision);
+    expect(after.error).toBe("Official workflow topology is locked.");
+  });
+
   test("seeds bundled workflows as locked official workflows", () => {
     const hub = new AgentHub();
     hub.ensureBundledWorkflows([{
@@ -28,6 +54,49 @@ describe("AgentHub workflow materialization", () => {
     });
     expect(bundledWorkflow.workflowV2Plan).toBeUndefined();
 
+    const reviewUpdate = hub.updateWorkflow({
+      workflowId: "bundled-test",
+      expectedRevision: bundledWorkflow.revision,
+      definition: { ...structuredClone(bundledWorkflow.definition), reviewEnabled: true },
+    });
+    expect(reviewUpdate).toMatchObject({ ok: false, error: "Official workflow topology is locked." });
+    const reviewEnabledWorkflow = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    expect(reviewEnabledWorkflow.definition.reviewEnabled).not.toBe(true);
+
+    const routedDefinition = structuredClone(reviewEnabledWorkflow.definition);
+    const routedNode = routedDefinition.nodes[0]!;
+    if (routedNode.execModel !== "llm") throw new Error("Bundled test node must be an LLM node.");
+    routedNode.modelId = "gpt-5.4";
+    const routeUpdate = hub.updateWorkflow({
+      workflowId: "bundled-test",
+      expectedRevision: reviewEnabledWorkflow.revision,
+      definition: routedDefinition,
+    });
+    expect(routeUpdate).toMatchObject({ ok: true, revision: reviewEnabledWorkflow.revision + 1 });
+    const routedWorkflow = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    expect(routedWorkflow.definition.nodes[0]).toMatchObject({ modelId: "gpt-5.4", prompt: "Answer." });
+
+    const bundledNode = structuredClone(bundledWorkflow.definition.nodes[0]!);
+    if (bundledNode.execModel !== "llm") throw new Error("Bundled test node must be an LLM node.");
+    hub.ensureBundledWorkflows([{
+      workflowId: "bundled-test",
+      title: "Bundled test",
+      objective: "Test bundled workflow",
+      definition: {
+        ...structuredClone(bundledWorkflow.definition),
+        nodes: [{ ...bundledNode, prompt: "Updated official prompt." }],
+      },
+    }]);
+    const refreshedWorkflow = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    expect(refreshedWorkflow.definition.nodes[0]).toMatchObject({ modelId: "gpt-5.4", prompt: "Updated official prompt." });
+
+    const changedTopology = structuredClone(refreshedWorkflow.definition);
+    changedTopology.nodes[0]!.title = "Changed locked title";
+    expect(hub.updateWorkflow({ workflowId: "bundled-test", expectedRevision: refreshedWorkflow.revision, definition: changedTopology })).toMatchObject({
+      ok: false,
+      error: "Official workflow topology is locked.",
+    });
+
     hub.patchWorkflowDraft({ workflowId: "bundled-test", reviewerConfiguredAgentId: TEST_AGENT_ID });
     const configuredWorkflow = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
     expect(hub.confirmWorkflow({ workflowId: "bundled-test", expectedRevision: configuredWorkflow.revision })).toMatchObject({ ok: true });
@@ -38,6 +107,9 @@ describe("AgentHub workflow materialization", () => {
         definition: { workflowId: "bundled-test" },
       },
     });
+    const run = vi.spyOn((hub as any).workflowRunService, "run").mockReturnValue({ ok: true, workflowId: "bundled-test", runId: "run-1" });
+    expect(hub.runWorkflow({ workflowId: "bundled-test", reviewEnabled: true })).toMatchObject({ ok: true });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ workflowId: "bundled-test", reviewEnabled: false }));
   });
 
   test("repairs legacy bundled workflow provenance without replacing customized content", () => {
@@ -97,6 +169,12 @@ describe("AgentHub workflow materialization", () => {
         edges: [],
       },
     }]);
+    const seeded = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
+    expect(hub.updateWorkflow({
+      workflowId: seeded.workflowId,
+      expectedRevision: seeded.revision,
+      definition: { ...structuredClone(seeded.definition), reviewEnabled: true },
+    })).toMatchObject({ ok: false, error: "Official workflow topology is locked." });
     const before = hub.snapshot().workflowStore.workflows.find((workflow) => workflow.workflowId === "bundled-test")!;
     hub.patchWorkflowDraft({
       workflowId: before.workflowId,
@@ -133,6 +211,7 @@ describe("AgentHub workflow materialization", () => {
       runContextDocument: "",
       definition: {
         objective: "New objective",
+        reviewEnabled: false,
         nodes: [{ id: "collect" }, { id: "report" }],
       },
     });
@@ -269,6 +348,93 @@ describe("AgentHub workflow materialization", () => {
     expect(hub.snapshot().workflowDraft?.runContextDocument).toBe("");
     expect(hub.snapshot().workflowDraft?.confirmedRevision).toBeUndefined();
     expect(hub.snapshot().workflowDraft?.workflowV2Plan).toBeUndefined();
+  });
+
+  test("removes legacy Review criticality from script nodes during workflow updates", () => {
+    const hub = new AgentHub();
+    const workflowId = hub.createWorkflowDraft().workflowDraft!.workflowId;
+    const materialized = hub.materializeWorkflowDraft(workflowId, {
+      title: "Transform",
+      objective: "Transform deterministically",
+      definition: {
+        workflowId,
+        graphVersion: 1,
+        objective: "Transform deterministically",
+        nodes: [{
+          id: "transform",
+          kind: "transform",
+          title: "Transform",
+          execModel: "script",
+          executionMode: "script",
+          script: createWorkflowV2InlineScriptSpec({ language: "typescript", code: "return { result: 'done' };" }),
+          outputFields: [{ key: "result", required: true }],
+        }],
+        edges: [],
+      },
+    });
+    const revisionBeforeUpdate = hub.snapshot().workflowDraft!.revision;
+    const definition = structuredClone(hub.snapshot().workflowDraft!.definition);
+    definition.nodes[0] = {
+      ...definition.nodes[0]!,
+      reviewLevel: "high",
+      reviewMaxRetries: 2,
+      judgeDimensions: [{ key: "quality", description: "Legacy script review must be ignored." }],
+    };
+
+    const result = hub.updateWorkflow({ workflowId, expectedRevision: materialized.revision, definition });
+
+    expect(result).toMatchObject({ ok: true, revision: revisionBeforeUpdate });
+    expect(hub.snapshot().workflowDraft?.definition.nodes[0]).not.toHaveProperty("reviewLevel");
+    expect(hub.snapshot().workflowDraft?.definition.nodes[0]).not.toHaveProperty("reviewMaxRetries");
+    expect(hub.snapshot().workflowDraft?.definition.nodes[0]).not.toHaveProperty("judgeDimensions");
+    expect(hub.snapshot().workflowDraft?.definition.reviewGates).toEqual([]);
+
+    hub.patchWorkflowDraft({ workflowId, definition });
+    expect(hub.snapshot().workflowDraft?.definition.nodes[0]).not.toHaveProperty("reviewLevel");
+    expect(hub.snapshot().workflowDraft?.definition.nodes[0]).not.toHaveProperty("reviewMaxRetries");
+    expect(hub.snapshot().workflowDraft?.definition.nodes[0]).not.toHaveProperty("judgeDimensions");
+    expect(hub.snapshot().workflowDraft?.definition.reviewGates).toEqual([]);
+  });
+
+  test("persists an explicit Manager Agent route on every generated LLM node", () => {
+    const hub = new AgentHub();
+    const draft = hub.createWorkflowDraft().workflowDraft!;
+    const result = hub.materializeWorkflowDraft(draft.workflowId, {
+      title: "Assigned answer",
+      objective: "Answer",
+      definition: {
+        workflowId: draft.workflowId,
+        graphVersion: 1,
+        objective: "Answer",
+        nodes: [
+          {
+            id: "answer-a",
+            kind: "answer",
+            title: "Answer A",
+            execModel: "llm",
+            executionMode: "one-shot",
+            prompt: "Answer part A.",
+            outputFields: [{ key: "answer", required: true }],
+          },
+          {
+            id: "answer-b",
+            kind: "answer",
+            title: "Answer B",
+            execModel: "llm",
+            executionMode: "one-shot",
+            prompt: "Answer part B.",
+            outputFields: [{ key: "answer", required: true }],
+          },
+        ],
+        edges: [],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(draft.configuredAgentId).toBeTruthy();
+    const llmNodes = hub.snapshot().workflowDraft?.definition.nodes.filter((node) => node.execModel === "llm") ?? [];
+    expect(llmNodes).toHaveLength(3);
+    expect(llmNodes.every((node) => node.configuredAgentId === draft.configuredAgentId)).toBe(true);
   });
 
   test("lets the planning agent revise a confirmed workflow in place", () => {

@@ -23,12 +23,14 @@ import type {
   WorkflowV2NodeCompletionSubmission,
 } from "../../shared/workflow-v2/completion";
 import type { WorkflowV2Plan } from "../../shared/workflow-v2/planning";
+import { workflowV2ReviewGateForNode } from "../../shared/workflow-v2/review-gates";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { workflowStoragePlanDocument, workflowStoragePlanFor } from "../../shared/workflow-v2/runtime-utils";
 import { WorkflowRunRegistry, type ActiveWorkflowRun } from "./workflow-run-registry";
 import { WorkflowV2RunExecutor } from "./v2/workflow-v2-run-executor";
 import { materializeWorkflowV2OutputArtifacts } from "./v2/workflow-v2-output-artifacts";
+import { materializeWorkflowV2AcceptedReviewCandidate } from "./v2/workflow-v2-review-override";
 import type { WorkflowV2RecoveryOverride } from "./v2/workflow-v2-execution-contract";
 import type {
   ExecuteWorkflowV2ScriptRequest,
@@ -122,10 +124,8 @@ export class WorkflowRuntime {
   private readonly runExecutor: WorkflowV2RunExecutor;
   private readonly scriptApprovalCoordinator = new WorkflowV2ScriptApprovalCoordinator();
   private readonly recoveryActionCoordinator = new WorkflowV2RecoveryActionCoordinator();
-  private readonly completionStore: WorkflowV2StorePort | undefined;
 
   constructor(private readonly deps: WorkflowRuntimeDependencies) {
-    this.completionStore = deps.createWorkflowV2Store?.();
     this.runExecutor = new WorkflowV2RunExecutor(deps, this.runRegistry);
   }
 
@@ -153,7 +153,7 @@ export class WorkflowRuntime {
     attempt: number;
     startedAt?: number;
   }): Promise<WorkflowV2NodeCompletionLedger | undefined> {
-    const store = this.completionStore;
+    const store = this.deps.createWorkflowV2Store?.();
     if (!store?.beginNodeCompletionExecution) return undefined;
     return store.beginNodeCompletionExecution({ ...input, startedAt: input.startedAt ?? Date.now() });
   }
@@ -172,7 +172,7 @@ export class WorkflowRuntime {
     if (node.status !== "running" && node.status !== "paused" && node.status !== "awaiting_input") {
       throw new Error(`Workflow node ${input.nodeId} is not accepting completion submissions.`);
     }
-    const store = this.completionStore;
+    const store = this.deps.createWorkflowV2Store?.();
     if (!store?.submitNodeCompletion) throw new Error("Workflow node completion storage is unavailable.");
     return store.submitNodeCompletion({ ...input, submittedAt: Date.now() });
   }
@@ -183,7 +183,7 @@ export class WorkflowRuntime {
     nodeId: string;
     executionId: string;
   }): Promise<WorkflowV2NodeCompletionSubmission | undefined> {
-    return this.completionStore?.readLatestNodeCompletionSubmission?.(input);
+    return this.deps.createWorkflowV2Store?.()?.readLatestNodeCompletionSubmission?.(input);
   }
 
   async resolveNodeCompletionSubmission(input: {
@@ -195,7 +195,7 @@ export class WorkflowRuntime {
     status: "consumed" | "accepted" | "rejected";
     reason?: string;
   }): Promise<WorkflowV2NodeCompletionSubmission | undefined> {
-    const store = this.completionStore;
+    const store = this.deps.createWorkflowV2Store?.();
     if (!store?.resolveNodeCompletionSubmission) return undefined;
     return store.resolveNodeCompletionSubmission({ ...input, resolvedAt: Date.now() });
   }
@@ -491,7 +491,7 @@ export class WorkflowRuntime {
     const continuationTargetNodeId = input.action === "continue"
       ? persisted.runState.nodeOrder.find((nodeId) => {
           const status = persisted.runState.nodes[nodeId]?.status;
-          return status !== "completed" && status !== "skipped";
+          return status !== "completed" && status !== "completed_with_override" && status !== "skipped";
         })
       : undefined;
     const pendingCheckpointId = persistedTransaction.pendingCheckpointId;
@@ -890,6 +890,7 @@ export class WorkflowRuntime {
       baseWorkflowContextDocument: run.contextDocument,
       storagePlanDocument: workflowStoragePlanDocument(storagePlan),
       initialCheckpoint: { runState: persisted.runState, workerOutputs: persisted.workerOutputs },
+      initialProgress: run.progress,
       initialNodeControl: persisted.nodeControl,
       initialDurableEventCount: persisted.eventCount,
       initialTransaction: persisted.transaction,
@@ -981,6 +982,7 @@ export class WorkflowRuntime {
       baseWorkflowContextDocument: run.contextDocument,
       storagePlanDocument: workflowStoragePlanDocument(storagePlan),
       initialCheckpoint: checkpoint,
+      initialProgress: run.progress,
       initialNodeControl: persisted.nodeControl,
       initialDurableEventCount: persisted.eventCount,
       ...(persisted.transaction ? { initialTransaction: persisted.transaction } : {}),
@@ -1047,7 +1049,7 @@ export class WorkflowRuntime {
         error: "Workflow V2 durable run state identity does not match the requested run.",
       };
     }
-    const plan = input.workflow.workflowV2Plan;
+    const plan = input.run.workflowV2Plan;
     if (!plan) {
       return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: "Workflow V2 plan was not found." };
     }
@@ -1087,6 +1089,9 @@ export class WorkflowRuntime {
         runId: input.run.runId,
         error: `Workflow V2 action ${input.action} requires a pending script permission request.`,
       };
+    }
+    if (input.action === "accept_last_result" && !intervention?.lastCandidate) {
+      return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: "Workflow V2 intervention has no candidate result to accept." };
     }
     if ((input.action === "escalate" || input.action === "increase_review_strength") && targetNode.execModel !== "llm") {
       return {
@@ -1154,6 +1159,61 @@ export class WorkflowRuntime {
       return { ok: true, workflowId: input.workflow.workflowId, runId: input.run.runId };
     }
 
+    if (input.action === "rerun_all") {
+      const operations = await store.readOperations?.(input.workflow.workflowId, input.run.runId) ?? [];
+      const appliedOperationIds = operations.filter((operation) => operation.adapterId && operation.state === "applied").map((operation) => operation.operationId);
+      if (appliedOperationIds.length > 0) {
+        const operationBroker = this.deps.createWorkflowV2RecoveryOperationBroker?.(store);
+        if (!operationBroker) {
+          return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: "Workflow V2 cannot rerun all nodes until the old Run's applied external operations can be compensated." };
+        }
+        const uncompensable = operations.filter((operation) => appliedOperationIds.includes(operation.operationId) && !operationBroker.canCompensateOperation(operation));
+        if (uncompensable.length > 0) {
+          return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: `Workflow V2 cannot rerun all nodes because these old operations are not compensable: ${uncompensable.map((operation) => operation.operationId).join(", ")}` };
+        }
+        const compensation = await operationBroker.compensateRun({ workflowId: input.workflow.workflowId, runId: input.run.runId, operationIds: appliedOperationIds, signal: AbortSignal.timeout(60_000) });
+        if (compensation.failed || compensation.skipped.length > 0 || compensation.compensated.length !== appliedOperationIds.length) {
+          return {
+            ok: false,
+            workflowId: input.workflow.workflowId,
+            runId: input.run.runId,
+            error: compensation.failed?.error ?? `Workflow V2 cannot rerun all nodes because these old operations were not compensated: ${[...compensation.skipped, ...appliedOperationIds.filter((operationId) => !compensation.compensated.includes(operationId))].join(", ")}`,
+          };
+        }
+      }
+      for (const operation of operations) {
+        if (operation.adapterId && operation.state === "planned") {
+          await store.transitionOperation?.({ workflowId: input.workflow.workflowId, runId: input.run.runId, operationId: operation.operationId, state: "discarded", updatedAt: resolvedAt });
+        }
+      }
+      const unresolvedOperations = (await store.readOperations?.(input.workflow.workflowId, input.run.runId) ?? [])
+        .filter((operation) => operation.adapterId)
+        .filter((operation) => operation.state !== "discarded" && operation.state !== "compensated");
+      if (unresolvedOperations.length > 0) {
+        return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: `Workflow V2 cannot rerun all nodes while old operations remain unresolved: ${unresolvedOperations.map((operation) => operation.operationId).join(", ")}` };
+      }
+      await store.discardWorkspaceTransaction?.({ workflowId: input.workflow.workflowId, runId: input.run.runId });
+      await store.appendEvents({ workflowId: input.workflow.workflowId, runId: input.run.runId, events: [resolutionEvent] });
+      const cleanedPersisted = await store.readRunState?.(input.workflow.workflowId, input.run.runId) ?? persisted;
+      await store.persistRunState({
+        ...structuredClone(cleanedPersisted),
+        savedAt: resolvedAt,
+        eventCount: initialDurableEventCount,
+        nodeControl: initialNodeControl,
+        ...(cleanedPersisted.transaction ? { transaction: { ...cleanedPersisted.transaction, status: "rolled_back", updatedAt: resolvedAt } } : {}),
+      });
+      this.deps.finishWorkflowRun({
+        workflowId: input.workflow.workflowId,
+        runId: input.run.runId,
+        status: "stopped",
+        progress: input.run.progress,
+        appendEvents: [{ type: "node_paused", nodeId: input.nodeId, at: resolvedAt, detail: resolutionReason, ...(intervention ? { intervention: structuredClone(intervention) } : {}) }],
+        contextDocument: input.run.contextDocument,
+        finalReport: [input.run.finalReport, `Superseded by a full rerun requested from ${targetNode.title}.`].filter(Boolean).join("\n\n"),
+      });
+      return this.runWorkflow({ workflowId: input.workflow.workflowId, contextDocument: input.run.contextDocument, triggerSource: "rerun", reviewEnabled: (plan.definition.reviewGates?.length ?? 0) > 0 || plan.definition.reviewEnabled === true, parentRunId: input.run.runId });
+    }
+
     const snapshot = this.deps.snapshot();
     const workDir = input.workflow.workDir || snapshot.workDir;
     const configuredAgentId = input.workflow.configuredAgentId;
@@ -1185,7 +1245,10 @@ export class WorkflowRuntime {
         planNode,
         upstreamOutputs,
         executionEnvironment: workflowV2ExecutionEnvironment({ node, workDir, configuredAgentId: agentRoute.configuredAgentId, modelId: agentRoute.modelId }),
-        reviewerPolicy: workflowV2ReviewerPolicy(node),
+        reviewerPolicy: workflowV2ReviewerPolicy(
+          node,
+          workflowV2ReviewGateForNode(plan.definition, node.id) ?? plan.definition.reviewEnabled === true,
+        ),
       });
       targetFingerprints.set(node.id, fingerprint);
       if (cacheEntry) knownOutputs.set(node.id, cacheEntry.output);
@@ -1206,11 +1269,6 @@ export class WorkflowRuntime {
         error: `Workflow V2 node ${input.nodeId} does not require recovery.`,
       };
     }
-    await store.appendEvents({
-      workflowId: input.workflow.workflowId,
-      runId: input.run.runId,
-      events: [resolutionEvent],
-    });
     const materialized = materializeWorkflowV2Recovery({
       persisted,
       targetDefinition: plan.definition,
@@ -1232,6 +1290,41 @@ export class WorkflowRuntime {
       materialized.recoveryCheckpoints.delete(input.nodeId);
       materialized.resumeConversations.delete(input.nodeId);
     }
+    if (input.action === "accept_last_result") {
+      const candidate = intervention!.lastCandidate!;
+      const candidateOperationIds = new Set(candidate.acceptance?.operationIds ?? []);
+      const candidateOperations = await store.readOperations?.(input.workflow.workflowId, input.run.runId) ?? [];
+      const missingCandidateOperationIds = [...candidateOperationIds].filter((operationId) => !candidateOperations.some((operation) => operation.operationId === operationId));
+      if (missingCandidateOperationIds.length > 0) {
+        return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: `Workflow V2 cannot accept the last result because its operation evidence is missing: ${missingCandidateOperationIds.join(", ")}` };
+      }
+      const unavailableCandidateOperations = candidateOperations
+        .filter((operation) => operation.adapterId && candidateOperationIds.has(operation.operationId))
+        .filter((operation) => operation.state !== "planned" && operation.state !== "applied");
+      if (unavailableCandidateOperations.length > 0) {
+        return { ok: false, workflowId: input.workflow.workflowId, runId: input.run.runId, error: `Workflow V2 cannot accept the last result because its external operations are no longer available: ${unavailableCandidateOperations.map((operation) => operation.operationId).join(", ")}` };
+      }
+      const acceptedOutput = await materializeWorkflowV2AcceptedReviewCandidate({
+        workflowId: input.workflow.workflowId,
+        runId: input.run.runId,
+        sourceWorkDir: workDir,
+        baselineId: persisted.transaction?.baselineId ?? `baseline:${input.workflow.workflowId}:${input.run.runId}`,
+        transactionMode: resolveWorkflowTransactionPolicy(plan.definition.transactionPolicy).policy.defaultMode,
+        node: targetNode,
+        candidate,
+        ...(store.prepareWorkspaceTransaction ? { prepareWorkspaceTransaction: (request) => store.prepareWorkspaceTransaction!(request) } : {}),
+      });
+      materialized.checkpoint.runState = transitionWorkflowV2NodeState(materialized.checkpoint.runState, { nodeId: input.nodeId, status: "completed_with_override", now: resolvedAt });
+      materialized.checkpoint.workerOutputs = materialized.checkpoint.workerOutputs.filter((output) => output.nodeId !== input.nodeId);
+      materialized.checkpoint.workerOutputs.push(acceptedOutput);
+      materialized.recoveryCheckpoints.delete(input.nodeId);
+      materialized.resumeConversations.delete(input.nodeId);
+    }
+    await store.appendEvents({
+      workflowId: input.workflow.workflowId,
+      runId: input.run.runId,
+      events: [resolutionEvent],
+    });
     const recoveryOverrides = new Map<string, WorkflowV2RecoveryOverride>();
     if (input.action === "approve_once") {
       const approval = createWorkflowV2ScriptApprovalOverride({ node: targetNode, planNode: plan.nodes.find((item) => item.nodeId === input.nodeId), intervention, resolutionReason });
@@ -1270,6 +1363,21 @@ export class WorkflowRuntime {
       workflowId: input.workflow.workflowId,
       runId: input.run.runId,
       status: "running",
+      ...(input.action === "accept_last_result" ? {
+        progress: input.run.progress.map((item) => {
+          if (item.nodeId !== input.nodeId) return item;
+          const { intervention: _resolvedIntervention, ...resolvedItem } = item;
+          const candidate = intervention!.lastCandidate!;
+          return {
+            ...resolvedItem,
+            status: "completed_with_override" as const,
+            detail: resolutionReason,
+            outputs: structuredClone(candidate.outputs),
+            ...(candidate.acceptance ? { acceptance: structuredClone(candidate.acceptance) } : {}),
+            ...(candidate.scriptReceipt ? { scriptReceipt: structuredClone(candidate.scriptReceipt) } : {}),
+          };
+        }),
+      } : {}),
       contextDocument: input.run.contextDocument,
     });
     const storagePlan = workflowStoragePlanFor(input.workflow.workflowId, input.run.runId);
@@ -1280,6 +1388,7 @@ export class WorkflowRuntime {
       baseWorkflowContextDocument: input.run.contextDocument,
       storagePlanDocument: workflowStoragePlanDocument(storagePlan),
       initialCheckpoint: materialized.checkpoint,
+      initialProgress: input.run.progress,
       initialNodeControl,
       initialDurableEventCount,
       ...(persisted.transaction ? { initialTransaction: persisted.transaction } : {}),
@@ -1349,7 +1458,7 @@ export class WorkflowRuntime {
       return next;
     }), appendEvents: [{ type: "gate_answered", nodeId: input.nodeId, at: submittedAt, answer: JSON.stringify(resolved.auditValues) }], contextDocument: run.contextDocument });
     const storagePlan = workflowStoragePlanFor(input.workflowId, input.runId);
-    void this.runExecutor.execute({ workflow, plan: workflow.workflowV2Plan, runId: input.runId, baseWorkflowContextDocument: run.contextDocument, storagePlanDocument: workflowStoragePlanDocument(storagePlan), initialCheckpoint: { runState, workerOutputs: persisted.workerOutputs }, initialNodeControl: nodeControl, initialDurableEventCount: persisted.eventCount, ...(persisted.transaction ? { initialTransaction: persisted.transaction } : {}) }).finally(() => this.runRegistry.release(input.runId));
+    void this.runExecutor.execute({ workflow, plan: workflow.workflowV2Plan, runId: input.runId, baseWorkflowContextDocument: run.contextDocument, storagePlanDocument: workflowStoragePlanDocument(storagePlan), initialCheckpoint: { runState, workerOutputs: persisted.workerOutputs }, initialProgress: run.progress, initialNodeControl: nodeControl, initialDurableEventCount: persisted.eventCount, ...(persisted.transaction ? { initialTransaction: persisted.transaction } : {}) }).finally(() => this.runRegistry.release(input.runId));
     return { ok: true, workflowId: input.workflowId, runId: input.runId };
   }
 

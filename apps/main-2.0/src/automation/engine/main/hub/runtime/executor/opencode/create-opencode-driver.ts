@@ -23,16 +23,16 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
     surfaceSupport: [...openCodeSurfaceSupport],
     getCapabilities: getOpenCodeCapabilities,
     runtimeStateCodec: openCodeRuntimeStateCodec,
-    createOneShotExecutor: (context) => context.planningWorkflowId && context.workflowRunId && context.workflowNodeId
+    createOneShotExecutor: (context) => context.planningWorkflowId && (context.workflowReviewRevision || (context.workflowRunId && context.workflowNodeId))
       ? new AcpWorkflowOneShotExecutor(context, {
           executable: context.runtime.command || options.executables.opencode,
           args: ["acp", "--cwd", context.workDir],
           modelId: context.runtimeConfig.model,
           mcpServers: [
-            ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId) ?? [] : []),
+            ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),
             ...acpWorkflowMcpServers({
               discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: context.planningWorkflowId,
-              runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
+              runId: context.workflowRunId, nodeId: context.workflowNodeId, executionId: context.workflowNodeExecutionId, reviewRevision: context.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
             }),
           ],
           ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
@@ -49,7 +49,7 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
             modelId: interactiveContext.runtimeConfig.model,
             mcpServers: [...acpMcpServers(options.mcpServersForAgent?.(interactiveContext.configuredAgentId) ?? []), ...acpWorkflowMcpServers({
               discoveryPath: options.workflowMcpDiscoveryPath?.(), workflowId: interactiveContext.planningWorkflowId,
-              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, managedToken: options.workflowMcpManagedToken?.(),
+              runId: interactiveContext.workflowRunId, nodeId: interactiveContext.workflowNodeId, executionId: interactiveContext.workflowNodeExecutionId, reviewRevision: interactiveContext.workflowReviewRevision, managedToken: options.workflowMcpManagedToken?.(),
             })],
             onEvent,
             onExit,

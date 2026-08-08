@@ -192,6 +192,7 @@ export type WorkflowAutomationModule = Pick<
   | "deleteWorkflow"
   | "confirmWorkflow"
   | "reviewWorkflow"
+  | "applyWorkflowReviewToManager"
   | "interruptWorkflowReview"
   | "runWorkflow"
   | "pauseWorkflowNode"

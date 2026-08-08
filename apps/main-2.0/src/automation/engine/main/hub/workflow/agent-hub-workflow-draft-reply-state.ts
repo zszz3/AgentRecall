@@ -1,6 +1,7 @@
 import type {
   RuntimeConversation,
   WorkflowDraftState,
+  WorkflowGrillMessage,
 } from "../../../shared/types";
 import { buildWorkflowAgentPrompt, buildWorkflowRevisionPrompt } from "../../../shared/workflow-agent";
 import { replaceWorkflowDraftMessage } from "./agent-hub-workflow-draft";
@@ -9,6 +10,8 @@ export function beginWorkflowDraftReply(input: {
   workflow: WorkflowDraftState;
   reply: string;
   thinkingMessage: string;
+  userMessageEvents?: WorkflowGrillMessage["events"];
+  startingOverride?: boolean;
   cloneDraft: (draft: WorkflowDraftState) => WorkflowDraftState;
   now?: number;
 }): {
@@ -16,7 +19,7 @@ export function beginWorkflowDraftReply(input: {
   request: { requestId: string; assistantMessageId: string; content: string };
   starting: boolean;
 } {
-  const starting = input.workflow.messages.length === 0;
+  const starting = input.startingOverride ?? input.workflow.messages.length === 0;
   const now = input.now ?? Date.now();
   const requestId = `workflow-${now}-${Math.random().toString(36).slice(2)}`;
   const assistantMessageId = `grill-assistant-${now}`;
@@ -30,7 +33,7 @@ export function beginWorkflowDraftReply(input: {
       objective: starting ? input.reply : input.workflow.objective,
       messages: [
         ...input.workflow.messages,
-        { id: `grill-user-${now}`, role: "user", content: input.reply },
+        { id: `grill-user-${now}`, role: "user", content: input.reply, ...(input.userMessageEvents?.length ? { events: structuredClone(input.userMessageEvents) } : {}) },
         { id: assistantMessageId, role: "assistant", content: input.thinkingMessage },
       ],
       reply: "",
@@ -94,8 +97,8 @@ export function createWorkflowDraftInteractiveRequest(input: {
     prompt: input.started.starting
       ? buildWorkflowAgentPrompt({ workflowId: input.started.next.workflowId, objective: input.reply })
       : buildWorkflowRevisionPrompt({ workflowId: input.started.next.workflowId, revision: input.started.next.revision, definition: input.started.next.definition, request: input.reply }),
-    configuredAgentId: input.started.next.reviewerConfiguredAgentId,
-    modelId: input.started.next.reviewerModelId,
+    configuredAgentId: input.started.next.configuredAgentId,
+    modelId: input.started.next.modelId,
     workDir: input.started.next.workDir || input.defaultWorkDir,
     starting: input.started.starting,
     ...(input.started.next.runtimeConversation

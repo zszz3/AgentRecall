@@ -154,6 +154,7 @@ describe("workflow-v2 file store", () => {
     state.eventCount = 0;
     await store.persistRunState(state);
     expect((await store.readRunState("workflow-1", "run-1"))?.eventCount).toBe(1);
+
   });
 
   test("serializes concurrent persistence events before assigning sequences", async () => {
@@ -257,6 +258,18 @@ describe("workflow-v2 file store", () => {
       nodeId: "node-1",
     }));
     expect((await store.readRunState("workflow-1", "run-1"))?.eventCount).toBe(1);
+    await store.planOperation({ workflowId: "workflow-1", record: {
+      ...operation,
+      operationId: "operation-2",
+      idempotencyKey: "discarded-key",
+      createdAt: 7,
+      updatedAt: 7,
+    } });
+    await expect(store.transitionOperation({ workflowId: "workflow-1", runId: "run-1", operationId: "operation-2", state: "discarded", updatedAt: 8 }))
+      .resolves.toMatchObject({ state: "discarded" });
+    await expect(store.transitionOperation({ workflowId: "workflow-1", runId: "run-1", operationId: "operation-2", state: "applying", updatedAt: 9 }))
+      .rejects.toThrow("cannot transition");
+    expect((await store.readRunState("workflow-1", "run-1"))?.transaction).toMatchObject({ operationCount: 2, irreversibleOperationCount: 1 });
   });
 
   test("persists an immutable commit plan and rejects later mutation", async () => {

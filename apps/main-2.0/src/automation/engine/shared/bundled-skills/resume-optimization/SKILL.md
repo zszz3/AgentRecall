@@ -161,18 +161,9 @@ When tailoring for a job description:
 
 ## References
 
-For detailed guidance on specific topics:
-
-- [Resume Structure Guide](references/resume-structure.md) - Section order, formatting, length
-- [Achievement Formula Guide](references/achievement-formula.md) - Transforming experience into impact
-- [ATS Keywords Guide](references/ats-keywords.md) - Keyword extraction and optimization
-- [Tailoring Guide](references/tailoring-guide.md) - Matching resume to job description
-
-## Related Resources
-
-- `achievement-bullet` output style - Format for achievement bullets
-- `/soft-skills:track-win` skill - Transform descriptions into achievement bullets
-- `resume-coach` agent - Interactive resume improvement
+The guidance in this Skill is self-contained. Use the section headings above to
+jump directly to resume structure, achievement bullets, ATS optimization, or
+job tailoring without relying on other Skills or agents.
 
 ## User-Facing Interface
 

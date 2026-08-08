@@ -19,7 +19,13 @@ export function inspectWorkflowReadiness(input: {
 }): WorkflowReadinessResult {
   const agents = new Map([...input.configuredAgents].map((agent) => [agent.id, agent]));
   const issues: WorkflowReadinessIssue[] = [];
-  inspectRoute({ scope: "reviewer", field: "reviewerConfiguredAgentId", configuredAgentId: input.workflow.reviewerConfiguredAgentId, modelId: input.workflow.reviewerModelId });
+  if (input.workflow.definition.reviewEnabled === true) {
+    inspectRoute({ scope: "reviewer", field: "reviewerConfiguredAgentId", configuredAgentId: input.workflow.reviewerConfiguredAgentId, modelId: input.workflow.reviewerModelId });
+  }
+  for (const gate of input.workflow.definition.reviewGates ?? []) {
+    const agent = agents.get(gate.configuredAgentId);
+    inspectRoute({ scope: "reviewer", nodeId: gate.targetNodeId, field: "reviewGates.configuredAgentId", configuredAgentId: gate.configuredAgentId, modelId: agent?.modelId ?? "default" });
+  }
 
   for (const node of input.workflow.definition.nodes) {
     if (node.execModel === "llm") {
@@ -67,8 +73,8 @@ export function portableWorkflowReadiness(file: WorkflowPortableFileV1, catalogs
     workflow: {
       configuredAgentId: file.workflow.executionDefaults.configuredAgentId,
       modelId: file.workflow.executionDefaults.modelId,
-      reviewerConfiguredAgentId: file.workflow.executionDefaults.reviewerConfiguredAgentId,
-      reviewerModelId: file.workflow.executionDefaults.reviewerModelId,
+      reviewerConfiguredAgentId: "",
+      reviewerModelId: "",
       definition: file.workflow.definition,
     },
   });

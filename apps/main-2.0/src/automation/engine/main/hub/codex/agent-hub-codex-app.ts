@@ -140,7 +140,7 @@ export function respondToCodexServerRequest(
   method: string,
   params: Record<string, unknown>,
 ): void {
-  const isWorkflowMcpRequest = ["workflow_create", "workflow_validate", "workflow_context_append"].some((toolName) =>
+  const isWorkflowMcpRequest = ["workflow_create", "workflow_validate", "workflow_context_append", "workflow_review_submit"].some((toolName) =>
     JSON.stringify(params).toLowerCase().includes(toolName),
   );
   if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {

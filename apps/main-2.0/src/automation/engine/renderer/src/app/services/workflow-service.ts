@@ -1,5 +1,6 @@
 import type {
   AppSnapshot,
+  ApplyWorkflowReviewToManagerRequest,
   CreateWorkflowDraftRequest,
   PatchWorkflowDraftRequest,
   UpdateWorkflowRequest,
@@ -48,6 +49,7 @@ export interface WorkflowService {
   exportWorkflow: (workflowId: string) => Promise<WorkflowExportResult>;
   confirmWorkflow: (request: ConfirmWorkflowRequest) => Promise<WorkflowOperationResult>;
   reviewWorkflow: (request: ReviewWorkflowRequest) => Promise<AppSnapshot>;
+  applyReviewToManager: (request: ApplyWorkflowReviewToManagerRequest) => Promise<AppSnapshot>;
   interruptWorkflowReview: (request: InterruptWorkflowReviewRequest) => Promise<AppSnapshot>;
   runWorkflow: (request: RunWorkflowRequest) => Promise<WorkflowOperationResult>;
   pauseNode: (request: PauseWorkflowNodeRequest) => Promise<WorkflowOperationResult>;
@@ -87,6 +89,7 @@ export function workflowService(): WorkflowService {
     exportWorkflow: (workflowId) => api.exportWorkflow(workflowId),
     confirmWorkflow: (request) => api.confirmWorkflow(request),
     reviewWorkflow: (request) => api.reviewWorkflow(request),
+    applyReviewToManager: (request) => api.applyWorkflowReviewToManager(request),
     interruptWorkflowReview: (request) => api.interruptWorkflowReview(request),
     runWorkflow: (request) => api.runWorkflow(request),
     pauseNode: (request) => api.pauseWorkflowNode(request),

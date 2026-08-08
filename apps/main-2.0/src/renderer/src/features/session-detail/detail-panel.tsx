@@ -213,7 +213,7 @@ export function DetailPanel({
   remoteUploadDisabled?: boolean;
   onCopyResume: () => void;
   onCopyMarkdown: () => void;
-  onExportMarkdown: () => void;
+  onExportMarkdown: (includeToolTrace: boolean) => void;
   onExportJson: () => void;
   onCopyPlain: () => void;
   onDelete: () => void;
@@ -239,14 +239,36 @@ export function DetailPanel({
     ...(traceCount > 0 ? [l(`${traceCount} trace events`, `${traceCount} 条轨迹`)] : []),
   ];
   const bodyRef = useRef<HTMLDivElement>(null);
+  const exportMarkdownMenuRef = useRef<HTMLDivElement>(null);
   const pendingInitialScrollRef = useRef<string | null>(session.sessionKey);
   const [roleFilter, setRoleFilter] = useState<ConversationRoleFilter>("all");
   const [showTools, setShowTools] = useState(readInitialToolEventsVisibility);
+  const [exportMarkdownMenuOpen, setExportMarkdownMenuOpen] = useState(false);
   const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
   const visibleTimelineItems = useMemo(
     () => filterConversationTimeline(timelineItems, roleFilter, showTools),
     [roleFilter, showTools, timelineItems],
   );
+
+  useEffect(() => {
+    if (!exportMarkdownMenuOpen) return;
+    const closeMenu = (event: MouseEvent): void => {
+      if (!exportMarkdownMenuRef.current?.contains(event.target as Node)) {
+        setExportMarkdownMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setExportMarkdownMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [exportMarkdownMenuOpen]);
+
+  useEffect(() => setExportMarkdownMenuOpen(false), [session.sessionKey]);
   const roleFilterEmpty = !loading
     && messages.length > 0
     && roleFilter !== "all"
@@ -537,9 +559,34 @@ export function DetailPanel({
               </button>
             ) : null}
             <button onClick={onCopyMarkdown} disabled={actionRunning}>Markdown</button>
-            <button onClick={onExportMarkdown} disabled={actionRunning}>
-              <Download size={15} /> {l("Export MD", "导出 MD")}
-            </button>
+            <div className="export-markdown-menu" ref={exportMarkdownMenuRef}>
+              <button
+                onClick={() => setExportMarkdownMenuOpen((open) => !open)}
+                disabled={actionRunning}
+                aria-haspopup="menu"
+                aria-expanded={exportMarkdownMenuOpen}
+              >
+                <Download size={15} /> {l("Export MD", "导出 MD")} <ChevronDown size={13} />
+              </button>
+              {exportMarkdownMenuOpen ? (
+                <div className="export-markdown-options" role="menu">
+                  <button role="menuitem" onClick={() => {
+                    setExportMarkdownMenuOpen(false);
+                    onExportMarkdown(false);
+                  }}>
+                    {l("Conversation only", "仅导出会话内容")}
+                    <small>{l("No Tool Trace", "不含 Tool Trace")}</small>
+                  </button>
+                  <button role="menuitem" onClick={() => {
+                    setExportMarkdownMenuOpen(false);
+                    onExportMarkdown(true);
+                  }}>
+                    {l("Complete record", "导出完整记录")}
+                    <small>{l("Include Tool Trace", "包含 Tool Trace")}</small>
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <button onClick={onExportJson} disabled={actionRunning}>
               <Download size={15} /> {l("Export JSON", "导出 JSON")}
             </button>

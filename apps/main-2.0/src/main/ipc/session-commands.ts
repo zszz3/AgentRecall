@@ -1,4 +1,5 @@
 import type { IpcMain } from "electron";
+import type { SessionMarkdownExportOptions } from "../../core/format-session";
 import type { SessionCommandService } from "../services/session-command-service";
 
 export function registerSessionCommandIpc(
@@ -16,8 +17,11 @@ export function registerSessionCommandIpc(
   ipc.handle("command:reveal", (_event, sessionKey: string) => service.reveal(sessionKey));
   ipc.handle("command:copy-markdown", (_event, sessionKey: string) =>
     service.copyMarkdown(sessionKey));
-  ipc.handle("command:export-markdown", (_event, sessionKey: string) =>
-    service.exportMarkdown(sessionKey));
+  ipc.handle("command:export-markdown", (
+    _event,
+    sessionKey: string,
+    options?: SessionMarkdownExportOptions,
+  ) => service.exportMarkdown(sessionKey, options));
   ipc.handle("command:export-json", (_event, sessionKey: string) =>
     service.exportJson(sessionKey));
   ipc.handle("command:copy-plain", (_event, sessionKey: string) =>

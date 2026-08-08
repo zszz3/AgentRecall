@@ -103,6 +103,8 @@ export function compileWorkflowV2Node(
   });
   const resourceLocks = overrides.resourceLocks ?? template.resourceLocks;
   const executionLease = overrides.executionLease ?? template.executionLease;
+  const reviewLevel = overrides.reviewLevel ?? template.reviewLevel;
+  const reviewMaxRetries = overrides.reviewMaxRetries ?? template.reviewMaxRetries;
 
   if (template.execModel === "llm") {
     const compiled: WorkflowV2LLMNode = {
@@ -117,6 +119,8 @@ export function compileWorkflowV2Node(
       ...(hooks ? { hooks } : {}),
       ...(resourceLocks ? { resourceLocks } : {}),
       ...(executionLease ? { executionLease: { ...executionLease } } : {}),
+      ...(reviewLevel ? { reviewLevel } : {}),
+      ...(reviewMaxRetries !== undefined ? { reviewMaxRetries } : {}),
       ...(overrides.modelProfile ?? template.modelProfile
         ? { modelProfile: overrides.modelProfile ?? template.modelProfile }
         : {}),
@@ -181,10 +185,12 @@ export function compileWorkflowV2Definition(
     workflowId: definition.workflowId,
     graphVersion: definition.graphVersion,
     objective: definition.objective,
+    ...(definition.reviewEnabled !== undefined ? { reviewEnabled: definition.reviewEnabled } : {}),
     nodes: definition.nodes.map((node) => compileWorkflowV2Node(node, registry)),
     edges: definition.edges.map((edge) => ({
       fromNodeId: edge.fromNodeId,
       toNodeId: edge.toNodeId,
     })),
+    ...(definition.reviewGates ? { reviewGates: structuredClone(definition.reviewGates) } : {}),
   };
 }

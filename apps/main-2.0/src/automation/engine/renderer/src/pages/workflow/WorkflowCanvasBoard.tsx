@@ -13,10 +13,10 @@ import {
   type NodeProps as ReactFlowNodeProps,
 } from "@xyflow/react";
 import type { WorkflowRunProgressItem } from "../../../../shared/types";
-import type { WorkflowV2Definition, WorkflowV2Node } from "../../../../shared/workflow-v2/definition";
+import type { WorkflowV2Definition, WorkflowV2Node, WorkflowV2ReviewGate } from "../../../../shared/workflow-v2/definition";
 import { workflowCanvasLayout, type WorkflowCanvasLayoutVariant } from "./workflow-canvas-layout";
 
-type WorkflowFlowNodeData = { node: WorkflowV2Node; layerSize: number };
+type WorkflowFlowNodeData = { node: WorkflowV2Node; layerSize: number; gate?: WorkflowV2ReviewGate };
 type WorkflowFlowNode = ReactFlowNode<WorkflowFlowNodeData, "workflowNode">;
 type WorkflowFlowEdge = ReactFlowEdge<Record<string, never>, "smoothstep">;
 
@@ -27,13 +27,14 @@ const WorkflowCanvasNodeContext = createContext<{
 }>({ renderNodeCard: () => <span />, runProgressByNodeId: new Map<string, WorkflowRunProgressItem>() });
 
 function WorkflowFlowNodeCard({ data }: ReactFlowNodeProps<WorkflowFlowNode>) {
-  const { node, layerSize } = data;
+  const { node, layerSize, gate } = data;
   const { renderNodeCard, runProgressByNodeId } = useContext(WorkflowCanvasNodeContext);
   const runProgress = runProgressByNodeId.get(node.id);
   return (
     <div className={`workflow-canvas-node is-${node.execModel} ${runProgress ? `run-${runProgress.status}` : ""}`} data-layer-size={layerSize}>
       <Handle type="target" position={Position.Left} className="workflow-canvas-handle" isConnectable={false} />
       {renderNodeCard(node)}
+      {gate ? <div className="workflow-canvas-review-gate"><strong>Review Gate · {gate.reviewLevel}</strong><span>{gate.judgeDimensions.length} dimensions · {gate.maxQualityRetries} retries</span></div> : null}
       <Handle type="source" position={Position.Right} className="workflow-canvas-handle" isConnectable={false} />
     </div>
   );
@@ -41,14 +42,14 @@ function WorkflowFlowNodeCard({ data }: ReactFlowNodeProps<WorkflowFlowNode>) {
 
 type WorkflowCanvasLayout = ReturnType<typeof workflowCanvasLayout>;
 
-function workflowLayoutFlowNodes(layout: WorkflowCanvasLayout): WorkflowFlowNode[] {
+function workflowLayoutFlowNodes(layout: WorkflowCanvasLayout, definition: WorkflowV2Definition): WorkflowFlowNode[] {
   return layout.nodes.map((layoutNode) => ({
     id: layoutNode.node.id,
     type: "workflowNode",
     position: { x: layoutNode.x, y: layoutNode.y },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
-    data: { node: layoutNode.node, layerSize: layoutNode.layerSize },
+    data: { node: layoutNode.node, layerSize: layoutNode.layerSize, ...(definition.reviewGates?.find((gate) => gate.targetNodeId === layoutNode.node.id) ? { gate: definition.reviewGates.find((gate) => gate.targetNodeId === layoutNode.node.id)! } : {}) },
     style: { width: layoutNode.width, minHeight: layoutNode.height },
   }));
 }
@@ -70,6 +71,7 @@ function workflowFlowEdges(layout: WorkflowCanvasLayout, runProgressByNodeId: Ma
 function workflowMiniMapNodeColor(node: WorkflowFlowNode, runProgress?: WorkflowRunProgressItem): string {
   if (runProgress?.status === "failed") return "var(--danger)";
   if (runProgress?.status === "completed") return "var(--ok)";
+  if (runProgress?.status === "completed_with_override") return "var(--warning)";
   if (runProgress?.status === "running") return "var(--accent)";
   return node.data.node.execModel === "script" ? "var(--warning)" : "var(--accent)";
 }
@@ -93,7 +95,7 @@ export function WorkflowCanvasBoard({
 }) {
   const variant: WorkflowCanvasLayoutVariant = expanded ? "expanded" : "preview";
   const layout = useMemo(() => workflowCanvasLayout(definition, variant), [definition, variant]);
-  const layoutNodes = useMemo(() => workflowLayoutFlowNodes(layout), [layout]);
+  const layoutNodes = useMemo(() => workflowLayoutFlowNodes(layout, definition), [definition, layout]);
   const edges = useMemo(() => workflowFlowEdges(layout, runProgressByNodeId), [layout, runProgressByNodeId]);
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowFlowNode>(layoutNodes);
   useEffect(() => setNodes(layoutNodes), [layoutNodes, setNodes]);

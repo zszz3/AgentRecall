@@ -45,7 +45,7 @@ export interface SessionDetailsActions {
   uploadRemote(session: SessionSearchResult): void;
   copyResume(session: SessionSearchResult): void;
   copyMarkdown(session: SessionSearchResult): void;
-  exportMarkdown(session: SessionSearchResult): void;
+  exportMarkdown(session: SessionSearchResult, includeToolTrace: boolean): void;
   exportJson(session: SessionSearchResult): void;
   copyPlain(session: SessionSearchResult): void;
   deleteSession(session: SessionSearchResult): void;
@@ -176,7 +176,7 @@ export function SessionDetails({
         remoteUploadDisabled={detail.source === "zcode-cli" || detail.environmentKind === "wsl"}
         onCopyResume={() => actions.copyResume(detail)}
         onCopyMarkdown={() => actions.copyMarkdown(detail)}
-        onExportMarkdown={() => actions.exportMarkdown(detail)}
+        onExportMarkdown={(includeToolTrace) => actions.exportMarkdown(detail, includeToolTrace)}
         onExportJson={() => actions.exportJson(detail)}
         onCopyPlain={() => actions.copyPlain(detail)}
         onDelete={() => actions.deleteSession(detail)}

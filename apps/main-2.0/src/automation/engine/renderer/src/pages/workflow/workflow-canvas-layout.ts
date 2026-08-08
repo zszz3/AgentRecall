@@ -72,9 +72,11 @@ function workflowV2DisplayLayers(definition: WorkflowV2Definition): WorkflowV2No
 export function workflowCanvasLayout(definition: WorkflowV2Definition, variant: WorkflowCanvasLayoutVariant = "preview"): WorkflowCanvasLayout {
   const dimensions = WORKFLOW_CANVAS_DIMENSIONS[variant];
   const layers = workflowV2DisplayLayers(definition).filter((layer) => layer.length > 0);
+  const gatedNodeIds = new Set((definition.reviewGates ?? []).map((gate) => gate.targetNodeId));
+  const nodeHeight = (node: WorkflowV2Node) => dimensions.nodeHeight + (gatedNodeIds.has(node.id) ? 48 : 0);
   const rowCount = Math.max(1, Math.ceil(layers.length / dimensions.maxColumns));
   const columnsPerRow = Math.max(1, Math.ceil(layers.length / rowCount));
-  const layerHeight = (layer: WorkflowV2Node[]) => layer.length * dimensions.nodeHeight + Math.max(0, layer.length - 1) * dimensions.nodeGap;
+  const layerHeight = (layer: WorkflowV2Node[]) => layer.reduce((height, node) => height + nodeHeight(node), 0) + Math.max(0, layer.length - 1) * dimensions.nodeGap;
   const rows: WorkflowV2Node[][][] = [];
   for (let index = 0; index < layers.length; index += columnsPerRow) rows.push(layers.slice(index, index + columnsPerRow));
 
@@ -88,10 +90,11 @@ export function workflowCanvasLayout(definition: WorkflowV2Definition, variant: 
       const x = dimensions.padding + columnIndex * (dimensions.nodeWidth + dimensions.layerGap);
       let y = rowTop + Math.max(0, (rowHeight - layerHeight(layer)) / 2);
       layer.forEach((node) => {
-        positionedNodes.set(node.id, { node, x, y, width: dimensions.nodeWidth, height: dimensions.nodeHeight, layerIndex: rowIndex * columnsPerRow + columnIndex, layerSize: layer.length });
+        const height = nodeHeight(node);
+        positionedNodes.set(node.id, { node, x, y, width: dimensions.nodeWidth, height, layerIndex: rowIndex * columnsPerRow + columnIndex, layerSize: layer.length });
         maxX = Math.max(maxX, x + dimensions.nodeWidth + dimensions.padding);
-        maxY = Math.max(maxY, y + dimensions.nodeHeight + dimensions.padding);
-        y += dimensions.nodeHeight + dimensions.nodeGap;
+        maxY = Math.max(maxY, y + height + dimensions.padding);
+        y += height + dimensions.nodeGap;
       });
     });
     rowTop += rowHeight + dimensions.rowGap;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isSessionSource,
   OPTIONAL_SESSION_SOURCE_DESCRIPTORS,
+  remoteSessionAgentForSource,
   SESSION_SOURCE_DESCRIPTORS,
   SESSION_SOURCE_REGISTRY,
   sessionSourceDescriptor,
@@ -87,10 +88,13 @@ describe("session source capability registry", () => {
         live: false,
         resume: false,
         migrate: false,
-        sessionSync: false,
+        sessionSync: true,
         openApp: false,
       },
     });
+    expect(remoteSessionAgentForSource("pi-cli")).toBe("pi");
+    expect(remoteSessionAgentForSource("hermes")).toBe("hermes");
+    expect(remoteSessionAgentForSource("zcode-cli")).toBeNull();
     expect(OPTIONAL_SESSION_SOURCE_DESCRIPTORS.filter(({ remoteCollectorOptional }) => remoteCollectorOptional).map(({ id }) => id)).toEqual([
       "tclaude-cli",
       "tcodex-cli",

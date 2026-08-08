@@ -48,9 +48,11 @@ export class TaskState {
   runtimeConversation: RuntimeConversation | undefined = undefined;
   usage: RuntimeUsage | undefined = undefined;
   planningWorkflowId: string | undefined = undefined;
+  workflowReviewRevision: number | undefined = undefined;
   workflowRunId: string | undefined = undefined;
   workflowNodeId: string | undefined = undefined;
   workflowNodeExecutionId: string | undefined = undefined;
+  allowedMcpTools: string[] | undefined = undefined;
   developerInstructions: string | undefined = undefined;
   contextDocument: string | undefined = undefined;
   continuationPolicy: RuntimeContinuationPolicy = "fresh";
