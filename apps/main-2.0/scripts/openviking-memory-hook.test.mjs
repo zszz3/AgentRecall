@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
 const {
@@ -145,6 +146,34 @@ test("the internal request budget stays well below the Codex hook deadline", () 
   );
 
   assert.match(source, /const REQUEST_TIMEOUT_MS = 2_000;/u);
+});
+
+test("no-op UserPromptSubmit and Stop CLI hooks succeed without emitting invalid JSON", (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-hook-cli-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const manifestPath = path.join(testHome, "hook-manifest.json");
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    version: 2,
+    baseUrl: "http://127.0.0.1:21933",
+    integrations: { claude: true, codex: true, opencode: false },
+    workspaces: [],
+  }));
+  const hookPath = path.join(import.meta.dirname, "..", "bin", "openviking-memory-hook.cjs");
+
+  for (const event of ["UserPromptSubmit", "Stop"]) {
+    const result = spawnSync(process.execPath, [
+      hookPath,
+      "--agent", "codex",
+      "--event", event,
+      "--manifest", manifestPath,
+    ], {
+      input: JSON.stringify({ cwd: testHome, session_id: "session-1", prompt: "diagnostic" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, `${event}: ${result.stderr}`);
+    assert.equal(result.stdout, "", `${event} must keep stdout empty when it has no hook output`);
+    assert.equal(result.stderr, "");
+  }
 });
 
 test("managed Stop appends once and waits for the session lifecycle to commit", async (context) => {

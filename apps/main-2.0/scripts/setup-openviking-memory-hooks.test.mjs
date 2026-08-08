@@ -58,6 +58,41 @@ test("reconciles Claude, Codex and OpenCode without replacing unrelated config",
   assert.equal(fs.existsSync(openCodeWrapper), false);
 });
 
+test("startup reconciliation replaces stale installed hook commands", (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-upgrade-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const claudePath = path.join(testHome, ".claude", "settings.json");
+  const codexPath = path.join(testHome, ".codex", "hooks.json");
+  fs.mkdirSync(path.dirname(claudePath), { recursive: true });
+  fs.mkdirSync(path.dirname(codexPath), { recursive: true });
+  const staleCommand = '"C:\\old-runtime\\node.exe" "C:\\old-app\\openviking-memory-hook.cjs" --agent claude --event UserPromptSubmit --manifest "C:\\old-home\\hook-manifest.json"';
+  fs.writeFileSync(claudePath, JSON.stringify({
+    hooks: { UserPromptSubmit: [{ matcher: "", hooks: [{ type: "command", command: staleCommand, timeout: 8 }] }] },
+  }));
+  fs.writeFileSync(codexPath, JSON.stringify({
+    hooks: { UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: staleCommand.replace("claude", "codex"), timeout: 8 }] }] },
+  }));
+  const options = {
+    homeDir: testHome,
+    hookScriptPath: "C:\\current-app\\openviking-memory-hook.cjs",
+    openCodePluginPath: "C:\\current-app\\openviking-opencode-plugin.mjs",
+    manifestPath: path.join(testHome, ".agent-recall-v2", "openviking", "hook-manifest.json"),
+    nodePath: "C:\\current-runtime\\node.exe",
+    integrations: { claude: true, codex: true, opencode: false },
+  };
+
+  assert.equal(reconcileOpenVikingMemoryHooks(options).status, "configured");
+
+  for (const configPath of [claudePath, codexPath]) {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const serialized = JSON.stringify(config);
+    assert.doesNotMatch(serialized, /old-runtime|old-app|old-home/u);
+    assert.match(serialized, /current-runtime/u);
+    assert.match(serialized, /current-app/u);
+    assert.match(serialized, /hook-manifest\.json/u);
+  }
+});
+
 function hasAgentRecallHook(entry) {
   return entry?.hooks?.some((hook) => hook.command?.includes("openviking-memory-hook.cjs"));
 }

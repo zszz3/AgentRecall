@@ -1211,7 +1211,7 @@ function reconcileOpenVikingMemoryHooks(settings: AppSettings): void {
     hookScriptPath: OPENVIKING_MEMORY_HOOK_SCRIPT_PATH,
     openCodePluginPath: OPENVIKING_OPENCODE_PLUGIN_PATH,
     manifestPath: openVikingHookManifestService.manifestPath(),
-    nodePath: process.env.npm_node_execpath || "node",
+    nodePath: process.env.AGENT_RECALL_NODE_PATH || process.env.npm_node_execpath || "node",
     integrations: openVikingIntegrations(settings),
   });
   if (result.status === "error") throw new Error(result.detail || "Could not configure OpenViking memory hooks.");
@@ -2694,6 +2694,11 @@ app.whenReady().then(async () => {
   );
   quotaService = createQuotaService();
   initializeOpenVikingMemory();
+  try {
+    reconcileOpenVikingMemoryHooks(getSettings());
+  } catch (error) {
+    console.error(`Failed to refresh OpenViking memory hooks during startup: ${error instanceof Error ? error.message : String(error)}`);
+  }
   // Publish the live endpoint so standalone MCP clients use the same store.
   try {
     writeDatabaseUrlPointer(postgresRuntime.connectionUrl);

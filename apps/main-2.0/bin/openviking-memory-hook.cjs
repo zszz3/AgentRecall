@@ -1135,7 +1135,9 @@ function runCli() {
       }
     }
     const result = await handleHook(input, parseArguments(process.argv.slice(2)));
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (result && Object.keys(result).length > 0) {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    }
   });
   process.stdin.resume();
 }
