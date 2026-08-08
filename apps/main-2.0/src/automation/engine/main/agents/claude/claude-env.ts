@@ -49,7 +49,7 @@ export function claudeCliModelForChannel(channel: AgentChannel | undefined, mode
 
 function defaultClaudeModel(channel: AgentChannel): string {
   if (channel.modelProvider === "deepseek-anthropic") return DEEPSEEK_FLASH_MODEL;
-  return channel.models.find((item) => item.id !== "default")?.id ?? DEFAULT_CLAUDE_MODEL;
+  return channel.models.find((item) => runtimeModelId(item.id))?.id ?? DEFAULT_CLAUDE_MODEL;
 }
 
 function claudeEnvironmentModelForChannel(channel: AgentChannel, modelId: string): string {

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_MODEL_ID } from "../../shared/models";
+import { DEFAULT_MODEL_ID, defaultModelOption } from "../../shared/models";
 import { runtimeDefinition } from "../../shared/runtime-catalog";
 import type { AgentChannel, AgentId, AgentModelOption, CodexDefaultConfig } from "../../shared/types";
 import { execCli } from "../platform/cli-launcher";
@@ -22,8 +22,8 @@ export interface LoadedRuntimeLocalConfig {
 function modelOptions(modelId: string | undefined): AgentModelOption[] {
   const normalized = modelId?.trim();
   return normalized && normalized !== DEFAULT_MODEL_ID
-    ? [{ id: DEFAULT_MODEL_ID, label: "Default" }, { id: normalized, label: normalized }]
-    : [{ id: DEFAULT_MODEL_ID, label: "Default" }];
+    ? [defaultModelOption(), { id: normalized, label: normalized }]
+    : [defaultModelOption()];
 }
 
 function defaultChannel(runtimeId: AgentId, existing: AgentChannel | undefined): AgentChannel {

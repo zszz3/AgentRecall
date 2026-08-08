@@ -18,43 +18,16 @@ import { OPENVIKING_EXTRACTION_REASONING_EFFORTS } from "../../../../core/openvi
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
 
-const SUMMARY_API_PROVIDER_PRESETS = API_PROVIDER_PRESETS.filter((preset) => preset.id !== "codexzh");
+// The summary route is a plain OpenAI-compatible route just like the Codex one, so it
+// offers the same presets; only the stored credential differs.
+const SUMMARY_API_PROVIDER_PRESETS = API_PROVIDER_PRESETS;
 
-function summaryFromCustomCodex(config: ApiConfig | undefined, base: ApiConfig): ApiConfig | null {
-  if (
-    config?.activeProvider !== "custom" ||
-    (!config.customBaseUrl.trim() && !config.customModel.trim() && !config.customApiKey.trim())
-  ) {
-    return null;
-  }
-  return {
-    ...base,
-    ...config,
-    activeProvider: "custom",
-    customProviderId: "custom",
-  };
-}
-
-function summaryFromCustomClaude(config: ClaudeApiConfig | undefined, base: ApiConfig): ApiConfig | null {
-  if (
-    config?.activeProvider !== "custom" ||
-    (!config.customBaseUrl.trim() && !config.customModel.trim() && !config.customApiKey.trim())
-  ) {
-    return null;
-  }
-  return {
-    ...base,
-    activeProvider: "custom",
-    customProviderId: "custom",
-    customProviderName: config.customProviderName.trim() || "Custom Claude",
-    customBaseUrl: config.customBaseUrl,
-    customApiKey: config.customApiKey,
-    customModel: config.customModel,
-    customApiFormat:
-      config.customApiFormat === "openai_chat" || config.customApiFormat === "openai_responses"
-        ? config.customApiFormat
-        : "openai_chat",
-  };
+// A Custom route only counts as configured once it carries any of baseUrl/model/apiKey.
+function hasSavedCustomRoute(
+  config: { activeProvider: string; customBaseUrl: string; customModel: string; customApiKey: string } | null | undefined,
+): boolean {
+  return config?.activeProvider === "custom"
+    && Boolean(config.customBaseUrl.trim() || config.customModel.trim() || config.customApiKey.trim());
 }
 
 function buildSummaryDraftFromSettings(settings: AppSettings | null): ApiConfig {
@@ -107,6 +80,7 @@ export function ProviderPage({
   const [codexModelProbeStatus, setCodexModelProbeStatus] = useState<SettingsFeedback>(null);
   const [claudeConfig, setClaudeConfig] = useState<ClaudeConfigSnapshot | null>(null);
   const [claudeConfigError, setClaudeConfigError] = useState("");
+  const [selectedClaudeConfigRoute, setSelectedClaudeConfigRoute] = useState("");
   const [claudeModelOptions, setClaudeModelOptions] = useState<string[]>([]);
   const [claudeModelMenuOpen, setClaudeModelMenuOpen] = useState(false);
   const [claudeModelProbeStatus, setClaudeModelProbeStatus] = useState<SettingsFeedback>(null);
@@ -118,19 +92,16 @@ export function ProviderPage({
   const claudeApiPresetSelectionRef = useRef(0);
   const summaryApiPresetSelectionRef = useRef(0);
   const codexConfigHydrationRef = useRef("");
+  const claudeConfigHydrationRef = useRef("");
   const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
   const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
   const updateDraftSummaryApiConfig = (next: Partial<ApiConfig>) => setDraftSummaryApiConfig((current) => ({ ...current, ...next }));
-  const selectedPreset = API_PROVIDER_PRESETS.find((preset) => preset.id === draftApiConfig.customProviderId) ?? API_PROVIDER_PRESETS[0];
-  const customName = selectedPreset?.label ?? (draftApiConfig.customProviderName || "CodexZH");
+  const selectedPreset = API_PROVIDER_PRESETS.find((preset) => preset.id === draftApiConfig.customProviderId);
+  const customName = selectedPreset?.label ?? (draftApiConfig.customProviderName || "Custom");
   const selectedClaudePreset =
-    CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId) ?? CLAUDE_API_PROVIDER_PRESETS[0];
+    CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === draftClaudeApiConfig.customProviderId);
   const customClaudeName = selectedClaudePreset?.label ?? (draftClaudeApiConfig.customProviderName || "Claude Code");
   const activeSummarySource = draftSummarySource;
-  const selectedSummaryPreset = useMemo(
-    () => SUMMARY_API_PROVIDER_PRESETS.find((preset) => preset.id === draftSummaryApiConfig.customProviderId) ?? SUMMARY_API_PROVIDER_PRESETS[SUMMARY_API_PROVIDER_PRESETS.length - 1],
-    [draftSummaryApiConfig.customProviderId],
-  );
   const summaryCodexModelOptions = useMemo(
     () => [...new Set([
       draftSummaryCodexModel.trim(),
@@ -141,6 +112,12 @@ export function ProviderPage({
   );
 
   const hydrateDraftFromCodexConfig = (snapshot: CodexConfigSnapshot) => {
+    // An empty or missing config.toml says nothing about the route the user wants; only an
+    // explicit official route should pull the draft back to "Codex Official".
+    if (!snapshot.exists) {
+      setSelectedCodexConfigProviderId("");
+      return;
+    }
     const activeProvider = snapshot.providers.find((provider) => provider.id === snapshot.activeProviderId);
     if (!activeProvider || snapshot.activeProviderId === "openai") {
       setSelectedCodexConfigProviderId("");
@@ -154,12 +131,43 @@ export function ProviderPage({
     setDraftApiConfig((current) => ({
       ...current,
       activeProvider: "custom",
-      customProviderId: activeProvider.id,
+      // A preset match must keep the preset's own id, otherwise the preset button stops
+      // looking selected and the stored key is looked up under the wrong name.
+      customProviderId: preset?.id ?? activeProvider.id,
       customProviderName: preset?.providerName ?? activeProvider.name ?? activeProvider.id,
       customBaseUrl: activeProvider.baseUrl || preset?.baseUrl || current.customBaseUrl,
       customModel: snapshot.activeModel || preset?.model || current.customModel,
       customApiFormat: activeProvider.wireApi === "chat" ? "openai_chat" : preset?.apiFormat ?? "openai_responses",
     }));
+  };
+
+  const codexConfigHydrationKey = (snapshot: CodexConfigSnapshot) =>
+    `${snapshot.configPath}:${snapshot.activeProviderId}:${snapshot.activeModel}:${snapshot.providers.map((provider) => `${provider.id}:${provider.baseUrl}`).join("|")}`;
+
+  const claudeConfigHydrationKey = (snapshot: ClaudeConfigSnapshot) =>
+    `${snapshot.settingsPath}:${snapshot.route.activeProvider}:${snapshot.route.customBaseUrl}:${snapshot.route.customModel}`;
+
+  const hydrateDraftFromClaudeConfig = (snapshot: ClaudeConfigSnapshot, configDir?: string) => {
+    if (snapshot.route.activeProvider !== "custom") return;
+    setSelectedClaudeConfigRoute("config");
+    setDraftClaudeApiConfig((current) => ({
+      ...current,
+      ...snapshot.route,
+      customConfigDir: configDir ?? current.customConfigDir,
+      customApiKey: current.customApiKey,
+    }));
+  };
+
+  const selectClaudeConfigRoute = (useConfigRoute: boolean) => {
+    setClaudeModelOptions([]);
+    setClaudeModelMenuOpen(false);
+    // The empty option is the manual route: keep whatever the user typed instead of
+    // snapping the select back to the settings.json baseline.
+    if (!useConfigRoute) {
+      setSelectedClaudeConfigRoute("");
+      return;
+    }
+    if (claudeConfig) hydrateDraftFromClaudeConfig(claudeConfig);
   };
 
   const selectApiPreset = async (presetId: ApiProviderPresetId) => {
@@ -203,10 +211,13 @@ export function ProviderPage({
     try {
       const snapshot = await window.sessionSearch.getCodexConfig({ configDir: draftApiConfig.customConfigDir || undefined });
       setCodexConfig(snapshot);
-      const hydrationKey = `${snapshot.configPath}:${snapshot.activeProviderId}:${snapshot.activeModel}:${snapshot.providers.map((provider) => `${provider.id}:${provider.baseUrl}`).join("|")}`;
+      const hydrationKey = codexConfigHydrationKey(snapshot);
       if (hydrationKey !== codexConfigHydrationRef.current) {
         codexConfigHydrationRef.current = hydrationKey;
-        hydrateDraftFromCodexConfig(snapshot);
+        // A Custom route already saved in-app is the draft baseline. Hydrating over it from
+        // config.toml would discard settings the user saved but has not applied yet, so the
+        // snapshot then only feeds the "Active config" visualizer.
+        if (!hasSavedCustomRoute(settings?.apiConfig)) hydrateDraftFromCodexConfig(snapshot);
       }
     } catch (error) {
       setCodexConfigError(error instanceof Error ? error.message : String(error));
@@ -220,13 +231,11 @@ export function ProviderPage({
         configDir: draftClaudeApiConfig.customConfigDir || undefined,
       });
       setClaudeConfig(snapshot);
-      if (snapshot.route.activeProvider === "custom") {
-        setDraftClaudeApiConfig((current) => ({
-          ...current,
-          ...snapshot.route,
-          customConfigDir: current.customConfigDir,
-          customApiKey: current.customApiKey,
-        }));
+      // Re-reading the same settings.json must not overwrite edits the user has not saved.
+      const hydrationKey = claudeConfigHydrationKey(snapshot);
+      if (hydrationKey !== claudeConfigHydrationRef.current) {
+        claudeConfigHydrationRef.current = hydrationKey;
+        if (!hasSavedCustomRoute(settings?.claudeApiConfig)) hydrateDraftFromClaudeConfig(snapshot);
       }
     } catch (error) {
       setClaudeConfigError(error instanceof Error ? error.message : String(error));
@@ -241,35 +250,39 @@ export function ProviderPage({
       updateDraftApiConfig({ customConfigDir: selected });
       const snapshot = await window.sessionSearch.getCodexConfig({ configDir: selected });
       setCodexConfig(snapshot);
+      codexConfigHydrationRef.current = codexConfigHydrationKey(snapshot);
       hydrateDraftFromCodexConfig(snapshot);
     } else {
       updateDraftClaudeApiConfig({ customConfigDir: selected });
       const snapshot = await window.sessionSearch.getClaudeConfig({ configDir: selected });
       setClaudeConfig(snapshot);
-      if (snapshot.route.activeProvider === "custom") {
-        setDraftClaudeApiConfig((current) => ({
-          ...current,
-          ...snapshot.route,
-          customConfigDir: selected,
-          customApiKey: current.customApiKey,
-        }));
-      }
+      claudeConfigHydrationRef.current = claudeConfigHydrationKey(snapshot);
+      hydrateDraftFromClaudeConfig(snapshot, selected);
     }
   };
 
   const selectCodexConfigProvider = (providerId: string) => {
+    setCodexModelOptions([]);
+    setCodexModelMenuOpen(false);
+    // The empty option is the manual route: drop the baseline and keep whatever the user
+    // has typed, instead of snapping the select back to the previous provider.
+    if (!providerId) {
+      setSelectedCodexConfigProviderId("");
+      updateDraftApiConfig({ activeProvider: "custom", customProviderId: "custom" });
+      return;
+    }
     const provider = codexConfig?.providers.find((item) => item.id === providerId);
     if (!provider) return;
     setSelectedCodexConfigProviderId(provider.id);
     updateDraftApiConfig({
       activeProvider: "custom",
-      customProviderId: "custom",
+      // Keep the config's own id so the credential lookup and the applied config.toml
+      // section both point at the provider the user just picked.
+      customProviderId: provider.id,
       customProviderName: provider.name || provider.id,
       customBaseUrl: provider.baseUrl,
       customApiFormat: provider.wireApi === "chat" ? "openai_chat" : "openai_responses",
     });
-    setCodexModelOptions([]);
-    setCodexModelMenuOpen(false);
   };
 
   const detectCodexModels = async () => {
@@ -315,17 +328,21 @@ export function ProviderPage({
     }
   };
 
+  // "Inherit Codex" probes and tests the Codex route the user is editing on the Codex tab;
+  // "custom" keeps the summary route strictly separate, including its own key store.
+  const summaryInheritsCodex = draftSummaryApiConfigMode === "inherit_codex";
+  const effectiveSummaryApiConfig = summaryInheritsCodex ? draftApiConfig : draftSummaryApiConfig;
+
   const detectSummaryModels = async () => {
     setSummaryModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
     try {
-      const inherited = draftSummaryApiConfigMode === "inherit_codex";
-      const config = inherited ? draftApiConfig : draftSummaryApiConfig;
+      const config = effectiveSummaryApiConfig;
       const result = await window.sessionSearch.probeCodexModels({
         baseUrl: config.customBaseUrl,
         apiKey: config.customApiKey,
         providerId: config.customProviderId,
-        codexHome: inherited ? config.customConfigDir || undefined : undefined,
-        keyTarget: inherited ? "codex" : "summary",
+        codexHome: config.customConfigDir || undefined,
+        keyTarget: summaryInheritsCodex ? "codex" : "summary",
       });
       setSummaryModelOptions(result.models);
       setSummaryModelMenuOpen(result.models.length > 0);
@@ -344,16 +361,15 @@ export function ProviderPage({
   const testSummaryConnection = async () => {
     setSummaryConnectionStatus({ kind: "running", message: l("Testing connection...", "正在测试连接...") });
     try {
-      const inherited = draftSummaryApiConfigMode === "inherit_codex";
-      const config = inherited ? draftApiConfig : draftSummaryApiConfig;
+      const config = effectiveSummaryApiConfig;
       const result = await window.sessionSearch.testSummaryProviderConnection({
         baseUrl: config.customBaseUrl,
         apiKey: config.customApiKey,
         providerId: config.customProviderId,
         model: config.customModel,
         apiFormat: config.customApiFormat,
-        codexHome: inherited ? config.customConfigDir || undefined : undefined,
-        inheritCodex: inherited,
+        codexHome: config.customConfigDir || undefined,
+        inheritCodex: summaryInheritsCodex,
       });
       setSummaryConnectionStatus({
         kind: "success",
@@ -379,7 +395,9 @@ export function ProviderPage({
           activeProvider: "custom",
           customProviderId: "custom",
           customProviderName: current.customProviderName || preset.providerName,
-          customApiKey: apiKey,
+          // Custom has no route of its own to restore, so a missing stored key must not
+          // erase whatever the user has already typed into the field.
+          customApiKey: apiKey || current.customApiKey,
         };
       }
       return {
@@ -398,6 +416,7 @@ export function ProviderPage({
       };
     });
     setShowClaudeApiKey(false);
+    if (preset.id !== "custom") setSelectedClaudeConfigRoute("");
   };
 
   const selectSummaryPreset = async (presetId: ApiProviderPresetId) => {
@@ -427,6 +446,9 @@ export function ProviderPage({
         };
     setDraftSummaryApiConfig(next);
     setDraftSummarySource("custom");
+    // Picking a preset here is an explicit statement that the summary route is its own
+    // thing; without this the draft keeps inheriting Codex and the fields do nothing.
+    setDraftSummaryApiConfigMode("custom");
     setShowSummaryApiKey(false);
     setSummaryModelOptions([]);
     setSummaryModelMenuOpen(false);
@@ -434,15 +456,9 @@ export function ProviderPage({
     setSummaryConnectionStatus(null);
   };
 
-  useEffect(() => {
-    setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
-    setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
-    setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings));
-    setDraftSummaryApiConfigMode(settings?.summaryApiConfigMode ?? "inherit_codex");
-    setDraftSummarySource(buildSummarySourceFromSettings(settings));
-    setDraftSummaryCodexModel(settings?.summaryCodexModel ?? "");
-    setDraftSummaryCodexReasoningEffort(settings?.openVikingExtractionReasoningEffort ?? "medium");
-  }, [
+  // Every save hands back a freshly built settings object, so comparing by identity would
+  // discard the draft the user is still editing. Compare by value instead.
+  const settingsSignature = JSON.stringify([
     settings?.apiConfig,
     settings?.claudeApiConfig,
     settings?.summaryApiConfig,
@@ -453,9 +469,26 @@ export function ProviderPage({
   ]);
 
   useEffect(() => {
-    if (apiTarget === "codex" || apiTarget === "summary") void refreshCodexConfig();
-    if (apiTarget === "claude") void refreshClaudeConfig();
-  }, [apiTarget]);
+    setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
+    setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
+    setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings));
+    setDraftSummaryApiConfigMode(settings?.summaryApiConfigMode ?? "inherit_codex");
+    setDraftSummarySource(buildSummarySourceFromSettings(settings));
+    setDraftSummaryCodexModel(settings?.summaryCodexModel ?? "");
+    setDraftSummaryCodexReasoningEffort(settings?.openVikingExtractionReasoningEffort ?? "medium");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsSignature]);
+
+  useEffect(() => {
+    // Re-read whenever the directory changes, otherwise the pane keeps showing the config
+    // of the previously typed path. Debounced so typing a path is not one fetch per key.
+    const timer = window.setTimeout(() => {
+      if (apiTarget === "codex" || apiTarget === "summary") void refreshCodexConfig();
+      if (apiTarget === "claude") void refreshClaudeConfig();
+    }, 250);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiTarget, draftApiConfig.customConfigDir, draftClaudeApiConfig.customConfigDir]);
 
   const runCodexAction = (action: "save" | "apply") => {
     const next = draftApiConfig;
@@ -590,19 +623,14 @@ export function ProviderPage({
               {draftApiConfig.activeProvider === "custom" ? (
                 <>
                   <div className="api-config-note">
-                    {draftApiConfig.customProviderId === "custom"
+                    {!selectedPreset || selectedPreset.id === "custom"
                       ? l(
-                          "Apply writes this custom route into ~/.codex/config.toml and preserves existing auth.json.",
-                          "应用时会把这个自定义路径写入 ~/.codex/config.toml，并保留现有 auth.json。",
-                        )
-                      : draftApiConfig.customProviderId === "codexzh"
-                      ? l(
-                          "Apply updates the active ~/.codex/config.toml route and preserves existing auth.json.",
-                          "应用时只更新当前 ~/.codex/config.toml 的路由配置，并保留现有 auth.json。",
+                          "Apply writes this custom route into the Codex config.toml and refreshes auth.json with the resolved key.",
+                          "应用时会把这个自定义路径写入 Codex config.toml，并用识别到的密钥刷新 auth.json。",
                         )
                       : l(
-                          `Apply merges the ${customName} route into ~/.codex/config.toml and preserves existing auth.json.`,
-                          `应用时会把 ${customName} 路由合并到 ~/.codex/config.toml，并保留现有 auth.json。`,
+                          `Apply merges the ${customName} route into the Codex config.toml and refreshes auth.json with the resolved key.`,
+                          `应用时会把 ${customName} 路由合并到 Codex config.toml，并用识别到的密钥刷新 auth.json。`,
                         )}
                   </div>
                   {codexConfig?.providers.some((provider) => provider.id !== "openai") ? (
@@ -610,7 +638,7 @@ export function ProviderPage({
                       <div className="settings-field-text">
                         <span className="settings-field-title">{l("Config provider", "配置供应商")}</span>
                         <span className="settings-field-sub">
-                          {l("Choose an existing ~/.codex/config.toml provider as the Custom baseline.", "选择 ~/.codex/config.toml 里的现有供应商作为 Custom 基线。")}
+                          {l("Choose an existing config.toml provider as the baseline, or keep the manual route below.", "选择 config.toml 里的现有供应商作为基线，或保留下方的手动路径。")}
                         </span>
                       </div>
                       <select
@@ -856,10 +884,28 @@ export function ProviderPage({
                 <>
                   <div className="api-config-note">
                     {l(
-                      `Apply writes ${customClaudeName} route env into ~/.claude/settings.json.`,
-                      `应用时会把 ${customClaudeName} 路由 env 写入 ~/.claude/settings.json。`,
+                      `Apply writes ${customClaudeName} route env into the Claude settings.json.`,
+                      `应用时会把 ${customClaudeName} 路由 env 写入 Claude settings.json。`,
                     )}
                   </div>
+                  {claudeConfig?.route.activeProvider === "custom" && claudeConfig.route.customBaseUrl ? (
+                    <label className="settings-field">
+                      <div className="settings-field-text">
+                        <span className="settings-field-title">{l("Config route", "配置路径")}</span>
+                        <span className="settings-field-sub">
+                          {l("Use the route already in settings.json as the baseline, or keep the manual route below.", "使用 settings.json 里的现有路径作为基线，或保留下方的手动路径。")}
+                        </span>
+                      </div>
+                      <select
+                        value={selectedClaudeConfigRoute}
+                        disabled={!settings || saving}
+                        onChange={(event) => selectClaudeConfigRoute(event.currentTarget.value === "config")}
+                      >
+                        <option value="">{l("Manual custom route", "手动自定义路径")}</option>
+                        <option value="config">{claudeConfig.route.customBaseUrl}</option>
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Provider name", "供应商名称")}</span>
@@ -991,6 +1037,29 @@ export function ProviderPage({
                   </div>
                   <label className="settings-field">
                     <div className="settings-field-text">
+                      <span className="settings-field-title">{l("API format", "API 格式")}</span>
+                      <span className="settings-field-sub">
+                        {l(
+                          "Anthropic-compatible relays keep the default; pick another only when the route speaks a different protocol.",
+                          "Anthropic-compatible 中转保持默认；只有路径使用其他协议时才需要更改。",
+                        )}
+                      </span>
+                    </div>
+                    <select
+                      value={draftClaudeApiConfig.customApiFormat}
+                      disabled={!settings || saving}
+                      onChange={(event) =>
+                        updateDraftClaudeApiConfig({ customApiFormat: event.currentTarget.value as ClaudeApiConfig["customApiFormat"] })
+                      }
+                    >
+                      <option value="anthropic">Anthropic Messages</option>
+                      <option value="openai_chat">OpenAI Chat Completions</option>
+                      <option value="openai_responses">OpenAI Responses API</option>
+                      <option value="gemini_native">Gemini Native</option>
+                    </select>
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
                       <span className="settings-field-title">{l("Key env", "Key 环境变量")}</span>
                       <span className="settings-field-sub">
                         {l("Most Claude Code routes use ANTHROPIC_AUTH_TOKEN.", "大多数 Claude Code 路径使用 ANTHROPIC_AUTH_TOKEN。")}
@@ -1104,15 +1173,36 @@ export function ProviderPage({
               ) : null}
               {activeSummarySource === "custom" ? (
                 <>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("Route config", "路径配置")}</span>
+                      <span className="settings-field-sub">
+                        {l(
+                          "Follow the Codex tab's custom route, or give summaries a route and key of their own.",
+                          "跟随 Codex 标签页的自定义路径，或给摘要单独配置路径和密钥。",
+                        )}
+                      </span>
+                    </div>
+                    <select
+                      value={draftSummaryApiConfigMode}
+                      disabled={!settings || saving}
+                      onChange={(event) =>
+                        setDraftSummaryApiConfigMode(event.currentTarget.value as AppSettings["summaryApiConfigMode"])
+                      }
+                    >
+                      <option value="inherit_codex">{l("Follow the Codex custom route", "跟随 Codex 自定义路径")}</option>
+                      <option value="custom">{l("Separate summary route", "独立的摘要路径")}</option>
+                    </select>
+                  </label>
                   <div className="api-config-note">
-                    {selectedSummaryPreset?.id === "custom"
+                    {summaryInheritsCodex
                       ? l(
-                          "The Custom draft is filled from your current local Codex config first, then local Claude config if Codex is unavailable. It only saves when you click Save summary settings.",
-                          "Custom 草稿会先填充当前本机 Codex 配置；如果没有，再回退到本机 Claude 配置。只有点击“保存摘要设置”才会保存。",
+                          "Summaries reuse the Codex tab's base URL, model, and credential, including the keys found in the Codex config. Switch to a separate route to edit the fields below.",
+                          "摘要会复用 Codex 标签页的 Base URL、模型和凭证（含 Codex 配置里识别到的密钥）。切换为独立路径后才能编辑下方字段。",
                         )
                       : l(
-                          "Preset selection only updates the draft. Click Save summary settings to save it.",
-                          "选择供应商后只会更新草稿；点击“保存摘要设置”后才会保存。",
+                          "Summaries use only the fields below and their own stored key. The Codex route is left untouched.",
+                          "摘要只使用下方字段和它自己保存的密钥，不会影响 Codex 路径。",
                         )}
                   </div>
                   <label className="settings-field">
@@ -1122,8 +1212,8 @@ export function ProviderPage({
                     </div>
                     <input
                       type="text"
-                      value={draftSummaryApiConfig.customBaseUrl}
-                      disabled={!settings || saving}
+                      value={effectiveSummaryApiConfig.customBaseUrl}
+                      disabled={!settings || saving || summaryInheritsCodex}
                       placeholder="https://api.deepseek.com"
                       onChange={(event) => updateDraftSummaryApiConfig({ customBaseUrl: event.currentTarget.value })}
                     />
@@ -1138,8 +1228,8 @@ export function ProviderPage({
                         <div className="codex-model-combo">
                           <input
                             type="text"
-                            value={draftSummaryApiConfig.customModel}
-                            disabled={!settings || saving}
+                            value={effectiveSummaryApiConfig.customModel}
+                            disabled={!settings || saving || summaryInheritsCodex}
                             placeholder="deepseek-v4-flash"
                             aria-haspopup="listbox"
                             aria-expanded={summaryModelMenuOpen}
@@ -1153,7 +1243,7 @@ export function ProviderPage({
                           <button
                             type="button"
                             className="codex-model-menu-trigger"
-                            disabled={!settings || saving || summaryModelOptions.length === 0}
+                            disabled={!settings || saving || summaryInheritsCodex || summaryModelOptions.length === 0}
                             aria-label={l("Choose detected model", "选择探测到的模型")}
                             aria-haspopup="listbox"
                             aria-expanded={summaryModelMenuOpen}
@@ -1217,13 +1307,20 @@ export function ProviderPage({
                   <label className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">API Key</span>
-                      <span className="settings-field-sub">{l("Stored locally.", "保存在本地。")}</span>
+                      <span className="settings-field-sub">
+                        {summaryInheritsCodex
+                          ? l(
+                              "Resolved from the Codex route, including its config, auth.json, and environment variables.",
+                              "由 Codex 路径解析，含其配置、auth.json 和环境变量。",
+                            )
+                          : l("Stored locally for the summary route only.", "仅为摘要路径保存在本地。")}
+                      </span>
                     </div>
                     <div className="secret-input">
                       <input
                         type={showSummaryApiKey ? "text" : "password"}
-                        value={draftSummaryApiConfig.customApiKey}
-                        disabled={!settings || saving}
+                        value={effectiveSummaryApiConfig.customApiKey}
+                        disabled={!settings || saving || summaryInheritsCodex}
                         onChange={(event) => updateDraftSummaryApiConfig({ customApiKey: event.currentTarget.value })}
                       />
                       <button
@@ -1236,6 +1333,24 @@ export function ProviderPage({
                         {showSummaryApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
+                  </label>
+                  <label className="settings-field">
+                    <div className="settings-field-text">
+                      <span className="settings-field-title">{l("API format", "API 格式")}</span>
+                      <span className="settings-field-sub">
+                        {l("Most direct API providers use Chat Completions.", "大多数直接 API 供应商使用 Chat Completions。")}
+                      </span>
+                    </div>
+                    <select
+                      value={effectiveSummaryApiConfig.customApiFormat}
+                      disabled={!settings || saving || summaryInheritsCodex}
+                      onChange={(event) =>
+                        updateDraftSummaryApiConfig({ customApiFormat: event.currentTarget.value as ApiConfig["customApiFormat"] })
+                      }
+                    >
+                      <option value="openai_chat">OpenAI Chat Completions</option>
+                      <option value="openai_responses">OpenAI Responses API</option>
+                    </select>
                   </label>
                 </>
               ) : null}

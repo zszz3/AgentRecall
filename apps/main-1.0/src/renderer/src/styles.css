@@ -6168,6 +6168,39 @@ select:focus-visible {
   align-items: center;
 }
 
+.summary-model-control {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.provider-model-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.provider-path-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  gap: 6px;
+  align-items: center;
+}
+
+.provider-path-input button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.provider-path-input button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .codex-model-combo {
   position: relative;
   display: grid;

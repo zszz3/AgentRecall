@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS } from "./models";
+import { DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS, defaultModelOption } from "./models";
 import { RUNTIME_DEFINITIONS, RUNTIME_IDS, runtimeDefinition } from "./runtime-catalog";
 import type { AgentChannel, AgentId } from "./types";
 
@@ -94,7 +94,7 @@ function createFallbackConfigChannels(): AgentChannel[] {
         agentId,
         models: FALLBACK_MODEL_OPTIONS[agentId].some((model) => model.id === DEFAULT_MODEL_ID)
           ? FALLBACK_MODEL_OPTIONS[agentId]
-          : [{ id: DEFAULT_MODEL_ID, label: "Default" }, ...FALLBACK_MODEL_OPTIONS[agentId]],
+          : [defaultModelOption(), ...FALLBACK_MODEL_OPTIONS[agentId]],
       };
     });
 }

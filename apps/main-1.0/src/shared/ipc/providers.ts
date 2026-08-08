@@ -1,8 +1,11 @@
 import { z } from "zod";
+import { isProviderId, PROVIDER_ID_MAX_LENGTH } from "../../core/api-config";
 import { defineIpcRequest } from "./contract";
 
 const boundedString = (max: number) => z.string().max(max);
-const providerId = boundedString(128).trim().min(1).regex(/^[A-Za-z0-9_.:-]+$/);
+// Codex config providers may be declared with a quoted section name, so ids such as
+// `My Proxy` are legal and must survive the trip to the main process.
+const providerId = boundedString(PROVIDER_ID_MAX_LENGTH).trim().refine(isProviderId, "Invalid provider id.");
 const configSnapshotInput = z.object({ configDir: boundedString(8_192).optional() }).strict();
 
 export const apiConfigInput = z.object({

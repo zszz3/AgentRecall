@@ -64,11 +64,12 @@ export interface McpMigrationResult {
 
 export async function loadMcpAppSettings(store: SessionStore): Promise<AppSettings> {
   const settings = readMcpAppSettings();
-  if (settings.summaryApiConfig.activeProvider !== "custom") return settings;
-  const apiKey = await store.getApiProviderKey(
-    "summary",
-    settings.summaryApiConfig.customProviderId,
-  );
+  // Which route the summary uses decides which key store to read: inheriting Codex means
+  // the credential lives under the Codex provider, not the summary one.
+  const inheritCodex = settings.summaryApiConfigMode === "inherit_codex";
+  const config = inheritCodex ? settings.apiConfig : settings.summaryApiConfig;
+  if (config.activeProvider !== "custom") return settings;
+  const apiKey = await store.getApiProviderKey(inheritCodex ? "codex" : "summary", config.customProviderId);
   return hydrateMcpSummaryApiKey(settings, () => apiKey);
 }
 

@@ -1092,9 +1092,12 @@ function initializeOpenVikingMemory(): void {
   const resolveExtractionState = async () => {
     const settings = await providerService.hydrateSettings();
     const codex = await providerService.getCodexConfig();
+    // The bootstrap path is only the default location; extraction must read the same
+    // Codex directory the user configured, or it falls back to an unauthenticated route.
+    const configuredCodexHome = settings.apiConfig.customConfigDir.trim() || codexHome;
     const codexEndpoint = settings.summarySource === "codex"
       || (settings.summarySource === "custom" && settings.summaryApiConfigMode === "inherit_codex")
-      ? await loadActiveCodexSummaryEndpointDefaults(codexHome)
+      ? await loadActiveCodexSummaryEndpointDefaults(configuredCodexHome)
       : null;
     return {
       settings,
@@ -1959,7 +1962,10 @@ function remoteMigrationResumeDisplayCommand(
 
 function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
   return {
-    resolveSummaryEndpoint: async () => resolveSummaryEndpointFromSettings(),
+    // Falling back to the local Codex exec route keeps migration compression working when
+    // no summary Provider is configured, instead of silently skipping compression.
+    resolveSummaryEndpoint: async () => (await resolveSummaryEndpointFromSettings())
+      ?? buildCodexExecEndpoint(await providerService.hydrateSettings()),
     createCompressor: (
       endpoint: SummaryEndpoint,
       concurrency: number,

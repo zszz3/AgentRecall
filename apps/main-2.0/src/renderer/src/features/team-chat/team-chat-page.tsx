@@ -36,6 +36,7 @@ import type {
   TeamChatRoomSummary,
 } from "../../../../shared/team-chat";
 import { parseTeamChatMentions, removeMentionFromText, resolveMentionedMemberIds } from "../../../../shared/team-chat";
+import { modelDisplayLabel } from "../../../../automation/engine/shared/models";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { useAutomationDetails } from "../automation/automation-provider";
@@ -766,7 +767,7 @@ export function TeamChatPage({
                           onClick={() => insertMention(member, true)}
                         >
                           <span className="team-chat-member-avatar available"><Bot size={14} /></span>
-                          <span><strong>{member.displayName}</strong><small>{member.runtimeId} · {member.modelId}</small></span>
+                          <span><strong>{member.displayName}</strong><small>{member.runtimeId} · {modelDisplayLabel(member.modelId)}</small></span>
                         </button>
                       ))}
                     </div>
@@ -1114,7 +1115,7 @@ function CreateRoomDialog({
                     </label>
                     <div className="team-chat-employee-meta">
                       <span>{selectedAgent?.runtimeAgentId}</span>
-                      <span>{selectedAgent?.modelId}</span>
+                      <span>{modelDisplayLabel(selectedAgent?.modelId)}</span>
                       {selectedAgent?.description ? <small>{selectedAgent.description}</small> : null}
                     </div>
                   </div>
@@ -1250,7 +1251,7 @@ function AddRoomEmployeeDialog({
         {selectedAgent ? (
           <div className="team-chat-employee-meta">
             <span>{selectedAgent.runtimeAgentId}</span>
-            <span>{selectedAgent.modelId}</span>
+            <span>{modelDisplayLabel(selectedAgent.modelId)}</span>
             {selectedAgent.description ? <small>{selectedAgent.description}</small> : null}
           </div>
         ) : null}

@@ -77,6 +77,14 @@ export interface ProviderServiceDependencies {
   operations?: Partial<ProviderServiceOperations>;
 }
 
+/**
+ * True when a settings update explicitly carries a credential field, so an empty value
+ * means "clear it" rather than "this update says nothing about the key".
+ */
+function carriesApiKey(update: { customApiKey?: string } | undefined): boolean {
+  return Boolean(update) && typeof update?.customApiKey === "string";
+}
+
 const defaultOperations: ProviderServiceOperations = {
   loadCodexProfileDefaults,
   loadClaudeApiConfigDefaults,
@@ -162,17 +170,19 @@ export class ProviderService {
   }
 
   persistKeysFromUpdate(update: AppSettingsUpdate, next: AppSettings): void {
-    if (update.apiConfig && next.apiConfig.activeProvider === "custom" && next.apiConfig.customApiKey.trim()) {
+    // The renderer always hydrates the key field before saving, so an update that carries
+    // `customApiKey` is authoritative — including when the user deliberately cleared it.
+    // Updates that omit the field leave the stored key alone.
+    if (carriesApiKey(update.apiConfig) && next.apiConfig.activeProvider === "custom") {
       this.dependencies.keys.set("codex", next.apiConfig.customProviderId, next.apiConfig.customApiKey);
     }
-    if (update.claudeApiConfig && next.claudeApiConfig.activeProvider === "custom" && next.claudeApiConfig.customApiKey.trim()) {
+    if (carriesApiKey(update.claudeApiConfig) && next.claudeApiConfig.activeProvider === "custom") {
       this.dependencies.keys.set("claude", next.claudeApiConfig.customProviderId, next.claudeApiConfig.customApiKey);
     }
     if (
-      update.summaryApiConfig
+      carriesApiKey(update.summaryApiConfig)
       && next.summaryApiConfigMode === "custom"
       && next.summaryApiConfig.activeProvider === "custom"
-      && next.summaryApiConfig.customApiKey.trim()
     ) {
       this.dependencies.keys.set("summary", next.summaryApiConfig.customProviderId, next.summaryApiConfig.customApiKey);
     }

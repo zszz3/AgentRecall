@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS } from "./models";
+import { DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS, defaultModelOption } from "./models";
 import type { AgentId, AgentModelOption, ClaudeApiKeyField, RuntimeProviderApiFormat } from "./types";
 import { CC_SWITCH_PROVIDER_PRESETS } from "./cc-switch-provider-presets.generated";
 
@@ -77,7 +77,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiFormat: "anthropic",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "glm-5.1", label: "GLM-5.1" },
     ],
   },
@@ -91,7 +91,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiFormat: "anthropic",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "kimi-k2.6", label: "Kimi K2.6" },
     ],
   },
@@ -105,7 +105,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiFormat: "openai_chat",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "anthropic/claude-sonnet-4.5", label: "Claude Sonnet" },
       { id: "anthropic/claude-opus-4.1", label: "Claude Opus" },
     ],
@@ -120,7 +120,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiFormat: "openai_chat",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "deepseek-ai/DeepSeek-V3.2", label: "DeepSeek V3.2" },
       { id: "zai-org/GLM-4.5", label: "GLM-4.5" },
     ],
@@ -135,7 +135,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiFormat: "openai_chat",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
       { id: "qwen-max", label: "Qwen Max" },
     ],
@@ -153,7 +153,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     configurableModelLabel: "Endpoint / model ID",
     configurableModelPlaceholder: "ep-m-... or doubao-seed-...",
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "doubao-seed-2-0-code-preview-latest", label: "Doubao Seed Code" },
     ],
   },
@@ -165,14 +165,14 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelProvider: "custom-anthropic",
     apiFormat: "anthropic",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: CODEX_DEFAULT_PRESET_ID,
     label: "Default",
     runtimeAgentId: "codex",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: "deepseek",
@@ -186,7 +186,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelReasoningEffort: "high",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
     ],
@@ -203,7 +203,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelReasoningEffort: "high",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "glm-5.1", label: "GLM-5.1" },
     ],
   },
@@ -219,7 +219,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelReasoningEffort: "high",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "kimi-k2.6", label: "Kimi K2.6" },
     ],
   },
@@ -235,7 +235,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelReasoningEffort: "high",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "LongCat-Flash-Chat", label: "LongCat Flash Chat" },
     ],
   },
@@ -251,7 +251,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelReasoningEffort: "high",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "mimo-v2.5-pro", label: "MiMo V2.5 Pro" },
     ],
   },
@@ -270,7 +270,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     configurableModelLabel: "Endpoint / model ID",
     configurableModelPlaceholder: "ep-m-... or doubao-seed-...",
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "doubao-seed-1-6-lite-251015", label: "Doubao Seed 1.6 Lite" },
       { id: "doubao-seed-2-0-lite-260428", label: "Doubao Seed 2.0 Lite" },
       { id: "doubao-seed-1-6", label: "Doubao Seed 1.6" },
@@ -286,7 +286,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     wireApi: "responses",
     apiFormat: "openai_responses",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: "api-openai",
@@ -297,7 +297,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.openai.com/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "gpt-4o", label: "GPT-4o" },
       { id: "gpt-4o-mini", label: "GPT-4o Mini" },
     ],
@@ -314,7 +314,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiKeyPrefix: "",
     extraHeaders: { "anthropic-version": "2023-06-01" },
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "claude-sonnet-4-6", label: "Claude Sonnet" },
       { id: "claude-opus-4-6", label: "Claude Opus" },
     ],
@@ -328,7 +328,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.deepseek.com/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
     ],
@@ -342,7 +342,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "glm-5.1", label: "GLM-5.1" },
     ],
   },
@@ -355,7 +355,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.moonshot.cn/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "kimi-k2.6", label: "Kimi K2.6" },
     ],
   },
@@ -368,7 +368,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.longcat.chat/openai/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "LongCat-Flash-Chat", label: "LongCat Flash Chat" },
     ],
   },
@@ -381,7 +381,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.xiaomimimo.com/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "mimo-v2.5-pro", label: "MiMo V2.5 Pro" },
     ],
   },
@@ -394,7 +394,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://openrouter.ai/api/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "openai/gpt-4o", label: "OpenAI GPT-4o" },
       { id: "anthropic/claude-sonnet-4.5", label: "Claude Sonnet" },
       { id: "deepseek/deepseek-chat", label: "DeepSeek Chat" },
@@ -409,7 +409,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://models.github.ai/inference/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "openai/gpt-4o", label: "GPT-4o" },
       { id: "xai/grok-3-mini", label: "Grok 3 Mini" },
     ],
@@ -423,7 +423,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.together.xyz/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "deepseek-ai/DeepSeek-V3.2", label: "DeepSeek V3.2" },
     ],
   },
@@ -436,7 +436,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.novita.ai/v3/openai",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "zai-org/glm-5.1", label: "GLM-5.1" },
       { id: "moonshotai/kimi-k2.5", label: "Kimi K2.5" },
     ],
@@ -450,7 +450,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://integrate.api.nvidia.com/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "moonshotai/kimi-k2.5", label: "Kimi K2.5" },
     ],
   },
@@ -463,7 +463,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.siliconflow.cn/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "deepseek-ai/DeepSeek-V3.2", label: "DeepSeek V3.2" },
       { id: "zai-org/GLM-4.5", label: "GLM-4.5" },
     ],
@@ -477,7 +477,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
       { id: "qwen-max", label: "Qwen Max" },
     ],
@@ -494,7 +494,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     configurableModelLabel: "Endpoint / model ID",
     configurableModelPlaceholder: "ep-m-... or doubao-seed-...",
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "doubao-seed-1-6-lite-251015", label: "Doubao Seed 1.6 Lite" },
       { id: "doubao-seed-2-0-lite-260428", label: "Doubao Seed 2.0 Lite" },
       { id: "doubao-seed-1-6", label: "Doubao Seed 1.6" },
@@ -509,7 +509,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "hunyuan-turbos-latest", label: "Hunyuan Turbos" },
     ],
   },
@@ -522,7 +522,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://api.minimax.chat/v1",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "MiniMax-M2", label: "MiniMax M2" },
     ],
   },
@@ -535,7 +535,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     baseUrl: "https://YOUR_RESOURCE_NAME.openai.azure.com/openai/deployments/YOUR_DEPLOYMENT",
     usesApiKey: true,
     models: [
-      { id: DEFAULT_MODEL_ID, label: "Default" },
+      defaultModelOption(),
       { id: "gpt-4o", label: "GPT-4o" },
     ],
   },
@@ -547,7 +547,7 @@ const LEGACY_PROVIDER_PRESETS: AgentProviderPreset[] = [
     modelProvider: "custom-api",
     baseUrl: "https://example.com/v1",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: HERMES_DEFAULT_PRESET_ID,
@@ -596,7 +596,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     runtimeAgentId: "codex",
     category: "local",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: CLAUDE_LOCAL_DEFAULT_PRESET_ID,
@@ -605,7 +605,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     category: "local",
     apiFormat: "anthropic",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: "custom",
@@ -616,7 +616,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     wireApi: "responses",
     apiFormat: "openai_responses",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   {
     id: "claude-code-custom",
@@ -627,7 +627,7 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     apiFormat: "anthropic",
     apiKeyField: "ANTHROPIC_AUTH_TOKEN",
     usesApiKey: true,
-    models: [{ id: DEFAULT_MODEL_ID, label: "Default" }],
+    models: [defaultModelOption()],
   },
   ...LEGACY_PROVIDER_PRESETS.filter(
     (preset) => preset.runtimeAgentId !== "codex" && preset.runtimeAgentId !== "claude",

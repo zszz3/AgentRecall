@@ -48,7 +48,11 @@ describe("Claude Code provider switching", () => {
     expect(normalizeClaudeApiConfig(null)).toEqual(defaultClaudeApiConfig);
     expect(normalizeClaudeApiConfig({ activeProvider: "custom", customProviderId: "deepseek" }).customProviderId).toBe("deepseek");
     expect(normalizeClaudeApiConfig({ activeProvider: "custom", customProviderId: "internal-gateway" }).customProviderId).toBe("internal-gateway");
-    expect(normalizeClaudeApiConfig({ activeProvider: "custom", customProviderId: "bad id" }).customProviderId).toBe("custom");
+    // Quoted TOML section names make spaces legal, so only characters that would break the
+    // section name we generate fall back to the "custom" id.
+    expect(normalizeClaudeApiConfig({ activeProvider: "custom", customProviderId: "My Proxy" }).customProviderId).toBe("My Proxy");
+    expect(normalizeClaudeApiConfig({ activeProvider: "custom", customProviderId: 'bad"id' }).customProviderId).toBe("custom");
+    expect(normalizeClaudeApiConfig({ activeProvider: "custom", customProviderId: "  " }).customProviderId).toBe("custom");
   });
 
   it("loads current Claude Code route defaults from settings.json", async () => {

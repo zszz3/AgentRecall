@@ -220,6 +220,19 @@ export const defaultClaudeApiConfig: ClaudeApiConfig = {
   customApiKeyField: "ANTHROPIC_AUTH_TOKEN",
 };
 
+export const PROVIDER_ID_MAX_LENGTH = 128;
+
+/**
+ * Codex happily writes quoted section names such as `[model_providers."My Proxy"]`, so a
+ * provider id is not always a slug. Reject only the characters that would break the TOML
+ * section name we generate or the quoted string we write it into.
+ */
+export function isProviderId(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > PROVIDER_ID_MAX_LENGTH) return false;
+  return !/[\p{Cc}"\\[\]]/u.test(trimmed);
+}
+
 export function normalizeApiConfig(config: ApiConfigInput | null | undefined): ApiConfig {
   const source = config ?? {};
   return {
@@ -263,7 +276,9 @@ export function mergeApiConfigWithProfileDefaults(
   return normalizeApiConfig({
     activeProvider: savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
     customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
-    customConfigDir: fieldWasSaved(savedSource.customConfigDir) ? current.customConfigDir : defaults.customConfigDir ?? current.customConfigDir,
+    // The config directory is what selects which profile we read, so it is never part of
+    // the defaults that reading produces — it only ever comes from the user's own setting.
+    customConfigDir: current.customConfigDir,
     customProviderName: fieldWasSaved(savedSource.customProviderName) ? current.customProviderName : defaults.customProviderName ?? current.customProviderName,
     customBaseUrl: fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
     customApiKey: current.customApiKey,
@@ -282,7 +297,9 @@ export function mergeClaudeApiConfigWithProfileDefaults(
   return normalizeClaudeApiConfig({
     activeProvider: savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
     customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
-    customConfigDir: fieldWasSaved(savedSource.customConfigDir) ? current.customConfigDir : defaults.customConfigDir ?? current.customConfigDir,
+    // The config directory is what selects which profile we read, so it is never part of
+    // the defaults that reading produces — it only ever comes from the user's own setting.
+    customConfigDir: current.customConfigDir,
     customProviderName: fieldWasSaved(savedSource.customProviderName)
       ? current.customProviderName
       : defaults.customProviderName ?? current.customProviderName,
@@ -331,8 +348,7 @@ function normalizeClaudeProviderPresetId(value: string | undefined): ClaudeApiPr
 
 function normalizeProviderId(value: string | undefined): string {
   const normalized = (value ?? "").trim();
-  if (!normalized || normalized.length > 128 || !/^[A-Za-z0-9_.:-]+$/.test(normalized)) return "custom";
-  return normalized;
+  return isProviderId(normalized) ? normalized : "custom";
 }
 
 function normalizeClaudeApiFormat(value: string | undefined): ClaudeApiFormat {

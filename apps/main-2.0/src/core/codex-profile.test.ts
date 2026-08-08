@@ -560,7 +560,11 @@ describe("codex profile switching", () => {
   it("normalizes provider ids while preserving valid custom ids", () => {
     expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "deepseek" }).customProviderId).toBe("deepseek");
     expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "dms" }).customProviderId).toBe("dms");
-    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "bad id" }).customProviderId).toBe("custom");
+    // Quoted TOML section names make spaces legal, so only characters that would break the
+    // section name we generate fall back to the "custom" id.
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "My Proxy" }).customProviderId).toBe("My Proxy");
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: 'bad"id' }).customProviderId).toBe("custom");
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "with[bracket]" }).customProviderId).toBe("custom");
   });
 
   it("writes a custom provider into the selected config directory without renaming its id", async () => {

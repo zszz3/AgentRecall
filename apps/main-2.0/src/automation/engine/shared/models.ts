@@ -1,6 +1,28 @@
 import type { AgentChannel, AgentId, AgentModelOption } from "./types";
 
 export const DEFAULT_MODEL_ID = "default";
+
+/**
+ * `Default` is not a model name — it means "send no model and let the agent's own config
+ * file decide". Saying so in the label stops it reading as a peer of `GPT-5.6-Sol` in the
+ * pickers, which is the source of the "what is Default?" confusion.
+ */
+export const DEFAULT_MODEL_LABEL = "Default (use config file)";
+
+/** Fresh object per call: model lists are mutated in place in a few normalization paths. */
+export function defaultModelOption(): AgentModelOption {
+  return { id: DEFAULT_MODEL_ID, label: DEFAULT_MODEL_LABEL };
+}
+
+/**
+ * The single way to turn a stored model id into something a user should read. Falls back to
+ * the raw id so an unknown model is still identifiable rather than blank.
+ */
+export function modelDisplayLabel(modelId: string | null | undefined, models?: AgentModelOption[]): string {
+  if (!modelId || modelId === DEFAULT_MODEL_ID) return DEFAULT_MODEL_LABEL;
+  return models?.find((model) => model.id === modelId)?.label || modelId;
+}
+
 export const CURRENT_CODEX_MODELS: AgentModelOption[] = [
   {
     id: "gpt-5.6-sol",
@@ -24,7 +46,7 @@ export const CURRENT_CODEX_MODELS: AgentModelOption[] = [
 
 export const FALLBACK_MODEL_OPTIONS: Record<AgentId, AgentModelOption[]> = {
   codex: [
-    { id: DEFAULT_MODEL_ID, label: "Default" },
+    defaultModelOption(),
     ...CURRENT_CODEX_MODELS,
     { id: "gpt-5.5", label: "GPT-5.5" },
     { id: "gpt-5.4", label: "GPT-5.4" },
@@ -32,25 +54,25 @@ export const FALLBACK_MODEL_OPTIONS: Record<AgentId, AgentModelOption[]> = {
     { id: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
   ],
   claude: [
-    { id: DEFAULT_MODEL_ID, label: "Default" },
+    defaultModelOption(),
     { id: "sonnet", label: "Sonnet" },
     { id: "opus", label: "Opus" },
   ],
   api: [
-    { id: DEFAULT_MODEL_ID, label: "Default" },
+    defaultModelOption(),
     { id: "gpt-4o", label: "GPT-4o" },
     { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
     { id: "glm-5.1", label: "GLM-5.1" },
     { id: "kimi-k2.6", label: "Kimi K2.6" },
   ],
   hermes: [
-    { id: DEFAULT_MODEL_ID, label: "Default" },
+    defaultModelOption(),
   ],
   opencode: [
-    { id: DEFAULT_MODEL_ID, label: "Default" },
+    defaultModelOption(),
   ],
   openclaw: [
-    { id: DEFAULT_MODEL_ID, label: "Default" },
+    defaultModelOption(),
   ],
 };
 
