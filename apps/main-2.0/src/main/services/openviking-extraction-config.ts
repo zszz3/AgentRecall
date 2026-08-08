@@ -52,9 +52,6 @@ export function resolveOpenVikingExtractionConfig(input: {
   }
 
   const config = input.settings.summaryApiConfig;
-  if (config.customApiFormat !== "openai_chat") {
-    throw new Error("OpenViking currently supports custom OpenAI Chat providers only.");
-  }
   const model = config.customModel.trim();
   const apiBase = config.customBaseUrl.trim();
   const apiKey = config.customApiKey.trim();
@@ -62,7 +59,7 @@ export function resolveOpenVikingExtractionConfig(input: {
     throw new Error("Complete the summary Provider URL, API key, and model before starting Memory.");
   }
   return {
-    provider: "openai",
+    provider: config.customApiFormat === "openai_responses" ? "openai-codex" : "openai",
     model,
     api_base: apiBase,
     api_key: apiKey,

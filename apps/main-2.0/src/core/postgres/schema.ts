@@ -1488,4 +1488,130 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS read_only boolean NOT NULL DEFAULT false;
     `,
   ],
+}, {
+  version: 32,
+  name: "repair directory memory control plane after migration version collision",
+  statements: [
+    `
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_memories (
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        uri text NOT NULL,
+        memory_type text NOT NULL,
+        authority text NOT NULL DEFAULT 'model'
+          CHECK (authority IN ('model', 'user')),
+        lifecycle text NOT NULL DEFAULT 'active'
+          CHECK (lifecycle IN ('active', 'disputed', 'superseded', 'invalidated', 'deleted')),
+        locked boolean NOT NULL DEFAULT false,
+        evidence_status text NOT NULL DEFAULT 'legacy'
+          CHECK (evidence_status IN ('verified', 'legacy', 'invalid')),
+        source text NOT NULL DEFAULT 'legacy'
+          CHECK (source IN ('openviking', 'manual', 'user-edit', 'legacy')),
+        title text,
+        locked_content text,
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        PRIMARY KEY (workspace_id, uri)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_memory_evidence (
+        id text PRIMARY KEY,
+        workspace_id text NOT NULL,
+        memory_uri text NOT NULL,
+        source_session_id text,
+        source_agent text,
+        source_turn_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+        archive_uri text,
+        memory_diff_uri text,
+        remote_task_id text,
+        model_snapshot jsonb,
+        policy_snapshot jsonb,
+        state text NOT NULL DEFAULT 'active'
+          CHECK (state IN ('active', 'invalidated')),
+        created_at timestamptz NOT NULL,
+        updated_at timestamptz NOT NULL,
+        FOREIGN KEY (workspace_id, memory_uri)
+          REFERENCES agent_recall.openviking_memories(workspace_id, uri) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_memory_feedback (
+        id text PRIMARY KEY,
+        workspace_id text NOT NULL,
+        memory_uri text NOT NULL,
+        feedback text NOT NULL CHECK (feedback IN ('helpful', 'wrong', 'outdated')),
+        actor text NOT NULL,
+        note text,
+        created_at timestamptz NOT NULL,
+        FOREIGN KEY (workspace_id, memory_uri)
+          REFERENCES agent_recall.openviking_memories(workspace_id, uri) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_commit_runs (
+        task_id text PRIMARY KEY,
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        session_id text NOT NULL,
+        agent text,
+        trigger text NOT NULL,
+        state text NOT NULL CHECK (state IN ('running', 'completed', 'failed')),
+        source_turn_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+        token_estimate integer NOT NULL DEFAULT 0 CHECK (token_estimate >= 0),
+        archive_uri text,
+        memory_diff_uri text,
+        memories_extracted jsonb,
+        token_usage jsonb,
+        error text,
+        started_at timestamptz NOT NULL,
+        completed_at timestamptz,
+        updated_at timestamptz NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_operation_events (
+        id text PRIMARY KEY,
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        phase text NOT NULL,
+        status text NOT NULL
+          CHECK (status IN ('started', 'completed', 'failed', 'degraded', 'skipped')),
+        session_id text,
+        task_id text,
+        started_at timestamptz NOT NULL,
+        completed_at timestamptz,
+        duration_ms integer CHECK (duration_ms IS NULL OR duration_ms >= 0),
+        details jsonb
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_recall.openviking_recall_traces (
+        id text PRIMARY KEY,
+        workspace_id text NOT NULL
+          REFERENCES agent_recall.openviking_workspaces(id) ON DELETE CASCADE,
+        agent text NOT NULL,
+        query text NOT NULL,
+        contextual_query text NOT NULL,
+        searched_scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
+        searched_types jsonb NOT NULL DEFAULT '[]'::jsonb,
+        candidates jsonb NOT NULL DEFAULT '[]'::jsonb,
+        injected_uris jsonb NOT NULL DEFAULT '[]'::jsonb,
+        injected_token_count integer NOT NULL DEFAULT 0 CHECK (injected_token_count >= 0),
+        duration_ms integer NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
+        degraded_reason text,
+        created_at timestamptz NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS openviking_memories_recall_idx
+        ON agent_recall.openviking_memories (
+          workspace_id, lifecycle, evidence_status, locked, updated_at DESC
+        );
+      CREATE INDEX IF NOT EXISTS openviking_memory_evidence_uri_idx
+        ON agent_recall.openviking_memory_evidence (workspace_id, memory_uri, created_at DESC);
+      CREATE INDEX IF NOT EXISTS openviking_memory_feedback_uri_idx
+        ON agent_recall.openviking_memory_feedback (workspace_id, memory_uri, created_at DESC);
+      CREATE INDEX IF NOT EXISTS openviking_commit_runs_workspace_idx
+        ON agent_recall.openviking_commit_runs (workspace_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS openviking_operation_events_workspace_idx
+        ON agent_recall.openviking_operation_events (workspace_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS openviking_recall_traces_workspace_idx
+        ON agent_recall.openviking_recall_traces (workspace_id, created_at DESC);
+    `,
+  ],
 }];
