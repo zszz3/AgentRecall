@@ -1,4 +1,5 @@
-// Generated from CC Switch v3.16.5. Run scripts/sync-cc-switch-providers.ts to refresh.
+// Transcribed by hand from CC Switch v3.16.5. There is no generator script; refresh it by
+// re-reading the upstream preset list and updating the entries below.
 import type { AgentProviderPreset } from "./provider-presets";
 
 export const CC_SWITCH_PROVIDER_PRESETS: AgentProviderPreset[] = [

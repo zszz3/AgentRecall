@@ -7,7 +7,7 @@ import type {
   WorkflowReadinessIssue,
   WorkflowReadinessResult,
 } from "../../../shared/types";
-import { isModelForChannel } from "../../../shared/models";
+import { DEFAULT_MODEL_ID, isModelForChannel } from "../../../shared/models";
 
 type ReadinessWorkflow = Pick<WorkflowDraftState, "configuredAgentId" | "modelId" | "reviewerConfiguredAgentId" | "reviewerModelId" | "definition">;
 
@@ -35,7 +35,7 @@ export function inspectWorkflowReadiness(input: {
         continue;
       }
       const agent = agents.get(configuredAgentId);
-      const modelId = node.modelId || agent?.modelId || "default";
+      const modelId = node.modelId || agent?.modelId || DEFAULT_MODEL_ID;
       inspectRoute({ scope: "node", nodeId: node.id, field: "configuredAgentId", configuredAgentId, modelId });
       if (agent) {
         const tools = availableTools(agent, input.mcpServers);

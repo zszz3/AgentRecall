@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { normalizeConfigChannelsForStorage } from "../../shared/config-channels";
-import { CURRENT_CODEX_MODELS, DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS, runtimeModelId } from "../../shared/models";
+import { CURRENT_CODEX_MODELS, DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS, defaultModelOption, runtimeModelId } from "../../shared/models";
 import { isRuntimeId, RUNTIME_DEFINITIONS } from "../../shared/runtime-catalog";
 import type {
   AgentChannel,
@@ -37,12 +37,17 @@ function asStringArray(value: unknown): string[] | undefined {
   return strings.length > 0 ? strings : undefined;
 }
 
+/**
+ * Profile names are Codex TOML section names, so they may only hold `[a-z0-9-]`. The fallback
+ * is deliberately not `DEFAULT_MODEL_ID`: a part that sanitizes away must not collide with the
+ * profile generated for the Default model.
+ */
 function sanitizeProfilePart(value: string): string {
   const sanitized = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return sanitized || "default";
+  return sanitized || "unnamed";
 }
 
 function profileNameFromPath(filePath: string): string {
@@ -215,7 +220,7 @@ function normalizeModels(models: unknown, fallback: AgentModelOption[]): AgentMo
 
   const source = normalized.length > 0 ? normalized : fallback;
   if (source.some((model) => model.id === DEFAULT_MODEL_ID)) return source;
-  return [{ id: DEFAULT_MODEL_ID, label: "Default" }, ...source];
+  return [defaultModelOption(), ...source];
 }
 
 function addCurrentCodexModels(models: AgentModelOption[]): AgentModelOption[] {
@@ -236,7 +241,7 @@ function primaryClaudeProviderModels(models: AgentModelOption[], environment: Re
   const primaryModelId = environment?.ANTHROPIC_MODEL;
   if (!primaryModelId) return models;
   const primary = models.find((model) => model.id === primaryModelId) ?? { id: primaryModelId, label: primaryModelId };
-  return [{ id: DEFAULT_MODEL_ID, label: "Default" }, primary];
+  return [defaultModelOption(), primary];
 }
 
 function isCodexOfficialChannel(channel: AgentChannel): boolean {
@@ -544,7 +549,7 @@ export function parseCodexProfileConfig(sourcePath: string, raw: string): Import
   const providerSection = providerSectionName ? sections[providerSectionName] ?? {} : {};
   const model = asString(root.model);
 
-  const models: AgentModelOption[] = [{ id: DEFAULT_MODEL_ID, label: "Default" }];
+  const models: AgentModelOption[] = [defaultModelOption()];
   if (model) models.push({ id: model, label: model });
 
   const channel: AgentChannel = {

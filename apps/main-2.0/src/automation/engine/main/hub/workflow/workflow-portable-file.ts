@@ -9,7 +9,7 @@ import type {
   WorkflowV2Definition,
 } from "../../../shared/types";
 import type { AgentChannel, ConfiguredAgent } from "../../../shared/types";
-import { isModelForChannel } from "../../../shared/models";
+import { DEFAULT_MODEL_ID, isModelForChannel } from "../../../shared/models";
 import { migrateWorkflowV2ReviewGates } from "../../../shared/workflow-v2/review-gates";
 import { validateWorkflowV2Definition } from "../../../shared/workflow-v2/validation";
 import { analyzeWorkflowV2Script, maximumWorkflowV2ScriptRisk } from "../../workflows/v2/workflow-v2-script-analysis";
@@ -266,7 +266,7 @@ export function applyWorkflowImportMappings(input: {
     if (node.execModel !== "llm") continue;
     const sourceAgentId = node.configuredAgentId ?? sourceWorkflowAgentId;
     const sourceAgent = agents.get(sourceAgentId);
-    const sourceModelId = node.modelId ?? sourceAgent?.modelId ?? "default";
+    const sourceModelId = node.modelId ?? sourceAgent?.modelId ?? DEFAULT_MODEL_ID;
     const route = mapRoute(sourceAgentId, sourceModelId);
     if (node.configuredAgentId) node.configuredAgentId = route.configuredAgentId;
     if (node.modelId) node.modelId = route.modelId;

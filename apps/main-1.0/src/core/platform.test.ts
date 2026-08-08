@@ -500,6 +500,7 @@ describe("API settings", () => {
     ).toEqual({
       activeProvider: "custom",
       customProviderId: "custom",
+      customConfigDir: "",
       customProviderName: "codexzh",
       customBaseUrl: "https://api.example.com/v1",
       customApiKey: "sk-test",
@@ -514,6 +515,7 @@ describe("API settings", () => {
       apiConfig: {
         activeProvider: "custom" as const,
         customProviderId: "codexzh" as const,
+        customConfigDir: "",
         customProviderName: "codexzh",
         customBaseUrl: "https://api.example.com/v1",
         customApiKey: "sk-test",
@@ -546,6 +548,7 @@ describe("API settings", () => {
     ).toEqual({
       activeProvider: "custom",
       customProviderId: "deepseek",
+      customConfigDir: "",
       customProviderName: "deepseek",
       customBaseUrl: "https://api.deepseek.com/anthropic",
       customApiKey: "sk-test",

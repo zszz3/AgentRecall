@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API_PROVIDER_PRESETS, defaultApiConfig, mergeApiConfigWithProfileDefaults, normalizeApiConfig } from "./api-config";
 import { applyCodexApiConfig, codexProfileForApiConfig, loadActiveCodexSummaryEndpointDefaults, loadCodexConfigSnapshot, loadCodexProfileDefaults, probeCodexModels } from "./codex-profile";
 
@@ -15,6 +16,17 @@ async function withCodexHome<T>(run: (codexHome: string) => Promise<T>): Promise
 }
 
 describe("codex profile switching", () => {
+  // Credential resolution now reads the environment, so blank the real developer keys
+  // before every case instead of letting them leak into assertions.
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("CODEX_API_KEY", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("applies CodexZH into active Codex config without requiring profile template files", async () => {
     await withCodexHome(async (codexHome) => {
       await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"old\"}\n");
@@ -51,7 +63,11 @@ describe("codex profile switching", () => {
       expect(config).toContain('base_url = "https://api.codexzh.com/v1"');
       expect(config).toContain('experimental_bearer_token = "sk-new"');
       expect(config).toContain("[mcp_servers.echo]");
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"old\"}\n");
+      // Codex reads the bearer token for a `requires_openai_auth` provider out of
+      // auth.json, so the switch has to land there too — the backup keeps the old login.
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe(
+        `${JSON.stringify({ OPENAI_API_KEY: "sk-new" }, null, 2)}\n`,
+      );
       await expect(readFile(path.join(codexHome, "backups/auth.json.before-codexzh-2026-06-03T08-09-10-111Z"), "utf8")).resolves.toBe(
         "{\"OPENAI_API_KEY\":\"old\"}\n",
       );
@@ -63,9 +79,12 @@ describe("codex profile switching", () => {
     });
   });
 
-  it("overlays CodexZH form fields onto the active config without replacing auth.json", async () => {
+  it("overlays CodexZH form fields onto the active config and refreshes auth.json in place", async () => {
     await withCodexHome(async (codexHome) => {
-      await writeFile(path.join(codexHome, "auth.json"), "{\"OPENAI_API_KEY\":\"official-login\"}\n");
+      await writeFile(
+        path.join(codexHome, "auth.json"),
+        `${JSON.stringify({ OPENAI_API_KEY: "official-login", tokens: { id_token: "keep-me" } })}\n`,
+      );
       await writeFile(
         path.join(codexHome, "config.toml"),
         [
@@ -106,7 +125,9 @@ describe("codex profile switching", () => {
       expect(config).toContain('experimental_bearer_token = "sk-new"');
       expect(config).toContain("[model_providers.codex]");
       expect(config).toContain("[mcp_servers.echo]");
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"official-login\"}\n");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe(
+        `${JSON.stringify({ OPENAI_API_KEY: "sk-new", tokens: { id_token: "keep-me" } }, null, 2)}\n`,
+      );
     });
   });
 
@@ -150,7 +171,7 @@ describe("codex profile switching", () => {
       expect(config).not.toContain('model = "deepseek-v4-flash"');
       expect(config).not.toContain('model_reasoning_effort = "high"');
       expect(config).not.toContain('experimental_bearer_token = "old-top-level-token"');
-      expect(config).not.toContain('experimental_bearer_token = "sk-deepseek"');
+      expect(config).toContain('experimental_bearer_token = "sk-deepseek"');
       expect(config).toContain("[model_providers.deepseek]");
       expect(config).toContain("[mcp_servers.echo]");
       await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"old\"}\n");
@@ -243,7 +264,12 @@ describe("codex profile switching", () => {
       },
     );
 
-    expect(result).toEqual({ endpoint: "https://api.example.com/v1/models", models: ["a-model", "z-model"] });
+    expect(result).toEqual({
+      endpoint: "https://api.example.com/v1/models",
+      endpoints: ["https://api.example.com/v1/models"],
+      models: ["a-model", "z-model"],
+      credentialSource: "API key field",
+    });
   });
 
   it("can probe models using an API token already stored in config.toml", async () => {
@@ -318,6 +344,129 @@ describe("codex profile switching", () => {
       );
 
       expect(result.models).toEqual(["clawbot:gpt-5.5"]);
+    });
+  });
+
+  it("resolves an existing auth.json key for a custom provider without env_key", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "dms"',
+          'model = "codewiz:gpt-5.6-sol"',
+          "",
+          "[model_providers.dms]",
+          'name = "DMS AI Adapter"',
+          'base_url = "http://127.0.0.1:45678/v1"',
+          'wire_api = "responses"',
+        ].join("\n"),
+      );
+      await writeFile(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "dms-key" }));
+
+      const result = await probeCodexModels(
+        { baseUrl: "", apiKey: "", providerId: "dms", codexHome },
+        async (_url, init) => {
+          expect(init?.headers?.Authorization).toBe("Bearer dms-key");
+          return {
+            ok: true,
+            status: 200,
+            async json() {
+              return { models: { "codewiz:gpt-5.6-sol": {}, "clawbot:gpt-5.5": {}, "gh:gpt-5.5": {}, "dibp:claude-4": {} } };
+            },
+          };
+        },
+      );
+
+      expect(result).toMatchObject({
+        models: ["clawbot:gpt-5.5", "codewiz:gpt-5.6-sol", "dibp:claude-4", "gh:gpt-5.5"],
+        credentialSource: "auth.json OPENAI_API_KEY",
+      });
+    });
+  });
+
+  it("finds a key for a manually typed Custom route that has no section of its own", async () => {
+    await withCodexHome(async (codexHome) => {
+      // The user picked "Manual custom route", so providerId `custom` matches nothing in
+      // config.toml — the key still has to be found on the provider Codex is actually using.
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "dms"',
+          "",
+          "[model_providers.dms]",
+          'base_url = "http://127.0.0.1:45678/v1"',
+          'api_key = "sk-inline-dms"',
+        ].join("\n"),
+      );
+
+      const result = await probeCodexModels(
+        { baseUrl: "https://api.example/v1", apiKey: "", providerId: "custom", codexHome },
+        async (_url, init) => {
+          expect(init?.headers?.Authorization).toBe("Bearer sk-inline-dms");
+          return { ok: true, status: 200, async json() { return { data: [{ id: "gh:gpt-5.5" }] }; } };
+        },
+      );
+
+      expect(result).toMatchObject({
+        models: ["gh:gpt-5.5"],
+        credentialSource: "config.toml dms.api_key (provider dms)",
+      });
+    });
+  });
+
+  it("falls back to a .env file next to the Codex config", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(path.join(codexHome, "config.toml"), 'model_provider = "dms"\n\n[model_providers.dms]\n');
+      await writeFile(path.join(codexHome, ".env"), "# comment\nexport CODEX_API_KEY='sk-dotenv'\n");
+
+      const result = await probeCodexModels(
+        { baseUrl: "https://api.example/v1", apiKey: "", providerId: "dms", codexHome },
+        async (_url, init) => {
+          expect(init?.headers?.Authorization).toBe("Bearer sk-dotenv");
+          return { ok: true, status: 200, async json() { return { data: [{ id: "gh:gpt-5.5" }] }; } };
+        },
+      );
+
+      expect(result.credentialSource).toBe(".env CODEX_API_KEY");
+    });
+  });
+
+  it("does not read a section key as if it were a top-level one", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "dms"',
+          "",
+          "[model_providers.dms]",
+          'name = "DMS"',
+          'model = "section-level-model"',
+          'base_url = "http://127.0.0.1:45678/v1"',
+        ].join("\n"),
+      );
+
+      const snapshot = await loadCodexConfigSnapshot(codexHome);
+      expect(snapshot.activeModel).toBe("");
+    });
+  });
+
+  it("expands ~ when reading a config directory, not only when writing it", async () => {
+    await withCodexHome(async (codexHome) => {
+      // `prepareProviderConfigDirectory` already expanded `~` on the write path; readers
+      // used to path.join() the literal string and silently return an empty snapshot.
+      const home = path.dirname(codexHome);
+      vi.stubEnv("HOME", home);
+      vi.stubEnv("USERPROFILE", home);
+      const tildePath = `~/${path.basename(codexHome)}`;
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        ['model_provider = "dms"', 'model = "codewiz:gpt-5.6-sol"', "", "[model_providers.dms]", 'base_url = "http://127.0.0.1:45678/v1"'].join("\n"),
+      );
+
+      const snapshot = await loadCodexConfigSnapshot(tildePath);
+      expect(snapshot.codexHome).toBe(codexHome);
+      expect(snapshot.activeProviderId).toBe("dms");
+      expect(snapshot.activeModel).toBe("codewiz:gpt-5.6-sol");
     });
   });
 
@@ -408,9 +557,72 @@ describe("codex profile switching", () => {
     });
   });
 
-  it("normalizes preset ids and falls back to Custom", () => {
+  it("normalizes provider ids while preserving valid custom ids", () => {
     expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "deepseek" }).customProviderId).toBe("deepseek");
-    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "missing" }).customProviderId).toBe("custom");
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "dms" }).customProviderId).toBe("dms");
+    // Quoted TOML section names make spaces legal, so only characters that would break the
+    // section name we generate fall back to the "custom" id.
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "My Proxy" }).customProviderId).toBe("My Proxy");
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: 'bad"id' }).customProviderId).toBe("custom");
+    expect(normalizeApiConfig({ activeProvider: "custom", customProviderId: "with[bracket]" }).customProviderId).toBe("custom");
+  });
+
+  it("writes a custom provider into the selected config directory without renaming its id", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "dms-key" }));
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "dms"',
+          'model = "codewiz:gpt-5.5"',
+          "",
+          "[model_providers.dms]",
+          'name = "DMS AI Adapter"',
+          'base_url = "http://127.0.0.1:45678/v1"',
+          'wire_api = "responses"',
+        ].join("\n"),
+      );
+
+      const result = await applyCodexApiConfig({
+        apiConfig: {
+          activeProvider: "custom",
+          customProviderId: "dms",
+          customConfigDir: codexHome,
+          customProviderName: "DMS AI Adapter",
+          customBaseUrl: "http://127.0.0.1:45678/v1",
+          customApiKey: "",
+          customModel: "codewiz:gpt-5.6-sol",
+          customApiFormat: "openai_responses",
+        },
+      });
+
+      expect(result).toMatchObject({ profile: "dms", codexHome, credentialSource: "auth.json OPENAI_API_KEY", verified: true });
+      await expect(readFile(path.join(codexHome, "config.toml"), "utf8")).resolves.toContain('model_provider = "dms"');
+    });
+  });
+
+  it("leaves auth.json untouched when the config write cannot be verified", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(path.join(codexHome, "auth.json"), '{"OPENAI_API_KEY":"still-mine"}\n');
+      // A directory where config.toml belongs makes the verified write fail after auth.json
+      // has already been replaced, which is exactly the case the rollback exists for.
+      await mkdir(path.join(codexHome, "config.toml"));
+
+      await expect(applyCodexApiConfig({
+        codexHome,
+        apiConfig: {
+          activeProvider: "custom",
+          customProviderId: "dms",
+          customProviderName: "DMS",
+          customBaseUrl: "http://127.0.0.1:45678/v1",
+          customApiKey: "sk-new",
+          customModel: "codewiz:gpt-5.6-sol",
+          customApiFormat: "openai_responses",
+        },
+      })).rejects.toThrow();
+
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe('{"OPENAI_API_KEY":"still-mine"}\n');
+    });
   });
 
   it("merges common providers into the active Codex config without overwriting unrelated sections", async () => {
@@ -458,7 +670,9 @@ describe("codex profile switching", () => {
       expect(config).toContain('wire_api = "responses"');
       expect(config).toContain('experimental_bearer_token = "sk-deepseek"');
       expect(config).toContain("[mcp_servers.echo]");
-      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe("{\"OPENAI_API_KEY\":\"old\"}\n");
+      await expect(readFile(path.join(codexHome, "auth.json"), "utf8")).resolves.toBe(
+        `${JSON.stringify({ OPENAI_API_KEY: "sk-deepseek" }, null, 2)}\n`,
+      );
       expect(result.profile).toBe("deepseek");
       await expect(readFile(path.join(codexHome, "backups/auth.json.before-deepseek-2026-06-03T08-09-10-111Z"), "utf8")).resolves.toBe(
         "{\"OPENAI_API_KEY\":\"old\"}\n",
@@ -502,6 +716,72 @@ describe("codex profile switching", () => {
       expect(config).toContain('wire_api = "responses"');
       expect(config).toContain('experimental_bearer_token = "sk-glm"');
       expect(config).toContain("[mcp_servers.echo]");
+    });
+  });
+});
+
+describe("loadActiveCodexSummaryEndpointDefaults", () => {
+  let codexHome: string;
+
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    codexHome = mkdtempSync(path.join(tmpdir(), "codex-profile-test-"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(codexHome, { recursive: true, force: true });
+  });
+
+  it("returns null for the official provider without any credentials", () => {
+    writeFileSync(path.join(codexHome, "config.toml"), 'model = "gpt-5.5"\n');
+    writeFileSync(path.join(codexHome, "auth.json"), "{}");
+    return expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toBeNull();
+  });
+
+  it("falls back to OPENAI_API_KEY for the official provider", async () => {
+    writeFileSync(path.join(codexHome, "config.toml"), 'model = "gpt-5.5"\n');
+    writeFileSync(
+      path.join(codexHome, "auth.json"),
+      JSON.stringify({ OPENAI_API_KEY: "sk-test-official" }),
+    );
+    await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
+      baseUrl: "",
+      model: "gpt-5.5",
+      apiKey: "sk-test-official",
+      apiFormat: "openai_responses",
+    });
+  });
+
+  it("falls back to OPENAI_API_KEY when no model_provider is set", async () => {
+    writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
+      baseUrl: "",
+      model: "",
+      apiKey: "sk-test",
+      apiFormat: "openai_responses",
+    });
+  });
+
+  it("keeps custom provider endpoint resolution unchanged", async () => {
+    writeFileSync(
+      path.join(codexHome, "config.toml"),
+      [
+        'model = "provider-model"',
+        'model_provider = "dms"',
+        "",
+        "[model_providers.dms]",
+        'base_url = "http://127.0.0.1:45678/v1"',
+        'wire_api = "responses"',
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-dms" }));
+    await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
+      baseUrl: "http://127.0.0.1:45678/v1",
+      model: "provider-model",
+      apiKey: "sk-dms",
+      apiFormat: "openai_responses",
     });
   });
 });

@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL_ID } from "../../../../shared/models";
+import { DEFAULT_MODEL_ID, defaultModelOption } from "../../../../shared/models";
 import type { AgentChannel, AgentModelOption, AgentPluginConfig, ClaudeDefaultConfig, CodexDefaultConfig, ProviderBalanceResult } from "../../../../shared/types";
 import { CLAUDE_LOCAL_DEFAULT_PRESET_ID, CODEX_LOCAL_DEFAULT_PRESET_ID, type AgentProviderPreset } from "../../../../shared/provider-presets";
 import type { Language } from "../../app/language";
@@ -104,7 +104,7 @@ function cloneChannelModels(models: AgentModelOption[]): AgentModelOption[] {
 }
 
 function defaultModelsForCodexConfig(modelId: string | null): AgentModelOption[] {
-  const models: AgentModelOption[] = [{ id: DEFAULT_MODEL_ID, label: "Default" }];
+  const models: AgentModelOption[] = [defaultModelOption()];
   const normalizedModelId = modelId?.trim();
   if (normalizedModelId && normalizedModelId !== DEFAULT_MODEL_ID) {
     models.push({ id: normalizedModelId, label: normalizedModelId });

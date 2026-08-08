@@ -1,7 +1,7 @@
 import { Plus, Save, Trash2 } from "lucide-react";
 import { agentAccent, agentLabel, resolveConfiguredAgentChannel } from "../../app/agents";
 import type { Language } from "../../app/language";
-import { DEFAULT_MODEL_ID } from "../../../../shared/models";
+import { DEFAULT_MODEL_ID, defaultModelOption } from "../../../../shared/models";
 import type { AgentChannel, ConfiguredAgent } from "../../../../shared/types";
 
 type MaybePromise = void | Promise<void>;
@@ -75,7 +75,7 @@ export function AgentPage({
     configuredAgents.find((agent) => agent.id === selectedConfiguredAgentId) ?? configuredAgents[0];
   const selectedAgentChannel = selectedConfiguredAgent ? resolveConfiguredAgentChannel(selectedConfiguredAgent, channels) : undefined;
   const selectedAgentModels =
-    selectedAgentChannel && selectedAgentChannel.models.length > 0 ? selectedAgentChannel.models : [{ id: DEFAULT_MODEL_ID, label: "Default" }];
+    selectedAgentChannel && selectedAgentChannel.models.length > 0 ? selectedAgentChannel.models : [defaultModelOption()];
   const selectedAgentModelId = selectedConfiguredAgent && selectedAgentModels.some((model) => model.id === selectedConfiguredAgent.modelId)
     ? selectedConfiguredAgent.modelId
     : DEFAULT_MODEL_ID;

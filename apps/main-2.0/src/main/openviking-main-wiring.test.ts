@@ -30,7 +30,12 @@ describe("OpenViking main-process wiring", () => {
     expect(mainSource).toContain(
       'const codexAuthBootstrapPath = codexAuthPath(process.env, app.getPath("home"))',
     );
-    expect(mainSource).toContain("loadActiveCodexSummaryEndpointDefaults(codexHome)");
+    // Extraction must read the Codex directory the user configured, not just the bootstrap
+    // default, or a custom config dir silently falls back to an unauthenticated route.
+    expect(mainSource).toContain(
+      "const configuredCodexHome = settings.apiConfig.customConfigDir.trim() || codexHome",
+    );
+    expect(mainSource).toContain("loadActiveCodexSummaryEndpointDefaults(configuredCodexHome)");
     expect(mainSource).toContain(
       "resolveOpenVikingExtractionConfig({ settings, codex, codexEndpoint })",
     );

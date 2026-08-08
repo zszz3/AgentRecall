@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import type { AgentEvent } from "../../../shared/types";
+import { runtimeModelId } from "../../../shared/models";
 import { spawnCli } from "../../platform/cli-launcher";
 
 export interface HermesRunOptions {
@@ -21,8 +22,9 @@ export class HermesRunner {
 
   async start(): Promise<void> {
     const args = ["-z", this.options.prompt];
-    if (this.options.modelId && this.options.modelId !== "default") {
-      args.push("--model", this.options.modelId);
+    const modelArg = runtimeModelId(this.options.modelId ?? "");
+    if (modelArg) {
+      args.push("--model", modelArg);
     }
 
     const proc = spawnCli({

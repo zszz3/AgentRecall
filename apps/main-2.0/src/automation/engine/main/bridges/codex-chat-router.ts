@@ -887,7 +887,13 @@ function zeroUsage(): unknown {
 
 function resolveModel(channel: AgentChannel, value: unknown): string {
   if (typeof value === "string" && runtimeModelId(value)) return value;
-  return channel.models.find((model) => model.id !== DEFAULT_MODEL_ID)?.id ?? "default";
+  // `Default` means "let the channel decide", so it is not a name any upstream understands.
+  // Forwarding it produces an opaque 400 from the provider; name the real problem instead.
+  const concrete = channel.models.find((model) => runtimeModelId(model.id))?.id;
+  if (!concrete) {
+    throw new Error(`Channel "${channel.label || channel.id}" has no model to send. Add a model to it before routing Codex through this channel.`);
+  }
+  return concrete;
 }
 
 function optionalNumberField(key: string, value: unknown): Record<string, number> {

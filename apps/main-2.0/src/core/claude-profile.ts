@@ -1,19 +1,46 @@
 import { constants } from "node:fs";
-import { access, chmod, copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { access, copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
-  claudeApiProviderPreset,
+  CLAUDE_API_PROVIDER_PRESETS,
   findClaudeApiProviderPresetByBaseUrl,
   normalizeClaudeApiConfig,
   type ClaudeApiConfig,
 } from "./api-config";
+import { writeVerifiedConfig } from "./atomic-config-write";
+import { probeProviderModels, type ProviderModelProbeResult, type ProviderModelsFetch } from "./provider-models";
+import { prepareProviderConfigDirectory, resolveProviderConfigDirectory } from "./provider-config-path";
 
 export interface ApplyClaudeProfileResult {
   profile: string;
   claudeHome: string;
   settingsPath: string;
   backupPaths: string[];
+  credentialSource: string | null;
+  verified: true;
+}
+
+export interface ClaudeConfigSnapshot {
+  claudeHome: string;
+  settingsPath: string;
+  exists: boolean;
+  /** Route currently written in settings.json, normalized to ClaudeApiConfig fields. */
+  route: Partial<ClaudeApiConfig>;
+  credentialSource: string | null;
+  hasApiKey: boolean;
+}
+
+export interface ClaudeModelProbeInput {
+  baseUrl: string;
+  apiKey: string;
+  apiFormat: ClaudeApiConfig["customApiFormat"];
+  apiKeyField: ClaudeApiConfig["customApiKeyField"];
+  claudeHome?: string;
+  apiKeySource?: string;
+}
+
+export interface ClaudeModelProbeResult extends ProviderModelProbeResult {
+  credentialSource: string;
 }
 
 const CLAUDE_ROUTE_ENV_KEYS = [
@@ -31,7 +58,8 @@ const CLAUDE_ROUTE_ENV_KEYS = [
   "API_TIMEOUT_MS",
 ] as const;
 
-export async function loadClaudeApiConfigDefaults(claudeHome = path.join(os.homedir(), ".claude")): Promise<Partial<ClaudeApiConfig>> {
+export async function loadClaudeApiConfigDefaults(configuredHome?: string): Promise<Partial<ClaudeApiConfig>> {
+  const claudeHome = resolveProviderConfigDirectory(configuredHome, ".claude");
   const settings = parseJsonObject(await readOptionalFile(path.join(claudeHome, "settings.json")));
   if (!settings) return {};
 
@@ -60,13 +88,49 @@ export async function loadClaudeApiConfigDefaults(claudeHome = path.join(os.home
   });
 }
 
+export async function loadClaudeConfigSnapshot(configuredHome?: string): Promise<ClaudeConfigSnapshot> {
+  const claudeHome = resolveProviderConfigDirectory(configuredHome, ".claude");
+  const settingsPath = path.join(claudeHome, "settings.json");
+  const text = await readOptionalFile(settingsPath);
+  const route = await loadClaudeApiConfigDefaults(claudeHome);
+  const credential = await resolveClaudeCredential({ claudeHome, apiKeyField: route.customApiKeyField });
+  return {
+    claudeHome,
+    settingsPath,
+    exists: Boolean(text?.trim()),
+    route: Object.keys(route).length > 0 ? { ...route, customApiKey: "" } : route,
+    credentialSource: credential.source,
+    hasApiKey: Boolean(credential.apiKey),
+  };
+}
+
+export async function probeClaudeModels(
+  input: ClaudeModelProbeInput,
+  fetchImpl: ProviderModelsFetch = fetch,
+): Promise<ClaudeModelProbeResult> {
+  const claudeHome = resolveProviderConfigDirectory(input.claudeHome, ".claude");
+  const explicitKey = input.apiKey.trim();
+  const credential = await resolveClaudeCredential({
+    claudeHome,
+    apiKeyField: input.apiKeyField,
+    explicitKey,
+    explicitSource: input.apiKeySource,
+  });
+  const result = await probeProviderModels({
+    baseUrl: input.baseUrl,
+    apiKey: credential.apiKey,
+    apiFormat: input.apiFormat,
+  }, fetchImpl);
+  return { ...result, credentialSource: credential.source || "resolved credential" };
+}
+
 export async function applyClaudeApiConfig(options: {
   claudeHome?: string;
   apiConfig: Partial<ClaudeApiConfig>;
   now?: Date;
 }): Promise<ApplyClaudeProfileResult> {
   const apiConfig = claudeApiConfigWithPresetDefaults(options.apiConfig);
-  const claudeHome = options.claudeHome ?? path.join(os.homedir(), ".claude");
+  const claudeHome = await prepareProviderConfigDirectory(options.claudeHome ?? apiConfig.customConfigDir, ".claude");
   const settingsPath = path.join(claudeHome, "settings.json");
   const backupDir = path.join(claudeHome, "backups");
   const profile = apiConfig.activeProvider === "custom" ? claudeProviderId(apiConfig) : "claude-official";
@@ -76,38 +140,61 @@ export async function applyClaudeApiConfig(options: {
   const backupPaths = await backupExistingTarget(settingsPath, path.join(backupDir, `settings.json.before-${profile}-${stamp}`));
   const settings = await loadMutableSettings(settingsPath);
 
+  let credentialSource: string | null = null;
   if (apiConfig.activeProvider === "custom") {
-    applyCustomClaudeEnv(settings, apiConfig);
+    const credential = await resolveClaudeCredential({
+      claudeHome,
+      apiKeyField: apiConfig.customApiKeyField,
+      explicitKey: apiConfig.customApiKey,
+    });
+    if (!credential.apiKey) throw new Error(`No API key was found for ${apiConfig.customProviderName}.`);
+    credentialSource = credential.source;
+    applyCustomClaudeEnv(settings, { ...apiConfig, customApiKey: credential.apiKey });
   } else {
     clearClaudeRouteEnv(settings);
   }
 
-  await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-  await chmod(settingsPath, 0o600);
+  await writeVerifiedConfig({
+    targetPath: settingsPath,
+    contents: `${JSON.stringify(settings, null, 2)}\n`,
+    verify: async () => {
+      const snapshot = await loadClaudeConfigSnapshot(claudeHome);
+      if (apiConfig.activeProvider !== "custom") {
+        if (snapshot.route.activeProvider !== "official") throw new Error("official Claude route was not restored");
+        return;
+      }
+      if (snapshot.route.activeProvider !== "custom") throw new Error("custom Claude route was not activated");
+      if (snapshot.route.customBaseUrl !== apiConfig.customBaseUrl) throw new Error("Claude Base URL was not written");
+      if (snapshot.route.customModel !== apiConfig.customModel) throw new Error("Claude model was not written");
+      if (!snapshot.hasApiKey) throw new Error("Claude credential was not readable after writing");
+    },
+  });
 
   return {
     profile,
     claudeHome,
     settingsPath,
     backupPaths,
+    credentialSource,
+    verified: true,
   };
 }
 
 function claudeApiConfigWithPresetDefaults(config: Partial<ClaudeApiConfig>): ClaudeApiConfig {
   const normalized = normalizeClaudeApiConfig(config);
-  const preset = claudeApiProviderPreset(normalized.customProviderId);
-  const model = config.customModel?.trim() || preset.model;
+  const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === normalized.customProviderId);
+  const model = config.customModel?.trim() || preset?.model || "";
   return normalizeClaudeApiConfig({
     ...normalized,
-    customProviderId: preset.id,
-    customProviderName: config.customProviderName?.trim() || preset.providerName,
-    customBaseUrl: config.customBaseUrl?.trim() || preset.baseUrl,
+    customProviderId: normalized.customProviderId,
+    customProviderName: config.customProviderName?.trim() || preset?.providerName || normalized.customProviderId,
+    customBaseUrl: config.customBaseUrl?.trim() || preset?.baseUrl || "",
     customModel: model,
-    customHaikuModel: config.customHaikuModel?.trim() || preset.haikuModel || model,
-    customSonnetModel: config.customSonnetModel?.trim() || preset.sonnetModel || model,
-    customOpusModel: config.customOpusModel?.trim() || preset.opusModel || model,
-    customApiFormat: config.customApiFormat ?? preset.apiFormat,
-    customApiKeyField: config.customApiKeyField ?? preset.apiKeyField,
+    customHaikuModel: config.customHaikuModel?.trim() || preset?.haikuModel || model,
+    customSonnetModel: config.customSonnetModel?.trim() || preset?.sonnetModel || model,
+    customOpusModel: config.customOpusModel?.trim() || preset?.opusModel || model,
+    customApiFormat: config.customApiFormat ?? preset?.apiFormat ?? "anthropic",
+    customApiKeyField: config.customApiKeyField ?? preset?.apiKeyField ?? "ANTHROPIC_AUTH_TOKEN",
   });
 }
 
@@ -125,10 +212,32 @@ function applyCustomClaudeEnv(settings: Record<string, unknown>, apiConfig: Clau
   env.ANTHROPIC_DEFAULT_SONNET_MODEL = apiConfig.customSonnetModel || apiConfig.customModel;
   env.ANTHROPIC_DEFAULT_OPUS_MODEL = apiConfig.customOpusModel || apiConfig.customModel;
 
-  const preset = claudeApiProviderPreset(apiConfig.customProviderId);
-  for (const [key, value] of Object.entries(preset.extraEnv ?? {})) {
+  const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === apiConfig.customProviderId);
+  for (const [key, value] of Object.entries(preset?.extraEnv ?? {})) {
     env[key] = value;
   }
+}
+
+async function resolveClaudeCredential(options: {
+  claudeHome: string;
+  apiKeyField?: ClaudeApiConfig["customApiKeyField"];
+  explicitKey?: string;
+  explicitSource?: string;
+}): Promise<{ apiKey: string; source: string | null }> {
+  const explicitKey = options.explicitKey?.trim() ?? "";
+  if (explicitKey) return { apiKey: explicitKey, source: options.explicitSource || "API key field" };
+  const settings = parseJsonObject(await readOptionalFile(path.join(options.claudeHome, "settings.json")));
+  const env = settings && isPlainObject(settings.env) ? settings.env : {};
+  const keys = [...new Set([options.apiKeyField, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"].filter(Boolean))] as string[];
+  for (const key of keys) {
+    const value = readString(env[key]);
+    if (value) return { apiKey: value, source: `settings.json env.${key}` };
+  }
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return { apiKey: value, source: `environment ${key}` };
+  }
+  return { apiKey: "", source: null };
 }
 
 function clearClaudeRouteEnv(settings: Record<string, unknown>): void {

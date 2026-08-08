@@ -13,7 +13,7 @@ import type {
   WorkflowGrillMessage,
   WorkflowRunProgressItem,
 } from "../../../shared/types";
-import { DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS, defaultChannelForAgent } from "../../../shared/models";
+import { DEFAULT_MODEL_ID, FALLBACK_MODEL_OPTIONS, defaultChannelForAgent, defaultModelOption } from "../../../shared/models";
 import { runtimeDefinition, runtimeLabel } from "../../../shared/runtime-catalog";
 import type { AgentProviderPreset } from "../../../shared/provider-presets";
 import { truncateWorkflowContext } from "../pages/workflow/workflow-utils";
@@ -91,7 +91,7 @@ export function createChannel(agentId: AgentId, existingIds: string[]): AgentCha
     label: useDefaultIdentity ? definition.defaultChannel.label : `New ${runtimeLabel(agentId)} Config`,
     models: FALLBACK_MODEL_OPTIONS[agentId].some((model) => model.id === DEFAULT_MODEL_ID)
       ? FALLBACK_MODEL_OPTIONS[agentId]
-      : [{ id: DEFAULT_MODEL_ID, label: "Default" }, ...FALLBACK_MODEL_OPTIONS[agentId]],
+      : [defaultModelOption(), ...FALLBACK_MODEL_OPTIONS[agentId]],
   };
 }
 

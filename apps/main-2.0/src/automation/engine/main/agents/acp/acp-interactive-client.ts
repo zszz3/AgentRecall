@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import { runtimeModelId } from "../../../shared/models";
 import type {
   AgentEvent,
 } from "../../../shared/types";
@@ -229,11 +230,12 @@ export class AcpInteractiveClient {
         this.currentSessionId = response.sessionId;
       }
 
-      if (this.options.modelId && this.options.modelId !== "default") {
+      const selectedModelId = runtimeModelId(this.options.modelId ?? "");
+      if (selectedModelId) {
         await withTimeout(
           connection.agent.request("session/set_model", {
             sessionId: this.currentSessionId,
-            modelId: this.options.modelId,
+            modelId: selectedModelId,
           }),
           ACP_CONFIG_TIMEOUT_MS,
           "ACP model selection",

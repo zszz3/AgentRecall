@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type MouseEvent, type ReactElement } from "react";
 import { Bot, CheckCircle2, CircleStop, FileInput, FolderOpen, GitBranch, History, Maximize2, Pencil, Play, RefreshCw, Send, ShieldAlert, Wand2, X } from "lucide-react";
-import { DEFAULT_MODEL_ID } from "../../../../shared/models";
+import { DEFAULT_MODEL_ID, modelDisplayLabel } from "../../../../shared/models";
 import { WORKFLOW_TOTAL_QUESTION_COUNT } from "../../../../shared/workflow-agent";
 import { validateWorkflowV2Definition } from "../../../../shared/workflow-v2/validation";
 import type { WorkflowV2Node } from "../../../../shared/workflow-v2/definition";
@@ -182,7 +182,7 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
   const workflowConfigTitle = [
     workflowConfiguredAgent?.name,
     workflowChannel?.label,
-    workflowModel?.label ?? workflowConfiguredAgent?.modelId ?? DEFAULT_MODEL_ID,
+    workflowModel?.label ?? modelDisplayLabel(workflowConfiguredAgent?.modelId),
     runtimeStatus(workflowRuntime),
   ]
     .filter(Boolean)
@@ -336,7 +336,8 @@ export function WorkflowPage({ controller: source }: { controller: WorkflowContr
     const nodeAgentId = node.execModel === "llm" ? node.configuredAgentId ?? "" : "";
     const nodeAgentConfig = configuredAgentById(nodeAgentId, configuredAgents);
     const nodeAgentName = nodeAgentConfig?.name || nodeAgentId || "Unconfigured";
-    const nodeModelId = node.execModel === "llm" ? node.modelId ?? nodeAgentConfig?.modelId ?? "-" : "script";
+    // Nodes store a raw id; the card is a user surface, so show the readable name instead.
+    const nodeModelId = node.execModel === "llm" ? modelDisplayLabel(node.modelId ?? nodeAgentConfig?.modelId) : "script";
     const canConfigureNodeAgent = node.execModel === "llm" && !runOwnsInput && !running;
     const nodeAgentRow =
       node.execModel === "llm" ? (

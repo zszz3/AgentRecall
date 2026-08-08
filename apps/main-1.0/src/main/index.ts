@@ -22,7 +22,6 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import {
   reconstructCodexResponsesRequest,
   resolveCodexResponsesRequest,
@@ -739,6 +738,21 @@ async function chooseLocalProjectDirectory(): Promise<string | null> {
   return result.filePaths[0] ?? null;
 }
 
+async function chooseProviderConfigDirectory(
+  target: "codex" | "claude" | "summary",
+  defaultPath?: string,
+): Promise<string | null> {
+  const label = target === "claude" ? "Claude Code" : target === "summary" ? "summary Provider" : "Codex";
+  const options: Electron.OpenDialogOptions = {
+    title: `Choose ${label} config directory`,
+    properties: ["openDirectory", "createDirectory"],
+    ...(defaultPath?.trim() ? { defaultPath: defaultPath.trim() } : {}),
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+}
+
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 820;
 const MIN_WINDOW_WIDTH = 860;
@@ -1263,17 +1277,13 @@ async function resolveSummaryEndpointFromSettings(): Promise<SummaryEndpoint | n
     }
   };
   if (settings.summarySource === "custom") {
-    const endpoint = resolveSummaryEndpointFromSettingsShared(settings, {});
+    const summaryApiConfig = await providerService.resolveSummaryApiConfig(settings);
+    const endpoint = resolveSummaryEndpointFromSettingsShared({
+      ...settings,
+      summaryApiConfigMode: "custom",
+      summaryApiConfig,
+    }, {});
     if (endpoint) return endpoint;
-    const codexDefaults = await loadActiveCodexSummaryEndpointDefaults();
-    if (codexDefaults) {
-      return {
-        baseUrl: codexDefaults.baseUrl,
-        model: codexDefaults.model,
-        apiKey: codexDefaults.apiKey,
-        apiFormat: codexDefaults.apiFormat,
-      };
-    }
     return buildCodexExecEndpointShared(settings, { onTemporarySession });
   }
   return resolveSummaryEndpointFromSettingsShared(settings, { onTemporarySession });
@@ -1471,15 +1481,8 @@ function remoteMigrationResumeDisplayCommand(
 
 function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
   return {
-    resolveSummaryEndpoint: (snapshot: AppSettings) => resolveSummaryEndpointFromSettingsShared(snapshot, {
-      onTemporarySession: (temporarySessionKey) => {
-        try {
-          store.deleteSession(temporarySessionKey);
-        } catch {
-          // Best-effort cleanup if an ephemeral summary call is indexed before it exits.
-        }
-      },
-    }) ?? buildCodexExecEndpoint(snapshot),
+    resolveSummaryEndpoint: async () => (await resolveSummaryEndpointFromSettings())
+      ?? buildCodexExecEndpoint(await providerService.hydrateSettings()),
     createCompressor: (endpoint: SummaryEndpoint, concurrency: number) =>
       createMigrationCompressor(endpoint, undefined, concurrency),
     migrate: migrateSession,
@@ -2124,7 +2127,7 @@ function registerIpc(): void {
   registerAppUpdateIpc(ipcMain, appUpdateService);
   registerQuotaIpc(ipcMain, quotaService);
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
-  registerProvidersIpc(ipcMain, providerService);
+  registerProvidersIpc(ipcMain, providerService, chooseProviderConfigDirectory);
   ipcMain.handle("settings:set", async (_event, settings: AppSettingsUpdate) => {
     const previous = getSettings();
     const next = mergeAppSettings(previous, settings);

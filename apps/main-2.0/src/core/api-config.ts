@@ -1,8 +1,8 @@
 export type ApiFormat = "openai_chat" | "openai_responses";
 export type ClaudeApiFormat = "anthropic" | "openai_chat" | "openai_responses" | "gemini_native";
 export type ApiProviderChoice = "official" | "custom";
-export type ApiProviderPresetId = "custom" | "codexzh" | "deepseek" | "zhipu_glm" | "longcat" | "kimi" | "xiaomi_mimo";
-export type ClaudeApiProviderPresetId = "custom" | "deepseek" | "zhipu_glm" | "longcat" | "kimi" | "xiaomi_mimo";
+export type ApiProviderPresetId = string;
+export type ClaudeApiProviderPresetId = string;
 export type ClaudeApiKeyField = "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 
 export interface ApiProviderPreset {
@@ -17,6 +17,7 @@ export interface ApiProviderPreset {
 export interface ApiConfig {
   activeProvider: ApiProviderChoice;
   customProviderId: ApiProviderPresetId;
+  customConfigDir: string;
   customProviderName: string;
   customBaseUrl: string;
   customApiKey: string;
@@ -41,6 +42,7 @@ export interface ClaudeApiProviderPreset {
 export interface ClaudeApiConfig {
   activeProvider: ApiProviderChoice;
   customProviderId: ClaudeApiProviderPresetId;
+  customConfigDir: string;
   customProviderName: string;
   customBaseUrl: string;
   customApiKey: string;
@@ -195,6 +197,7 @@ export const CLAUDE_API_PROVIDER_PRESETS: ClaudeApiProviderPreset[] = [
 export const defaultApiConfig: ApiConfig = {
   activeProvider: "official",
   customProviderId: "codexzh",
+  customConfigDir: "",
   customProviderName: "CodexZH",
   customBaseUrl: "",
   customApiKey: "",
@@ -205,6 +208,7 @@ export const defaultApiConfig: ApiConfig = {
 export const defaultClaudeApiConfig: ClaudeApiConfig = {
   activeProvider: "official",
   customProviderId: "custom",
+  customConfigDir: "",
   customProviderName: "Custom Claude",
   customBaseUrl: "",
   customApiKey: "",
@@ -216,11 +220,25 @@ export const defaultClaudeApiConfig: ClaudeApiConfig = {
   customApiKeyField: "ANTHROPIC_AUTH_TOKEN",
 };
 
+export const PROVIDER_ID_MAX_LENGTH = 128;
+
+/**
+ * Codex happily writes quoted section names such as `[model_providers."My Proxy"]`, so a
+ * provider id is not always a slug. Reject only the characters that would break the TOML
+ * section name we generate or the quoted string we write it into.
+ */
+export function isProviderId(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > PROVIDER_ID_MAX_LENGTH) return false;
+  return !/[\p{Cc}"\\[\]]/u.test(trimmed);
+}
+
 export function normalizeApiConfig(config: ApiConfigInput | null | undefined): ApiConfig {
   const source = config ?? {};
   return {
     activeProvider: source.activeProvider === "custom" ? "custom" : "official",
     customProviderId: normalizeProviderPresetId(source.customProviderId),
+    customConfigDir: (source.customConfigDir ?? "").trim(),
     customProviderName: normalizeNonEmptyString(source.customProviderName, defaultApiConfig.customProviderName),
     customBaseUrl: (source.customBaseUrl ?? "").trim(),
     customApiKey: (source.customApiKey ?? "").trim(),
@@ -235,6 +253,7 @@ export function normalizeClaudeApiConfig(config: ClaudeApiConfigInput | null | u
   return {
     activeProvider: source.activeProvider === "custom" ? "custom" : "official",
     customProviderId: normalizeClaudeProviderPresetId(source.customProviderId),
+    customConfigDir: (source.customConfigDir ?? "").trim(),
     customProviderName: normalizeNonEmptyString(source.customProviderName, defaultClaudeApiConfig.customProviderName),
     customBaseUrl: (source.customBaseUrl ?? "").trim(),
     customApiKey: (source.customApiKey ?? "").trim(),
@@ -257,6 +276,9 @@ export function mergeApiConfigWithProfileDefaults(
   return normalizeApiConfig({
     activeProvider: savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
     customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
+    // The config directory is what selects which profile we read, so it is never part of
+    // the defaults that reading produces — it only ever comes from the user's own setting.
+    customConfigDir: current.customConfigDir,
     customProviderName: fieldWasSaved(savedSource.customProviderName) ? current.customProviderName : defaults.customProviderName ?? current.customProviderName,
     customBaseUrl: fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
     customApiKey: current.customApiKey,
@@ -275,6 +297,9 @@ export function mergeClaudeApiConfigWithProfileDefaults(
   return normalizeClaudeApiConfig({
     activeProvider: savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
     customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
+    // The config directory is what selects which profile we read, so it is never part of
+    // the defaults that reading produces — it only ever comes from the user's own setting.
+    customConfigDir: current.customConfigDir,
     customProviderName: fieldWasSaved(savedSource.customProviderName)
       ? current.customProviderName
       : defaults.customProviderName ?? current.customProviderName,
@@ -296,11 +321,11 @@ export function mergeClaudeApiConfigWithProfileDefaults(
 }
 
 export function apiProviderPreset(id: ApiProviderPresetId): ApiProviderPreset {
-  return API_PROVIDER_PRESETS.find((preset) => preset.id === id) ?? API_PROVIDER_PRESETS[0];
+  return API_PROVIDER_PRESETS.find((preset) => preset.id === id) ?? API_PROVIDER_PRESETS.find((preset) => preset.id === "custom")!;
 }
 
 export function claudeApiProviderPreset(id: ClaudeApiProviderPresetId): ClaudeApiProviderPreset {
-  return CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === id) ?? CLAUDE_API_PROVIDER_PRESETS[0];
+  return CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === id) ?? CLAUDE_API_PROVIDER_PRESETS.find((preset) => preset.id === "custom")!;
 }
 
 export function findClaudeApiProviderPresetByBaseUrl(baseUrl: string): ClaudeApiProviderPreset | null {
@@ -314,11 +339,16 @@ function fieldWasSaved(value: string | undefined): boolean {
 }
 
 function normalizeProviderPresetId(value: string | undefined): ApiProviderPresetId {
-  return API_PROVIDER_PRESETS.some((preset) => preset.id === value) ? (value as ApiProviderPresetId) : "custom";
+  return normalizeProviderId(value);
 }
 
 function normalizeClaudeProviderPresetId(value: string | undefined): ClaudeApiProviderPresetId {
-  return CLAUDE_API_PROVIDER_PRESETS.some((preset) => preset.id === value) ? (value as ClaudeApiProviderPresetId) : "custom";
+  return normalizeProviderId(value);
+}
+
+function normalizeProviderId(value: string | undefined): string {
+  const normalized = (value ?? "").trim();
+  return isProviderId(normalized) ? normalized : "custom";
 }
 
 function normalizeClaudeApiFormat(value: string | undefined): ClaudeApiFormat {

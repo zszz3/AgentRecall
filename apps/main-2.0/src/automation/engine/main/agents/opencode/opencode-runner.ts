@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import type { AgentEvent } from "../../../shared/types";
+import { runtimeModelId } from "../../../shared/models";
 import { spawnCli } from "../../platform/cli-launcher";
 
 const MAX_STDERR_CHARS = 8_000;
@@ -74,7 +75,8 @@ export class OpenCodeRunner {
 
   async start(): Promise<void> {
     const args = ["run", "--format", "json"];
-    if (this.options.modelId && this.options.modelId !== "default") args.push("--model", this.options.modelId);
+    const modelArg = runtimeModelId(this.options.modelId ?? "");
+    if (modelArg) args.push("--model", modelArg);
     args.push(this.options.prompt);
 
     const proc = spawnCli({

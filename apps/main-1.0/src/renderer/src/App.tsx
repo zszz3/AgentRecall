@@ -2180,14 +2180,20 @@ export function App(): ReactElement {
   async function applyApiConfigToCodex(apiConfig: ApiConfig): Promise<void> {
     setSettingsFeedback({ kind: "running", message: t("Applying Codex profile...", "正在应用 Codex 配置...") });
     try {
+      const result = await window.sessionSearch.applyCodexProfile(apiConfig);
       const nextSettings = await window.sessionSearch.setSettings({ apiConfig });
       setAppSettings(nextSettings);
-      const result = await window.sessionSearch.applyCodexProfile(apiConfig);
       const profileLabel = result.profile === "codex" ? "Codex Official" : apiConfig.customProviderName.trim() || "CodexZH";
       const usesLocalProxy = apiConfig.activeProvider === "custom" && apiConfig.customApiFormat === "openai_chat";
       const successMessage = usesLocalProxy
-        ? t(`Applied ${profileLabel} to ~/.codex via local proxy.`, `已通过本地 proxy 将 ${profileLabel} 应用到 ~/.codex。`)
-        : t(`Applied ${profileLabel} to ~/.codex.`, `已将 ${profileLabel} 应用到 ~/.codex。`);
+        ? t(
+            `Applied and verified ${profileLabel} at ${result.configTarget} via local proxy.`,
+            `已通过本地 proxy 将 ${profileLabel} 写入并验证：${result.configTarget}`,
+          )
+        : t(
+            `Applied and verified ${profileLabel} at ${result.configTarget}.`,
+            `已将 ${profileLabel} 写入并验证：${result.configTarget}`,
+          );
       setSettingsFeedback({ kind: "success", message: successMessage });
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));
@@ -2200,12 +2206,15 @@ export function App(): ReactElement {
   async function applyApiConfigToClaude(claudeApiConfig: ClaudeApiConfig): Promise<void> {
     setSettingsFeedback({ kind: "running", message: t("Applying Claude Code profile...", "正在应用 Claude Code 配置...") });
     try {
+      const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
       const nextSettings = await window.sessionSearch.setSettings({ claudeApiConfig });
       setAppSettings(nextSettings);
-      const result = await window.sessionSearch.applyClaudeProfile(claudeApiConfig);
       const profileLabel =
         result.profile === "claude-official" ? "Claude Official" : claudeApiConfig.customProviderName.trim() || "Claude Code";
-      const successMessage = t(`Applied ${profileLabel} to ~/.claude.`, `已将 ${profileLabel} 应用到 ~/.claude。`);
+      const successMessage = t(
+        `Applied and verified ${profileLabel} at ${result.settingsPath}.`,
+        `已将 ${profileLabel} 写入并验证：${result.settingsPath}`,
+      );
       setSettingsFeedback({ kind: "success", message: successMessage });
       window.setTimeout(() => {
         setSettingsFeedback((current) => (current?.kind === "success" && current.message === successMessage ? null : current));

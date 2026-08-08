@@ -53,11 +53,14 @@ export function buildClaudeExecEndpoint(settings: Pick<AppSettings, "claudeBinar
 // Returns null only when "custom" is selected but incomplete (no usable provider).
 export function resolveSummaryEndpointFromSettings(
   settings: Pick<AppSettings, "summarySource" | "summaryApiConfig" | "claudeBinary" | "codexBinary">
-    & Partial<Pick<AppSettings, "summaryCodexModel" | "openVikingExtractionReasoningEffort">>,
+    & Partial<Pick<AppSettings, "summaryApiConfigMode" | "apiConfig" | "summaryCodexModel" | "openVikingExtractionReasoningEffort">>,
   options: BuildExecEndpointOptions = {},
 ): SummaryEndpoint | null {
   if (settings.summarySource === "custom") {
-    return resolveSummaryEndpoint([settings.summaryApiConfig]);
+    const config = settings.summaryApiConfigMode === "inherit_codex" && settings.apiConfig
+      ? settings.apiConfig
+      : settings.summaryApiConfig;
+    return resolveSummaryEndpoint([config]);
   }
   if (settings.summarySource === "claude") {
     return buildClaudeExecEndpoint(settings, options);
