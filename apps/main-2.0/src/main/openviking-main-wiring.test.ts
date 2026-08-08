@@ -16,6 +16,9 @@ describe("OpenViking main-process wiring", () => {
     expect(mainSource).toContain("openVikingHookManifestService?.clear()");
     expect(mainSource).toContain("reconcileOpenVikingMemoryHooks");
     expect(mainSource).toContain("refreshOpenVikingHookManifest");
+    expect(mainSource).toContain(
+      'process.env.AGENT_RECALL_NODE_PATH || process.env.npm_node_execpath || "node"',
+    );
     expect(mainSource).toContain("snapshot.workspaces.some((workspace) => workspace.managed)");
     expect(mainSource).not.toContain("syncManagedWorkspaces");
     expect(mainSource).toContain("build-openviking-runtime.mjs");
@@ -36,6 +39,12 @@ describe("OpenViking main-process wiring", () => {
     );
     expect(mainSource.indexOf("store = new SessionStore")).toBeLessThan(
       mainSource.indexOf("initializeOpenVikingMemory();"),
+    );
+    expect(mainSource.indexOf("initializeOpenVikingMemory();")).toBeLessThan(
+      mainSource.indexOf("reconcileOpenVikingMemoryHooks(getSettings());"),
+    );
+    expect(mainSource.indexOf("reconcileOpenVikingMemoryHooks(getSettings());")).toBeLessThan(
+      mainSource.indexOf("const initialIndexSettled"),
     );
     expect(mainSource).not.toContain("registerAgentMemoryIpc");
     expect(mainSource).not.toContain("new AgentMemoryService");
