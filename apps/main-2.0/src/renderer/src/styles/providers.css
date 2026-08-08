@@ -184,6 +184,21 @@
   gap: 6px;
 }
 
+.provider-path-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  gap: 6px;
+}
+
+.provider-path-input button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+}
+
 .codex-model-combo {
   position: relative;
   min-width: 0;

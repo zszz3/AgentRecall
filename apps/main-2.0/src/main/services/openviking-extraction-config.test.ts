@@ -82,6 +82,7 @@ describe("resolveOpenVikingExtractionConfig", () => {
       settings: {
         ...defaultSettings,
         summarySource: "custom",
+        summaryApiConfigMode: "custom",
         summaryApiConfig: {
           ...defaultSettings.summaryApiConfig,
           customApiFormat: "openai_chat",
@@ -111,6 +112,7 @@ describe("resolveOpenVikingExtractionConfig", () => {
       settings: {
         ...defaultSettings,
         summarySource: "custom",
+        summaryApiConfigMode: "custom",
         summaryApiConfig: {
           ...defaultSettings.summaryApiConfig,
           customApiFormat: "openai_chat",
@@ -136,6 +138,7 @@ describe("resolveOpenVikingExtractionConfig", () => {
       settings: {
         ...defaultSettings,
         summarySource: "custom",
+        summaryApiConfigMode: "custom",
         summaryApiConfig: {
           ...defaultSettings.summaryApiConfig,
           customApiFormat: "openai_responses",

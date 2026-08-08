@@ -2,12 +2,13 @@ import { z } from "zod";
 import { defineIpcRequest } from "./contract";
 
 const boundedString = (max: number) => z.string().max(max);
-const providerId = z.enum(["custom", "codexzh", "deepseek", "zhipu_glm", "longcat", "kimi", "xiaomi_mimo"]);
-const claudeProviderId = z.enum(["custom", "deepseek", "zhipu_glm", "longcat", "kimi", "xiaomi_mimo"]);
+const providerId = boundedString(128).trim().min(1).regex(/^[A-Za-z0-9_.:-]+$/);
+const configSnapshotInput = z.object({ configDir: boundedString(8_192).optional() }).strict();
 
 export const apiConfigInput = z.object({
   activeProvider: z.enum(["official", "custom"]),
   customProviderId: providerId,
+  customConfigDir: boundedString(8_192),
   customProviderName: boundedString(256),
   customBaseUrl: boundedString(8_192),
   customApiKey: boundedString(65_536),
@@ -17,7 +18,8 @@ export const apiConfigInput = z.object({
 
 export const claudeApiConfigInput = z.object({
   activeProvider: z.enum(["official", "custom"]),
-  customProviderId: claudeProviderId,
+  customProviderId: providerId,
+  customConfigDir: boundedString(8_192),
   customProviderName: boundedString(256),
   customBaseUrl: boundedString(8_192),
   customApiKey: boundedString(65_536),
@@ -32,30 +34,52 @@ export const claudeApiConfigInput = z.object({
 export const codexModelProbeInput = z.object({
   baseUrl: boundedString(8_192),
   apiKey: boundedString(65_536),
-  providerId: boundedString(128).trim().min(1).optional(),
+  providerId: providerId.optional(),
+  codexHome: boundedString(8_192).optional(),
   keyTarget: z.enum(["codex", "summary"]).optional(),
 }).strict();
+
+export const claudeModelProbeInput = z.object({
+  baseUrl: boundedString(8_192),
+  apiKey: boundedString(65_536),
+  providerId: providerId.optional(),
+  claudeHome: boundedString(8_192).optional(),
+  apiFormat: z.enum(["anthropic", "openai_chat", "openai_responses", "gemini_native"]),
+  apiKeyField: z.enum(["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]),
+}).strict();
+
+export const providerKeyTarget = z.enum(["codex", "claude", "summary"]);
 
 export const summaryProviderConnectionInput = z.object({
   baseUrl: boundedString(8_192).trim().min(1),
   apiKey: boundedString(65_536),
-  providerId: boundedString(128).trim().min(1),
+  providerId,
   model: boundedString(512).trim().min(1),
   apiFormat: z.enum(["openai_chat", "openai_responses"]),
+  codexHome: boundedString(8_192).optional(),
+  inheritCodex: z.boolean().optional(),
 }).strict();
 
-export const providerKeyTarget = z.enum(["codex", "claude", "summary"]);
 export type ProviderKeyTarget = z.infer<typeof providerKeyTarget>;
+export type ConfigSnapshotRequest = z.infer<typeof configSnapshotInput>;
 export type CodexModelProbeRequest = z.infer<typeof codexModelProbeInput>;
+export type ClaudeModelProbeRequest = z.infer<typeof claudeModelProbeInput>;
 export type SummaryProviderConnectionRequest = z.infer<typeof summaryProviderConnectionInput>;
 
 export interface SummaryProviderConnectionResult {
   elapsedMs: number;
+  credentialSource: string;
 }
 
 export const PROVIDERS_IPC = {
-  getCodexConfig: defineIpcRequest("codex-config:get", z.tuple([])),
+  getCodexConfig: defineIpcRequest("codex-config:get", z.tuple([configSnapshotInput])),
+  getClaudeConfig: defineIpcRequest("claude-config:get", z.tuple([configSnapshotInput])),
   probeCodexModels: defineIpcRequest("codex-config:probe-models", z.tuple([codexModelProbeInput])),
+  probeClaudeModels: defineIpcRequest("claude-config:probe-models", z.tuple([claudeModelProbeInput])),
+  pickConfigDirectory: defineIpcRequest(
+    "provider-config:pick-directory",
+    z.tuple([providerKeyTarget, z.union([boundedString(8_192), z.undefined()])]),
+  ),
   testSummaryProviderConnection: defineIpcRequest(
     "summary-provider:test-connection",
     z.tuple([summaryProviderConnectionInput]),
@@ -66,6 +90,6 @@ export const PROVIDERS_IPC = {
   stopCodexChatProxy: defineIpcRequest("codex-chat-proxy:stop", z.tuple([])),
   getApiProviderKey: defineIpcRequest(
     "api-provider-key:get",
-    z.tuple([providerKeyTarget, boundedString(128).trim().min(1)]),
+    z.tuple([providerKeyTarget, providerId]),
   ),
 } as const;

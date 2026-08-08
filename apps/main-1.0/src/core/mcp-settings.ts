@@ -71,11 +71,12 @@ export function hydrateMcpSummaryApiKey(
   settings: AppSettings,
   getApiProviderKey: (target: "codex" | "claude" | "summary", providerId: string) => string,
 ): AppSettings {
-  if (settings.summaryApiConfig.activeProvider !== "custom") return settings;
-  const customApiKey = getApiProviderKey("summary", settings.summaryApiConfig.customProviderId);
+  const inheritCodex = settings.summaryApiConfigMode === "inherit_codex";
+  const config = inheritCodex ? settings.apiConfig : settings.summaryApiConfig;
+  if (config.activeProvider !== "custom") return settings;
+  const customApiKey = getApiProviderKey(inheritCodex ? "codex" : "summary", config.customProviderId);
   if (!customApiKey) return settings;
-  return {
-    ...settings,
-    summaryApiConfig: { ...settings.summaryApiConfig, customApiKey },
-  };
+  return inheritCodex
+    ? { ...settings, apiConfig: { ...settings.apiConfig, customApiKey } }
+    : { ...settings, summaryApiConfig: { ...settings.summaryApiConfig, customApiKey } };
 }

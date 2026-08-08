@@ -26,7 +26,10 @@ export function resolveOpenVikingExtractionConfig(input: {
     throw new Error("Claude CLI cannot be used for OpenViking memory extraction.");
   }
 
-  if (input.settings.summarySource === "codex") {
+  if (
+    input.settings.summarySource === "codex"
+    || (input.settings.summarySource === "custom" && input.settings.summaryApiConfigMode === "inherit_codex")
+  ) {
     const model = input.settings.summaryCodexModel.trim()
       || input.codexEndpoint?.model.trim()
       || input.codex.activeModel.trim()

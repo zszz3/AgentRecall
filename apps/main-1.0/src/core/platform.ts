@@ -93,6 +93,7 @@ export interface AppSettings {
   summaryMaxAgeDays: number;
   compressionConcurrency: number;
   summarySource: "codex" | "claude" | "custom";
+  summaryApiConfigMode: "inherit_codex" | "custom";
   sessionSearchMcpEnabled: boolean;
   skillSyncEnabled: boolean;
   skillSyncSupabaseUrl: string;
@@ -152,6 +153,7 @@ export const defaultSettings: AppSettings = {
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
   summarySource: "custom",
+  summaryApiConfigMode: "inherit_codex",
   sessionSearchMcpEnabled: true,
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",
@@ -179,6 +181,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     autoCheckUpdates: Boolean(merged.autoCheckUpdates),
     showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
+    summaryApiConfigMode: merged.summaryApiConfigMode === "custom" ? "custom" : "inherit_codex",
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),

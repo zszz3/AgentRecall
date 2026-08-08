@@ -12,6 +12,7 @@ import {
   type ClaudeApiProviderPresetId,
 } from "../../../../core/api-config";
 import type { AppSettings, AppSettingsUpdate } from "../../../../core/platform";
+import type { ClaudeConfigSnapshot } from "../../../../core/claude-profile";
 import type { CodexConfigSnapshot } from "../../../../core/codex-profile";
 import { OPENVIKING_EXTRACTION_REASONING_EFFORTS } from "../../../../core/openviking-settings";
 import type { SettingsFeedback } from "../../app-types";
@@ -57,19 +58,7 @@ function summaryFromCustomClaude(config: ClaudeApiConfig | undefined, base: ApiC
 }
 
 function buildSummaryDraftFromSettings(settings: AppSettings | null): ApiConfig {
-  const base = settings?.summaryApiConfig ?? { ...defaultApiConfig };
-  const codex = summaryFromCustomCodex(settings?.apiConfig, base);
-  if (codex) {
-    return {
-      ...codex,
-      customProviderId: "custom",
-    };
-  }
-
-  const claude = summaryFromCustomClaude(settings?.claudeApiConfig, base);
-  if (claude) return claude;
-
-  return base;
+  return settings?.summaryApiConfig ?? { ...defaultApiConfig };
 }
 
 function buildSummarySourceFromSettings(settings: AppSettings | null): AppSettings["summarySource"] {
@@ -102,6 +91,9 @@ export function ProviderPage({
     () => settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig },
   );
   const [draftSummaryApiConfig, setDraftSummaryApiConfig] = useState<ApiConfig>(() => buildSummaryDraftFromSettings(settings));
+  const [draftSummaryApiConfigMode, setDraftSummaryApiConfigMode] = useState<AppSettings["summaryApiConfigMode"]>(
+    () => settings?.summaryApiConfigMode ?? "inherit_codex",
+  );
   const [draftSummarySource, setDraftSummarySource] = useState<AppSettings["summarySource"]>(() => buildSummarySourceFromSettings(settings));
   const [draftSummaryCodexModel, setDraftSummaryCodexModel] = useState(() => settings?.summaryCodexModel ?? "");
   const [draftSummaryCodexReasoningEffort, setDraftSummaryCodexReasoningEffort] = useState(
@@ -113,6 +105,11 @@ export function ProviderPage({
   const [codexModelOptions, setCodexModelOptions] = useState<string[]>([]);
   const [codexModelMenuOpen, setCodexModelMenuOpen] = useState(false);
   const [codexModelProbeStatus, setCodexModelProbeStatus] = useState<SettingsFeedback>(null);
+  const [claudeConfig, setClaudeConfig] = useState<ClaudeConfigSnapshot | null>(null);
+  const [claudeConfigError, setClaudeConfigError] = useState("");
+  const [claudeModelOptions, setClaudeModelOptions] = useState<string[]>([]);
+  const [claudeModelMenuOpen, setClaudeModelMenuOpen] = useState(false);
+  const [claudeModelProbeStatus, setClaudeModelProbeStatus] = useState<SettingsFeedback>(null);
   const [summaryModelOptions, setSummaryModelOptions] = useState<string[]>([]);
   const [summaryModelMenuOpen, setSummaryModelMenuOpen] = useState(false);
   const [summaryModelProbeStatus, setSummaryModelProbeStatus] = useState<SettingsFeedback>(null);
@@ -157,7 +154,7 @@ export function ProviderPage({
     setDraftApiConfig((current) => ({
       ...current,
       activeProvider: "custom",
-      customProviderId: preset?.id ?? "custom",
+      customProviderId: activeProvider.id,
       customProviderName: preset?.providerName ?? activeProvider.name ?? activeProvider.id,
       customBaseUrl: activeProvider.baseUrl || preset?.baseUrl || current.customBaseUrl,
       customModel: snapshot.activeModel || preset?.model || current.customModel,
@@ -204,7 +201,7 @@ export function ProviderPage({
   const refreshCodexConfig = async () => {
     setCodexConfigError("");
     try {
-      const snapshot = await window.sessionSearch.getCodexConfig();
+      const snapshot = await window.sessionSearch.getCodexConfig({ configDir: draftApiConfig.customConfigDir || undefined });
       setCodexConfig(snapshot);
       const hydrationKey = `${snapshot.configPath}:${snapshot.activeProviderId}:${snapshot.activeModel}:${snapshot.providers.map((provider) => `${provider.id}:${provider.baseUrl}`).join("|")}`;
       if (hydrationKey !== codexConfigHydrationRef.current) {
@@ -213,6 +210,50 @@ export function ProviderPage({
       }
     } catch (error) {
       setCodexConfigError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const refreshClaudeConfig = async () => {
+    setClaudeConfigError("");
+    try {
+      const snapshot = await window.sessionSearch.getClaudeConfig({
+        configDir: draftClaudeApiConfig.customConfigDir || undefined,
+      });
+      setClaudeConfig(snapshot);
+      if (snapshot.route.activeProvider === "custom") {
+        setDraftClaudeApiConfig((current) => ({
+          ...current,
+          ...snapshot.route,
+          customConfigDir: current.customConfigDir,
+          customApiKey: current.customApiKey,
+        }));
+      }
+    } catch (error) {
+      setClaudeConfigError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const pickConfigDirectory = async (target: "codex" | "claude") => {
+    const currentPath = target === "codex" ? draftApiConfig.customConfigDir : draftClaudeApiConfig.customConfigDir;
+    const selected = await window.sessionSearch.pickConfigDirectory(target, currentPath || undefined);
+    if (!selected) return;
+    if (target === "codex") {
+      updateDraftApiConfig({ customConfigDir: selected });
+      const snapshot = await window.sessionSearch.getCodexConfig({ configDir: selected });
+      setCodexConfig(snapshot);
+      hydrateDraftFromCodexConfig(snapshot);
+    } else {
+      updateDraftClaudeApiConfig({ customConfigDir: selected });
+      const snapshot = await window.sessionSearch.getClaudeConfig({ configDir: selected });
+      setClaudeConfig(snapshot);
+      if (snapshot.route.activeProvider === "custom") {
+        setDraftClaudeApiConfig((current) => ({
+          ...current,
+          ...snapshot.route,
+          customConfigDir: selected,
+          customApiKey: current.customApiKey,
+        }));
+      }
     }
   };
 
@@ -238,6 +279,8 @@ export function ProviderPage({
         baseUrl: draftApiConfig.customBaseUrl,
         apiKey: draftApiConfig.customApiKey,
         providerId: selectedCodexConfigProviderId || codexConfig?.activeProviderId,
+        codexHome: draftApiConfig.customConfigDir || undefined,
+        keyTarget: "codex",
       });
       setCodexModelOptions(result.models);
       setCodexModelMenuOpen(result.models.length > 0);
@@ -247,14 +290,42 @@ export function ProviderPage({
     }
   };
 
+  const detectClaudeModels = async () => {
+    setClaudeModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
+    try {
+      const result = await window.sessionSearch.probeClaudeModels({
+        baseUrl: draftClaudeApiConfig.customBaseUrl,
+        apiKey: draftClaudeApiConfig.customApiKey,
+        providerId: draftClaudeApiConfig.customProviderId,
+        claudeHome: draftClaudeApiConfig.customConfigDir || undefined,
+        apiFormat: draftClaudeApiConfig.customApiFormat,
+        apiKeyField: draftClaudeApiConfig.customApiKeyField,
+      });
+      setClaudeModelOptions(result.models);
+      setClaudeModelMenuOpen(result.models.length > 0);
+      setClaudeModelProbeStatus({
+        kind: "success",
+        message: l(
+          `Found ${result.models.length} models using ${result.credentialSource}.`,
+          `使用 ${result.credentialSource} 找到 ${result.models.length} 个模型。`,
+        ),
+      });
+    } catch (error) {
+      setClaudeModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   const detectSummaryModels = async () => {
     setSummaryModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
     try {
+      const inherited = draftSummaryApiConfigMode === "inherit_codex";
+      const config = inherited ? draftApiConfig : draftSummaryApiConfig;
       const result = await window.sessionSearch.probeCodexModels({
-        baseUrl: draftSummaryApiConfig.customBaseUrl,
-        apiKey: draftSummaryApiConfig.customApiKey,
-        providerId: draftSummaryApiConfig.customProviderId,
-        keyTarget: "summary",
+        baseUrl: config.customBaseUrl,
+        apiKey: config.customApiKey,
+        providerId: config.customProviderId,
+        codexHome: inherited ? config.customConfigDir || undefined : undefined,
+        keyTarget: inherited ? "codex" : "summary",
       });
       setSummaryModelOptions(result.models);
       setSummaryModelMenuOpen(result.models.length > 0);
@@ -273,18 +344,22 @@ export function ProviderPage({
   const testSummaryConnection = async () => {
     setSummaryConnectionStatus({ kind: "running", message: l("Testing connection...", "正在测试连接...") });
     try {
+      const inherited = draftSummaryApiConfigMode === "inherit_codex";
+      const config = inherited ? draftApiConfig : draftSummaryApiConfig;
       const result = await window.sessionSearch.testSummaryProviderConnection({
-        baseUrl: draftSummaryApiConfig.customBaseUrl,
-        apiKey: draftSummaryApiConfig.customApiKey,
-        providerId: draftSummaryApiConfig.customProviderId,
-        model: draftSummaryApiConfig.customModel,
-        apiFormat: draftSummaryApiConfig.customApiFormat,
+        baseUrl: config.customBaseUrl,
+        apiKey: config.customApiKey,
+        providerId: config.customProviderId,
+        model: config.customModel,
+        apiFormat: config.customApiFormat,
+        codexHome: inherited ? config.customConfigDir || undefined : undefined,
+        inheritCodex: inherited,
       });
       setSummaryConnectionStatus({
         kind: "success",
         message: l(
-          `Connection succeeded in ${result.elapsedMs} ms.`,
-          `连接成功，耗时 ${result.elapsedMs} 毫秒。`,
+          `Connection succeeded in ${result.elapsedMs} ms using ${result.credentialSource}.`,
+          `连接成功，使用 ${result.credentialSource}，耗时 ${result.elapsedMs} 毫秒。`,
         ),
       });
     } catch (error) {
@@ -363,6 +438,7 @@ export function ProviderPage({
     setDraftApiConfig(settings?.apiConfig ?? { ...defaultApiConfig });
     setDraftClaudeApiConfig(settings?.claudeApiConfig ?? { ...defaultClaudeApiConfig });
     setDraftSummaryApiConfig(buildSummaryDraftFromSettings(settings));
+    setDraftSummaryApiConfigMode(settings?.summaryApiConfigMode ?? "inherit_codex");
     setDraftSummarySource(buildSummarySourceFromSettings(settings));
     setDraftSummaryCodexModel(settings?.summaryCodexModel ?? "");
     setDraftSummaryCodexReasoningEffort(settings?.openVikingExtractionReasoningEffort ?? "medium");
@@ -370,6 +446,7 @@ export function ProviderPage({
     settings?.apiConfig,
     settings?.claudeApiConfig,
     settings?.summaryApiConfig,
+    settings?.summaryApiConfigMode,
     settings?.summaryCodexModel,
     settings?.summarySource,
     settings?.openVikingExtractionReasoningEffort,
@@ -377,23 +454,13 @@ export function ProviderPage({
 
   useEffect(() => {
     if (apiTarget === "codex" || apiTarget === "summary") void refreshCodexConfig();
+    if (apiTarget === "claude") void refreshClaudeConfig();
   }, [apiTarget]);
 
   const runCodexAction = (action: "save" | "apply") => {
     const next = draftApiConfig;
     if (action === "save") {
-      const summary = summaryFromCustomCodex(next, draftSummaryApiConfig);
-      if (summary) {
-        setDraftSummaryApiConfig(summary);
-        setDraftSummarySource("custom");
-        onSettingsChange({
-          apiConfig: next,
-          summarySource: "custom",
-          summaryApiConfig: summary,
-        });
-      } else {
-        onSettingsChange({ apiConfig: next });
-      }
+      onSettingsChange({ apiConfig: next });
     } else {
       onApplyToCodex(next);
       window.setTimeout(() => void refreshCodexConfig(), 600);
@@ -404,21 +471,11 @@ export function ProviderPage({
     if (apiTarget === "codex") {
       runCodexAction("save");
     } else if (apiTarget === "claude") {
-      const summary = summaryFromCustomClaude(draftClaudeApiConfig, draftSummaryApiConfig);
-      if (summary) {
-        setDraftSummaryApiConfig(summary);
-        setDraftSummarySource("custom");
-        onSettingsChange({
-          claudeApiConfig: draftClaudeApiConfig,
-          summarySource: "custom",
-          summaryApiConfig: summary,
-        });
-      } else {
-        onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
-      }
+      onSettingsChange({ claudeApiConfig: draftClaudeApiConfig });
     } else {
       onSettingsChange({
         summarySource: draftSummarySource,
+        summaryApiConfigMode: draftSummaryApiConfigMode,
         summaryCodexModel: draftSummaryCodexModel,
         openVikingExtractionReasoningEffort: draftSummaryCodexReasoningEffort,
         summaryApiConfig: draftSummaryApiConfig,
@@ -480,6 +537,17 @@ export function ProviderPage({
                   <em>{codexConfigError || (codexConfig?.exists ? l(`${codexConfig.providers.length} providers`, `${codexConfig.providers.length} 个供应商`) : l("Not created yet", "尚未创建"))}</em>
                 </div>
               </div>
+              <label className="settings-field">
+                <div className="settings-field-text">
+                  <span className="settings-field-title">{l("Config directory", "配置目录")}</span>
+                  <span className="settings-field-sub">{l("Leave empty to use ~/.codex.", "留空使用 ~/.codex。")}</span>
+                </div>
+                <div className="provider-path-input">
+                  <input type="text" value={draftApiConfig.customConfigDir} disabled={!settings || saving} placeholder="~/.codex" onChange={(event) => updateDraftApiConfig({ customConfigDir: event.currentTarget.value })} />
+                  <button type="button" disabled={!settings || saving} onClick={() => void pickConfigDirectory("codex")}>{l("Browse", "选择")}</button>
+                  <button type="button" disabled={!settings || saving || !draftApiConfig.customConfigDir} onClick={() => updateDraftApiConfig({ customConfigDir: "" })}>{l("Default", "默认")}</button>
+                </div>
+              </label>
               <div
                 className="api-provider-switch codex-provider-switch"
                 role="group"
@@ -537,7 +605,7 @@ export function ProviderPage({
                           `应用时会把 ${customName} 路由合并到 ~/.codex/config.toml，并保留现有 auth.json。`,
                         )}
                   </div>
-                  {draftApiConfig.customProviderId === "custom" && codexConfig?.providers.some((provider) => provider.id !== "openai") ? (
+                  {codexConfig?.providers.some((provider) => provider.id !== "openai") ? (
                     <label className="settings-field">
                       <div className="settings-field-text">
                         <span className="settings-field-title">{l("Config provider", "配置供应商")}</span>
@@ -591,10 +659,11 @@ export function ProviderPage({
                     <div className="settings-field-text">
                       <span className="settings-field-title">API Key</span>
                       <span className="settings-field-sub">
-                        {l(
-                          "Stored locally. Applying it to Codex CLI will be a separate explicit action.",
-                          "保存在本地；写入 Codex CLI 会作为单独的显式动作。",
-                        )}
+                        {draftApiConfig.customApiKey
+                          ? l("Using the key entered here.", "使用此处输入的密钥。")
+                          : codexConfig?.activeProvider?.hasApiKey
+                            ? l(`Detected from ${codexConfig.activeProvider.credentialSource ?? "Codex config"}.`, `已从 ${codexConfig.activeProvider.credentialSource ?? "Codex 配置"} 识别。`)
+                            : l("No key detected. AgentRecall also checks Codex config, auth.json, and environment variables.", "未识别到密钥；AgentRecall 还会检查 Codex 配置、auth.json 和环境变量。")}
                       </span>
                     </div>
                     <div className="secret-input">
@@ -752,6 +821,29 @@ export function ProviderPage({
                   </button>
                 ))}
               </div>
+              <div className="codex-config-visualizer">
+                <div>
+                  <span>{l("Config file", "配置文件")}</span>
+                  <strong>{claudeConfig?.settingsPath ?? "~/.claude/settings.json"}</strong>
+                  <em>{claudeConfigError || (claudeConfig?.exists ? l("Loaded", "已读取") : l("Not created yet", "尚未创建"))}</em>
+                </div>
+                <div>
+                  <span>{l("Credential", "凭证")}</span>
+                  <strong>{claudeConfig?.hasApiKey ? l("Detected", "已识别") : l("Not detected", "未识别")}</strong>
+                  <em>{claudeConfig?.credentialSource ?? l("Enter a key or choose another directory", "输入密钥或选择其他目录")}</em>
+                </div>
+              </div>
+              <label className="settings-field">
+                <div className="settings-field-text">
+                  <span className="settings-field-title">{l("Config directory", "配置目录")}</span>
+                  <span className="settings-field-sub">{l("Leave empty to use ~/.claude.", "留空使用 ~/.claude。")}</span>
+                </div>
+                <div className="provider-path-input">
+                  <input type="text" value={draftClaudeApiConfig.customConfigDir} disabled={!settings || saving} placeholder="~/.claude" onChange={(event) => updateDraftClaudeApiConfig({ customConfigDir: event.currentTarget.value })} />
+                  <button type="button" disabled={!settings || saving} onClick={() => void pickConfigDirectory("claude")}>{l("Browse", "选择")}</button>
+                  <button type="button" disabled={!settings || saving || !draftClaudeApiConfig.customConfigDir} onClick={() => updateDraftClaudeApiConfig({ customConfigDir: "" })}>{l("Default", "默认")}</button>
+                </div>
+              </label>
               {draftClaudeApiConfig.activeProvider === "official" ? (
                 <div className="api-config-note">
                   {l(
@@ -802,7 +894,11 @@ export function ProviderPage({
                     <div className="settings-field-text">
                       <span className="settings-field-title">API Key</span>
                       <span className="settings-field-sub">
-                        {l("Stored locally and written to Claude Code only when applied.", "保存在本地，只在应用时写入 Claude Code。")}
+                        {draftClaudeApiConfig.customApiKey
+                          ? l("Using the key entered here.", "使用此处输入的密钥。")
+                          : claudeConfig?.hasApiKey
+                            ? l(`Detected from ${claudeConfig.credentialSource ?? "Claude settings"}.`, `已从 ${claudeConfig.credentialSource ?? "Claude 设置"} 识别。`)
+                            : l("No key detected yet.", "尚未识别到密钥。")}
                       </span>
                     </div>
                     <div className="secret-input">
@@ -823,19 +919,38 @@ export function ProviderPage({
                       </button>
                     </div>
                   </label>
-                  <label className="settings-field">
+                  <div className="settings-field">
                     <div className="settings-field-text">
                       <span className="settings-field-title">{l("Model", "模型")}</span>
-                      <span className="settings-field-sub">{l("Primary Claude Code model env.", "Claude Code 的主模型 env。")}</span>
+                      <span className="settings-field-sub">{l("Primary Claude Code model. Namespaced IDs are preserved.", "Claude Code 主模型；完整保留带命名空间的 ID。")}</span>
                     </div>
-                    <input
-                      type="text"
-                      value={draftClaudeApiConfig.customModel}
-                      disabled={!settings || saving}
-                      placeholder="claude-sonnet-4.6"
-                      onChange={(event) => updateDraftClaudeApiConfig({ customModel: event.currentTarget.value })}
-                    />
-                  </label>
+                    <div className="codex-model-input">
+                      <div className="codex-model-combo">
+                        <input
+                          type="text"
+                          value={draftClaudeApiConfig.customModel}
+                          disabled={!settings || saving}
+                          placeholder="claude-sonnet-4.6"
+                          onFocus={() => setClaudeModelMenuOpen(claudeModelOptions.length > 0)}
+                          onBlur={() => window.setTimeout(() => setClaudeModelMenuOpen(false), 100)}
+                          onChange={(event) => updateDraftClaudeApiConfig({ customModel: event.currentTarget.value })}
+                        />
+                        <button type="button" className="codex-model-menu-trigger" disabled={!settings || saving || claudeModelOptions.length === 0} onMouseDown={(event) => event.preventDefault()} onClick={() => setClaudeModelMenuOpen((current) => !current)}><ChevronDown size={14} /></button>
+                        {claudeModelMenuOpen && claudeModelOptions.length > 0 ? (
+                          <div className="codex-model-menu" role="listbox">
+                            {claudeModelOptions.map((model) => (
+                              <button type="button" className="codex-model-option" key={model} onMouseDown={(event) => event.preventDefault()} onClick={() => {
+                                updateDraftClaudeApiConfig({ customModel: model });
+                                setClaudeModelMenuOpen(false);
+                              }}>{model}</button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                      <button type="button" className="codex-model-detect-button" disabled={!settings || saving || claudeModelProbeStatus?.kind === "running"} onClick={() => void detectClaudeModels()}>{l("Detect models", "探测模型")}</button>
+                    </div>
+                    {claudeModelProbeStatus ? <div className={`api-config-status ${claudeModelProbeStatus.kind}`}>{claudeModelProbeStatus.message}</div> : null}
+                  </div>
                   <div className="api-model-grid">
                     <label className="settings-field">
                       <div className="settings-field-text">

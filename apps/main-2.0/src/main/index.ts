@@ -877,6 +877,21 @@ async function chooseLocalProjectDirectory(): Promise<string | null> {
   return result.filePaths[0] ?? null;
 }
 
+async function chooseProviderConfigDirectory(
+  target: "codex" | "claude" | "summary",
+  defaultPath?: string,
+): Promise<string | null> {
+  const label = target === "claude" ? "Claude Code" : target === "summary" ? "summary Provider" : "Codex";
+  const options: Electron.OpenDialogOptions = {
+    title: `Choose ${label} config directory`,
+    properties: ["openDirectory", "createDirectory"],
+    ...(defaultPath?.trim() ? { defaultPath: defaultPath.trim() } : {}),
+  };
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+}
+
 async function chooseOpenVikingMemoryDirectory(): Promise<string | null> {
   const options: Electron.OpenDialogOptions = {
     title: "Choose a directory for managed memory",
@@ -1078,6 +1093,7 @@ function initializeOpenVikingMemory(): void {
     const settings = await providerService.hydrateSettings();
     const codex = await providerService.getCodexConfig();
     const codexEndpoint = settings.summarySource === "codex"
+      || (settings.summarySource === "custom" && settings.summaryApiConfigMode === "inherit_codex")
       ? await loadActiveCodexSummaryEndpointDefaults(codexHome)
       : null;
     return {
@@ -1707,17 +1723,13 @@ async function resolveSummaryEndpointFromSettings(): Promise<SummaryEndpoint | n
     void store.deleteSession(sessionKey).catch(() => undefined);
   };
   if (settings.summarySource === "custom") {
-    const endpoint = resolveSummaryEndpointFromSettingsShared(settings, {});
+    const summaryApiConfig = await providerService.resolveSummaryApiConfig(settings);
+    const endpoint = resolveSummaryEndpointFromSettingsShared({
+      ...settings,
+      summaryApiConfigMode: "custom",
+      summaryApiConfig,
+    }, {});
     if (endpoint) return endpoint;
-    const codexDefaults = await loadActiveCodexSummaryEndpointDefaults();
-    if (codexDefaults) {
-      return {
-        baseUrl: codexDefaults.baseUrl,
-        model: codexDefaults.model,
-        apiKey: codexDefaults.apiKey,
-        apiFormat: codexDefaults.apiFormat,
-      };
-    }
     return buildCodexExecEndpointShared(settings, { onTemporarySession });
   }
   return resolveSummaryEndpointFromSettingsShared(settings, { onTemporarySession });
@@ -1783,11 +1795,7 @@ async function createLocalRemoteRestoreDependencies(
   onProgress: (progress: SessionMigrationProgress) => void,
 ): Promise<RemoteSessionRestoreDependencies> {
   const settings = await providerService.hydrateSettings();
-  const endpoint = resolveSummaryEndpointFromSettingsShared(settings, {
-    onTemporarySession: (temporarySessionKey) => {
-      void store.deleteSession(temporarySessionKey).catch(() => undefined);
-    },
-  });
+  const endpoint = await resolveSummaryEndpointFromSettings();
   const compressor = endpoint
     ? createMigrationCompressor(
         endpoint,
@@ -1828,11 +1836,7 @@ async function createSourceRemoteRestoreDependencies(
   onProgress: (progress: SessionMigrationProgress) => void,
 ): Promise<RemoteSessionRestoreDependencies> {
   const settings = await providerService.hydrateSettings();
-  const endpoint = resolveSummaryEndpointFromSettingsShared(settings, {
-    onTemporarySession: (temporarySessionKey) => {
-      void store.deleteSession(temporarySessionKey).catch(() => undefined);
-    },
-  });
+  const endpoint = await resolveSummaryEndpointFromSettings();
   const compressor = endpoint
     ? createMigrationCompressor(
         endpoint,
@@ -1955,11 +1959,7 @@ function remoteMigrationResumeDisplayCommand(
 
 function localSessionMigrationRuntime(event: IpcMainInvokeEvent) {
   return {
-    resolveSummaryEndpoint: (snapshot: AppSettings) => resolveSummaryEndpointFromSettingsShared(snapshot, {
-      onTemporarySession: (temporarySessionKey) => {
-        void store.deleteSession(temporarySessionKey).catch(() => undefined);
-      },
-    }),
+    resolveSummaryEndpoint: async () => resolveSummaryEndpointFromSettings(),
     createCompressor: (
       endpoint: SummaryEndpoint,
       concurrency: number,
@@ -2538,7 +2538,7 @@ function registerIpc(): void {
     mainWindow?.webContents.send("open-session", sessionKey);
   });
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
-  registerProvidersIpc(ipcMain, providerService);
+  registerProvidersIpc(ipcMain, providerService, chooseProviderConfigDirectory);
   ipcMain.handle("settings:set", (_event, settings: AppSettingsUpdate) => applySettingsUpdate(settings));
   ipcMain.handle("v1-import:run", async () => {
     const result = await new V1SessionImportService({

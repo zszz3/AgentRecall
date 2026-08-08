@@ -114,6 +114,7 @@ export interface AppSettings {
   compressionConcurrency: number;
   migrationCompleteTokenLimit: number;
   summarySource: "codex" | "claude" | "custom";
+  summaryApiConfigMode: "inherit_codex" | "custom";
   summaryCodexModel: string;
   sessionSearchMcpEnabled: boolean;
   workflowMcpEnabled: boolean;
@@ -187,6 +188,7 @@ export const defaultSettings: AppSettings = {
   compressionConcurrency: 8,
   migrationCompleteTokenLimit: 100_000,
   summarySource: "codex",
+  summaryApiConfigMode: "inherit_codex",
   summaryCodexModel: "",
   sessionSearchMcpEnabled: true,
   workflowMcpEnabled: false,
@@ -234,6 +236,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     ),
     showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
+    summaryApiConfigMode: merged.summaryApiConfigMode === "custom" ? "custom" : "inherit_codex",
     summaryCodexModel: String(merged.summaryCodexModel ?? "").trim(),
     skillAiRuntimeId: String(merged.skillAiRuntimeId ?? "").trim(),
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
