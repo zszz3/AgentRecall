@@ -245,6 +245,7 @@ export interface SessionTurnSummary {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  cacheCreationInputTokens?: number;
   reasoningOutputTokens: number;
   totalTokens: number;
   errorCount: number;
@@ -289,6 +290,8 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  /** Tokens written to a provider prompt cache. Omitted by sources that do not report cache writes. */
+  cacheCreationInputTokens?: number;
   reasoningOutputTokens: number;
   totalTokens: number;
 }

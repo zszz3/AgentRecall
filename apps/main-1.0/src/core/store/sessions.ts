@@ -103,6 +103,7 @@ interface SessionRow {
   input_tokens: number;
   output_tokens: number;
   cached_input_tokens: number;
+  cache_creation_input_tokens: number;
   reasoning_output_tokens: number;
   total_tokens: number;
   ai_summary: string | null;
@@ -256,10 +257,10 @@ export class SessionsStore {
           INSERT INTO sessions (
             session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
-            input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
+            input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id, codex_history_mode
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
@@ -278,6 +279,7 @@ export class SessionsStore {
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
             cached_input_tokens = excluded.cached_input_tokens,
+            cache_creation_input_tokens = excluded.cache_creation_input_tokens,
             reasoning_output_tokens = excluded.reasoning_output_tokens,
             total_tokens = excluded.total_tokens,
             indexed_at = excluded.indexed_at,
@@ -308,6 +310,7 @@ export class SessionsStore {
           tokenUsage.inputTokens,
           tokenUsage.outputTokens,
           tokenUsage.cachedInputTokens,
+          tokenUsage.cacheCreationInputTokens ?? 0,
           tokenUsage.reasoningOutputTokens,
           tokenUsage.totalTokens,
           indexedAt,
@@ -393,9 +396,9 @@ export class SessionsStore {
         `
         INSERT INTO token_events (
           session_key, dedupe_key, timestamp, input_tokens, output_tokens,
-          cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+          cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       );
       for (const event of normalizedTokenEvents) {
@@ -406,6 +409,7 @@ export class SessionsStore {
           event.inputTokens,
           event.outputTokens,
           event.cachedInputTokens,
+          event.cacheCreationInputTokens ?? 0,
           event.reasoningOutputTokens,
           event.totalTokens,
           event.sourceTurnId ?? null,
@@ -541,7 +545,7 @@ export class SessionsStore {
 
   getTokenEvents(sessionKey: string): TokenUsageEvent[] {
     return this.db.prepare(`
-      SELECT timestamp, dedupe_key, input_tokens, output_tokens, cached_input_tokens,
+      SELECT timestamp, dedupe_key, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
         reasoning_output_tokens, total_tokens, source_turn_id
       FROM token_events
       WHERE session_key = ?
@@ -554,6 +558,9 @@ export class SessionsStore {
         inputTokens: Number(value.input_tokens),
         outputTokens: Number(value.output_tokens),
         cachedInputTokens: Number(value.cached_input_tokens),
+        ...(Number(value.cache_creation_input_tokens) > 0
+          ? { cacheCreationInputTokens: Number(value.cache_creation_input_tokens) }
+          : {}),
         reasoningOutputTokens: Number(value.reasoning_output_tokens),
         totalTokens: Number(value.total_tokens),
         sourceTurnId: typeof value.source_turn_id === "string" ? value.source_turn_id : null,
@@ -579,10 +586,10 @@ export class SessionsStore {
           INSERT INTO sessions (
             session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
-            input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
+            input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
@@ -601,6 +608,7 @@ export class SessionsStore {
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
             cached_input_tokens = excluded.cached_input_tokens,
+            cache_creation_input_tokens = excluded.cache_creation_input_tokens,
             reasoning_output_tokens = excluded.reasoning_output_tokens,
             total_tokens = excluded.total_tokens,
             indexed_at = excluded.indexed_at,
@@ -627,6 +635,7 @@ export class SessionsStore {
           tokenUsage.inputTokens,
           tokenUsage.outputTokens,
           tokenUsage.cachedInputTokens,
+          tokenUsage.cacheCreationInputTokens ?? 0,
           tokenUsage.reasoningOutputTokens,
           tokenUsage.totalTokens,
           indexedAt,
@@ -642,9 +651,9 @@ export class SessionsStore {
           `
           INSERT INTO token_events (
             session_key, dedupe_key, timestamp, input_tokens, output_tokens,
-            cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+            cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         );
         for (const event of normalizedTokenEvents) {
@@ -655,6 +664,7 @@ export class SessionsStore {
             event.inputTokens,
             event.outputTokens,
             event.cachedInputTokens,
+            event.cacheCreationInputTokens ?? 0,
             event.reasoningOutputTokens,
             event.totalTokens,
             event.sourceTurnId ?? null,
@@ -919,10 +929,10 @@ export class SessionsStore {
           .prepare(
             `INSERT OR IGNORE INTO token_events (
                session_key, dedupe_key, timestamp, input_tokens, output_tokens,
-               cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+               cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
              )
              SELECT ?, dedupe_key, timestamp, input_tokens, output_tokens,
-               cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+               cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
              FROM token_events WHERE session_key = ?`,
           )
           .run(targetKey, legacyKey);
@@ -944,11 +954,12 @@ export class SessionsStore {
                input_tokens = (SELECT COALESCE(SUM(input_tokens), 0) FROM token_events WHERE session_key = ?),
                output_tokens = (SELECT COALESCE(SUM(output_tokens), 0) FROM token_events WHERE session_key = ?),
                cached_input_tokens = (SELECT COALESCE(SUM(cached_input_tokens), 0) FROM token_events WHERE session_key = ?),
+               cache_creation_input_tokens = (SELECT COALESCE(SUM(cache_creation_input_tokens), 0) FROM token_events WHERE session_key = ?),
                reasoning_output_tokens = (SELECT COALESCE(SUM(reasoning_output_tokens), 0) FROM token_events WHERE session_key = ?),
                total_tokens = (SELECT COALESCE(SUM(total_tokens), 0) FROM token_events WHERE session_key = ?)
              WHERE session_key = ?`,
           )
-          .run(targetKey, targetKey, targetKey, targetKey, targetKey, targetKey, targetKey);
+          .run(targetKey, targetKey, targetKey, targetKey, targetKey, targetKey, targetKey, targetKey);
       }
 
       // Migration ids are globally unique while source_session_key is only indexed, so every
@@ -1509,6 +1520,7 @@ export class SessionsStore {
       summary.inputTokens = row.input_tokens;
       summary.outputTokens = row.output_tokens;
       summary.cachedInputTokens = row.cached_input_tokens;
+      if (row.cache_creation_input_tokens > 0) summary.cacheCreationInputTokens = row.cache_creation_input_tokens;
       summary.reasoningOutputTokens = row.reasoning_output_tokens;
       summary.totalTokens = row.total_tokens;
     }
@@ -1524,6 +1536,9 @@ export class SessionsStore {
         inputTokens: acc.inputTokens + row.inputTokens,
         outputTokens: acc.outputTokens + row.outputTokens,
         cachedInputTokens: acc.cachedInputTokens + row.cachedInputTokens,
+        ...((acc.cacheCreationInputTokens ?? 0) + (row.cacheCreationInputTokens ?? 0) > 0
+          ? { cacheCreationInputTokens: (acc.cacheCreationInputTokens ?? 0) + (row.cacheCreationInputTokens ?? 0) }
+          : {}),
         reasoningOutputTokens: acc.reasoningOutputTokens + row.reasoningOutputTokens,
         totalTokens: acc.totalTokens + row.totalTokens,
       }),
@@ -1601,6 +1616,7 @@ export class SessionsStore {
             input_tokens = 0,
             output_tokens = 0,
             cached_input_tokens = 0,
+            cache_creation_input_tokens = 0,
             reasoning_output_tokens = 0,
             total_tokens = 0,
             original_title = '',
@@ -1812,6 +1828,7 @@ export class SessionsStore {
     input_tokens: number;
     output_tokens: number;
     cached_input_tokens: number;
+    cache_creation_input_tokens: number;
     reasoning_output_tokens: number;
     total_tokens: number;
   }> {
@@ -1831,6 +1848,7 @@ export class SessionsStore {
             token_events.input_tokens AS input_tokens,
             token_events.output_tokens AS output_tokens,
             token_events.cached_input_tokens AS cached_input_tokens,
+            token_events.cache_creation_input_tokens AS cache_creation_input_tokens,
             token_events.reasoning_output_tokens AS reasoning_output_tokens,
             token_events.total_tokens AS total_tokens,
             ROW_NUMBER() OVER (
@@ -1858,6 +1876,7 @@ export class SessionsStore {
             input_tokens,
             output_tokens,
             cached_input_tokens,
+            cache_creation_input_tokens,
             reasoning_output_tokens,
             total_tokens
           FROM ranked
@@ -1868,6 +1887,7 @@ export class SessionsStore {
           COALESCE(SUM(input_tokens), 0) AS input_tokens,
           COALESCE(SUM(output_tokens), 0) AS output_tokens,
           COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+          COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
           COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
           COALESCE(SUM(total_tokens), 0) AS total_tokens
         FROM deduped
@@ -1880,6 +1900,7 @@ export class SessionsStore {
       input_tokens: number;
       output_tokens: number;
       cached_input_tokens: number;
+      cache_creation_input_tokens: number;
       reasoning_output_tokens: number;
       total_tokens: number;
     }>;
@@ -1939,6 +1960,7 @@ export class SessionsStore {
     input_tokens: number;
     output_tokens: number;
     cached_input_tokens: number;
+    cache_creation_input_tokens: number;
     reasoning_output_tokens: number;
     total_tokens: number;
   }> {
@@ -1950,6 +1972,7 @@ export class SessionsStore {
           COALESCE(SUM(input_tokens), 0) AS input_tokens,
           COALESCE(SUM(output_tokens), 0) AS output_tokens,
           COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+          COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_input_tokens,
           COALESCE(SUM(reasoning_output_tokens), 0) AS reasoning_output_tokens,
           COALESCE(SUM(total_tokens), 0) AS total_tokens
         FROM sessions
@@ -1963,6 +1986,7 @@ export class SessionsStore {
       input_tokens: number;
       output_tokens: number;
       cached_input_tokens: number;
+      cache_creation_input_tokens: number;
       reasoning_output_tokens: number;
       total_tokens: number;
     }>;
@@ -2289,6 +2313,9 @@ export class SessionsStore {
         inputTokens: row.input_tokens,
         outputTokens: row.output_tokens,
         cachedInputTokens: row.cached_input_tokens,
+        ...(row.cache_creation_input_tokens > 0
+          ? { cacheCreationInputTokens: row.cache_creation_input_tokens }
+          : {}),
         reasoningOutputTokens: row.reasoning_output_tokens,
         totalTokens: row.total_tokens,
       },
@@ -2402,12 +2429,14 @@ function normalizeTokenUsage(tokenUsage: TokenUsage | undefined): TokenUsage {
   const inputTokens = nonNegativeNumber(tokenUsage?.inputTokens);
   const outputTokens = nonNegativeNumber(tokenUsage?.outputTokens);
   const cachedInputTokens = nonNegativeNumber(tokenUsage?.cachedInputTokens);
+  const cacheCreationInputTokens = nonNegativeNumber(tokenUsage?.cacheCreationInputTokens);
   const reasoningOutputTokens = nonNegativeNumber(tokenUsage?.reasoningOutputTokens);
-  const derivedTotal = inputTokens + outputTokens + cachedInputTokens + reasoningOutputTokens;
+  const derivedTotal = inputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens + reasoningOutputTokens;
   return {
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
     reasoningOutputTokens,
     totalTokens: nonNegativeNumber(tokenUsage?.totalTokens) || derivedTotal,
   };
@@ -2428,6 +2457,9 @@ function tokenUsageFromEvents(events: TokenUsageEvent[]): TokenUsage {
       inputTokens: acc.inputTokens + event.inputTokens,
       outputTokens: acc.outputTokens + event.outputTokens,
       cachedInputTokens: acc.cachedInputTokens + event.cachedInputTokens,
+      ...((acc.cacheCreationInputTokens ?? 0) + (event.cacheCreationInputTokens ?? 0) > 0
+        ? { cacheCreationInputTokens: (acc.cacheCreationInputTokens ?? 0) + (event.cacheCreationInputTokens ?? 0) }
+        : {}),
       reasoningOutputTokens: acc.reasoningOutputTokens + event.reasoningOutputTokens,
       totalTokens: acc.totalTokens + event.totalTokens,
     }),

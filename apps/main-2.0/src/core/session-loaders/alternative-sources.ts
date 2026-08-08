@@ -976,8 +976,9 @@ function zcodeTokenEventsFromModelUsage(
       const id = stringField(row, "id");
       const assistantMessageId = stringField(row, "assistant_message_id");
       if (!id || !assistantMessageIds.has(assistantMessageId)) continue;
-      const cached = Math.max(0, numberField(row, "cache_read_input_tokens")) + Math.max(0, numberField(row, "cache_creation_input_tokens"));
-      const freshInput = Math.max(0, numberField(row, "input_tokens") - cached);
+      const cached = Math.max(0, numberField(row, "cache_read_input_tokens"));
+      const cacheCreation = Math.max(0, numberField(row, "cache_creation_input_tokens"));
+      const freshInput = Math.max(0, numberField(row, "input_tokens") - cached - cacheCreation);
       events.push(
         tokenEvent(
           timestampMs(unknownField(row, "completed_at")) || timestampMs(unknownField(row, "started_at")),
@@ -986,6 +987,7 @@ function zcodeTokenEventsFromModelUsage(
           Math.max(0, numberField(row, "output_tokens")),
           cached,
           Math.max(0, numberField(row, "reasoning_tokens")),
+          cacheCreation,
         ),
       );
     }

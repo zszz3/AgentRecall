@@ -1488,4 +1488,23 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS read_only boolean NOT NULL DEFAULT false;
     `,
   ],
+}, {
+  version: 32,
+  name: "separate cache creation tokens from cache reads",
+  statements: [
+    `
+      ALTER TABLE agent_recall.sessions
+        ADD COLUMN IF NOT EXISTS cache_creation_input_tokens bigint NOT NULL DEFAULT 0;
+      ALTER TABLE agent_recall.session_turns
+        ADD COLUMN IF NOT EXISTS cache_creation_input_tokens bigint NOT NULL DEFAULT 0;
+      ALTER TABLE agent_recall.token_events
+        ADD COLUMN IF NOT EXISTS cache_creation_input_tokens bigint NOT NULL DEFAULT 0;
+
+      UPDATE agent_recall.sessions
+      SET file_mtime_ms = 0,
+          content_indexed_mtime_ms = 0,
+          content_indexed_size = 0
+      WHERE source IN ('claude-cli', 'claude-app', 'tclaude-cli', 'zcode-cli');
+    `,
+  ],
 }];

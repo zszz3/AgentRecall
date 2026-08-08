@@ -36,6 +36,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
       reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
       total_tokens INTEGER NOT NULL DEFAULT 0,
       indexed_at INTEGER NOT NULL DEFAULT 0,
@@ -108,6 +109,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
       reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
       total_tokens INTEGER NOT NULL DEFAULT 0,
       source_turn_id TEXT,
@@ -274,6 +276,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   addColumnIfMissing(db, "sessions", "input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "sessions", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "reasoning_output_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "total_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "environment_id", "TEXT NOT NULL DEFAULT 'local'");
@@ -292,6 +295,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   addColumnIfMissing(db, "messages", "phase", "TEXT");
   addColumnIfMissing(db, "messages", "source_record_id", "TEXT");
   addColumnIfMissing(db, "token_events", "source_turn_id", "TEXT");
+  addColumnIfMissing(db, "token_events", "cache_creation_input_tokens", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "trace_events", "source_turn_id", "TEXT");
   addColumnIfMissing(db, "trace_events", "attributes_json", "TEXT");
   addColumnIfMissing(db, "environments", "wsl_distribution", "TEXT");
@@ -310,6 +314,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   runCursorRuntimeEnvironmentMigration(db);
   runCursorEmptyComposerShellsMigration(db);
   runRemoveClaudeCodexInternalSourcesMigration(db);
+  runCacheTokenSemanticsMigration(db);
   runCodexSessionSemanticsMigration(db);
   runCodexTraceDetailMigration(db);
   addColumnIfMissing(db, "skill_sync_bindings", "remote_version", "INTEGER NOT NULL DEFAULT 1");
@@ -582,6 +587,30 @@ function runCodexTraceDetailMigration(db: SessionStoreDatabase): void {
               content_indexed_mtime_ms = 0,
               content_indexed_size = 0
           WHERE source IN ('codex-cli', 'codex-app', 'tcodex-cli')
+        `,
+      ).run();
+      db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function runCacheTokenSemanticsMigration(db: SessionStoreDatabase): void {
+  const migrationId = "cache-token-semantics-v1";
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const applied = db.prepare("SELECT 1 FROM data_migrations WHERE id = ?").get(migrationId);
+    if (!applied) {
+      db.prepare(
+        `
+          UPDATE sessions
+          SET file_mtime_ms = 0,
+              content_indexed_mtime_ms = 0,
+              content_indexed_size = 0
+          WHERE source IN ('claude-cli', 'claude-app', 'tclaude-cli', 'zcode-cli')
         `,
       ).run();
       db.prepare("INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)").run(migrationId, Date.now());

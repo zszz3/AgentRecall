@@ -496,8 +496,11 @@
 .workbench-token-track .input,
 .workbench-token-legend .input > i { background: var(--accent); }
 
-.workbench-token-track .cached,
-.workbench-token-legend .cached > i { background: color-mix(in srgb, var(--accent) 42%, var(--panel-subtle)); }
+.workbench-token-track .cache-read,
+.workbench-token-legend .cache-read > i { background: color-mix(in srgb, var(--accent) 42%, var(--panel-subtle)); }
+
+.workbench-token-track .cache-write,
+.workbench-token-legend .cache-write > i { background: color-mix(in srgb, var(--claude) 52%, var(--panel-subtle)); }
 
 .workbench-token-track .output,
 .workbench-token-legend .output > i { background: var(--codex); }

@@ -116,7 +116,8 @@ export function TokenTrendChart({ points = [], language, onSelectDay }: TokenTre
               </div>
               <dl>
                 <div><dt>{l("Input", "输入")}</dt><dd>{formatTokenCount(activePoint.day.inputTokens)}</dd></div>
-                <div><dt>{l("Cached", "缓存")}</dt><dd>{formatTokenCount(activePoint.day.cachedInputTokens)}</dd></div>
+                <div><dt>{l("Cache read", "缓存读取")}</dt><dd>{formatTokenCount(activePoint.day.cachedInputTokens)}</dd></div>
+                <div><dt>{l("Cache write", "缓存写入")}</dt><dd>{formatTokenCount(activePoint.day.cacheCreationInputTokens ?? 0)}</dd></div>
                 <div><dt>{l("Output", "输出")}</dt><dd>{formatTokenCount(activePoint.day.outputTokens)}</dd></div>
                 <div><dt>{l("Reasoning", "推理")}</dt><dd>{formatTokenCount(activePoint.day.reasoningOutputTokens)}</dd></div>
               </dl>

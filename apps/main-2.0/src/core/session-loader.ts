@@ -644,6 +644,7 @@ function subtractTokenUsage(current: TokenUsage, previous: TokenUsage | null): T
     Math.max(0, current.outputTokens - previous.outputTokens),
     Math.max(0, current.cachedInputTokens - previous.cachedInputTokens),
     Math.max(0, current.reasoningOutputTokens - previous.reasoningOutputTokens),
+    Math.max(0, (current.cacheCreationInputTokens ?? 0) - (previous.cacheCreationInputTokens ?? 0)),
   );
 }
 
@@ -799,19 +800,16 @@ function extractClaudeTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     const usage = objectField(message, "usage");
     if (!usage) return;
 
-    // Anthropic splits input across three billed buckets: fresh `input_tokens`,
-    // `cache_creation_input_tokens` (written to cache, billed ~1.25x) and
-    // `cache_read_input_tokens` (cache hit, billed ~0.1x). All three are really
-    // processed, so the cache buckets belong in the cached total.
     const cached =
       numberField(usage, "cache_read_input_tokens") +
-      numberField(usage, "cached_input_tokens") +
-      numberField(usage, "cache_creation_input_tokens");
+      numberField(usage, "cached_input_tokens");
+    const cacheCreation = numberField(usage, "cache_creation_input_tokens");
     const entry = createTokenUsage(
       numberField(usage, "input_tokens"),
       numberField(usage, "output_tokens"),
       cached,
       numberField(usage, "reasoning_output_tokens"),
+      cacheCreation,
     );
     const key = stringField(message, "id") || stringField(row, "uuid") || `${index}:${JSON.stringify(usage)}`;
     putTokenEvent(

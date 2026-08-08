@@ -38,6 +38,7 @@ export interface SessionRow extends Record<string, unknown> {
   input_tokens: number | string;
   output_tokens: number | string;
   cached_input_tokens: number | string;
+  cache_creation_input_tokens: number | string;
   reasoning_output_tokens: number | string;
   total_tokens: number | string;
   indexed_at: Date | string;
@@ -73,6 +74,7 @@ export interface SessionTurnSummaryRow extends Record<string, unknown> {
   input_tokens: number | string;
   output_tokens: number | string;
   cached_input_tokens: number | string;
+  cache_creation_input_tokens: number | string;
   reasoning_output_tokens: number | string;
   total_tokens: number | string;
   error_count: number | string;
@@ -99,6 +101,7 @@ export const SESSION_TURN_SUMMARY_SQL = `
     turns.input_tokens,
     turns.output_tokens,
     turns.cached_input_tokens,
+    turns.cache_creation_input_tokens,
     turns.reasoning_output_tokens,
     turns.total_tokens,
     turns.error_count,
@@ -211,6 +214,9 @@ export function sessionTurnSummaryFromRow(row: SessionTurnSummaryRow): SessionTu
     inputTokens: numberValue(row.input_tokens),
     outputTokens: numberValue(row.output_tokens),
     cachedInputTokens: numberValue(row.cached_input_tokens),
+    ...(numberValue(row.cache_creation_input_tokens) > 0
+      ? { cacheCreationInputTokens: numberValue(row.cache_creation_input_tokens) }
+      : {}),
     reasoningOutputTokens: numberValue(row.reasoning_output_tokens),
     totalTokens: numberValue(row.total_tokens),
     errorCount: numberValue(row.error_count),
@@ -224,13 +230,15 @@ export function normalizedTokenUsage(usage?: TokenUsage): TokenUsage {
   const inputTokens = numberValue(usage?.inputTokens);
   const outputTokens = numberValue(usage?.outputTokens);
   const cachedInputTokens = numberValue(usage?.cachedInputTokens);
+  const cacheCreationInputTokens = numberValue(usage?.cacheCreationInputTokens);
   const reasoningOutputTokens = numberValue(usage?.reasoningOutputTokens);
   return {
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
     reasoningOutputTokens,
-    totalTokens: inputTokens + outputTokens + cachedInputTokens + reasoningOutputTokens,
+    totalTokens: inputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens + reasoningOutputTokens,
   };
 }
 
@@ -244,6 +252,9 @@ export function tokenUsageFromEvents(
       inputTokens: total.inputTokens + numberValue(event.inputTokens),
       outputTokens: total.outputTokens + numberValue(event.outputTokens),
       cachedInputTokens: total.cachedInputTokens + numberValue(event.cachedInputTokens),
+      ...((total.cacheCreationInputTokens ?? 0) + numberValue(event.cacheCreationInputTokens) > 0
+        ? { cacheCreationInputTokens: (total.cacheCreationInputTokens ?? 0) + numberValue(event.cacheCreationInputTokens) }
+        : {}),
       reasoningOutputTokens: total.reasoningOutputTokens + numberValue(event.reasoningOutputTokens),
       totalTokens: total.totalTokens + numberValue(event.totalTokens),
     }),
@@ -357,6 +368,9 @@ export function hydrateSession(
       inputTokens: numberValue(row.input_tokens),
       outputTokens: numberValue(row.output_tokens),
       cachedInputTokens: numberValue(row.cached_input_tokens),
+      ...(numberValue(row.cache_creation_input_tokens) > 0
+        ? { cacheCreationInputTokens: numberValue(row.cache_creation_input_tokens) }
+        : {}),
       reasoningOutputTokens: numberValue(row.reasoning_output_tokens),
       totalTokens: numberValue(row.total_tokens),
     },

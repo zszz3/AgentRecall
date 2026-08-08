@@ -224,14 +224,17 @@ def visible_claude_rows(rows):
 const REMOTE_TOKEN_USAGE_PY = String.raw`def _tok_num(value):
   return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
 
-def _tok_create(input_tokens, output_tokens, cached, reasoning):
-  return {
+def _tok_create(input_tokens, output_tokens, cached, reasoning, cache_creation=0):
+  result = {
     "inputTokens": input_tokens,
     "outputTokens": output_tokens,
     "cachedInputTokens": cached,
     "reasoningOutputTokens": reasoning,
-    "totalTokens": input_tokens + output_tokens + cached + reasoning,
+    "totalTokens": input_tokens + output_tokens + cached + cache_creation + reasoning,
   }
+  if cache_creation > 0:
+    result["cacheCreationInputTokens"] = cache_creation
+  return result
 
 def _tok_empty():
   return _tok_create(0, 0, 0, 0)
@@ -240,6 +243,8 @@ def _tok_add(total, nxt):
   total["inputTokens"] += nxt["inputTokens"]
   total["outputTokens"] += nxt["outputTokens"]
   total["cachedInputTokens"] += nxt["cachedInputTokens"]
+  if "cacheCreationInputTokens" in total or "cacheCreationInputTokens" in nxt:
+    total["cacheCreationInputTokens"] = total.get("cacheCreationInputTokens", 0) + nxt.get("cacheCreationInputTokens", 0)
   total["reasoningOutputTokens"] += nxt["reasoningOutputTokens"]
   total["totalTokens"] += nxt["totalTokens"]
 
@@ -325,6 +330,7 @@ def _tok_cumulative_delta(current, previous_totals):
     max(0, current["outputTokens"] - previous["outputTokens"]),
     max(0, current["cachedInputTokens"] - previous["cachedInputTokens"]),
     max(0, current["reasoningOutputTokens"] - previous["reasoningOutputTokens"]),
+    max(0, current.get("cacheCreationInputTokens", 0) - previous.get("cacheCreationInputTokens", 0)),
   )
   previous_totals[best_index] = dict(current)
   return delta
@@ -381,8 +387,9 @@ def accumulate_claude_tokens(state, row):
   usage = message.get("usage")
   if not isinstance(usage, dict):
     return
-  cached = _tok_num(usage.get("cache_read_input_tokens")) + _tok_num(usage.get("cached_input_tokens")) + _tok_num(usage.get("cache_creation_input_tokens"))
-  entry = _tok_create(_tok_num(usage.get("input_tokens")), _tok_num(usage.get("output_tokens")), cached, _tok_num(usage.get("reasoning_output_tokens")))
+  cached = _tok_num(usage.get("cache_read_input_tokens")) + _tok_num(usage.get("cached_input_tokens"))
+  cache_creation = _tok_num(usage.get("cache_creation_input_tokens"))
+  entry = _tok_create(_tok_num(usage.get("input_tokens")), _tok_num(usage.get("output_tokens")), cached, _tok_num(usage.get("reasoning_output_tokens")), cache_creation)
   mid = message.get("id")
   uid = row.get("uuid")
   if isinstance(mid, str) and mid:
@@ -994,6 +1001,9 @@ function tokenUsageField(value: Record<string, unknown>, key: string): TokenUsag
     inputTokens: numberField(raw, "inputTokens"),
     outputTokens: numberField(raw, "outputTokens"),
     cachedInputTokens: numberField(raw, "cachedInputTokens"),
+    ...(typeof raw.cacheCreationInputTokens === "number"
+      ? { cacheCreationInputTokens: numberField(raw, "cacheCreationInputTokens") }
+      : {}),
     reasoningOutputTokens: numberField(raw, "reasoningOutputTokens"),
     totalTokens: numberField(raw, "totalTokens"),
   };
@@ -1015,13 +1025,16 @@ function parseTokenEvent(value: unknown, lineNumber: number, index: number): Tok
   const inputTokens = nonNegativeFiniteField(value, "inputTokens", prefix);
   const outputTokens = nonNegativeFiniteField(value, "outputTokens", prefix);
   const cachedInputTokens = nonNegativeFiniteField(value, "cachedInputTokens", prefix);
+  const cacheCreationInputTokens = value.cacheCreationInputTokens === undefined
+    ? 0
+    : nonNegativeFiniteField(value, "cacheCreationInputTokens", prefix);
   const reasoningOutputTokens = nonNegativeFiniteField(value, "reasoningOutputTokens", prefix);
   const totalTokens = nonNegativeFiniteField(value, "totalTokens", prefix);
   const sourceTurnId = value.sourceTurnId;
   if (sourceTurnId !== undefined && sourceTurnId !== null && typeof sourceTurnId !== "string") {
     throw new Error(`${prefix}.sourceTurnId`);
   }
-  if (totalTokens !== inputTokens + outputTokens + cachedInputTokens + reasoningOutputTokens) {
+  if (totalTokens !== inputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens + reasoningOutputTokens) {
     throw new Error(`${prefix}.totalTokens`);
   }
   return {
@@ -1030,6 +1043,7 @@ function parseTokenEvent(value: unknown, lineNumber: number, index: number): Tok
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    ...(value.cacheCreationInputTokens !== undefined ? { cacheCreationInputTokens } : {}),
     reasoningOutputTokens,
     totalTokens,
     ...(sourceTurnId !== undefined ? { sourceTurnId } : {}),

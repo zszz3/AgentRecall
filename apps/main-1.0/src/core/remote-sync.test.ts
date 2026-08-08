@@ -1167,7 +1167,8 @@ db.close()
           dedupeKey: "claude-code:msg_1",
           inputTokens: 10,
           outputTokens: 20,
-          cachedInputTokens: 35,
+          cachedInputTokens: 30,
+          cacheCreationInputTokens: 5,
           reasoningOutputTokens: 2,
           totalTokens: 67,
         },
@@ -1184,7 +1185,8 @@ db.close()
       expect(claudeSummary?.tokenUsage).toEqual({
         inputTokens: 13,
         outputTokens: 24,
-        cachedInputTokens: 37,
+        cachedInputTokens: 32,
+        cacheCreationInputTokens: 5,
         reasoningOutputTokens: 3,
         totalTokens: 77,
       });

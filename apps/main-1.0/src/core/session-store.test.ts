@@ -180,8 +180,9 @@ describe("SessionStore", () => {
       inputTokens: 10,
       outputTokens: 5,
       cachedInputTokens: 2,
+      cacheCreationInputTokens: 3,
       reasoningOutputTokens: 1,
-      totalTokens: 18,
+      totalTokens: 21,
       sourceTurnId: "legacy-turn-1",
     };
     store.upsertIndexedSession(
@@ -253,8 +254,9 @@ describe("SessionStore", () => {
       inputTokens: 10,
       outputTokens: 5,
       cachedInputTokens: 2,
+      cacheCreationInputTokens: 3,
       reasoningOutputTokens: 1,
-      totalTokens: 18,
+      totalTokens: 21,
     });
     store.close();
   });
@@ -781,6 +783,11 @@ describe("SessionStore", () => {
     );
 
     const store = new SessionStore(db);
+
+    const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    const tokenEventColumns = db.prepare("PRAGMA table_info(token_events)").all() as Array<{ name: string }>;
+    expect(sessionColumns.map((column) => column.name)).toContain("cache_creation_input_tokens");
+    expect(tokenEventColumns.map((column) => column.name)).toContain("cache_creation_input_tokens");
 
     expect(store.getSession("codex:old")).toMatchObject({
       sessionKey: "codex:old",

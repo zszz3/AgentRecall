@@ -216,7 +216,8 @@ export function WorkbenchPage({
   const sourceRows = usageStatsDisplayRows(stats.bySource);
   const tokenParts = [
     { key: "input", label: l("Input", "输入"), value: stats.total.inputTokens },
-    { key: "cached", label: l("Cached", "缓存"), value: stats.total.cachedInputTokens },
+    { key: "cache-read", label: l("Cache read", "缓存读取"), value: stats.total.cachedInputTokens },
+    { key: "cache-write", label: l("Cache write", "缓存写入"), value: stats.total.cacheCreationInputTokens ?? 0 },
     { key: "output", label: l("Output", "输出"), value: stats.total.outputTokens },
     { key: "reasoning", label: l("Reasoning", "推理"), value: stats.total.reasoningOutputTokens },
   ];
@@ -366,7 +367,7 @@ export function WorkbenchPage({
                 <strong>{l("Token composition", "Token 构成")}</strong>
                 <span>{cacheRate == null
                   ? l("No input token data", "暂无输入 Token 数据")
-                  : l(`Cached input is ${cacheRate}% of input`, `缓存输入占输入 ${cacheRate}%`)}</span>
+                  : l(`Cache hits cover ${cacheRate}% of input`, `缓存命中占输入 ${cacheRate}%`)}</span>
               </div>
               <div className="workbench-token-track" aria-hidden="true">
                 {tokenParts.map((part) => (

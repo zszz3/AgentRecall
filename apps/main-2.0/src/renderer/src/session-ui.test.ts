@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canMigrateSession, migrationTargetsForSession } from "./session-ui";
+import { canMigrateSession, migrationTargetsForSession, usageCacheRate } from "./session-ui";
 
 const settings = { includeTclaude: false, includeTcodex: false };
 
@@ -23,5 +23,15 @@ describe("migrationTargetsForSession", () => {
   it("keeps local and WSL target behavior", () => {
     expect(migrationTargetsForSession({ source: "claude-cli", environmentId: "local", environmentKind: "local" }, settings)).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor"]);
     expect(migrationTargetsForSession({ source: "codex-cli", environmentId: "wsl-1", environmentKind: "wsl" }, settings)).toEqual(["claude", "codex"]);
+  });
+});
+
+describe("usageCacheRate", () => {
+  it("treats cache creation as a miss and cache reads as hits", () => {
+    expect(usageCacheRate({
+      inputTokens: 500,
+      cachedInputTokens: 300,
+      cacheCreationInputTokens: 2_000,
+    })).toBe(10.7);
   });
 });

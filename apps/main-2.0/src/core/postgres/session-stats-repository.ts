@@ -49,13 +49,15 @@ function normalizedTokenUsage(usage?: TokenUsage): TokenUsage {
   const inputTokens = numberValue(usage?.inputTokens);
   const outputTokens = numberValue(usage?.outputTokens);
   const cachedInputTokens = numberValue(usage?.cachedInputTokens);
+  const cacheCreationInputTokens = numberValue(usage?.cacheCreationInputTokens);
   const reasoningOutputTokens = numberValue(usage?.reasoningOutputTokens);
   return {
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
     reasoningOutputTokens,
-    totalTokens: inputTokens + outputTokens + cachedInputTokens + reasoningOutputTokens,
+    totalTokens: inputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens + reasoningOutputTokens,
   };
 }
 
@@ -244,6 +246,7 @@ export class PostgresSessionStatsRepository {
           events.input_tokens,
           events.output_tokens,
           events.cached_input_tokens,
+          events.cache_creation_input_tokens,
           events.reasoning_output_tokens,
           events.total_tokens,
           row_number() over (
@@ -268,6 +271,7 @@ export class PostgresSessionStatsRepository {
         coalesce(sum(input_tokens), 0) as input_tokens,
         coalesce(sum(output_tokens), 0) as output_tokens,
         coalesce(sum(cached_input_tokens), 0) as cached_input_tokens,
+        coalesce(sum(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
         coalesce(sum(reasoning_output_tokens), 0) as reasoning_output_tokens,
         coalesce(sum(total_tokens), 0) as total_tokens
       from ranked
@@ -288,6 +292,7 @@ export class PostgresSessionStatsRepository {
         input_tokens: number | string;
         output_tokens: number | string;
         cached_input_tokens: number | string;
+        cache_creation_input_tokens: number | string;
         reasoning_output_tokens: number | string;
         total_tokens: number | string;
       }>(tokensSql, rangeValues),
@@ -299,6 +304,7 @@ export class PostgresSessionStatsRepository {
         input_tokens: number | string;
         output_tokens: number | string;
         cached_input_tokens: number | string;
+        cache_creation_input_tokens: number | string;
         reasoning_output_tokens: number | string;
         total_tokens: number | string;
       }>(
@@ -308,6 +314,7 @@ export class PostgresSessionStatsRepository {
             coalesce(sum(input_tokens), 0) as input_tokens,
             coalesce(sum(output_tokens), 0) as output_tokens,
             coalesce(sum(cached_input_tokens), 0) as cached_input_tokens,
+            coalesce(sum(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
             coalesce(sum(reasoning_output_tokens), 0) as reasoning_output_tokens,
             coalesce(sum(total_tokens), 0) as total_tokens
           from agent_recall.sessions sessions
@@ -333,6 +340,9 @@ export class PostgresSessionStatsRepository {
       summary.inputTokens = numberValue(row.input_tokens);
       summary.outputTokens = numberValue(row.output_tokens);
       summary.cachedInputTokens = numberValue(row.cached_input_tokens);
+      if (numberValue(row.cache_creation_input_tokens) > 0) {
+        summary.cacheCreationInputTokens = numberValue(row.cache_creation_input_tokens);
+      }
       summary.reasoningOutputTokens = numberValue(row.reasoning_output_tokens);
       summary.totalTokens = numberValue(row.total_tokens);
     }
@@ -347,6 +357,9 @@ export class PostgresSessionStatsRepository {
         inputTokens: summary.inputTokens + source.inputTokens,
         outputTokens: summary.outputTokens + source.outputTokens,
         cachedInputTokens: summary.cachedInputTokens + source.cachedInputTokens,
+        ...((summary.cacheCreationInputTokens ?? 0) + (source.cacheCreationInputTokens ?? 0) > 0
+          ? { cacheCreationInputTokens: (summary.cacheCreationInputTokens ?? 0) + (source.cacheCreationInputTokens ?? 0) }
+          : {}),
         reasoningOutputTokens: summary.reasoningOutputTokens + source.reasoningOutputTokens,
         totalTokens: summary.totalTokens + source.totalTokens,
       }),
@@ -359,6 +372,7 @@ export class PostgresSessionStatsRepository {
       input_tokens: number | string;
       output_tokens: number | string;
       cached_input_tokens: number | string;
+      cache_creation_input_tokens: number | string;
       reasoning_output_tokens: number | string;
       total_tokens: number | string;
     }>(
@@ -376,7 +390,7 @@ export class PostgresSessionStatsRepository {
             ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
         )
         select
-          occurred_at, input_tokens, output_tokens, cached_input_tokens,
+          occurred_at, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
           reasoning_output_tokens, total_tokens
         from ranked
         where row_rank = 1
@@ -397,6 +411,9 @@ export class PostgresSessionStatsRepository {
             inputTokens: sum.inputTokens + numberValue(row.input_tokens),
             outputTokens: sum.outputTokens + numberValue(row.output_tokens),
             cachedInputTokens: sum.cachedInputTokens + numberValue(row.cached_input_tokens),
+            ...((sum.cacheCreationInputTokens ?? 0) + numberValue(row.cache_creation_input_tokens) > 0
+              ? { cacheCreationInputTokens: (sum.cacheCreationInputTokens ?? 0) + numberValue(row.cache_creation_input_tokens) }
+              : {}),
             reasoningOutputTokens: sum.reasoningOutputTokens + numberValue(row.reasoning_output_tokens),
             totalTokens: sum.totalTokens + numberValue(row.total_tokens),
           }),

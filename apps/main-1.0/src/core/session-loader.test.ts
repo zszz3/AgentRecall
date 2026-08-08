@@ -2439,12 +2439,11 @@ describe("Claude session loading", () => {
 
     const loaded = loadClaudeCliSessions(claudeDir);
 
-    // cached bucket = cache_read 300 + cache_creation 2000 = 2300; the 2000
-    // cache-creation tokens were previously dropped entirely.
     expect(loaded[0].session.tokenUsage).toEqual({
       inputTokens: 500,
       outputTokens: 100,
-      cachedInputTokens: 2300,
+      cachedInputTokens: 300,
+      cacheCreationInputTokens: 2000,
       reasoningOutputTokens: 0,
       totalTokens: 2900,
     });

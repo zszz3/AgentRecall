@@ -60,6 +60,7 @@ export function usageStatsDisplayRows(rows: SessionSourceStats[]): UsageStatsDis
     current.inputTokens += row.inputTokens;
     current.outputTokens += row.outputTokens;
     current.cachedInputTokens += row.cachedInputTokens;
+    current.cacheCreationInputTokens = (current.cacheCreationInputTokens ?? 0) + (row.cacheCreationInputTokens ?? 0);
     current.reasoningOutputTokens += row.reasoningOutputTokens;
     current.totalTokens += row.totalTokens;
     grouped.set(group.key, current);

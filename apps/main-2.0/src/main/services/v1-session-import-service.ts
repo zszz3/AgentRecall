@@ -83,6 +83,7 @@ interface V1SessionRow {
   input_tokens: number;
   output_tokens: number;
   cached_input_tokens: number;
+  cache_creation_input_tokens?: number;
   reasoning_output_tokens: number;
   total_tokens: number;
   ai_summary: string | null;
@@ -343,6 +344,9 @@ function readSessionBundle(db: DatabaseSyncType, row: V1SessionRow): V1SessionBu
         inputTokens: numberValue(event.input_tokens),
         outputTokens: numberValue(event.output_tokens),
         cachedInputTokens: numberValue(event.cached_input_tokens),
+        ...(numberValue(event.cache_creation_input_tokens) > 0
+          ? { cacheCreationInputTokens: numberValue(event.cache_creation_input_tokens) }
+          : {}),
         reasoningOutputTokens: numberValue(event.reasoning_output_tokens),
         totalTokens: numberValue(event.total_tokens),
         ...(nullableText(event.source_turn_id) ? { sourceTurnId: nullableText(event.source_turn_id) } : {}),
@@ -382,6 +386,9 @@ function readSessionBundle(db: DatabaseSyncType, row: V1SessionRow): V1SessionBu
         inputTokens: numberValue(row.input_tokens),
         outputTokens: numberValue(row.output_tokens),
         cachedInputTokens: numberValue(row.cached_input_tokens),
+        ...(numberValue(row.cache_creation_input_tokens) > 0
+          ? { cacheCreationInputTokens: numberValue(row.cache_creation_input_tokens) }
+          : {}),
         reasoningOutputTokens: numberValue(row.reasoning_output_tokens),
         totalTokens: numberValue(row.total_tokens),
       },

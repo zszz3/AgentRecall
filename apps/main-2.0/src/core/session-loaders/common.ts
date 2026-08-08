@@ -229,13 +229,15 @@ export function createTokenUsage(
   outputTokens: number,
   cachedInputTokens: number,
   reasoningOutputTokens: number,
+  cacheCreationInputTokens = 0,
 ): TokenUsage {
   return {
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
     reasoningOutputTokens,
-    totalTokens: inputTokens + outputTokens + cachedInputTokens + reasoningOutputTokens,
+    totalTokens: inputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens + reasoningOutputTokens,
   };
 }
 
@@ -253,11 +255,12 @@ export function tokenEvent(
   outputTokens: number,
   cachedInputTokens: number,
   reasoningOutputTokens: number,
+  cacheCreationInputTokens = 0,
 ): TokenUsageEvent {
   return {
     timestamp,
     dedupeKey,
-    ...createTokenUsage(inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens),
+    ...createTokenUsage(inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens, cacheCreationInputTokens),
   };
 }
 
@@ -275,6 +278,9 @@ export function tokenUsageFromEvents(events: TokenUsageEvent[]): TokenUsage {
     total.inputTokens += entry.inputTokens;
     total.outputTokens += entry.outputTokens;
     total.cachedInputTokens += entry.cachedInputTokens;
+    if (total.cacheCreationInputTokens !== undefined || entry.cacheCreationInputTokens !== undefined) {
+      total.cacheCreationInputTokens = (total.cacheCreationInputTokens ?? 0) + (entry.cacheCreationInputTokens ?? 0);
+    }
     total.reasoningOutputTokens += entry.reasoningOutputTokens;
     total.totalTokens += entry.totalTokens;
   }

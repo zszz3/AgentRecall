@@ -18,6 +18,7 @@ const EMPTY_STATS: SessionStats = {
     inputTokens: 0,
     outputTokens: 0,
     cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
     reasoningOutputTokens: 0,
     totalTokens: 0,
   },

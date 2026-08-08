@@ -64,6 +64,7 @@ export interface DerivedSessionTurn {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  cacheCreationInputTokens: number;
   reasoningOutputTokens: number;
   totalTokens: number;
   errorCount: number;
@@ -524,6 +525,7 @@ function buildTurns(
         inputTokens: total.inputTokens + event.inputTokens,
         outputTokens: total.outputTokens + event.outputTokens,
         cachedInputTokens: total.cachedInputTokens + event.cachedInputTokens,
+        cacheCreationInputTokens: total.cacheCreationInputTokens + (event.cacheCreationInputTokens ?? 0),
         reasoningOutputTokens: total.reasoningOutputTokens + event.reasoningOutputTokens,
         totalTokens: total.totalTokens + event.totalTokens,
       }),
@@ -531,6 +533,7 @@ function buildTurns(
         inputTokens: 0,
         outputTokens: 0,
         cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
         reasoningOutputTokens: 0,
         totalTokens: 0,
       },
@@ -625,6 +628,7 @@ function buildRawEvents(
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
         cachedInputTokens: event.cachedInputTokens,
+        cacheCreationInputTokens: event.cacheCreationInputTokens ?? 0,
         reasoningOutputTokens: event.reasoningOutputTokens,
         totalTokens: event.totalTokens,
         ...(event.sourceTurnId !== undefined ? { sourceTurnId: event.sourceTurnId } : {}),

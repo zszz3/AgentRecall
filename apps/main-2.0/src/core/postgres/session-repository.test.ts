@@ -83,8 +83,9 @@ const tokens: TokenUsageEvent[] = [{
   inputTokens: 100,
   outputTokens: 20,
   cachedInputTokens: 40,
+  cacheCreationInputTokens: 10,
   reasoningOutputTokens: 5,
-  totalTokens: 165,
+  totalTokens: 175,
 }];
 
 describe("PostgresSessionRepository", () => {
@@ -359,8 +360,9 @@ describe("PostgresSessionRepository", () => {
         inputTokens: 100,
         outputTokens: 20,
         cachedInputTokens: 40,
+        cacheCreationInputTokens: 10,
         reasoningOutputTokens: 5,
-        totalTokens: 165,
+        totalTokens: 175,
       },
     });
 
@@ -497,7 +499,7 @@ describe("PostgresSessionRepository", () => {
         status: "failed",
         userPreview: "Find the login failure",
         assistantPreview: "The cache key is stale.",
-        totalTokens: 165,
+        totalTokens: 175,
         errorCount: 1,
         toolNames: ["shell"],
         messageCount: 2,
@@ -626,15 +628,16 @@ describe("PostgresSessionRepository", () => {
       inputTokens: 100,
       outputTokens: 20,
       cachedInputTokens: 40,
+      cacheCreationInputTokens: 10,
       reasoningOutputTokens: 5,
-      totalTokens: 165,
+      totalTokens: 175,
     });
     expect(stats.bySource).toEqual([
       expect.objectContaining({ source: "codex-app", sessionCount: 1, messageCount: 2 }),
       expect.objectContaining({ source: "codex-cli", sessionCount: 1, messageCount: messages.length }),
     ]);
     expect(stats.dailyTokenUsage).toHaveLength(7);
-    expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(165);
+    expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(175);
   });
 
   it("compares the previous period and returns a trimmed Token trend", async () => {
@@ -642,13 +645,13 @@ describe("PostgresSessionRepository", () => {
 
     const currentDay = Date.parse("2026-07-20T12:00:00.000Z");
     const currentStats = await statsRepository.getStats({ period: "today" }, currentDay);
-    expect(currentStats.total.totalTokens).toBe(165);
+    expect(currentStats.total.totalTokens).toBe(175);
     expect(currentStats.previousTotal?.totalTokens).toBe(0);
 
     const followingDay = Date.parse("2026-07-21T12:00:00.000Z");
     const followingStats = await statsRepository.getStats({ period: "today" }, followingDay);
     expect(followingStats.total.totalTokens).toBe(0);
-    expect(followingStats.previousTotal?.totalTokens).toBe(165);
+    expect(followingStats.previousTotal?.totalTokens).toBe(175);
     expect((await statsRepository.getStats({ period: "allTime" }, followingDay)).previousTotal)
       .toBeNull();
 
@@ -656,7 +659,7 @@ describe("PostgresSessionRepository", () => {
       .resolves.toMatchObject({
         period: "today",
         granularity: "day",
-        buckets: [{ totalTokens: 165 }],
+        buckets: [{ totalTokens: 175 }],
       });
   });
 });

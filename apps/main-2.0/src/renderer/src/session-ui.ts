@@ -60,6 +60,7 @@ export function usageStatsDisplayRows(rows: SessionSourceStats[]): UsageStatsDis
     current.inputTokens += row.inputTokens;
     current.outputTokens += row.outputTokens;
     current.cachedInputTokens += row.cachedInputTokens;
+    current.cacheCreationInputTokens = (current.cacheCreationInputTokens ?? 0) + (row.cacheCreationInputTokens ?? 0);
     current.reasoningOutputTokens += row.reasoningOutputTokens;
     current.totalTokens += row.totalTokens;
     grouped.set(group.key, current);
@@ -95,10 +96,13 @@ export function formatUsageDelta(delta: UsageDelta): string {
   return `${delta.kind === "up" ? "+" : "-"}${delta.percent ?? 0}%`;
 }
 
-export function usageCacheRate(value: Pick<SessionStatsSummary, "inputTokens" | "cachedInputTokens">): number | null {
+export function usageCacheRate(
+  value: Pick<SessionStatsSummary, "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens">,
+): number | null {
   const inputTokens = Math.max(0, value.inputTokens);
   const cachedInputTokens = Math.max(0, value.cachedInputTokens);
-  const totalInputTokens = inputTokens + cachedInputTokens;
+  const cacheCreationInputTokens = Math.max(0, value.cacheCreationInputTokens ?? 0);
+  const totalInputTokens = inputTokens + cacheCreationInputTokens + cachedInputTokens;
   if (totalInputTokens === 0) return null;
   return Math.round((cachedInputTokens / totalInputTokens) * 1_000) / 10;
 }

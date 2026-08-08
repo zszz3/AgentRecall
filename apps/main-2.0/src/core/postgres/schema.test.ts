@@ -81,6 +81,16 @@ describe("AgentRecall PostgreSQL schema", () => {
       is_nullable: "NO",
       column_default: "true",
     }]);
+    for (const tableName of ["sessions", "session_turns", "token_events"]) {
+      const cacheCreationColumns = await database.query<{ column_name: string }>(`
+        select column_name
+        from information_schema.columns
+        where table_schema = 'agent_recall'
+          and table_name = $1
+          and column_name = 'cache_creation_input_tokens'
+      `, [tableName]);
+      expect(cacheCreationColumns.rows).toEqual([{ column_name: "cache_creation_input_tokens" }]);
+    }
     const workflowOriginColumns = await database.query<{ column_name: string; data_type: string; is_nullable: string }>(`
       select column_name, data_type, is_nullable
       from information_schema.columns
@@ -524,9 +534,9 @@ describe("AgentRecall PostgreSQL schema", () => {
     }))).toEqual(
       [...sessionSources].sort().map((source) => ({
         session_key: `${source}:session`,
-        file_mtime_ms: source === "claude-cli" ? 123 : 0,
-        content_indexed_mtime_ms: source === "claude-cli" ? 123 : 0,
-        content_indexed_size: source === "claude-cli" ? 456 : 0,
+        file_mtime_ms: 0,
+        content_indexed_mtime_ms: 0,
+        content_indexed_size: 0,
         custom_title: `Custom ${source}`,
         favorited: true,
       })),

@@ -492,14 +492,14 @@ async function insertTurns(
           id, session_key, turn_index, source_message_index, source_turn_id, synthetic, status,
           started_at, ended_at, duration_ms, time_to_first_token_ms, abort_reason,
           user_text, assistant_text, tool_text, search_text,
-          input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+          input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
           total_tokens, error_count, tool_names, derivation_version
         )
         select
           id, $1, turn_index, source_message_index, source_turn_id, synthetic, status,
           started_at, ended_at, duration_ms, time_to_first_token_ms, abort_reason,
           user_text, assistant_text, tool_text, search_text,
-          input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+          input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
           total_tokens, error_count, tool_names, derivation_version
         from jsonb_to_recordset($2::jsonb) as records(
           id text,
@@ -520,6 +520,7 @@ async function insertTurns(
           input_tokens integer,
           output_tokens integer,
           cached_input_tokens integer,
+          cache_creation_input_tokens integer,
           reasoning_output_tokens integer,
           total_tokens integer,
           error_count integer,
@@ -546,6 +547,7 @@ async function insertTurns(
         input_tokens: turn.inputTokens,
         output_tokens: turn.outputTokens,
         cached_input_tokens: turn.cachedInputTokens,
+        cache_creation_input_tokens: turn.cacheCreationInputTokens ?? 0,
         reasoning_output_tokens: turn.reasoningOutputTokens,
         total_tokens: turn.totalTokens,
         error_count: turn.errorCount,
@@ -717,7 +719,7 @@ export class PostgresSessionRepository {
             session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path,
             original_title, first_question, started_at, file_mtime_ms, file_size,
             pr_url, pr_number, message_count, turn_count, input_tokens, output_tokens,
-            cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
+            cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id,
             codex_history_mode
           )
@@ -725,7 +727,7 @@ export class PostgresSessionRepository {
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18,
-            $19, $20, $21, now(), $22, $23, $24, $25, $26
+            $19, $20, $21, $22, now(), $23, $24, $25, $26, $27
           )
           on conflict (session_key) do update set
             raw_id = excluded.raw_id,
@@ -746,6 +748,7 @@ export class PostgresSessionRepository {
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
             cached_input_tokens = excluded.cached_input_tokens,
+            cache_creation_input_tokens = excluded.cache_creation_input_tokens,
             reasoning_output_tokens = excluded.reasoning_output_tokens,
             total_tokens = excluded.total_tokens,
             indexed_at = excluded.indexed_at,
@@ -776,6 +779,7 @@ export class PostgresSessionRepository {
           tokenUsage.inputTokens,
           tokenUsage.outputTokens,
           tokenUsage.cachedInputTokens,
+          tokenUsage.cacheCreationInputTokens ?? 0,
           tokenUsage.reasoningOutputTokens,
           tokenUsage.totalTokens,
           session.fileMtimeMs,
@@ -862,17 +866,18 @@ export class PostgresSessionRepository {
           `
             insert into agent_recall.token_events (
               session_key, dedupe_key, occurred_at, input_tokens, output_tokens,
-              cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+              cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
             )
             select
               $1, dedupe_key, occurred_at, input_tokens, output_tokens,
-              cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+              cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
             from jsonb_to_recordset($2::jsonb) as records(
               dedupe_key text,
               occurred_at timestamptz,
               input_tokens bigint,
               output_tokens bigint,
               cached_input_tokens bigint,
+              cache_creation_input_tokens bigint,
               reasoning_output_tokens bigint,
               total_tokens bigint,
               source_turn_id text
@@ -886,6 +891,7 @@ export class PostgresSessionRepository {
               input_tokens: event.inputTokens,
               output_tokens: event.outputTokens,
               cached_input_tokens: event.cachedInputTokens,
+              cache_creation_input_tokens: event.cacheCreationInputTokens ?? 0,
               reasoning_output_tokens: event.reasoningOutputTokens,
               total_tokens: event.totalTokens,
               source_turn_id: event.sourceTurnId ?? null,
@@ -963,14 +969,14 @@ export class PostgresSessionRepository {
             session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path,
             original_title, first_question, started_at, file_mtime_ms, file_size,
             pr_url, pr_number, message_count, turn_count, input_tokens, output_tokens,
-            cached_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
+            cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id
           )
           values (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12,
             $13, $14, $15, 0, $16, $17,
-            $18, $19, $20, now(), 0, 0, $21, $22
+            $18, $19, $20, $21, now(), 0, 0, $22, $23
           )
           on conflict (session_key) do update set
             raw_id = excluded.raw_id,
@@ -990,6 +996,7 @@ export class PostgresSessionRepository {
             input_tokens = excluded.input_tokens,
             output_tokens = excluded.output_tokens,
             cached_input_tokens = excluded.cached_input_tokens,
+            cache_creation_input_tokens = excluded.cache_creation_input_tokens,
             reasoning_output_tokens = excluded.reasoning_output_tokens,
             total_tokens = excluded.total_tokens,
             indexed_at = excluded.indexed_at,
@@ -1016,6 +1023,7 @@ export class PostgresSessionRepository {
           tokenUsage.inputTokens,
           tokenUsage.outputTokens,
           tokenUsage.cachedInputTokens,
+          tokenUsage.cacheCreationInputTokens ?? 0,
           tokenUsage.reasoningOutputTokens,
           tokenUsage.totalTokens,
           Boolean(session.isSubagent),
@@ -1030,9 +1038,9 @@ export class PostgresSessionRepository {
             `
               insert into agent_recall.token_events (
                 session_key, dedupe_key, occurred_at, input_tokens, output_tokens,
-                cached_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
+                cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
               )
-              values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             `,
             [
               session.sessionKey,
@@ -1041,6 +1049,7 @@ export class PostgresSessionRepository {
               event.inputTokens,
               event.outputTokens,
               event.cachedInputTokens,
+              event.cacheCreationInputTokens ?? 0,
               event.reasoningOutputTokens,
               event.totalTokens,
               event.sourceTurnId ? postgresText(event.sourceTurnId).trim() || null : null,
@@ -1201,11 +1210,12 @@ export class PostgresSessionRepository {
       input_tokens: number | string;
       output_tokens: number | string;
       cached_input_tokens: number | string;
+      cache_creation_input_tokens: number | string;
       reasoning_output_tokens: number | string;
       total_tokens: number | string;
       source_turn_id: string | null;
     }>(`
-      select occurred_at, dedupe_key, input_tokens, output_tokens, cached_input_tokens,
+      select occurred_at, dedupe_key, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
              reasoning_output_tokens, total_tokens, source_turn_id
       from agent_recall.token_events
       where session_key = $1
@@ -1217,6 +1227,9 @@ export class PostgresSessionRepository {
       inputTokens: numberValue(row.input_tokens),
       outputTokens: numberValue(row.output_tokens),
       cachedInputTokens: numberValue(row.cached_input_tokens),
+      ...(numberValue(row.cache_creation_input_tokens) > 0
+        ? { cacheCreationInputTokens: numberValue(row.cache_creation_input_tokens) }
+        : {}),
       reasoningOutputTokens: numberValue(row.reasoning_output_tokens),
       totalTokens: numberValue(row.total_tokens),
       sourceTurnId: row.source_turn_id,
@@ -1634,7 +1647,7 @@ export class PostgresSessionRepository {
               original_title, first_question, started_at, file_mtime_ms, file_size,
               pr_url, pr_number, custom_title, favorited, hidden,
               last_opened_at, last_resumed_at, message_count, turn_count,
-              input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+              input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
               total_tokens, indexed_at, is_subagent, parent_session_id,
               ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
               codex_history_mode
@@ -1644,7 +1657,7 @@ export class PostgresSessionRepository {
               original_title, first_question, started_at, file_mtime_ms, file_size,
               pr_url, pr_number, custom_title, favorited, hidden,
               last_opened_at, last_resumed_at, message_count, turn_count,
-              input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+              input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
               total_tokens, indexed_at, is_subagent, parent_session_id,
               ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
               codex_history_mode
@@ -1880,6 +1893,7 @@ export class PostgresSessionRepository {
           input_tokens = 0,
           output_tokens = 0,
           cached_input_tokens = 0,
+          cache_creation_input_tokens = 0,
           reasoning_output_tokens = 0,
           total_tokens = 0,
           original_title = '',

@@ -788,17 +788,27 @@ function addTokenUsage(total: TokenUsage, next: TokenUsage): void {
   total.inputTokens += next.inputTokens;
   total.outputTokens += next.outputTokens;
   total.cachedInputTokens += next.cachedInputTokens;
+  if (total.cacheCreationInputTokens !== undefined || next.cacheCreationInputTokens !== undefined) {
+    total.cacheCreationInputTokens = (total.cacheCreationInputTokens ?? 0) + (next.cacheCreationInputTokens ?? 0);
+  }
   total.reasoningOutputTokens += next.reasoningOutputTokens;
   total.totalTokens += next.totalTokens;
 }
 
-function createTokenUsage(inputTokens: number, outputTokens: number, cachedInputTokens: number, reasoningOutputTokens: number): TokenUsage {
+function createTokenUsage(
+  inputTokens: number,
+  outputTokens: number,
+  cachedInputTokens: number,
+  reasoningOutputTokens: number,
+  cacheCreationInputTokens = 0,
+): TokenUsage {
   return {
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
     reasoningOutputTokens,
-    totalTokens: inputTokens + outputTokens + cachedInputTokens + reasoningOutputTokens,
+    totalTokens: inputTokens + outputTokens + cachedInputTokens + cacheCreationInputTokens + reasoningOutputTokens,
   };
 }
 
@@ -816,11 +826,12 @@ function tokenEvent(
   outputTokens: number,
   cachedInputTokens: number,
   reasoningOutputTokens: number,
+  cacheCreationInputTokens = 0,
 ): TokenUsageEvent {
   return {
     timestamp,
     dedupeKey,
-    ...createTokenUsage(inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens),
+    ...createTokenUsage(inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens, cacheCreationInputTokens),
   };
 }
 
@@ -842,6 +853,7 @@ function subtractTokenUsage(current: TokenUsage, previous: TokenUsage | null): T
     Math.max(0, current.outputTokens - previous.outputTokens),
     Math.max(0, current.cachedInputTokens - previous.cachedInputTokens),
     Math.max(0, current.reasoningOutputTokens - previous.reasoningOutputTokens),
+    Math.max(0, (current.cacheCreationInputTokens ?? 0) - (previous.cacheCreationInputTokens ?? 0)),
   );
 }
 
@@ -997,19 +1009,16 @@ function extractClaudeTokenEvents(rows: unknown[]): TokenUsageEvent[] {
     const usage = objectField(message, "usage");
     if (!usage) return;
 
-    // Anthropic splits input across three billed buckets: fresh `input_tokens`,
-    // `cache_creation_input_tokens` (written to cache, billed ~1.25x) and
-    // `cache_read_input_tokens` (cache hit, billed ~0.1x). All three are really
-    // processed, so the cache buckets belong in the cached total.
     const cached =
       numberField(usage, "cache_read_input_tokens") +
-      numberField(usage, "cached_input_tokens") +
-      numberField(usage, "cache_creation_input_tokens");
+      numberField(usage, "cached_input_tokens");
+    const cacheCreation = numberField(usage, "cache_creation_input_tokens");
     const entry = createTokenUsage(
       numberField(usage, "input_tokens"),
       numberField(usage, "output_tokens"),
       cached,
       numberField(usage, "reasoning_output_tokens"),
+      cacheCreation,
     );
     const key = stringField(message, "id") || stringField(row, "uuid") || `${index}:${JSON.stringify(usage)}`;
     putTokenEvent(
@@ -2907,8 +2916,9 @@ function zcodeTokenEventsFromModelUsage(
       const id = stringField(row, "id");
       const assistantMessageId = stringField(row, "assistant_message_id");
       if (!id || !assistantMessageIds.has(assistantMessageId)) continue;
-      const cached = Math.max(0, numberField(row, "cache_read_input_tokens")) + Math.max(0, numberField(row, "cache_creation_input_tokens"));
-      const freshInput = Math.max(0, numberField(row, "input_tokens") - cached);
+      const cached = Math.max(0, numberField(row, "cache_read_input_tokens"));
+      const cacheCreation = Math.max(0, numberField(row, "cache_creation_input_tokens"));
+      const freshInput = Math.max(0, numberField(row, "input_tokens") - cached - cacheCreation);
       events.push(
         tokenEvent(
           timestampMs(unknownField(row, "completed_at")) || timestampMs(unknownField(row, "started_at")),
@@ -2917,6 +2927,7 @@ function zcodeTokenEventsFromModelUsage(
           Math.max(0, numberField(row, "output_tokens")),
           cached,
           Math.max(0, numberField(row, "reasoning_tokens")),
+          cacheCreation,
         ),
       );
     }
