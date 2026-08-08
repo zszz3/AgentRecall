@@ -304,6 +304,56 @@ describe("AgentRecall PostgreSQL schema", () => {
     await upgradedDatabase.close();
   });
 
+  it("repairs directory memory tables when version 28 was already used by another migration", async () => {
+    const pool = new PGliteTestPool();
+    const branchDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 27),
+    });
+    await branchDatabase.initialize();
+    await branchDatabase.query(`
+      INSERT INTO agent_recall.schema_migrations (version, name)
+      VALUES (28, 'persist Workflow review history and full-rerun lineage');
+    `);
+
+    const upgradedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await upgradedDatabase.initialize();
+
+    const tables = await upgradedDatabase.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'agent_recall'
+        AND table_name IN (
+          'openviking_memories',
+          'openviking_memory_evidence',
+          'openviking_memory_feedback',
+          'openviking_commit_runs',
+          'openviking_operation_events',
+          'openviking_recall_traces'
+        )
+      ORDER BY table_name
+    `);
+    expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "openviking_commit_runs",
+      "openviking_memories",
+      "openviking_memory_evidence",
+      "openviking_memory_feedback",
+      "openviking_operation_events",
+      "openviking_recall_traces",
+    ]);
+
+    const repairMigration = await upgradedDatabase.query<{ name: string }>(`
+      SELECT name FROM agent_recall.schema_migrations WHERE version = 32
+    `);
+    expect(repairMigration.rows).toEqual([{
+      name: "repair directory memory control plane after migration version collision",
+    }]);
+    await upgradedDatabase.close();
+  });
+
   it("stores Turn search and trace hierarchy as first-class PostgreSQL structures", async () => {
     const database = new PostgresDatabase(new PGliteTestPool(), {
       migrationLock: false,
