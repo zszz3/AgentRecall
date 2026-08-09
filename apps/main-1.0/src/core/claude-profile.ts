@@ -201,21 +201,45 @@ function claudeApiConfigWithPresetDefaults(config: Partial<ClaudeApiConfig>): Cl
 function applyCustomClaudeEnv(settings: Record<string, unknown>, apiConfig: ClaudeApiConfig): void {
   if (!apiConfig.customApiKey) throw new Error(`API key is required to apply ${apiConfig.customProviderName}.`);
   if (!apiConfig.customBaseUrl) throw new Error(`Base URL is required to apply ${apiConfig.customProviderName}.`);
-  if (!apiConfig.customModel) throw new Error(`Model is required to apply ${apiConfig.customProviderName}.`);
 
   const env = ensureEnv(settings);
   clearClaudeRouteEnv(settings);
   env.ANTHROPIC_BASE_URL = apiConfig.customBaseUrl;
   env[apiConfig.customApiKeyField] = apiConfig.customApiKey;
-  env.ANTHROPIC_MODEL = apiConfig.customModel;
-  env.ANTHROPIC_DEFAULT_HAIKU_MODEL = apiConfig.customHaikuModel || apiConfig.customModel;
-  env.ANTHROPIC_DEFAULT_SONNET_MODEL = apiConfig.customSonnetModel || apiConfig.customModel;
-  env.ANTHROPIC_DEFAULT_OPUS_MODEL = apiConfig.customOpusModel || apiConfig.customModel;
+  // An empty model means "keep whatever the config file already selects", the same thing the
+  // Default entry means in every model picker. Pinning the route without pinning the model is a
+  // legitimate setup, so the model variables are simply left unset rather than rejected.
+  if (apiConfig.customModel) {
+    env.ANTHROPIC_MODEL = apiConfig.customModel;
+    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = apiConfig.customHaikuModel || apiConfig.customModel;
+    env.ANTHROPIC_DEFAULT_SONNET_MODEL = apiConfig.customSonnetModel || apiConfig.customModel;
+    env.ANTHROPIC_DEFAULT_OPUS_MODEL = apiConfig.customOpusModel || apiConfig.customModel;
+  }
 
   const preset = CLAUDE_API_PROVIDER_PRESETS.find((item) => item.id === apiConfig.customProviderId);
   for (const [key, value] of Object.entries(preset?.extraEnv ?? {})) {
     env[key] = value;
   }
+}
+
+/**
+ * Resolves the credential the Claude CLI would use for a config directory, following the same
+ * order it does: an explicitly typed key, then `settings.json`'s `env`, then the process
+ * environment. Mirrors `resolveCodexProviderCredential` so callers that must work against either
+ * agent — the AI summary panel, for one — can treat the two the same way.
+ */
+export async function resolveClaudeProviderCredential(input: {
+  claudeHome?: string;
+  apiKeyField?: ClaudeApiConfig["customApiKeyField"];
+  apiKey?: string;
+  apiKeySource?: string;
+}): Promise<{ apiKey: string; source: string | null }> {
+  return resolveClaudeCredential({
+    claudeHome: resolveProviderConfigDirectory(input.claudeHome, ".claude"),
+    apiKeyField: input.apiKeyField,
+    explicitKey: input.apiKey,
+    explicitSource: input.apiKeySource,
+  });
 }
 
 async function resolveClaudeCredential(options: {

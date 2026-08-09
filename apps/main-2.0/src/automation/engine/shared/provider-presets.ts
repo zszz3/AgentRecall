@@ -583,8 +583,22 @@ const PROVIDER_MODEL_CATALOG_URLS: Readonly<Record<string, string>> = {
   "claude-code-deepseek": "https://api.deepseek.com/models",
 };
 
+/**
+ * The transcribed CC Switch data carries upstream's own bare `"Default"` label on every preset,
+ * which overrides ours in 52 places and puts the raw word back in the pickers next to real model
+ * names. Re-point it at `defaultModelOption()` here so the Default label has exactly one source,
+ * and a future re-transcription cannot reintroduce the divergence.
+ */
+function withCanonicalDefaultModel(preset: AgentProviderPreset): AgentProviderPreset {
+  if (!preset.models?.some((model) => model.id === DEFAULT_MODEL_ID)) return preset;
+  return {
+    ...preset,
+    models: preset.models.map((model) => (model.id === DEFAULT_MODEL_ID ? defaultModelOption() : model)),
+  };
+}
+
 export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
-  ...CC_SWITCH_PROVIDER_PRESETS.map((preset) => ({
+  ...CC_SWITCH_PROVIDER_PRESETS.map((preset) => withCanonicalDefaultModel({
     ...preset,
     ...(PROVIDER_MODEL_CATALOG_URLS[preset.id]
       ? { modelCatalogUrl: PROVIDER_MODEL_CATALOG_URLS[preset.id] }

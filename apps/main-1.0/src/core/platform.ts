@@ -26,8 +26,14 @@ import {
 } from "./terminal-title";
 import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
+import { normalizeSummaryReasoningEffort, type SummaryReasoningEffort } from "./summary-settings";
 
 export { type TerminalChoice, defaultTerminalFor, normalizeTerminal, terminalOptionsFor } from "./terminal-options";
+export {
+  SUMMARY_REASONING_EFFORTS,
+  normalizeSummaryReasoningEffort,
+  type SummaryReasoningEffort,
+} from "./summary-settings";
 export {
   defaultApiConfig,
   defaultClaudeApiConfig,
@@ -93,7 +99,17 @@ export interface AppSettings {
   summaryMaxAgeDays: number;
   compressionConcurrency: number;
   summarySource: "codex" | "claude" | "custom";
+  /** Only meaningful for `summarySource === "custom"`: reuse the Codex tab's route or keep a separate one. */
   summaryApiConfigMode: "inherit_codex" | "custom";
+  summaryCodexModel: string;
+  summaryClaudeModel: string;
+  /**
+   * The Codex/Claude summary sources spawn a CLI, so the only lever they have is which config
+   * directory it reads. Empty means "follow the machine's own `~/.codex` / `~/.claude`".
+   */
+  summaryCodexConfigDir: string;
+  summaryClaudeConfigDir: string;
+  summaryReasoningEffort: SummaryReasoningEffort;
   sessionSearchMcpEnabled: boolean;
   skillSyncEnabled: boolean;
   skillSyncSupabaseUrl: string;
@@ -152,8 +168,13 @@ export const defaultSettings: AppSettings = {
   summaryAutoBackfill: false,
   summaryMaxAgeDays: 30,
   compressionConcurrency: 8,
-  summarySource: "custom",
+  summarySource: "codex",
   summaryApiConfigMode: "inherit_codex",
+  summaryCodexModel: "",
+  summaryClaudeModel: "",
+  summaryCodexConfigDir: "",
+  summaryClaudeConfigDir: "",
+  summaryReasoningEffort: "medium",
   sessionSearchMcpEnabled: true,
   skillSyncEnabled: false,
   skillSyncSupabaseUrl: "",
@@ -182,6 +203,11 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     showInDock: merged.showInDock !== false,
     summarySource: merged.summarySource === "claude" || merged.summarySource === "custom" ? merged.summarySource : "codex",
     summaryApiConfigMode: merged.summaryApiConfigMode === "custom" ? "custom" : "inherit_codex",
+    summaryCodexModel: String(merged.summaryCodexModel ?? "").trim(),
+    summaryClaudeModel: String(merged.summaryClaudeModel ?? "").trim(),
+    summaryCodexConfigDir: String(merged.summaryCodexConfigDir ?? "").trim(),
+    summaryClaudeConfigDir: String(merged.summaryClaudeConfigDir ?? "").trim(),
+    summaryReasoningEffort: normalizeSummaryReasoningEffort(merged.summaryReasoningEffort),
     skillSyncEnabled: Boolean(merged.skillSyncEnabled),
     skillSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.skillSyncSupabaseUrl),
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),

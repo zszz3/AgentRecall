@@ -45,6 +45,14 @@ const V1_SETTINGS_KEYS = [
   "summaryMaxAgeDays",
   "compressionConcurrency",
   "summarySource",
+  // The whole summary route, not just its source. Importing the source alone used to carry the
+  // user across without the model, directory, or provider mode that make it resolve.
+  "summaryApiConfigMode",
+  "summaryCodexModel",
+  "summaryClaudeModel",
+  "summaryCodexConfigDir",
+  "summaryClaudeConfigDir",
+  "summaryReasoningEffort",
   "sessionSearchMcpEnabled",
   "remoteSyncEnabled",
   "syncSessionAttachments",

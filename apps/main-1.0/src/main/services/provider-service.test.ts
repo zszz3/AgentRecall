@@ -72,6 +72,8 @@ function createHarness(settings: AppSettings = cloneSettings()) {
       activeModel: "",
       activeProvider: null,
       providers: [],
+      credentialSource: null,
+      hasApiKey: false,
     })),
     probeCodexModels: vi.fn(async () => ({
       models: ["model-a"],
@@ -86,6 +88,10 @@ function createHarness(settings: AppSettings = cloneSettings()) {
       credentialSource: "API key field",
     })),
     resolveCodexProviderCredential: vi.fn(async ({ apiKey }) => ({
+      apiKey: apiKey || "",
+      source: apiKey ? "API key field" : null,
+    })),
+    resolveClaudeProviderCredential: vi.fn(async ({ apiKey }) => ({
       apiKey: apiKey || "",
       source: apiKey ? "API key field" : null,
     })),
@@ -334,6 +340,67 @@ describe("ProviderService settings and keys", () => {
     expect(harness.operations.probeCodexModels).toHaveBeenNthCalledWith(2, expect.objectContaining({
       apiKey: "summary-key",
       apiKeySource: "AgentRecall summary key store",
+    }));
+  });
+
+  it("probes the summary Claude route with its own key store and directory", async () => {
+    const settings = cloneSettings();
+    settings.claudeApiConfig = {
+      ...settings.claudeApiConfig,
+      customProviderId: "claude-tab-provider",
+      customConfigDir: "/tmp/claude-tab",
+    };
+    settings.summaryClaudeConfigDir = "/tmp/summary-claude";
+    settings.summaryApiConfig = { ...settings.summaryApiConfig, customProviderId: "summary-provider" };
+    const harness = createHarness(settings);
+    harness.keys.set("claude:claude-tab-provider", "claude-tab-key");
+    harness.keys.set("summary:summary-provider", "summary-key");
+
+    await harness.service.probeClaudeModels({
+      baseUrl: "https://summary.example",
+      apiKey: "",
+      apiFormat: "anthropic",
+      apiKeyField: "ANTHROPIC_AUTH_TOKEN",
+      keyTarget: "summary",
+    });
+    await harness.service.probeClaudeModels({
+      baseUrl: "https://claude.example",
+      apiKey: "",
+      apiFormat: "anthropic",
+      apiKeyField: "ANTHROPIC_AUTH_TOKEN",
+    });
+
+    // Reading the Claude tab's key or directory for a summary probe would make the panel report
+    // a route the summary run never uses.
+    expect(harness.operations.probeClaudeModels).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      apiKey: "summary-key",
+      claudeHome: "/tmp/summary-claude",
+      apiKeySource: "AgentRecall summary key store",
+    }));
+    expect(harness.operations.probeClaudeModels).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      apiKey: "claude-tab-key",
+      claudeHome: "/tmp/claude-tab",
+    }));
+  });
+
+  it("treats an empty summary Claude directory as the machine's own ~/.claude", async () => {
+    const settings = cloneSettings();
+    settings.claudeApiConfig = { ...settings.claudeApiConfig, customConfigDir: "/tmp/claude-tab" };
+    settings.summaryClaudeConfigDir = "";
+    const harness = createHarness(settings);
+
+    await harness.service.probeClaudeModels({
+      baseUrl: "https://summary.example",
+      apiKey: "",
+      apiFormat: "anthropic",
+      apiKeyField: "ANTHROPIC_AUTH_TOKEN",
+      keyTarget: "summary",
+    });
+
+    // Falling through to the Claude tab's directory would silently turn "follow this machine"
+    // into "follow the other tab".
+    expect(harness.operations.probeClaudeModels).toHaveBeenCalledWith(expect.objectContaining({
+      claudeHome: undefined,
     }));
   });
 });

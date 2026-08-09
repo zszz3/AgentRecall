@@ -36,6 +36,12 @@ describe("OpenViking main-process wiring", () => {
       "const configuredCodexHome = settings.apiConfig.customConfigDir.trim() || codexHome",
     );
     expect(mainSource).toContain("loadActiveCodexSummaryEndpointDefaults(configuredCodexHome)");
+    // The Codex summary source keeps its own directory, and extraction has to read that one
+    // rather than the Codex tab's, or memory extraction and summaries use different routes.
+    expect(mainSource).toContain(
+      "const summaryCodexHome = settings.summaryCodexConfigDir.trim() || codexHome",
+    );
+    expect(mainSource).toContain("loadActiveCodexSummaryEndpointDefaults(summaryCodexHome)");
     expect(mainSource).toContain(
       "resolveOpenVikingExtractionConfig({ settings, codex, codexEndpoint })",
     );

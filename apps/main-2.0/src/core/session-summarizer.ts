@@ -22,6 +22,12 @@ export interface SummaryEndpoint {
   cwd?: string;
   modelArg?: string;
   reasoningEffort?: string;
+  /**
+   * Extra environment for CLI-backed endpoints. This is how a summary source points `codex` /
+   * `claude` at a config directory other than the machine's own, since neither CLI takes a base
+   * URL or an API key on the command line.
+   */
+  env?: Record<string, string>;
   onTemporarySession?: (sessionKey: string) => void;
 }
 
@@ -237,28 +243,54 @@ export function isTemperatureUnsupported(status: number, detail: string): boolea
   return status === 400 && /temperature/i.test(detail) && /(deprecated|unsupported|not support|does not support|only the default)/i.test(detail);
 }
 
+// The mirror of the temperature case: plenty of OpenAI-compatible gateways front models that
+// have no reasoning stage and reject the parameter. Retrying without it keeps a summary working
+// on those providers instead of failing because of a control the user set for a different model.
+export function isReasoningEffortUnsupported(status: number, detail: string): boolean {
+  return status === 400
+    && /reasoning/i.test(detail)
+    && /(deprecated|unsupported|not support|does not support|unknown|unrecognized|invalid|extra)/i.test(detail);
+}
+
+/**
+ * Issues the request, dropping `temperature` and then `reasoning` if the provider says it cannot
+ * accept them. Each knob is retried at most once, so this makes at most three round trips.
+ */
+async function postWithOptionalKnobs(
+  send: (knobs: { temperature: boolean; reasoning: boolean }) => Promise<Response>,
+  wantsReasoning: boolean,
+): Promise<Response> {
+  const knobs = { temperature: true, reasoning: wantsReasoning };
+  let response = await send(knobs);
+  while (!response.ok) {
+    const detail = await safeReadText(response);
+    if (knobs.temperature && isTemperatureUnsupported(response.status, detail)) knobs.temperature = false;
+    else if (knobs.reasoning && isReasoningEffortUnsupported(response.status, detail)) knobs.reasoning = false;
+    else throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
+    response = await send(knobs);
+  }
+  return response;
+}
+
 // OpenAI-compatible /chat/completions (DeepSeek, GLM pay-as-you-go, Kimi, etc.).
 async function openaiChatCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
-  const request = (includeTemperature: boolean) =>
-    postJson(
-      `${endpoint.baseUrl}/chat/completions`,
-      { Authorization: `Bearer ${endpoint.apiKey}` },
-      { model: endpoint.model, messages, ...(includeTemperature ? { temperature: 0.2 } : {}), stream: false },
-      signal,
-    );
-  let response = await request(true);
-  if (!response.ok) {
-    const detail = await safeReadText(response);
-    if (isTemperatureUnsupported(response.status, detail)) {
-      response = await request(false);
-    } else {
-      throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
-    }
-  }
-  if (!response.ok) {
-    const detail = await safeReadText(response);
-    throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
-  }
+  const effort = endpoint.reasoningEffort?.trim() ?? "";
+  const response = await postWithOptionalKnobs(
+    (knobs) =>
+      postJson(
+        `${endpoint.baseUrl}/chat/completions`,
+        { Authorization: `Bearer ${endpoint.apiKey}` },
+        {
+          model: endpoint.model,
+          messages,
+          ...(knobs.temperature ? { temperature: 0.2 } : {}),
+          ...(knobs.reasoning ? { reasoning_effort: effort } : {}),
+          stream: false,
+        },
+        signal,
+      ),
+    Boolean(effort),
+  );
   const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const content = data.choices?.[0]?.message?.content;
   if (typeof content !== "string" || !content.trim()) throw new Error("AI summary response had no content.");
@@ -267,32 +299,24 @@ async function openaiChatCompletion(endpoint: SummaryEndpoint, messages: ChatMes
 
 // OpenAI-compatible Responses API (/responses), used by Codex-style providers.
 async function openaiResponsesCompletion(endpoint: SummaryEndpoint, messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
-  const request = (includeTemperature: boolean) =>
-    postJson(
-      `${endpoint.baseUrl}/responses`,
-      { Authorization: `Bearer ${endpoint.apiKey}` },
-      {
-        model: endpoint.model,
-        instructions: responsesInstructions(messages),
-        input: toResponsesInput(messages),
-        ...(includeTemperature ? { temperature: 0.2 } : {}),
-        stream: false,
-      },
-      signal,
-    );
-  let response = await request(true);
-  if (!response.ok) {
-    const detail = await safeReadText(response);
-    if (isTemperatureUnsupported(response.status, detail)) {
-      response = await request(false);
-    } else {
-      throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
-    }
-  }
-  if (!response.ok) {
-    const detail = await safeReadText(response);
-    throw new Error(`AI summary request failed (HTTP ${response.status}). ${detail}`.trim());
-  }
+  const effort = endpoint.reasoningEffort?.trim() ?? "";
+  const response = await postWithOptionalKnobs(
+    (knobs) =>
+      postJson(
+        `${endpoint.baseUrl}/responses`,
+        { Authorization: `Bearer ${endpoint.apiKey}` },
+        {
+          model: endpoint.model,
+          instructions: responsesInstructions(messages),
+          input: toResponsesInput(messages),
+          ...(knobs.temperature ? { temperature: 0.2 } : {}),
+          ...(knobs.reasoning ? { reasoning: { effort } } : {}),
+          stream: false,
+        },
+        signal,
+      ),
+    Boolean(effort),
+  );
   const data = (await response.json()) as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
   const content =
     typeof data.output_text === "string"
@@ -313,10 +337,15 @@ async function openaiResponsesCompletion(endpoint: SummaryEndpoint, messages: Ch
 // it goes through a shell. We therefore set `shell: true` on win32 and quote the
 // arguments ourselves. The prompt is sent through stdin instead of being added
 // to the command line, because Windows has a small command-line length limit.
-function spawnCli(command: string, args: string[], options: { cwd: string; signal: AbortSignal; input: string }) {
+function spawnCli(
+  command: string,
+  args: string[],
+  options: { cwd: string; signal: AbortSignal; input: string; env?: Record<string, string> },
+) {
   const stdio: ["pipe", "pipe", "pipe"] = ["pipe", "pipe", "pipe"];
+  const env = options.env ? { ...process.env, ...options.env } : process.env;
   if (process.platform !== "win32") {
-    const proc = spawn(command, args, { cwd: options.cwd, env: process.env, stdio, signal: options.signal });
+    const proc = spawn(command, args, { cwd: options.cwd, env, stdio, signal: options.signal });
     proc.stdin.end(options.input);
     return proc;
   }
@@ -326,7 +355,7 @@ function spawnCli(command: string, args: string[], options: { cwd: string; signa
   const cmdString = [command, ...quotedArgs].join(" ");
   const proc = spawn(cmdString, [], {
     cwd: options.cwd,
-    env: process.env,
+    env,
     stdio,
     signal: options.signal,
     shell: true,
@@ -370,6 +399,7 @@ async function codexExecCompletion(endpoint: SummaryEndpoint, messages: ChatMess
       cwd,
       signal: mergedSignal,
       input: prompt,
+      env: endpoint.env,
     });
     let stderr = "";
     let content = "";
@@ -464,7 +494,7 @@ async function claudeExecCompletion(endpoint: SummaryEndpoint, messages: ChatMes
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const proc = spawnCli(command, args, { cwd, signal: mergedSignal, input: prompt });
+    const proc = spawnCli(command, args, { cwd, signal: mergedSignal, input: prompt, env: endpoint.env });
     const sessionIds = new Set<string>();
     let stderr = "";
     let streamedContent = "";
@@ -506,7 +536,7 @@ async function claudeExecCompletion(endpoint: SummaryEndpoint, messages: ChatMes
         if (isRecord(event) && event.type === "result" && typeof event.result === "string") resultContent = event.result;
         else streamedContent += extractClaudeEventText(event);
       }
-      void deleteClaudeTemporarySessions(cwd, sessionIds);
+      void deleteClaudeTemporarySessions(cwd, sessionIds, claudeHomeFor(endpoint));
       if (code !== 0) {
         const status = code === null ? `unknown${signalName ? ` (${signalName})` : ""}` : String(code);
         reject(new Error(`Claude Code summary exited with ${status}. ${stderr.trim().slice(-1000)}`.trim()));
@@ -569,12 +599,25 @@ function extractClaudeEventText(event: unknown): string {
     .join("");
 }
 
-async function deleteClaudeTemporarySessions(cwd: string, sessionIds: Iterable<string>): Promise<void> {
+/**
+ * Where the Claude CLI will have written this run's transcript. It follows `CLAUDE_CONFIG_DIR`
+ * when the endpoint points at its own config directory, so cleanup deletes the ephemeral session
+ * the CLI actually created rather than looking for it under `~/.claude` and leaving it behind.
+ */
+function claudeHomeFor(endpoint: SummaryEndpoint): string {
+  return endpoint.env?.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), ".claude");
+}
+
+async function deleteClaudeTemporarySessions(
+  cwd: string,
+  sessionIds: Iterable<string>,
+  claudeHome: string,
+): Promise<void> {
   const slug = cwd.replace(/[\\/]/g, "-");
   await Promise.all(
     [...sessionIds].map(async (sessionId) => {
       try {
-        await rm(path.join(os.homedir(), ".claude", "projects", slug, `${sessionId}.jsonl`), { force: true });
+        await rm(path.join(claudeHome, "projects", slug, `${sessionId}.jsonl`), { force: true });
       } catch {
         // Best-effort cleanup only; the summary result should not depend on local history deletion.
       }

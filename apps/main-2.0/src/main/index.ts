@@ -1112,10 +1112,14 @@ function initializeOpenVikingMemory(): void {
     // The bootstrap path is only the default location; extraction must read the same
     // Codex directory the user configured, or it falls back to an unauthenticated route.
     const configuredCodexHome = settings.apiConfig.customConfigDir.trim() || codexHome;
+    // The Codex summary source has a directory of its own, and when it is set the summary run
+    // reads that one. Extraction has to follow it or the two disagree about which route is live.
+    const summaryCodexHome = settings.summaryCodexConfigDir.trim() || codexHome;
     const codexEndpoint = settings.summarySource === "codex"
-      || (settings.summarySource === "custom" && settings.summaryApiConfigMode === "inherit_codex")
-      ? await loadActiveCodexSummaryEndpointDefaults(configuredCodexHome)
-      : null;
+      ? await loadActiveCodexSummaryEndpointDefaults(summaryCodexHome)
+      : settings.summarySource === "custom" && settings.summaryApiConfigMode === "inherit_codex"
+        ? await loadActiveCodexSummaryEndpointDefaults(configuredCodexHome)
+        : null;
     return {
       settings,
       vlm: resolveOpenVikingExtractionConfig({ settings, codex, codexEndpoint }),

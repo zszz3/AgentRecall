@@ -1,4 +1,5 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -104,7 +105,7 @@ let input = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { input += chunk; });
 process.stdin.on("end", () => {
-  fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2), input }) + "\\n");
+  fs.appendFileSync(callsPath, JSON.stringify({ args: process.argv.slice(2), input, claudeConfigDir: process.env.CLAUDE_CONFIG_DIR || "" }) + "\\n");
   if (!process.argv.includes("--print") || !process.argv.includes("stream-json")) {
     console.error("expected claude --print --output-format stream-json");
     process.exit(2);
@@ -397,6 +398,41 @@ describe("summarizeSession", () => {
     expect(calls[0].args).not.toContain(expect.stringContaining("summarize using official claude"));
     expect(calls[0].input).toContain("summarize using official claude");
     expect(calls[0].input.length).toBeGreaterThan(20_000);
+  });
+
+  it("cleans up the temporary session inside the config directory it was told to use", async () => {
+    const fake = await writeClaudeExecFake();
+    const claudeHome = await mkdtemp(path.join(os.tmpdir(), "session-summary-claude-home-"));
+    temporaryExecutableDirectories.add(claudeHome);
+    const cwd = path.dirname(fake.executable);
+    const projectDir = path.join(claudeHome, "projects", cwd.replace(/[\\/]/g, "-"));
+    await mkdir(projectDir, { recursive: true });
+    const transcript = path.join(projectDir, "claude-summary-1.jsonl");
+    await writeFile(transcript, "{}\n", "utf8");
+
+    await summarizeSession(
+      longSummaryExcerpt("summarize into a separate claude home"),
+      {
+        baseUrl: "",
+        model: "claude",
+        apiKey: "",
+        apiFormat: "claude_exec",
+        command: fake.executable,
+        cwd,
+        env: { CLAUDE_CONFIG_DIR: claudeHome },
+      },
+      requestSummaryCompletion,
+    );
+
+    const calls = (await readFile(fake.callsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { claudeConfigDir: string });
+    expect(calls[0].claudeConfigDir).toBe(claudeHome);
+    // Cleanup is fire-and-forget on process close, so give it a moment before checking.
+    // Deleting under ~/.claude instead would leave this ephemeral transcript behind in the very
+    // directory the app indexes, and the synthetic session would show up in search results.
+    await expect.poll(() => existsSync(transcript), { timeout: 2000 }).toBe(false);
   });
 });
 

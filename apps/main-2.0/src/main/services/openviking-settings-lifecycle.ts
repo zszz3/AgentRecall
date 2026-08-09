@@ -1,9 +1,16 @@
 import type { OpenVikingRuntimeState } from "../../core/openviking-memory";
 import type { AppSettingsUpdate } from "../../core/platform";
 
+/**
+ * Every setting the resolved extraction route depends on. Miss one and the running extractor
+ * keeps using the old route after the user changes it. The Claude summary settings are
+ * deliberately absent: extraction rejects the Claude source outright, so they cannot move it.
+ */
 const EXTRACTION_SETTING_KEYS = new Set<keyof AppSettingsUpdate>([
   "summarySource",
+  "summaryApiConfigMode",
   "summaryCodexModel",
+  "summaryCodexConfigDir",
   "openVikingExtractionReasoningEffort",
   "summaryApiConfig",
 ]);

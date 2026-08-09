@@ -12,6 +12,7 @@ import {
   loadClaudeApiConfigDefaults,
   loadClaudeConfigSnapshot,
   probeClaudeModels,
+  resolveClaudeProviderCredential,
   type ApplyClaudeProfileResult,
   type ClaudeConfigSnapshot,
   type ClaudeModelProbeResult,
@@ -65,6 +66,7 @@ export interface ProviderServiceOperations {
   probeCodexModels: typeof probeCodexModels;
   probeClaudeModels: typeof probeClaudeModels;
   resolveCodexProviderCredential: typeof resolveCodexProviderCredential;
+  resolveClaudeProviderCredential: typeof resolveClaudeProviderCredential;
   requestSummaryCompletion: typeof requestSummaryCompletion;
   applyCodexApiConfig: typeof applyCodexApiConfig;
   applyClaudeApiConfig: typeof applyClaudeApiConfig;
@@ -87,6 +89,26 @@ function carriesApiKey(update: { customApiKey?: string } | undefined): boolean {
   return Boolean(update) && typeof update?.customApiKey === "string";
 }
 
+/** Human-readable provenance for the credential the connection test ended up using. */
+function summaryKeySource(typedKey: string, resolvedKey: string, store: ProviderKeyTarget): string | undefined {
+  if (typedKey) return "API key field";
+  return resolvedKey ? `AgentRecall ${store} key store` : undefined;
+}
+
+/**
+ * The Claude route may be configured with Gemini's native format, which the summary client cannot
+ * speak. Saying so is better than testing a different format and reporting a success the real
+ * summary run would not reproduce.
+ */
+function summaryConnectionApiFormat(
+  apiFormat: SummaryProviderConnectionRequest["apiFormat"],
+): "anthropic" | "openai_chat" | "openai_responses" {
+  if (apiFormat === "gemini_native") {
+    throw new Error("AI summary cannot use the Gemini native format. Choose Anthropic or an OpenAI-compatible format.");
+  }
+  return apiFormat;
+}
+
 const defaultOperations: ProviderServiceOperations = {
   loadCodexProfileDefaults,
   loadClaudeApiConfigDefaults,
@@ -95,6 +117,7 @@ const defaultOperations: ProviderServiceOperations = {
   probeCodexModels,
   probeClaudeModels,
   resolveCodexProviderCredential,
+  resolveClaudeProviderCredential,
   requestSummaryCompletion,
   applyCodexApiConfig,
   applyClaudeApiConfig,
@@ -237,11 +260,13 @@ export class ProviderService {
       baseUrl: input.baseUrl,
       apiKey: input.apiKey || savedKey,
       providerId: input.providerId,
-      // Every target may fall back to the Codex config: the summary route inherits
-      // Codex's credential unless it has been given one of its own.
+      // The renderer always sends the directory it means, so these fallbacks only cover a probe
+      // that omitted one. A summary probe must not fall through to the Codex tab's directory:
+      // they are independent routes, and an empty summary directory means the machine's `~/.codex`.
       codexHome: input.codexHome
-        || (keyTarget === "summary" ? settings.summaryApiConfig.customConfigDir : "")
-        || settings.apiConfig.customConfigDir
+        || (keyTarget === "summary"
+          ? settings.summaryApiConfig.customConfigDir || settings.summaryCodexConfigDir
+          : settings.apiConfig.customConfigDir)
         || undefined,
       apiKeySource: input.apiKey
         ? "API key field"
@@ -253,36 +278,30 @@ export class ProviderService {
 
   async probeClaudeModels(input: ClaudeModelProbeRequest): Promise<ClaudeModelProbeResult> {
     const settings = this.dependencies.getSettings();
-    const providerId = input.providerId || settings.claudeApiConfig.customProviderId;
-    const savedKey = await this.dependencies.keys.get("claude", providerId);
+    const keyTarget = input.keyTarget ?? "claude";
+    const targetConfig = keyTarget === "summary" ? settings.summaryApiConfig : settings.claudeApiConfig;
+    const providerId = input.providerId || targetConfig.customProviderId;
+    const savedKey = await this.dependencies.keys.get(keyTarget, providerId);
     return this.operations.probeClaudeModels({
       baseUrl: input.baseUrl,
       apiKey: input.apiKey || savedKey,
       apiFormat: input.apiFormat,
       apiKeyField: input.apiKeyField,
-      claudeHome: input.claudeHome || settings.claudeApiConfig.customConfigDir || undefined,
-      apiKeySource: input.apiKey ? "API key field" : savedKey ? "AgentRecall claude key store" : undefined,
+      claudeHome: input.claudeHome
+        || (keyTarget === "summary" ? settings.summaryClaudeConfigDir : settings.claudeApiConfig.customConfigDir)
+        || undefined,
+      apiKeySource: input.apiKey
+        ? "API key field"
+        : savedKey
+          ? `AgentRecall ${keyTarget} key store`
+          : undefined,
     });
   }
 
   async testSummaryProviderConnection(
     input: SummaryProviderConnectionRequest,
   ): Promise<SummaryProviderConnectionResult> {
-    const keyTarget = input.inheritCodex ? "codex" : "summary";
-    const settings = this.dependencies.getSettings();
-    const apiKey = input.apiKey.trim() || await this.dependencies.keys.get(keyTarget, input.providerId);
-    const credential = input.inheritCodex
-      ? await this.operations.resolveCodexProviderCredential({
-          codexHome: input.codexHome || settings.apiConfig.customConfigDir || undefined,
-          providerId: input.providerId,
-          apiKey,
-          apiKeySource: input.apiKey.trim()
-            ? "API key field"
-            : apiKey
-              ? "AgentRecall codex key store"
-              : undefined,
-        })
-      : { apiKey, source: input.apiKey.trim() ? "API key field" : apiKey ? "AgentRecall summary key store" : null };
+    const credential = await this.resolveSummaryConnectionCredential(input);
     if (!credential.apiKey) throw new Error("API key is required to test the summary Provider.");
     const startedAt = Date.now();
     await this.operations.requestSummaryCompletion(
@@ -290,7 +309,7 @@ export class ProviderService {
         baseUrl: input.baseUrl.trim().replace(/\/+$/, ""),
         apiKey: credential.apiKey,
         model: input.model.trim(),
-        apiFormat: input.apiFormat,
+        apiFormat: summaryConnectionApiFormat(input.apiFormat),
       },
       [{ role: "user", content: "Reply with exactly OK." }],
       AbortSignal.timeout(30_000),
@@ -299,6 +318,56 @@ export class ProviderService {
       elapsedMs: Math.max(0, Date.now() - startedAt),
       credentialSource: credential.source || "resolved credential",
     };
+  }
+
+  /**
+   * Each summary source keeps its credential somewhere different — the Codex and Claude sources
+   * in the config directory they point at, the custom source in its own key slot (or the Codex
+   * tab's, when it inherits) — so the lookup has to branch before the request is even built.
+   */
+  private async resolveSummaryConnectionCredential(
+    input: SummaryProviderConnectionRequest,
+  ): Promise<{ apiKey: string; source: string | null }> {
+    const settings = this.dependencies.getSettings();
+    const typedKey = input.apiKey.trim();
+
+    if (input.source === "claude") {
+      const apiKey = typedKey || await this.summaryStoredKey(input.providerId);
+      return this.operations.resolveClaudeProviderCredential({
+        claudeHome: input.configDir || settings.summaryClaudeConfigDir || undefined,
+        apiKeyField: input.apiKeyField,
+        apiKey,
+        apiKeySource: summaryKeySource(typedKey, apiKey, "summary"),
+      });
+    }
+
+    if (input.source === "codex") {
+      const apiKey = typedKey || await this.summaryStoredKey(input.providerId);
+      return this.operations.resolveCodexProviderCredential({
+        codexHome: input.configDir || settings.summaryCodexConfigDir || undefined,
+        providerId: input.providerId,
+        apiKey,
+        apiKeySource: summaryKeySource(typedKey, apiKey, "summary"),
+      });
+    }
+
+    const keyTarget = input.inherit ? "codex" : "summary";
+    const apiKey = typedKey || await this.dependencies.keys.get(keyTarget, input.providerId);
+    if (!input.inherit) {
+      return { apiKey, source: summaryKeySource(typedKey, apiKey, "summary") ?? null };
+    }
+    return this.operations.resolveCodexProviderCredential({
+      codexHome: input.codexHome || settings.apiConfig.customConfigDir || undefined,
+      providerId: input.providerId,
+      apiKey,
+      apiKeySource: summaryKeySource(typedKey, apiKey, "codex"),
+    });
+  }
+
+  /** The Codex and Claude summary sources may have no provider id at all when the route is official. */
+  private async summaryStoredKey(providerId: string | undefined): Promise<string> {
+    const id = providerId?.trim();
+    return id ? this.dependencies.keys.get("summary", id) : "";
   }
 
   async applyCodexProfile(apiConfigInput: Partial<ApiConfig>): Promise<ApplyCodexProfileResult> {
@@ -392,7 +461,6 @@ export class ProviderService {
   private async ensureChatProxy(apiConfig: ApiConfig): Promise<CodexChatProxyStatus> {
     if (!apiConfig.customApiKey) throw new Error(`API key is required to start ${apiConfig.customProviderName} proxy.`);
     if (!apiConfig.customBaseUrl) throw new Error(`Base URL is required to start ${apiConfig.customProviderName} proxy.`);
-    if (!apiConfig.customModel) throw new Error(`Model is required to start ${apiConfig.customProviderName} proxy.`);
 
     const targetSignature = JSON.stringify({
       upstreamBaseUrl: apiConfig.customBaseUrl.replace(/\/+$/, ""),
@@ -457,6 +525,9 @@ export class ProviderService {
     return this.readSavedPatch<ApiConfig>("summaryApiConfig", [
       "activeProvider",
       "customProviderId",
+      // Without this the summary route cannot remember its own config directory, so the panel
+      // could never tell an explicitly chosen directory from the default.
+      "customConfigDir",
       "customProviderName",
       "customBaseUrl",
       "customApiKey",

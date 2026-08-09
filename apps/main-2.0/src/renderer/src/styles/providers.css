@@ -184,6 +184,14 @@
   gap: 6px;
 }
 
+/* The summary status row collects the probe, connection, and fallback messages that used to
+   be scattered between fields, so they stay in one predictable place across all three sources. */
+.summary-status-stack {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
 .provider-path-input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content max-content;

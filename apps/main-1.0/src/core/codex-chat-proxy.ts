@@ -68,6 +68,15 @@ export class CodexChatProxy {
     };
   }
 
+  /**
+   * An empty configured model means "use the model the agent's own config file selects". The CLI
+   * already puts that model on the wire, so it is forwarded untouched instead of being replaced
+   * by a blank that the upstream would reject.
+   */
+  private effectiveModel(body: Record<string, unknown>): string {
+    return this.options.model || readString(body.model) || "";
+  }
+
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       if (req.method === "GET" && req.url === "/health") {
@@ -86,7 +95,7 @@ export class CodexChatProxy {
           "content-type": "application/json",
           authorization: `Bearer ${this.options.apiKey}`,
         },
-        body: JSON.stringify(buildChatCompletionRequest(body, this.options.model)),
+        body: JSON.stringify(buildChatCompletionRequest(body, this.effectiveModel(body))),
       });
 
       if (!upstreamResponse.ok || !upstreamResponse.body) {
@@ -107,7 +116,7 @@ export class CodexChatProxy {
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
-      await pipeChatSseAsResponses(upstreamResponse.body, res, this.options.model);
+      await pipeChatSseAsResponses(upstreamResponse.body, res, this.effectiveModel(body) || "chat-model");
     } catch (error) {
       if (!res.headersSent) {
         writeJson(res, 500, { error: { message: error instanceof Error ? error.message : String(error) } });

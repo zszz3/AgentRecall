@@ -561,15 +561,33 @@ describe("API settings", () => {
     });
   });
 
-  it("defaults API config to Codex official and summary search to Custom", () => {
+  it("defaults API config to Codex official and summary search to Codex", () => {
     expect(defaultSettings.apiConfig).toEqual(defaultApiConfig);
     expect(defaultSettings.claudeApiConfig).toEqual(defaultClaudeApiConfig);
-    expect(defaultSettings.summarySource).toBe("custom");
+    expect(defaultSettings.summarySource).toBe("codex");
     expect(defaultSettings.summaryApiConfig).toMatchObject({
       activeProvider: "custom",
       customProviderId: "custom",
       customProviderName: "Custom Codex",
     });
+  });
+
+  it("starts every summary source on the machine's own config directory", () => {
+    expect(defaultSettings.summaryCodexConfigDir).toBe("");
+    expect(defaultSettings.summaryClaudeConfigDir).toBe("");
+    expect(defaultSettings.summaryCodexModel).toBe("");
+    expect(defaultSettings.summaryClaudeModel).toBe("");
+  });
+
+  it("keeps an unrecognized reasoning effort out of the summary request", () => {
+    expect(mergeAppSettings(defaultSettings, { summaryReasoningEffort: "medium" }).summaryReasoningEffort)
+      .toBe("medium");
+    // "" is the real "let the model decide" choice, so anything unknown has to land there rather
+    // than on an arbitrary level the upstream may reject.
+    expect(mergeAppSettings(defaultSettings, { summaryReasoningEffort: "" }).summaryReasoningEffort).toBe("");
+    expect(
+      mergeAppSettings(defaultSettings, { summaryReasoningEffort: "turbo" as never }).summaryReasoningEffort,
+    ).toBe("");
   });
 
   it("enables session search MCP by default while preserving an explicit opt-out", () => {

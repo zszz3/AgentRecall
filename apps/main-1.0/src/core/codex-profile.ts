@@ -47,6 +47,14 @@ export interface CodexConfigSnapshot {
   availableModels?: string[];
   activeProvider: CodexConfigProviderEntry | null;
   providers: CodexConfigProviderEntry[];
+  /**
+   * Credential the active route would actually use, resolved the same way `codex` resolves it:
+   * inline in `config.toml`, then `auth.json`, `.env`, and the environment. The per-provider
+   * entries deliberately refuse to borrow a sibling's key, so an official route — which has no
+   * `[model_providers.*]` section at all — has no other way to report that a key exists.
+   */
+  credentialSource: string | null;
+  hasApiKey: boolean;
 }
 
 export interface CodexModelProbeInput {
@@ -141,6 +149,7 @@ export async function loadCodexConfigSnapshot(configuredHome?: string): Promise<
   } catch {
     cachedModels = [];
   }
+  const activeCredential = await resolveCodexCredential({ codexHome, configText: text, providerId: activeProviderId });
   return {
     codexHome,
     configPath,
@@ -150,6 +159,8 @@ export async function loadCodexConfigSnapshot(configuredHome?: string): Promise<
     availableModels: [...new Set([activeModel, ...cachedModels].filter(Boolean))],
     activeProvider: providers.find((provider) => provider.id === activeProviderId) ?? null,
     providers,
+    credentialSource: activeCredential.source,
+    hasApiKey: Boolean(activeCredential.apiKey),
   };
 }
 
@@ -450,7 +461,6 @@ async function applyGeneratedCodexProvider(options: {
   const stamp = backupStamp(options.now ?? new Date());
 
   if (!apiConfig.customBaseUrl) throw new Error(`Base URL is required to apply ${apiConfig.customProviderName}.`);
-  if (!apiConfig.customModel) throw new Error(`Model is required to apply ${apiConfig.customProviderName}.`);
 
   await mkdir(backupDir, { recursive: true });
   const backupPaths = await backupExistingTargets([
@@ -492,7 +502,11 @@ async function applyGeneratedCodexProvider(options: {
         const snapshot = await loadCodexConfigSnapshot(codexHome);
         const provider = snapshot.providers.find((item) => item.id === providerId);
         if (snapshot.activeProviderId !== providerId) throw new Error(`provider ${providerId} was not activated`);
-        if (snapshot.activeModel !== apiConfig.customModel) throw new Error(`model ${apiConfig.customModel} was not written`);
+        // Only a model the user actually chose is verified: an empty one means "keep the config
+        // file's own model", so there is nothing to write and nothing to check.
+        if (apiConfig.customModel && snapshot.activeModel !== apiConfig.customModel) {
+          throw new Error(`model ${apiConfig.customModel} was not written`);
+        }
         if (!provider || normalizeBaseUrl(provider.baseUrl) !== normalizeBaseUrl(expectedBaseUrl)) throw new Error("provider Base URL was not written");
         if (!provider.hasApiKey) throw new Error("provider credential was not readable after writing");
       },
@@ -622,9 +636,9 @@ function readTomlBoolean(text: string, key: string): boolean {
 }
 
 function generatedCodexConfig(apiConfig: ApiConfig, providerId: string): string {
+  const modelLine = apiConfig.customModel ? `model = ${tomlString(apiConfig.customModel)}\n` : "";
   return `model_provider = ${tomlString(providerId)}
-model = ${tomlString(apiConfig.customModel)}
-model_reasoning_effort = "high"
+${modelLine}model_reasoning_effort = "high"
 disable_response_storage = true
 
 ${modelProviderSection(providerId)}
