@@ -12,7 +12,7 @@ export interface ProviderModelProbeResult {
   endpoints: string[];
 }
 
-export type ProviderModelsFetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<{
+export type ProviderModelsFetch = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{
   ok: boolean;
   status: number;
   statusText?: string;
@@ -21,6 +21,16 @@ export type ProviderModelsFetch = (url: string, init?: { headers?: Record<string
 
 /** Aggregator gateways page their catalog; stop well before a broken cursor loops forever. */
 const MAX_MODEL_PAGES = 20;
+
+/** A gateway that has not answered by now is not going to; without this the probe hangs forever. */
+const MODEL_PROBE_TIMEOUT_MS = 20_000;
+
+interface ProbeFailure {
+  endpoint: string;
+  error: Error;
+  /** Empty when the endpoint answered and rejected us — that error already explains itself. */
+  transportReason: string;
+}
 
 export async function probeProviderModels(
   input: ProviderModelProbeRequest,
@@ -38,20 +48,89 @@ export async function probeProviderModels(
 
   const models = new Set<string>();
   const answered: string[] = [];
-  let firstFailure: Error | null = null;
+  const failures: ProbeFailure[] = [];
   for (const endpoint of endpoints) {
     try {
       const page = await collectModelPages(endpoint, headers, fetchImpl);
       answered.push(endpoint);
       for (const model of page) models.add(model);
     } catch (error) {
-      firstFailure ??= error instanceof Error ? error : new Error(String(error));
+      failures.push(describeProbeFailure(endpoint, error));
     }
   }
 
-  if (answered.length === 0) throw firstFailure ?? new Error(`No model IDs were returned by ${endpoints[0]}.`);
+  if (answered.length === 0) throw combineProbeFailures(failures, endpoints);
   if (models.size === 0) throw new Error(`No model IDs were returned by ${answered.join(", ")}.`);
   return { endpoint: answered[0], endpoints: answered, models: sortModelIds(models) };
+}
+
+/**
+ * `fetch` collapses every transport failure into the same bare `TypeError: fetch failed` and
+ * keeps the actual reason — DNS, refused connection, expired certificate — only in `error.cause`.
+ * Reporting that chain is the whole difference between a message the user can act on and one
+ * that names neither the URL nor the problem.
+ */
+function describeProbeFailure(endpoint: string, error: unknown): ProbeFailure {
+  if (!(error instanceof Error)) {
+    return { endpoint, error: new Error(`Model detection failed at ${endpoint}: ${String(error)}`), transportReason: "" };
+  }
+  if (error.name === "TimeoutError" || error.name === "AbortError") {
+    const reason = `no response within ${Math.round(MODEL_PROBE_TIMEOUT_MS / 1000)}s`;
+    return { endpoint, error: new Error(`Model detection could not reach ${endpoint}: ${reason}.`), transportReason: reason };
+  }
+  const transportReason = transportFailureReason(error);
+  if (!transportReason) return { endpoint, error, transportReason: "" };
+  return {
+    endpoint,
+    error: new Error(`Model detection could not reach ${endpoint}: ${transportReason}.`),
+    transportReason,
+  };
+}
+
+/** Empty for anything that is not a transport failure, so those errors are re-thrown untouched. */
+function transportFailureReason(error: Error): string {
+  const code = errorCauseCode(error);
+  if (!code) return "";
+  const explanation = TRANSPORT_FAILURE_EXPLANATIONS[code];
+  if (explanation) return `${explanation} (${code})`;
+  const cause = error.cause instanceof Error ? error.cause.message : "";
+  return cause ? `${cause} (${code})` : code;
+}
+
+const TRANSPORT_FAILURE_EXPLANATIONS: Readonly<Record<string, string>> = {
+  ENOTFOUND: "the host name could not be resolved — check the Base URL, or whether this network needs a proxy",
+  EAI_AGAIN: "the host name could not be resolved — check the Base URL, or whether this network needs a proxy",
+  ECONNREFUSED: "nothing accepted the connection on that host and port",
+  ECONNRESET: "the connection was closed before an answer arrived",
+  ETIMEDOUT: "the connection timed out — check whether this network needs a proxy",
+  UND_ERR_CONNECT_TIMEOUT: "the connection timed out — check whether this network needs a proxy",
+  EPROTO: "the TLS handshake failed — check whether the Base URL should use http:// instead",
+  CERT_HAS_EXPIRED: "the server's TLS certificate has expired",
+  DEPTH_ZERO_SELF_SIGNED_CERT: "the server uses a self-signed TLS certificate",
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: "the server's TLS certificate could not be verified",
+  ERR_INVALID_URL: "that is not a valid URL — a Base URL needs a scheme such as https://",
+};
+
+/** Walks the `cause` chain, because undici nests the OS error one or two levels down. */
+function errorCauseCode(error: Error): string {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const code = (current as NodeJS.ErrnoException).code;
+    if (typeof code === "string" && code) return code;
+    current = current.cause;
+  }
+  return "";
+}
+
+/** Every endpoint failing the same way is one problem, and should read as one problem. */
+function combineProbeFailures(failures: ProbeFailure[], endpoints: string[]): Error {
+  if (failures.length === 0) return new Error(`No model IDs were returned by ${endpoints[0]}.`);
+  const reasons = new Set(failures.map((failure) => failure.transportReason));
+  if (failures.length > 1 && reasons.size === 1 && failures[0].transportReason) {
+    const tried = failures.map((failure) => failure.endpoint).join(", ");
+    return new Error(`Model detection could not reach ${tried}: ${failures[0].transportReason}.`);
+  }
+  return failures[0].error;
 }
 
 async function collectModelPages(
@@ -62,7 +141,7 @@ async function collectModelPages(
   const models = new Set<string>();
   let url: string | null = endpoint;
   for (let page = 0; page < MAX_MODEL_PAGES && url; page += 1) {
-    const response = await fetchImpl(url, { headers });
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(MODEL_PROBE_TIMEOUT_MS) });
     if (!response.ok) {
       // A follow-up page failing should not discard the models already collected.
       if (page > 0) break;

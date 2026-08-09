@@ -71,6 +71,59 @@ describe("provider model discovery", () => {
   });
 });
 
+describe("model probe transport failures", () => {
+  /** What `fetch` throws when it never reaches the server: a bare message plus a nested cause. */
+  function fetchFailed(code: string, message = "connect failure"): TypeError {
+    const cause = Object.assign(new Error(message), { code });
+    return Object.assign(new TypeError("fetch failed"), { cause });
+  }
+
+  it("names the URL and the underlying reason instead of only 'fetch failed'", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw fetchFailed("ENOTFOUND", "getaddrinfo ENOTFOUND api.example");
+    });
+
+    // The bare "TypeError: fetch failed" the user used to see names neither the endpoint that
+    // failed nor why, which leaves nothing to act on.
+    await expect(probeProviderModels({ baseUrl: "https://api.example/v1", apiKey: "secret" }, fetchImpl))
+      .rejects.toThrow(/could not reach https:\/\/api\.example\/v1\/models.*host name could not be resolved.*ENOTFOUND/);
+  });
+
+  it("reports one problem when every endpoint fails the same way", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw fetchFailed("ECONNREFUSED");
+    });
+
+    const error = await probeProviderModels({ baseUrl: "https://api.example/relay", apiKey: "secret" }, fetchImpl)
+      .then(() => { throw new Error("the probe was expected to fail"); }, (thrown: Error) => thrown);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(error.message).toContain("https://api.example/relay/models, https://api.example/relay/v1/models, https://api.example/v1/models");
+    expect(error.message).toContain("nothing accepted the connection");
+    expect(error.message).not.toContain("fetch failed");
+  });
+
+  it("keeps an HTTP rejection's own message rather than calling it a transport failure", async () => {
+    const fetchImpl = vi.fn(async (url: string) => (url.endsWith("/relay/models")
+      ? { ok: false, status: 401, statusText: "Unauthorized", json: async () => ({}) }
+      : (() => { throw fetchFailed("ENOTFOUND"); })()));
+
+    await expect(probeProviderModels({ baseUrl: "https://api.example/relay", apiKey: "secret" }, fetchImpl))
+      .rejects.toThrow("Model detection failed at https://api.example/relay/models (401 Unauthorized).");
+  });
+
+  it("gives up on a silent endpoint instead of hanging", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: { signal?: AbortSignal }) => {
+      // A black-holed connection never settles; only the probe's own deadline ends it.
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    });
+
+    await expect(probeProviderModels({ baseUrl: "https://api.example/v1", apiKey: "secret" }, fetchImpl))
+      .rejects.toThrow(/could not reach https:\/\/api\.example\/v1\/models: no response within 20s/);
+  });
+});
+
 describe("verified config writes", () => {
   it("restores the original file when read-back verification fails", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "agent-recall-config-write-"));
