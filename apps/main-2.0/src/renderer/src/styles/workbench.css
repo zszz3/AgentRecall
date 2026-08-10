@@ -538,7 +538,7 @@
   display: grid;
   min-width: 0;
   max-height: 47px;
-  align-content: center;
+  align-content: safe center;
   gap: 5px;
   padding-right: 2px;
   overflow-y: auto;
