@@ -69,7 +69,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ai_summary text,
         ai_summary_model text,
         ai_summary_at timestamptz,
-        ai_summary_basis integer,
+        ai_summary_basis double precision,
         codex_history_mode text
       );
 
@@ -1583,4 +1583,14 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
   version: 35,
   name: "preserve Cursor custom title precedence",
   statements: [],
+}, {
+  version: 36,
+  name: "store AI summary freshness timestamps without integer overflow",
+  statements: [
+    `
+      ALTER TABLE agent_recall.sessions
+        ALTER COLUMN ai_summary_basis TYPE double precision
+        USING ai_summary_basis::double precision;
+    `,
+  ],
 }];

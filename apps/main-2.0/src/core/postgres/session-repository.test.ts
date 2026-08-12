@@ -111,6 +111,20 @@ describe("PostgresSessionRepository", () => {
     await database.close();
   });
 
+  it("stores AI summary freshness for millisecond file timestamps", async () => {
+    const fileMtimeMs = 1_786_512_474_899.402;
+    const indexed = session({ fileMtimeMs });
+    await repository.upsertIndexedSession(indexed, messages, tokens, traces);
+
+    await expect(repository.setAiSummary(indexed.sessionKey, "Summary", "test-model")).resolves.toBe(true);
+
+    const result = await database.query<{ ai_summary_basis: number | string }>(
+      "select ai_summary_basis from agent_recall.sessions where session_key = $1",
+      [indexed.sessionKey],
+    );
+    expect(Number(result.rows[0]?.ai_summary_basis)).toBe(fileMtimeMs);
+  });
+
   it("preserves paginated Codex history when migrating to a new Session key", async () => {
     const legacyKey = "ssh:dev:codex:legacy-paginated";
     const targetKey = "ssh:dev:codex-cli:legacy-paginated";

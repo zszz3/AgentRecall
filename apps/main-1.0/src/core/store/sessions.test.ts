@@ -29,6 +29,24 @@ function indexedSession(overrides: Partial<IndexedSession> = {}): IndexedSession
 }
 
 describe("SessionsStore", () => {
+  it("stores AI summary freshness for millisecond file timestamps", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const fileMtimeMs = 1_786_512_474_899.402;
+      const session = indexedSession({ fileMtimeMs });
+      store.upsertIndexedSession(session, []);
+
+      expect(store.setAiSummary(session.sessionKey, "Summary", "test-model")).toBe(true);
+      const row = db.prepare("SELECT ai_summary_basis FROM sessions WHERE session_key = ?")
+        .get(session.sessionKey) as { ai_summary_basis: number };
+      expect(row.ai_summary_basis).toBe(fileMtimeMs);
+    } finally {
+      db.close();
+    }
+  });
+
   it("round-trips Codex lifecycle fields and reconstructs private incremental state", () => {
     const db = new DatabaseSync(":memory:");
     try {

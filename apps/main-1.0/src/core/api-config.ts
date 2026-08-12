@@ -270,20 +270,33 @@ export function mergeApiConfigWithProfileDefaults(
   current: ApiConfig,
   saved: Partial<ApiConfig> | null | undefined,
   profileDefaults: Partial<ApiConfig> | null | undefined,
+  preferProfileDefaults = false,
 ): ApiConfig {
   const savedSource = saved ?? {};
   const defaults = profileDefaults ?? {};
   return normalizeApiConfig({
-    activeProvider: savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
-    customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
+    activeProvider: preferProfileDefaults
+      ? defaults.activeProvider ?? savedSource.activeProvider ?? current.activeProvider
+      : savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
+    customProviderId: preferProfileDefaults
+      ? defaults.customProviderId ?? savedSource.customProviderId ?? current.customProviderId
+      : savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
     // The config directory is what selects which profile we read, so it is never part of
     // the defaults that reading produces — it only ever comes from the user's own setting.
     customConfigDir: current.customConfigDir,
-    customProviderName: fieldWasSaved(savedSource.customProviderName) ? current.customProviderName : defaults.customProviderName ?? current.customProviderName,
-    customBaseUrl: fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
+    customProviderName: preferProfileDefaults
+      ? defaults.customProviderName ?? current.customProviderName
+      : fieldWasSaved(savedSource.customProviderName) ? current.customProviderName : defaults.customProviderName ?? current.customProviderName,
+    customBaseUrl: preferProfileDefaults
+      ? defaults.customBaseUrl ?? current.customBaseUrl
+      : fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
     customApiKey: current.customApiKey,
-    customModel: fieldWasSaved(savedSource.customModel) ? current.customModel : defaults.customModel ?? current.customModel,
-    customApiFormat: savedSource.customApiFormat ?? defaults.customApiFormat ?? current.customApiFormat,
+    customModel: preferProfileDefaults
+      ? defaults.customModel ?? current.customModel
+      : fieldWasSaved(savedSource.customModel) ? current.customModel : defaults.customModel ?? current.customModel,
+    customApiFormat: preferProfileDefaults
+      ? defaults.customApiFormat ?? savedSource.customApiFormat ?? current.customApiFormat
+      : savedSource.customApiFormat ?? defaults.customApiFormat ?? current.customApiFormat,
   });
 }
 
@@ -291,32 +304,53 @@ export function mergeClaudeApiConfigWithProfileDefaults(
   current: ClaudeApiConfig,
   saved: Partial<ClaudeApiConfig> | null | undefined,
   profileDefaults: Partial<ClaudeApiConfig> | null | undefined,
+  preferProfileDefaults = false,
 ): ClaudeApiConfig {
   const savedSource = saved ?? {};
   const defaults = profileDefaults ?? {};
   return normalizeClaudeApiConfig({
-    activeProvider: savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
-    customProviderId: savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
+    activeProvider: preferProfileDefaults
+      ? defaults.activeProvider ?? savedSource.activeProvider ?? current.activeProvider
+      : savedSource.activeProvider ?? defaults.activeProvider ?? current.activeProvider,
+    customProviderId: preferProfileDefaults
+      ? defaults.customProviderId ?? savedSource.customProviderId ?? current.customProviderId
+      : savedSource.customProviderId ?? defaults.customProviderId ?? current.customProviderId,
     // The config directory is what selects which profile we read, so it is never part of
     // the defaults that reading produces — it only ever comes from the user's own setting.
     customConfigDir: current.customConfigDir,
-    customProviderName: fieldWasSaved(savedSource.customProviderName)
+    customProviderName: preferProfileDefaults
+      ? defaults.customProviderName ?? current.customProviderName
+      : fieldWasSaved(savedSource.customProviderName)
       ? current.customProviderName
       : defaults.customProviderName ?? current.customProviderName,
-    customBaseUrl: fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
+    customBaseUrl: preferProfileDefaults
+      ? defaults.customBaseUrl ?? current.customBaseUrl
+      : fieldWasSaved(savedSource.customBaseUrl) ? current.customBaseUrl : defaults.customBaseUrl ?? current.customBaseUrl,
     customApiKey: current.customApiKey,
-    customModel: fieldWasSaved(savedSource.customModel) ? current.customModel : defaults.customModel ?? current.customModel,
-    customHaikuModel: fieldWasSaved(savedSource.customHaikuModel)
+    customModel: preferProfileDefaults
+      ? defaults.customModel ?? current.customModel
+      : fieldWasSaved(savedSource.customModel) ? current.customModel : defaults.customModel ?? current.customModel,
+    customHaikuModel: preferProfileDefaults
+      ? defaults.customHaikuModel ?? current.customHaikuModel
+      : fieldWasSaved(savedSource.customHaikuModel)
       ? current.customHaikuModel
       : defaults.customHaikuModel ?? current.customHaikuModel,
-    customSonnetModel: fieldWasSaved(savedSource.customSonnetModel)
+    customSonnetModel: preferProfileDefaults
+      ? defaults.customSonnetModel ?? current.customSonnetModel
+      : fieldWasSaved(savedSource.customSonnetModel)
       ? current.customSonnetModel
       : defaults.customSonnetModel ?? current.customSonnetModel,
-    customOpusModel: fieldWasSaved(savedSource.customOpusModel)
+    customOpusModel: preferProfileDefaults
+      ? defaults.customOpusModel ?? current.customOpusModel
+      : fieldWasSaved(savedSource.customOpusModel)
       ? current.customOpusModel
       : defaults.customOpusModel ?? current.customOpusModel,
-    customApiFormat: savedSource.customApiFormat ?? defaults.customApiFormat ?? current.customApiFormat,
-    customApiKeyField: savedSource.customApiKeyField ?? defaults.customApiKeyField ?? current.customApiKeyField,
+    customApiFormat: preferProfileDefaults
+      ? defaults.customApiFormat ?? savedSource.customApiFormat ?? current.customApiFormat
+      : savedSource.customApiFormat ?? defaults.customApiFormat ?? current.customApiFormat,
+    customApiKeyField: preferProfileDefaults
+      ? defaults.customApiKeyField ?? savedSource.customApiKeyField ?? current.customApiKeyField
+      : savedSource.customApiKeyField ?? defaults.customApiKeyField ?? current.customApiKeyField,
   });
 }
 

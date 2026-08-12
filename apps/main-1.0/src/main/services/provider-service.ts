@@ -31,6 +31,7 @@ import {
 import type { AppSettings, AppSettingsUpdate } from "../../core/platform";
 import { providerConfigDirectoryExists } from "../../core/provider-config-path";
 import { requestSummaryCompletion } from "../../core/session-summarizer";
+import { buildCodexExecEndpoint } from "../../core/summary-endpoint";
 import type {
   ClaudeModelProbeRequest,
   CodexModelProbeRequest,
@@ -166,11 +167,13 @@ export class ProviderService {
         currentSettings.apiConfig,
         savedCodex,
         codexDefaults,
+        true,
       ),
       claudeApiConfig: mergeClaudeApiConfigWithProfileDefaults(
         currentSettings.claudeApiConfig,
         savedClaude,
         claudeDefaults,
+        true,
       ),
       summaryApiConfig: mergeApiConfigWithProfileDefaults(
         settings.summaryApiConfig,
@@ -315,9 +318,26 @@ export class ProviderService {
   async testSummaryProviderConnection(
     input: SummaryProviderConnectionRequest,
   ): Promise<SummaryProviderConnectionResult> {
+    const startedAt = Date.now();
+    if (input.source === "codex") {
+      const settings = this.dependencies.getSettings();
+      await this.operations.requestSummaryCompletion(
+        buildCodexExecEndpoint({
+          ...settings,
+          summaryCodexModel: input.model.trim(),
+          summaryCodexConfigDir: input.configDir ?? settings.summaryCodexConfigDir,
+        }),
+        [{ role: "user", content: "Reply with exactly OK." }],
+        AbortSignal.timeout(30_000),
+      );
+      return {
+        elapsedMs: Math.max(0, Date.now() - startedAt),
+        credentialSource: "Codex CLI",
+      };
+    }
+
     const credential = await this.resolveSummaryConnectionCredential(input);
     if (!credential.apiKey) throw new Error("API key is required to test the summary Provider.");
-    const startedAt = Date.now();
     await this.operations.requestSummaryCompletion(
       {
         baseUrl: input.baseUrl.trim().replace(/\/+$/, ""),

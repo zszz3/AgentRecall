@@ -165,6 +165,61 @@ describe("ProviderService settings and keys", () => {
     ]);
   });
 
+  it("lets active local profiles replace stale saved provider fields", async () => {
+    const settings = cloneSettings();
+    settings.apiConfig = customCodexConfig({
+      customProviderName: "Saved Codex",
+      customBaseUrl: "https://saved.example/v1",
+      customModel: "saved-codex-model",
+    });
+    settings.claudeApiConfig = {
+      ...settings.claudeApiConfig,
+      activeProvider: "custom",
+      customProviderId: "custom",
+      customProviderName: "Saved Claude",
+      customBaseUrl: "https://saved.example/anthropic",
+      customModel: "saved-claude-model",
+    };
+    const harness = createHarness(settings);
+    for (const [path, value] of [
+      ["apiConfig.customProviderName", settings.apiConfig.customProviderName],
+      ["apiConfig.customBaseUrl", settings.apiConfig.customBaseUrl],
+      ["apiConfig.customModel", settings.apiConfig.customModel],
+      ["claudeApiConfig.customProviderName", settings.claudeApiConfig.customProviderName],
+      ["claudeApiConfig.customBaseUrl", settings.claudeApiConfig.customBaseUrl],
+      ["claudeApiConfig.customModel", settings.claudeApiConfig.customModel],
+    ] as const) harness.savedSettings.set(path, value);
+    vi.mocked(harness.operations.loadCodexProfileDefaults).mockResolvedValue({
+      activeProvider: "custom",
+      customProviderId: "custom",
+      customProviderName: "Local Codex",
+      customBaseUrl: "https://local.example/v1",
+      customModel: "local-codex-model",
+      customApiFormat: "openai_responses",
+    });
+    vi.mocked(harness.operations.loadClaudeApiConfigDefaults).mockResolvedValue({
+      activeProvider: "custom",
+      customProviderId: "custom",
+      customProviderName: "Local Claude",
+      customBaseUrl: "https://local.example/anthropic",
+      customModel: "local-claude-model",
+      customApiFormat: "anthropic",
+    });
+
+    const hydrated = await harness.service.hydrateSettings();
+
+    expect(hydrated.apiConfig).toMatchObject({
+      customProviderName: "Local Codex",
+      customBaseUrl: "https://local.example/v1",
+      customModel: "local-codex-model",
+    });
+    expect(hydrated.claudeApiConfig).toMatchObject({
+      customProviderName: "Local Claude",
+      customBaseUrl: "https://local.example/anthropic",
+      customModel: "local-claude-model",
+    });
+  });
+
   it("hydrates local profile defaults and injects separately stored keys", async () => {
     const settings = cloneSettings();
     settings.apiConfig = customCodexConfig({ customApiKey: "", customModel: "" });
@@ -422,6 +477,36 @@ describe("ProviderService settings and keys", () => {
     expect(harness.operations.probeClaudeModels).toHaveBeenCalledWith(expect.objectContaining({
       claudeHome: undefined,
     }));
+  });
+});
+
+describe("summary connection tests", () => {
+  it("tests the Codex source through the same CLI path as real summaries", async () => {
+    const settings = cloneSettings();
+    settings.codexBinary = "custom-codex";
+    settings.summaryCodexConfigDir = "";
+    const harness = createHarness(settings);
+
+    const result = await harness.service.testSummaryProviderConnection({
+      source: "codex",
+      baseUrl: "https://unused.example/v1",
+      apiKey: "",
+      model: "gpt-test",
+      apiFormat: "openai_responses",
+    });
+
+    expect(harness.operations.resolveCodexProviderCredential).not.toHaveBeenCalled();
+    expect(harness.operations.requestSummaryCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiFormat: "codex_exec",
+        command: "custom-codex",
+        model: "gpt-test",
+        modelArg: "gpt-test",
+      }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(result.credentialSource).toBe("Codex CLI");
   });
 });
 

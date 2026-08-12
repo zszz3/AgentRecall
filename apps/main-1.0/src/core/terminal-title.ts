@@ -7,7 +7,8 @@ export function normalizeTerminalTitle(value: string): string {
       .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "")
       .replace(/\s+/g, " ")
       .trim() || "Untitled Session";
-  return Array.from(normalized).slice(0, MAX_TERMINAL_TITLE_CODE_POINTS).join("");
+  const truncated = Array.from(normalized).slice(0, MAX_TERMINAL_TITLE_CODE_POINTS).join("").trim();
+  return truncated || "Untitled Session";
 }
 
 function posixQuote(value: string): string {
