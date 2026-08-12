@@ -11,6 +11,7 @@ import { AutomationPageState } from "./automation-page-state";
 import { useAutomationDetails } from "./automation-provider";
 
 const PROVIDER_KEYS_STORAGE_KEY = "agent-recall-automation-provider-keys";
+type RuntimeUnsavedDecision = "save" | "discard" | "cancel";
 
 function readProviderKeys(): Record<string, string> {
   try {
@@ -46,8 +47,10 @@ export function RuntimeFeaturePage({
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [agentDirty, setAgentDirty] = useState(false);
   const [agentStatus, setAgentStatus] = useState("");
+  const [unsavedPrompt, setUnsavedPrompt] = useState("");
   const editableAgentsRef = useRef(editableAgents);
   const agentDirtyRef = useRef(agentDirty);
+  const unsavedDecisionRef = useRef<((decision: RuntimeUnsavedDecision) => void) | null>(null);
   const onChannelsSaved = useCallback((previous: typeof snapshot, next: typeof snapshot): void => {
     if (!agentDirtyRef.current) {
       editableAgentsRef.current = next.configuredAgents;
@@ -59,6 +62,26 @@ export function RuntimeFeaturePage({
     setEditableAgents(reconciled);
   }, []);
   const manager = useRuntimeConfigManager({ chatApi: api, snapshot, setSnapshot, runtimeViewActive: true, onChannelsSaved });
+
+  const requestUnsavedDecision = useCallback((message: string): Promise<RuntimeUnsavedDecision> => (
+    new Promise((resolve) => {
+      unsavedDecisionRef.current?.("cancel");
+      unsavedDecisionRef.current = resolve;
+      setUnsavedPrompt(message);
+    })
+  ), []);
+
+  const resolveUnsavedDecision = useCallback((decision: RuntimeUnsavedDecision): void => {
+    const resolve = unsavedDecisionRef.current;
+    unsavedDecisionRef.current = null;
+    setUnsavedPrompt("");
+    resolve?.(decision);
+  }, []);
+
+  useEffect(() => () => {
+    unsavedDecisionRef.current?.("cancel");
+    unsavedDecisionRef.current = null;
+  }, []);
 
   const saveAgents = useCallback(async (): Promise<void> => {
     setAgentStatus("");
@@ -96,24 +119,24 @@ export function RuntimeFeaturePage({
       return () => onNavigationGuardChange(null);
     }
     onNavigationGuardChange(async () => {
-      if (manager.configDirty && !(await manager.confirmSaveBeforeSwitch(localize(
+      if (manager.configDirty && !(await manager.confirmSaveBeforeSwitch(() => requestUnsavedDecision(localize(
         language,
-        "Runtime configuration has unsaved changes. Save before leaving?",
-        "Runtime 配置尚未保存，离开前保存吗？",
-      )))) return false;
+        "Runtime configuration has unsaved changes.",
+        "Runtime 配置有尚未保存的修改。",
+      ))))) return false;
       if (agentDirty) await saveAgents();
       return true;
     });
     return () => onNavigationGuardChange(null);
-  }, [agentDirty, language, manager.configDirty, manager.confirmSaveBeforeSwitch, onNavigationGuardChange, saveAgents]);
+  }, [agentDirty, language, manager.configDirty, manager.confirmSaveBeforeSwitch, onNavigationGuardChange, requestUnsavedDecision, saveAgents]);
 
   const switchView = async (next: "channels" | "agents"): Promise<void> => {
     if (view === next) return;
-    if (view === "channels" && manager.configDirty && !(await manager.confirmSaveBeforeSwitch(localize(
+    if (view === "channels" && manager.configDirty && !(await manager.confirmSaveBeforeSwitch(() => requestUnsavedDecision(localize(
       language,
-      "Runtime configuration has unsaved changes. Save before switching?",
-      "Runtime 配置尚未保存，切换前保存吗？",
-    )))) return;
+      "Runtime configuration has unsaved changes.",
+      "Runtime 配置有尚未保存的修改。",
+    ))))) return;
     if (view === "agents" && agentDirty) await saveAgents();
     setView(next);
   };
@@ -247,6 +270,23 @@ export function RuntimeFeaturePage({
           )}
         </div>
       </AutomationPageState>
+      {unsavedPrompt ? (
+        <div className="runtime-unsaved-backdrop" role="presentation">
+          <section className="runtime-unsaved-dialog" role="dialog" aria-modal="true" aria-labelledby="runtime-unsaved-title">
+            <header>
+              <strong id="runtime-unsaved-title">{localize(language, "Unsaved Runtime configuration", "Runtime 配置尚未保存")}</strong>
+              <span>{unsavedPrompt}</span>
+            </header>
+            <footer>
+              <button type="button" onClick={() => resolveUnsavedDecision("cancel")}>{localize(language, "Cancel", "取消")}</button>
+              <button type="button" onClick={() => resolveUnsavedDecision("discard")}>{localize(language, "Don't save", "不保存")}</button>
+              <button type="button" className="automation-control-button is-primary" onClick={() => resolveUnsavedDecision("save")}>
+                <Save size={13} />{localize(language, "Save", "保存")}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

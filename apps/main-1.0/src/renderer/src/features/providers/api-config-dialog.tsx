@@ -1032,10 +1032,11 @@ export function ApiConfigDialog({
                     <div className="settings-field-text">
                       <span className="settings-field-title">API Key</span>
                       <span className="settings-field-sub">
-                        {l(
-                          "Stored locally. Applying it to Codex CLI will be a separate explicit action.",
-                          "保存在本地；写入 Codex CLI 会作为单独的显式动作。",
-                        )}
+                        {draftApiConfig.customApiKey
+                          ? l("Using the key entered here.", "使用此处输入的密钥。")
+                          : codexConfig?.hasApiKey
+                            ? l(`Detected from ${codexConfig.credentialSource ?? "Codex config"}.`, `已从 ${codexConfig.credentialSource ?? "Codex 配置"} 识别。`)
+                            : l("No key detected. AgentRecall also checks Codex config, auth.json, and environment variables.", "未识别到密钥；AgentRecall 还会检查 Codex 配置、auth.json 和环境变量。")}
                       </span>
                     </div>
                     <div className="secret-input">
@@ -1777,4 +1778,3 @@ export function ApiConfigDialog({
 function normalizeProviderBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
-

@@ -414,6 +414,26 @@ describe("codex profile switching", () => {
     });
   });
 
+  it("reads the Authorization header used by the Runtime local config", async () => {
+    await withCodexHome(async (codexHome) => {
+      await writeFile(
+        path.join(codexHome, "config.toml"),
+        [
+          'model_provider = "gateway"',
+          "",
+          "[model_providers.gateway]",
+          'base_url = "https://api.example/v1"',
+          'http_headers = { "Authorization" = "Bearer runtime-header-key" }',
+        ].join("\n"),
+      );
+
+      const snapshot = await loadCodexConfigSnapshot(codexHome);
+
+      expect(snapshot.hasApiKey).toBe(true);
+      expect(snapshot.credentialSource).toBe("config.toml gateway.http_headers.Authorization");
+    });
+  });
+
   it("falls back to a .env file next to the Codex config", async () => {
     await withCodexHome(async (codexHome) => {
       await writeFile(path.join(codexHome, "config.toml"), 'model_provider = "dms"\n\n[model_providers.dms]\n');

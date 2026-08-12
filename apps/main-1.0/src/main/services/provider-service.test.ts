@@ -54,6 +54,7 @@ function createHarness(settings: AppSettings = cloneSettings()) {
   const settingsWrites: Array<{ path: string; value: unknown }> = [];
   const proxies: Array<CodexChatProxyPort & { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
   const operations: ProviderServiceOperations = {
+    providerConfigDirectoryExists: vi.fn(async () => true),
     loadCodexProfileDefaults: vi.fn(async () => ({})),
     loadClaudeApiConfigDefaults: vi.fn(async () => ({})),
     loadClaudeConfigSnapshot: vi.fn(async () => ({
@@ -145,6 +146,25 @@ function customCodexConfig(overrides: Partial<ApiConfig> = {}): ApiConfig {
 }
 
 describe("ProviderService settings and keys", () => {
+  it("drops deleted saved config directories and reloads the machine-local profiles", async () => {
+    const settings = cloneSettings();
+    settings.apiConfig.customConfigDir = "/deleted/codex-home";
+    settings.claudeApiConfig.customConfigDir = "/deleted/claude-home";
+    const harness = createHarness(settings);
+    vi.mocked(harness.operations.providerConfigDirectoryExists).mockResolvedValue(false);
+
+    const hydrated = await harness.service.hydrateSettings();
+
+    expect(hydrated.apiConfig.customConfigDir).toBe("");
+    expect(hydrated.claudeApiConfig.customConfigDir).toBe("");
+    expect(harness.operations.loadCodexProfileDefaults).toHaveBeenCalledWith(undefined);
+    expect(harness.operations.loadClaudeApiConfigDefaults).toHaveBeenCalledWith(undefined);
+    expect(harness.settingsWrites).toEqual([
+      { path: "apiConfig.customConfigDir", value: "" },
+      { path: "claudeApiConfig.customConfigDir", value: "" },
+    ]);
+  });
+
   it("hydrates local profile defaults and injects separately stored keys", async () => {
     const settings = cloneSettings();
     settings.apiConfig = customCodexConfig({ customApiKey: "", customModel: "" });

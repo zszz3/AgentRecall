@@ -58,19 +58,21 @@ const CLAUDE_ROUTE_ENV_KEYS = [
   "API_TIMEOUT_MS",
 ] as const;
 
-export async function loadClaudeApiConfigDefaults(configuredHome?: string): Promise<Partial<ClaudeApiConfig>> {
+export async function loadClaudeApiConfigDefaults(
+  configuredHome?: string,
+  processEnv: NodeJS.ProcessEnv = process.env,
+): Promise<Partial<ClaudeApiConfig>> {
   const claudeHome = resolveProviderConfigDirectory(configuredHome, ".claude");
   const settings = parseJsonObject(await readOptionalFile(path.join(claudeHome, "settings.json")));
-  if (!settings) return {};
-
-  const env = isPlainObject(settings.env) ? settings.env : {};
-  const baseUrl = readString(env.ANTHROPIC_BASE_URL);
-  const token = readString(env.ANTHROPIC_AUTH_TOKEN);
-  const apiKey = readString(env.ANTHROPIC_API_KEY);
-  const routeModel = readString(env.ANTHROPIC_MODEL);
-  const model = routeModel || readString(settings.model);
+  const settingsEnv = settings && isPlainObject(settings.env) ? settings.env : {};
+  const value = (key: string): string => readString(processEnv[key]) || readString(settingsEnv[key]);
+  const baseUrl = value("ANTHROPIC_BASE_URL");
+  const token = value("ANTHROPIC_AUTH_TOKEN");
+  const apiKey = value("ANTHROPIC_API_KEY");
+  const routeModel = value("ANTHROPIC_MODEL");
+  const model = routeModel || readString(settings?.model);
   const hasRouteEnv = Boolean(baseUrl || token || apiKey || routeModel);
-  if (!hasRouteEnv) return { activeProvider: "official" };
+  if (!hasRouteEnv) return settings ? { activeProvider: "official" } : {};
 
   const preset = baseUrl ? findClaudeApiProviderPresetByBaseUrl(baseUrl) : null;
   return normalizeClaudeApiConfig({
@@ -80,9 +82,9 @@ export async function loadClaudeApiConfigDefaults(configuredHome?: string): Prom
     customBaseUrl: baseUrl,
     customApiKey: token || apiKey,
     customModel: model,
-    customHaikuModel: readString(env.ANTHROPIC_DEFAULT_HAIKU_MODEL),
-    customSonnetModel: readString(env.ANTHROPIC_DEFAULT_SONNET_MODEL),
-    customOpusModel: readString(env.ANTHROPIC_DEFAULT_OPUS_MODEL),
+    customHaikuModel: value("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+    customSonnetModel: value("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+    customOpusModel: value("ANTHROPIC_DEFAULT_OPUS_MODEL"),
     customApiFormat: preset?.apiFormat ?? "anthropic",
     customApiKeyField: apiKey && !token ? "ANTHROPIC_API_KEY" : (preset?.apiKeyField ?? "ANTHROPIC_AUTH_TOKEN"),
   });
@@ -254,12 +256,12 @@ async function resolveClaudeCredential(options: {
   const env = settings && isPlainObject(settings.env) ? settings.env : {};
   const keys = [...new Set([options.apiKeyField, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"].filter(Boolean))] as string[];
   for (const key of keys) {
-    const value = readString(env[key]);
-    if (value) return { apiKey: value, source: `settings.json env.${key}` };
-  }
-  for (const key of keys) {
     const value = process.env[key]?.trim();
     if (value) return { apiKey: value, source: `environment ${key}` };
+  }
+  for (const key of keys) {
+    const value = readString(env[key]);
+    if (value) return { apiKey: value, source: `settings.json env.${key}` };
   }
   return { apiKey: "", source: null };
 }

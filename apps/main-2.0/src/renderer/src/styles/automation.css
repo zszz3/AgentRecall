@@ -622,6 +622,58 @@
   display: none;
 }
 
+.runtime-unsaved-backdrop {
+  position: fixed;
+  z-index: 180;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--dialog-overlay);
+  backdrop-filter: blur(4px);
+}
+
+.runtime-unsaved-dialog {
+  width: min(420px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-dialog);
+}
+
+.runtime-unsaved-dialog header {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.runtime-unsaved-dialog header strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.runtime-unsaved-dialog header span {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.runtime-unsaved-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.runtime-unsaved-dialog footer button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+}
+
 .automation-page .runtime-provider-picker {
   display: grid;
   width: min(760px, 100%);

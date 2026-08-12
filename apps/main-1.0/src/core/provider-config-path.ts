@@ -4,13 +4,30 @@ import os from "node:os";
 import path from "node:path";
 
 export function resolveProviderConfigDirectory(configuredPath: string | undefined, defaultDirectoryName: string): string {
-  const value = (configuredPath ?? "").trim();
+  const environmentPath = defaultDirectoryName === ".codex"
+    ? process.env.CODEX_HOME
+    : defaultDirectoryName === ".claude"
+      ? process.env.CLAUDE_CONFIG_DIR
+      : undefined;
+  const value = (configuredPath ?? "").trim() || environmentPath?.trim() || "";
   if (!value) return path.join(os.homedir(), defaultDirectoryName);
   if (value === "~") return os.homedir();
   if (value.startsWith(`~${path.sep}`) || value.startsWith("~/") || value.startsWith("~\\")) {
     return path.resolve(os.homedir(), value.slice(2));
   }
   return path.resolve(value);
+}
+
+export async function providerConfigDirectoryExists(
+  configuredPath: string | undefined,
+  defaultDirectoryName: string,
+): Promise<boolean> {
+  if (!(configuredPath ?? "").trim()) return true;
+  try {
+    return (await stat(resolveProviderConfigDirectory(configuredPath, defaultDirectoryName))).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 export async function prepareProviderConfigDirectory(

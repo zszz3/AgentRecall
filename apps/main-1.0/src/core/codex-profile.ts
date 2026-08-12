@@ -259,6 +259,23 @@ async function resolveCodexCredential(options: {
   const inline = readInlineCodexKey(section);
   if (inline) return { apiKey: inline.apiKey, source: `config.toml ${options.providerId}.${inline.field}` };
 
+  const authorization = readTomlInlineTable(section, "http_headers").Authorization?.trim() ?? "";
+  if (authorization) {
+    return {
+      apiKey: authorization.replace(/^Bearer\s+/i, "").trim(),
+      source: `config.toml ${options.providerId}.http_headers.Authorization`,
+    };
+  }
+
+  const authorizationEnv = readTomlInlineTable(section, "env_http_headers").Authorization?.trim() ?? "";
+  const authorizationEnvValue = authorizationEnv ? process.env[authorizationEnv]?.trim() : "";
+  if (authorizationEnvValue) {
+    return {
+      apiKey: authorizationEnvValue.replace(/^Bearer\s+/i, "").trim(),
+      source: `environment ${authorizationEnv}`,
+    };
+  }
+
   const topLevelInline = readInlineCodexKey(topLevelTomlRegion(options.configText));
   if (topLevelInline) return { apiKey: topLevelInline.apiKey, source: `config.toml ${topLevelInline.field}` };
 
@@ -749,6 +766,39 @@ function readTomlString(text: string, key: string): string | null {
   const rawValue = text.match(pattern)?.[1];
   if (!rawValue) return null;
   return parseTomlString(rawValue);
+}
+
+function readTomlInlineTable(text: string, key: string): Record<string, string> {
+  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*\\{(.*?)\\}\\s*$`, "m");
+  const body = text.match(pattern)?.[1];
+  if (!body) return {};
+  const values: Record<string, string> = {};
+  for (const entry of splitTomlCommaList(body)) {
+    const separator = entry.indexOf("=");
+    if (separator < 0) continue;
+    const rawKey = entry.slice(0, separator).trim();
+    const name = parseTomlString(rawKey) ?? rawKey;
+    const value = parseTomlString(entry.slice(separator + 1));
+    if (name && value) values[name] = value;
+  }
+  return values;
+}
+
+function splitTomlCommaList(value: string): string[] {
+  const parts: string[] = [];
+  let quote: '"' | "'" | null = null;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if ((char === '"' || char === "'") && value[index - 1] !== "\\") {
+      quote = quote === char ? null : quote ?? char;
+    } else if (char === "," && !quote) {
+      parts.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  parts.push(value.slice(start).trim());
+  return parts.filter(Boolean);
 }
 
 /** Everything before the first `[section]` header, i.e. the config's top-level table. */

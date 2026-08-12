@@ -10,6 +10,7 @@ function createHarness(settings: AppSettings = cloneSettings()) {
   const keys = new Map<string, string>();
   const savedSettings = new Map<string, unknown>();
   const operations: Partial<ProviderServiceOperations> = {
+    providerConfigDirectoryExists: vi.fn(async () => true),
     loadCodexProfileDefaults: vi.fn(async () => ({})),
     loadClaudeApiConfigDefaults: vi.fn(async () => ({})),
     probeCodexModels: vi.fn(async () => ({
@@ -54,6 +55,25 @@ function createHarness(settings: AppSettings = cloneSettings()) {
   });
   return { service, settings, keys, savedSettings, operations };
 }
+
+describe("ProviderService local config directories", () => {
+  it("drops deleted saved config directories and reloads the machine-local profiles", async () => {
+    const settings = cloneSettings();
+    settings.apiConfig.customConfigDir = "/deleted/codex-home";
+    settings.claudeApiConfig.customConfigDir = "/deleted/claude-home";
+    const harness = createHarness(settings);
+    vi.mocked(harness.operations.providerConfigDirectoryExists!).mockResolvedValue(false);
+
+    const hydrated = await harness.service.hydrateSettings();
+
+    expect(hydrated.apiConfig.customConfigDir).toBe("");
+    expect(hydrated.claudeApiConfig.customConfigDir).toBe("");
+    expect(harness.operations.loadCodexProfileDefaults).toHaveBeenCalledWith(undefined);
+    expect(harness.operations.loadClaudeApiConfigDefaults).toHaveBeenCalledWith(undefined);
+    expect(harness.savedSettings.get("apiConfig.customConfigDir")).toBe("");
+    expect(harness.savedSettings.get("claudeApiConfig.customConfigDir")).toBe("");
+  });
+});
 
 describe("summary Claude route isolation", () => {
   it("probes with the summary key store and the summary config directory", async () => {

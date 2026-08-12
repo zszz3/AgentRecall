@@ -1017,8 +1017,8 @@ export function ProviderPage({
                       <span className="settings-field-sub">
                         {draftApiConfig.customApiKey
                           ? l("Using the key entered here.", "使用此处输入的密钥。")
-                          : codexConfig?.activeProvider?.hasApiKey
-                            ? l(`Detected from ${codexConfig.activeProvider.credentialSource ?? "Codex config"}.`, `已从 ${codexConfig.activeProvider.credentialSource ?? "Codex 配置"} 识别。`)
+                          : codexConfig?.hasApiKey
+                            ? l(`Detected from ${codexConfig.credentialSource ?? "Codex config"}.`, `已从 ${codexConfig.credentialSource ?? "Codex 配置"} 识别。`)
                             : l("No key detected. AgentRecall also checks Codex config, auth.json, and environment variables.", "未识别到密钥；AgentRecall 还会检查 Codex 配置、auth.json 和环境变量。")}
                       </span>
                     </div>

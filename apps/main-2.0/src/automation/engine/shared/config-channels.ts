@@ -53,6 +53,10 @@ function sameConfigValue(left: unknown, right: unknown): boolean {
     ));
 }
 
+export function configChannelsEqual(left: AgentChannel[], right: AgentChannel[]): boolean {
+  return sameConfigValue(left, right);
+}
+
 function isUntouchedOptionalRuntimeDefault(channel: AgentChannel): boolean {
   const definition = runtimeDefinition(channel.agentId);
   if (definition.autoCreateConfig) return false;

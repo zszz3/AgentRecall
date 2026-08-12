@@ -1,7 +1,7 @@
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_API_PROVIDER_PRESETS,
   defaultClaudeApiConfig,
@@ -23,6 +23,15 @@ async function readSettings(claudeHome: string): Promise<Record<string, unknown>
 }
 
 describe("Claude Code provider switching", () => {
+  beforeEach(() => {
+    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_BASE_URL", "");
+    vi.stubEnv("ANTHROPIC_MODEL", "");
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
   it("keeps common Claude provider presets from cc-switch available", () => {
     expect(CLAUDE_API_PROVIDER_PRESETS.map((preset) => preset.id)).toEqual([
       "custom",
@@ -86,6 +95,21 @@ describe("Claude Code provider switching", () => {
         customSonnetModel: "kimi-k2.6",
         customOpusModel: "kimi-k2.6",
         customApiKeyField: "ANTHROPIC_AUTH_TOKEN",
+      });
+    });
+  });
+
+  it("uses the same process environment route as the Runtime local config", async () => {
+    await withClaudeHome(async (claudeHome) => {
+      await expect(loadClaudeApiConfigDefaults(claudeHome, {
+        ANTHROPIC_BASE_URL: "https://runtime.example/anthropic",
+        ANTHROPIC_AUTH_TOKEN: "runtime-key",
+        ANTHROPIC_MODEL: "runtime-model",
+      })).resolves.toMatchObject({
+        activeProvider: "custom",
+        customBaseUrl: "https://runtime.example/anthropic",
+        customApiKey: "runtime-key",
+        customModel: "runtime-model",
       });
     });
   });

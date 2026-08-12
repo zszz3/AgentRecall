@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { AutomationApi } from "../../../../../../../preload/automation";
-import { selectConfigChannelsForDisplay } from "../../../../../shared/config-channels";
+import { configChannelsEqual, selectConfigChannelsForDisplay } from "../../../../../shared/config-channels";
 import { DEFAULT_MODEL_ID } from "../../../../../shared/models";
 import type {
   AgentChannel,
@@ -20,12 +20,15 @@ const BALANCE_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 export async function confirmConfigSwitch(
   dirty: boolean,
-  confirmSave: () => boolean,
+  decide: () => Promise<"save" | "discard" | "cancel">,
   save: () => Promise<void>,
+  discard: () => void,
 ): Promise<boolean> {
   if (!dirty) return true;
-  if (!confirmSave()) return false;
-  await save();
+  const decision = await decide();
+  if (decision === "cancel") return false;
+  if (decision === "save") await save();
+  else discard();
   return true;
 }
 
@@ -98,7 +101,7 @@ export interface RuntimeConfigManager {
   queryRuntimeChannelBalance: (channelId: string, options?: { persistBeforeQuery?: boolean; quiet?: boolean }) => Promise<void>;
   refreshModelCatalog: (channelId: string) => Promise<void>;
   importLocalConfig: (runtimeId: AgentId, channelId?: string) => Promise<void>;
-  confirmSaveBeforeSwitch: (message: string) => Promise<boolean>;
+  confirmSaveBeforeSwitch: (decide: () => Promise<"save" | "discard" | "cancel">) => Promise<boolean>;
 }
 
 export function useRuntimeConfigManager({
@@ -171,16 +174,21 @@ export function useRuntimeConfigManager({
   }, []);
 
   const syncChannelsFromSnapshot = useCallback((channels: AgentChannel[]) => {
+    configChannelsRef.current = channels;
     setConfigChannels(channels);
     setSelectedConfigChannelId((current) => channelForRuntimeSelection(channels, selectedRuntimeId, current)?.id ?? "");
   }, [channelForRuntimeSelection, selectedRuntimeId]);
 
   const updateConfigChannels = useCallback((next: AgentChannel[]) => {
+    if (configChannelsEqual(configChannelsRef.current, next)) return;
+    configChannelsRef.current = next;
     setConfigChannels(next);
-    setConfigDirty(true);
+    const dirty = !configChannelsEqual(snapshot.channels, next);
+    configDirtyRef.current = dirty;
+    setConfigDirty(dirty);
     setConfigStatus("");
     setSelectedConfigChannelId((current) => channelForRuntimeSelection(next, selectedRuntimeId, current)?.id ?? "");
-  }, [channelForRuntimeSelection, selectedRuntimeId]);
+  }, [channelForRuntimeSelection, selectedRuntimeId, snapshot.channels]);
 
   const selectRuntime = useCallback((runtimeId: AgentId) => {
     setSelectedRuntimeId(runtimeId);
@@ -202,14 +210,11 @@ export function useRuntimeConfigManager({
     const currentChannels = configChannelsRef.current;
     const channel = createChannel(runtimeId, currentChannels.map((item) => item.id));
     const next = [...currentChannels, channel];
-    configChannelsRef.current = next;
-    setConfigChannels(next);
-    setConfigDirty(true);
-    setConfigStatus("");
+    updateConfigChannels(next);
     setConfigContextMenu(undefined);
     setSelectedRuntimeId(runtimeId);
     setSelectedConfigChannelId(channel.id);
-  }, []);
+  }, [updateConfigChannels]);
 
   const openConfigContextMenu = useCallback((event: MouseEvent, channelId: string, closeOtherMenus?: () => void) => {
     event.preventDefault();
@@ -229,9 +234,7 @@ export function useRuntimeConfigManager({
       return;
     }
     const next = configChannelsRef.current.filter((channel) => channel.id !== channelId);
-    setConfigChannels(next);
-    setConfigDirty(true);
-    setConfigStatus("");
+    updateConfigChannels(next);
     setBalanceResults((current) => {
       if (!(channelId in current)) return current;
       const nextResults = { ...current };
@@ -243,11 +246,13 @@ export function useRuntimeConfigManager({
         ? (channelForRuntimeSelection(next, selectedRuntimeId, "")?.id ?? "")
         : (channelForRuntimeSelection(next, selectedRuntimeId, current)?.id ?? "")
     ));
-  }, [channelForRuntimeSelection, selectedRuntimeId, snapshot.configuredAgents]);
+  }, [channelForRuntimeSelection, selectedRuntimeId, snapshot.configuredAgents, updateConfigChannels]);
 
   const persistChannelConfig = useCallback(async (): Promise<AppSnapshot> => {
     const next = await chatApi.saveModelChannels(configChannelsRef.current);
+    configChannelsRef.current = next.channels;
     setConfigChannels(next.channels);
+    configDirtyRef.current = false;
     setConfigDirty(false);
     setSelectedConfigChannelId((current) => channelForRuntimeSelection(next.channels, selectedRuntimeId, current)?.id ?? "");
     setSnapshot(next);
@@ -257,7 +262,9 @@ export function useRuntimeConfigManager({
 
   const persistSpecificChannelConfig = useCallback(async (channels: AgentChannel[]): Promise<AppSnapshot> => {
     const next = await chatApi.saveModelChannels(channels);
+    configChannelsRef.current = next.channels;
     setConfigChannels(next.channels);
+    configDirtyRef.current = false;
     setConfigDirty(false);
     setSelectedConfigChannelId((current) => channelForRuntimeSelection(next.channels, selectedRuntimeId, current)?.id ?? "");
     setSnapshot(next);
@@ -274,26 +281,42 @@ export function useRuntimeConfigManager({
     }
   }, [persistChannelConfig]);
 
-  const confirmSaveBeforeSwitch = useCallback(async (message: string): Promise<boolean> => {
+  const confirmSaveBeforeSwitch = useCallback(async (
+    decide: () => Promise<"save" | "discard" | "cancel">,
+  ): Promise<boolean> => {
     try {
-      return await confirmConfigSwitch(configDirtyRef.current, () => window.confirm(message), async () => {
-        await persistChannelConfig();
-        setConfigStatus("Saved");
-      });
+      return await confirmConfigSwitch(
+        configDirtyRef.current,
+        decide,
+        async () => {
+          await persistChannelConfig();
+          setConfigStatus("Saved");
+        },
+        () => {
+          syncChannelsFromSnapshot(snapshot.channels);
+          configDirtyRef.current = false;
+          setConfigDirty(false);
+          setConfigStatus("");
+        },
+      );
     } catch (error) {
       setConfigStatus(error instanceof Error ? error.message : String(error));
       return false;
     }
-  }, [persistChannelConfig]);
+  }, [persistChannelConfig, snapshot.channels, syncChannelsFromSnapshot]);
 
   const updateConfigChannel = useCallback((channelId: string, updater: (channel: AgentChannel) => AgentChannel) => {
+    const current = configChannelsRef.current.find((channel) => channel.id === channelId);
+    if (!current) return;
+    const updated = updater(current);
+    if (configChannelsEqual([current], [updated])) return;
     setBalanceResults((current) => {
       if (!(channelId in current)) return current;
       const next = { ...current };
       delete next[channelId];
       return next;
     });
-    updateConfigChannels(configChannelsRef.current.map((channel) => (channel.id === channelId ? updater(channel) : channel)));
+    updateConfigChannels(configChannelsRef.current.map((channel) => (channel.id === channelId ? updated : channel)));
   }, [updateConfigChannels]);
 
   const replaceConfigChannelAndPersist = useCallback(async (channelId: string, nextChannel: AgentChannel): Promise<void> => {
@@ -366,6 +389,7 @@ export function useRuntimeConfigManager({
       if (configDirtyRef.current) await persistChannelConfig();
       const result = await chatApi.refreshModelCatalog(channelId);
       syncChannelsFromSnapshot(result.snapshot.channels);
+      configDirtyRef.current = false;
       setConfigDirty(false);
       setSnapshot(result.snapshot);
       setConfigStatus(`Loaded ${result.discoveredCount} models from ${result.providerLabel}`);
@@ -380,9 +404,11 @@ export function useRuntimeConfigManager({
     try {
       const result = await chatApi.importRuntimeLocalConfig(runtimeId, channelId);
       setSelectedRuntimeId(runtimeId);
+      configChannelsRef.current = result.snapshot.channels;
       setConfigChannels(result.snapshot.channels);
       setSelectedConfigChannelId(result.channelId);
       setConfigDirty(false);
+      configDirtyRef.current = false;
       setSnapshot(result.snapshot);
       setConfigStatus(`Imported local defaults from ${result.source}`);
     } catch (error) {
@@ -516,6 +542,7 @@ export function useRuntimeConfigManager({
 
   useEffect(() => {
     if (configDirty) return;
+    configChannelsRef.current = snapshot.channels;
     syncChannelsFromSnapshot(snapshot.channels);
   }, [configDirty, snapshot.channels, syncChannelsFromSnapshot]);
 
