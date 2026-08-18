@@ -5,6 +5,7 @@ export type OptionalSessionSourceSetting =
   | "includeTcodex"
   | "includeCodeBuddyCli"
   | "includeWorkBuddy"
+  | "includeDeepSeekHarness"
   | "includeCodeWizCli"
   | "includeOpenClaw"
   | "includeHermes"
@@ -22,6 +23,7 @@ export type SessionSourceFamily =
   | "tcodex"
   | "codebuddy"
   | "workbuddy"
+  | "deepseek-harness"
   | "codewiz"
   | "openclaw"
   | "hermes"
@@ -112,6 +114,12 @@ export const SESSION_SOURCE_REGISTRY = {
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
     capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
   },
+  "deepseek-harness": {
+    id: "deepseek-harness", label: "DeepSeek Harness", format: "dsh", family: "deepseek-harness", uiFamily: "other", statsGroup: null,
+    optionalSetting: "includeDeepSeekHarness", pendingKey: "deepseek-harness", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
+    resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
+    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+  },
   "codewiz-cli": {
     id: "codewiz-cli", label: "CodeWiz", format: "codewiz", family: "codewiz", uiFamily: "codewiz", statsGroup: null,
     optionalSetting: "includeCodeWizCli", pendingKey: "codewiz", remoteCollectorOptional: false, liveFamily: "codewiz", migrationAgent: "codewiz",
@@ -187,6 +195,10 @@ export function sessionSourceDescriptor(source: SessionSource): SessionSourceDes
 
 export function sessionSourceLabel(source: SessionSource): string {
   return sessionSourceDescriptor(source).label;
+}
+
+export function isReadOnlySessionSource(source: SessionSource): boolean {
+  return source === "pi-cli" || source === "workbuddy-cli" || source === "deepseek-harness";
 }
 
 export function remoteSessionAgentForSource(source: SessionSource): RemoteSessionAgent | null {

@@ -1790,6 +1790,33 @@ describe("SessionStore", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("rejects DeepSeek Harness source deletion while record-only source pruning keeps the file", () => {
+    const store = createInMemoryStore();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-delete-dsh-"));
+    const filePath = path.join(dir, "session.jsonl.zstd");
+    fs.writeFileSync(filePath, "{}\n", "utf8");
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "dsh:abc",
+        rawId: "abc",
+        source: "deepseek-harness",
+        filePath,
+      }),
+      messages,
+    );
+
+    expect(() => store.deleteSession("dsh:abc"))
+      .toThrow("DeepSeek Harness session source files are read-only.");
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(store.getSession("dsh:abc")).not.toBeNull();
+
+    store.deleteSessionsBySource(["deepseek-harness"]);
+
+    expect(store.getSession("dsh:abc")).toBeNull();
+    expect(fs.existsSync(filePath)).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("does not search tag names from the text search box, but supports explicit tag filtering", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession(), messages);

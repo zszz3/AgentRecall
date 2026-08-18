@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isSessionSource,
+  isReadOnlySessionSource,
   OPTIONAL_SESSION_SOURCE_DESCRIPTORS,
   remoteSessionAgentForSource,
   SESSION_SOURCE_DESCRIPTORS,
@@ -18,6 +19,7 @@ const ALL_SOURCES = [
   "tcodex-cli",
   "codebuddy-cli",
   "workbuddy-cli",
+  "deepseek-harness",
   "codewiz-cli",
   "openclaw",
   "hermes",
@@ -53,6 +55,7 @@ describe("session source capability registry", () => {
       "includeTcodex",
       "includeCodeBuddyCli",
       "includeWorkBuddy",
+      "includeDeepSeekHarness",
       "includeCodeWizCli",
       "includeOpenClaw",
       "includeHermes",
@@ -92,6 +95,21 @@ describe("session source capability registry", () => {
       nativeAppFamily: null,
       capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
     });
+    expect(sessionSourceDescriptor("deepseek-harness")).toMatchObject({
+      label: "DeepSeek Harness",
+      format: "dsh",
+      family: "deepseek-harness",
+      uiFamily: "other",
+      optionalSetting: "includeDeepSeekHarness",
+      pendingKey: "deepseek-harness",
+      remoteCollectorOptional: false,
+      liveFamily: null,
+      migrationAgent: null,
+      resumeTarget: null,
+      remoteFamily: null,
+      nativeAppFamily: null,
+      capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+    });
     expect(sessionSourceDescriptor("pi-cli")).toMatchObject({
       label: "Pi",
       format: "pi",
@@ -113,6 +131,8 @@ describe("session source capability registry", () => {
     expect(remoteSessionAgentForSource("hermes")).toBe("hermes");
     expect(remoteSessionAgentForSource("zcode-cli")).toBeNull();
     expect(remoteSessionAgentForSource("workbuddy-cli")).toBeNull();
+    expect(remoteSessionAgentForSource("deepseek-harness")).toBeNull();
+    expect(isReadOnlySessionSource("deepseek-harness")).toBe(true);
     expect(OPTIONAL_SESSION_SOURCE_DESCRIPTORS.filter(({ remoteCollectorOptional }) => remoteCollectorOptional).map(({ id }) => id)).toEqual([
       "tclaude-cli",
       "tcodex-cli",

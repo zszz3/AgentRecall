@@ -41,7 +41,7 @@ AgentRecall 用来集中管理分散在不同 AI Coding Agent 中的会话。你
 - **搜索和整理会话**：统一索引 Claude Code、Codex 以及已启用的可选来源，支持关键词、环境、项目、来源、标签、收藏、隐藏状态和时间范围筛选，也可以保存常用搜索条件。
 - **查看完整上下文**：在详情页查看消息、Markdown、代码块、工具事件和附件；会话内可以继续查找关键词，并按用户或助手消息缩小范围。
 - **继续、迁移和导出**：从搜索结果 Resume 原会话，在支持的本地 Agent 之间迁移，也可以导出 Markdown、纯文本或常见模型请求格式的 JSON。
-- **扩展会话来源**：Claude Code 和 Codex 默认启用。CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder 需要在 **设置 → 可选来源** 中开启。WorkBuddy 首版仅支持本地搜索、查看和导出消息、工具轨迹、标题及用量信息，不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。Windows WSL 和 SSH 环境可以单独添加。
+- **扩展会话来源**：Claude Code 和 Codex 默认启用。CodeBuddy、WorkBuddy、DeepSeek Harness、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder 需要在 **设置 → 可选来源** 中开启。WorkBuddy 首版仅支持本地搜索、查看和导出消息、工具轨迹、标题及用量信息，不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。DeepSeek Harness 默认关闭，以只读方式索引 `${DSH_HOME:-~/.dsh}/sessions` 下的本机会话，支持搜索、详情、导出、标题、工具轨迹、Token 用量、父子会话和附件；暂不支持实时跟踪、Resume、迁移、同步、从 AgentRecall 打开 DeepSeek Harness，或删除原始会话文件。Windows WSL 和 SSH 环境可以单独添加。
 - **AI 辅助检索**：为会话生成摘要，或用自然语言描述想找的内容。摘要和 AI 找会话使用你在 Provider 中选择的 Codex、Claude Code 或自定义接口。
 - **跨设备同步**：使用自己的 Supabase 项目手动上传会话，或为 Claude Code、Codex 安装同步 Hooks。在另一台设备上可以搜索、查看和恢复云端会话。
 - **Skills 与数字资产**：查看和管理本机 Skills，并在多台设备间同步 Skills、Rules 和 Memories。云端版本可以预览、安装或恢复。

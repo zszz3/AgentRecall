@@ -1,4 +1,5 @@
 import type { EnvironmentKind, SessionEnvironment, SessionSource } from "./types";
+import { isReadOnlySessionSource } from "./session-sources";
 
 export interface SessionEnvironmentIdentity {
   environmentKind: EnvironmentKind;
@@ -21,8 +22,7 @@ export function isLocalSessionStorage(session: SessionStorageIdentity): boolean 
 }
 
 export function canDeleteSessionLocally(session: SessionEnvironmentIdentity): boolean {
-  return session.source !== "pi-cli"
-    && session.source !== "workbuddy-cli"
+  return (session.source === undefined || !isReadOnlySessionSource(session.source))
     && (session.environmentKind !== "ssh" || session.sourceAvailable === false);
 }
 

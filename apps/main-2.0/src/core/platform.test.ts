@@ -7,6 +7,11 @@ describe("app settings", () => {
     expect(mergeAppSettings(defaultSettings, { includeWorkBuddy: true }).includeWorkBuddy).toBe(true);
   });
 
+  it("keeps DeepSeek Harness indexing opt-in while accepting an explicit enable", () => {
+    expect(defaultSettings.includeDeepSeekHarness).toBe(false);
+    expect(mergeAppSettings(defaultSettings, { includeDeepSeekHarness: true }).includeDeepSeekHarness).toBe(true);
+  });
+
   it("starts every summary source on the machine's own config directory", () => {
     expect(defaultSettings.summarySource).toBe("codex");
     expect(defaultSettings.summaryCodexConfigDir).toBe("");

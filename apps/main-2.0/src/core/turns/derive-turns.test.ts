@@ -575,6 +575,120 @@ describe("deriveSessionTimeline", () => {
     expect(timeline.turns[0].status).toBe("running");
   });
 
+  it("projects native DeepSeek Harness completed, failed, and aborted lifecycle events", () => {
+    const dshMessages: SessionMessage[] = [
+      {
+        role: "user",
+        content: "complete",
+        timestamp: "2026-08-17T01:00:00.000Z",
+        index: 0,
+        sourceTurnId: "dsh:1",
+      },
+      {
+        role: "user",
+        content: "fail",
+        timestamp: "2026-08-17T01:01:00.000Z",
+        index: 1,
+        sourceTurnId: "dsh:2",
+      },
+      {
+        role: "user",
+        content: "abort",
+        timestamp: "2026-08-17T01:02:00.000Z",
+        index: 2,
+        sourceTurnId: "dsh:3",
+      },
+    ];
+    const dshLifecycle: SessionTraceEvent[] = [
+      {
+        index: 0,
+        kind: "event",
+        source: "dsh",
+        title: "Turn started",
+        detail: "",
+        timestamp: "2026-08-17T01:00:00.000Z",
+        eventType: "dsh.turn.started",
+        status: "running",
+        sourceTurnId: "dsh:1",
+      },
+      {
+        index: 1,
+        kind: "event",
+        source: "dsh",
+        title: "Turn completed",
+        detail: "",
+        timestamp: "2026-08-17T01:00:03.000Z",
+        eventType: "dsh.turn.completed",
+        status: "completed",
+        sourceTurnId: "dsh:1",
+        attributes: { durationMs: 3_000 },
+      },
+      {
+        index: 2,
+        kind: "event",
+        source: "dsh",
+        title: "Turn started",
+        detail: "",
+        timestamp: "2026-08-17T01:01:00.000Z",
+        eventType: "dsh.turn.started",
+        status: "running",
+        sourceTurnId: "dsh:2",
+      },
+      {
+        index: 3,
+        kind: "event",
+        source: "dsh",
+        title: "Turn failed",
+        detail: "provider unavailable",
+        timestamp: "2026-08-17T01:01:02.000Z",
+        eventType: "dsh.turn.failed",
+        status: "failed",
+        sourceTurnId: "dsh:2",
+      },
+      {
+        index: 4,
+        kind: "event",
+        source: "dsh",
+        title: "Turn started",
+        detail: "",
+        timestamp: "2026-08-17T01:02:00.000Z",
+        eventType: "dsh.turn.started",
+        status: "running",
+        sourceTurnId: "dsh:3",
+      },
+      {
+        index: 5,
+        kind: "event",
+        source: "dsh",
+        title: "Turn aborted",
+        detail: "user",
+        timestamp: "2026-08-17T01:02:01.000Z",
+        eventType: "dsh.turn.aborted",
+        status: "aborted",
+        sourceTurnId: "dsh:3",
+        attributes: { abortReason: "user" },
+      },
+    ];
+
+    const timeline = deriveSessionTimeline({
+      sessionKey: "dsh:lifecycle",
+      messages: dshMessages,
+      traceEvents: dshLifecycle,
+    });
+
+    expect(timeline.turns).toHaveLength(3);
+    expect(timeline.turns.map((turn) => ({
+      sourceTurnId: turn.sourceTurnId,
+      status: turn.status,
+      spans: turn.spans,
+      abortReason: turn.abortReason,
+    }))).toEqual([
+      { sourceTurnId: "dsh:1", status: "completed", spans: [], abortReason: null },
+      { sourceTurnId: "dsh:2", status: "failed", spans: [], abortReason: null },
+      { sourceTurnId: "dsh:3", status: "aborted", spans: [], abortReason: "user" },
+    ]);
+  });
+
   it("retains rolled-back token usage without creating a token-only Turn", () => {
     const loaded = loadCodexSessionRows("/tmp/codex-token-only-rollback.jsonl", [
       {

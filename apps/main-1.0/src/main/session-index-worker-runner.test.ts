@@ -12,8 +12,11 @@ describe("runSessionIndexWorker", () => {
     const homeDir = path.join(root, "home");
     const userDataPath = path.join(root, "user-data");
     const sessionDir = path.join(homeDir, ".codex", "sessions", "2026", "08", "04");
+    const dshHome = path.join(homeDir, ".dsh");
+    const dshSessionDir = path.join(dshHome, "sessions", "--worker-project--", "worker-dsh");
     const dbPath = path.join(userDataPath, "session-search.sqlite");
     fs.mkdirSync(sessionDir, { recursive: true });
+    fs.mkdirSync(dshSessionDir, { recursive: true });
     fs.mkdirSync(userDataPath, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, "rollout-worker.jsonl"), [
       JSON.stringify({
@@ -31,6 +34,27 @@ describe("runSessionIndexWorker", () => {
         },
       }),
     ].join("\n"));
+    fs.writeFileSync(path.join(dshSessionDir, "session.jsonl"), `${[
+      {
+        type: "session",
+        version: 0,
+        id: "worker-dsh",
+        createdAt: Date.parse("2026-08-04T09:01:00.000Z"),
+        cwd: "/worker/project",
+        delegationDepth: 0,
+      },
+      {
+        type: "user/message",
+        seq: 0,
+        time: Date.parse("2026-08-04T09:01:01.000Z"),
+        data: {
+          role: "user",
+          source: { kind: "user" },
+          content: [{ type: "text", text: "worker DeepSeek Harness content" }],
+        },
+        surfaceOp: "append",
+      },
+    ].map((row) => JSON.stringify(row)).join("\n")}\n`);
     new SessionStore(dbPath).close();
     const messages: SessionIndexWorkerMessage[] = [];
 
@@ -41,18 +65,28 @@ describe("runSessionIndexWorker", () => {
         userDataPath,
         batchSize: 1,
         timeBudgetMs: 1,
-        loadOptions: { homeDir },
+        loadOptions: {
+          homeDir,
+          includeDeepSeekHarness: true,
+          deepSeekHarnessHomeDir: dshHome,
+        },
         disabledSources: [],
       }, (message) => messages.push(message));
 
       expect(result).toMatchObject({
         type: "index",
-        status: { indexed: 1, skipped: 0, total: 1, error: null },
+        status: { indexed: 2, skipped: 0, total: 2, error: null },
       });
       expect(messages.some((message) => message.type === "progress")).toBe(true);
       const store = new SessionStore(dbPath, { initializeSchema: false });
       try {
         expect(store.searchSessions({ query: "worker searchable content" })).toHaveLength(1);
+        expect(store.searchSessions({ query: "worker DeepSeek Harness content" })).toEqual([
+          expect.objectContaining({
+            sessionKey: "dsh:worker-dsh",
+            source: "deepseek-harness",
+          }),
+        ]);
       } finally {
         store.close();
       }
@@ -66,6 +100,7 @@ describe("runSessionIndexWorker", () => {
       const prunedStore = new SessionStore(dbPath, { initializeSchema: false });
       try {
         expect(prunedStore.searchSessions({ query: "worker searchable content" })).toHaveLength(0);
+        expect(prunedStore.searchSessions({ query: "worker DeepSeek Harness content" })).toHaveLength(1);
       } finally {
         prunedStore.close();
       }

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   cleanTitle,
@@ -8,6 +9,7 @@ import {
   extractCursorUserQuery,
   getAdapter,
   isMeaningfulUserMessage,
+  isVisibleDeepSeekHarnessUserSource,
   stripCodexInjectedNoise,
 } from "./format-adapters";
 import { scanCompleteJsonl, scanCompleteJsonlAsync } from "./codex-jsonl-stream";
@@ -18,6 +20,8 @@ import {
   formatCodexToolDetail,
   sanitizeCodexTraceValue,
 } from "./session-loaders/codex-rollout";
+import { decodeDeepSeekHarnessZstd } from "./session-loaders/dsh-zstd";
+import { MAX_ATTACHMENT_BYTES } from "./session-attachments";
 import { truncateTraceDetail } from "./trace-detail";
 import type {
   CodeBuddyConversationLine,
@@ -28,6 +32,7 @@ import type {
   CodexConversationLine,
   IndexedSession,
   LoadedSession,
+  SessionAttachment,
   SessionFormat,
   SessionMessage,
   SessionSource,
@@ -48,6 +53,60 @@ const TCLAUDE_DIR = ".tclaude";
 const TCODEX_DIR = ".tcodex";
 const CODEBUDDY_DIR = ".codebuddy";
 const WORKBUDDY_DIR = ".workbuddy";
+const DEEPSEEK_HARNESS_DIR = ".dsh";
+const DEEPSEEK_HARNESS_SESSION_FILES = ["session.jsonl.zstd", "session.jsonl"] as const;
+const DEEPSEEK_HARNESS_KNOWN_EVENT_TYPES = new Set([
+  "agent-preset/selected",
+  "agent/inbox/spliced",
+  "approval/asked",
+  "approval/decided",
+  "approval/policy",
+  "assistant/chunk",
+  "assistant/message",
+  "command/done",
+  "command/run",
+  "compaction/end",
+  "compaction/prune",
+  "compaction/start",
+  "compaction/summary",
+  "feedback/record",
+  "goal/change",
+  "hook/invoked",
+  "hook/result",
+  "llm/retry",
+  "llm/retry-started",
+  "permission/preset",
+  "plan/mode",
+  "request/context",
+  "request/header",
+  "sandbox/mode",
+  "schedule/change",
+  "session/end-seed",
+  "session/title",
+  "session/title-llm-request",
+  "step/end",
+  "step/start",
+  "subagent/descriptor",
+  "todo/write",
+  "tool-workflow/agent-end",
+  "tool-workflow/agent-start",
+  "tool-workflow/run-end",
+  "tool-workflow/run-start",
+  "tool/call",
+  "tool/code-dispatch",
+  "tool/code-dispatch-start",
+  "tool/result",
+  "turn/end",
+  "turn/start",
+  "user/message",
+  "web/deepseek-search-llm-request",
+]);
+const DEEPSEEK_HARNESS_ATTACHMENT_MEDIA_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
 const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 const QODER_DIR = ".qoder";
 const PI_SESSIONS_DIR = path.join(".pi", "agent", "sessions");
@@ -61,6 +120,8 @@ export interface SessionLoadOptions {
   includeTcodex?: boolean;
   includeCodeBuddyCli?: boolean;
   includeWorkBuddy?: boolean;
+  includeDeepSeekHarness?: boolean;
+  deepSeekHarnessHomeDir?: string;
   includeCodeWizCli?: boolean;
   includeOpenClaw?: boolean;
   includeHermes?: boolean;
@@ -1357,7 +1418,7 @@ function readGitBranchAt(gitPath: string): string | null {
 }
 
 function createIndexedSession(input: {
-  keyPrefix: "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "workbuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi";
+  keyPrefix: "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "workbuddy" | "dsh" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -1481,6 +1542,1265 @@ function walkJsonlFiles(dir: string): string[] {
     else if (entry.name.endsWith(".jsonl")) files.push(fullPath);
   }
   return files;
+}
+
+interface DeepSeekHarnessCandidate {
+  filePath: string;
+  dshHome: string;
+  projectDirectoryName: string;
+  rawId: string;
+  stat: VirtualSessionFileStat;
+  regularFile: boolean;
+}
+
+interface DeepSeekHarnessDiscovery {
+  candidates: DeepSeekHarnessCandidate[];
+  transcripts: DeepSeekHarnessCandidate[];
+  mixedEncoding: boolean;
+}
+
+interface DeepSeekHarnessHeader {
+  rawId: string;
+  projectPath: string;
+  timestamp: number;
+  seedLength: number;
+  isSubagent: boolean;
+  parentSessionId: string | null;
+}
+
+interface DeepSeekHarnessParsedContent {
+  text: string;
+  attachments: SessionAttachment[];
+}
+
+export function resolveDeepSeekHarnessHome(
+  configured: string | undefined,
+  homeDir = os.homedir(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const fromEnv = env.DSH_HOME;
+  const selected = configured
+    ?? (fromEnv !== undefined && fromEnv.trim().length > 0
+      ? fromEnv
+      : path.join(homeDir, DEEPSEEK_HARNESS_DIR));
+  const expanded = selected === "~"
+    ? homeDir
+    : selected.startsWith("~/") || selected.startsWith("~\\")
+      ? path.join(homeDir, selected.slice(2))
+      : selected;
+  return path.resolve(expanded);
+}
+
+export function loadDeepSeekHarnessSessions(
+  dshHome = resolveDeepSeekHarnessHome(undefined),
+  options: SessionLoadOptions = {},
+): LoadedSession[] {
+  return [...loadDeepSeekHarnessSessionsIterator(dshHome, options)];
+}
+
+export function* loadDeepSeekHarnessSessionsIterator(
+  dshHome: string,
+  options: SessionLoadOptions = {},
+): Generator<LoadedSession> {
+  const discovery = deepSeekHarnessCandidates(dshHome, options);
+  if (discovery.mixedEncoding) {
+    for (const transcript of discovery.transcripts) {
+      warnDeepSeekHarnessSession(
+        transcript.filePath,
+        "sessions root contains both raw and compressed transcript encodings",
+      );
+    }
+    return;
+  }
+  const { candidates } = discovery;
+  const byRawId = new Map<string, DeepSeekHarnessCandidate[]>();
+  for (const candidate of candidates) {
+    const group = byRawId.get(candidate.rawId) ?? [];
+    group.push(candidate);
+    byRawId.set(candidate.rawId, group);
+  }
+  const duplicates = new Set<string>();
+  for (const [rawId, group] of byRawId) {
+    if (group.length < 2) continue;
+    duplicates.add(rawId);
+    for (const candidate of group) {
+      warnDeepSeekHarnessSession(
+        candidate.filePath,
+        "duplicate session id appears in more than one project directory",
+      );
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (duplicates.has(candidate.rawId)) continue;
+    if (!candidate.regularFile) {
+      warnDeepSeekHarnessSession(candidate.filePath, "session transcript is not a regular file");
+      continue;
+    }
+    if (shouldSkipFile(options, candidate.filePath, candidate.stat)) continue;
+    try {
+      const loaded = loadDeepSeekHarnessSessionFile(candidate);
+      if (loaded) yield loaded;
+    } catch (error) {
+      warnDeepSeekHarnessSession(
+        candidate.filePath,
+        error instanceof Error ? error.message : "session transcript could not be read",
+      );
+    }
+  }
+}
+
+function deepSeekHarnessCandidates(
+  dshHome: string,
+  options: SessionLoadOptions,
+): DeepSeekHarnessDiscovery {
+  const sessionsDirectory = path.join(dshHome, "sessions");
+  const candidates: DeepSeekHarnessCandidate[] = [];
+  const transcripts: DeepSeekHarnessCandidate[] = [];
+  const encodings = new Set<"raw" | "zstd">();
+  for (const projectEntry of readDirectoryEntries(sessionsDirectory)) {
+    if (!projectEntry.isDirectory()) continue;
+    const projectDirectory = path.join(sessionsDirectory, projectEntry.name);
+    for (const sessionEntry of readDirectoryEntries(projectDirectory)) {
+      if (!sessionEntry.isDirectory()) continue;
+      const sessionDirectory = path.join(projectDirectory, sessionEntry.name);
+      const entries = readDirectoryEntries(sessionDirectory);
+      const transcriptEntries = DEEPSEEK_HARNESS_SESSION_FILES.flatMap((name) => {
+        const entry = entries.find((candidate) => candidate.name === name);
+        if (!entry) return [];
+        const filePath = path.join(sessionDirectory, name);
+        const stat = safeStat(filePath);
+        encodings.add(name.endsWith(".zstd") ? "zstd" : "raw");
+        const transcript = {
+          filePath,
+          dshHome,
+          projectDirectoryName: projectEntry.name,
+          rawId: "",
+          stat,
+          regularFile: entry.isFile() && !entry.isSymbolicLink(),
+        };
+        transcripts.push(transcript);
+        return [transcript];
+      });
+      if (transcriptEntries.length === 0) continue;
+      if (transcriptEntries.length > 1) continue;
+      const rawId = decodeDeepSeekHarnessSegment(sessionEntry.name);
+      if (rawId === null) {
+        warnDeepSeekHarnessSession(
+          transcriptEntries[0].filePath,
+          "session directory name is not a canonical encoded session id",
+        );
+        continue;
+      }
+      candidates.push({
+        ...transcriptEntries[0],
+        rawId,
+      });
+    }
+  }
+  return {
+    candidates,
+    transcripts,
+    mixedEncoding: encodings.size > 1,
+  };
+}
+
+function readDirectoryEntries(directory: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+  } catch {
+    return [];
+  }
+}
+
+function loadDeepSeekHarnessSessionFile(
+  candidate: DeepSeekHarnessCandidate,
+): LoadedSession | null {
+  const snapshot = readStableDeepSeekHarnessTranscript(candidate.filePath, candidate.dshHome);
+  const content = candidate.filePath.endsWith(".zstd")
+    ? decodeDeepSeekHarnessZstd(snapshot.bytes)
+    : snapshot.bytes.toString("utf8");
+  const rows = parseDeepSeekHarnessJsonl(content);
+  const header = parseDeepSeekHarnessHeader(rows[0], candidate);
+  const ownRows = validateDeepSeekHarnessEventRows(rows.slice(1), header.seedLength);
+  const attachmentCache = new Map<string, SessionAttachment>();
+  const { messages, firstQuestion: question } = deepSeekHarnessMessages(
+    ownRows,
+    candidate.dshHome,
+    attachmentCache,
+  );
+  const tokenEvents = deepSeekHarnessTokenEvents(ownRows);
+  const traceEvents = deepSeekHarnessTraceEvents(ownRows);
+  if (messages.length === 0 && traceEvents.length === 0) return null;
+
+  let latestTitle = "";
+  for (const row of ownRows) {
+    if (!isRecord(row) || row.type !== "session/title") continue;
+    const title = stringField(objectField(row, "data"), "title").trim();
+    if (title) latestTitle = title;
+  }
+  const descriptorTitle = firstDeepSeekHarnessDescriptorLabel(ownRows);
+  const session = createIndexedSession({
+      keyPrefix: "dsh",
+      rawId: header.rawId,
+      source: "deepseek-harness",
+      projectPath: header.projectPath,
+      filePath: candidate.filePath,
+      originalTitle: latestTitle || cleanTitle(question) || descriptorTitle || "Untitled Session",
+      firstQuestion: cleanTitle(question),
+      timestamp: header.timestamp,
+      tokenUsage: tokenUsageFromEvents(tokenEvents),
+      stat: snapshot.stat,
+      isSubagent: header.isSubagent,
+      parentSessionId: header.parentSessionId,
+    });
+  session.timestamp = header.timestamp;
+  return {
+    session,
+    messages,
+    tokenEvents,
+    traceEvents,
+  };
+}
+
+function readStableDeepSeekHarnessTranscript(filePath: string, dshHome: string): {
+  bytes: Buffer;
+  stat: VirtualSessionFileStat;
+} {
+  const canonicalHome = fs.realpathSync(dshHome);
+  const canonicalSessions = fs.realpathSync(path.join(dshHome, "sessions"));
+  if (!isPathWithin(canonicalSessions, canonicalHome)) {
+    throw new Error("configured sessions directory escaped the DeepSeek Harness home");
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    assertDeepSeekHarnessTranscriptLocation(filePath, canonicalSessions);
+    const beforePath = fs.lstatSync(filePath);
+    if (!beforePath.isFile() || beforePath.isSymbolicLink()) {
+      throw new Error("session transcript is not a regular file");
+    }
+
+    const flags = process.platform === "win32"
+      ? fs.constants.O_RDONLY
+      : fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+    const descriptor = fs.openSync(filePath, flags);
+    try {
+      const opened = fs.fstatSync(descriptor);
+      const pathAfterOpen = fs.lstatSync(filePath);
+      if (!opened.isFile() || !pathAfterOpen.isFile() || pathAfterOpen.isSymbolicLink()) {
+        throw new Error("session transcript changed into a non-regular file");
+      }
+      assertDeepSeekHarnessTranscriptLocation(filePath, canonicalSessions);
+      if (!sameDeepSeekHarnessFileSnapshot(beforePath, opened)
+        || !sameDeepSeekHarnessFileSnapshot(opened, pathAfterOpen)) {
+        continue;
+      }
+
+      const bytes = fs.readFileSync(descriptor);
+      const afterRead = fs.fstatSync(descriptor);
+      const pathAfterRead = fs.lstatSync(filePath);
+      if (!afterRead.isFile() || !pathAfterRead.isFile() || pathAfterRead.isSymbolicLink()) {
+        throw new Error("session transcript changed into a non-regular file");
+      }
+      assertDeepSeekHarnessTranscriptLocation(filePath, canonicalSessions);
+      if (sameDeepSeekHarnessFileSnapshot(opened, afterRead)
+        && sameDeepSeekHarnessFileSnapshot(afterRead, pathAfterRead)
+        && bytes.length === afterRead.size) {
+        return {
+          bytes,
+          stat: { mtimeMs: afterRead.mtimeMs, size: afterRead.size },
+        };
+      }
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  }
+  throw new Error("session transcript changed repeatedly while it was being read");
+}
+
+function assertDeepSeekHarnessTranscriptLocation(filePath: string, canonicalSessions: string): void {
+  const canonicalTranscript = fs.realpathSync(filePath);
+  if (!isPathWithin(canonicalTranscript, canonicalSessions)) {
+    throw new Error("session transcript escaped the configured sessions directory");
+  }
+}
+
+function sameDeepSeekHarnessFileSnapshot(left: fs.Stats, right: fs.Stats): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && Math.abs(left.mtimeMs - right.mtimeMs) < 1
+    && Math.abs(left.ctimeMs - right.ctimeMs) < 1;
+}
+
+function parseDeepSeekHarnessJsonl(content: string): unknown[] {
+  const completeContent = content.endsWith("\n")
+    ? content
+    : content.slice(0, Math.max(0, content.lastIndexOf("\n") + 1));
+  const lines = completeContent.split("\n");
+  const rows: unknown[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) {
+      if (index === lines.length - 1 && lines[index] === "") continue;
+      throw new Error(`session transcript contains a blank JSONL record at line ${index + 1}`);
+    }
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      throw new Error(`session transcript contains malformed JSONL at line ${index + 1}`);
+    }
+  }
+  if (rows.length === 0) throw new Error("session transcript is empty");
+  return rows;
+}
+
+function parseDeepSeekHarnessHeader(
+  value: unknown,
+  candidate: DeepSeekHarnessCandidate,
+): DeepSeekHarnessHeader {
+  if (!isRecord(value) || value.type !== "session") {
+    throw new Error("session transcript has no valid header");
+  }
+  if (value.version !== 0) throw new Error("session transcript uses an unsupported format version");
+  const rawId = stringField(value, "id");
+  if (!rawId.trim() || rawId.includes("\0") || rawId !== candidate.rawId) {
+    throw new Error("session header id does not match its encoded directory");
+  }
+  const createdAt = unknownField(value, "createdAt");
+  if (!Number.isSafeInteger(createdAt) || (createdAt as number) < 0 || Object.is(createdAt, -0)) {
+    throw new Error("session header has an invalid creation time");
+  }
+  const rawCwd = unknownField(value, "cwd");
+  let projectPath = "";
+  if (rawCwd === undefined) {
+    if (candidate.projectDirectoryName !== "_no-cwd") {
+      throw new Error("session without a cwd is outside the _no-cwd project directory");
+    }
+  } else {
+    if (typeof rawCwd !== "string" || rawCwd.length === 0 || rawCwd.includes("\0")) {
+      throw new Error("session header has an invalid cwd");
+    }
+    if (!path.posix.isAbsolute(rawCwd) && !path.win32.isAbsolute(rawCwd)) {
+      throw new Error("session header cwd is not an absolute path");
+    }
+    if (candidate.projectDirectoryName !== deepSeekHarnessProjectKey(rawCwd)) {
+      throw new Error("session header cwd does not match its project directory");
+    }
+    projectPath = rawCwd;
+  }
+  const rawParent = unknownField(value, "parentSession");
+  if (rawParent !== undefined
+    && (typeof rawParent !== "string" || !rawParent.trim() || rawParent.includes("\0"))) {
+    throw new Error("session header has an invalid parent session");
+  }
+  const rawOrigin = unknownField(value, "origin");
+  if (rawOrigin !== undefined && rawOrigin !== "subagent") {
+    throw new Error("session header has an invalid origin");
+  }
+  const rawSeedLength = unknownField(value, "seedLength");
+  if (rawSeedLength !== undefined
+    && (!Number.isSafeInteger(rawSeedLength)
+      || (rawSeedLength as number) < 0
+      || Object.is(rawSeedLength, -0))) {
+    throw new Error("session header has an invalid seed length");
+  }
+  const rawDepth = unknownField(value, "delegationDepth");
+  // Early v0 transcripts omitted delegationDepth. Treating omission as the
+  // root depth preserves those logs while rc.7 writers continue to emit it.
+  const delegationDepth = rawDepth === undefined ? 0 : rawDepth;
+  if (!Number.isSafeInteger(delegationDepth)
+    || (delegationDepth as number) < 0
+    || Object.is(delegationDepth, -0)) {
+    throw new Error("session header has an invalid delegation depth");
+  }
+  const rawAgentPreset = unknownField(value, "agentPreset");
+  if (rawAgentPreset !== undefined && typeof rawAgentPreset !== "string") {
+    throw new Error("session header has an invalid agent preset");
+  }
+  if (Object.hasOwn(value, "sandboxMode") || Object.hasOwn(value, "approvalPolicy")) {
+    throw new Error("session header uses retired policy baseline fields");
+  }
+  const parentSessionId = typeof rawParent === "string" ? rawParent : null;
+  return {
+    rawId,
+    projectPath,
+    timestamp: createdAt as number,
+    seedLength: rawSeedLength === undefined ? 0 : rawSeedLength as number,
+    isSubagent: rawOrigin === "subagent" || (delegationDepth as number) > 0,
+    parentSessionId,
+  };
+}
+
+function validateDeepSeekHarnessEventRows(
+  rows: unknown[],
+  seedLength: number,
+): Record<string, unknown>[] {
+  const ownRows: Record<string, unknown>[] = [];
+  let expectedSeq = 0;
+  for (const [index, row] of rows.entries()) {
+    if (!isRecord(row)) {
+      throw new Error(`session transcript contains an invalid event at line ${index + 2}`);
+    }
+    const packedLength = deepSeekHarnessPackedRowLength(row);
+    if (packedLength !== null) {
+      const seq0 = row.seq0 as number;
+      if (seq0 !== expectedSeq) {
+        throw new Error(
+          `session transcript has a non-contiguous event sequence at line ${index + 2}`,
+        );
+      }
+      expectedSeq += packedLength;
+      continue;
+    }
+    const seq = unknownField(row, "seq");
+    if (!Number.isSafeInteger(seq) || (seq as number) < 0 || Object.is(seq, -0)) {
+      throw new Error(`session transcript contains an invalid event sequence at line ${index + 2}`);
+    }
+    if (seq !== expectedSeq) {
+      throw new Error(
+        `session transcript has a non-contiguous event sequence at line ${index + 2}`,
+      );
+    }
+    expectedSeq += 1;
+    const type = unknownField(row, "type");
+    if (typeof type !== "string") {
+      throw new Error(`session transcript contains an invalid event type at line ${index + 2}`);
+    }
+    if (!DEEPSEEK_HARNESS_KNOWN_EVENT_TYPES.has(type)) {
+      if (unknownField(row, "ignorable") !== true) {
+        throw new Error(
+          `session transcript contains an unknown required event type at line ${index + 2}`,
+        );
+      }
+      continue;
+    }
+    if (Object.hasOwn(row, "ignorable") && unknownField(row, "ignorable") !== true) {
+      throw new Error(`session transcript contains an invalid ignorable marker at line ${index + 2}`);
+    }
+    if ((seq as number) >= seedLength) ownRows.push(row);
+  }
+  if (seedLength > expectedSeq) {
+    throw new Error("session header seed length exceeds the stored event sequence");
+  }
+  return ownRows;
+}
+
+function deepSeekHarnessPackedRowLength(row: Record<string, unknown>): number | null {
+  // Adapted from DeepSeek Harness rc.7 storage-row validation; see
+  // apps/main-1.0/THIRD_PARTY_NOTICES.md.
+  const tag = row.type;
+  if (tag !== "text-chunks" && tag !== "reasoning-chunks" && tag !== "tool-call-chunks") {
+    return null;
+  }
+  const malformed = (): never => {
+    throw new Error(`session transcript contains a malformed ${tag} storage row`);
+  };
+  if (!deepSeekHarnessHasExactKeys(row, ["type", "seq0", "time0", "data"])) malformed();
+  if (!Number.isSafeInteger(row.seq0) || (row.seq0 as number) < 0 || Object.is(row.seq0, -0)) {
+    malformed();
+  }
+  if (!Number.isSafeInteger(row.time0)) malformed();
+  const data = objectField(row, "data");
+  if (!data) return malformed();
+  const payloadKey = tag === "tool-call-chunks" ? "args" : "texts";
+  const commonKeys = ["turn", "step", "index", "dt", payloadKey];
+  if (tag === "tool-call-chunks") {
+    const keys = Object.hasOwn(data, "name")
+      ? [...commonKeys, "id", "name"]
+      : [...commonKeys, "id"];
+    if (!deepSeekHarnessHasExactKeys(data, keys)
+      || typeof data.id !== "string"
+      || (Object.hasOwn(data, "name") && typeof data.name !== "string")) {
+      malformed();
+    }
+  } else if (!deepSeekHarnessHasExactKeys(data, commonKeys)) {
+    malformed();
+  }
+  if (typeof data.turn !== "number"
+    || typeof data.step !== "number"
+    || typeof data.index !== "number") {
+    malformed();
+  }
+  const payload = unknownField(data, payloadKey);
+  const deltas = unknownField(data, "dt");
+  if (!Array.isArray(payload)) return malformed();
+  if (payload.length === 0 || payload.some((item) => typeof item !== "string")) malformed();
+  if (!Array.isArray(deltas)) return malformed();
+  if (deltas.length !== payload.length - 1
+    || deltas.some((delta) => !Number.isSafeInteger(delta))) malformed();
+  if (!Number.isSafeInteger((row.seq0 as number) + payload.length - 1)) malformed();
+  let timestamp = row.time0 as number;
+  for (const delta of deltas as number[]) {
+    timestamp += delta;
+    if (!Number.isSafeInteger(timestamp)) malformed();
+  }
+  return payload.length;
+}
+
+function deepSeekHarnessHasExactKeys(
+  value: Record<string, unknown>,
+  expected: string[],
+): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length
+    && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function deepSeekHarnessMessages(
+  rows: unknown[],
+  dshHome: string,
+  attachmentCache: Map<string, SessionAttachment>,
+): { messages: SessionMessage[]; firstQuestion: string } {
+  const messages: SessionMessage[] = [];
+  let firstQuestion = "";
+  let activeTurnId: string | null = null;
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const data = objectField(row, "data");
+    if (row.type === "turn/start") {
+      activeTurnId = deepSeekHarnessTurnId(unknownField(data, "turn"));
+      continue;
+    }
+    if (row.type === "turn/end") {
+      activeTurnId = null;
+      continue;
+    }
+    if (row.surfaceOp !== "append") continue;
+    if (!data) continue;
+    let role: SessionMessage["role"] | null = null;
+    let message: Record<string, unknown> | null = null;
+    if (row.type === "user/message") {
+      const source = objectField(data, "source");
+      if (!isVisibleDeepSeekHarnessUserSource(source)) continue;
+      role = "user";
+      message = data;
+    } else if (row.type === "assistant/message") {
+      role = "assistant";
+      message = objectField(data, "message") ?? data;
+    }
+    if (!role || !message) continue;
+    const parsed = parseDeepSeekHarnessContent(
+      unknownField(message, "content"),
+      dshHome,
+      attachmentCache,
+    );
+    if (!parsed.text && parsed.attachments.length === 0) continue;
+    if (role === "user" && !firstQuestion && parsed.text && isMeaningfulUserMessage(parsed.text)) {
+      firstQuestion = parsed.text;
+    }
+    const sourceTurnId = deepSeekHarnessTurnId(unknownField(data, "turn")) ?? activeTurnId;
+    messages.push({
+      role,
+      content: parsed.text || "[Attachment]",
+      timestamp: deepSeekHarnessTimestamp(row.time),
+      index: messages.length,
+      ...(sourceTurnId ? { sourceTurnId } : {}),
+      ...(parsed.attachments.length > 0 ? { attachments: parsed.attachments } : {}),
+    });
+  }
+  return { messages, firstQuestion };
+}
+
+function firstDeepSeekHarnessDescriptorLabel(rows: unknown[]): string {
+  // Descriptor rules follow DeepSeek Harness rc.7; see
+  // apps/main-1.0/THIRD_PARTY_NOTICES.md.
+  const oneShotKeys = new Set(["version", "mode", "provider", "label"]);
+  const continuableKeys = new Set([
+    "version",
+    "mode",
+    "provider",
+    "label",
+    "agentProvider",
+    "agentModel",
+    "persona",
+    "toolFilter",
+  ]);
+  for (const row of rows) {
+    if (!isRecord(row) || row.type !== "subagent/descriptor") continue;
+    const data = objectField(row, "data");
+    if (!data || data.version !== 2) return "";
+    const mode = unknownField(data, "mode");
+    if (mode !== "one-shot" && mode !== "continuable") return "";
+    const allowedKeys = mode === "one-shot" ? oneShotKeys : continuableKeys;
+    if (Object.keys(data).some((key) => !allowedKeys.has(key))) return "";
+    if (typeof data.provider !== "string") return "";
+    const label = unknownField(data, "label");
+    if (mode === "continuable" && typeof label !== "string") return "";
+    if (label !== undefined && typeof label !== "string") return "";
+    if (mode === "continuable") {
+      if (!deepSeekHarnessOptionalString(data, "agentProvider")
+        || !deepSeekHarnessOptionalString(data, "agentModel")
+        || !deepSeekHarnessOptionalString(data, "persona")
+        || !deepSeekHarnessToolFilterIsValid(unknownField(data, "toolFilter"))) {
+        return "";
+      }
+    }
+    return typeof label === "string" ? label.trim() : "";
+  }
+  return "";
+}
+
+function deepSeekHarnessOptionalString(
+  value: Record<string, unknown>,
+  key: string,
+): boolean {
+  const field = unknownField(value, key);
+  return field === undefined || typeof field === "string";
+}
+
+function deepSeekHarnessToolFilterIsValid(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length === 0 || keys.some((key) => key !== "allow" && key !== "deny")) return false;
+  return keys.every((key) =>
+    Array.isArray(value[key])
+    && (value[key] as unknown[]).every((item) => typeof item === "string"));
+}
+
+function parseDeepSeekHarnessContent(
+  value: unknown,
+  dshHome: string,
+  attachmentCache: Map<string, SessionAttachment>,
+): DeepSeekHarnessParsedContent {
+  if (typeof value === "string") return { text: value, attachments: [] };
+  if (!Array.isArray(value)) return { text: "", attachments: [] };
+  const texts: string[] = [];
+  const attachments: SessionAttachment[] = [];
+  for (const [index, block] of value.entries()) {
+    if (!isRecord(block)) continue;
+    if (block.type === "text" && typeof block.text === "string" && block.text) {
+      texts.push(block.text);
+      continue;
+    }
+    const attachment = deepSeekHarnessAttachment(block, index, dshHome, attachmentCache);
+    if (attachment) attachments.push(attachment);
+  }
+  return { text: texts.join("\n"), attachments };
+}
+
+function deepSeekHarnessAttachment(
+  block: Record<string, unknown>,
+  index: number,
+  dshHome: string,
+  cache: Map<string, SessionAttachment>,
+): SessionAttachment | null {
+  // Attachment-envelope and image checks follow DeepSeek Harness rc.7; see
+  // apps/main-1.0/THIRD_PARTY_NOTICES.md.
+  if (block.type !== "image") return null;
+  const reference = objectField(block, "attachment");
+  if (!reference) return legacyDeepSeekHarnessAttachment(block, index);
+  const attachmentId = stringField(reference, "attachmentId");
+  const match = /^sha256:([a-f0-9]{64})$/u.exec(attachmentId);
+  const mediaType = stringField(reference, "mediaType");
+  const expectedBytes = unknownField(reference, "bytes");
+  const width = unknownField(reference, "width");
+  const height = unknownField(reference, "height");
+  const hash = match?.[1];
+  const fileName = safeDeepSeekHarnessAttachmentName(
+    unknownField(reference, "name"),
+    mediaType,
+    index,
+    hash,
+  );
+  const fallbackId = attachmentId || `dsh-image-${index + 1}`;
+  const base = {
+    id: fallbackId,
+    fileName,
+    mimeType: mediaType || "application/octet-stream",
+    previewKind: "image" as const,
+    ...(hash ? { sha256: hash } : {}),
+    ...(Number.isSafeInteger(expectedBytes) && (expectedBytes as number) >= 0
+      ? { sizeBytes: expectedBytes as number }
+      : {}),
+  };
+  if (!hash
+    || !DEEPSEEK_HARNESS_ATTACHMENT_MEDIA_TYPES.has(mediaType)
+    || !Number.isSafeInteger(expectedBytes)
+    || (expectedBytes as number) <= 0
+    || !Number.isSafeInteger(width)
+    || (width as number) <= 0
+    || !Number.isSafeInteger(height)
+    || (height as number) <= 0) {
+    return { ...base, status: "unsafe" };
+  }
+  const cacheKey = [
+    attachmentId,
+    mediaType,
+    expectedBytes,
+    width,
+    height,
+    fileName,
+  ].join("\0");
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  if ((expectedBytes as number) > MAX_ATTACHMENT_BYTES) {
+    const attachment = { ...base, status: "too_large" as const };
+    cache.set(cacheKey, attachment);
+    return attachment;
+  }
+
+  const attachmentRoot = path.resolve(dshHome, "attachments", "v1", "objects");
+  const objectPath = path.join(attachmentRoot, hash.slice(0, 2), hash);
+  const object = readDeepSeekHarnessAttachmentObject(
+    objectPath,
+    attachmentRoot,
+    dshHome,
+    expectedBytes as number,
+  );
+  let attachment: SessionAttachment;
+  if (object.status !== "available" || !object.bytes) {
+    attachment = {
+      ...base,
+      status: object.status,
+      ...(object.sizeBytes !== undefined ? { sizeBytes: object.sizeBytes } : {}),
+    };
+  } else {
+    const actualHash = createHash("sha256").update(object.bytes).digest("hex");
+    const image = deepSeekHarnessImageMetadata(object.bytes);
+    attachment = actualHash === hash
+      && image?.mimeType === mediaType
+      && image.width === width
+      && image.height === height
+      ? {
+          ...base,
+          status: "available",
+          source: { kind: "inline", value: object.bytes.toString("base64") },
+        }
+      : { ...base, status: "unsafe", sizeBytes: object.bytes.length };
+  }
+  cache.set(cacheKey, attachment);
+  return attachment;
+}
+
+function readDeepSeekHarnessAttachmentObject(
+  objectPath: string,
+  attachmentRoot: string,
+  dshHome: string,
+  expectedBytes: number,
+): {
+  status: SessionAttachment["status"];
+  bytes?: Buffer;
+  sizeBytes?: number;
+} {
+  try {
+    const canonicalDshHome = fs.realpathSync(dshHome);
+    const canonicalRoot = fs.realpathSync(attachmentRoot);
+    if (!isPathWithin(canonicalRoot, canonicalDshHome)) return { status: "unsafe" };
+
+    const pathBefore = fs.lstatSync(objectPath);
+    if (!pathBefore.isFile() || pathBefore.isSymbolicLink()) {
+      return { status: "unsafe", sizeBytes: pathBefore.size };
+    }
+    const canonicalObject = fs.realpathSync(objectPath);
+    if (!isPathWithin(canonicalObject, canonicalRoot)) {
+      return { status: "unsafe", sizeBytes: pathBefore.size };
+    }
+
+    const flags = process.platform === "win32"
+      ? fs.constants.O_RDONLY
+      : fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+    const descriptor = fs.openSync(objectPath, flags);
+    try {
+      const opened = fs.fstatSync(descriptor);
+      const pathAfterOpen = fs.lstatSync(objectPath);
+      if (!opened.isFile() || !pathAfterOpen.isFile() || pathAfterOpen.isSymbolicLink()) {
+        return { status: "unsafe", sizeBytes: opened.size };
+      }
+      if (opened.size > MAX_ATTACHMENT_BYTES) {
+        return { status: "too_large", sizeBytes: opened.size };
+      }
+      if (!sameDeepSeekHarnessFileSnapshot(pathBefore, opened)
+        || !sameDeepSeekHarnessFileSnapshot(opened, pathAfterOpen)
+        || opened.size !== expectedBytes) {
+        return { status: "unsafe", sizeBytes: opened.size };
+      }
+
+      const bytes = fs.readFileSync(descriptor);
+      const afterRead = fs.fstatSync(descriptor);
+      const pathAfterRead = fs.lstatSync(objectPath);
+      if (!afterRead.isFile() || !pathAfterRead.isFile() || pathAfterRead.isSymbolicLink()) {
+        return { status: "unsafe", sizeBytes: afterRead.size };
+      }
+      if (!sameDeepSeekHarnessFileSnapshot(opened, afterRead)
+        || !sameDeepSeekHarnessFileSnapshot(afterRead, pathAfterRead)
+        || bytes.length !== afterRead.size) {
+        return { status: "unsafe", sizeBytes: afterRead.size };
+      }
+      return { status: "available", bytes, sizeBytes: bytes.length };
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  } catch (error) {
+    return {
+      status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unsafe",
+    };
+  }
+}
+
+function legacyDeepSeekHarnessAttachment(
+  block: Record<string, unknown>,
+  index: number,
+): SessionAttachment | null {
+  const raw = typeof block.data === "string"
+    ? block.data
+    : typeof block.image_url === "string"
+      ? block.image_url
+      : null;
+  if (!raw) return null;
+  const dataMatch = /^data:([^;,]+);base64,([\s\S]+)$/u.exec(raw);
+  const mediaType = dataMatch?.[1]
+    ?? (typeof block.mimeType === "string" ? block.mimeType : "image/png");
+  const encoded = dataMatch?.[2] ?? raw;
+  const fileName = safeDeepSeekHarnessAttachmentName(
+    block.name ?? block.filename,
+    mediaType,
+    index,
+  );
+  const base = {
+    id: `dsh-legacy-image-${index + 1}`,
+    fileName,
+    mimeType: mediaType,
+    previewKind: "image" as const,
+  };
+  if (!DEEPSEEK_HARNESS_ATTACHMENT_MEDIA_TYPES.has(mediaType)
+    || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) {
+    return { ...base, status: "unsafe" };
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  if (bytes.length === 0) return { ...base, status: "missing", sha256: hash, sizeBytes: 0 };
+  if (bytes.length > MAX_ATTACHMENT_BYTES) {
+    return { ...base, status: "too_large", sha256: hash, sizeBytes: bytes.length };
+  }
+  if (deepSeekHarnessImageMetadata(bytes)?.mimeType !== mediaType) {
+    return { ...base, status: "unsafe", sha256: hash, sizeBytes: bytes.length };
+  }
+  return {
+    ...base,
+    status: "available",
+    sha256: hash,
+    sizeBytes: bytes.length,
+    source: { kind: "inline", value: bytes.toString("base64") },
+  };
+}
+
+function safeDeepSeekHarnessAttachmentName(
+  value: unknown,
+  mediaType: string,
+  index: number,
+  hash?: string,
+): string {
+  if (typeof value === "string") {
+    const leaf = value.slice(Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\")) + 1);
+    const cleaned = leaf.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 255);
+    if (cleaned) return cleaned;
+  }
+  const extension = mediaType === "image/jpeg"
+    ? "jpg"
+    : mediaType === "image/webp"
+      ? "webp"
+      : mediaType === "image/gif"
+        ? "gif"
+        : "png";
+  if (hash) return `${hash.slice(0, 12)}.${extension}`;
+  return index === 0 ? `image.${extension}` : `image-${index + 1}.${extension}`;
+}
+
+function deepSeekHarnessTokenEvents(rows: unknown[]): TokenUsageEvent[] {
+  const entries = new Map<string, TokenUsageEvent>();
+  let activeTurn: number | null = null;
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const data = objectField(row, "data");
+    if (row.type === "turn/start") {
+      activeTurn = deepSeekHarnessPositiveInteger(unknownField(data, "turn"));
+      continue;
+    }
+    if (row.type === "turn/end") {
+      const endedTurn = deepSeekHarnessPositiveInteger(unknownField(data, "turn"));
+      if (endedTurn !== null && activeTurn === endedTurn) activeTurn = null;
+      continue;
+    }
+    if (row.type !== "assistant/message" || row.surfaceOp !== "append") continue;
+    const usage = objectField(data, "usage");
+    if (!usage) continue;
+    const parsedUsage = deepSeekHarnessUsage(usage);
+    if (!parsedUsage) continue;
+    const { input, rawOutput, cacheRead, cacheWrite, rawReasoning } = parsedUsage;
+    const reasoning = Math.min(
+      rawOutput,
+      rawReasoning,
+    );
+    if (input === 0 && rawOutput === 0 && cacheRead === 0 && cacheWrite === 0) continue;
+    const seq = unknownField(row, "seq");
+    if (!Number.isSafeInteger(seq) || (seq as number) < 0 || Object.is(seq, -0)) continue;
+    const entry = tokenEvent(
+      deepSeekHarnessTimestampMs(row.time),
+      `dsh:${seq}`,
+      input,
+      rawOutput - reasoning,
+      cacheRead,
+      reasoning,
+      cacheWrite,
+    );
+    const turn = deepSeekHarnessPositiveInteger(unknownField(data, "turn")) ?? activeTurn;
+    if (turn !== null) entry.sourceTurnId = `dsh:${turn}`;
+    putTokenEvent(entries, entry);
+  }
+  return [...entries.values()];
+}
+
+function deepSeekHarnessUsage(value: Record<string, unknown>): {
+  input: number;
+  rawOutput: number;
+  cacheRead: number;
+  cacheWrite: number;
+  rawReasoning: number;
+} | null {
+  const read = (key: string): number | null => {
+    const field = unknownField(value, key);
+    if (field === undefined) return 0;
+    return Number.isSafeInteger(field) && (field as number) >= 0 && !Object.is(field, -0)
+      ? field as number
+      : null;
+  };
+  const input = read("inputTokens");
+  const rawOutput = read("outputTokens");
+  const cacheRead = read("cacheReadTokens");
+  const cacheWrite = read("cacheWriteTokens");
+  const rawReasoning = read("reasoningTokens");
+  if (input === null
+    || rawOutput === null
+    || cacheRead === null
+    || cacheWrite === null
+    || rawReasoning === null) {
+    return null;
+  }
+  return { input, rawOutput, cacheRead, cacheWrite, rawReasoning };
+}
+
+function deepSeekHarnessTraceEvents(rows: unknown[]): SessionTraceEvent[] {
+  const toolNames = new Map<string, string>();
+  for (const row of rows) {
+    if (!isRecord(row) || row.type !== "tool/call") continue;
+    if (row.surfaceOp !== undefined && row.surfaceOp !== "append") continue;
+    const data = objectField(row, "data");
+    const callId = stringField(data, "callId");
+    const name = stringField(data, "name");
+    if (callId && name) toolNames.set(callId, name);
+  }
+
+  const events: Array<Omit<SessionTraceEvent, "index">> = [];
+  let activeTurn: number | null = null;
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const data = objectField(row, "data");
+    if (!data) continue;
+    if (row.type === "turn/start") {
+      activeTurn = deepSeekHarnessPositiveInteger(unknownField(data, "turn"));
+      continue;
+    }
+    if (row.type === "turn/end") {
+      const endedTurn = deepSeekHarnessPositiveInteger(unknownField(data, "turn"));
+      if (endedTurn !== null && activeTurn === endedTurn) activeTurn = null;
+      continue;
+    }
+    if (row.type === "tool/call") {
+      if (row.surfaceOp !== undefined && row.surfaceOp !== "append") continue;
+      const callId = stringField(data, "callId");
+      const name = stringField(data, "name");
+      if (!callId || !name) continue;
+      const args = parseMaybeJson(unknownField(data, "arguments"));
+      const turn = deepSeekHarnessPositiveInteger(unknownField(data, "turn")) ?? activeTurn;
+      const step = deepSeekHarnessPositiveInteger(unknownField(data, "step"));
+      events.push({
+        kind: "tool_call",
+        source: "dsh",
+        title: titleWithSummary(name, deepSeekHarnessToolSummary(args)),
+        detail: stringifyDetail(args),
+        timestamp: deepSeekHarnessTimestamp(row.time),
+        callId,
+        eventType: "dsh.tool.call",
+        status: "running",
+        ...(turn !== null ? { sourceTurnId: `dsh:${turn}` } : {}),
+        attributes: {
+          input: args,
+          ...(turn !== null ? { turn } : {}),
+          ...(step !== null ? { step } : {}),
+        },
+      });
+      continue;
+    }
+    if (row.type !== "tool/result" || row.surfaceOp !== "append") continue;
+    const result = deepSeekHarnessToolResult(data);
+    if (!result) continue;
+    const name = toolNames.get(result.callId) || "tool";
+    const turn = deepSeekHarnessPositiveInteger(unknownField(data, "turn")) ?? activeTurn;
+    const step = deepSeekHarnessPositiveInteger(unknownField(data, "step"));
+    events.push({
+      kind: "tool_result",
+      source: "dsh",
+      title: titleWithSummary(name, "result"),
+      detail: deepSeekHarnessToolResultDetail(result.content),
+      timestamp: deepSeekHarnessTimestamp(row.time),
+      callId: result.callId,
+      eventType: "dsh.tool.result",
+      status: result.isError ? "failed" : "completed",
+      ...(turn !== null ? { sourceTurnId: `dsh:${turn}` } : {}),
+      attributes: {
+        output: result.content,
+        ...(turn !== null ? { turn } : {}),
+        ...(step !== null ? { step } : {}),
+      },
+    });
+  }
+  return events.map((event, index) => ({ ...event, index }));
+}
+
+function deepSeekHarnessToolSummary(value: unknown): string {
+  return firstStringField(value, [
+    "command",
+    "cmd",
+    "path",
+    "file_path",
+    "query",
+    "url",
+    "description",
+  ]);
+}
+
+function deepSeekHarnessToolResult(data: Record<string, unknown>): {
+  callId: string;
+  content: unknown;
+  isError: boolean;
+} | null {
+  const message = objectField(data, "message");
+  if (message) {
+    const source = objectField(message, "source");
+    const sourceCallId = stringField(source, "callId");
+    const content = unknownField(message, "content");
+    if (!Array.isArray(content)) return null;
+    const block = content.find((item) =>
+      isRecord(item)
+      && item.type === "tool-result"
+      && (!sourceCallId || stringField(item, "toolCallId") === sourceCallId));
+    if (!isRecord(block)) return null;
+    const callId = sourceCallId || stringField(block, "toolCallId");
+    if (!callId) return null;
+    return {
+      callId,
+      content: unknownField(block, "content"),
+      isError: unknownField(block, "isError") === true || objectField(data, "error") !== null,
+    };
+  }
+  const callId = stringField(data, "callId");
+  if (!callId) return null;
+  return {
+    callId,
+    content: unknownField(data, "content"),
+    isError: unknownField(data, "isError") === true || objectField(data, "error") !== null,
+  };
+}
+
+function deepSeekHarnessToolResultDetail(value: unknown): string {
+  if (Array.isArray(value)) {
+    const text = value
+      .filter((block) => isRecord(block) && block.type === "text")
+      .map((block) => stringField(block, "text"))
+      .filter(Boolean)
+      .join("\n");
+    if (text) return text;
+  }
+  return stringifyDetail(value);
+}
+
+function deepSeekHarnessTimestamp(value: unknown): string {
+  const timestamp = deepSeekHarnessTimestampMs(value);
+  return timestamp > 0 || value === 0 ? new Date(timestamp).toISOString() : "";
+}
+
+function deepSeekHarnessTimestampMs(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function deepSeekHarnessTurnId(value: unknown): string | null {
+  const turn = deepSeekHarnessPositiveInteger(value);
+  return turn === null ? null : `dsh:${turn}`;
+}
+
+function deepSeekHarnessPositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function deepSeekHarnessJpegDimensions(bytes: Buffer): {
+  width: number;
+  height: number;
+} | null {
+  let offset = 2;
+  const startOfFrame = new Set([
+    0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+    0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+  ]);
+  while (offset + 3 < bytes.length) {
+    if (bytes[offset] !== 0xFF) {
+      offset += 1;
+      continue;
+    }
+    while (offset < bytes.length && bytes[offset] === 0xFF) offset += 1;
+    const marker = bytes[offset];
+    offset += 1;
+    if (marker === 0xD8 || marker === 0xD9) continue;
+    if (offset + 1 >= bytes.length) return null;
+    const length = bytes.readUInt16BE(offset);
+    if (length < 2 || offset + length > bytes.length) return null;
+    if (startOfFrame.has(marker) && length >= 7) {
+      return {
+        height: bytes.readUInt16BE(offset + 3),
+        width: bytes.readUInt16BE(offset + 5),
+      };
+    }
+    offset += length;
+  }
+  return null;
+}
+
+function deepSeekHarnessWebpDimensions(bytes: Buffer): {
+  width: number;
+  height: number;
+} | null {
+  if (bytes.length < 21) return null;
+  const chunk = bytes.subarray(12, 16).toString("ascii");
+  if (chunk === "VP8X" && bytes.length >= 30) {
+    return {
+      width: 1 + bytes.readUIntLE(24, 3),
+      height: 1 + bytes.readUIntLE(27, 3),
+    };
+  }
+  if (chunk === "VP8 "
+    && bytes.length >= 30
+    && bytes.subarray(23, 26).equals(Buffer.from([0x9D, 0x01, 0x2A]))) {
+    return {
+      width: bytes.readUInt16LE(26) & 0x3FFF,
+      height: bytes.readUInt16LE(28) & 0x3FFF,
+    };
+  }
+  if (chunk === "VP8L" && bytes.length >= 25 && bytes[20] === 0x2F) {
+    const bits = bytes.readUInt32LE(21);
+    return {
+      width: 1 + (bits & 0x3FFF),
+      height: 1 + ((bits >>> 14) & 0x3FFF),
+    };
+  }
+  return null;
+}
+
+function deepSeekHarnessImageMetadata(bytes: Buffer): {
+  mimeType: string;
+  width: number;
+  height: number;
+} | null {
+  if (bytes.length >= 24
+    && bytes.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    )) {
+    return {
+      mimeType: "image/png",
+      width: bytes.readUInt32BE(16),
+      height: bytes.readUInt32BE(20),
+    };
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+    const dimensions = deepSeekHarnessJpegDimensions(bytes);
+    return dimensions ? { mimeType: "image/jpeg", ...dimensions } : null;
+  }
+  if (bytes.length >= 10) {
+    const signature = bytes.subarray(0, 6).toString("ascii");
+    if (signature === "GIF87a" || signature === "GIF89a") {
+      return {
+        mimeType: "image/gif",
+        width: bytes.readUInt16LE(6),
+        height: bytes.readUInt16LE(8),
+      };
+    }
+  }
+  if (bytes.length >= 12
+    && bytes.subarray(0, 4).toString("ascii") === "RIFF"
+    && bytes.subarray(8, 12).toString("ascii") === "WEBP") {
+    const dimensions = deepSeekHarnessWebpDimensions(bytes);
+    return dimensions ? { mimeType: "image/webp", ...dimensions } : null;
+  }
+  return null;
+}
+
+function deepSeekHarnessProjectKey(cwd: string): string {
+  // Path keys and encoded segments mirror DeepSeek Harness rc.7 persistence;
+  // see apps/main-1.0/THIRD_PARTY_NOTICES.md.
+  let readable = "";
+  let separatorRun = false;
+  for (let index = 0; index < cwd.length; index += 1) {
+    const code = cwd.charCodeAt(index);
+    const character = String.fromCharCode(code);
+    if (character === "/" || character === "\\" || character === ":") {
+      if (!separatorRun) readable += "-";
+      separatorRun = true;
+    } else if (character !== "~" && /^[A-Za-z0-9._-]$/u.test(character)) {
+      readable += character;
+      separatorRun = false;
+    } else {
+      readable += `~${code.toString(16).toUpperCase().padStart(4, "0")}`;
+      separatorRun = false;
+    }
+  }
+  const slug = readable.replace(/^-+/u, "") || "root";
+  return `--${slug.slice(0, 251)}--`;
+}
+
+function encodeDeepSeekHarnessSegment(raw: string): string {
+  if (!raw) return "";
+  if (raw === ".") return "~002E";
+  if (raw === "..") return "~002E~002E";
+  let encoded = "";
+  for (let index = 0; index < raw.length; index += 1) {
+    const code = raw.charCodeAt(index);
+    const character = String.fromCharCode(code);
+    encoded += character !== "~" && /^[A-Za-z0-9._-]$/u.test(character)
+      ? character
+      : `~${code.toString(16).toUpperCase().padStart(4, "0")}`;
+  }
+  return encoded;
+}
+
+function decodeDeepSeekHarnessSegment(encoded: string): string | null {
+  if (!encoded) return null;
+  let decoded = "";
+  for (let index = 0; index < encoded.length;) {
+    if (encoded[index] !== "~") {
+      if (!/^[A-Za-z0-9._-]$/u.test(encoded[index])) return null;
+      decoded += encoded[index];
+      index += 1;
+      continue;
+    }
+    const hex = encoded.slice(index + 1, index + 5);
+    if (!/^[0-9A-F]{4}$/u.test(hex)) return null;
+    decoded += String.fromCharCode(Number.parseInt(hex, 16));
+    index += 5;
+  }
+  return decoded && encodeDeepSeekHarnessSegment(decoded) === encoded ? decoded : null;
+}
+
+function isPathWithin(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function warnDeepSeekHarnessSession(filePath: string, reason: string): void {
+  console.warn(`[deepseek-harness] Skipping ${filePath}: ${reason}`);
 }
 
 function parseValidPiTimestampMs(value: unknown): number | null {
@@ -3842,6 +5162,12 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   if (options.includeTcodex) yield* loadCodexSessionsIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
   if (options.includeWorkBuddy) yield* loadWorkBuddyCliSessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options);
+  if (options.includeDeepSeekHarness) {
+    yield* loadDeepSeekHarnessSessionsIterator(
+      resolveDeepSeekHarnessHome(options.deepSeekHarnessHomeDir, homeDir),
+      options,
+    );
+  }
 }
 
 export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOptions = {}): AsyncGenerator<LoadedSession> {
@@ -3873,4 +5199,10 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   if (options.includeTcodex) yield* loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
   if (options.includeWorkBuddy) yield* loadWorkBuddyCliSessionsIterator(path.join(homeDir, WORKBUDDY_DIR), options);
+  if (options.includeDeepSeekHarness) {
+    yield* loadDeepSeekHarnessSessionsIterator(
+      resolveDeepSeekHarnessHome(options.deepSeekHarnessHomeDir, homeDir),
+      options,
+    );
+  }
 }

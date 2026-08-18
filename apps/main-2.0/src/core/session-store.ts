@@ -1,5 +1,6 @@
 import { deleteHermesSession } from "./hermes-session-writer";
 import { isLocalSessionStorage } from "./session-environment";
+import { isReadOnlySessionSource, sessionSourceDescriptor } from "./session-sources";
 import { deleteLocalSessionSources } from "./session-source-delete";
 import { deleteZcodeSessions } from "./zcode-session-writer";
 import {
@@ -235,8 +236,8 @@ export class SessionStore {
     const targets = await this.sessions.getSessionDeletionTargets([sessionKey]);
     const target = targets.find((item) => item.sessionKey === sessionKey);
     if (!target) return false;
-    if (target.source === "pi-cli" || target.source === "workbuddy-cli") {
-      throw new Error(`${target.source === "pi-cli" ? "Pi" : "WorkBuddy"} session source files are read-only.`);
+    if (isReadOnlySessionSource(target.source)) {
+      throw new Error(`${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
     }
     if (target.source === "zcode-cli") {
       const idsByFilePath = new Map<string, string[]>();

@@ -62,4 +62,15 @@ describe("sourceFilters", () => {
       value: "workbuddy-cli",
     });
   });
+
+  it("shows DeepSeek Harness only when its setting is enabled", () => {
+    expect(sourceFilters(defaultSettings)).not.toContainEqual({
+      label: "DeepSeek Harness",
+      value: "deepseek-harness",
+    });
+    expect(sourceFilters({ ...defaultSettings, includeDeepSeekHarness: true })).toContainEqual({
+      label: "DeepSeek Harness",
+      value: "deepseek-harness",
+    });
+  });
 });

@@ -7,6 +7,7 @@ export type SessionSource =
   | "tcodex-cli"
   | "codebuddy-cli"
   | "workbuddy-cli"
+  | "deepseek-harness"
   | "codewiz-cli"
   | "openclaw"
   | "hermes"
@@ -16,7 +17,7 @@ export type SessionSource =
   | "trae"
   | "qoder"
   | "pi-cli";
-export type SessionFormat = "claude" | "codex" | "codebuddy" | "workbuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi";
+export type SessionFormat = "claude" | "codex" | "codebuddy" | "workbuddy" | "dsh" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi";
 export type SessionSortBy = "smart" | "activity" | "created";
 export type EnvironmentKind = "local" | "wsl" | "ssh";
 export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";

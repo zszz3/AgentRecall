@@ -599,6 +599,24 @@ export function SettingsDialog({
                 </label>
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
+                    <span className="settings-field-title">Include DeepSeek Harness</span>
+                    <span className="settings-field-sub">
+                      {l(
+                        "Indexes sessions under $DSH_HOME/sessions (or ~/.dsh/sessions) in read-only mode.",
+                        "以只读方式索引 $DSH_HOME/sessions（或 ~/.dsh/sessions）中的会话。",
+                      )}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.includeDeepSeekHarness)}
+                    disabled={!settings}
+                    onChange={(event) => onSettingsChange({ includeDeepSeekHarness: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
                     <span className="settings-field-title">Include OpenClaw</span>
                     <span className="settings-field-sub">{l("Indexes local OpenClaw session files.", "索引本地 OpenClaw 会话文件。")}</span>
                   </div>

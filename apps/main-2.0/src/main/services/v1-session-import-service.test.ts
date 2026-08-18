@@ -148,6 +148,38 @@ describe("V1SessionImportService", () => {
       parentSessionId: null,
     });
   });
+
+  it("imports the DeepSeek Harness setting and source rows from V1", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-recall-v1-import-dsh-"));
+    tempRoots.push(root);
+    const v1UserData = path.join(root, "AgentRecall");
+    mkdirSync(v1UserData, { recursive: true });
+    writeFileSync(path.join(v1UserData, "config.json"), JSON.stringify({ includeDeepSeekHarness: true }));
+    const dbPath = path.join(v1UserData, "session-search.sqlite");
+    createV1Database(dbPath, null);
+    insertV1DeepSeekHarnessSession(dbPath);
+
+    const store = new FakeImportStore();
+    let importedSettings: AppSettingsUpdate = {};
+    const result = await new V1SessionImportService({
+      store,
+      appDataPath: root,
+      v2UserDataPath: path.join(root, "agent-recall-v2"),
+      applySettings: async (update) => {
+        importedSettings = update;
+      },
+    }).importData();
+
+    expect(result).toMatchObject({ importedSessions: 2, failedSessions: 0, importedSettings: 1 });
+    expect(importedSettings).toEqual({ includeDeepSeekHarness: true });
+    expect(store.sessions.get("dsh:dsh-v1")?.session).toMatchObject({
+      sessionKey: "dsh:dsh-v1",
+      rawId: "dsh-v1",
+      source: "deepseek-harness",
+      parentSessionId: "parent-dsh",
+      isSubagent: false,
+    });
+  });
 });
 
 interface ImportedSessionRecord {
@@ -321,6 +353,22 @@ function insertV1WorkBuddySession(dbPath: string): void {
       "/workspace/workbuddy", "/fixtures/workbuddy-v1.jsonl", "Imported WorkBuddy", "Question",
       4_000, 5_000, 200, null, null, null, 0, 0, 1,
       10, 20, 3, 4, 37, null, null, 0, null, null,
+    );
+  } finally {
+    db.close();
+  }
+}
+
+function insertV1DeepSeekHarnessSession(dbPath: string): void {
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.prepare(`
+      INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "dsh:dsh-v1", "dsh-v1", "deepseek-harness", "local", "local",
+      "/workspace/dsh", "/fixtures/session.jsonl.zstd", "Imported DeepSeek Harness", "Question",
+      6_000, 7_000, 300, null, null, null, 0, 0, 1,
+      10, 20, 3, 4, 37, null, null, 0, "parent-dsh", null,
     );
   } finally {
     db.close();

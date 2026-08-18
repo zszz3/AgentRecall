@@ -22,6 +22,8 @@ export interface SessionLoadOptions {
   includeTcodex?: boolean;
   includeCodeBuddyCli?: boolean;
   includeWorkBuddy?: boolean;
+  includeDeepSeekHarness?: boolean;
+  deepSeekHarnessHomeDir?: string;
   includeCodeWizCli?: boolean;
   includeOpenClaw?: boolean;
   includeHermes?: boolean;
@@ -296,6 +298,7 @@ export function createIndexedSession(input: {
     | "tcodex"
     | "codebuddy"
     | "workbuddy"
+    | "dsh"
     | "codewiz"
     | "openclaw"
     | "hermes"

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { constants, zstdCompressSync } from "node:zlib";
 import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
 import { indexMigratedSessionFile, syncDefaultSessionsInBatches, syncLoadedSessionsInBatches } from "./indexer";
@@ -308,6 +309,177 @@ describe("indexer", () => {
         source: "pi-cli",
       });
     } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("indexes opted-in DeepSeek Harness sessions, skips unchanged files, and prunes removed transcripts", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-dsh-index-"));
+    try {
+      const filePath = writeDeepSeekHarnessSession(
+        homeDir,
+        "dsh-indexed",
+        "searchable DeepSeek Harness integration",
+      );
+      const loadOptions = {
+        homeDir,
+        includeDeepSeekHarness: true,
+        deepSeekHarnessHomeDir: path.join(homeDir, ".dsh"),
+      };
+
+      const cold = await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions,
+      });
+
+      expect(cold).toMatchObject({ indexed: 1, skipped: 0, total: 1, error: null });
+      expect(store.searchSessions({
+        query: "searchable DeepSeek Harness integration",
+        limit: 10,
+      })).toEqual([
+        expect.objectContaining({
+          sessionKey: "dsh:dsh-indexed",
+          source: "deepseek-harness",
+        }),
+      ]);
+
+      const previous = store.listIndexedSessionFiles()
+        .find((item) => item.sessionKey === "dsh:dsh-indexed")!;
+      fs.writeFileSync(filePath, "{not valid jsonl".padEnd(previous.fileSize, "x"));
+      fs.utimesSync(filePath, previous.fileMtimeMs / 1000, previous.fileMtimeMs / 1000);
+
+      const warm = await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions,
+      });
+
+      expect(warm).toMatchObject({ indexed: 0, skipped: 1, total: 1, error: null });
+      expect(store.searchSessions({
+        query: "searchable DeepSeek Harness integration",
+        limit: 10,
+      })).toHaveLength(1);
+
+      fs.rmSync(path.dirname(filePath), { recursive: true, force: true });
+      const pruned = await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions,
+      });
+
+      expect(pruned).toMatchObject({ indexed: 0, skipped: 0, total: 0, error: null });
+      expect(store.getSession("dsh:dsh-indexed")).toBeNull();
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("prunes a warm-indexed DeepSeek Harness session when a duplicate id makes discovery ambiguous", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-dsh-duplicate-index-"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      writeDeepSeekHarnessSession(homeDir, "dsh-duplicate", "Initially searchable");
+      const loadOptions = {
+        homeDir,
+        includeDeepSeekHarness: true,
+        deepSeekHarnessHomeDir: path.join(homeDir, ".dsh"),
+      };
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions });
+      expect(store.getSession("dsh:dsh-duplicate")).not.toBeNull();
+
+      const duplicatePath = path.join(
+        homeDir,
+        ".dsh",
+        "sessions",
+        "--other--",
+        "dsh-duplicate",
+        "session.jsonl",
+      );
+      fs.mkdirSync(path.dirname(duplicatePath), { recursive: true });
+      fs.writeFileSync(duplicatePath, `${[
+        {
+          type: "session",
+          version: 0,
+          id: "dsh-duplicate",
+          createdAt: Date.parse("2026-08-04T10:00:00.000Z"),
+          cwd: "/other",
+          delegationDepth: 0,
+        },
+        {
+          type: "user/message",
+          seq: 0,
+          time: Date.parse("2026-08-04T10:00:01.000Z"),
+          data: {
+            role: "user",
+            source: { kind: "user" },
+            content: [{ type: "text", text: "Ambiguous duplicate" }],
+          },
+          surfaceOp: "append",
+        },
+      ].map((row) => JSON.stringify(row)).join("\n")}\n`);
+
+      const ambiguous = await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions,
+      });
+
+      expect(ambiguous).toMatchObject({ indexed: 0, skipped: 0, total: 0, error: null });
+      expect(store.getSession("dsh:dsh-duplicate")).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("duplicate session id"));
+    } finally {
+      warn.mockRestore();
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("prunes warm-indexed DeepSeek Harness sessions when the root mixes raw and compressed encodings", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-dsh-mixed-index-"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      writeDeepSeekHarnessSession(homeDir, "dsh-raw", "Initially indexed raw session");
+      const loadOptions = {
+        homeDir,
+        includeDeepSeekHarness: true,
+        deepSeekHarnessHomeDir: path.join(homeDir, ".dsh"),
+      };
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions });
+      expect(store.getSession("dsh:dsh-raw")).not.toBeNull();
+
+      const compressedPath = path.join(
+        homeDir,
+        ".dsh",
+        "sessions",
+        "--other--",
+        "dsh-compressed",
+        "session.jsonl.zstd",
+      );
+      fs.mkdirSync(path.dirname(compressedPath), { recursive: true });
+      fs.writeFileSync(compressedPath, zstdCompressSync(`${JSON.stringify({
+        type: "session",
+        version: 0,
+        id: "dsh-compressed",
+        createdAt: Date.parse("2026-08-04T10:00:00.000Z"),
+        cwd: "/other",
+        delegationDepth: 0,
+      })}\n`, {
+        params: { [constants.ZSTD_c_checksumFlag]: 1 },
+      }));
+
+      const mixed = await syncDefaultSessionsInBatches(store, {
+        batchSize: 1,
+        loadOptions,
+      });
+
+      expect(mixed).toMatchObject({ indexed: 0, skipped: 0, total: 0, error: null });
+      expect(store.getSession("dsh:dsh-raw")).toBeNull();
+      expect(store.getSession("dsh:dsh-compressed")).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("both raw and compressed"));
+    } finally {
+      warn.mockRestore();
       store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });
     }
@@ -1095,6 +1267,40 @@ function writeCodexSession(homeDir: string, id: string, question: string, title:
       }),
     ].join("\n"),
   );
+  return filePath;
+}
+
+function writeDeepSeekHarnessSession(homeDir: string, id: string, question: string): string {
+  const filePath = path.join(
+    homeDir,
+    ".dsh",
+    "sessions",
+    "--repo--",
+    id,
+    "session.jsonl",
+  );
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${[
+    {
+      type: "session",
+      version: 0,
+      id,
+      createdAt: Date.parse("2026-08-04T09:00:00.000Z"),
+      cwd: "/repo",
+      delegationDepth: 0,
+    },
+    {
+      type: "user/message",
+      seq: 0,
+      time: Date.parse("2026-08-04T09:00:01.000Z"),
+      data: {
+        role: "user",
+        source: { kind: "user" },
+        content: [{ type: "text", text: question }],
+      },
+      surfaceOp: "append",
+    },
+  ].map((row) => JSON.stringify(row)).join("\n")}\n`);
   return filePath;
 }
 

@@ -23,6 +23,13 @@ export interface FormatAdapter {
   parseLine(raw: unknown): ParsedLine;
 }
 
+export function isVisibleDeepSeekHarnessUserSource(source: unknown): boolean {
+  if (!source || typeof source !== "object") return false;
+  const record = source as Record<string, unknown>;
+  return record.kind === "user"
+    || (record.kind === "coordinator" && record.form === "relay");
+}
+
 function attachmentPreviewKind(mimeType: string): SessionAttachment["previewKind"] {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType === "application/pdf") return "pdf";
@@ -208,6 +215,43 @@ export const workbuddyAdapter: FormatAdapter = {
   },
 };
 
+export const dshAdapter: FormatAdapter = {
+  format: "dsh",
+  parseLine(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    if (row.surfaceOp !== "append") return null;
+    const data = row.data && typeof row.data === "object"
+      ? row.data as Record<string, unknown>
+      : null;
+    if (!data) return null;
+    let role: "user" | "assistant";
+    let message = data;
+    if (row.type === "user/message") {
+      const source = data.source && typeof data.source === "object"
+        ? data.source as Record<string, unknown>
+        : null;
+      if (!isVisibleDeepSeekHarnessUserSource(source)) return null;
+      role = "user";
+    } else if (row.type === "assistant/message") {
+      role = "assistant";
+      message = data.message && typeof data.message === "object"
+        ? data.message as Record<string, unknown>
+        : data;
+    } else {
+      return null;
+    }
+    const parsed = extractContentBlocks(message.content);
+    if (!parsed.text) return null;
+    return {
+      role,
+      content: parsed.text,
+      timestamp: timestampFromRaw(row),
+      ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
+    };
+  },
+};
+
 function roleFromRaw(raw: unknown): "user" | "assistant" | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
@@ -360,6 +404,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   }
   if (sourceOrFormat === "codebuddy") return codebuddyAdapter;
   if (sourceOrFormat === "workbuddy") return workbuddyAdapter;
+  if (sourceOrFormat === "dsh") return dshAdapter;
   if (sourceOrFormat === "codewiz") return codeWizAdapter;
   if (sourceOrFormat === "openclaw") return openClawAdapter;
   if (sourceOrFormat === "hermes") return hermesAdapter;
@@ -373,6 +418,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (format === "claude") return claudeAdapter;
   if (format === "codebuddy") return codebuddyAdapter;
   if (format === "workbuddy") return workbuddyAdapter;
+  if (format === "dsh") return dshAdapter;
   if (format === "codewiz") return codeWizAdapter;
   if (format === "openclaw") return openClawAdapter;
   if (format === "hermes") return hermesAdapter;

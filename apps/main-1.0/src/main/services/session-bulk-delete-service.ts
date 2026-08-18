@@ -7,7 +7,7 @@ import type {
   SessionBulkDeleteTarget,
 } from "../../core/session-bulk-delete";
 import { deleteLocalSessionSources } from "../../core/session-source-delete";
-import { sessionSourceDescriptor } from "../../core/session-sources";
+import { isReadOnlySessionSource, sessionSourceDescriptor } from "../../core/session-sources";
 import type { SessionEnvironment, SessionSource } from "../../core/types";
 import { deleteWslSessionSources } from "../../core/wsl-session-actions";
 import { deleteZcodeSessions } from "../../core/zcode-session-writer";
@@ -148,7 +148,7 @@ function classifyTarget(
   if (request.inactiveBefore !== undefined && target.lastActivityAt >= request.inactiveBefore) {
     return issueFor(target.sessionKey, "recent", "Session is not older than the selected cutoff.");
   }
-  if (target.source === "pi-cli" || target.source === "workbuddy-cli") {
+  if (isReadOnlySessionSource(target.source)) {
     return issueFor(target.sessionKey, "read-only", `${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
   }
   if (SHARED_DATABASE_SOURCES.has(target.source)) return issueFor(target.sessionKey, "shared-database", "This source stores multiple sessions in a shared database.");

@@ -42,12 +42,14 @@ AgentRecall 帮你把分散在不同 AI Coding Agent 里的本地会话找回来
 | 类型 | 来源 |
 | --- | --- |
 | 默认来源 | Claude Code CLI、Claude Desktop app、Codex CLI、Codex Desktop |
-| 可选本地来源 | CodeBuddy、WorkBuddy、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder |
+| 可选本地来源 | CodeBuddy、WorkBuddy、DeepSeek Harness、CodeWiz、TClaude、TCodex、OpenClaw、Hermes、OpenCode、ZCode、Cursor Agent、Trae、Qoder |
 | 扩展环境 | Windows WSL、SSH 远程环境 |
 
 不同来源的可用能力略有差异；应用会在界面中按来源展示可用的查看、恢复、迁移和统计操作。
 
 WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的消息、工具轨迹、标题及用量信息；暂不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。
+
+DeepSeek Harness 默认关闭，以只读方式索引 `${DSH_HOME:-~/.dsh}/sessions` 下的本机会话，支持搜索、详情、导出、标题、工具轨迹、Token 用量、父子会话和附件；暂不支持实时跟踪、Resume、迁移、同步、从 AgentRecall 打开 DeepSeek Harness，或删除原始会话文件。
 
 ## 快速开始
 

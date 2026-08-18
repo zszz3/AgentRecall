@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { traceCompactionSummary } from "./trace-presentation";
+import { traceCompactionSummary, tracePresentation } from "./trace-presentation";
 
 describe("traceCompactionSummary", () => {
   it("returns displayable compact statistics", () => {
@@ -22,5 +22,16 @@ describe("traceCompactionSummary", () => {
   it("rejects malformed compact statistics", () => {
     expect(traceCompactionSummary(undefined)).toBeNull();
     expect(traceCompactionSummary({ compaction: { itemCount: "27" } })).toBeNull();
+  });
+});
+
+describe("DeepSeek Harness trace presentation", () => {
+  it("hides turn starts and presents every terminal state as a turn summary", () => {
+    expect(tracePresentation({ kind: "event", eventType: "dsh.turn.started" }))
+      .toEqual({ category: "lifecycle", visibility: "hidden" });
+    for (const eventType of ["dsh.turn.completed", "dsh.turn.aborted", "dsh.turn.failed"]) {
+      expect(tracePresentation({ kind: "event", eventType }))
+        .toEqual({ category: "lifecycle", visibility: "turn_summary" });
+    }
   });
 });

@@ -1730,6 +1730,7 @@ function runIndexSync(): Promise<IndexStatus> {
         includeTcodex: settings.includeTcodex,
         includeCodeBuddyCli: settings.includeCodeBuddyCli,
         includeWorkBuddy: settings.includeWorkBuddy,
+        includeDeepSeekHarness: settings.includeDeepSeekHarness,
         includeCodeWizCli: settings.includeCodeWizCli,
         includeOpenClaw: settings.includeOpenClaw,
         includeHermes: settings.includeHermes,

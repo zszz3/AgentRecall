@@ -39,7 +39,7 @@ import type { SessionStoreDatabase } from "./database";
 import { EnvironmentStore, localEnvironment } from "./environments";
 import { deleteHermesSession } from "../hermes-session-writer";
 import { deleteLocalSessionSources } from "../session-source-delete";
-import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "../session-sources";
+import { isReadOnlySessionSource, SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "../session-sources";
 import { deleteZcodeSessions } from "../zcode-session-writer";
 import type { SessionBulkDeleteTarget } from "../session-bulk-delete";
 
@@ -708,7 +708,7 @@ export class SessionsStore {
     const targets = this.getSessionDeletionTargets([sessionKey]);
     const row = targets.find((target) => target.sessionKey === sessionKey);
     if (!row) return false;
-    if (row.source === "pi-cli" || row.source === "workbuddy-cli") {
+    if (isReadOnlySessionSource(row.source)) {
       throw new Error(`${sessionSourceDescriptor(row.source).label} session source files are read-only.`);
     }
     if (row.source === "zcode-cli") {

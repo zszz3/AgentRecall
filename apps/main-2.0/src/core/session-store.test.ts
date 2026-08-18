@@ -541,6 +541,32 @@ describe("SessionStore PostgreSQL facade", () => {
     }
   });
 
+  it("keeps DeepSeek Harness source files and indexed records when direct deletion is attempted", async () => {
+    const store = createStore();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-delete-dsh-"));
+    const filePath = path.join(dir, "session.jsonl");
+    fs.writeFileSync(filePath, "{}\n", "utf8");
+    await store.upsertIndexedSession(
+      indexedSession({
+        sessionKey: "dsh:session-a",
+        rawId: "session-a",
+        source: "deepseek-harness",
+        filePath,
+      }),
+      messages,
+    );
+
+    try {
+      await expect(store.deleteSession("dsh:session-a")).rejects.toThrow(
+        "DeepSeek Harness session source files are read-only.",
+      );
+      expect(fs.existsSync(filePath)).toBe(true);
+      await expect(store.getSession("dsh:session-a")).resolves.not.toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Session search results paged while filtering subagents in SQL", async () => {
     const store = createStore();
     await store.upsertIndexedSession(indexedSession(), messages);

@@ -57,4 +57,15 @@ describe("main process startup wiring", () => {
     expect(source).toContain('const sshArgs = buildRemoteSyncSshArgs(environment, "").slice(0, -1)');
     expect(source).toContain("await openResumeInTerminal(session, getSettings(), { sshArgs })");
   });
+
+  it("guards single-session deletion through the shared read-only source policy", () => {
+    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    const deleteBlock = source.match(
+      /ipcMain\.handle\("session:delete",[\s\S]*?\n\s*}\);\n/,
+    )?.[0];
+
+    expect(deleteBlock).toBeDefined();
+    expect(deleteBlock).toContain("isReadOnlySessionSource(session.source)");
+    expect(deleteBlock).toContain("session source files are read-only");
+  });
 });

@@ -135,6 +135,24 @@ describe("SessionCatalogService deletion policy", () => {
     expect(store.getSessionDeletionTargets).not.toHaveBeenCalled();
   });
 
+  it("rejects DeepSeek Harness deletion before the source file deletion path", async () => {
+    const { service, store } = createService(session({
+      sessionKey: "dsh:local",
+      source: "deepseek-harness",
+      environmentId: "local",
+      environmentKind: "local",
+      filePath: "/fixtures/session.jsonl",
+    }));
+
+    await expect(service.delete("dsh:local")).rejects.toThrow(
+      "DeepSeek Harness session source files are read-only.",
+    );
+
+    expect(store.deleteSessionRecord).not.toHaveBeenCalled();
+    expect(store.deleteSession).not.toHaveBeenCalled();
+    expect(store.getSessionDeletionTargets).not.toHaveBeenCalled();
+  });
+
   it("refreshes live sessions in the main process before deleting a local session", async () => {
     const current = session({
       sessionKey: "codex:live",

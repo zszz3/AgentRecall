@@ -132,6 +132,11 @@ describe("formatSessionMarkdown", () => {
   it("uses the shared source label for Pi exports", () => {
     expect(formatSessionMarkdown({ ...session, source: "pi-cli" }, messages)).toContain("Pi · `/repo`");
   });
+
+  it("uses the shared source label for DeepSeek Harness exports", () => {
+    expect(formatSessionMarkdown({ ...session, source: "deepseek-harness" }, messages))
+      .toContain("DeepSeek Harness · `/repo`");
+  });
 });
 
 describe("formatSessionPlainText", () => {

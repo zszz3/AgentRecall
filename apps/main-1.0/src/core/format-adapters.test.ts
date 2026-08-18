@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeAdapter, codebuddyAdapter, codexAdapter, cleanTitle, cursorAdapter, extractCursorUserQuery, getAdapter, getFormatForSource, isMeaningfulUserMessage, workbuddyAdapter } from "./format-adapters";
+import { claudeAdapter, codebuddyAdapter, codexAdapter, cleanTitle, cursorAdapter, dshAdapter, extractCursorUserQuery, getAdapter, getFormatForSource, isMeaningfulUserMessage, workbuddyAdapter } from "./format-adapters";
 import { decodeCursorWorkspaceSlug, parseCursorTranscriptPath } from "./session-loader";
 import * as path from "node:path";
 
@@ -159,6 +159,54 @@ describe("format adapters", () => {
       content: "code\nkeep this too",
       timestamp: new Date(1_780_321_278_404).toISOString(),
     });
+  });
+
+  it("maps DeepSeek Harness to its append-only text adapter", () => {
+    expect(getFormatForSource("deepseek-harness")).toBe("dsh");
+    expect(getAdapter("deepseek-harness")).toBe(dshAdapter);
+    expect(dshAdapter.parseLine({
+      type: "user/message",
+      time: 1_786_000_000_000,
+      data: {
+        role: "user",
+        source: { kind: "user" },
+        content: [{ type: "text", text: "DSH prompt" }],
+      },
+      surfaceOp: "append",
+    })).toMatchObject({
+      role: "user",
+      content: "DSH prompt",
+    });
+    expect(dshAdapter.parseLine({
+      type: "user/message",
+      data: {
+        role: "user",
+        source: { kind: "coordinator", form: "relay", senderSessionId: "parent" },
+        content: [{ type: "text", text: "Continuable follow-up" }],
+      },
+      surfaceOp: "append",
+    })).toMatchObject({
+      role: "user",
+      content: "Continuable follow-up",
+    });
+    expect(dshAdapter.parseLine({
+      type: "user/message",
+      data: {
+        role: "user",
+        source: { kind: "plugin" },
+        content: [{ type: "text", text: "injected" }],
+      },
+      surfaceOp: "append",
+    })).toBeNull();
+    expect(dshAdapter.parseLine({
+      type: "user/message",
+      data: {
+        role: "user",
+        source: { kind: "coordinator", form: "notice" },
+        content: [{ type: "text", text: "not a relay" }],
+      },
+      surfaceOp: "append",
+    })).toBeNull();
   });
 
   it("resolves Qoder through its declared format instead of the Codex fallback", () => {

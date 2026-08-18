@@ -117,7 +117,7 @@ import {
   isSharedSessionSourceDatabase,
   remoteSessionKey,
 } from "../core/session-environment";
-import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "../core/session-sources";
+import { isReadOnlySessionSource, OPTIONAL_SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
@@ -1194,6 +1194,7 @@ function runIndexSync(): Promise<IndexStatus> {
         includeTcodex: settings.includeTcodex,
         includeCodeBuddyCli: settings.includeCodeBuddyCli,
         includeWorkBuddy: settings.includeWorkBuddy,
+        includeDeepSeekHarness: settings.includeDeepSeekHarness,
         includeCodeWizCli: settings.includeCodeWizCli,
         includeOpenClaw: settings.includeOpenClaw,
         includeHermes: settings.includeHermes,
@@ -2133,7 +2134,7 @@ function registerIpc(): void {
     sessionBulkDeleteService.delete(await withFreshLiveSessions(request)));
   ipcMain.handle("session:delete", async (_event, sessionKey: string) => {
     const session = store.getSession(sessionKey);
-    if (session?.source === "pi-cli" || session?.source === "workbuddy-cli") {
+    if (session && isReadOnlySessionSource(session.source)) {
       throw new Error(`${sessionSourceDescriptor(session.source).label} session source files are read-only.`);
     }
     if (session && !canDeleteSessionLocally(session)) {

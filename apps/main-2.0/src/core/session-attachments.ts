@@ -41,7 +41,10 @@ export function materializeSessionAttachment(
     ...(attachment.sha256 ? { sha256: attachment.sha256 } : {}),
     cachePath: null,
   });
-  if (!options.cacheRoot || !attachment.source) return unavailable("missing");
+  if (attachment.status !== "available") {
+    return unavailable(attachment.status, attachment.sizeBytes);
+  }
+  if (!options.cacheRoot || !attachment.source) return unavailable("missing", attachment.sizeBytes);
 
   let bytes: Buffer;
   if (attachment.source.kind === "inline") {
@@ -84,7 +87,14 @@ export function materializeSessionAttachment(
   if (bytes.length > MAX_ATTACHMENT_BYTES || bytes.length > options.remainingSessionBytes) {
     return unavailable("too_large", bytes.length);
   }
+  if (attachment.sizeBytes !== undefined && attachment.sizeBytes !== bytes.length) {
+    return unavailable("unsafe", bytes.length);
+  }
   const digest = createHash("sha256").update(bytes).digest("hex");
+  if (attachment.sha256 !== undefined
+    && (!/^[a-f0-9]{64}$/u.test(attachment.sha256) || attachment.sha256 !== digest)) {
+    return unavailable("unsafe", bytes.length);
+  }
   const extension = safeExtension(attachment.fileName);
   const cachePath = path.join(options.cacheRoot, `${digest}${extension}`);
   mkdirSync(options.cacheRoot, { recursive: true });

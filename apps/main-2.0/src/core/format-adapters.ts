@@ -206,6 +206,48 @@ export const workbuddyAdapter: FormatAdapter = {
   },
 };
 
+export const deepSeekHarnessAdapter: FormatAdapter = {
+  format: "dsh",
+  parseLine(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const event = raw as Record<string, unknown>;
+    if (event.surfaceOp !== "append") return null;
+    const data = event.data && typeof event.data === "object"
+      ? event.data as Record<string, unknown>
+      : null;
+    if (!data) return null;
+    const message = data.message && typeof data.message === "object"
+      ? data.message as Record<string, unknown>
+      : data;
+    const role = event.type === "user/message"
+      ? "user"
+      : event.type === "assistant/message"
+        ? "assistant"
+        : null;
+    if (!role) return null;
+    if (role === "user") {
+      const source = message.source && typeof message.source === "object"
+        ? message.source as Record<string, unknown>
+        : null;
+      const human = source?.kind === "user";
+      const coordinatorRelay = source?.kind === "coordinator" && source.form === "relay";
+      if (!human && !coordinatorRelay) return null;
+    }
+    const parsed = extractContentBlocks(message.content);
+    if (!parsed.text) return null;
+    const turn = typeof data.turn === "number" && Number.isSafeInteger(data.turn) && data.turn > 0
+      ? `dsh:${data.turn}`
+      : null;
+    return {
+      role,
+      content: parsed.text,
+      timestamp: timestampFromRaw(event),
+      ...(turn ? { sourceTurnId: turn } : {}),
+      ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
+    };
+  },
+};
+
 function roleFromRaw(raw: unknown): "user" | "assistant" | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
@@ -358,6 +400,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   }
   if (sourceOrFormat === "codebuddy") return codebuddyAdapter;
   if (sourceOrFormat === "workbuddy") return workbuddyAdapter;
+  if (sourceOrFormat === "dsh") return deepSeekHarnessAdapter;
   if (sourceOrFormat === "codewiz") return codeWizAdapter;
   if (sourceOrFormat === "openclaw") return openClawAdapter;
   if (sourceOrFormat === "hermes") return hermesAdapter;
@@ -371,6 +414,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (format === "claude") return claudeAdapter;
   if (format === "codebuddy") return codebuddyAdapter;
   if (format === "workbuddy") return workbuddyAdapter;
+  if (format === "dsh") return deepSeekHarnessAdapter;
   if (format === "codewiz") return codeWizAdapter;
   if (format === "openclaw") return openClawAdapter;
   if (format === "hermes") return hermesAdapter;

@@ -16,6 +16,47 @@ export interface TraceCompactionSummary {
   opaqueCompaction: boolean;
 }
 
+const TURN_STARTED_EVENT_TYPES = new Set([
+  "codex.turn.started",
+  "dsh.turn.started",
+  "task_started",
+]);
+const TURN_COMPLETED_EVENT_TYPES = new Set([
+  "codex.turn.completed",
+  "dsh.turn.completed",
+  "task_complete",
+]);
+const TURN_ABORTED_EVENT_TYPES = new Set([
+  "codex.turn.aborted",
+  "dsh.turn.aborted",
+  "turn_aborted",
+]);
+const TURN_FAILED_EVENT_TYPES = new Set([
+  "dsh.turn.failed",
+]);
+
+export function isTurnStartedEventType(eventType: string | null | undefined): boolean {
+  return Boolean(eventType && TURN_STARTED_EVENT_TYPES.has(eventType));
+}
+
+export function isTurnCompletedEventType(eventType: string | null | undefined): boolean {
+  return Boolean(eventType && TURN_COMPLETED_EVENT_TYPES.has(eventType));
+}
+
+export function isTurnAbortedEventType(eventType: string | null | undefined): boolean {
+  return Boolean(eventType && TURN_ABORTED_EVENT_TYPES.has(eventType));
+}
+
+export function isTurnFailedEventType(eventType: string | null | undefined): boolean {
+  return Boolean(eventType && TURN_FAILED_EVENT_TYPES.has(eventType));
+}
+
+export function isTurnTerminalEventType(eventType: string | null | undefined): boolean {
+  return isTurnCompletedEventType(eventType)
+    || isTurnAbortedEventType(eventType)
+    || isTurnFailedEventType(eventType);
+}
+
 export function normalizeSessionTraceStatus(value: unknown): SessionTraceStatus | null {
   if (value === "success" || value === "completed") return "completed";
   if (value === "failure" || value === "failed") return "failed";
@@ -27,15 +68,10 @@ export function tracePresentation(
   event: Pick<SessionTraceEvent, "kind" | "eventType">,
 ): SessionTracePresentation {
   const eventType = event.eventType || "";
-  if (eventType === "codex.turn.started" || eventType === "task_started") {
+  if (isTurnStartedEventType(eventType)) {
     return { category: "lifecycle", visibility: "hidden" };
   }
-  if (
-    eventType === "codex.turn.completed"
-    || eventType === "codex.turn.aborted"
-    || eventType === "task_complete"
-    || eventType === "turn_aborted"
-  ) {
+  if (isTurnTerminalEventType(eventType)) {
     return { category: "lifecycle", visibility: "turn_summary" };
   }
   if (eventType === "codex.reasoning_summary" || eventType === "agent_reasoning") {

@@ -25,7 +25,8 @@
     "out",
     "dist/main/index.js",
     "bin",
-    "assets"
+    "assets",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "dev": "electron-vite dev",

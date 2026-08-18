@@ -541,6 +541,7 @@ describe("RemoteSessionService cloud orchestration", () => {
   it.each([
     { label: "ZCode", sessionKey: "zcode:session-1", source: "zcode-cli" as const },
     { label: "WorkBuddy", sessionKey: "workbuddy:session-1", source: "workbuddy-cli" as const },
+    { label: "DeepSeek Harness", sessionKey: "dsh:session-1", source: "deepseek-harness" as const },
   ])("rejects $label uploads before building a portable remote session", async ({ label, sessionKey, source }) => {
     const harness = createHarness({
       settings: configuredSettings(),

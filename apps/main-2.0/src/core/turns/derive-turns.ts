@@ -7,9 +7,16 @@ import type {
   SessionTurnStatus,
   TokenUsageEvent,
 } from "../types";
-import { tracePresentation } from "../trace-presentation";
+import {
+  isTurnAbortedEventType,
+  isTurnCompletedEventType,
+  isTurnFailedEventType,
+  isTurnStartedEventType,
+  isTurnTerminalEventType,
+  tracePresentation,
+} from "../trace-presentation";
 
-export const TURN_DERIVATION_VERSION = 5;
+export const TURN_DERIVATION_VERSION = 6;
 
 export interface DerivedRawEvent {
   eventIndex: number;
@@ -151,7 +158,7 @@ function lifecycleEndedAtMs(traceEvents: readonly SessionTraceEvent[]): Map<stri
   const endedAt = new Map<string, number>();
   for (const event of traceEvents) {
     if (!event.sourceTurnId) continue;
-    if (event.eventType !== "codex.turn.completed" && event.eventType !== "codex.turn.aborted") continue;
+    if (!isTurnTerminalEventType(event.eventType)) continue;
     const terminalAt = timestampMs(
       (typeof event.attributes?.endedAt === "string" || typeof event.attributes?.endedAt === "number"
         ? event.attributes.endedAt
@@ -433,12 +440,10 @@ function lifecycleProjection(turn: TurnDraft): {
   const lifecycle = [...turn.traceEvents]
     .filter((event) => tracePresentation(event).category === "lifecycle")
     .sort(compareTimestamped);
-  const started = lifecycle.find((event) => event.eventType === "codex.turn.started");
+  const started = lifecycle.find((event) => isTurnStartedEventType(event.eventType));
   let terminal: SessionTraceEvent | undefined;
   for (const event of lifecycle) {
-    if (event.eventType === "codex.turn.completed" || event.eventType === "codex.turn.aborted") {
-      terminal = event;
-    }
+    if (isTurnTerminalEventType(event.eventType)) terminal = event;
   }
   const endedAt = terminal
     ? attributeString(terminal.attributes, "endedAt") || timestampString(terminal.timestamp)
@@ -451,11 +456,11 @@ function lifecycleProjection(turn: TurnDraft): {
     ? new Date(Date.parse(endedAt) - durationMs).toISOString()
     : null;
   return {
-    status: terminal?.eventType === "codex.turn.aborted" || terminal?.status === "aborted"
+    status: isTurnAbortedEventType(terminal?.eventType) || terminal?.status === "aborted"
       ? "aborted"
-      : terminal?.status === "failed"
+      : isTurnFailedEventType(terminal?.eventType) || terminal?.status === "failed"
         ? "failed"
-        : terminal?.eventType === "codex.turn.completed"
+        : isTurnCompletedEventType(terminal?.eventType)
           ? "completed"
           : started
             ? "running"

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { codexAdapter, getAdapter, getFormatForSource, workbuddyAdapter } from "./format-adapters";
+import {
+  codexAdapter,
+  deepSeekHarnessAdapter,
+  getAdapter,
+  getFormatForSource,
+  workbuddyAdapter,
+} from "./format-adapters";
 
 describe("Codex format adapter", () => {
   it("strips subagent notifications from user messages", () => {
@@ -80,5 +86,85 @@ describe("WorkBuddy format adapter", () => {
       content: "code",
       timestamp: "2026-05-28T20:26:40.000Z",
     });
+  });
+});
+
+describe("DeepSeek Harness format adapter", () => {
+  it("parses appended human and legacy assistant messages without exposing injected context", () => {
+    expect(getFormatForSource("deepseek-harness")).toBe("dsh");
+    expect(getAdapter("deepseek-harness")).toBe(deepSeekHarnessAdapter);
+    expect(deepSeekHarnessAdapter.parseLine({
+      type: "user/message",
+      time: 1_780_000_000_000,
+      surfaceOp: "append",
+      data: {
+        content: [{ type: "text", text: "Inspect the project" }],
+        source: { kind: "user" },
+      },
+    })).toMatchObject({
+      role: "user",
+      content: "Inspect the project",
+      timestamp: "2026-05-28T20:26:40.000Z",
+    });
+    expect(deepSeekHarnessAdapter.parseLine({
+      type: "assistant/message",
+      time: 1_780_000_001_000,
+      surfaceOp: "append",
+      data: {
+        turn: 2,
+        step: 1,
+        content: [{ type: "text", text: "Done" }],
+        provenance: { provider: "deepseek" },
+      },
+    })).toMatchObject({
+      role: "assistant",
+      content: "Done",
+      sourceTurnId: "dsh:2",
+    });
+    expect(deepSeekHarnessAdapter.parseLine({
+      type: "user/message",
+      surfaceOp: "append",
+      data: {
+        source: { kind: "user" },
+        content: [{
+          type: "image",
+          data: "data:image/png;base64,AA==",
+          name: "pixel.png",
+        }],
+      },
+    })).toMatchObject({
+      role: "user",
+      content: "[Attachment]",
+      attachments: [{
+        fileName: "pixel.png",
+        mimeType: "image/png",
+        status: "available",
+        source: { kind: "inline", value: "AA==" },
+      }],
+    });
+    expect(deepSeekHarnessAdapter.parseLine({
+      type: "user/message",
+      surfaceOp: "append",
+      data: {
+        content: [{ type: "text", text: "delegated request" }],
+        source: { kind: "coordinator", form: "relay" },
+      },
+    })).toMatchObject({
+      role: "user",
+      content: "delegated request",
+    });
+    expect(deepSeekHarnessAdapter.parseLine({
+      type: "user/message",
+      surfaceOp: "append",
+      data: {
+        content: [{ type: "text", text: "runtime context" }],
+        source: { kind: "plugin" },
+      },
+    })).toBeNull();
+    expect(deepSeekHarnessAdapter.parseLine({
+      type: "assistant/message",
+      surfaceOp: { op: "replace", start: 1, end: 2 },
+      data: { content: [{ type: "text", text: "compacted" }] },
+    })).toBeNull();
   });
 });

@@ -69,16 +69,27 @@ describe("SessionBulkDeleteService", () => {
     expect(preview.skipped).toEqual([]);
   });
 
-  it("treats WorkBuddy source files as read-only", async () => {
-    const store = createStore([target("workbuddy:session", { source: "workbuddy-cli", sourceAvailable: true })]);
+  it.each([
+    {
+      label: "WorkBuddy",
+      sessionKey: "workbuddy:session",
+      source: "workbuddy-cli" as const,
+    },
+    {
+      label: "DeepSeek Harness",
+      sessionKey: "dsh:session",
+      source: "deepseek-harness" as const,
+    },
+  ])("treats $label source files as read-only", async ({ label, sessionKey, source }) => {
+    const store = createStore([target(sessionKey, { source, sourceAvailable: true })]);
     const service = new SessionBulkDeleteService(store);
     const request = {
-      sessionKeys: ["workbuddy:session"],
+      sessionKeys: [sessionKey],
       liveSessionKeys: [],
     };
     expect(service.preview(request)).toMatchObject({
       deletableCount: 0,
-      skipped: [{ sessionKey: "workbuddy:session", reason: "read-only", message: "WorkBuddy session source files are read-only." }],
+      skipped: [{ sessionKey, reason: "read-only", message: `${label} session source files are read-only.` }],
     });
     await expect(service.delete(request)).resolves.toMatchObject({ deletedSessionKeys: [], failed: [] });
     expect(store.deleteSessionRecords).not.toHaveBeenCalled();
