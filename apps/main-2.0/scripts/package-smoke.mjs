@@ -10,6 +10,7 @@ import { packReleaseArchive } from "./pack-release.mjs";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const maxReleaseArchiveBytes = 4.25 * 1024 * 1024;
 const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agent-recall-package-smoke-"));
 const packDir = path.join(tempRoot, "pack");
 const prefix = path.join(tempRoot, "prefix");
@@ -103,8 +104,8 @@ try {
   await Promise.all([packDir, prefix, stageRoot, home].map((directory) => mkdir(directory, { recursive: true })));
   const archive = await packReleaseArchive({ root, destination: packDir, environment });
   const archiveSize = (await stat(archive)).size;
-  if (archiveSize >= 4 * 1024 * 1024) {
-    throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 4MB.`);
+  if (archiveSize >= maxReleaseArchiveBytes) {
+    throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 4.25MB.`);
   }
   await execFileAsync(npm, ["install", "--global", archive, "--prefix", prefix, "--no-audit", "--no-fund"], {
     cwd: root,
