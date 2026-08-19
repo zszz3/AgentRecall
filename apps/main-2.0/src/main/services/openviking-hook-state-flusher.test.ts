@@ -37,6 +37,53 @@ function client() {
 }
 
 describe("OpenVikingHookStateFlusher", () => {
+  it("removes abandoned submitted prompts after their retention window", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-submitted-turns-"));
+    roots.push(root);
+    const stateDir = path.join(root, "hook-state");
+    await mkdir(stateDir);
+    const statePath = path.join(stateDir, "submitted.json");
+    await writeFile(statePath, JSON.stringify({
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      pendingTokenEstimate: 0,
+      submittedTurns: [
+        {
+          sourceTurnId: "stale-turn",
+          prompts: ["STALE_PRIVATE_PROMPT"],
+          submittedAt: "2026-08-03T00:00:00.000Z",
+        },
+        {
+          sourceTurnId: "active-turn",
+          prompts: ["Active prompt"],
+          submittedAt: "2026-08-05T00:30:00.000Z",
+        },
+      ],
+      updatedAt: "2026-08-05T00:30:00.000Z",
+    }));
+    const openViking = client();
+    const onStateChanged = vi.fn();
+    const flusher = new OpenVikingHookStateFlusher({
+      stateDir,
+      client: openViking,
+      control: control(),
+      credentials: { get: vi.fn(async () => auth) },
+      onStateChanged,
+    });
+
+    await flusher.flushIdle(Date.parse("2026-08-05T01:00:00.000Z"));
+
+    const persisted = await readFile(statePath, "utf8");
+    expect(persisted).not.toContain("STALE_PRIVATE_PROMPT");
+    expect(JSON.parse(persisted).submittedTurns).toEqual([{
+      sourceTurnId: "active-turn",
+      prompts: ["Active prompt"],
+      submittedAt: "2026-08-05T00:30:00.000Z",
+    }]);
+    expect(openViking.commitSession).not.toHaveBeenCalled();
+    expect(onStateChanged).toHaveBeenCalledOnce();
+  });
+
   it("commits idle pending sessions while leaving active sessions alone", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-flusher-"));
     roots.push(root);
@@ -49,7 +96,10 @@ describe("OpenVikingHookStateFlusher", () => {
       sessionId: "session-idle",
       agent: "codex",
       pendingTokenEstimate: 120,
-      pendingEvidence: [{ id: "turn-1", inputChars: 480, toolCount: 3 }],
+      pendingEvidence: [
+        { id: "turn-1:version-1", sourceTurnId: "turn-1", inputChars: 200, toolCount: 1 },
+        { id: "turn-1:version-2", sourceTurnId: "turn-1", inputChars: 280, toolCount: 2 },
+      ],
       updatedAt: "2026-07-30T00:00:00.000Z",
     }));
     await writeFile(activePath, JSON.stringify({
@@ -74,10 +124,12 @@ describe("OpenVikingHookStateFlusher", () => {
     expect(openViking.commitSession).toHaveBeenCalledWith(auth, "session-idle");
     expect(JSON.parse(await readFile(idlePath, "utf8"))).toMatchObject({
       pendingTokenEstimate: 0,
+      pendingEvidence: [],
       lastCommittedAt: "2026-07-30T00:03:00.000Z",
       commitTasks: [{
         taskId: "task-1",
         trigger: "idle",
+        evidenceIds: ["turn-1:version-1", "turn-1:version-2"],
         sourceTurnIds: ["turn-1"],
         tokenEstimate: 120,
         inputChars: 480,

@@ -1,8 +1,12 @@
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import net from "node:net";
 import path from "node:path";
 import { Client } from "pg";
+
+const moduleRequire = createRequire(import.meta.url);
 
 export interface EmbeddedPostgresOptions {
   databaseDir: string;
@@ -36,9 +40,37 @@ interface StartPostgresRuntimeOptions {
   createEmbedded?: (
     options: EmbeddedPostgresOptions,
   ) => EmbeddedPostgresInstance | Promise<EmbeddedPostgresInstance>;
-  isRuntimeAvailable?: (connectionUrl: string) => Promise<boolean>;
+  probeExistingRuntime?: (
+    connectionUrl: string,
+  ) => Promise<ExistingPostgresRuntime | null>;
+  resolveEmbeddedRuntime?: (
+    platform: NodeJS.Platform,
+    arch: string,
+  ) => Promise<EmbeddedPostgresRuntime>;
+  stopExistingRuntime?: (
+    input: StopExistingPostgresRuntimeInput,
+  ) => Promise<void>;
   choosePort?: () => Promise<number>;
   createPassword?: () => string;
+  platform?: NodeJS.Platform;
+  arch?: string;
+}
+
+interface ExistingPostgresRuntime {
+  dataDirectory: string;
+  libraryDirectory: string;
+  majorVersion: number;
+}
+
+interface EmbeddedPostgresRuntime {
+  pgCtlPath: string;
+  libraryDirectory: string;
+  majorVersion: number;
+}
+
+interface StopExistingPostgresRuntimeInput {
+  pgCtlPath: string;
+  dataDirectory: string;
 }
 
 interface RuntimeConfig {
@@ -52,6 +84,22 @@ interface RuntimeConfig {
 }
 
 const RUNTIME_CONFIG_NAME = "runtime.json";
+const EMBEDDED_POSTGRES_PACKAGES: Record<string, Record<string, string>> = {
+  darwin: {
+    arm64: "@embedded-postgres/darwin-arm64",
+    x64: "@embedded-postgres/darwin-x64",
+  },
+  linux: {
+    arm: "@embedded-postgres/linux-arm",
+    arm64: "@embedded-postgres/linux-arm64",
+    ia32: "@embedded-postgres/linux-ia32",
+    ppc64: "@embedded-postgres/linux-ppc64",
+    x64: "@embedded-postgres/linux-x64",
+  },
+  win32: {
+    x64: "@embedded-postgres/windows-x64",
+  },
+};
 const EMBEDDED_POSTGRES_PROCESS_EVENTS = [
   "exit",
   "beforeExit",
@@ -92,20 +140,52 @@ export async function startPostgresRuntime(
   if (!existingConfig) await writeRuntimeConfig(configPath, config);
 
   const connectionUrl = runtimeConnectionUrl(config);
-  if (
-    existingConfig?.initialized
-    && await (options.isRuntimeAvailable ?? isRuntimeAvailable)(connectionUrl)
-  ) {
-    return {
-      connectionUrl,
-      managed: true,
-      stop: async () => undefined,
-    };
+  const dataDirectory = path.join(runtimeDirectory, "data");
+  if (existingConfig?.initialized) {
+    const platform = options.platform ?? process.platform;
+    const embeddedRuntime = await (
+      options.resolveEmbeddedRuntime ?? resolveEmbeddedRuntime
+    )(platform, options.arch ?? process.arch);
+    const dataMajorVersion = await readPostgresDataMajorVersion(dataDirectory);
+    if (dataMajorVersion !== embeddedRuntime.majorVersion) {
+      throw new Error("Managed PostgreSQL data uses a different major version; automatic recovery was refused.");
+    }
+    const existingRuntime = await (
+      options.probeExistingRuntime ?? probeExistingRuntime
+    )(connectionUrl);
+    if (existingRuntime) {
+      if (!await pathsReferToSameLocation(existingRuntime.dataDirectory, dataDirectory, platform)) {
+        throw new Error("Managed PostgreSQL is running from an unexpected data directory; automatic recovery was refused.");
+      }
+      if (
+        existingRuntime.majorVersion !== dataMajorVersion
+        || existingRuntime.majorVersion !== embeddedRuntime.majorVersion
+      ) {
+        throw new Error("Managed PostgreSQL uses a different major version; automatic recovery was refused.");
+      }
+      if (
+        await pathsReferToSameLocation(
+          existingRuntime.libraryDirectory,
+          embeddedRuntime.libraryDirectory,
+          platform,
+        )
+      ) {
+        return {
+          connectionUrl,
+          managed: true,
+          stop: async () => undefined,
+        };
+      }
+      await (options.stopExistingRuntime ?? stopExistingRuntime)({
+        pgCtlPath: embeddedRuntime.pgCtlPath,
+        dataDirectory,
+      });
+    }
   }
 
   const createEmbedded = options.createEmbedded ?? defaultCreateEmbedded;
   const embedded = await createEmbedded({
-    databaseDir: path.join(runtimeDirectory, "data"),
+    databaseDir: dataDirectory,
     port: config.port,
     user: config.user,
     password: config.password,
@@ -148,20 +228,172 @@ export async function startPostgresRuntime(
   };
 }
 
-async function isRuntimeAvailable(connectionUrl: string): Promise<boolean> {
-  const client = new Client({
-    connectionString: connectionUrl,
-    connectionTimeoutMillis: 1_000,
-  });
-  try {
-    await client.connect();
-    await client.query("select 1");
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await client.end().catch(() => undefined);
+async function probeExistingRuntime(
+  connectionUrl: string,
+): Promise<ExistingPostgresRuntime | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const client = new Client({
+      connectionString: connectionUrl,
+      connectionTimeoutMillis: 1_000,
+      query_timeout: 1_000,
+    });
+    try {
+      await client.connect();
+      const result = await client.query<{
+        data_directory: string;
+        library_directory: string;
+        server_version_num: string;
+      }>(`
+        select
+          current_setting('data_directory') as data_directory,
+          current_setting('server_version_num') as server_version_num,
+          (select setting from pg_config where name = 'PKGLIBDIR') as library_directory
+      `);
+      const row = result.rows[0];
+      const serverVersion = Number(row?.server_version_num);
+      if (
+        typeof row?.data_directory !== "string"
+        || !row.data_directory
+        || typeof row.library_directory !== "string"
+        || !row.library_directory
+        || !Number.isInteger(serverVersion)
+        || serverVersion <= 0
+      ) {
+        throw new Error("Managed PostgreSQL runtime identity is incomplete.");
+      }
+      return {
+        dataDirectory: row.data_directory,
+        libraryDirectory: row.library_directory,
+        majorVersion: Math.floor(serverVersion / 10_000),
+      };
+    } catch (error) {
+      if (postgresErrorCode(error) === "ECONNREFUSED") return null;
+      if (isTransientPostgresIdentityError(error) && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
+      throw new Error("Managed PostgreSQL runtime identity could not be verified.", { cause: error });
+    } finally {
+      await client.end().catch(() => undefined);
+    }
   }
+  throw new Error("Managed PostgreSQL runtime identity could not be verified.");
+}
+
+async function resolveEmbeddedRuntime(
+  platform: NodeJS.Platform,
+  arch: string,
+): Promise<EmbeddedPostgresRuntime> {
+  const packageName = EMBEDDED_POSTGRES_PACKAGES[platform]?.[arch];
+  if (!packageName) throw new Error(`AgentRecall V2 does not support ${platform}-${arch}.`);
+  const entryPath = moduleRequire.resolve(packageName);
+  const runtimeRoot = path.resolve(path.dirname(entryPath), "..");
+  const runtimeManifest = JSON.parse(
+    await fs.readFile(path.join(runtimeRoot, "package.json"), "utf8"),
+  ) as { version?: unknown };
+  const majorVersion = Number.parseInt(String(runtimeManifest.version || "").split(".")[0] || "", 10);
+  if (!Number.isInteger(majorVersion) || majorVersion <= 0) {
+    throw new Error(`Embedded PostgreSQL runtime ${packageName} has an invalid version.`);
+  }
+  const executableSuffix = platform === "win32" ? ".exe" : "";
+  const extensionSuffix = platform === "win32"
+    ? ".dll"
+    : platform === "darwin"
+      ? ".dylib"
+      : ".so";
+  const pgCtlPath = path.join(runtimeRoot, "native", "bin", `pg_ctl${executableSuffix}`);
+  const libraryDirectory = platform === "win32"
+    ? path.join(runtimeRoot, "native", "lib")
+    : path.join(runtimeRoot, "native", "lib", "postgresql");
+  await Promise.all([
+    assertRuntimeFile(pgCtlPath),
+    assertRuntimeFile(path.join(libraryDirectory, `pg_trgm${extensionSuffix}`)),
+  ]);
+  return { pgCtlPath, libraryDirectory, majorVersion };
+}
+
+async function assertRuntimeFile(filePath: string): Promise<void> {
+  if (!(await fs.stat(filePath)).isFile()) {
+    throw new Error(`Embedded PostgreSQL runtime file is invalid: ${filePath}`);
+  }
+}
+
+async function readPostgresDataMajorVersion(dataDirectory: string): Promise<number> {
+  let rawVersion: string;
+  try {
+    rawVersion = (await fs.readFile(path.join(dataDirectory, "PG_VERSION"), "utf8")).trim();
+  } catch (error) {
+    throw new Error("Managed PostgreSQL data version could not be verified.", { cause: error });
+  }
+  if (!/^\d+(?:\.\d+)?$/u.test(rawVersion)) {
+    throw new Error("Managed PostgreSQL data version is invalid.");
+  }
+  const majorVersion = Number(rawVersion);
+  if (!Number.isFinite(majorVersion) || majorVersion <= 0) {
+    throw new Error("Managed PostgreSQL data version is invalid.");
+  }
+  return majorVersion;
+}
+
+async function pathsReferToSameLocation(
+  left: string,
+  right: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
+  const [canonicalLeft, canonicalRight] = await Promise.all([
+    canonicalRuntimePath(left, platform),
+    canonicalRuntimePath(right, platform),
+  ]);
+  return canonicalLeft === canonicalRight;
+}
+
+async function canonicalRuntimePath(
+  value: string,
+  platform: NodeJS.Platform,
+): Promise<string> {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  let resolved = pathApi.resolve(value);
+  try {
+    resolved = await fs.realpath(resolved);
+  } catch {
+    // A deleted previous runtime cannot be resolved, but its absolute path is
+    // still sufficient to prove that it differs from the current runtime.
+  }
+  return platform === "win32"
+    ? resolved.replace(/\//gu, "\\").toLowerCase()
+    : resolved;
+}
+
+function stopExistingRuntime(
+  input: StopExistingPostgresRuntimeInput,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(input.pgCtlPath, [
+      "stop",
+      "-D", input.dataDirectory,
+      "-m", "fast",
+      "-w",
+      "-t", "10",
+    ], {
+      timeout: 15_000,
+      windowsHide: true,
+    }, (error) => {
+      if (error) reject(new Error("Unable to stop the stale managed PostgreSQL runtime safely.", { cause: error }));
+      else resolve();
+    });
+  });
+}
+
+function postgresErrorCode(error: unknown): string | undefined {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function isTransientPostgresIdentityError(error: unknown): boolean {
+  const code = postgresErrorCode(error);
+  return code === "ECONNRESET"
+    || code === "ETIMEDOUT"
+    || code === "57P03";
 }
 
 async function defaultCreateEmbedded(options: EmbeddedPostgresOptions): Promise<EmbeddedPostgresInstance> {

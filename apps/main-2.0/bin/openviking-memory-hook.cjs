@@ -20,9 +20,14 @@ const MIN_RECALL_TOKEN_BUDGET = 256;
 const MAX_RECALL_TOKEN_BUDGET = 8_192;
 const MIN_RECALL_SCORE = 0.25;
 const COMMIT_REQUEST_STALE_MS = 5 * 60_000;
+const SUBMITTED_TURN_STALE_MS = 24 * 60 * 60_000;
+const MAX_SUBMITTED_TURNS = 16;
+const MAX_SUBMITTED_PROMPTS_PER_TURN = 4;
+const MAX_CAPTURED_TURN_VERSIONS = 100;
 const STATE_LOCK_RETRY_MS = 10;
 const STATE_LOCK_TIMEOUT_MS = 5_000;
 const STATE_LOCK_STALE_MS = 30_000;
+const SESSION_END_STATE_LOCK_TIMEOUT_MS = 200;
 
 function findWorkspaceForCwd(manifest, cwd, platform = process.platform) {
   if (!manifest || !Array.isArray(manifest.workspaces) || typeof cwd !== "string" || !cwd.trim()) return null;
@@ -72,8 +77,18 @@ async function handleHook(input, options) {
     const sourceSessionId = hookSourceSessionId(input);
     const sessionId = hookSessionId(workspace.id, agent, sourceSessionId);
     if (opts.event === "UserPromptSubmit") {
-      const prompt = cleanText(input.prompt, MAX_PROMPT_CHARS);
+      const prompt = cleanText(input.prompt, MAX_TURN_CHARS);
       if (!prompt) return {};
+      const sourceTurnId = hookSourceTurnId(input);
+      if (agent === "codex" && sessionId && sourceTurnId) {
+        await stageSubmittedTurn(stateDir, sessionId, {
+          workspaceId: workspace.id,
+          agent,
+          sourceSessionId,
+          sourceTurnId,
+          prompt,
+        });
+      }
       const state = sessionId ? readSessionState(stateDir, sessionId) : null;
       const recentTurns = isVagueContinuation(prompt)
         ? state?.recentTurns?.length
@@ -99,7 +114,13 @@ async function handleHook(input, options) {
 
     if (!sessionId) return {};
     if (opts.event === "Stop") {
-      const turn = latestTurn(input);
+      const sourceTurnId = hookSourceTurnId(input);
+      const assistant = cleanText(input.last_assistant_message, MAX_TURN_CHARS);
+      const turn = agent === "codex"
+        ? sourceTurnId && assistant
+          ? { user: "", assistant, executionSummary: "", toolCount: 0 }
+          : null
+        : latestTurn(input);
       if (!turn) return {};
       await captureTurn(workspace, sessionId, turn, {
         baseUrl: manifest.baseUrl,
@@ -108,6 +129,8 @@ async function handleHook(input, options) {
         stateDir,
         agent,
         sourceSessionId,
+        sourceTurnId,
+        requireSubmittedTurn: agent === "codex",
         commitTokenThreshold: opts.commitTokenThreshold,
         commitRequested: explicitlyRequestsMemory(turn.user),
       });
@@ -115,6 +138,9 @@ async function handleHook(input, options) {
     }
 
     if (opts.event === "PreCompact" || opts.event === "SessionEnd") {
+      const stateLockTimeoutMs = opts.event === "SessionEnd"
+        ? SESSION_END_STATE_LOCK_TIMEOUT_MS
+        : undefined;
       await commitSession(workspace, sessionId, {
         baseUrl: manifest.baseUrl,
         fetchImpl: opts.fetchImpl,
@@ -122,6 +148,7 @@ async function handleHook(input, options) {
         stateDir,
         agent,
         sourceSessionId,
+        stateLockTimeoutMs,
         trigger: opts.event === "PreCompact" ? "compact" : "session-end",
       });
     }
@@ -435,22 +462,36 @@ async function readCoreMemories(workspace, policy, options, recallBlock) {
 }
 
 async function captureTurn(workspace, sessionId, turn, options) {
-  const user = cleanText(turn?.user, MAX_TURN_CHARS);
+  const initialUser = cleanText(turn?.user, MAX_TURN_CHARS);
   const assistantResult = cleanText(turn?.assistant, MAX_TURN_CHARS);
   const executionSummary = cleanText(turn?.executionSummary, 1_000);
   const assistant = cleanText([
     assistantResult,
     executionSummary ? `Execution summary: ${executionSummary}` : "",
   ].filter(Boolean).join("\n\n"), MAX_TURN_CHARS);
-  if (!user || !assistant) return false;
-  const inputChars = user.length + assistant.length;
+  if ((!initialUser && !options.requireSubmittedTurn) || !assistant) return false;
   const toolCount = Math.max(0, Math.floor(Number(turn?.toolCount || 0)));
-  const fingerprint = sha256(JSON.stringify([user, assistant]));
+  const sourceTurnId = cleanText(options.sourceTurnId, 256);
+  if (options.requireSubmittedTurn && !sourceTurnId) return false;
   const statePath = sessionStatePath(options.stateDir, sessionId);
-  const turnTokenEstimate = estimateTokens(user) + estimateTokens(assistant);
   const append = async () => {
     const previous = statePath ? readStateFile(statePath) || {} : {};
-    if (previous.fingerprint === fingerprint) return null;
+    const submittedTurn = options.requireSubmittedTurn
+      ? submittedTurnForStop(previous, sourceTurnId)
+      : null;
+    const user = submittedTurn?.prompt || initialUser;
+    if (!user) return null;
+    const inputChars = user.length + assistant.length;
+    const turnTokenEstimate = estimateTokens(user) + estimateTokens(assistant);
+    const fingerprint = sha256(JSON.stringify([user, assistant]));
+    const capturedTurnVersions = normalizedCapturedTurnVersions(previous);
+    if (
+      sourceTurnId
+        ? capturedTurnVersions.some((item) =>
+          item.sourceTurnId === sourceTurnId && item.fingerprint === fingerprint
+        )
+        : previous.fingerprint === fingerprint
+    ) return null;
     const started = Date.now();
     const encodedSessionId = encodeURIComponent(sessionId);
     const created = await requestJson(`/api/v1/sessions/${encodedSessionId}?auto_create=true`, workspace, options, { method: "GET" });
@@ -471,6 +512,7 @@ async function captureTurn(workspace, sessionId, turn, options) {
     if (statePath) {
       const recentTurns = Array.isArray(previous.recentTurns) ? previous.recentTurns : [];
       const pendingEvidence = Array.isArray(previous.pendingEvidence) ? previous.pendingEvidence : [];
+      const submittedTurns = activeSubmittedTurns(previous);
       pendingTokenEstimate = Number(previous.pendingTokenEstimate || 0) + turnTokenEstimate;
       const capturedAt = new Date().toISOString();
       writeStateAtomic(statePath, {
@@ -481,9 +523,19 @@ async function captureTurn(workspace, sessionId, turn, options) {
         agent: options.agent,
         sourceSessionId: options.sourceSessionId || previous.sourceSessionId,
         fingerprint,
+        submittedTurns,
+        capturedTurnIds: undefined,
+        capturedTurnVersions: sourceTurnId
+          ? [...capturedTurnVersions, {
+            sourceTurnId,
+            fingerprint,
+            capturedAt,
+          }].slice(-MAX_CAPTURED_TURN_VERSIONS)
+          : capturedTurnVersions,
         recentTurns: [...recentTurns, { user, assistant }].slice(-2),
         pendingEvidence: [...pendingEvidence, {
-          id: fingerprint,
+          id: sourceTurnId ? `${sourceTurnId}:${fingerprint}` : fingerprint,
+          ...(sourceTurnId ? { sourceTurnId } : {}),
           capturedAt,
           tokenEstimate: turnTokenEstimate,
           inputChars,
@@ -494,7 +546,14 @@ async function captureTurn(workspace, sessionId, turn, options) {
         updatedAt: capturedAt,
       });
     }
-    return { started, completed: Date.now(), pendingTokenEstimate };
+    return {
+      started,
+      completed: Date.now(),
+      pendingTokenEstimate,
+      turnTokenEstimate,
+      inputChars,
+      commitRequested: explicitlyRequestsMemory(user),
+    };
   };
   const captured = statePath ? await withStateLock(statePath, append) : await append();
   if (!captured) return false;
@@ -508,19 +567,20 @@ async function captureTurn(workspace, sessionId, turn, options) {
     completedAt: new Date(captured.completed).toISOString(),
     durationMs: captured.completed - captured.started,
     details: {
-      turnTokenEstimate,
+      turnTokenEstimate: captured.turnTokenEstimate,
       pendingTokenEstimate: captured.pendingTokenEstimate,
-      inputChars,
+      inputChars: captured.inputChars,
       toolCount,
     },
   });
   const threshold = Number.isFinite(options.commitTokenThreshold)
     ? Math.max(1, options.commitTokenThreshold)
     : DEFAULT_COMMIT_TOKEN_THRESHOLD;
-  if (options.commitRequested === true || captured.pendingTokenEstimate >= threshold) {
+  const commitRequested = options.commitRequested === true || captured.commitRequested;
+  if (commitRequested || captured.pendingTokenEstimate >= threshold) {
     await commitSession(workspace, sessionId, {
       ...options,
-      trigger: options.commitRequested === true ? "explicit-remember" : "token-threshold",
+      trigger: commitRequested ? "explicit-remember" : "token-threshold",
     });
   }
   return true;
@@ -539,16 +599,26 @@ async function commitSession(workspace, sessionId, options) {
   });
   const completed = Date.now();
   if (!response.accepted) {
-    if (statePath) await clearCommitRequest(statePath, request.requestId);
+    if (statePath) {
+      await clearCommitRequest(statePath, request.requestId, options.stateLockTimeoutMs);
+    }
     writeHookEvent(options.stateDir, failedEvent(workspace.id, sessionId, "commit", started, "commit-rejected"));
     return false;
   }
   const result = response.payload?.result ?? response.payload ?? {};
   const taskId = cleanText(result.task_id || result.taskId || result.id, 256);
   if (!taskId) {
-    if (statePath) await clearCommitRequest(statePath, request.requestId);
+    if (statePath) {
+      await clearCommitRequest(statePath, request.requestId, options.stateLockTimeoutMs);
+    }
   } else if (statePath) {
-    await acceptCommitRequest(statePath, request, taskId, completed);
+    await acceptCommitRequest(
+      statePath,
+      request,
+      taskId,
+      completed,
+      options.stateLockTimeoutMs,
+    );
   }
   writeHookEvent(options.stateDir, {
     workspaceId: workspace.id,
@@ -574,7 +644,15 @@ async function commitSession(workspace, sessionId, options) {
 async function prepareCommitRequest(statePath, workspace, sessionId, options, started) {
   return withStateLock(statePath, async () => {
     const previous = readStateFile(statePath) || {};
-    if (isActiveCommitRequest(previous.commitRequest, started)) return null;
+    if (isActiveCommitRequest(previous.commitRequest, started)) {
+      if (options.trigger === "session-end" && Array.isArray(previous.submittedTurns)) {
+        writeStateAtomic(statePath, {
+          ...previous,
+          submittedTurns: [],
+        });
+      }
+      return null;
+    }
     const hasPending = Number(previous.pendingTokenEstimate || 0) > 0
       || (Array.isArray(previous.pendingEvidence) && previous.pendingEvidence.length > 0);
     const hasRunningTask = Array.isArray(previous.commitTasks)
@@ -592,20 +670,25 @@ async function prepareCommitRequest(statePath, workspace, sessionId, options, st
       workspaceId: workspace.id,
       agent: options.agent || previous.agent,
       sourceSessionId: options.sourceSessionId || previous.sourceSessionId,
+      ...(options.trigger === "session-end" ? { submittedTurns: [] } : {}),
       commitRequest: request,
     });
     return request;
-  });
+  }, options.stateLockTimeoutMs);
 }
 
 function commitRequestFromState(state, options, started) {
   const evidence = Array.isArray(state.pendingEvidence) ? state.pendingEvidence : [];
+  const evidenceIds = evidence.map((item) => String(item?.id || "")).filter(Boolean);
   return {
     requestId: randomId(),
     trigger: options.trigger || "manual",
     agent: options.agent || state.agent || "unknown",
     sourceSessionId: options.sourceSessionId || state.sourceSessionId,
-    sourceTurnIds: evidence.map((item) => String(item?.id || "")).filter(Boolean),
+    evidenceIds,
+    sourceTurnIds: [...new Set(evidence
+      .map((item) => String(item?.sourceTurnId || item?.id || ""))
+      .filter(Boolean))],
     tokenEstimate: Math.max(0, Number(state.pendingTokenEstimate || 0)),
     inputChars: evidence.reduce(
       (total, item) => total + Math.max(0, Number(item?.inputChars || 0)),
@@ -619,16 +702,16 @@ function commitRequestFromState(state, options, started) {
   };
 }
 
-async function clearCommitRequest(statePath, requestId) {
+async function clearCommitRequest(statePath, requestId, lockTimeoutMs) {
   await withStateLock(statePath, async () => {
     const current = readStateFile(statePath);
     if (!current || current.commitRequest?.requestId !== requestId) return;
     delete current.commitRequest;
     writeStateAtomic(statePath, current);
-  });
+  }, lockTimeoutMs);
 }
 
-async function acceptCommitRequest(statePath, request, taskId, completed) {
+async function acceptCommitRequest(statePath, request, taskId, completed, lockTimeoutMs) {
   await withStateLock(statePath, async () => {
     const current = readStateFile(statePath) || {};
     if (current.commitRequest?.requestId === request.requestId) delete current.commitRequest;
@@ -646,11 +729,11 @@ async function acceptCommitRequest(statePath, request, taskId, completed) {
       lastCommittedAt: acceptedAt,
       updatedAt: acceptedAt,
     });
-  });
+  }, lockTimeoutMs);
 }
 
 function removeCommittedPendingState(state, request) {
-  const committedIds = new Set(request.sourceTurnIds || []);
+  const committedIds = new Set(request.evidenceIds || request.sourceTurnIds || []);
   const pendingEvidence = (Array.isArray(state.pendingEvidence) ? state.pendingEvidence : [])
     .filter((item) => !committedIds.has(String(item?.id || "")));
   const pendingTokenEstimate = Math.max(
@@ -808,6 +891,10 @@ function hookSourceSessionId(input) {
   return cleanText(input?.session_id || input?.sessionId || input?.conversation_id || input?.conversationId, 256);
 }
 
+function hookSourceTurnId(input) {
+  return cleanText(input?.turn_id || input?.turnId, 256);
+}
+
 function hookSessionId(workspaceId, agent, externalId) {
   return externalId ? `agent-recall-${sha256(`${workspaceId}:${agent}:${externalId}`).slice(0, 32)}` : null;
 }
@@ -829,6 +916,96 @@ function readStateFile(filePath) {
   } catch {
     return null;
   }
+}
+
+async function stageSubmittedTurn(stateDir, sessionId, submittedTurn) {
+  const filePath = sessionStatePath(stateDir, sessionId);
+  if (!filePath) return;
+  await withStateLock(filePath, async () => {
+    const previous = readStateFile(filePath) || {};
+    const submittedTurns = activeSubmittedTurns(previous);
+    const existing = submittedTurns.find((item) => item.sourceTurnId === submittedTurn.sourceTurnId);
+    const prompts = existing?.prompts.includes(submittedTurn.prompt)
+      ? existing.prompts
+      : boundedSubmittedPrompts([...(existing?.prompts || []), submittedTurn.prompt]);
+    const nextTurn = {
+      sourceTurnId: submittedTurn.sourceTurnId,
+      prompts,
+      submittedAt: new Date().toISOString(),
+    };
+    writeStateAtomic(filePath, {
+      ...previous,
+      version: 2,
+      sessionId,
+      workspaceId: submittedTurn.workspaceId,
+      agent: submittedTurn.agent,
+      sourceSessionId: submittedTurn.sourceSessionId || previous.sourceSessionId,
+      submittedTurns: [
+        ...submittedTurns.filter((item) => item.sourceTurnId !== submittedTurn.sourceTurnId),
+        nextTurn,
+      ].slice(-MAX_SUBMITTED_TURNS),
+      capturedTurnIds: undefined,
+      capturedTurnVersions: normalizedCapturedTurnVersions(previous),
+      updatedAt: nextTurn.submittedAt,
+    });
+  });
+}
+
+function submittedTurnForStop(state, sourceTurnId) {
+  if (!sourceTurnId) return null;
+  const submittedTurn = activeSubmittedTurns(state).find((item) => item.sourceTurnId === sourceTurnId);
+  if (!submittedTurn) return null;
+  const prompt = joinedSubmittedPrompts(submittedTurn.prompts);
+  return prompt ? { ...submittedTurn, prompt } : null;
+}
+
+function activeSubmittedTurns(state, now = Date.now()) {
+  return (Array.isArray(state?.submittedTurns) ? state.submittedTurns : [])
+    .map((item) => ({
+      sourceTurnId: cleanText(item?.sourceTurnId, 256),
+      prompts: boundedSubmittedPrompts(
+        (Array.isArray(item?.prompts) ? item.prompts : [item?.prompt])
+        .map((prompt) => cleanText(prompt, MAX_TURN_CHARS))
+        .filter(Boolean),
+      ),
+      submittedAt: cleanText(item?.submittedAt, 100),
+    }))
+    .filter((item) => {
+      const submittedAt = Date.parse(item.submittedAt);
+      return item.sourceTurnId
+        && item.prompts.length > 0
+        && Number.isFinite(submittedAt)
+        && now - submittedAt <= SUBMITTED_TURN_STALE_MS;
+    })
+    .slice(-MAX_SUBMITTED_TURNS);
+}
+
+function boundedSubmittedPrompts(prompts) {
+  if (prompts.length <= MAX_SUBMITTED_PROMPTS_PER_TURN) return prompts;
+  return [
+    prompts[0],
+    ...prompts.slice(-(MAX_SUBMITTED_PROMPTS_PER_TURN - 1)),
+  ];
+}
+
+function joinedSubmittedPrompts(prompts) {
+  const joined = prompts.join("\n\n");
+  if (joined.length <= MAX_TURN_CHARS) return joined;
+  const separator = "\n\n[...]\n\n";
+  const available = MAX_TURN_CHARS - separator.length;
+  const headLength = Math.ceil(available / 2);
+  return `${joined.slice(0, headLength)}${separator}${joined.slice(-(available - headLength))}`;
+}
+
+function normalizedCapturedTurnVersions(state) {
+  return (Array.isArray(state?.capturedTurnVersions) ? state.capturedTurnVersions : [])
+    .map((item) => ({
+      sourceTurnId: cleanText(item?.sourceTurnId, 256),
+      fingerprint: cleanText(item?.fingerprint, 64),
+      capturedAt: cleanText(item?.capturedAt, 100),
+    }))
+    .filter((item) => item.sourceTurnId && item.fingerprint)
+    .slice(-MAX_CAPTURED_TURN_VERSIONS);
 }
 
 function latestWorkspaceHandoff(stateDir, workspaceId, excludedSessionId) {
@@ -1069,10 +1246,10 @@ function writeStateAtomic(filePath, value) {
   fs.renameSync(temporaryPath, filePath);
 }
 
-async function withStateLock(filePath, operation) {
+async function withStateLock(filePath, operation, timeoutMs = STATE_LOCK_TIMEOUT_MS) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const lockPath = `${filePath}.lock`;
-  const deadline = Date.now() + STATE_LOCK_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   while (true) {
     try {
       fs.mkdirSync(lockPath, { mode: 0o700 });

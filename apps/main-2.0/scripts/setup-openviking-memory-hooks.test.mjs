@@ -86,6 +86,8 @@ test("reconciles Claude, Codex and OpenCode without replacing unrelated config",
   assert.equal(codex.hooks.Stop[0].hooks[0].command, "keep-codex");
   assert.ok(codex.hooks.UserPromptSubmit.some(hasAgentRecallHook));
   assert.ok(codex.hooks.PreCompact.some(hasAgentRecallHook));
+  assert.ok(codex.hooks.SessionEnd.some(hasAgentRecallHook));
+  assert.equal(codex.hooks.SessionEnd.find(hasAgentRecallHook).hooks[0].timeout, 3);
   const openCodeWrapper = path.join(testHome, ".config", "opencode", "plugins", "agent-recall-openviking.js");
   assert.match(fs.readFileSync(openCodeWrapper, "utf8"), /openviking-opencode-plugin/);
   assert.deepEqual(openVikingMemoryHookStatus(options), {

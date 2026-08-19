@@ -176,7 +176,7 @@ test("no-op UserPromptSubmit and Stop CLI hooks succeed without emitting invalid
   }
 });
 
-test("unexpected runtime failures are returned to Codex and recorded without leaking prompt content", async (context) => {
+test("unexpected runtime failures are returned to hosts and recorded without leaking prompt content", async (context) => {
   const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-hook-diagnostic-"));
   context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
   const rootPath = path.join(testHome, "project");
@@ -191,7 +191,7 @@ test("unexpected runtime failures are returned to Codex and recorded without lea
     prompt: "private user prompt must not enter diagnostics",
     last_assistant_message: "private assistant output must not enter diagnostics",
   }, {
-    agent: "codex",
+    agent: "claude",
     event: "Stop",
     manifest: managedManifest(rootPath),
     stateDir: blockedStateDir,
@@ -202,7 +202,7 @@ test("unexpected runtime failures are returned to Codex and recorded without lea
   assert.match(result.systemMessage, /AgentRecall OpenViking Stop hook encountered an error:/u);
   assert.doesNotMatch(result.systemMessage, /private user prompt|private assistant output/u);
   const diagnostic = fs.readFileSync(diagnosticLogPath, "utf8");
-  assert.match(diagnostic, /"agent":"codex"/u);
+  assert.match(diagnostic, /"agent":"claude"/u);
   assert.match(diagnostic, /"event":"Stop"/u);
   assert.doesNotMatch(diagnostic, /private user prompt|private assistant output/u);
 
@@ -264,6 +264,322 @@ test("UserPromptSubmit runtime failures are returned as Codex context", async (c
   assert.match(result.hookSpecificOutput.additionalContext, /AgentRecall OpenViking UserPromptSubmit hook encountered an error:/u);
   assert.equal(result.systemMessage, result.hookSpecificOutput.additionalContext);
   assert.doesNotMatch(JSON.stringify(result), /private prompt/u);
+});
+
+test("Codex Desktop pairs submitted prompts with Stop without reading its rollout", async (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-codex-desktop-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const rootPath = path.join(testHome, "project");
+  const stateDir = path.join(testHome, "state");
+  const transcriptPath = path.join(testHome, "rollout.jsonl");
+  fs.mkdirSync(rootPath, { recursive: true });
+  fs.writeFileSync(transcriptPath, JSON.stringify({
+    type: "response_item",
+    payload: {
+      type: "function_call_output",
+      output: "API_KEY=private-tool-output-must-not-be-recorded",
+    },
+  }));
+  const requests = [];
+  const baseOptions = {
+    agent: "codex",
+    manifest: managedManifest(rootPath),
+    stateDir,
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).includes("/api/v1/sessions/")) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      return Response.json({ status: "ok", result: { memories: [] } });
+    },
+    realpathSync: (value) => path.resolve(value),
+  };
+
+  await handleHook({
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "desktop-turn",
+    prompt: "Implement Codex Desktop memory capture.",
+  }, { ...baseOptions, event: "UserPromptSubmit" });
+  await handleHook({
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "desktop-turn",
+    prompt: "Also preserve user messages steered into the active turn.",
+  }, { ...baseOptions, event: "UserPromptSubmit" });
+
+  const stopInput = {
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "desktop-turn",
+    transcript_path: transcriptPath,
+    last_assistant_message: "Codex Desktop capture is complete.",
+  };
+  await Promise.all([
+    handleHook(stopInput, { ...baseOptions, event: "Stop" }),
+    handleHook(stopInput, { ...baseOptions, event: "Stop" }),
+  ]);
+
+  const batches = requests.filter((request) => request.url.endsWith("/messages/batch"));
+  assert.equal(batches.length, 1);
+  const messages = JSON.parse(batches[0].init.body).messages;
+  assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
+  assert.match(messages[0].content, /Implement Codex Desktop memory capture/u);
+  assert.match(messages[0].content, /preserve user messages steered into the active turn/u);
+  assert.ok(
+    messages[0].content.indexOf("Implement Codex Desktop") < messages[0].content.indexOf("preserve user messages"),
+  );
+  assert.equal(messages[1].content, "Codex Desktop capture is complete.");
+  assert.doesNotMatch(JSON.stringify(messages), /private-tool-output|API_KEY/u);
+
+  const stateFile = fs.readdirSync(stateDir).find((name) => name.endsWith(".json"));
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, stateFile), "utf8"));
+  assert.equal(state.submittedTurns[0].sourceTurnId, "desktop-turn");
+  assert.equal(state.capturedTurnVersions[0].sourceTurnId, "desktop-turn");
+  assert.equal(state.capturedTurnVersions.length, 1);
+  assert.equal("capturedTurnIds" in state, false);
+  assert.match(state.pendingEvidence[0].id, /^desktop-turn:/u);
+});
+
+test("Codex Desktop matches queued turns by id even when Stop events arrive out of order", async (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-codex-order-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const rootPath = path.join(testHome, "project");
+  const stateDir = path.join(testHome, "state");
+  const transcriptPath = path.join(testHome, "unrelated-rollout.jsonl");
+  fs.mkdirSync(rootPath, { recursive: true });
+  fs.writeFileSync(transcriptPath, [
+    JSON.stringify({ message: { role: "user", content: "SECRET_FROM_ANOTHER_TURN" } }),
+    JSON.stringify({ message: { role: "assistant", content: "Unrelated answer" } }),
+  ].join("\n"));
+  const requests = [];
+  const baseOptions = {
+    agent: "codex",
+    manifest: managedManifest(rootPath),
+    stateDir,
+    fetchImpl: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return Response.json({ status: "ok", result: { memories: [] } });
+    },
+    realpathSync: (value) => path.resolve(value),
+  };
+
+  for (const [turnId, prompt] of [["turn-a", "Prompt A"], ["turn-b", "Prompt B"]]) {
+    await handleHook({
+      cwd: rootPath,
+      session_id: "desktop-session",
+      turn_id: turnId,
+      prompt,
+    }, { ...baseOptions, event: "UserPromptSubmit" });
+  }
+  await handleHook({
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "turn-missing",
+    transcript_path: transcriptPath,
+    last_assistant_message: "Must not steal another turn's prompt.",
+  }, { ...baseOptions, event: "Stop" });
+  for (const [turnId, assistant] of [["turn-b", "Answer B"], ["turn-a", "Answer A"]]) {
+    await handleHook({
+      cwd: rootPath,
+      session_id: "desktop-session",
+      turn_id: turnId,
+      last_assistant_message: assistant,
+    }, { ...baseOptions, event: "Stop" });
+  }
+
+  const batches = requests
+    .filter((request) => request.url.endsWith("/messages/batch"))
+    .map((request) => JSON.parse(request.init.body).messages);
+  assert.equal(batches.length, 2);
+  assert.deepEqual(batches.map((messages) => [
+    messages[0].content,
+    messages[1].content,
+  ]), [
+    ["Prompt B", "Answer B"],
+    ["Prompt A", "Answer A"],
+  ]);
+  assert.doesNotMatch(JSON.stringify(batches), /SECRET_FROM_ANOTHER_TURN|Unrelated answer/u);
+});
+
+test("Codex Desktop retains a submitted prompt until OpenViking accepts the turn", async (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-codex-retry-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const rootPath = path.join(testHome, "project");
+  const stateDir = path.join(testHome, "state");
+  fs.mkdirSync(rootPath, { recursive: true });
+  let batchAttempts = 0;
+  const baseOptions = {
+    agent: "codex",
+    manifest: managedManifest(rootPath),
+    stateDir,
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/messages/batch")) {
+        batchAttempts += 1;
+        if (batchAttempts === 1) return Response.json({ status: "error", message: "retry" });
+      }
+      return Response.json({ status: "ok", result: { memories: [] } });
+    },
+    realpathSync: (value) => path.resolve(value),
+  };
+  const submitInput = {
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "retry-turn",
+    prompt: "Retain this prompt until append succeeds.",
+  };
+  const stopInput = {
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "retry-turn",
+    last_assistant_message: "Retryable answer.",
+  };
+
+  await handleHook(submitInput, {
+    ...baseOptions,
+    event: "UserPromptSubmit",
+    fetchImpl: async () => {
+      throw new Error("recall unavailable");
+    },
+  });
+  await handleHook(stopInput, { ...baseOptions, event: "Stop" });
+  const stateFile = fs.readdirSync(stateDir).find((name) => name.endsWith(".json"));
+  let state = JSON.parse(fs.readFileSync(path.join(stateDir, stateFile), "utf8"));
+  assert.equal(state.submittedTurns[0].sourceTurnId, "retry-turn");
+  assert.deepEqual(state.capturedTurnVersions, []);
+
+  await handleHook(stopInput, { ...baseOptions, event: "Stop" });
+  await handleHook(stopInput, { ...baseOptions, event: "Stop" });
+  state = JSON.parse(fs.readFileSync(path.join(stateDir, stateFile), "utf8"));
+  assert.equal(batchAttempts, 2);
+  assert.equal(state.submittedTurns[0].sourceTurnId, "retry-turn");
+  assert.equal(state.capturedTurnVersions[0].sourceTurnId, "retry-turn");
+  assert.equal(state.capturedTurnVersions.length, 1);
+});
+
+test("Codex Desktop captures a continued turn's changed final answer without duplicating identical Stops", async (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-codex-continued-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const rootPath = path.join(testHome, "project");
+  const stateDir = path.join(testHome, "state");
+  fs.mkdirSync(rootPath, { recursive: true });
+  const batches = [];
+  const baseOptions = {
+    agent: "codex",
+    manifest: managedManifest(rootPath),
+    stateDir,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/messages/batch")) {
+        batches.push(JSON.parse(init.body).messages);
+      }
+      return Response.json({ status: "ok", result: { task_id: "task-continued" } });
+    },
+    realpathSync: (value) => path.resolve(value),
+  };
+  await handleHook({
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "continued-turn",
+    prompt: "Run the checks and finish the fix.",
+  }, { ...baseOptions, event: "UserPromptSubmit" });
+
+  const firstStop = {
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "continued-turn",
+    stop_hook_active: false,
+    last_assistant_message: "The first pass is done.",
+  };
+  await handleHook(firstStop, { ...baseOptions, event: "Stop" });
+  await handleHook({ ...firstStop, stop_hook_active: true }, { ...baseOptions, event: "Stop" });
+  await handleHook({
+    ...firstStop,
+    stop_hook_active: true,
+    last_assistant_message: "The checks now pass and the fix is complete.",
+  }, { ...baseOptions, event: "Stop" });
+
+  assert.equal(batches.length, 2);
+  assert.deepEqual(batches.map((messages) => messages[1].content), [
+    "The first pass is done.",
+    "The checks now pass and the fix is complete.",
+  ]);
+  const stateFile = fs.readdirSync(stateDir).find((name) => name.endsWith(".json"));
+  let state = JSON.parse(fs.readFileSync(path.join(stateDir, stateFile), "utf8"));
+  assert.equal(state.capturedTurnVersions.length, 2);
+
+  await handleHook({
+    cwd: rootPath,
+    session_id: "desktop-session",
+  }, { ...baseOptions, event: "SessionEnd" });
+  state = JSON.parse(fs.readFileSync(path.join(stateDir, stateFile), "utf8"));
+  assert.deepEqual(state.submittedTurns, []);
+  assert.deepEqual(state.commitTasks[0].sourceTurnIds, ["continued-turn"]);
+  assert.equal(state.commitTasks[0].evidenceIds.length, 2);
+});
+
+test("Codex Desktop preserves a steer that races with Stop for the next final capture", async (context) => {
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-openviking-codex-race-"));
+  context.after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+  const rootPath = path.join(testHome, "project");
+  const stateDir = path.join(testHome, "state");
+  fs.mkdirSync(rootPath, { recursive: true });
+  const batches = [];
+  let releaseFirstBatch;
+  let markFirstBatchStarted;
+  const firstBatchStarted = new Promise((resolve) => {
+    markFirstBatchStarted = resolve;
+  });
+  const releaseBatch = new Promise((resolve) => {
+    releaseFirstBatch = resolve;
+  });
+  const baseOptions = {
+    agent: "codex",
+    manifest: managedManifest(rootPath),
+    stateDir,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith("/messages/batch")) {
+        batches.push(JSON.parse(init.body).messages);
+        if (batches.length === 1) {
+          markFirstBatchStarted();
+          await releaseBatch;
+        }
+      }
+      return Response.json({ status: "ok", result: { memories: [] } });
+    },
+    realpathSync: (value) => path.resolve(value),
+  };
+  const identity = {
+    cwd: rootPath,
+    session_id: "desktop-session",
+    turn_id: "racing-turn",
+  };
+  await handleHook({
+    ...identity,
+    prompt: "Initial prompt.",
+  }, { ...baseOptions, event: "UserPromptSubmit" });
+
+  const stopping = handleHook({
+    ...identity,
+    last_assistant_message: "Interim answer.",
+  }, { ...baseOptions, event: "Stop" });
+  await firstBatchStarted;
+  const steering = handleHook({
+    ...identity,
+    prompt: "Steered requirement.",
+  }, { ...baseOptions, event: "UserPromptSubmit" });
+  releaseFirstBatch();
+  await Promise.all([stopping, steering]);
+  await handleHook({
+    ...identity,
+    stop_hook_active: true,
+    last_assistant_message: "Final answer with the steer applied.",
+  }, { ...baseOptions, event: "Stop" });
+
+  assert.equal(batches.length, 2);
+  assert.equal(batches[0][0].content, "Initial prompt.");
+  assert.match(batches[1][0].content, /Initial prompt/u);
+  assert.match(batches[1][0].content, /Steered requirement/u);
+  assert.equal(batches[1][1].content, "Final answer with the steer applied.");
 });
 
 test("managed Stop appends once and waits for the session lifecycle to commit", async (context) => {
@@ -455,7 +771,7 @@ test("commit keeps turns captured while the request is in flight", async (contex
   ].join("\n"));
   const manifest = managedManifest(rootPath);
   const baseOptions = {
-    agent: "codex",
+    agent: "claude",
     manifest,
     stateDir,
     realpathSync: (value) => path.resolve(value),

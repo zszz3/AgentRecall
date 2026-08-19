@@ -40,6 +40,7 @@ interface OpenVikingHookStateFlusherOptions {
 
 interface HookTurnEvidence {
   id?: string;
+  sourceTurnId?: string;
   inputChars?: number;
   toolCount?: number;
 }
@@ -49,6 +50,7 @@ interface HookCommitTask {
   trigger?: string;
   agent?: string;
   sourceSessionId?: string;
+  evidenceIds?: string[];
   sourceTurnIds?: string[];
   tokenEstimate?: number;
   inputChars?: number;
@@ -68,6 +70,7 @@ interface HookSessionState {
   agent?: string;
   pendingTokenEstimate?: number;
   pendingEvidence?: HookTurnEvidence[];
+  submittedTurns?: unknown[];
   commitRequest?: HookCommitRequest;
   commitTasks?: HookCommitTask[];
   recallBlockedByTaskId?: string;
@@ -98,6 +101,7 @@ interface OpenVikingTaskResult extends Record<string, unknown> {
 const DEFAULT_IDLE_MS = 120_000;
 const DEFAULT_INTERVAL_MS = 10_000;
 const COMMIT_REQUEST_STALE_MS = 5 * 60_000;
+const SUBMITTED_TURN_STALE_MS = 24 * 60 * 60_000;
 const STATE_LOCK_RETRY_MS = 10;
 const STATE_LOCK_TIMEOUT_MS = 5_000;
 const STATE_LOCK_STALE_MS = 30_000;
@@ -188,6 +192,10 @@ export class OpenVikingHookStateFlusher {
     if (!state) return false;
     let changed = false;
 
+    const pruned = await this.pruneStaleSubmittedTurns(filePath, state, now);
+    state = pruned.state;
+    changed = pruned.changed || changed;
+
     if (state.workspaceId && state.sessionId && Array.isArray(state.commitTasks)) {
       const result = await this.processCommitTasks(state, now);
       if (result.completedTaskIds.size > 0) {
@@ -275,6 +283,29 @@ export class OpenVikingHookStateFlusher {
       },
     });
     return true;
+  }
+
+  private async pruneStaleSubmittedTurns(
+    filePath: string,
+    state: HookSessionState,
+    now: number,
+  ): Promise<{ state: HookSessionState; changed: boolean }> {
+    const submittedTurns = Array.isArray(state.submittedTurns) ? state.submittedTurns : [];
+    if (!submittedTurns.some((item) => !isActiveSubmittedTurn(item, now))) {
+      return { state, changed: false };
+    }
+    return withStateLock(filePath, async () => {
+      const current = await readState(filePath);
+      if (!current) return { state, changed: false };
+      const currentTurns = Array.isArray(current.submittedTurns) ? current.submittedTurns : [];
+      const activeTurns = currentTurns.filter((item) => isActiveSubmittedTurn(item, now));
+      if (activeTurns.length === currentTurns.length) {
+        return { state: current, changed: false };
+      }
+      current.submittedTurns = activeTurns;
+      await writeState(filePath, current);
+      return { state: current, changed: true };
+    });
   }
 
   private async prepareIdleCommit(
@@ -682,14 +713,18 @@ function commitRequestFromState(
   now: number,
 ): HookCommitRequest {
   const evidence = Array.isArray(state.pendingEvidence) ? state.pendingEvidence : [];
+  const evidenceIds = evidence
+    .map((item) => String(item?.id || ""))
+    .filter(Boolean);
   return {
     requestId: randomUUID(),
     trigger,
     agent: state.agent || "unknown",
     ...(state.sourceSessionId ? { sourceSessionId: state.sourceSessionId } : {}),
-    sourceTurnIds: evidence
-      .map((item) => String(item?.id || ""))
-      .filter(Boolean),
+    evidenceIds,
+    sourceTurnIds: [...new Set(evidence
+      .map((item) => String(item?.sourceTurnId || item?.id || ""))
+      .filter(Boolean))],
     tokenEstimate: Math.max(0, Math.floor(Number(state.pendingTokenEstimate || 0))),
     inputChars: evidence.reduce(
       (total, item) => total + Math.max(0, Number(item?.inputChars || 0)),
@@ -714,7 +749,7 @@ function removeCommittedPendingState(
   state: HookSessionState,
   request: HookCommitRequest,
 ): void {
-  const committedIds = new Set(request.sourceTurnIds ?? []);
+  const committedIds = new Set(request.evidenceIds ?? request.sourceTurnIds ?? []);
   state.pendingEvidence = (Array.isArray(state.pendingEvidence) ? state.pendingEvidence : [])
     .filter((item) => !committedIds.has(String(item?.id || "")));
   state.pendingTokenEstimate = Math.max(
@@ -724,6 +759,12 @@ function removeCommittedPendingState(
   if (state.pendingTokenEstimate <= 0 && state.pendingEvidence.length === 0) {
     state.pendingSince = null;
   }
+}
+
+function isActiveSubmittedTurn(value: unknown, now: number): boolean {
+  const record = objectValue(value);
+  const submittedAt = Date.parse(stringValue(record?.submittedAt));
+  return Number.isFinite(submittedAt) && now - submittedAt <= SUBMITTED_TURN_STALE_MS;
 }
 
 async function withStateLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {

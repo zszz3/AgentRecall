@@ -77,6 +77,7 @@ function addCodexHooks(settings, options) {
   addHook(settings, "UserPromptSubmit", buildHookCommand(options, "codex", "UserPromptSubmit"), { matcher: "*", timeout: 8 });
   addHook(settings, "Stop", buildHookCommand(options, "codex", "Stop"), { matcher: "*", timeout: 15 });
   addHook(settings, "PreCompact", buildHookCommand(options, "codex", "PreCompact"), { matcher: "*", timeout: 10 });
+  addHook(settings, "SessionEnd", buildHookCommand(options, "codex", "SessionEnd"), { matcher: "other", timeout: 3 });
 }
 
 function addHook(settings, event, command, entryOptions) {
