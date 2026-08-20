@@ -15,6 +15,7 @@ export type SessionIndexWorkerLoadOptions = Pick<
   | "includeOpenCode"
   | "includeZcode"
   | "includePi"
+  | "includeKimiCli"
   | "includeCursorAgent"
   | "includeTrae"
   | "includeQoder"

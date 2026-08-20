@@ -64,6 +64,8 @@ export const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 export const PI_SESSIONS_DIR = path.join(".pi", "agent", "sessions");
 export const QODER_DIR = ".qoder";
 export const TRAE_DIR_NAMES = [".trae", ".trae-cn"] as const;
+export const KIMI_CODE_DIR = ".kimi-code";
+export const KIMI_LEGACY_DIR = ".kimi";
 
 function readOnlyDatabase(dbPath: string): import("node:sqlite").DatabaseSync | null {
   if (!fs.existsSync(dbPath)) return null;
@@ -361,6 +363,55 @@ export function* loadPiSessionsIterator(
     if (shouldSkipFile(options, filePath, stat)) continue;
     const loaded = loadPiSessionFile(filePath, stat);
     if (loaded) yield loaded;
+  }
+}
+
+function loadKimiSessionFile(filePath: string, stat = safeStat(filePath)): LoadedSession | null {
+  const rows = readJsonl(filePath);
+  if (rows.length === 0) return null;
+  const messages = sourceMessages(rows, "kimi");
+  if (messages.length === 0) return null;
+  const meta = rows.find((row): row is Record<string, unknown> => isRecord(row) && (stringField(row, "type") === "session" || stringField(row, "type") === "session_info"));
+  const pathParts = filePath.split(/[\\/]+/u);
+  const sessionsIndex = pathParts.lastIndexOf("sessions");
+  const rawId = stringField(meta, "id") || (sessionsIndex >= 0 && pathParts[sessionsIndex + 2]) || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
+  const projectPath = stringField(meta, "cwd") || stringField(meta, "workDir") || stringField(meta, "work_dir") || "";
+  const question = firstQuestion(messages);
+  return {
+    session: createIndexedSession({
+      keyPrefix: "kimi",
+      rawId,
+      source: "kimi-cli",
+      projectPath,
+      filePath,
+      originalTitle: cleanTitle(question) || rawId,
+      firstQuestion: cleanTitle(question),
+      timestamp: stat.mtimeMs,
+      stat,
+    }),
+    messages,
+    traceEvents: traceEventsFromRows(rows, "kimi"),
+  };
+}
+
+export function* loadKimiSessionsIterator(
+  kimiRoots: readonly string[],
+  options: SessionLoadOptions = {},
+): Generator<LoadedSession> {
+  const seen = new Set<string>();
+  for (const root of kimiRoots) {
+    for (const filePath of walkJsonlFiles(root)) {
+      if (!/(?:context|wire)\.jsonl$/i.test(filePath)) continue;
+      const sessionDir = path.dirname(filePath);
+      if (seen.has(sessionDir)) continue;
+      const stat = safeStat(filePath);
+      if (shouldSkipFile(options, filePath, stat)) continue;
+      const loaded = loadKimiSessionFile(filePath, stat);
+      if (loaded) {
+        seen.add(sessionDir);
+        yield loaded;
+      }
+    }
   }
 }
 

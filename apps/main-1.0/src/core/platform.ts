@@ -91,6 +91,7 @@ export interface AppSettings {
   includeTrae: boolean;
   includeQoder: boolean;
   includePi: boolean;
+  includeKimiCli: boolean;
   includeDeepSeekCli: boolean;
   rulesSyncEnabled: boolean;
   memoriesSyncEnabled: boolean;
@@ -164,6 +165,7 @@ export const defaultSettings: AppSettings = {
   includeTrae: false,
   includeQoder: false,
   includePi: false,
+  includeKimiCli: false,
   includeDeepSeekCli: false,
   rulesSyncEnabled: false,
   memoriesSyncEnabled: false,

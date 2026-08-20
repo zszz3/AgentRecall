@@ -42,6 +42,7 @@ const V1_SETTINGS_KEYS = [
   "includeTrae",
   "includeQoder",
   "includePi",
+  "includeKimiCli",
   "summaryAutoBackfill",
   "summaryMaxAgeDays",
   "compressionConcurrency",

@@ -57,12 +57,15 @@ const WORKBUDDY_DIR = ".workbuddy";
 const CODEWIZ_SHARE_DIR = path.join(".local", "share", "codewiz");
 const QODER_DIR = ".qoder";
 const PI_SESSIONS_DIR = path.join(".pi", "agent", "sessions");
+const KIMI_CODE_DIR = ".kimi-code";
+const KIMI_LEGACY_DIR = ".kimi";
 const TRAE_DIR_NAMES = [".trae", ".trae-cn"] as const;
 const CODEX_WORKSPACE_PLACEHOLDER = /^<[^>]+>$/u;
 
 export interface SessionLoadOptions {
   homeDir?: string;
   includePi?: boolean;
+  includeKimiCli?: boolean;
   includeTclaude?: boolean;
   includeTcodex?: boolean;
   includeCodeBuddyCli?: boolean;
@@ -1364,7 +1367,7 @@ function readGitBranchAt(gitPath: string): string | null {
 }
 
 function createIndexedSession(input: {
-  keyPrefix: "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "workbuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi" | "deepseek";
+  keyPrefix: "claude" | "codex" | "tclaude" | "tcodex" | "codebuddy" | "workbuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi" | "deepseek" | "kimi";
   rawId: string;
   source: SessionSource;
   projectPath: string;
@@ -1676,6 +1679,39 @@ function* loadPiSessionsIterator(
     if (shouldSkipFile(options, filePath, stat)) continue;
     const loaded = loadPiSessionFile(filePath, stat);
     if (loaded) yield loaded;
+  }
+}
+
+function loadKimiSessionFile(filePath: string, stat?: VirtualSessionFileStat): LoadedSession | null {
+  const rows = readJsonl(filePath);
+  if (rows.length === 0) return null;
+  const messages = sourceMessages(rows, "kimi");
+  if (messages.length === 0) return null;
+  const meta = rows.find((row): row is Record<string, unknown> => isRecord(row) && (stringField(row, "type") === "session" || stringField(row, "type") === "session_info"));
+  const pathParts = filePath.split(/[\\/]+/u);
+  const sessionsIndex = pathParts.lastIndexOf("sessions");
+  const rawId = stringField(meta, "id") || (sessionsIndex >= 0 && pathParts[sessionsIndex + 2]) || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
+  const projectPath = stringField(meta, "cwd") || stringField(meta, "workDir") || stringField(meta, "work_dir") || "";
+  const question = cleanTitle(firstQuestion(messages));
+  return {
+    session: createIndexedSession({ keyPrefix: "kimi", rawId, source: "kimi-cli", projectPath, filePath, originalTitle: question || rawId, firstQuestion: question, timestamp: stat?.mtimeMs ?? Date.now(), stat }),
+    messages,
+    traceEvents: traceEventsFromRows(rows, "kimi"),
+  };
+}
+
+function* loadKimiSessionsIterator(kimiRoots: readonly string[], options: SessionLoadOptions): Generator<LoadedSession> {
+  const seen = new Set<string>();
+  for (const root of kimiRoots) {
+    for (const filePath of walkJsonlFiles(root)) {
+      if (!/(?:context|wire)\.jsonl$/i.test(filePath)) continue;
+      const sessionDir = path.dirname(filePath);
+      if (seen.has(sessionDir)) continue;
+      const stat = safeStat(filePath);
+      if (shouldSkipFile(options, filePath, stat)) continue;
+      const loaded = loadKimiSessionFile(filePath, stat);
+      if (loaded) { seen.add(sessionDir); yield loaded; }
+    }
   }
 }
 
@@ -3913,6 +3949,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   if (options.includePi) {
     yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
   }
+  if (options.includeKimiCli) yield* loadKimiSessionsIterator([path.join(homeDir, KIMI_CODE_DIR), path.join(homeDir, KIMI_LEGACY_DIR)], options);
   if (options.includeOpenClaw) {
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options);
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options);
@@ -3950,6 +3987,7 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   if (options.includePi) {
     yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
   }
+  if (options.includeKimiCli) yield* loadKimiSessionsIterator([path.join(homeDir, KIMI_CODE_DIR), path.join(homeDir, KIMI_LEGACY_DIR)], options);
   if (options.includeOpenClaw) {
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options);
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options);

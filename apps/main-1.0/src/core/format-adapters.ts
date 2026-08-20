@@ -350,6 +350,23 @@ export const piAdapter: FormatAdapter = {
     };
   },
 };
+export const kimiAdapter: FormatAdapter = {
+  format: "kimi",
+  parseLine(raw) {
+    let candidate: unknown = raw;
+    for (let depth = 0; depth < 3 && candidate && typeof candidate === "object"; depth += 1) {
+      const role = roleFromRaw(candidate);
+      if (role) {
+        const parsed = extractContentBlocks(contentFromRaw(candidate));
+        if (!parsed.text) return null;
+        return { role, content: parsed.text, timestamp: timestampFromRaw(candidate), ...(parsed.attachments ? { attachments: parsed.attachments } : {}) };
+      }
+      const record = candidate as Record<string, unknown>;
+      candidate = record.message ?? record.data ?? record.payload ?? record.event;
+    }
+    return null;
+  },
+};
 
 export function getFormatForSource(source: SessionSource): SessionFormat {
   return sessionSourceDescriptor(source).format;
@@ -371,6 +388,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (sourceOrFormat === "qoder") return qoderAdapter;
   if (sourceOrFormat === "pi") return piAdapter;
   if (sourceOrFormat === "deepseek") return deepseekAdapter;
+  if (sourceOrFormat === "kimi") return kimiAdapter;
   const format = getFormatForSource(sourceOrFormat);
   if (format === "claude") return claudeAdapter;
   if (format === "codebuddy") return codebuddyAdapter;
@@ -385,6 +403,7 @@ export function getAdapter(sourceOrFormat: SessionSource | SessionFormat): Forma
   if (format === "qoder") return qoderAdapter;
   if (format === "pi") return piAdapter;
   if (format === "deepseek") return deepseekAdapter;
+  if (format === "kimi") return kimiAdapter;
   return codexAdapter;
 }
 

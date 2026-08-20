@@ -15,6 +15,8 @@ import {
 } from "./deepseek-harness";
 import {
   CODEWIZ_SHARE_DIR,
+  KIMI_CODE_DIR,
+  KIMI_LEGACY_DIR,
   PI_SESSIONS_DIR,
   QODER_DIR,
   TRAE_DIR_NAMES,
@@ -25,6 +27,7 @@ import {
   loadOpenClawSessionsIterator,
   loadOpenCodeSessions,
   loadPiSessionsIterator,
+  loadKimiSessionsIterator,
   loadQoderSessionsIterator,
   loadTraeSessionsIterator,
   loadZcodeSessions,
@@ -1920,6 +1923,10 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
     yield* loadDeepSeekCliSessionsIterator(deepSeekDir, options);
   }
   if (options.includePi) yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
+  if (options.includeKimiCli) yield* loadKimiSessionsIterator([
+    path.join(homeDir, KIMI_CODE_DIR),
+    path.join(homeDir, KIMI_LEGACY_DIR),
+  ], options);
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);
@@ -1965,6 +1972,10 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
     yield* loadDeepSeekCliSessionsIterator(deepSeekDir, options);
   }
   if (options.includePi) yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
+  if (options.includeKimiCli) yield* loadKimiSessionsIterator([
+    path.join(homeDir, KIMI_CODE_DIR),
+    path.join(homeDir, KIMI_LEGACY_DIR),
+  ], options);
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
   if (options.includeCodeBuddyCli) yield* loadCodeBuddyCliSessionsIterator(path.join(homeDir, CODEBUDDY_DIR), options);

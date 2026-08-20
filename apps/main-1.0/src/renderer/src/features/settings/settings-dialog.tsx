@@ -545,6 +545,13 @@ export function SettingsDialog({
                 </label>
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
+                    <span className="settings-field-title">Include Kimi Code</span>
+                    <span className="settings-field-sub">{l("Indexes local Kimi Code sessions read-only.", "以只读方式索引本地 Kimi Code 会话。")}</span>
+                  </div>
+                  <input type="checkbox" className="switch" checked={Boolean(settings?.includeKimiCli)} disabled={!settings} onChange={(event) => onSettingsChange({ includeKimiCli: event.currentTarget.checked })} />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
                     <span className="settings-field-title">Include ~/.tclaude</span>
                     <span className="settings-field-sub">{l("Indexes TClaude CLI sessions and allows migration to that CLI.", "索引 TClaude CLI 会话，并允许迁移到该 CLI。")}</span>
                   </div>

@@ -27,6 +27,7 @@ const ALL_SOURCES = [
   "trae",
   "qoder",
   "pi-cli",
+  "kimi-cli",
   "deepseek-cli",
 ] as const satisfies readonly SessionSource[];
 
@@ -66,6 +67,7 @@ describe("session source capability registry", () => {
       "includeTrae",
       "includeQoder",
       "includePi",
+      "includeKimiCli",
       "includeDeepSeekCli",
     ]);
     expect(sessionSourceDescriptor("tclaude-cli")).toMatchObject({ liveFamily: "tclaude", migrationAgent: "claude" });
