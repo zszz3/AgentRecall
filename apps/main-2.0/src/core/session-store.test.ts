@@ -689,6 +689,29 @@ describe("SessionStore PostgreSQL facade", () => {
     }
   });
 
+  it("rejects Kimi source deletion while record-only source pruning keeps the file", async () => {
+    const store = createStore();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-delete-kimi-"));
+    const filePath = path.join(dir, "context.jsonl");
+    fs.writeFileSync(filePath, "{}\n", "utf8");
+    await store.upsertIndexedSession(indexedSession({
+      sessionKey: "kimi:session-a",
+      rawId: "session-a",
+      source: "kimi-cli",
+      filePath,
+    }), messages);
+
+    await expect(store.deleteSession("kimi:session-a")).rejects.toThrow("Kimi Code session source files are read-only.");
+    expect(fs.existsSync(filePath)).toBe(true);
+    await expect(store.getSession("kimi:session-a")).resolves.not.toBeNull();
+
+    await store.deleteSessionsBySource(["kimi-cli"]);
+
+    await expect(store.getSession("kimi:session-a")).resolves.toBeNull();
+    expect(fs.existsSync(filePath)).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("keeps Session search results paged while filtering subagents in SQL", async () => {
     const store = createStore();
     await store.upsertIndexedSession(indexedSession(), messages);

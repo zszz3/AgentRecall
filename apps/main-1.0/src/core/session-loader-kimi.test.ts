@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { loadDefaultSessions } from "./session-loader";
 
 const homes: string[] = [];
@@ -23,9 +24,9 @@ describe("Kimi Code session loading", () => {
     expect(loaded.messages.map((message) => message.content)).toEqual(["hello Kimi", "hello"]);
   });
 
-  it("accepts nested wire records from the newer layout", () => {
+  it("falls back to the main wire file when context is absent", () => {
     const root = home();
-    write(path.join(root, ".kimi-code", "sessions", "work", "session-2", "agents", "root", "wire.jsonl"), [
+    write(path.join(root, ".kimi-code", "sessions", "work", "session-2", "wire.jsonl"), [
       { event: { role: "user", content: "new layout" } },
       { data: { message: { role: "assistant", content: "works" } } },
     ]);
@@ -34,12 +35,29 @@ describe("Kimi Code session loading", () => {
     expect(loaded.messages.map((message) => message.content)).toEqual(["new layout", "works"]);
   });
 
-  it("keeps work-directory identities distinct and deduplicates agent files", () => {
+  it("keeps work-directory identities distinct and prefers main context over wire and subagents", () => {
     const root = home();
-    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "agents", "root", "wire.jsonl"), [{ role: "user", content: "a" }]);
-    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "agents", "worker", "wire.jsonl"), [{ role: "user", content: "duplicate agent" }]);
+    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "context.jsonl"), [{ role: "user", content: "main context" }]);
+    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "wire.jsonl"), [{ role: "user", content: "main wire" }]);
+    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "subagents", "worker", "wire.jsonl"), [{ role: "user", content: "subagent" }]);
     write(path.join(root, ".kimi-code", "sessions", "work-b", "same", "context.jsonl"), [{ role: "user", content: "b" }]);
     const loaded = loadDefaultSessions({ homeDir: root, includeKimiCli: true });
     expect(loaded.map((item) => item.session.rawId)).toEqual(["work-a/same", "work-b/same"]);
+    expect(loaded[0].session.filePath).toBe(path.join(root, ".kimi-code", "sessions", "work-a", "same", "context.jsonl"));
+    expect(loaded[0].messages.map((message) => message.content)).toEqual(["main context"]);
+  });
+
+  it("maps the official work-directory hash through kimi.json", () => {
+    const root = home();
+    const projectPath = "D:/official-kimi-project";
+    const workDirHash = createHash("md5").update(projectPath, "utf8").digest("hex");
+    fs.mkdirSync(path.join(root, ".kimi"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".kimi", "kimi.json"), JSON.stringify({ work_dirs: [{ path: projectPath }] }), "utf8");
+    write(path.join(root, ".kimi", "sessions", workDirHash, "session-mapped", "context.jsonl"), [
+      { role: "user", content: "mapped project" },
+    ]);
+
+    const [loaded] = loadDefaultSessions({ homeDir: root, includeKimiCli: true });
+    expect(loaded.session.projectPath).toBe(projectPath);
   });
 });

@@ -1869,6 +1869,29 @@ describe("SessionStore", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it("rejects Kimi source deletion while record-only source pruning keeps the file", () => {
+    const store = createInMemoryStore();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-delete-kimi-"));
+    const filePath = path.join(dir, "context.jsonl");
+    fs.writeFileSync(filePath, "{}\n", "utf8");
+    store.upsertIndexedSession(sampleSession({
+      sessionKey: "kimi:abc",
+      rawId: "abc",
+      source: "kimi-cli",
+      filePath,
+    }), messages);
+
+    expect(() => store.deleteSession("kimi:abc")).toThrow("Kimi Code session source files are read-only.");
+    expect(fs.existsSync(filePath)).toBe(true);
+    expect(store.getSession("kimi:abc")).not.toBeNull();
+
+    store.deleteSessionsBySource(["kimi-cli"]);
+
+    expect(store.getSession("kimi:abc")).toBeNull();
+    expect(fs.existsSync(filePath)).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("does not search tag names from the text search box, but supports explicit tag filtering", () => {
     const store = createInMemoryStore();
     store.upsertIndexedSession(sampleSession(), messages);

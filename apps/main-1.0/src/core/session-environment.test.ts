@@ -18,6 +18,11 @@ describe("session environment", () => {
       environmentId: "local",
       source: "workbuddy-cli",
     })).toBe(false);
+    expect(canDeleteSessionLocally({
+      environmentKind: "local",
+      environmentId: "local",
+      source: "kimi-cli",
+    })).toBe(false);
   });
 
   it("identifies shared multi-session source databases", () => {

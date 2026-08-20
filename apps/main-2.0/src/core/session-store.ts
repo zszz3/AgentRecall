@@ -248,8 +248,9 @@ export class SessionStore {
     await this.ready;
     const target = targets.find((item) => item.sessionKey === requestedSessionKey);
     if (!target) return false;
-    if (target.source === "pi-cli" || target.source === "workbuddy-cli") {
-      throw new Error(`${target.source === "pi-cli" ? "Pi" : "WorkBuddy"} session source files are read-only.`);
+    if (target.source === "pi-cli" || target.source === "workbuddy-cli" || target.source === "kimi-cli") {
+      const label = target.source === "pi-cli" ? "Pi" : target.source === "workbuddy-cli" ? "WorkBuddy" : "Kimi Code";
+      throw new Error(`${label} session source files are read-only.`);
     }
     if (!canDeleteSessionLocally(target)) {
       throw new Error("Cannot delete sessions stored on SSH remote environments.");

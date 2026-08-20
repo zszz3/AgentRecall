@@ -1924,8 +1924,8 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   }
   if (options.includePi) yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
   if (options.includeKimiCli) yield* loadKimiSessionsIterator([
-    path.join(homeDir, KIMI_CODE_DIR),
     path.join(homeDir, KIMI_LEGACY_DIR),
+    path.join(homeDir, KIMI_CODE_DIR),
   ], options);
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);
@@ -1973,8 +1973,8 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   }
   if (options.includePi) yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
   if (options.includeKimiCli) yield* loadKimiSessionsIterator([
-    path.join(homeDir, KIMI_CODE_DIR),
     path.join(homeDir, KIMI_LEGACY_DIR),
+    path.join(homeDir, KIMI_CODE_DIR),
   ], options);
   if (options.includeTclaude) yield* loadClaudeCliSessionsIterator(path.join(homeDir, TCLAUDE_DIR), "tclaude-cli", options);
   if (options.includeTcodex) yield* loadCodexSessionsAsyncIterator(path.join(homeDir, TCODEX_DIR), "tcodex-cli", options);

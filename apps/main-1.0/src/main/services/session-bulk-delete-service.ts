@@ -251,7 +251,7 @@ function classifyTarget(
   if (request.inactiveBefore !== undefined && target.lastActivityAt >= request.inactiveBefore) {
     return issueFor(target.sessionKey, "recent", "Session is not older than the selected cutoff.");
   }
-  if (target.source === "pi-cli" || target.source === "workbuddy-cli") {
+  if (target.source === "pi-cli" || target.source === "workbuddy-cli" || target.source === "kimi-cli") {
     return issueFor(target.sessionKey, "read-only", `${sessionSourceDescriptor(target.source).label} session source files are read-only.`);
   }
   if (SHARED_DATABASE_SOURCES.has(target.source)) return issueFor(target.sessionKey, "shared-database", "This source stores multiple sessions in a shared database.");

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   cleanTitle,
@@ -1682,7 +1683,26 @@ function* loadPiSessionsIterator(
   }
 }
 
-function loadKimiSessionFile(filePath: string, root: string, stat?: VirtualSessionFileStat): LoadedSession | null {
+function loadKimiProjectPaths(root: string): { dependencyMtimeMs?: number; paths: Map<string, string> } {
+  const metadataPath = path.join(root, "kimi.json");
+  const metadataStat = safeStat(metadataPath);
+  const paths = new Map<string, string>();
+  try {
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8")) as unknown;
+    if (!isRecord(metadata) || !Array.isArray(metadata.work_dirs)) return { dependencyMtimeMs: metadataStat?.mtimeMs, paths };
+    for (const item of metadata.work_dirs) {
+      if (!isRecord(item)) continue;
+      const projectPath = stringField(item, "path");
+      if (!projectPath) continue;
+      paths.set(createHash("md5").update(projectPath, "utf8").digest("hex"), projectPath);
+    }
+  } catch {
+    // Missing or malformed metadata should not prevent session discovery.
+  }
+  return { dependencyMtimeMs: metadataStat?.mtimeMs, paths };
+}
+
+function loadKimiSessionFile(filePath: string, root: string, projectPaths: ReadonlyMap<string, string>, stat?: VirtualSessionFileStat): LoadedSession | null {
   const rows = readJsonl(filePath);
   if (rows.length === 0) return null;
   const messages = sourceMessages(rows, "kimi");
@@ -1694,7 +1714,9 @@ function loadKimiSessionFile(filePath: string, root: string, stat?: VirtualSessi
   const agentIndex = sessionParts.indexOf("agents");
   const derivedId = (agentIndex >= 0 ? sessionParts.slice(0, agentIndex) : sessionParts.slice(0, -1)).filter(Boolean).join("/");
   const rawId = derivedId || stringField(meta, "id") || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
-  const projectPath = stringField(meta, "cwd") || stringField(meta, "workDir") || stringField(meta, "work_dir") || "";
+  const workDirKey = sessionParts[0] ?? "";
+  const mappedProjectPath = [...projectPaths].find(([hash]) => workDirKey === hash || workDirKey.endsWith(`_${hash}`))?.[1] ?? "";
+  const projectPath = stringField(meta, "cwd") || stringField(meta, "workDir") || stringField(meta, "work_dir") || mappedProjectPath;
   const question = cleanTitle(firstQuestion(messages));
   return {
     session: createIndexedSession({ keyPrefix: "kimi", rawId, source: "kimi-cli", projectPath, filePath, originalTitle: question || rawId, firstQuestion: question, timestamp: stat?.mtimeMs ?? Date.now(), stat }),
@@ -1706,11 +1728,28 @@ function loadKimiSessionFile(filePath: string, root: string, stat?: VirtualSessi
 function* loadKimiSessionsIterator(kimiRoots: readonly string[], options: SessionLoadOptions): Generator<LoadedSession> {
   const seen = new Set<string>();
   for (const root of kimiRoots) {
+    const projectMetadata = loadKimiProjectPaths(root);
+    const filesBySessionDir = new Map<string, string[]>();
     for (const filePath of walkJsonlFiles(root)) {
-      if (!/(?:context|wire)\.jsonl$/i.test(filePath)) continue;
+      const relativeParts = path.relative(root, filePath).split(/[\\/]+/u);
+      if (relativeParts.some((part) => part === "agents" || part === "subagents")) continue;
+      if (!/^(?:context|wire)\.jsonl$/i.test(path.basename(filePath))) continue;
+      const sessionDir = path.dirname(filePath);
+      const files = filesBySessionDir.get(sessionDir) ?? [];
+      files.push(filePath);
+      filesBySessionDir.set(sessionDir, files);
+    }
+    const representativeFiles = [...filesBySessionDir.values()]
+      .map((files) => files.sort((left, right) => {
+        const leftPriority = path.basename(left).toLowerCase() === "context.jsonl" ? 0 : 1;
+        const rightPriority = path.basename(right).toLowerCase() === "context.jsonl" ? 0 : 1;
+        return leftPriority - rightPriority || left.localeCompare(right);
+      })[0])
+      .sort((left, right) => left.localeCompare(right));
+    for (const filePath of representativeFiles) {
       const stat = safeStat(filePath);
-      if (shouldSkipFile(options, filePath, stat)) continue;
-      const loaded = loadKimiSessionFile(filePath, root, stat);
+      if (shouldSkipFile(options, filePath, stat, projectMetadata.dependencyMtimeMs)) continue;
+      const loaded = loadKimiSessionFile(filePath, root, projectMetadata.paths, stat);
       if (loaded) {
         if (seen.has(loaded.session.rawId)) continue;
         seen.add(loaded.session.rawId);
@@ -3954,7 +3993,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
   if (options.includePi) {
     yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
   }
-  if (options.includeKimiCli) yield* loadKimiSessionsIterator([path.join(homeDir, KIMI_CODE_DIR), path.join(homeDir, KIMI_LEGACY_DIR)], options);
+  if (options.includeKimiCli) yield* loadKimiSessionsIterator([path.join(homeDir, KIMI_LEGACY_DIR), path.join(homeDir, KIMI_CODE_DIR)], options);
   if (options.includeOpenClaw) {
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options);
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options);
@@ -3992,7 +4031,7 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
   if (options.includePi) {
     yield* loadPiSessionsIterator(path.join(homeDir, PI_SESSIONS_DIR), options);
   }
-  if (options.includeKimiCli) yield* loadKimiSessionsIterator([path.join(homeDir, KIMI_CODE_DIR), path.join(homeDir, KIMI_LEGACY_DIR)], options);
+  if (options.includeKimiCli) yield* loadKimiSessionsIterator([path.join(homeDir, KIMI_LEGACY_DIR), path.join(homeDir, KIMI_CODE_DIR)], options);
   if (options.includeOpenClaw) {
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".openclaw"), options);
     yield* loadOpenClawSessionsIterator(path.join(homeDir, ".clawdbot"), options);
