@@ -1682,15 +1682,18 @@ function* loadPiSessionsIterator(
   }
 }
 
-function loadKimiSessionFile(filePath: string, stat?: VirtualSessionFileStat): LoadedSession | null {
+function loadKimiSessionFile(filePath: string, root: string, stat?: VirtualSessionFileStat): LoadedSession | null {
   const rows = readJsonl(filePath);
   if (rows.length === 0) return null;
   const messages = sourceMessages(rows, "kimi");
   if (messages.length === 0) return null;
   const meta = rows.find((row): row is Record<string, unknown> => isRecord(row) && (stringField(row, "type") === "session" || stringField(row, "type") === "session_info"));
-  const pathParts = filePath.split(/[\\/]+/u);
-  const sessionsIndex = pathParts.lastIndexOf("sessions");
-  const rawId = stringField(meta, "id") || (sessionsIndex >= 0 && pathParts[sessionsIndex + 2]) || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
+  const relativeParts = path.relative(root, filePath).split(/[\\/]+/u);
+  const sessionsIndex = relativeParts.indexOf("sessions");
+  const sessionParts = sessionsIndex >= 0 ? relativeParts.slice(sessionsIndex + 1) : [];
+  const agentIndex = sessionParts.indexOf("agents");
+  const derivedId = (agentIndex >= 0 ? sessionParts.slice(0, agentIndex) : sessionParts.slice(0, -1)).filter(Boolean).join("/");
+  const rawId = derivedId || stringField(meta, "id") || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
   const projectPath = stringField(meta, "cwd") || stringField(meta, "workDir") || stringField(meta, "work_dir") || "";
   const question = cleanTitle(firstQuestion(messages));
   return {
@@ -1705,12 +1708,14 @@ function* loadKimiSessionsIterator(kimiRoots: readonly string[], options: Sessio
   for (const root of kimiRoots) {
     for (const filePath of walkJsonlFiles(root)) {
       if (!/(?:context|wire)\.jsonl$/i.test(filePath)) continue;
-      const sessionDir = path.dirname(filePath);
-      if (seen.has(sessionDir)) continue;
       const stat = safeStat(filePath);
       if (shouldSkipFile(options, filePath, stat)) continue;
-      const loaded = loadKimiSessionFile(filePath, stat);
-      if (loaded) { seen.add(sessionDir); yield loaded; }
+      const loaded = loadKimiSessionFile(filePath, root, stat);
+      if (loaded) {
+        if (seen.has(loaded.session.rawId)) continue;
+        seen.add(loaded.session.rawId);
+        yield loaded;
+      }
     }
   }
 }

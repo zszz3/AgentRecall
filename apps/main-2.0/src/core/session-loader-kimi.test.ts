@@ -20,7 +20,7 @@ describe("Kimi Code session loading", () => {
     ]);
     const [loaded] = loadDefaultSessions({ homeDir: root, includeKimiCli: true });
     expect(loaded.session.source).toBe("kimi-cli");
-    expect(loaded.session.rawId).toBe("session-1");
+    expect(loaded.session.rawId).toBe("work/session-1");
     expect(loaded.messages.map((message) => message.content)).toEqual(["hello Kimi", "hello"]);
   });
 
@@ -31,7 +31,16 @@ describe("Kimi Code session loading", () => {
       { data: { message: { role: "assistant", content: "works" } } },
     ]);
     const [loaded] = loadDefaultSessions({ homeDir: root, includeKimiCli: true });
-    expect(loaded.session.rawId).toBe("session-2");
+    expect(loaded.session.rawId).toBe("work/session-2");
     expect(loaded.messages.map((message) => message.content)).toEqual(["new layout", "works"]);
+  });
+
+  it("keeps work-directory identities distinct and deduplicates agent files", () => {
+    const root = home();
+    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "agents", "root", "wire.jsonl"), [{ role: "user", content: "a" }]);
+    write(path.join(root, ".kimi-code", "sessions", "work-a", "same", "agents", "worker", "wire.jsonl"), [{ role: "user", content: "duplicate agent" }]);
+    write(path.join(root, ".kimi-code", "sessions", "work-b", "same", "context.jsonl"), [{ role: "user", content: "b" }]);
+    const loaded = loadDefaultSessions({ homeDir: root, includeKimiCli: true });
+    expect(loaded.map((item) => item.session.rawId)).toEqual(["work-a/same", "work-b/same"]);
   });
 });
