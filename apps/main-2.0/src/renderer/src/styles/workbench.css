@@ -1256,7 +1256,7 @@
 
 @keyframes workbench-live-pulse {
   0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 10%, transparent); }
+  50% { opacity: 1; }
 }
 
 .workbench-session-copy {
