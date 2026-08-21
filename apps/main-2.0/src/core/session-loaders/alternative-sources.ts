@@ -386,7 +386,28 @@ function loadKimiProjectPaths(root: string): { dependencyMtimeMs: number; paths:
   return { dependencyMtimeMs: metadataStat.mtimeMs, paths };
 }
 
-function loadKimiSessionFile(filePath: string, root: string, projectPaths: ReadonlyMap<string, string>, stat = safeStat(filePath)): LoadedSession | null {
+function legacyKimiSessionRawId(filePath: string, root: string): string {
+  const relativeParts = path.relative(root, filePath).split(/[\\/]+/u);
+  const sessionsIndex = relativeParts.indexOf("sessions");
+  const sessionParts = sessionsIndex >= 0 ? relativeParts.slice(sessionsIndex + 1) : [];
+  const fileName = path.basename(filePath).toLowerCase();
+  if (/^(?:context|wire)\.jsonl$/u.test(fileName)) return sessionParts.slice(0, -1).filter(Boolean).join("/");
+  return [...sessionParts.slice(0, -1), path.basename(filePath, ".jsonl")].filter(Boolean).join("/");
+}
+
+function legacyKimiSessionId(filePath: string): string {
+  return /^(?:context|wire)\.jsonl$/iu.test(path.basename(filePath))
+    ? path.basename(path.dirname(filePath))
+    : path.basename(filePath, ".jsonl");
+}
+
+function legacyKimiStatePath(filePath: string): string | null {
+  return /^(?:context|wire)\.jsonl$/iu.test(path.basename(filePath))
+    ? path.join(path.dirname(filePath), "state.json")
+    : null;
+}
+
+function loadLegacyKimiSessionFile(filePath: string, root: string, projectPaths: ReadonlyMap<string, string>, stat = safeStat(filePath)): LoadedSession | null {
   const rows = readJsonl(filePath);
   if (rows.length === 0) return null;
   const messages = sourceMessages(rows, "kimi");
@@ -395,13 +416,14 @@ function loadKimiSessionFile(filePath: string, root: string, projectPaths: Reado
   const relativeParts = path.relative(root, filePath).split(/[\\/]+/u);
   const sessionsIndex = relativeParts.indexOf("sessions");
   const sessionParts = sessionsIndex >= 0 ? relativeParts.slice(sessionsIndex + 1) : [];
-  const agentIndex = sessionParts.indexOf("agents");
-  const derivedId = (agentIndex >= 0 ? sessionParts.slice(0, agentIndex) : sessionParts.slice(0, -1)).filter(Boolean).join("/");
-  const rawId = derivedId || stringField(meta, "id") || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
+  const rawId = legacyKimiSessionRawId(filePath, root) || stringField(meta, "id") || path.basename(path.dirname(filePath)) || path.basename(filePath, ".jsonl");
   const workDirKey = sessionParts[0] ?? "";
   const mappedProjectPath = [...projectPaths].find(([hash]) => workDirKey === hash || workDirKey.endsWith(`_${hash}`))?.[1] ?? "";
   const projectPath = stringField(meta, "cwd") || stringField(meta, "workDir") || stringField(meta, "work_dir") || mappedProjectPath;
   const question = firstQuestion(messages);
+  const statePath = legacyKimiStatePath(filePath);
+  const state = statePath ? readJsonObject(statePath) : null;
+  const title = stringField(state, "custom_title") || cleanTitle(question) || rawId;
   return {
     session: createIndexedSession({
       keyPrefix: "kimi",
@@ -409,7 +431,7 @@ function loadKimiSessionFile(filePath: string, root: string, projectPaths: Reado
       source: "kimi-cli",
       projectPath,
       filePath,
-      originalTitle: cleanTitle(question) || rawId,
+      originalTitle: title,
       firstQuestion: cleanTitle(question),
       timestamp: stat.mtimeMs,
       stat,
@@ -419,40 +441,207 @@ function loadKimiSessionFile(filePath: string, root: string, projectPaths: Reado
   };
 }
 
+interface KimiCodeIndexEntry {
+  sessionId: string;
+  sessionDir: string;
+  workDir: string;
+}
+
+function readJsonObject(filePath: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    return isRecord(parsed) && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function readKimiCodeSessionIndex(root: string): Map<string, KimiCodeIndexEntry> {
+  const sessionsRoot = path.join(root, "sessions");
+  const entries = new Map<string, KimiCodeIndexEntry>();
+  for (const row of readJsonl(path.join(root, "session_index.jsonl"))) {
+    if (!isRecord(row)) continue;
+    const sessionId = stringField(row, "sessionId");
+    if (!sessionId) continue;
+    if (row.deleted === true) {
+      entries.delete(sessionId);
+      continue;
+    }
+    const sessionDir = stringField(row, "sessionDir");
+    const workDir = stringField(row, "workDir");
+    if (!path.isAbsolute(sessionDir) || path.basename(sessionDir) !== sessionId || !isPathInside(sessionsRoot, sessionDir)) continue;
+    entries.set(sessionId, { sessionId, sessionDir: path.resolve(sessionDir), workDir });
+  }
+  return entries;
+}
+
+function kimiCodeContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => isRecord(part) && stringField(part, "type") === "text" ? stringField(part, "text") : "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function kimiCodeMessages(rows: unknown[]): SessionMessage[] {
+  const drafts: Array<{ role: "user" | "assistant"; parts: string[]; timestamp: string }> = [];
+  const openSteps = new Map<string, (typeof drafts)[number]>();
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const recordType = stringField(row, "type");
+    if (recordType === "context.append_message") {
+      const message = objectField(row, "message");
+      const role = stringField(message, "role");
+      if (role !== "user" && role !== "assistant") continue;
+      const text = kimiCodeContentText(message?.content);
+      if (!text || (role === "user" && !isMeaningfulUserMessage(text))) continue;
+      drafts.push({ role, parts: [text], timestamp: timestampString(row.time) });
+      continue;
+    }
+    if (recordType !== "context.append_loop_event") continue;
+    const event = objectField(row, "event");
+    const eventType = stringField(event, "type");
+    if (eventType === "step.begin") {
+      const stepId = stringField(event, "uuid");
+      if (!stepId) continue;
+      const draft = { role: "assistant" as const, parts: [], timestamp: timestampString(row.time) };
+      drafts.push(draft);
+      openSteps.set(stepId, draft);
+      continue;
+    }
+    if (eventType === "content.part") {
+      const draft = openSteps.get(stringField(event, "stepUuid"));
+      const part = objectField(event, "part");
+      if (draft && stringField(part, "type") === "text") {
+        const text = stringField(part, "text");
+        if (text) draft.parts.push(text);
+      }
+      continue;
+    }
+    if (eventType === "step.end") openSteps.delete(stringField(event, "uuid"));
+  }
+  return drafts
+    .map((draft) => ({ ...draft, content: draft.parts.join("\n") }))
+    .filter((draft) => Boolean(draft.content))
+    .map((draft, index) => messageFromParts(draft.role, draft.content, draft.timestamp, index));
+}
+
+function kimiCodeMainWireIdentity(filePath: string, root: string): { sessionId: string; sessionDir: string } | null {
+  const parts = path.relative(root, filePath).split(/[\\/]+/u);
+  if (parts.length !== 6 || parts[0] !== "sessions" || parts[3] !== "agents" || parts[4] !== "main" || parts[5] !== "wire.jsonl") return null;
+  return { sessionId: parts[2], sessionDir: path.dirname(path.dirname(path.dirname(filePath))) };
+}
+
+function kimiCodeTitle(state: Record<string, unknown>, question: string, rawId: string): string {
+  const title = stringField(state, "title");
+  if (typeof state.isCustomTitle === "boolean" && title) return title;
+  return stringField(state, "customTitle") || title || stringField(state, "lastPrompt") || question || rawId;
+}
+
+function loadKimiCodeSessionFile(
+  filePath: string,
+  root: string,
+  indexEntry: KimiCodeIndexEntry | undefined,
+  state: Record<string, unknown>,
+  stat: VirtualSessionFileStat,
+): LoadedSession | null {
+  const identity = kimiCodeMainWireIdentity(filePath, root);
+  if (!identity) return null;
+  const rows = readJsonl(filePath);
+  const messages = kimiCodeMessages(rows);
+  if (messages.length === 0) return null;
+  const question = cleanTitle(firstQuestion(messages));
+  const projectPath = stringField(state, "cwd") || stringField(state, "workDir") || indexEntry?.workDir || "";
+  const timestamp = timestampMs(state.updatedAt) || timestampMs(state.createdAt) || stat.mtimeMs;
+  return {
+    session: createIndexedSession({
+      keyPrefix: "kimi",
+      rawId: identity.sessionId,
+      source: "kimi-cli",
+      projectPath,
+      filePath,
+      originalTitle: kimiCodeTitle(state, question, identity.sessionId),
+      firstQuestion: question,
+      timestamp,
+      stat,
+    }),
+    messages,
+  };
+}
+
 export function* loadKimiSessionsIterator(
-  kimiRoots: readonly string[],
+  legacyRoot: string,
+  codeRoot: string,
   options: SessionLoadOptions = {},
 ): Generator<LoadedSession> {
   const seen = new Set<string>();
-  for (const root of kimiRoots) {
-    const projectMetadata = loadKimiProjectPaths(root);
-    const filesBySessionDir = new Map<string, string[]>();
-    for (const filePath of walkJsonlFiles(root)) {
-      const relativeParts = path.relative(root, filePath).split(/[\\/]+/u);
-      if (relativeParts.some((part) => part === "agents" || part === "subagents")) continue;
-      if (!/^(?:context|wire)\.jsonl$/i.test(path.basename(filePath))) continue;
-      const sessionDir = path.dirname(filePath);
-      const files = filesBySessionDir.get(sessionDir) ?? [];
-      files.push(filePath);
-      filesBySessionDir.set(sessionDir, files);
-    }
-    const representativeFiles = [...filesBySessionDir.values()]
-      .map((files) => files.sort((left, right) => {
-        const leftPriority = path.basename(left).toLowerCase() === "context.jsonl" ? 0 : 1;
-        const rightPriority = path.basename(right).toLowerCase() === "context.jsonl" ? 0 : 1;
-        return leftPriority - rightPriority || left.localeCompare(right);
-      })[0])
-      .sort((left, right) => left.localeCompare(right));
-    for (const filePath of representativeFiles) {
-      const stat = safeStat(filePath);
-      if (shouldSkipFile(options, filePath, stat, projectMetadata.dependencyMtimeMs)) continue;
-      const loaded = loadKimiSessionFile(filePath, root, projectMetadata.paths, stat);
-      if (loaded) {
-        if (seen.has(loaded.session.rawId)) continue;
-        seen.add(loaded.session.rawId);
-        yield loaded;
-      }
-    }
+  const legacySessionIds = new Set<string>();
+  const projectMetadata = loadKimiProjectPaths(legacyRoot);
+  const filesBySessionDir = new Map<string, string[]>();
+  for (const filePath of walkJsonlFiles(legacyRoot)) {
+    const relativeParts = path.relative(legacyRoot, filePath).split(/[\\/]+/u);
+    if (relativeParts.some((part) => part === "agents" || part === "subagents")) continue;
+    const sessionsIndex = relativeParts.indexOf("sessions");
+    const sessionParts = sessionsIndex >= 0 ? relativeParts.slice(sessionsIndex + 1) : [];
+    const isDirectorySession = /^(?:context|wire)\.jsonl$/iu.test(path.basename(filePath));
+    const isFlatSession = sessionParts.length === 2 && path.extname(filePath).toLowerCase() === ".jsonl";
+    if (!isDirectorySession && !isFlatSession) continue;
+    const sessionDir = isDirectorySession ? path.dirname(filePath) : filePath;
+    const files = filesBySessionDir.get(sessionDir) ?? [];
+    files.push(filePath);
+    filesBySessionDir.set(sessionDir, files);
+  }
+  const representativeFiles = [...filesBySessionDir.values()]
+    .map((files) => files.sort((left, right) => {
+      const leftPriority = path.basename(left).toLowerCase() === "context.jsonl" ? 0 : 1;
+      const rightPriority = path.basename(right).toLowerCase() === "context.jsonl" ? 0 : 1;
+      return leftPriority - rightPriority || left.localeCompare(right);
+    })[0])
+    .sort((left, right) => left.localeCompare(right));
+  for (const filePath of representativeFiles) {
+    const rawId = legacyKimiSessionRawId(filePath, legacyRoot);
+    const seenKey = rawId || filePath;
+    if (seen.has(seenKey)) continue;
+    seen.add(seenKey);
+    legacySessionIds.add(legacyKimiSessionId(filePath));
+    const stat = safeStat(filePath);
+    const statePath = legacyKimiStatePath(filePath);
+    const dependencyMtimeMs = Math.max(projectMetadata.dependencyMtimeMs, statePath ? safeStat(statePath).mtimeMs : 0);
+    if (shouldSkipFile(options, filePath, stat, dependencyMtimeMs)) continue;
+    const loaded = loadLegacyKimiSessionFile(filePath, legacyRoot, projectMetadata.paths, stat);
+    if (loaded) yield loaded;
+  }
+
+  const indexPath = path.join(codeRoot, "session_index.jsonl");
+  const sessionIndex = readKimiCodeSessionIndex(codeRoot);
+  const candidates = new Map<string, { sessionId: string; sessionDir: string; filePath: string }>();
+  for (const entry of sessionIndex.values()) {
+    const filePath = path.join(entry.sessionDir, "agents", "main", "wire.jsonl");
+    if (fs.existsSync(filePath)) candidates.set(path.resolve(entry.sessionDir), { sessionId: entry.sessionId, sessionDir: entry.sessionDir, filePath });
+  }
+  for (const filePath of walkJsonlFiles(path.join(codeRoot, "sessions"))) {
+    const identity = kimiCodeMainWireIdentity(filePath, codeRoot);
+    if (identity) candidates.set(path.resolve(identity.sessionDir), { ...identity, filePath });
+  }
+  for (const candidate of [...candidates.values()].sort((left, right) => left.filePath.localeCompare(right.filePath))) {
+    const statePath = path.join(candidate.sessionDir, "state.json");
+    const state = readJsonObject(statePath) ?? {};
+    const custom = objectField(state, "custom");
+    const importedLegacyId = stringField(custom, "kimi_cli_session_id");
+    if (importedLegacyId && legacySessionIds.has(importedLegacyId)) continue;
+    const stat = safeStat(candidate.filePath);
+    const dependencyMtimeMs = Math.max(safeStat(indexPath).mtimeMs, safeStat(statePath).mtimeMs);
+    if (shouldSkipFile(options, candidate.filePath, stat, dependencyMtimeMs)) continue;
+    const indexed = sessionIndex.get(candidate.sessionId);
+    const indexEntry = indexed && path.resolve(indexed.sessionDir) === path.resolve(candidate.sessionDir) ? indexed : undefined;
+    const loaded = loadKimiCodeSessionFile(candidate.filePath, codeRoot, indexEntry, state, stat);
+    if (loaded) yield loaded;
   }
 }
 
