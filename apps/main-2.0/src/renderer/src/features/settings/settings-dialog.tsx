@@ -1197,54 +1197,6 @@ export function SettingsDialog({
                     onChange={(event) => onSettingsChange({ skillSyncEnabled: event.currentTarget.checked })}
                   />
                 </label>
-                <header className="settings-pane-head" style={{ marginTop: 18 }}>
-                  <h3>{l("Rules sync", "Rules 同步")}</h3>
-                  <p>
-                    {l(
-                      "Sync CLAUDE.md and .qoder/rules across devices using the same Supabase project as Skill sync.",
-                      "使用与 Skill 同步相同的 Supabase 项目，跨设备同步 CLAUDE.md 和 .qoder/rules 规则文件。",
-                    )}
-                  </p>
-                </header>
-                <label className="settings-field settings-toggle">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">{l("Enable rules sync", "启用 Rules 同步")}</span>
-                    <span className="settings-field-sub">
-                      {l("Uses the Supabase URL and anon key configured above for Skill sync.", "使用上方 Skill 同步配置的 Supabase URL 和 anon key。")}
-                    </span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="switch"
-                    checked={Boolean(settings?.rulesSyncEnabled)}
-                    disabled={!settings}
-                    onChange={(event) => onSettingsChange({ rulesSyncEnabled: event.currentTarget.checked })}
-                  />
-                </label>
-                <header className="settings-pane-head" style={{ marginTop: 18 }}>
-                  <h3>{l("Memories sync", "Memories 同步")}</h3>
-                  <p>
-                    {l(
-                      "Sync Qoder long-term memories across devices using the same Supabase project as Skill sync.",
-                      "使用与 Skill 同步相同的 Supabase 项目，跨设备同步 Qoder 长期记忆。",
-                    )}
-                  </p>
-                </header>
-                <label className="settings-field settings-toggle">
-                  <div className="settings-field-text">
-                    <span className="settings-field-title">{l("Enable memories sync", "启用 Memories 同步")}</span>
-                    <span className="settings-field-sub">
-                      {l("Uses the Supabase URL and anon key configured above for Skill sync.", "使用上方 Skill 同步配置的 Supabase URL 和 anon key。")}
-                    </span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="switch"
-                    checked={Boolean(settings?.memoriesSyncEnabled)}
-                    disabled={!settings}
-                    onChange={(event) => onSettingsChange({ memoriesSyncEnabled: event.currentTarget.checked })}
-                  />
-                </label>
               </section>
             ) : null}
             {activeSection === "workflow" ? (

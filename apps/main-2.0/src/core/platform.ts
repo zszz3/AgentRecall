@@ -104,8 +104,6 @@ export interface AppSettings {
   includePi: boolean;
   includeKimiCli: boolean;
   includeDeepSeekCli: boolean;
-  rulesSyncEnabled: boolean;
-  memoriesSyncEnabled: boolean;
   evalEnabled: boolean;
   openVikingMemoryEnabled: boolean;
   openVikingClaudeEnabled: boolean;
@@ -200,8 +198,6 @@ export const defaultSettings: AppSettings = {
   includePi: false,
   includeKimiCli: false,
   includeDeepSeekCli: false,
-  rulesSyncEnabled: false,
-  memoriesSyncEnabled: false,
   evalEnabled: false,
   openVikingMemoryEnabled: false,
   openVikingClaudeEnabled: false,

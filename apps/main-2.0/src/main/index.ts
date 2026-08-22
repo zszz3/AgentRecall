@@ -133,9 +133,7 @@ import {
   restartOpenVikingForExtractionSettings,
 } from "./services/openviking-settings-lifecycle";
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
-import { registerMemoriesIpc, type MemoriesIpcService } from "./ipc/memories";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
-import { registerRulesIpc, type RulesIpcService } from "./ipc/rules";
 import { registerSkillsIpc } from "./ipc/skills";
 import { registerSessionCatalogIpc } from "./ipc/session-catalog";
 import { registerSessionCommandIpc } from "./ipc/session-commands";
@@ -189,8 +187,6 @@ import {
   RemoteSessionService,
   type SessionSyncHookSetup,
 } from "./services/remote-session-service";
-import { buildMemoriesSyncSetupSql, memoryIdentity, scanLocalMemories, SupabaseMemoriesSyncClient } from "../core/memories-sync";
-import { buildRulesSyncSetupSql, restoreRules, ruleIdentity, scanLocalRules, SupabaseRulesSyncClient } from "../core/rules-sync";
 import { SkillService, type SkillUsageHookSetup } from "./services/skill-service";
 import { SessionCatalogService } from "./services/session-catalog-service";
 import { SessionCommandService } from "./services/session-command-service";
@@ -745,111 +741,6 @@ const remoteSessionService = new RemoteSessionService({
 
 function visibleSearchOptions(options: SearchOptions = {}): SearchOptions {
   return { ...options, excludeSubagents: true };
-}
-
-function createRulesSyncService(): RulesIpcService {
-  const projectDirs = async () =>
-    (await listVisibleProjects(visibleProjectOptions())).map((project) => project.path);
-  const createClient = () => {
-    const settings = getSettings();
-    return new SupabaseRulesSyncClient({ url: settings.skillSyncSupabaseUrl, anonKey: settings.skillSyncSupabaseAnonKey });
-  };
-  return {
-    async getSyncSnapshot() {
-      const settings = getSettings();
-      const localRules = scanLocalRules({ projectDirs: await projectDirs() });
-      if (!settings.rulesSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
-        return { status: { kind: "unconfigured" as const, setupSql: buildRulesSyncSetupSql() }, localRules, remoteRules: [], scannedAt: Date.now() };
-      }
-      const client = createClient();
-      const status = await client.checkStatus();
-      const remoteRules = status.kind === "ready" ? await client.listRemoteRules() : [];
-      return { status, localRules, remoteRules, scannedAt: Date.now() };
-    },
-    async upload(identity) {
-      const localRules = scanLocalRules({ projectDirs: await projectDirs() });
-      const rule = localRules.find((r) => ruleIdentity(r) === identity);
-      if (!rule) throw new Error("Rule not found locally.");
-      return createClient().uploadRule(rule);
-    },
-    async uploadAll() {
-      const localRules = scanLocalRules({ projectDirs: await projectDirs() });
-      const client = createClient();
-      const remoteRules = await client.listRemoteRules();
-      let uploaded = 0;
-      let skipped = 0;
-      for (const rule of localRules) {
-        const remote = remoteRules.find((r) => r.agent === rule.agent && r.scope === rule.scope && r.name === rule.name && r.project_path === rule.projectPath);
-        if (remote && remote.content_hash === rule.contentHash) {
-          skipped++;
-          continue;
-        }
-        await client.uploadRule(rule);
-        uploaded++;
-      }
-      return { uploaded, skipped };
-    },
-    async deleteRemote(remoteId) {
-      return createClient().deleteRule(remoteId);
-    },
-    copySetupSql() {
-      clipboard.writeText(buildRulesSyncSetupSql());
-    },
-    async restore() {
-      const client = createClient();
-      const remoteRules = await client.listRemoteRules();
-      return restoreRules(remoteRules, { projectDirs: await projectDirs() });
-    },
-  };
-}
-
-function createMemoriesSyncService(): MemoriesIpcService {
-  const createClient = () => {
-    const settings = getSettings();
-    return new SupabaseMemoriesSyncClient({ url: settings.skillSyncSupabaseUrl, anonKey: settings.skillSyncSupabaseAnonKey });
-  };
-  return {
-    async getSyncSnapshot() {
-      const settings = getSettings();
-      const localMemories = scanLocalMemories();
-      if (!settings.memoriesSyncEnabled || !settings.skillSyncSupabaseUrl || !settings.skillSyncSupabaseAnonKey) {
-        return { status: { kind: "unconfigured" as const, setupSql: buildMemoriesSyncSetupSql() }, localMemories, remoteMemories: [], scannedAt: Date.now() };
-      }
-      const client = createClient();
-      const status = await client.checkStatus();
-      const remoteMemories = status.kind === "ready" ? await client.listRemoteMemories() : [];
-      return { status, localMemories, remoteMemories, scannedAt: Date.now() };
-    },
-    async upload(identity) {
-      const localMemories = scanLocalMemories();
-      const memory = localMemories.find((m) => memoryIdentity(m) === identity);
-      if (!memory) throw new Error("Memory not found locally.");
-      return createClient().uploadMemory(memory);
-    },
-    async uploadAll() {
-      const localMemories = scanLocalMemories();
-      const client = createClient();
-      const remoteMemories = await client.listRemoteMemories();
-      let uploaded = 0;
-      let skipped = 0;
-      for (const memory of localMemories) {
-        const remote = remoteMemories.find((r) => r.agent === memory.agent && r.scope === memory.scope && r.name === memory.name && r.project_path === memory.projectPath);
-        if (remote && remote.content_hash === memory.contentHash) {
-          skipped++;
-          continue;
-        }
-        await client.uploadMemory(memory);
-        uploaded++;
-      }
-      return { uploaded, skipped };
-    },
-    async deleteRemote(remoteId) {
-      return createClient().deleteMemory(remoteId);
-    },
-    copySetupSql() {
-      clipboard.writeText(buildMemoriesSyncSetupSql());
-    },
-  };
 }
 
 function createDiscoveryService(): DiscoveryIpcService {
@@ -2762,8 +2653,6 @@ function registerIpc(): void {
     return result;
   });
   registerSkillsIpc(ipcMain, skillService);
-  registerRulesIpc(ipcMain, createRulesSyncService());
-  registerMemoriesIpc(ipcMain, createMemoriesSyncService());
   registerDiscoveryIpc(ipcMain, createDiscoveryService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {
     clipboard.writeText(buildCombinedSupabaseSetupSql());

@@ -42,10 +42,8 @@ import { createAutomationApi } from "./automation";
 import { createQuotaApi } from "./quota";
 import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
-import { createMemoriesApi } from "./memories";
 import { createOpenVikingMemoryApi } from "./openviking-memory";
 import { createDiscoveryApi } from "./discovery";
-import { createRulesApi } from "./rules";
 import { createSkillsApi } from "./skills";
 import { createTeamChatApi } from "./team-chat";
 
@@ -132,8 +130,6 @@ const api = {
   importV1Data: (): Promise<V1ImportResult> => ipcRenderer.invoke("v1-import:run"),
   ...createProvidersApi(ipcRenderer),
   ...createSkillsApi(ipcRenderer),
-  ...createRulesApi(ipcRenderer),
-  ...createMemoriesApi(ipcRenderer),
   ...createDiscoveryApi(ipcRenderer),
   ...createRemoteSessionsApi(ipcRenderer),
   copyCombinedSyncSetupSql: (): Promise<void> => ipcRenderer.invoke("supabase:copy-combined-setup-sql"),
