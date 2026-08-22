@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { scanCompleteJsonlAsync } from "./codex-jsonl-stream";
+import { extractCodexStructuredToolCalls } from "./session-loaders/codex-tool-calls";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as {
@@ -267,6 +268,7 @@ export function readSkillUsageSourceEvents(source: SkillUsageSource): SkillUsage
 
 export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource): Promise<SkillUsageEvent[]> {
   if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
+  if (source.kind === "codex-session") return readCodexSessionUsageEventsAsync(source);
   const events: SkillUsageEvent[] = [];
   try {
     await scanCompleteJsonlAsync(source.path, {
@@ -287,6 +289,23 @@ export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource):
     return [];
   }
   return events;
+}
+
+// Codex sessions are scanned as a whole file: the structured tool-call layer
+// must see requests and runtime completions together to deduplicate them.
+async function readCodexSessionUsageEventsAsync(source: SkillUsageSource): Promise<SkillUsageEvent[]> {
+  const rows: unknown[] = [];
+  try {
+    await scanCompleteJsonlAsync(source.path, {
+      shouldParseLine: (line) => line.length <= 512 * 1024,
+      onRecord: (record) => {
+        if (isRecord(record)) rows.push(record);
+      },
+    });
+  } catch {
+    return [];
+  }
+  return codexSessionUsageEvents(rows, source);
 }
 
 function addUsageEvents(
@@ -349,28 +368,52 @@ function parseUsageLine(line: string): { skill: string; timestamp: number } | nu
 }
 
 function readSessionFileUsageEvents(source: SkillUsageSource): SkillUsageEvent[] {
+  if (source.kind === "codex-session") {
+    const rows: unknown[] = [];
+    forEachJsonlLine(source.path, (line) => {
+      const parsed = parseUsageRecordLine(line);
+      if (parsed) rows.push(parsed);
+    });
+    return codexSessionUsageEvents(rows, source);
+  }
   const events: SkillUsageEvent[] = [];
   forEachJsonlLine(source.path, (line) => events.push(...parseSessionUsageLine(line, source)));
   return events;
 }
 
-function parseSessionUsageLine(line: string, source: SkillUsageSource): SkillUsageEvent[] {
+// Codex tool usage flows through the structured tool-call layer so requests,
+// runtime completions and namespaced tools are each counted once per call.
+function codexSessionUsageEvents(rows: readonly unknown[], source: SkillUsageSource): SkillUsageEvent[] {
+  const defaultOwner = source.provider === "codex" || source.provider === "tcodex"
+    ? "codex"
+    : undefined;
+  return extractCodexStructuredToolCalls(rows).flatMap((call) => usageEventsFromToolCall(
+    { name: call.canonicalName, input: call.input },
+    Math.min(...call.evidence.map((item) => item.timestamp)),
+    defaultOwner,
+  ));
+}
+
+function parseUsageRecordLine(line: string): Record<string, unknown> | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
-    return [];
+    return null;
   }
-  if (!isRecord(parsed)) return [];
-  return parseSessionUsageRecord(parsed, source);
+  return isRecord(parsed) ? parsed : null;
+}
+
+function parseSessionUsageLine(line: string, source: SkillUsageSource): SkillUsageEvent[] {
+  const parsed = parseUsageRecordLine(line);
+  return parsed ? parseSessionUsageRecord(parsed, source) : [];
 }
 
 function parseSessionUsageRecord(parsed: Record<string, unknown>, source: SkillUsageSource): SkillUsageEvent[] {
 
   const timestamp = timestampFrom(parsed.timestamp ?? parsed.createdAt ?? parsed.created_at);
-  const calls = source.kind === "codex-session"
-    ? codexToolCalls(parsed)
-    : source.kind === "codebuddy-session"
+  if (source.kind === "codex-session") return [];
+  const calls = source.kind === "codebuddy-session"
       ? codeBuddyToolCalls(parsed)
       : source.kind === "workbuddy-session"
         ? workBuddyToolCalls(parsed)
@@ -386,14 +429,6 @@ function parseSessionUsageRecord(parsed: Record<string, unknown>, source: SkillU
         : undefined;
 
   return calls.flatMap((call) => usageEventsFromToolCall(call, timestamp, defaultOwner));
-}
-
-function codexToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
-  if (row.type !== "response_item") return [];
-  const payload = recordField(row, "payload");
-  if (!payload || (payload.type !== "function_call" && payload.type !== "custom_tool_call")) return [];
-  if (typeof payload.name !== "string") return [];
-  return [{ name: payload.name, input: payload.type === "custom_tool_call" ? payload.input : payload.arguments }];
 }
 
 function codeBuddyToolCalls(row: Record<string, unknown>): StructuredToolCall[] {

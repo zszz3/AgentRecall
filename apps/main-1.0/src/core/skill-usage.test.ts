@@ -235,6 +235,83 @@ describe("skill usage", () => {
     expect(usageForSkill(snapshot, "explicit-alias", "codex")?.count).toBe(1);
   }));
 
+  it("counts paginated Codex runtime records once alongside their requests", () => withTempHome((homeDir) => {
+    const sessionsDir = path.join(homeDir, "codex-fixture", "sessions");
+    const skillPath = "/tmp/.codex/skills/paged-read/SKILL.md";
+    const completionOnlyPath = "/tmp/.codex/skills/paged-only/SKILL.md";
+    writeJsonl(path.join(sessionsDir, "rollout.jsonl"), [
+      {
+        type: "session_meta",
+        timestamp: "2026-06-01T09:00:00.000Z",
+        payload: { id: "s-1", cwd: "/repo", history_mode: "paginated" },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-06-01T10:00:00.000Z",
+        payload: {
+          type: "function_call",
+          name: "shell_command",
+          call_id: "cmd-1",
+          arguments: JSON.stringify({ command: `cat ${skillPath}` }),
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-01T10:00:05.000Z",
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-1",
+          item: {
+            type: "CommandExecution",
+            id: "cmd-1",
+            command: ["cat", skillPath],
+            cwd: "/repo",
+            status: "completed",
+            exit_code: 0,
+          },
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-01T10:01:00.000Z",
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-1",
+          item: {
+            type: "CommandExecution",
+            id: "cmd-2",
+            command: ["sed", "-n", "1,5p", completionOnlyPath],
+            cwd: "/repo",
+            status: "completed",
+            exit_code: 0,
+          },
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-06-01T10:02:00.000Z",
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-1",
+          item: {
+            type: "DynamicToolCall",
+            id: "dyn-1",
+            namespace: "skills",
+            tool: "read",
+            arguments: { package: "e0/search" },
+            status: "completed",
+            success: true,
+          },
+        },
+      },
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: sessionsDir });
+    expect(snapshot.totalEvents).toBe(2);
+    expect(usageForSkill(snapshot, "paged-read", "codex")?.count).toBe(1);
+    expect(usageForSkill(snapshot, "paged-only", "codex")?.count).toBe(1);
+  }));
+
   it("honors optional source settings and parses Qoder structured calls", () => withTempHome((homeDir) => {
     const qoderPath = path.join(
       homeDir,

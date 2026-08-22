@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 import { isWorkBuddySessionFile } from "./session-loaders/workbuddy-paths";
+import { extractCodexStructuredToolCalls } from "./session-loaders/codex-tool-calls";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as {
@@ -300,14 +301,24 @@ export async function readSkillUsageSourceEventsAsync(source: SkillUsageSource):
   if (source.kind.endsWith("-db")) return readDatabaseUsageEvents(source);
   const context: SessionFileContext = { failedToolUseIds: new Set() };
   const events: ScannedUsageEvent[] = [];
+  // Codex sessions are scanned as a whole file: the structured tool-call layer
+  // must see requests and runtime completions together to deduplicate them.
+  const codexRows = source.kind === "codex-session" ? [] as unknown[] : null;
   try {
     await scanCompleteJsonlAsync(source.path, {
       shouldParseLine: (line) => line.length <= 512 * 1024,
-      onRecord: (record) => events.push(...parseSessionUsageRecord(record, source, context)),
+      onRecord: (record) => {
+        if (codexRows) {
+          if (isRecord(record)) collectCodexUsageRecord(record, codexRows, events, context);
+          return;
+        }
+        events.push(...parseSessionUsageRecord(record, source, context));
+      },
     });
   } catch {
     return [];
   }
+  if (codexRows) events.push(...codexSessionUsageEvents(codexRows, source, context));
   const settled = settleSessionFileEvents(events, context);
   if (source.hookLogPath) enrichEventsWithHookHash(settled, source.hookLogPath);
   return settled;
@@ -441,7 +452,16 @@ function optionalText(value: unknown): string {
 function readSessionFileUsageEvents(source: SkillUsageSource): SkillUsageEvent[] {
   const context: SessionFileContext = { failedToolUseIds: new Set() };
   const events: ScannedUsageEvent[] = [];
-  forEachJsonlLine(source.path, (line) => events.push(...parseSessionUsageLine(line, source, context)));
+  const codexRows = source.kind === "codex-session" ? [] as unknown[] : null;
+  forEachJsonlLine(source.path, (line) => {
+    if (codexRows) {
+      const parsed = parseUsageRecordLine(line);
+      if (parsed) collectCodexUsageRecord(parsed, codexRows, events, context);
+      return;
+    }
+    events.push(...parseSessionUsageLine(line, source, context));
+  });
+  if (codexRows) events.push(...codexSessionUsageEvents(codexRows, source, context));
   const settled = settleSessionFileEvents(events, context);
   if (source.hookLogPath) enrichEventsWithHookHash(settled, source.hookLogPath);
   return settled;
@@ -475,18 +495,60 @@ function settleSessionFileEvents(
   return settled;
 }
 
+// Codex tool usage flows through the structured tool-call layer so requests,
+// runtime completions and namespaced tools are each counted once per call.
+// Session-level evidence (header ids, skill envelopes) is still collected per
+// record while the file streams in.
+function collectCodexUsageRecord(
+  row: Record<string, unknown>,
+  rows: unknown[],
+  events: ScannedUsageEvent[],
+  context: SessionFileContext,
+): void {
+  if (readCodexSessionMeta(row, context)) return;
+  const timestamp = timestampFrom(row.timestamp ?? row.createdAt ?? row.created_at);
+  const envelope = codexSkillEnvelopeEvent(row, timestamp, context);
+  if (envelope) events.push(envelope);
+  collectFailedToolUseIds(row, context);
+  rows.push(row);
+}
+
+function codexSessionUsageEvents(
+  rows: readonly unknown[],
+  source: SkillUsageSource,
+  context: SessionFileContext,
+): ScannedUsageEvent[] {
+  const defaultOwner = source.provider === "codex" || source.provider === "tcodex"
+    ? "codex"
+    : undefined;
+  return extractCodexStructuredToolCalls(rows).flatMap((call) => usageEventsFromToolCall(
+    { name: call.canonicalName, input: call.input },
+    Math.min(...call.evidence.map((item) => item.timestamp)),
+    defaultOwner,
+  ).map((event) => ({
+    ...event,
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+    ...(context.cwd ? { cwd: context.cwd } : {}),
+  })));
+}
+
+function parseUsageRecordLine(line: string): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  return isRecord(parsed) ? parsed : null;
+}
+
 function parseSessionUsageLine(
   line: string,
   source: SkillUsageSource,
   context: SessionFileContext,
 ): ScannedUsageEvent[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return [];
-  }
-  return parseSessionUsageRecord(parsed, source, context);
+  const parsed = parseUsageRecordLine(line);
+  return parsed ? parseSessionUsageRecord(parsed, source, context) : [];
 }
 
 function parseSessionUsageRecord(
@@ -497,15 +559,9 @@ function parseSessionUsageRecord(
   if (!isRecord(parsed)) return [];
 
   const timestamp = timestampFrom(parsed.timestamp ?? parsed.createdAt ?? parsed.created_at);
-  if (source.kind === "codex-session") {
-    if (readCodexSessionMeta(parsed, context)) return [];
-    const envelope = codexSkillEnvelopeEvent(parsed, timestamp, context);
-    if (envelope) return [envelope];
-  }
+  if (source.kind === "codex-session") return [];
   collectFailedToolUseIds(parsed, context);
-  const calls = source.kind === "codex-session"
-    ? codexToolCalls(parsed)
-    : source.kind === "codebuddy-session"
+  const calls = source.kind === "codebuddy-session"
       ? codeBuddyToolCalls(parsed)
       : source.kind === "workbuddy-session"
         ? workBuddyToolCalls(parsed)
@@ -589,14 +645,6 @@ function collectFailedToolUseIds(row: Record<string, unknown>, context: SessionF
     const id = optionalText(item.tool_use_id);
     if (id) context.failedToolUseIds.add(id);
   }
-}
-
-function codexToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
-  if (row.type !== "response_item") return [];
-  const payload = recordField(row, "payload");
-  if (!payload || (payload.type !== "function_call" && payload.type !== "custom_tool_call")) return [];
-  if (typeof payload.name !== "string") return [];
-  return [{ name: payload.name, input: payload.type === "custom_tool_call" ? payload.input : payload.arguments }];
 }
 
 function codeBuddyToolCalls(row: Record<string, unknown>): StructuredToolCall[] {

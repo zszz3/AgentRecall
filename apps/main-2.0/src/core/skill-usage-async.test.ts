@@ -45,6 +45,122 @@ describe("asynchronous skill usage refresh", () => {
     }
   });
 
+  it("counts paginated Codex runtime calls once and keeps session linkage", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-paginated-skill-usage-"));
+    try {
+      const sessionPath = path.join(homeDir, ".codex", "sessions", "2026", "08", "rollout.jsonl");
+      const skillPath = "/tmp/.codex/skills/paged-read/SKILL.md";
+      const completionOnlyPath = "/tmp/.codex/skills/paged-only/SKILL.md";
+      writeJsonl(sessionPath, [
+        {
+          type: "session_meta",
+          timestamp: "2026-08-04T00:00:00.000Z",
+          payload: { id: "s-1", cwd: "/repo", history_mode: "paginated" },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-08-04T00:00:01.000Z",
+          payload: {
+            type: "function_call",
+            name: "shell_command",
+            call_id: "cmd-1",
+            arguments: JSON.stringify({ command: `cat ${skillPath}` }),
+          },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-08-04T00:00:02.000Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-1",
+            item: {
+              type: "CommandExecution",
+              id: "cmd-1",
+              command: ["cat", skillPath],
+              cwd: "/repo",
+              status: "completed",
+              exit_code: 0,
+            },
+          },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-08-04T00:00:03.000Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-1",
+            item: {
+              type: "CommandExecution",
+              id: "cmd-2",
+              command: ["sed", "-n", "1,5p", completionOnlyPath],
+              cwd: "/repo",
+              status: "completed",
+              exit_code: 0,
+            },
+          },
+        },
+      ]);
+
+      const sources = await listSkillUsageSourcesAsync({ homeDir, codexSessionsDir: path.dirname(sessionPath) });
+      const source = sources.find((item) => item.path === sessionPath);
+      const events = await readSkillUsageSourceEventsAsync(source!);
+      expect(events).toHaveLength(2);
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ agent: "codex", skill: "paged-read", sessionId: "s-1", cwd: "/repo" }),
+        expect.objectContaining({ agent: "codex", skill: "paged-only", sessionId: "s-1", cwd: "/repo" }),
+      ]));
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Codex skill envelopes alongside structured tool calls", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-envelope-skill-usage-"));
+    try {
+      const sessionPath = path.join(homeDir, ".codex", "sessions", "2026", "08", "rollout.jsonl");
+      const skillPath = "/tmp/.codex/skills/envelope-demo/SKILL.md";
+      writeJsonl(sessionPath, [
+        {
+          type: "session_meta",
+          timestamp: "2026-08-04T00:00:00.000Z",
+          payload: { id: "s-2", cwd: "/repo" },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-08-04T00:00:01.000Z",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{
+              type: "input_text",
+              text: `<skill><name>envelope-demo</name><path>${skillPath}</path>\n# demo\n</skill>`,
+            }],
+          },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-08-04T00:00:02.000Z",
+          payload: {
+            type: "function_call",
+            name: "shell_command",
+            call_id: "cmd-1",
+            arguments: JSON.stringify({ command: `cat ${skillPath}` }),
+          },
+        },
+      ]);
+
+      const sources = await listSkillUsageSourcesAsync({ homeDir, codexSessionsDir: path.dirname(sessionPath) });
+      const source = sources.find((item) => item.path === sessionPath);
+      const events = await readSkillUsageSourceEventsAsync(source!);
+      expect(events).toHaveLength(2);
+      expect(events.filter((event) => "skillHash" in event)).toEqual([
+        expect.objectContaining({ agent: "codex", skill: "envelope-demo", sessionId: "s-2" }),
+      ]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("gates WorkBuddy usage and scans only root and subagent session layouts", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-workbuddy-skill-usage-"));
     try {
