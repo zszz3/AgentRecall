@@ -122,8 +122,12 @@ function searchTerms(query) {
   const terms = [];
   const pattern = /"([^"]+)"|(\S+)/gu;
   for (const match of String(query ?? "").matchAll(pattern)) {
+    const quoted = Boolean(match[1]);
     const value = (match[1] ?? match[2] ?? "").trim();
-    if (value) terms.push(value);
+    if (!value || value.toLocaleLowerCase() === "and") continue;
+    // 与主程序 parseSearchClauses 对齐:丢弃 AND 操作符和单字符检索词(除非显式加引号)。
+    if (!quoted && [...value].length < 2) continue;
+    if (!terms.includes(value)) terms.push(value);
   }
   return terms;
 }
@@ -162,9 +166,10 @@ export async function searchSessions(db, { query = "", source = "", project = ""
   }
 
   const q = String(query || "").trim();
-  if (q) {
+  const terms = q ? searchTerms(q) : [];
+  if (terms.length > 0) {
     const searchable = `concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary)`;
-    for (const term of searchTerms(q)) {
+    for (const term of terms) {
       params.push(likePattern(term));
       filters.push(`${searchable} ILIKE $${params.length} ESCAPE '\\'`);
     }

@@ -330,8 +330,13 @@ export function parseSearchClauses(query: string): string[] {
   const clauses: string[] = [];
   const expression = /"([^"]+)"|(\S+)/gu;
   for (const match of query.matchAll(expression)) {
+    const quoted = Boolean(match[1]);
     const value = (match[1] || match[2] || "").trim();
     if (!value || value.toLocaleLowerCase() === "and") continue;
+    // 子串(ILIKE)匹配下,单个字符(ASCII 或中文)几乎命中所有会话,无意义。
+    // 除非用户显式加引号,否则丢弃单字符检索词。
+    const meaningful = quoted || [...value].length >= 2;
+    if (!meaningful) continue;
     if (!clauses.includes(value)) clauses.push(value);
   }
   return clauses;

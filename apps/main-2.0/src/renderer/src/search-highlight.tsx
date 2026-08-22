@@ -6,8 +6,15 @@ export interface HighlightedTextPart {
 }
 
 export function searchHighlightTerms(query: string): string[] {
-  const tokens = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
-  return [...new Set(tokens.map((token) => token.toLocaleLowerCase()).filter((token) => token !== "and"))];
+  const terms: string[] = [];
+  const expression = /"([^"]+)"|([\p{L}\p{N}_]+)/gu;
+  for (const match of query.matchAll(expression)) {
+    const quoted = Boolean(match[1]);
+    const value = (match[1] ?? match[2] ?? "").trim().toLocaleLowerCase();
+    if (!value || value === "and" || (!quoted && [...value].length < 2)) continue;
+    if (!terms.includes(value)) terms.push(value);
+  }
+  return terms;
 }
 
 export function highlightedTextParts(text: string, terms: string[]): HighlightedTextPart[] {
