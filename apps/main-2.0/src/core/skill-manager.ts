@@ -58,6 +58,7 @@ export interface SkillManagerOptions {
   codexHome?: string;
   managedRoot?: string;
   managedOnly?: boolean;
+  localAgentRootsOnly?: boolean;
   projectDirs?: string[];
   claudePluginsDir?: string;
 }
@@ -105,27 +106,29 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
   const codexHome = options.codexHome || process.env.CODEX_HOME || path.join(homeDir, ".codex");
   const projectDirs = dedupePaths(options.projectDirs ?? [process.cwd()]);
   const defaultRoots: SkillRootConfig[] = [
-    ...AGENT_SKILL_REGISTRY.flatMap((entry) => {
-      const roots: SkillRootConfig[] = [];
-      if (!entry.hasUserSource || !entry.skillDir) return roots;
-      const dir = agentSkillDir(entry.id, homeDir);
-      if (!dir) return roots;
-      if (entry.id === "codex") {
-        roots.push({ agent: "codex", source: "codex-user", path: path.join(codexHome, "skills") });
-        roots.push({ agent: "codex", source: "codex-system", path: path.join(codexHome, "skills", ".system") });
-        roots.push({ agent: "codex", source: "codex-shared", path: path.join(homeDir, ".agents", "skills") });
-      } else {
-        roots.push({ agent: entry.id, source: `${entry.id}-user` as SkillSource, path: dir });
-      }
-      if (entry.hasProjectSource) {
-        roots.push(...projectDirs.map((projectDir): SkillRootConfig => ({
-          agent: entry.id,
-          source: `${entry.id}-project` as SkillSource,
-          path: path.join(projectDir, entry.skillDir!),
-        })));
-      }
-      return roots;
-    }),
+    ...AGENT_SKILL_REGISTRY
+      .filter((entry) => !options.localAgentRootsOnly || entry.id === "codex" || entry.id === "claude")
+      .flatMap((entry) => {
+        const roots: SkillRootConfig[] = [];
+        if (!entry.hasUserSource || !entry.skillDir) return roots;
+        const dir = agentSkillDir(entry.id, homeDir);
+        if (!dir) return roots;
+        if (entry.id === "codex") {
+          roots.push({ agent: "codex", source: "codex-user", path: path.join(codexHome, "skills") });
+          roots.push({ agent: "codex", source: "codex-system", path: path.join(codexHome, "skills", ".system") });
+          roots.push({ agent: "codex", source: "codex-shared", path: path.join(homeDir, ".agents", "skills") });
+        } else {
+          roots.push({ agent: entry.id, source: `${entry.id}-user` as SkillSource, path: dir });
+        }
+        if (entry.hasProjectSource && !options.localAgentRootsOnly) {
+          roots.push(...projectDirs.map((projectDir): SkillRootConfig => ({
+            agent: entry.id,
+            source: `${entry.id}-project` as SkillSource,
+            path: path.join(projectDir, entry.skillDir!),
+          })));
+        }
+        return roots;
+      }),
   ];
   const roots: SkillRootConfig[] = [
     ...(options.managedRoot
@@ -148,7 +151,7 @@ export function listInstalledSkills(options: SkillManagerOptions = {}): Installe
     skills.push(...rootSkills);
   }
 
-  if (!options.managedOnly) {
+  if (!options.managedOnly && !options.localAgentRootsOnly) {
     const pluginsDir = options.claudePluginsDir || path.join(homeDir, ".claude", "plugins");
     const pluginRoots = collectClaudePluginRoots(pluginsDir);
     const pluginSkills: InstalledSkill[] = [];

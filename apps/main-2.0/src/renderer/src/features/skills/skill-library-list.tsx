@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
-import type { ManagedSkill, ManagedSkillOriginKind } from "../../../../core/managed-skill-library";
+import type { ManagedSkill, ManagedSkillOriginKind, ManagedSkillTargetState } from "../../../../core/managed-skill-library";
 import type { RemoteSkillGroup } from "../../../../core/skill-sync";
 import { formatCompactNumber } from "../../format-count";
 import { localize, type LanguageMode } from "../../language";
+import { TARGET_LABELS } from "./skill-target-dialog";
 
 export type ManagedSkillOriginFilter = "all" | ManagedSkillOriginKind;
 export type ManagedSkillSort = "usage" | "name" | "updated";
@@ -95,11 +96,15 @@ export function SkillLibraryList({
       .map(([kind, groupSkills]) => ({ kind, skills: groupSkills }));
   }, [skills]);
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     if (skills.length === 0) return;
-    event.preventDefault();
     const current = Math.max(0, skills.findIndex((skill) => skill.managedId === selectedId));
-    const next = Math.min(skills.length - 1, Math.max(0, current + (event.key === "ArrowDown" ? 1 : -1)));
+    let next: number;
+    if (event.key === "ArrowDown") next = Math.min(skills.length - 1, current + 1);
+    else if (event.key === "ArrowUp") next = Math.max(0, current - 1);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = skills.length - 1;
+    else return;
+    event.preventDefault();
     onSelect(skills[next].managedId);
   };
 
@@ -141,7 +146,13 @@ export function SkillLibraryList({
       </div>
 
       <div className="skill-library-scroll" role="listbox" aria-label={l("Managed Skill library", "托管 Skill 库")}>
-        {loading && skills.length === 0 ? <div className="skill-library-empty">{l("Loading Skills…", "正在加载 Skill…")}</div> : null}
+        {loading && skills.length === 0 ? (
+          <div className="skill-library-skeletons" role="presentation" aria-busy="true" aria-label={l("Loading Skills…", "正在加载 Skill…")}>
+            {[0, 1, 2, 3].map((row) => (
+              <div key={row} className="skill-row-skeleton"><span /><span /></div>
+            ))}
+          </div>
+        ) : null}
         {!loading && skills.length === 0 && remoteOnlyGroups.length === 0 ? (
           <div className="skill-library-empty">
             <strong>{l("No managed Skills", "Skill 库还是空的")}</strong>
@@ -214,7 +225,7 @@ export function SkillLibraryList({
                         })() : null}
                         <span className="skill-target-dots" aria-label={l("Installation targets", "安装目标")}>
                           {skill.installations.map((installation) => (
-                            <i key={installation.target} className={installation.state} title={`${installation.target}: ${installation.state}`} />
+                            <i key={installation.target} className={installation.state} title={`${TARGET_LABELS[installation.target] ?? installation.target}: ${installStateLabel(installation.state, language)}`} />
                           ))}
                         </span>
                       </div>
@@ -282,4 +293,10 @@ export function originGroupOrder(kind: ManagedSkillOriginKind): number {
   if (kind === "skills-sh") return 1;
   if (kind === "remote") return 2;
   return 3;
+}
+
+function installStateLabel(state: ManagedSkillTargetState, language: LanguageMode): string {
+  if (state === "installed") return localize(language, "Installed", "已安装");
+  if (state === "conflict") return localize(language, "Conflict", "冲突");
+  return localize(language, "Not installed", "未安装");
 }

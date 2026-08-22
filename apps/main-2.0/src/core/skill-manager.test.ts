@@ -15,6 +15,44 @@ afterEach(() => {
 });
 
 describe("listInstalledSkills", () => {
+  it("can limit local candidates to the Codex, Claude, and shared user roots", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-local-skill-scan-"));
+    temporaryDirectories.push(homeDir);
+    const codexHome = path.join(homeDir, ".codex");
+    const projectDir = path.join(homeDir, "project");
+
+    writeSkill(path.join(codexHome, "skills", "codex-user"), "Codex user");
+    writeSkill(path.join(codexHome, "skills", ".system", "codex-system"), "Codex system");
+    writeSkill(path.join(homeDir, ".claude", "skills", "claude-user"), "Claude user");
+    writeSkill(path.join(homeDir, ".agents", "skills", "shared"), "Shared");
+    writeSkill(path.join(homeDir, ".qoder", "skills", "qoder-user"), "Qoder user");
+    writeSkill(path.join(projectDir, ".codex", "skills", "project-skill"), "Project Skill");
+    writeSkill(
+      path.join(homeDir, ".claude", "plugins", "marketplaces", "official", "plugins", "example", "skills", "plugin-skill"),
+      "Plugin Skill",
+    );
+
+    const snapshot = listInstalledSkills({
+      homeDir,
+      codexHome,
+      projectDirs: [projectDir],
+      localAgentRootsOnly: true,
+    });
+
+    expect(snapshot.skills.map((skill) => skill.name)).toEqual([
+      "Claude user",
+      "Codex system",
+      "Codex user",
+      "Shared",
+    ]);
+    expect(snapshot.roots.map((root) => root.source)).toEqual([
+      "codex-user",
+      "codex-system",
+      "codex-shared",
+      "claude-user",
+    ]);
+  });
+
   it("skips only root-level managed Skill backup directories", () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-skill-scan-"));
     temporaryDirectories.push(homeDir);

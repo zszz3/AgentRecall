@@ -361,9 +361,11 @@ export class SkillService {
     return {
       ...snapshot,
       skills: snapshot.skills.map((skill) => {
-        const stat = isSkillUsageAgent(skill.agent)
-          ? this.operations.usageForSkill(usage, skill.name, skill.agent)
-          : this.operations.usageForSkill(usage, skill.name);
+        // Local candidates are deduped by skill name, so a skill installed for
+        // several agents collapses to one row. Count usage by name (total across
+        // agents) rather than per-agent — otherwise a StepCode/Claude invocation
+        // of a skill whose surviving row is its Codex copy would read as zero.
+        const stat = this.operations.usageForSkill(usage, skill.name);
         return { ...skill, usageCount: stat?.count ?? 0, lastUsedAt: stat?.lastUsedAt ?? null };
       }),
     };
@@ -449,6 +451,7 @@ export class SkillService {
       homeDir: this.dependencies.homeDir,
       includeTclaude: settings.includeTclaude,
       includeTcodex: settings.includeTcodex,
+      includeStepcode: settings.includeStepcode,
       includeCodeBuddyCli: settings.includeCodeBuddyCli,
       includeWorkBuddy: settings.includeWorkBuddy,
       includeCodeWizCli: settings.includeCodeWizCli,

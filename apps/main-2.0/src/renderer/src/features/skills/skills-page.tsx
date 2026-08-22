@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { Compass, RefreshCw, Upload, X } from "lucide-react";
-import type { InstalledSkill, InstalledSkillsSnapshot, SkillRootStatus, SkillSource } from "../../../../core/skill-manager";
+import { Compass, PackagePlus, RefreshCw, Upload, X } from "lucide-react";
+import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
 import type { RemoteSkill, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
 import { formatCompactNumber } from "../../format-count";
@@ -11,6 +11,8 @@ import type { SkillsFeedback } from "../../app-types";
 import { LocalSkillsTab } from "./local-skills-tab";
 import { CloudSkillDetail } from "./cloud-skill-detail";
 import { SkillDiscoveryDialog } from "./skill-discovery-dialog";
+import { planBatchSkillTargetInstall } from "./skill-batch-install";
+import { SkillBatchTargetDialog } from "./skill-batch-target-dialog";
 import { SkillLibraryDetail } from "./skill-library-detail";
 import {
   filterManagedSkills,
@@ -91,6 +93,7 @@ export function SkillsPage({
   const [deleteCandidate, setDeleteCandidate] = useState<ManagedSkill | null>(null);
   const [targetBusy, setTargetBusy] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchTargetDialogOpen, setBatchTargetDialogOpen] = useState(false);
   const [appFeedback, setAppFeedback] = useState<{ kind: "success" | "warning" | "error"; message: string } | null>(null);
   const [pendingSelection, setPendingSelection] = useState<string | null>(null);
   const filteredSkills = useMemo(
@@ -202,6 +205,49 @@ export function SkillsPage({
     }
   };
 
+  const installChecked = async (targets: SkillInstallTarget[]) => {
+    const selected = managedSkills.filter((skill) => checkedIds.has(skill.managedId));
+    if (selected.length === 0 || targets.length === 0) return;
+    setBatchBusy(true);
+    setAppFeedback(null);
+    const remaining = new Set<string>();
+    const problems: string[] = [];
+    let updated = 0;
+    try {
+      for (const skill of selected) {
+        const plan = planBatchSkillTargetInstall(skill, targets);
+        if (plan.conflictTargets.length > 0) {
+          remaining.add(skill.managedId);
+          problems.push(`${skill.name}: ${plan.conflictTargets.join(", ")}`);
+        }
+        if (!plan.changed) continue;
+        try {
+          await window.sessionSearch.updateManagedSkillTargets(skill.managedId, plan.targets, []);
+          updated += 1;
+        } catch (error) {
+          remaining.add(skill.managedId);
+          problems.push(`${skill.name}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      setCheckedIds(remaining);
+      setAppFeedback(problems.length > 0
+        ? {
+          kind: "warning",
+          message: l(
+            `${updated} Skills updated. ${remaining.size} need attention: ${problems.slice(0, 3).join(" · ")}`,
+            `已更新 ${updated} 个 Skill，${remaining.size} 个需要处理：${problems.slice(0, 3).join(" · ")}`,
+          ),
+        }
+        : {
+          kind: "success",
+          message: l(`${selected.length} Skills are installed on the selected agents.`, `${selected.length} 个 Skill 已安装到所选 Agent。`),
+        });
+      onRefresh();
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   const refreshActiveTab = () => {
     if (activeTab === "local") onRefreshLocal();
     else onRefresh();
@@ -275,11 +321,24 @@ export function SkillsPage({
           aria-labelledby="app-skills-tab"
           hidden={activeTab !== "app"}
         >
-          {feedback ? <div className={`managed-skills-feedback ${feedback.kind}`}>{feedback.message}</div> : null}
-          {appFeedback ? <div className={`managed-skills-feedback ${appFeedback.kind}`}>{appFeedback.message}</div> : null}
+          {(() => {
+            // One feedback slot: an in-flight (running) message always wins, otherwise
+            // show the most recent page-action result, falling back to the controller's.
+            const active = feedback?.kind === "running" ? feedback : appFeedback ?? feedback;
+            if (!active) return null;
+            return (
+              <div className={`managed-skills-feedback ${active.kind}`}>
+                {active.kind === "running"
+                  ? <RefreshCw size={13} className="managed-skills-feedback-spin" aria-hidden="true" />
+                  : null}
+                <span>{active.message}</span>
+              </div>
+            );
+          })()}
           {checkedIds.size > 0 ? (
             <div className="managed-skills-batch-bar">
               <span>{l(`${checkedIds.size} selected`, `已选择 ${checkedIds.size} 个`)}</span>
+              <button type="button" onClick={() => setBatchTargetDialogOpen(true)} disabled={loading || batchBusy}><PackagePlus size={13} />{l("Install selected", "安装所选")}</button>
               <button type="button" onClick={() => void uploadChecked()} disabled={loading || batchBusy || syncSnapshot.status.kind !== "ready"}><Upload size={13} />{l("Upload selected", "上传所选")}</button>
               <button type="button" onClick={() => setCheckedIds(new Set())}>{l("Clear", "清空")}</button>
             </div>
@@ -368,13 +427,28 @@ export function SkillsPage({
       </section>
 
       <SkillDiscoveryDialog open={discoveryOpen} language={language} onClose={() => setDiscoveryOpen(false)} onImported={libraryChanged} />
+      <SkillBatchTargetDialog
+        open={batchTargetDialogOpen}
+        skills={managedSkills.filter((skill) => checkedIds.has(skill.managedId))}
+        busy={batchBusy}
+        language={language}
+        onClose={() => setBatchTargetDialogOpen(false)}
+        onSave={installChecked}
+      />
       {deleteCandidate ? (
         <div className="dialog-backdrop managed-skill-dialog-backdrop" onMouseDown={() => setDeleteCandidate(null)}>
-          <section className="command-dialog managed-skill-delete-dialog" onMouseDown={(event) => event.stopPropagation()}>
-            <header><h3>{l("Delete from Skill library?", "从 Skill 库删除？")}</h3><button type="button" className="icon-button" onClick={() => setDeleteCandidate(null)}><X size={16} /></button></header>
+          <section
+            className="command-dialog managed-skill-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="skill-delete-dialog-title"
+            onMouseDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => { if (event.key === "Escape") setDeleteCandidate(null); }}
+          >
+            <header><h3 id="skill-delete-dialog-title">{l("Delete from Skill library?", "从 Skill 库删除？")}</h3><button type="button" className="icon-button" onClick={() => setDeleteCandidate(null)} aria-label={l("Close", "关闭")}><X size={16} /></button></header>
             <p>{l(`AgentRecall will delete “${deleteCandidate.name}” and remove only links it owns. Existing conflicting folders remain untouched.`, `AgentRecall 会删除“${deleteCandidate.name}”，并只移除自己创建的链接；有冲突的原目录不会被修改。`)}</p>
             <code title={deleteCandidate.directoryPath}>{deleteCandidate.directoryPath}</code>
-            <footer><button type="button" onClick={() => setDeleteCandidate(null)}>{l("Cancel", "取消")}</button><button type="button" className="danger-action" onClick={() => void confirmDelete()}>{l("Delete", "删除")}</button></footer>
+            <footer><button type="button" autoFocus onClick={() => setDeleteCandidate(null)}>{l("Cancel", "取消")}</button><button type="button" className="danger-action" onClick={() => void confirmDelete()}>{l("Delete", "删除")}</button></footer>
           </section>
         </div>
       ) : null}
@@ -388,31 +462,4 @@ export function isManagedSkill(skill: InstalledSkill): skill is ManagedSkill {
   return typeof candidate.managedId === "string"
     && Boolean(candidate.origin)
     && Array.isArray(candidate.installations);
-}
-
-export function summarizeSkillRoots(roots: SkillRootStatus[]): SkillRootStatus[] {
-  const visible: SkillRootStatus[] = [];
-  const projectRoots = new Map<SkillSource, SkillRootStatus[]>();
-  for (const root of roots) {
-    if (root.source !== "codex-project" && root.source !== "claude-project") {
-      visible.push(root);
-      continue;
-    }
-    const group = projectRoots.get(root.source) ?? [];
-    group.push(root);
-    projectRoots.set(root.source, group);
-  }
-  for (const [source, group] of projectRoots) {
-    const existing = group.filter((root) => root.exists);
-    const skillCount = group.reduce((sum, root) => sum + root.skillCount, 0);
-    if (existing.length === 0 && skillCount === 0) continue;
-    visible.push({
-      agent: group[0].agent,
-      source,
-      path: (existing.length > 0 ? existing : group).map((root) => root.path).join("\n"),
-      exists: existing.length > 0,
-      skillCount,
-    });
-  }
-  return visible;
 }

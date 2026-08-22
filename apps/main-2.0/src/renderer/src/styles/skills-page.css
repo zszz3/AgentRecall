@@ -210,6 +210,20 @@
   color: var(--warning, #b7791f);
 }
 
+.managed-skills-feedback.running {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.managed-skills-feedback-spin {
+  flex: 0 0 auto;
+  animation: skills-spin 0.9s linear infinite;
+}
+
+@keyframes skills-spin {
+  to { transform: rotate(360deg); }
+}
+
 .managed-skills-batch-bar {
   min-height: 38px;
   flex: 0 0 auto;
@@ -1681,4 +1695,43 @@
 .skill-eval-badge-link:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Loading skeleton rows for the managed Skill list */
+.skill-library-skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.skill-row-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 12px;
+  border-radius: var(--radius, 8px);
+  background: var(--panel-subtle);
+}
+
+.skill-row-skeleton span {
+  height: 9px;
+  border-radius: 4px;
+  background: var(--border-subtle);
+  animation: skills-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.skill-row-skeleton span:first-child { width: 62%; }
+.skill-row-skeleton span:last-child { width: 40%; height: 8px; }
+
+@keyframes skills-skeleton-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .managed-skills-feedback-spin,
+  .skill-row-skeleton span {
+    animation: none;
+  }
 }

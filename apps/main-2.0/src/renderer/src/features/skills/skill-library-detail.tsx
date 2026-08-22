@@ -100,16 +100,6 @@ export function SkillLibraryDetail({
           </div>
         </header>
 
-        <section className="managed-skill-document">
-          <div className="managed-skill-document-head">
-            <span>SKILL.md</span>
-            <small>{l(`Used ${skill.usageCount ?? 0} times`, `使用 ${skill.usageCount ?? 0} 次`)}</small>
-          </div>
-          <div className="managed-skill-markdown">
-            <Markdown text={markdownPreview(skill.markdown, 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
-          </div>
-        </section>
-
         <SkillSyncPanel
           skill={skill}
           entry={entry}
@@ -124,6 +114,16 @@ export function SkillLibraryDetail({
           onCopySetupSql={onCopySetupSql}
           onOpenSqlEditor={onOpenSqlEditor}
         />
+
+        <section className="managed-skill-document">
+          <div className="managed-skill-document-head">
+            <span>SKILL.md</span>
+            <small>{l(`Used ${skill.usageCount ?? 0} times`, `使用 ${skill.usageCount ?? 0} 次`)}</small>
+          </div>
+          <div className="managed-skill-markdown">
+            <Markdown text={markdownPreview(skill.markdown, 18_000, l("…(truncated)", "…（已截断）"))} language={language} />
+          </div>
+        </section>
       </main>
       <SkillTargetDialog
         open={targetDialogOpen}

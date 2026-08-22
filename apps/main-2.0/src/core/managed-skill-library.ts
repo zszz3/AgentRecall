@@ -172,6 +172,7 @@ export class ManagedSkillLibrary {
       homeDir: this.homeDir,
       codexHome: this.codexHome,
       projectDirs,
+      localAgentRootsOnly: true,
     });
     return {
       ...snapshot,
