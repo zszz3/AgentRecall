@@ -106,15 +106,16 @@ Run focused Vitest files from the affected app while iterating, for example `npm
 
 - MRs target `main`; direct feature pushes to `main` are not part of the development workflow. Split independent changes into independent branches.
 - Every development branch with user-visible changes adds exactly one `.release-notes/<branch-slug>.md` before opening an MR. A branch may omit the note only when every changed file is release infrastructure: `.github/**`, `AGENTS.md`, `.release-notes/README.md`, `scripts/release-notes.mjs`, or `scripts/release-notes.test.mjs`.
-- Put exactly one routing marker immediately after the note title: `<!-- release-target: v1 -->`, `<!-- release-target: v2 -->`, or `<!-- release-target: both -->`. Use `both` only when the same user-visible outcome ships in both products.
+- Every new note must put exactly one of `<!-- release-target: v1 -->`, `<!-- release-target: v2 -->`, or `<!-- release-target: both -->` immediately after the note title. Use `both` only when the same user-visible outcome ships in both products.
 - A note has one `#` title and at least one bullet under `## 新增功能` or `## Bug 修复`. It is final product copy consumed verbatim by GitHub Releases, the terminal, and the update UI.
-- Describe concrete user outcomes. Exclude PRs, branches, commits, CI, pipelines, refactors, tests, internal services, databases, paths, credentials, and implementation mechanics unless that detail is itself a user-facing feature. Do not use vague copy such as “优化代码” or “修复一些问题”.
+- Release notes are product copy for end users, not engineering change logs. Describe concrete user outcomes and exclude PRs, branches, commits, CI, pipelines, refactors, tests, internal services, databases, paths, credentials, and implementation mechanics unless that detail is itself a user-facing feature. Do not use vague copy such as “优化代码” or “修复一些问题”.
+- Remove internal-only changes entirely. If a useful outcome contains private or sensitive context, rewrite it at the product-behavior level and omit identifiers, hosts, paths, table names, credentials, and organizational details.
 - Run `npm run release-note:check` before opening or merging an MR. Do not proceed while it fails.
 
 ## Merge and release
 
 - MRs merged into `main` accumulate release notes; they do not publish immediately. The scheduled workflow publishes pending notes daily at 10:00 Beijing time and can be triggered manually for an urgent release.
-- V1 and V2 are versioned and published independently. Scheduled and manual runs publish only products with matching pending notes; a run with no notes since the latest stable tag exits without a release.
+- V1 and V2 are versioned and published independently. Scheduled and manual runs publish only products with matching pending notes; manually starting the workflow does not force both products to release. A run with no notes since the latest stable tag exits without a release.
 - V1 `vX.Y.Z` releases own GitHub's repository-wide `Latest` marker and `releases/latest/download`. V2 uses immutable `v2-X.Y.Z` releases and the moving `v2-latest` install/update pointer.
 - Use semantic versions conservatively. Routine fixes and small behavior changes bump `z`; a meaningful capability increase or concentrated major-fix batch bumps `y`; any `x` increase requires explicit user confirmation.
 - The current workflow treats any `新增功能` entry as a `y` bump and a release containing only `Bug 修复` entries as a `z` bump. Reserve `新增功能` for changes intended to justify a minor release.
