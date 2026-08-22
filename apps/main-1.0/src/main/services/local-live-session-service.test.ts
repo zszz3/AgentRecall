@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalLiveSessionService } from "./local-live-session-service";
 
 const roots: string[] = [];
@@ -78,6 +79,23 @@ describe("LocalLiveSessionService", () => {
       generatedAt: "restarted",
       sessions: [],
     });
+  });
+
+  it("terminates the crashed worker so its thread is reclaimed", async () => {
+    const service = serviceFor(`
+      import { parentPort } from "node:worker_threads";
+      parentPort.on("message", () => {
+        throw new Error("live worker crashed");
+      });
+    `);
+
+    const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+    try {
+      await expect(service.load({ homeDir: "boom" })).rejects.toThrow("live worker crashed");
+      expect(terminateSpy).toHaveBeenCalled();
+    } finally {
+      terminateSpy.mockRestore();
+    }
   });
 
   it("keeps the main thread heartbeat responsive during blocking worker work", async () => {

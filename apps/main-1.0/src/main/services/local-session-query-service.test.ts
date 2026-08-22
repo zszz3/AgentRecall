@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalSessionQueryService } from "./local-session-query-service";
 
 const roots: string[] = [];
@@ -95,6 +96,23 @@ describe("LocalSessionQueryService", () => {
 
     await expect(first).rejects.toThrow("worker crashed");
     await expect(second).rejects.toThrow("worker crashed");
+  });
+
+  it("terminates the crashed worker so its thread is reclaimed", async () => {
+    const service = serviceFor(`
+      import { parentPort } from "node:worker_threads";
+      parentPort.on("message", () => {
+        throw new Error("worker crashed");
+      });
+    `);
+
+    const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+    try {
+      await expect(service.listTags({ projectPath: "boom" })).rejects.toThrow("worker crashed");
+      expect(terminateSpy).toHaveBeenCalled();
+    } finally {
+      terminateSpy.mockRestore();
+    }
   });
 
   it("returns a rejected promise when the worker cannot be started", async () => {

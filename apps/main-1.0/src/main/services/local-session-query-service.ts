@@ -155,6 +155,9 @@ export class LocalSessionQueryService {
       this.pending.delete(requestId);
       pending.reject(error);
     }
+    // The worker may not have exited on its own (e.g. an uncaught error in a
+    // thread that stays alive); reclaim its thread instead of leaking it.
+    void worker.terminate();
   }
 
   private hasPendingFor(worker: Worker): boolean {
