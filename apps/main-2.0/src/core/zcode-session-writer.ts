@@ -14,6 +14,7 @@ const SESSION_RELATED_TABLES = [
   "turn_usage",
   "tool_usage",
   "input_history",
+  "session_target",
 ] as const;
 
 type DatabaseSchema = "main" | "zcode_tasks";
