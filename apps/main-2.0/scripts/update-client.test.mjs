@@ -1786,7 +1786,7 @@ test("forces an uncached Electron reinstall after normal repair and cache recove
       'const fs = require("node:fs"); const path = require("node:path");',
       'fs.rmSync(path.join(__dirname, "dist"), { recursive: true, force: true });',
       'fs.mkdirSync(path.join(__dirname, "dist"), { recursive: true });',
-      'if (process.env.force_no_cache === "true") {',
+      'if (process.env.force_no_cache === "true" && process.env.ELECTRON_MIRROR === "https://npmmirror.com/mirrors/electron/" && process.env.ELECTRON_CUSTOM_DIR === "{{ version }}") {',
       `  const executable = path.join(__dirname, "dist", ${JSON.stringify(relativeExecutable)});`,
       `  const defaultApp = path.join(__dirname, "dist", ${JSON.stringify(relativeDefaultApp)});`,
       '  fs.mkdirSync(path.dirname(executable), { recursive: true }); fs.writeFileSync(executable, "#!/bin/sh\\necho v42.3.0\\n"); fs.chmodSync(executable, 0o755);',
@@ -1803,16 +1803,29 @@ test("forces an uncached Electron reinstall after normal repair and cache recove
   await ensureInstalledElectron({
     packagePath,
     timeoutMs: 5_000,
+    env: { force_no_cache: "", ELECTRON_MIRROR: "", ELECTRON_CUSTOM_DIR: "" },
     findCachedArchiveImpl: async () => null,
     execFileImpl: async (command, args, options) => {
       if (command === process.execPath && args[0] === path.join(electronPath, "install.js")) {
-        installRuns.push(options.env.force_no_cache || "");
+        installRuns.push({
+          forceNoCache: options.env.force_no_cache || "",
+          mirror: options.env.ELECTRON_MIRROR || "",
+          customDir: options.env.ELECTRON_CUSTOM_DIR || "",
+        });
       }
       return electronFixtureExec(command, args, options);
     },
   });
 
-  assert.deepEqual(installRuns, ["", "true"]);
+  assert.deepEqual(installRuns, [
+    { forceNoCache: "", mirror: "", customDir: "" },
+    { forceNoCache: "true", mirror: "", customDir: "" },
+    {
+      forceNoCache: "true",
+      mirror: "https://npmmirror.com/mirrors/electron/",
+      customDir: "{{ version }}",
+    },
+  ]);
   assert.equal(await readFile(path.join(electronPath, "path.txt"), "utf8"), relativeExecutable);
   assert.equal(isElectronRuntimeReady(packagePath), true);
 });

@@ -29,6 +29,7 @@ const LATEST_UPDATE_MANIFEST_URL = `${LATEST_RELEASE_URL}/download/${STABLE_INST
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const UPDATE_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
+const ELECTRON_FALLBACK_MIRROR = "https://npmmirror.com/mirrors/electron/";
 const TRANSIENT_REMOVE_ERROR_CODES = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 
 function packageRoot() {
@@ -1028,10 +1029,14 @@ async function ensureInstalledElectron(options = {}) {
     if (fs.existsSync(distBackup)) await fsp.rename(distBackup, cleanupPath);
     await removeRuntimeDirectory(cleanupPath).catch(() => undefined);
   };
-  const repairViaInstallScript = async (forceNoCache = false) => {
+  const repairViaInstallScript = async ({ forceNoCache = false, mirror, customDir } = {}) => {
+    const environment = { ...nodeEnvironment };
+    if (forceNoCache) environment.force_no_cache = "true";
+    if (mirror !== undefined) environment.ELECTRON_MIRROR = mirror;
+    if (customDir !== undefined) environment.ELECTRON_CUSTOM_DIR = customDir;
     await run(nodePath, [installScript], {
       cwd: electronModulePath,
-      env: forceNoCache ? { ...nodeEnvironment, force_no_cache: "true" } : nodeEnvironment,
+      env: environment,
       timeout,
       maxBuffer: 16 * 1024 * 1024,
     });
@@ -1132,12 +1137,20 @@ async function ensureInstalledElectron(options = {}) {
   };
   try {
     if (await attemptRepair(repairFromRuntimeSource)) return;
-    if (await attemptRepair(() => repairViaInstallScript(false))) return;
+    if (await attemptRepair(() => repairViaInstallScript())) return;
     if (await attemptRepair(repairMissingPathFile)) return;
     if (await attemptRepair(repairFromCachedArchive)) return;
     await removeRuntimeDirectory(distPath).catch(() => undefined);
     await fsp.rm(pathFile, { force: true }).catch(() => undefined);
-    if (await attemptRepair(() => repairViaInstallScript(true))) return;
+    if (await attemptRepair(() => repairViaInstallScript({ forceNoCache: true }))) return;
+    if (await attemptRepair(repairMissingPathFile)) return;
+    await removeRuntimeDirectory(distPath).catch(() => undefined);
+    await fsp.rm(pathFile, { force: true }).catch(() => undefined);
+    if (await attemptRepair(() => repairViaInstallScript({
+      forceNoCache: true,
+      mirror: ELECTRON_FALLBACK_MIRROR,
+      customDir: "{{ version }}",
+    }))) return;
     if (await attemptRepair(repairMissingPathFile)) return;
     throw repairError || new Error("Electron runtime files are incomplete.");
   } catch (error) {

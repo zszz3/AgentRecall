@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -59,14 +59,20 @@ test("V2 development startup repairs Electron without disabling TLS verification
   assert.equal(packageJson.scripts.predev, "node ../../scripts/ensure-electron-runtime.mjs .");
   assert.match(source, /"--proto-redir", "=https"/);
   assert.match(source, /checksums\[fileName\]/);
+  assert.match(source, /mkdtemp\(path\.join\(electronDirectory, "\.agent-recall-electron-"\)\)/);
   assert.doesNotMatch(source, /NODE_TLS_REJECT_UNAUTHORIZED/);
 });
 
-test("keeps a complete V2 Electron runtime unchanged in an isolated checkout", async (t) => {
+test("keeps a complete V2 Electron runtime unchanged and removes only stale staging", async (t) => {
   const fixture = await temporaryRepository(t);
   const electronDirectory = path.join(fixture.directory, "apps", "main-2.0", "node_modules", "electron");
   const { executable } = electronRuntimeDetails({ version: "42.9.2" });
+  const staleStaging = path.join(electronDirectory, ".agent-recall-electron-stale");
+  const recentStaging = path.join(electronDirectory, ".agent-recall-electron-recent");
   await mkdir(path.join(electronDirectory, "dist", path.dirname(executable)), { recursive: true });
+  await Promise.all([mkdir(staleStaging), mkdir(recentStaging)]);
+  const staleTime = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  await utimes(staleStaging, staleTime, staleTime);
   await Promise.all([
     writeFile(path.join(electronDirectory, "package.json"), JSON.stringify({ version: "42.9.2" })),
     writeFile(path.join(electronDirectory, "checksums.json"), "{}\n"),
@@ -82,6 +88,8 @@ test("keeps a complete V2 Electron runtime unchanged in an isolated checkout", a
 
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
+  await assert.rejects(access(staleStaging), (error) => error?.code === "ENOENT");
+  await access(recentStaging);
 });
 
 test("explains how to install missing V2 dependencies", async (t) => {

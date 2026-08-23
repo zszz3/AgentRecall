@@ -1,9 +1,8 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -12,6 +11,8 @@ const defaultMirrors = [
   "https://github.com/electron/electron/releases/download/",
   "https://npmmirror.com/mirrors/electron/",
 ];
+const staleStagingAgeMs = 24 * 60 * 60 * 1000;
+const staleCleanupRaceCodes = new Set(["EBUSY", "ENOENT", "ENOTEMPTY", "EPERM"]);
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -76,6 +77,22 @@ async function runtimeReady(electronDirectory, executable, expectedVersion) {
   }
 }
 
+async function removeStaleStagingDirectories(electronDirectory, now = Date.now()) {
+  const entries = await readdir(electronDirectory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(".agent-recall-electron-")) continue;
+    const entryPath = path.join(electronDirectory, entry.name);
+    try {
+      const metadata = await stat(entryPath);
+      if (now - metadata.mtimeMs < staleStagingAgeMs) continue;
+      await rm(entryPath, { recursive: true, force: true });
+    } catch (error) {
+      // Another startup may still own or have already removed this staging directory.
+      if (!staleCleanupRaceCodes.has(error?.code)) throw error;
+    }
+  }
+}
+
 async function downloadWithSystemTrust(urls, destination) {
   const curl = process.platform === "win32" ? "curl.exe" : "curl";
   const errors = [];
@@ -129,11 +146,12 @@ export async function ensureElectronRuntime(appDirectory) {
     throw error;
   }
   const { fileName, executable } = electronRuntimeDetails({ version: packageJson.version });
+  await removeStaleStagingDirectories(electronDirectory);
   if (await runtimeReady(electronDirectory, executable, packageJson.version)) return;
 
   const expectedChecksum = checksums[fileName];
   if (!expectedChecksum) throw new Error(`Electron checksum is unavailable for ${fileName}.`);
-  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-recall-electron-"));
+  const temporaryDirectory = await mkdtemp(path.join(electronDirectory, ".agent-recall-electron-"));
   const archive = path.join(temporaryDirectory, fileName);
   const stagedDist = path.join(temporaryDirectory, "dist");
   const backupDist = path.join(temporaryDirectory, "previous-dist");
