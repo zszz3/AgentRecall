@@ -83,6 +83,14 @@ export function buildRuntimePlan(input) {
         : []),
       `openviking[local-embed]==${openVikingPackageVersion}`,
       "mcp>=1.27.0,<2",
+      // openviking hashes primary keys through xxhash.xxh64(str) in
+      // storage/vectordb/utils/str_to_uint64.py. xxhash 4 dropped implicit
+      // string encoding and raises "Strings must be encoded before hashing",
+      // which makes every local vector read, write, and delete throw. The
+      // caller swallows that error, so long-term memory silently indexes
+      // nothing and recall always comes back empty. 3.x accepts str and
+      // produces identical digests, so pin below 4 until upstream encodes.
+      "xxhash<4",
     ],
   };
 }

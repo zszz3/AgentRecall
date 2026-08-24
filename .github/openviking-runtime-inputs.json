@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "runtimeVersion": "0.4.11-r6",
+  "runtimeVersion": "0.4.11-r7",
   "nodeVersion": "22.23.1",
   "rustToolchain": "1.97.1",
   "nodeDependencies": [

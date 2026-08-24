@@ -566,7 +566,7 @@ test("accepts only a complete published OpenViking runtime release with matching
 test("OpenViking runtime probe CLI falls back for ordinary misses but fails a revision conflict", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-recall-openviking-probe-cli-"));
   const smallAssetsDirectory = path.join(directory, "small-assets");
-  const runtimeVersion = "0.4.11-r6";
+  const runtimeVersion = "0.4.11-r7";
   const expectedTag = "v2-0.10.1";
   const inputs = await loadOpenVikingRuntimeInputs({ configPath: ".github/openviking-runtime-inputs.json" });
   assert.equal(inputs.config.runtimeVersion, runtimeVersion);
