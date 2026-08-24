@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { access, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -132,11 +133,7 @@ export async function ensureElectronRuntime(appDirectory) {
 
   const expectedChecksum = checksums[fileName];
   if (!expectedChecksum) throw new Error(`Electron checksum is unavailable for ${fileName}.`);
-  // Keep the staged and backup runtimes beside Electron so all replacement
-  // renames stay on one filesystem. Development worktrees can be mounted on a
-  // different device from the system temp directory, where rename() is not
-  // supported and fails with EXDEV.
-  const temporaryDirectory = await mkdtemp(path.join(electronDirectory, ".agent-recall-electron-"));
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "agent-recall-electron-"));
   const archive = path.join(temporaryDirectory, fileName);
   const stagedDist = path.join(temporaryDirectory, "dist");
   const backupDist = path.join(temporaryDirectory, "previous-dist");

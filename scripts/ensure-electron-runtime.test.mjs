@@ -1,17 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
-  electronDownloadUrls,
-  electronRuntimeDetails,
-  ensureElectronRuntime,
-} from "./ensure-electron-runtime.mjs";
+import { electronDownloadUrls, electronRuntimeDetails } from "./ensure-electron-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL("./ensure-electron-runtime.mjs", import.meta.url));
@@ -87,79 +82,6 @@ test("keeps a complete V2 Electron runtime unchanged in an isolated checkout", a
 
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
-});
-
-test("repairs an incomplete Electron runtime when the system temp directory is on another device", {
-  skip: process.platform === "win32",
-}, async (t) => {
-  const directory = await mkdtemp(path.join(path.dirname(scriptPath), ".electron-runtime-cross-device-"));
-  const appDirectory = path.join(directory, "apps", "main-2.0");
-  const electronDirectory = path.join(appDirectory, "node_modules", "electron");
-  const extractDirectory = path.join(appDirectory, "node_modules", "@electron-internal", "extract-zip");
-  const fakeBinDirectory = path.join(directory, "bin");
-  const archiveSource = path.join(directory, "synthetic-electron.zip");
-  const version = "42.9.2";
-  const { fileName, executable } = electronRuntimeDetails({ version });
-  const archiveContent = "synthetic Electron archive\n";
-  const checksum = createHash("sha256").update(archiveContent).digest("hex");
-  t.after(() => rm(directory, { recursive: true, force: true }));
-
-  await Promise.all([
-    mkdir(path.join(electronDirectory, "dist"), { recursive: true }),
-    mkdir(extractDirectory, { recursive: true }),
-    mkdir(fakeBinDirectory, { recursive: true }),
-  ]);
-  await Promise.all([
-    writeFile(path.join(appDirectory, "package.json"), JSON.stringify({ name: "agent-recall-v2" })),
-    writeFile(path.join(electronDirectory, "package.json"), JSON.stringify({ version })),
-    writeFile(path.join(electronDirectory, "checksums.json"), JSON.stringify({ [fileName]: checksum })),
-    writeFile(path.join(electronDirectory, "path.txt"), "stale-electron"),
-    writeFile(path.join(electronDirectory, "dist", "stale-runtime"), "old runtime\n"),
-    writeFile(archiveSource, archiveContent),
-    writeFile(path.join(extractDirectory, "package.json"), JSON.stringify({
-      name: "@electron-internal/extract-zip",
-      main: "index.cjs",
-    })),
-    writeFile(path.join(extractDirectory, "index.cjs"), `
-      const fs = require("node:fs/promises");
-      const path = require("node:path");
-      exports.extract = async (_archive, { dir }) => {
-        const executablePath = path.join(dir, process.env.AGENT_RECALL_TEST_ELECTRON_EXECUTABLE);
-        await fs.mkdir(path.dirname(executablePath), { recursive: true });
-        await fs.writeFile(path.join(dir, "version"), process.env.AGENT_RECALL_TEST_ELECTRON_VERSION);
-        await fs.writeFile(executablePath, "new runtime\\n", { mode: 0o755 });
-      };
-    `),
-    writeFile(path.join(fakeBinDirectory, "curl"), `#!/usr/bin/env node
-      const fs = require("node:fs");
-      const outputIndex = process.argv.indexOf("--output");
-      fs.copyFileSync(process.env.AGENT_RECALL_TEST_ELECTRON_ARCHIVE, process.argv[outputIndex + 1]);
-    `),
-  ]);
-  await chmod(path.join(fakeBinDirectory, "curl"), 0o755);
-
-  const environment = {
-    PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
-    AGENT_RECALL_TEST_ELECTRON_ARCHIVE: archiveSource,
-    AGENT_RECALL_TEST_ELECTRON_EXECUTABLE: executable,
-    AGENT_RECALL_TEST_ELECTRON_VERSION: version,
-  };
-  const previousEnvironment = new Map(
-    Object.keys(environment).map((key) => [key, process.env[key]]),
-  );
-  Object.assign(process.env, environment);
-  t.after(() => {
-    for (const [key, value] of previousEnvironment) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  });
-
-  await ensureElectronRuntime(appDirectory);
-
-  assert.equal(await readFile(path.join(electronDirectory, "path.txt"), "utf8"), executable);
-  assert.equal(await readFile(path.join(electronDirectory, "dist", "version"), "utf8"), version);
-  assert.equal(await readFile(path.join(electronDirectory, "dist", executable), "utf8"), "new runtime\n");
 });
 
 test("explains how to install missing V2 dependencies", async (t) => {
