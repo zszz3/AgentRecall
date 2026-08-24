@@ -326,7 +326,7 @@ export class CodexToolCallCollector {
       if (!propertyName) return;
       const normalized = splitToolName(propertyName);
       const args = Array.isArray(node.arguments) ? node.arguments : [];
-      const evaluated = args.length === 0 ? { resolved: true, value: {} } : literalValue(args[0]);
+      const evaluated = args.length === 0 ? { resolved: true, value: {} } : staticArgumentValue(args[0]);
       const currentOrdinal = ordinal++;
       this.add({
         callId: syntheticId(parentCallId, "ast", currentOrdinal),
@@ -646,6 +646,29 @@ function literalValue(node: unknown): { resolved: boolean; value: unknown } {
     return { resolved: true, value: result };
   }
   return { resolved: false, value: null };
+}
+
+function staticArgumentValue(node: unknown): { resolved: boolean; value: unknown } {
+  const evaluated = literalValue(node);
+  if (evaluated.resolved) return evaluated;
+
+  const value = record(node);
+  if (value?.type !== "ObjectExpression") return evaluated;
+  const properties = Array.isArray(value.properties) ? value.properties : [];
+  const result: Record<string, unknown> = {};
+  for (const propertyValue of properties) {
+    const property = record(propertyValue);
+    if (!property || property.type !== "ObjectProperty" || property.computed === true) return evaluated;
+    const key = record(property.key);
+    const keyText = key?.type === "Identifier" ? text(key.name) : text(key?.value);
+    if (!keyText) return evaluated;
+    const propertyResult = literalValue(property.value);
+    if (propertyResult.resolved) result[keyText] = propertyResult.value;
+    else delete result[keyText];
+  }
+  return Object.keys(result).length > 0
+    ? { resolved: true, value: result }
+    : evaluated;
 }
 
 function completedStatus(status: unknown): ToolCallStatus {

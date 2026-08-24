@@ -102,7 +102,13 @@ export type TurnTimelineItem =
       timestampMs: number | null;
       order: number;
       span: SessionTraceSpan;
+      childSpans: TurnTimelineSpanNode[];
     };
+
+export interface TurnTimelineSpanNode {
+  span: SessionTraceSpan;
+  children: TurnTimelineSpanNode[];
+}
 
 export type TurnMessageRoleFilter = "all" | "user" | "assistant";
 
@@ -112,6 +118,22 @@ function timestampMs(timestamp: string | null): number | null {
   if (!timestamp) return null;
   const parsed = Date.parse(timestamp);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function spanToolAttributes(span: SessionTraceSpan): Record<string, unknown> | null {
+  const tool = span.attributes.tool;
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) return null;
+  return tool as Record<string, unknown>;
+}
+
+function spanExecutionEvidence(span: SessionTraceSpan): string | null {
+  const evidence = spanToolAttributes(span)?.executionEvidence;
+  return typeof evidence === "string" ? evidence : null;
+}
+
+function spanWasParsedFromCodeMode(span: SessionTraceSpan): boolean {
+  return spanExecutionEvidence(span) === "static-only"
+    || spanToolAttributes(span)?.parsedFromCodeMode === true;
 }
 
 export function buildTurnTimeline(
@@ -130,6 +152,21 @@ export function buildTurnTimeline(
         const eventType = typeof span.attributes.eventType === "string" ? span.attributes.eventType : null;
         return tracePresentation({ kind, eventType }).category !== "tool";
       });
+  const spanNodes = new Map<string, TurnTimelineSpanNode>(
+    visibleSpans.map((span) => [span.id, { span, children: [] }]),
+  );
+  const rootSpanNodes: TurnTimelineSpanNode[] = [];
+  for (const span of visibleSpans) {
+    const node = spanNodes.get(span.id)!;
+    const parent = spanWasParsedFromCodeMode(span) && span.parentSpanId
+      ? spanNodes.get(span.parentSpanId)
+      : undefined;
+    if (parent && parent !== node) {
+      parent.children.push(node);
+    } else {
+      rootSpanNodes.push(node);
+    }
+  }
   const items: TurnTimelineItem[] = [
     ...visibleMessages.map((message) => ({
       kind: "message" as const,
@@ -138,12 +175,13 @@ export function buildTurnTimeline(
       order: message.messageIndex * 2,
       message,
     })),
-    ...visibleSpans.map((span) => ({
+    ...rootSpanNodes.map(({ span, children }) => ({
           kind: "span" as const,
           key: `span:${span.id}`,
           timestampMs: timestampMs(span.startedAt),
           order: span.spanIndex * 2 + 1,
           span,
+          childSpans: children,
         })),
   ];
 
@@ -164,12 +202,21 @@ interface TurnFindMatch {
 
 function turnTimelineSearchText(item: TurnTimelineItem): string {
   if (item.kind === "message") return item.message.content;
+  const spanText = (node: TurnTimelineSpanNode): string => [
+    node.span.name,
+    node.span.error,
+    node.span.input ? payloadText(node.span.input) : "",
+    node.span.output ? payloadText(node.span.output) : "",
+    JSON.stringify(node.span.attributes),
+    ...node.children.map(spanText),
+  ].filter(Boolean).join(" ");
   return [
     item.span.name,
     item.span.error,
     item.span.input ? payloadText(item.span.input) : "",
     item.span.output ? payloadText(item.span.output) : "",
     JSON.stringify(item.span.attributes),
+    ...item.childSpans.map(spanText),
   ].filter(Boolean).join(" ");
 }
 
@@ -254,7 +301,11 @@ export function TurnMigrationContextMenu({
   );
 }
 
-function spanStatusSymbol(status: SessionTraceSpan["status"]): string {
+function spanStatusSymbol(span: SessionTraceSpan): string {
+  const evidence = spanExecutionEvidence(span);
+  if (evidence === "static-only") return "◇";
+  if (evidence === "recorded-request") return "→";
+  const status = span.status;
   if (status === "completed") return "✓";
   if (status === "failed") return "✕";
   if (status === "running") return "→";
@@ -262,7 +313,11 @@ function spanStatusSymbol(status: SessionTraceSpan["status"]): string {
   return "•";
 }
 
-function spanStatusLabel(status: SessionTraceSpan["status"], language: LanguageMode): string {
+function spanStatusLabel(span: SessionTraceSpan, language: LanguageMode): string {
+  const evidence = spanExecutionEvidence(span);
+  if (evidence === "static-only") return localize(language, "Statically identified", "静态识别");
+  if (evidence === "recorded-request") return localize(language, "Requested", "已请求");
+  const status = span.status;
   if (status === "running") return localize(language, "Running", "进行中");
   if (status === "completed") return localize(language, "Completed", "已完成");
   if (status === "failed") return localize(language, "Failed", "失败");
@@ -442,12 +497,36 @@ function spanDisplayName(span: SessionTraceSpan): string {
     : span.name;
 }
 
+const PARSED_TOOL_SUMMARY_LIMIT = 240;
+
+function parsedToolSummary(span: SessionTraceSpan): string {
+  const preferredKeys = ["cmd", "command", "query", "path", "file_path", "url"];
+  let summary = "";
+  for (const key of preferredKeys) {
+    const value = span.input?.[key];
+    if (typeof value === "string" && value.trim()) {
+      summary = value.trim();
+      break;
+    }
+    if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+      summary = value.join(" ");
+      break;
+    }
+  }
+  if (!summary && span.input) summary = payloadText(span.input).replace(/\s+/g, " ").trim();
+  return summary.length > PARSED_TOOL_SUMMARY_LIMIT
+    ? `${summary.slice(0, PARSED_TOOL_SUMMARY_LIMIT)}…`
+    : summary;
+}
+
 function TurnSpanBlock({
   span,
+  children = [],
   language,
   target = false,
 }: {
   span: SessionTraceSpan;
+  children?: TurnTimelineSpanNode[];
   language: LanguageMode;
   target?: boolean;
 }): ReactElement {
@@ -457,8 +536,9 @@ function TurnSpanBlock({
   const eventType = typeof span.attributes.eventType === "string" ? span.attributes.eventType : "";
   const agentRelated = eventType.startsWith("codex.collaboration.") || span.name.startsWith("collaboration.");
   const SpanIcon = agentRelated ? BotMessageSquare : Wrench;
+  const evidence = spanExecutionEvidence(span);
   return (
-    <details className={`msg tool ${span.status} ${target ? "match-target" : ""}`}>
+    <details className={`msg tool ${span.status} ${children.length > 0 ? "msg-tool-group" : ""} ${evidence ? `evidence-${evidence}` : ""} ${target ? "match-target" : ""}`}>
       <summary className="msg-tool-summary">
         <span className="msg-avatar" aria-hidden>
           <SpanIcon size={agentRelated ? 13 : 11} />
@@ -466,7 +546,7 @@ function TurnSpanBlock({
         <span className="msg-head">
           <strong>{spanDisplayName(span)}</strong>
           <span className="msg-tool-status">
-            {spanStatusSymbol(span.status)} {spanStatusLabel(span.status, language)}
+            {spanStatusSymbol(span)} {spanStatusLabel(span, language)}
           </span>
           <span className="msg-time">
             {elapsed ? <span>{elapsed}</span> : null}
@@ -514,6 +594,40 @@ function TurnSpanBlock({
           </div>
         ) : null}
       </div>
+      {children.length > 0 ? (
+        <div className="msg-tool-child-results">
+          <div className="msg-tool-code-mode-origin" role="note">
+            <strong>{localize(
+              language,
+              `AST static parse · ${children.length} ${children.length === 1 ? "call" : "calls"}`,
+              `AST 静态解析 · ${children.length} 个调用`,
+            )}</strong>
+            <span>{localize(
+              language,
+              "Call ownership and code arguments come from the exec AST; status and output come from runtime records.",
+              "调用归属与代码参数来自 exec AST；状态和输出来自运行时记录",
+            )}</span>
+          </div>
+          {children.map((child) => {
+            const summary = parsedToolSummary(child.span);
+            const staticOnly = spanExecutionEvidence(child.span) === "static-only";
+            return (
+              <div className="msg-tool-child-result" key={child.span.id}>
+                {!staticOnly ? (
+                  <TurnSpanBlock span={child.span} children={child.children} language={language} />
+                ) : null}
+                <div className="msg-tool-parsed-result">
+                  <span className="msg-tool-parsed-result-label">
+                    {localize(language, "AST parsed", "AST 解析")}
+                  </span>
+                  <strong>{spanDisplayName(child.span)}</strong>
+                  <code>{summary || localize(language, "Arguments not statically resolved", "参数未能静态解析")}</code>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </details>
   );
 }
@@ -564,7 +678,7 @@ function TurnDetailTimeline({
                 target={target || (matchedMessageIndex !== null && item.message.sourceMessageIndex === matchedMessageIndex)}
               />
             ) : (
-              <TurnSpanBlock span={item.span} language={language} target={target} />
+              <TurnSpanBlock span={item.span} children={item.childSpans} language={language} target={target} />
             )}
           </div>
         );

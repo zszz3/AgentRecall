@@ -9,7 +9,7 @@ import type {
 } from "../types";
 import { tracePresentation } from "../trace-presentation";
 
-export const TURN_DERIVATION_VERSION = 6;
+export const TURN_DERIVATION_VERSION = 7;
 
 export interface DerivedRawEvent {
   eventIndex: number;
@@ -398,6 +398,16 @@ function attributeTimestamp(value: unknown): string | null {
   return typeof value === "string" || typeof value === "number" ? timestampString(value) : null;
 }
 
+function toolAttribute(
+  attributes: Record<string, unknown> | undefined,
+  name: string,
+): string | null {
+  const tool = attributes?.tool;
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) return null;
+  const value = (tool as Record<string, unknown>)[name];
+  return typeof value === "string" && value ? value : null;
+}
+
 function isToolSpan(span: DerivedTraceSpan): boolean {
   const traceKind = span.attributes.traceKind;
   const kind = traceKind === "tool_call" || traceKind === "tool_result" ? traceKind : "event";
@@ -430,13 +440,16 @@ function buildSpans(turnId: string, traceEvents: readonly SessionTraceEvent[]): 
     const startedAt = attributeTimestamp(event.attributes?.startedAt) ?? timestampString(event.timestamp);
     const endedAt = attributeTimestamp(event.attributes?.endedAt)
       ?? (event.kind === "tool_call" ? null : timestampString(event.timestamp));
+    const executionEvidence = toolAttribute(event.attributes, "executionEvidence");
     const span: DerivedTraceSpan = {
       id: stableId(turnId, "span", event.callId || `${event.kind}:${event.index}`),
       parentSpanId: null,
       spanIndex: spans.length,
       kind: isTool ? "tool" : "event",
       name: spanName(event.title),
-      status: event.kind === "tool_call" ? "running" : completedSpanStatus(event.status),
+      status: event.kind === "tool_call" && executionEvidence !== "static-only" && executionEvidence !== "recorded-request"
+        ? "running"
+        : completedSpanStatus(event.status),
       startedAt,
       endedAt,
       callId,
@@ -453,6 +466,15 @@ function buildSpans(turnId: string, traceEvents: readonly SessionTraceEvent[]): 
     };
     spans.push(span);
     if (callId && event.kind === "tool_call") calls.set(callId, span);
+  }
+
+  const spansByCallId = new Map(
+    spans.flatMap((span) => span.callId ? [[span.callId, span] as const] : []),
+  );
+  for (const span of spans) {
+    const parentCallId = toolAttribute(span.attributes, "parentCallId");
+    const parent = parentCallId ? spansByCallId.get(parentCallId) : undefined;
+    if (parent && parent !== span) span.parentSpanId = parent.id;
   }
 
   return spans;

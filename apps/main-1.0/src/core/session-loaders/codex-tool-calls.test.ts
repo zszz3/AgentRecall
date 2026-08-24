@@ -323,6 +323,49 @@ describe("codex structured tool calls", () => {
     ))).toBe(true);
   });
 
+  it("keeps safe fields from Promise.all tool arguments that also contain dynamic values", () => {
+    const commands = [
+      "sed -n '1,260p' pr.md",
+      "rg --files .github",
+      "git show --stat --oneline HEAD",
+      "git log --oneline origin/main..HEAD",
+      "sed -n '1,160p' .release-notes/structured-tool-call.md",
+    ];
+    const source = [
+      'const repo = "/repo";',
+      "await Promise.all([",
+      ...commands.map((cmd) => `  tools.exec_command({ cmd: ${JSON.stringify(cmd)}, workdir: repo }),`),
+      "]);",
+    ].join("\n");
+    const calls = extractCodexStructuredToolCalls([
+      responseRow({
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "promise-exec",
+        input: source,
+      }),
+    ]).filter((call) => call.canonicalName === "exec_command");
+
+    expect(calls).toHaveLength(5);
+    expect(calls.map((call) => call.input)).toEqual(
+      commands.map((cmd) => ({ cmd })),
+    );
+    expect(calls.every((call) => call.executionEvidence === "static-only")).toBe(true);
+  });
+
+  it("does not keep partial AST fields when a dynamic spread can override them", () => {
+    const calls = extractCodexStructuredToolCalls([
+      responseRow({
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "spread-exec",
+        input: 'await tools.exec_command({ cmd: "unsafe", ...dynamicOptions });',
+      }),
+    ]);
+
+    expect(calls.find((call) => call.canonicalName === "exec_command")?.input).toBeNull();
+  });
+
   it("does not guess a parent when identical nested calls are ambiguous", () => {
     const calls = extractCodexStructuredToolCalls([
       { type: "session_meta", payload: { history_mode: "paginated" } },

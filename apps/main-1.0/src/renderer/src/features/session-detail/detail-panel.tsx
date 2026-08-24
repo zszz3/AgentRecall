@@ -32,7 +32,12 @@ import { collaborationMessageMetadata } from "./collaboration-message";
 
 export type ConversationTimelineItem =
   | { kind: "message"; key: string; timestampMs: number | null; order: number; message: SessionMessage }
-  | { kind: "trace"; key: string; timestampMs: number | null; order: number; event: SessionTraceEvent };
+  | { kind: "trace"; key: string; timestampMs: number | null; order: number; event: SessionTraceEvent; children: ConversationTraceNode[] };
+
+export interface ConversationTraceNode {
+  event: SessionTraceEvent;
+  children: ConversationTraceNode[];
+}
 
 export type ConversationRoleFilter = "all" | SessionMessage["role"];
 
@@ -54,6 +59,22 @@ function messageTimelineItem(message: SessionMessage): ConversationTimelineItem 
   };
 }
 
+function traceToolAttributes(event: SessionTraceEvent): Record<string, unknown> | null {
+  const tool = event.attributes?.tool;
+  if (!tool || typeof tool !== "object" || Array.isArray(tool)) return null;
+  return tool as Record<string, unknown>;
+}
+
+function traceToolAttribute(event: SessionTraceEvent, name: string): string | null {
+  const value = traceToolAttributes(event)?.[name];
+  return typeof value === "string" && value ? value : null;
+}
+
+function traceWasParsedFromCodeMode(event: SessionTraceEvent): boolean {
+  return traceToolAttribute(event, "executionEvidence") === "static-only"
+    || traceToolAttributes(event)?.parsedFromCodeMode === true;
+}
+
 export function conversationTimeline(messages: SessionMessage[], traceEvents: SessionTraceEvent[]): ConversationTimelineItem[] {
   const messageTimes = messages.map((message) => timestampMs(message.timestamp)).filter((time): time is number => time !== null);
   const minMessageTime = messageTimes.length > 0 ? Math.min(...messageTimes) : null;
@@ -69,15 +90,37 @@ export function conversationTimeline(messages: SessionMessage[], traceEvents: Se
           const time = timestampMs(event.timestamp);
           return time === null || minMessageTime === null || maxMessageTime === null || (time >= minMessageTime && time <= maxMessageTime);
         });
+  const traceNodes = new Map(
+    visibleTraceEvents.map((event) => [event.index, { event, children: [] } satisfies ConversationTraceNode]),
+  );
+  const traceNodesByCallId = new Map<string, ConversationTraceNode>();
+  for (const node of traceNodes.values()) {
+    if (node.event.callId && !traceNodesByCallId.has(node.event.callId)) {
+      traceNodesByCallId.set(node.event.callId, node);
+    }
+  }
+  const rootTraceNodes: ConversationTraceNode[] = [];
+  for (const node of traceNodes.values()) {
+    const parentCallId = traceWasParsedFromCodeMode(node.event)
+      ? traceToolAttribute(node.event, "parentCallId")
+      : null;
+    const parent = parentCallId ? traceNodesByCallId.get(parentCallId) : undefined;
+    if (parent && parent !== node) {
+      parent.children.push(node);
+    } else {
+      rootTraceNodes.push(node);
+    }
+  }
 
   const items: ConversationTimelineItem[] = [
     ...messages.map(messageTimelineItem),
-    ...visibleTraceEvents.map((event) => ({
+    ...rootTraceNodes.map(({ event, children }) => ({
       kind: "trace" as const,
       key: `trace:${event.index}`,
       timestampMs: timestampMs(event.timestamp),
       order: event.index * 2 + 1,
       event,
+      children,
     })),
   ];
 
@@ -293,7 +336,18 @@ export function DetailPanel({
           keys.push(item.key);
         }
       } else {
-        const hay = [item.event.title, item.event.detail, item.event.eventType]
+        const childText = (node: ConversationTraceNode): string => [
+          node.event.title,
+          node.event.detail,
+          node.event.eventType,
+          ...node.children.map(childText),
+        ].filter(Boolean).join(" ");
+        const hay = [
+          item.event.title,
+          item.event.detail,
+          item.event.eventType,
+          ...item.children.map(childText),
+        ]
           .filter(Boolean)
           .join(" ")
           .toLocaleLowerCase();
@@ -691,7 +745,7 @@ export function DetailPanel({
                   target={item.message.index === matchedMessageIndex}
                 />
               ) : (
-                <TraceEventBlock key={item.key} timelineKey={item.key} event={item.event} language={language} />
+                <TraceEventBlock key={item.key} timelineKey={item.key} event={item.event} children={item.children} language={language} />
               )
             ))}
             {!loading && newerMessageCount > 0 ? (
@@ -823,7 +877,9 @@ function MessageBlock({
 }
 
 function traceStatusSymbol(event: SessionTraceEvent): string {
-  if (event.kind === "tool_call") return "→";
+  const evidence = traceToolAttribute(event, "executionEvidence");
+  if (evidence === "static-only") return "◇";
+  if (evidence === "recorded-request" || event.kind === "tool_call") return "→";
   if (event.status === "completed") return "✓";
   if (event.status === "failed") return "✗";
   if (event.status === "aborted") return "■";
@@ -831,6 +887,9 @@ function traceStatusSymbol(event: SessionTraceEvent): string {
 }
 
 function traceStatusLabel(event: SessionTraceEvent, language: LanguageMode): string {
+  const evidence = traceToolAttribute(event, "executionEvidence");
+  if (evidence === "static-only") return localize(language, "Statically identified", "静态识别");
+  if (evidence === "recorded-request") return localize(language, "Requested", "已请求");
   if (event.status === "running") return localize(language, "Running", "进行中");
   if (event.status === "completed") return localize(language, "Completed", "已完成");
   if (event.status === "failed") return localize(language, "Failed", "失败");
@@ -839,8 +898,42 @@ function traceStatusLabel(event: SessionTraceEvent, language: LanguageMode): str
 }
 
 const TRACE_TRUNCATE_LIMIT = 2400;
+const PARSED_TOOL_SUMMARY_LIMIT = 240;
 
-function TraceEventBlock({ event, language, timelineKey }: { event: SessionTraceEvent; language: LanguageMode; timelineKey: string }): ReactElement {
+function parsedTraceSummary(event: SessionTraceEvent): string {
+  const input = event.attributes?.input;
+  let summary = "";
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    const fields = input as Record<string, unknown>;
+    for (const key of ["cmd", "command", "query", "path", "file_path", "url"]) {
+      const value = fields[key];
+      if (typeof value === "string" && value.trim()) {
+        summary = value.trim();
+        break;
+      }
+      if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+        summary = value.join(" ");
+        break;
+      }
+    }
+  }
+  if (!summary && event.detail) summary = traceDetailText(event.detail).replace(/\s+/g, " ").trim();
+  return summary.length > PARSED_TOOL_SUMMARY_LIMIT
+    ? `${summary.slice(0, PARSED_TOOL_SUMMARY_LIMIT)}…`
+    : summary;
+}
+
+function TraceEventBlock({
+  event,
+  children = [],
+  language,
+  timelineKey,
+}: {
+  event: SessionTraceEvent;
+  children?: ConversationTraceNode[];
+  language: LanguageMode;
+  timelineKey: string;
+}): ReactElement {
   const truncated = Boolean(event.detail) && event.detail.length > TRACE_TRUNCATE_LIMIT;
   const [expanded, setExpanded] = useState(false);
   const durationText = traceDurationLabel(event.attributes);
@@ -854,7 +947,7 @@ function TraceEventBlock({ event, language, timelineKey }: { event: SessionTrace
   }, [event.detail, truncated, expanded, language]);
 
   return (
-    <details className={`trace-event ${event.kind} ${event.status || "unknown"}`} data-timeline-key={timelineKey}>
+    <details className={`trace-event ${children.length > 0 ? "trace-event-group" : ""} ${event.kind} ${event.status || "unknown"}`} data-timeline-key={timelineKey}>
       <summary className="trace-head">
         <strong>
           <span className="trace-symbol">{traceStatusSymbol(event)}</span>
@@ -889,6 +982,44 @@ function TraceEventBlock({ event, language, timelineKey }: { event: SessionTrace
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full detail", "展开详情")}
         </button>
+      ) : null}
+      {children.length > 0 ? (
+        <div className="trace-child-results">
+          <div className="trace-code-mode-origin" role="note">
+            <strong>{localize(
+              language,
+              `AST static parse · ${children.length} ${children.length === 1 ? "call" : "calls"}`,
+              `AST 静态解析 · ${children.length} 个调用`,
+            )}</strong>
+            <span>{localize(
+              language,
+              "Call ownership and code arguments come from the exec AST; status and output come from runtime records.",
+              "调用归属与代码参数来自 exec AST；状态和输出来自运行时记录",
+            )}</span>
+          </div>
+          {children.map((child) => {
+            const staticOnly = traceToolAttribute(child.event, "executionEvidence") === "static-only";
+            return (
+              <div className="trace-child-result" key={child.event.index}>
+                {!staticOnly ? (
+                  <TraceEventBlock
+                    event={child.event}
+                    children={child.children}
+                    language={language}
+                    timelineKey={`${timelineKey}:child:${child.event.index}`}
+                  />
+                ) : null}
+                <div className="trace-parsed-result">
+                  <span className="trace-parsed-result-label">
+                    {localize(language, "AST parsed", "AST 解析")}
+                  </span>
+                  <strong>{child.event.title.split(" · ", 1)[0] || child.event.title}</strong>
+                  <code>{parsedTraceSummary(child.event) || localize(language, "Arguments not statically resolved", "参数未能静态解析")}</code>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : null}
     </details>
   );

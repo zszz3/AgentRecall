@@ -3432,7 +3432,7 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.trace-event pre {
+.trace-event > pre {
   display: none;
   margin: 0;
   padding: 9px 10px 10px;
@@ -3444,8 +3444,76 @@ select:focus-visible {
   line-height: 1.5;
 }
 
-.trace-event[open] pre {
+.trace-event[open] > pre {
   display: block;
+}
+
+.trace-child-results {
+  display: grid;
+  gap: 9px;
+  margin: 8px 10px 10px;
+}
+
+.trace-code-mode-origin {
+  display: grid;
+  gap: 3px;
+}
+
+.trace-code-mode-origin strong {
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.trace-code-mode-origin span {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.trace-child-result {
+  min-width: 0;
+}
+
+.trace-child-result > .trace-event {
+  margin: 0;
+}
+
+.trace-parsed-result {
+  display: grid;
+  grid-template-columns: auto minmax(90px, auto) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  margin: 4px 0 0 24px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border-subtle);
+  border-radius: 0 5px 5px 0;
+  background: var(--panel-bg);
+}
+
+.trace-parsed-result-label,
+.trace-parsed-result strong,
+.trace-parsed-result code {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.trace-parsed-result-label {
+  color: var(--text-muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.trace-parsed-result strong {
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-parsed-result code {
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .loading-state {

@@ -589,22 +589,28 @@ async function insertTurns(
     );
   }
 
-  const spans = turns.flatMap((turn) => turn.spans.map((span) => ({
-    id: span.id,
-    turn_id: turn.id,
-    parent_span_id: span.parentSpanId,
-    span_index: span.spanIndex,
-    kind: span.kind,
-    name: span.name,
-    status: span.status,
-    started_at: span.startedAt,
-    ended_at: span.endedAt,
-    call_id: span.callId,
-    input: span.input,
-    output: span.output,
-    error: span.error,
-    attributes: span.attributes,
-  })));
+  const spanParents: Array<{ id: string; parent_span_id: string }> = [];
+  const spans = turns.flatMap((turn) => turn.spans.map((span) => {
+    if (span.parentSpanId) {
+      spanParents.push({ id: span.id, parent_span_id: span.parentSpanId });
+    }
+    return {
+      id: span.id,
+      turn_id: turn.id,
+      parent_span_id: null,
+      span_index: span.spanIndex,
+      kind: span.kind,
+      name: span.name,
+      status: span.status,
+      started_at: span.startedAt,
+      ended_at: span.endedAt,
+      call_id: span.callId,
+      input: span.input,
+      output: span.output,
+      error: span.error,
+      attributes: span.attributes,
+    };
+  }));
   for (let offset = 0; offset < spans.length; offset += INDEX_INSERT_BATCH_SIZE) {
     await client.query(
       `
@@ -633,6 +639,20 @@ async function insertTurns(
         )
       `,
       [JSON.stringify(spans.slice(offset, offset + INDEX_INSERT_BATCH_SIZE))],
+    );
+  }
+  for (let offset = 0; offset < spanParents.length; offset += INDEX_INSERT_BATCH_SIZE) {
+    await client.query(
+      `
+        update agent_recall.trace_spans spans
+        set parent_span_id = records.parent_span_id
+        from jsonb_to_recordset($1::jsonb) as records(
+          id text,
+          parent_span_id text
+        )
+        where spans.id = records.id
+      `,
+      [JSON.stringify(spanParents.slice(offset, offset + INDEX_INSERT_BATCH_SIZE))],
     );
   }
 }

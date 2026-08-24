@@ -86,6 +86,60 @@ const tokenEvents: TokenUsageEvent[] = [
 ];
 
 describe("deriveSessionTimeline", () => {
+  it("links Code Mode child tools to their exec parent and does not mark static evidence as running", () => {
+    const timeline = deriveSessionTimeline({
+      sessionKey: "codex:code-mode-group",
+      messages: [
+        {
+          role: "user",
+          content: "inspect the skill",
+          timestamp: "2026-08-13T09:17:00.000Z",
+          index: 0,
+        },
+      ],
+      traceEvents: [
+        {
+          index: 0,
+          kind: "tool_result",
+          source: "codex",
+          title: "exec · exec_command",
+          detail: "done",
+          timestamp: "2026-08-13T09:17:00.100Z",
+          callId: "call-code-mode",
+          status: "completed",
+          attributes: {
+            tool: {
+              canonicalName: "exec",
+              executionEvidence: "runtime-confirmed",
+            },
+          },
+        },
+        {
+          index: 1,
+          kind: "tool_call",
+          source: "codex",
+          title: "exec_command",
+          detail: '{"cmd":"sed -n 1,240p SKILL.md"}',
+          timestamp: "2026-08-13T09:17:00.100Z",
+          callId: "call-code-mode#ast-0",
+          status: "unknown",
+          attributes: {
+            tool: {
+              canonicalName: "exec_command",
+              executionEvidence: "static-only",
+              parentCallId: "call-code-mode",
+            },
+          },
+        },
+      ],
+    });
+
+    const [parent, child] = timeline.turns[0].spans;
+    expect(parent.callId).toBe("call-code-mode");
+    expect(child.parentSpanId).toBe(parent.id);
+    expect(child.status).toBe("unknown");
+  });
+
   it("projects structured collaboration outputs without a value wrapper", () => {
     const loaded = loadCodexSessionRows("/tmp/codex-list-agents.jsonl", [
       {

@@ -1827,6 +1827,66 @@ describe("Codex session loading", () => {
     ]);
   });
 
+  it("marks runtime-confirmed Code Mode children as parsed for parent summaries", () => {
+    const input = [
+      'const repo = "/repo";',
+      "await Promise.all([",
+      '  tools.exec_command({ cmd: "pwd", workdir: repo }),',
+      '  tools.exec_command({ cmd: "git status", workdir: repo }),',
+      "]);",
+    ].join("\n");
+    const loaded = loadCodexSessionRows("/tmp/codex-parsed-runtime.jsonl", [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-24T11:55:00Z",
+        payload: { id: "codex-parsed-runtime", cwd: "/repo", history_mode: "paginated" },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-24T11:55:01Z",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "exec-parent",
+          input,
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-1" },
+        },
+      },
+      ...["pwd", "git status"].map((command, index) => ({
+        type: "event_msg",
+        timestamp: `2026-08-24T11:55:0${index + 2}Z`,
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-1",
+          item: {
+            type: "CommandExecution",
+            id: `runtime-${index}`,
+            command: ["zsh", "-lc", command],
+            status: "completed",
+            exit_code: 0,
+          },
+        },
+      })),
+    ]);
+
+    const children = loaded?.traceEvents?.filter((event) => event.callId?.startsWith("runtime-")) ?? [];
+    expect(children).toHaveLength(2);
+    expect(children.map((event) => event.attributes?.tool)).toEqual([
+      expect.objectContaining({
+        canonicalName: "exec_command",
+        executionEvidence: "runtime-confirmed",
+        parentCallId: "exec-parent",
+        parsedFromCodeMode: true,
+      }),
+      expect.objectContaining({
+        canonicalName: "exec_command",
+        executionEvidence: "runtime-confirmed",
+        parentCallId: "exec-parent",
+        parsedFromCodeMode: true,
+      }),
+    ]);
+  });
+
   it("preserves Codex tool identity and timing across intermediate call events", () => {
     const loaded = loadCodexSessionRows("/tmp/codex-intermediate-tool-event.jsonl", [
       {

@@ -797,6 +797,7 @@ function applyStructuredCodexToolCalls(
     const timestamp = existing?.timestamp
       ?? (call.timestamp > 0 ? new Date(call.timestamp).toISOString() : anchor.timestamp);
     const existingToolAttributes = isRecord(existing?.attributes?.tool) ? existing.attributes.tool : {};
+    const parsedFromCodeMode = call.evidence.some((item) => item.evidence === "code-mode-ast");
     const attributes = {
       ...(existing?.attributes ?? {}),
       input,
@@ -805,6 +806,7 @@ function applyStructuredCodexToolCalls(
         ...existingToolAttributes,
         canonicalName: call.canonicalName,
         executionEvidence: call.executionEvidence,
+        parsedFromCodeMode,
         ...(call.parentCallId ? { parentCallId: call.parentCallId } : {}),
         ...(call.pluginId ? { pluginId: call.pluginId } : {}),
         ...(call.scriptPath ? { scriptPath: call.scriptPath } : {}),
