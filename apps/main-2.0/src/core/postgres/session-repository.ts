@@ -743,13 +743,13 @@ export class PostgresSessionRepository {
             pr_url, pr_number, message_count, turn_count, input_tokens, output_tokens,
             cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
             content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id,
-            codex_history_mode
+            codex_history_mode, codex_tool_call_state
           )
           values (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18,
-            $19, $20, $21, $22, now(), $23, $24, $25, $26, $27
+            $19, $20, $21, $22, now(), $23, $24, $25, $26, $27, $28::jsonb
           )
           on conflict (session_key) do update set
             raw_id = excluded.raw_id,
@@ -779,6 +779,7 @@ export class PostgresSessionRepository {
             is_subagent = excluded.is_subagent,
             parent_session_id = excluded.parent_session_id,
             codex_history_mode = excluded.codex_history_mode,
+            codex_tool_call_state = excluded.codex_tool_call_state,
             source_available = true
         `,
         [
@@ -809,6 +810,9 @@ export class PostgresSessionRepository {
           Boolean(session.isSubagent),
           session.parentSessionId ?? null,
           codexIncrementalState?.historyMode ?? null,
+          codexIncrementalState?.toolCallState
+            ? JSON.stringify(postgresJsonValue(codexIncrementalState.toolCallState))
+            : null,
         ],
       );
 
@@ -1690,11 +1694,12 @@ export class PostgresSessionRepository {
         ai_summary_at: Date | string | null;
         ai_summary_basis: number | string | null;
         codex_history_mode: string | null;
+        codex_tool_call_state: Record<string, unknown> | string | null;
       }>(
         `
           select custom_title, favorited, hidden, last_opened_at, last_resumed_at,
             ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
-            codex_history_mode
+            codex_history_mode, codex_tool_call_state
           from agent_recall.sessions
           where session_key = $1
         `,
@@ -1718,7 +1723,7 @@ export class PostgresSessionRepository {
               input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
               total_tokens, indexed_at, is_subagent, parent_session_id,
               ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
-              codex_history_mode
+              codex_history_mode, codex_tool_call_state
             )
             select
               $2, raw_id, source, environment_id, storage_environment_id, project_path, file_path,
@@ -1728,7 +1733,7 @@ export class PostgresSessionRepository {
               input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
               total_tokens, indexed_at, is_subagent, parent_session_id,
               ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
-              codex_history_mode
+              codex_history_mode, codex_tool_call_state
             from agent_recall.sessions
             where session_key = $1
           `,
@@ -1760,7 +1765,8 @@ export class PostgresSessionRepository {
               ai_summary_model = case when ai_summary is null then $8 else ai_summary_model end,
               ai_summary_at = case when ai_summary is null then $9 else ai_summary_at end,
               ai_summary_basis = case when ai_summary is null then $10 else ai_summary_basis end,
-              codex_history_mode = coalesce(codex_history_mode, $11)
+              codex_history_mode = coalesce(codex_history_mode, $11),
+              codex_tool_call_state = coalesce(codex_tool_call_state, $12::jsonb)
             where session_key = $1
           `,
           [
@@ -1775,6 +1781,11 @@ export class PostgresSessionRepository {
             legacy.ai_summary_at,
             legacy.ai_summary_basis,
             legacy.codex_history_mode,
+            legacy.codex_tool_call_state === null
+              ? null
+              : typeof legacy.codex_tool_call_state === "string"
+                ? legacy.codex_tool_call_state
+                : JSON.stringify(legacy.codex_tool_call_state),
           ],
         );
         await client.query(

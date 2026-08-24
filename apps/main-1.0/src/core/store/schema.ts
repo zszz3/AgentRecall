@@ -44,7 +44,8 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
       content_indexed_size INTEGER NOT NULL DEFAULT 0,
       is_subagent INTEGER NOT NULL DEFAULT 0,
       parent_session_id TEXT,
-      codex_history_mode TEXT
+      codex_history_mode TEXT,
+      codex_tool_call_state TEXT
     );
 
     CREATE TABLE IF NOT EXISTS environments (
@@ -293,6 +294,7 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
   const addedSubagentColumn = addColumnIfMissing(db, "sessions", "is_subagent", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "sessions", "parent_session_id", "TEXT");
   addColumnIfMissing(db, "sessions", "codex_history_mode", "TEXT");
+  const addedCodexToolCallStateColumn = addColumnIfMissing(db, "sessions", "codex_tool_call_state", "TEXT");
   addColumnIfMissing(db, "messages", "source_turn_id", "TEXT");
   addColumnIfMissing(db, "messages", "phase", "TEXT");
   addColumnIfMissing(db, "messages", "source_record_id", "TEXT");
@@ -305,6 +307,13 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
     db
       .prepare(
         "UPDATE sessions SET file_mtime_ms = 0 WHERE source IN ('claude-cli', 'claude-app', 'tclaude-cli', 'codex-cli', 'codex-app', 'tcodex-cli')",
+      )
+      .run();
+  }
+  if (addedCodexToolCallStateColumn) {
+    db
+      .prepare(
+        "UPDATE sessions SET file_mtime_ms = 0, content_indexed_mtime_ms = 0, content_indexed_size = 0 WHERE source IN ('codex-cli', 'codex-app', 'tcodex-cli')",
       )
       .run();
   }

@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import type { IndexedSession } from "../types";
+import type { CodexIncrementalState, IndexedSession } from "../types";
 import { EnvironmentStore } from "./environments";
 import { migrateSessionStore } from "./schema";
 import { SessionsStore } from "./sessions";
@@ -53,6 +53,24 @@ describe("SessionsStore", () => {
       migrateSessionStore(db);
       const store = new SessionsStore(db, new EnvironmentStore(db));
       const session = indexedSession();
+      const toolCallState: NonNullable<CodexIncrementalState["toolCallState"]> = {
+        observations: [{
+          callId: "exec-parent#ast-0",
+          parentCallId: "exec-parent",
+          turnId: "turn-1",
+          namespace: null,
+          rawName: "exec_command",
+          input: { cmd: "pwd" },
+          cwd: "/repo",
+          status: "unknown",
+          evidence: "code-mode-ast",
+          durationMs: null,
+          timestamp: Date.parse("2026-07-30T08:00:00.000Z"),
+        }],
+        cwd: "/repo",
+        declaredSessionFormat: "paginated",
+        sawToolCompletion: false,
+      };
       store.upsertIndexedSession(
         session,
         [{
@@ -89,6 +107,7 @@ describe("SessionsStore", () => {
           historyMode: "paginated",
           messageProvenance: [{ messageIndex: 0, sourceRecordId: "response_item:message-1" }],
           activeTurnIds: ["turn-1"],
+          toolCallState,
         },
       );
 
@@ -108,6 +127,7 @@ describe("SessionsStore", () => {
         historyMode: "paginated",
         messageProvenance: [{ messageIndex: 0, sourceRecordId: "response_item:message-1" }],
         activeTurnIds: ["turn-1"],
+        toolCallState,
       });
     } finally {
       db.close();

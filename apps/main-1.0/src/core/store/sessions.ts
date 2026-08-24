@@ -119,6 +119,7 @@ interface SessionRow {
   content_indexed_mtime_ms: number;
   content_indexed_size: number;
   codex_history_mode: string | null;
+  codex_tool_call_state: string | null;
 }
 
 interface SessionDeletionRelationRow {
@@ -215,6 +216,20 @@ function parseTraceAttributes(value: string | null): Record<string, unknown> | u
   }
 }
 
+function parseCodexToolCallState(
+  value: string | null,
+): CodexIncrementalState["toolCallState"] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return parsed && Array.isArray(parsed.observations)
+      ? parsed as unknown as NonNullable<CodexIncrementalState["toolCallState"]>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface TraceEventQueryOptions {
   startTimestamp?: string;
   endTimestamp?: string;
@@ -262,9 +277,10 @@ export class SessionsStore {
             session_key, raw_id, source, environment_id, storage_environment_id, project_path, file_path, original_title, first_question,
             timestamp, file_mtime_ms, file_size, pr_url, pr_number, message_count,
             input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, indexed_at,
-            content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id, codex_history_mode
+            content_indexed_mtime_ms, content_indexed_size, is_subagent, parent_session_id, codex_history_mode,
+            codex_tool_call_state
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(session_key) DO UPDATE SET
             raw_id = excluded.raw_id,
             source = excluded.source,
@@ -292,6 +308,7 @@ export class SessionsStore {
             is_subagent = excluded.is_subagent,
             parent_session_id = excluded.parent_session_id,
             codex_history_mode = excluded.codex_history_mode,
+            codex_tool_call_state = excluded.codex_tool_call_state,
             source_available = 1
         `,
         )
@@ -323,6 +340,9 @@ export class SessionsStore {
           session.isSubagent ? 1 : 0,
           session.parentSessionId ?? null,
           codexIncrementalState?.historyMode ?? null,
+          codexIncrementalState?.toolCallState
+            ? JSON.stringify(codexIncrementalState.toolCallState)
+            : null,
         );
 
       this.db.prepare("DELETE FROM messages WHERE session_key = ?").run(session.sessionKey);
@@ -864,7 +884,8 @@ export class SessionsStore {
       const legacy = this.db
         .prepare(
           `SELECT custom_title, favorited, hidden, last_opened_at, last_resumed_at,
-             ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis, codex_history_mode
+             ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis, codex_history_mode,
+             codex_tool_call_state
            FROM sessions WHERE session_key = ?`,
         )
         .get(legacyKey) as
@@ -880,6 +901,7 @@ export class SessionsStore {
           | "ai_summary_at"
           | "ai_summary_basis"
           | "codex_history_mode"
+          | "codex_tool_call_state"
         >
         | undefined;
       if (!legacy) return;
@@ -917,7 +939,8 @@ export class SessionsStore {
                ai_summary_at = CASE WHEN ai_summary IS NULL THEN ? ELSE ai_summary_at END,
                ai_summary_basis = CASE WHEN ai_summary IS NULL THEN ? ELSE ai_summary_basis END,
                ai_summary = COALESCE(ai_summary, ?),
-               codex_history_mode = COALESCE(codex_history_mode, ?)
+               codex_history_mode = COALESCE(codex_history_mode, ?),
+               codex_tool_call_state = COALESCE(codex_tool_call_state, ?)
              WHERE session_key = ?`,
           )
           .run(
@@ -935,6 +958,7 @@ export class SessionsStore {
             legacy.ai_summary_basis,
             legacy.ai_summary,
             legacy.codex_history_mode,
+            legacy.codex_tool_call_state,
             targetKey,
           );
         this.db
@@ -1418,8 +1442,8 @@ export class SessionsStore {
 
   getCodexIncrementalState(sessionKey: string): CodexIncrementalState {
     const session = this.db.prepare(
-      "SELECT codex_history_mode FROM sessions WHERE session_key = ?",
-    ).get(sessionKey) as { codex_history_mode: string | null } | undefined;
+      "SELECT codex_history_mode, codex_tool_call_state FROM sessions WHERE session_key = ?",
+    ).get(sessionKey) as Pick<SessionRow, "codex_history_mode" | "codex_tool_call_state"> | undefined;
     const messageProvenance = this.db.prepare(
       `SELECT message_index, source_record_id
        FROM messages
@@ -1439,6 +1463,7 @@ export class SessionsStore {
       if (event.event_type === "codex.turn.started") activeTurnIds.add(event.source_turn_id);
       else activeTurnIds.delete(event.source_turn_id);
     }
+    const toolCallState = parseCodexToolCallState(session?.codex_tool_call_state ?? null);
     return {
       historyMode: session?.codex_history_mode === "paginated" ? "paginated" : "legacy",
       messageProvenance: messageProvenance.map((row) => ({
@@ -1446,6 +1471,7 @@ export class SessionsStore {
         sourceRecordId: row.source_record_id,
       })),
       activeTurnIds: [...activeTurnIds],
+      ...(toolCallState ? { toolCallState } : {}),
     };
   }
 

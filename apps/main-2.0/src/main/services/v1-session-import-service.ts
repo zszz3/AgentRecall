@@ -101,6 +101,7 @@ interface V1SessionRow {
   is_subagent: number;
   parent_session_id: string | null;
   codex_history_mode: string | null;
+  codex_tool_call_state?: string | null;
 }
 
 interface V1SessionBundle {
@@ -378,6 +379,7 @@ function readSessionBundle(db: DatabaseSyncType, row: V1SessionRow): V1SessionBu
     if (event.eventType === "codex.turn.completed" || event.eventType === "codex.turn.aborted") activeTurnIds.delete(event.sourceTurnId);
   }
   const isCodex = row.source === "codex-cli" || row.source === "codex-app" || row.source === "tcodex-cli";
+  const toolCallState = parseCodexToolCallState(row.codex_tool_call_state);
   return {
     session: {
       sessionKey,
@@ -416,6 +418,7 @@ function readSessionBundle(db: DatabaseSyncType, row: V1SessionRow): V1SessionBu
             historyMode: row.codex_history_mode === "paginated" ? "paginated" : "legacy",
             messageProvenance: provenance,
             activeTurnIds: [...activeTurnIds],
+            ...(toolCallState ? { toolCallState } : {}),
           },
         }
       : {}),
@@ -427,6 +430,20 @@ function readSessionBundle(db: DatabaseSyncType, row: V1SessionRow): V1SessionBu
     aiSummaryModel: row.ai_summary_model?.trim() || "v1-import",
     tags,
   };
+}
+
+function parseCodexToolCallState(
+  value: string | null | undefined,
+): CodexIncrementalState["toolCallState"] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return parsed && Array.isArray(parsed.observations)
+      ? parsed as unknown as NonNullable<CodexIncrementalState["toolCallState"]>
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readSessionTags(db: DatabaseSyncType, sessionKey: string): string[] {

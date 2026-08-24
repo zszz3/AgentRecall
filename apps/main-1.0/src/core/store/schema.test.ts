@@ -43,6 +43,62 @@ describe("session store schema", () => {
     }
   });
 
+  it("adds Codex tool-call state storage and invalidates affected sessions exactly once", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      db.exec("ALTER TABLE sessions DROP COLUMN codex_tool_call_state");
+      const insert = db.prepare(`
+        INSERT INTO sessions (
+          session_key, raw_id, source, project_path, file_path,
+          original_title, first_question, timestamp, file_mtime_ms, file_size,
+          content_indexed_mtime_ms, content_indexed_size
+        ) VALUES (?, ?, ?, '/repo', ?, 'Title', 'Question', 1, 123, 456, 123, 456)
+      `);
+      insert.run("codex:tool-state", "tool-state", "codex-cli", "/tmp/codex.jsonl");
+      insert.run("claude:unchanged", "unchanged", "claude-cli", "/tmp/claude.jsonl");
+
+      migrateSessionStore(db);
+
+      expect(db.prepare(
+        "SELECT type FROM pragma_table_info('sessions') WHERE name = 'codex_tool_call_state'",
+      ).get()).toEqual({ type: "TEXT" });
+      expect(db.prepare(`
+        SELECT file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+        FROM sessions WHERE session_key = 'codex:tool-state'
+      `).get()).toEqual({
+        file_mtime_ms: 0,
+        content_indexed_mtime_ms: 0,
+        content_indexed_size: 0,
+      });
+      expect(db.prepare(`
+        SELECT file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+        FROM sessions WHERE session_key = 'claude:unchanged'
+      `).get()).toEqual({
+        file_mtime_ms: 123,
+        content_indexed_mtime_ms: 123,
+        content_indexed_size: 456,
+      });
+
+      db.prepare(`
+        UPDATE sessions
+        SET file_mtime_ms = 789, content_indexed_mtime_ms = 789, content_indexed_size = 987
+        WHERE session_key = 'codex:tool-state'
+      `).run();
+      migrateSessionStore(db);
+      expect(db.prepare(`
+        SELECT file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+        FROM sessions WHERE session_key = 'codex:tool-state'
+      `).get()).toEqual({
+        file_mtime_ms: 789,
+        content_indexed_mtime_ms: 789,
+        content_indexed_size: 987,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses the composite message activity index for per-session latest timestamps", () => {
     const db = new DatabaseSync(":memory:");
     try {

@@ -109,6 +109,94 @@ describe("AgentRecall PostgreSQL schema", () => {
     await database.close();
   });
 
+  it("adds Codex tool-call state storage and invalidates affected sessions exactly once", async () => {
+    const pool = new PGliteTestPool();
+    const legacyDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 40),
+    });
+    await legacyDatabase.initialize();
+    await legacyDatabase.query("alter table agent_recall.sessions drop column codex_tool_call_state");
+    await legacyDatabase.query(`
+      insert into agent_recall.sessions (
+        session_key, raw_id, source, environment_id, project_path, file_path,
+        original_title, first_question, started_at, file_mtime_ms, file_size, indexed_at,
+        content_indexed_mtime_ms, content_indexed_size
+      ) values
+        ('codex:tool-state', 'tool-state', 'codex-cli', 'local', '/repo', '/tmp/codex.jsonl',
+          'Title', 'Question', now(), 123, 456, now(), 123, 456),
+        ('claude:unchanged', 'unchanged', 'claude-cli', 'local', '/repo', '/tmp/claude.jsonl',
+          'Title', 'Question', now(), 123, 456, now(), 123, 456)
+    `);
+
+    const upgradedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await upgradedDatabase.initialize();
+
+    const column = await upgradedDatabase.query<{ data_type: string }>(`
+      select data_type
+      from information_schema.columns
+      where table_schema = 'agent_recall'
+        and table_name = 'sessions'
+        and column_name = 'codex_tool_call_state'
+    `);
+    expect(column.rows).toEqual([{ data_type: "jsonb" }]);
+    const freshness = await upgradedDatabase.query<{
+      session_key: string;
+      file_mtime_ms: number;
+      content_indexed_mtime_ms: number;
+      content_indexed_size: number;
+    }>(`
+      select session_key, file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+      from agent_recall.sessions
+      where session_key in ('codex:tool-state', 'claude:unchanged')
+      order by session_key
+    `);
+    expect(freshness.rows).toEqual([
+      {
+        session_key: "claude:unchanged",
+        file_mtime_ms: 123,
+        content_indexed_mtime_ms: 123,
+        content_indexed_size: 456,
+      },
+      {
+        session_key: "codex:tool-state",
+        file_mtime_ms: 0,
+        content_indexed_mtime_ms: 0,
+        content_indexed_size: 0,
+      },
+    ]);
+
+    await upgradedDatabase.query(`
+      update agent_recall.sessions
+      set file_mtime_ms = 789, content_indexed_mtime_ms = 789, content_indexed_size = 987
+      where session_key = 'codex:tool-state'
+    `);
+    const reopenedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await reopenedDatabase.initialize();
+    const preserved = await reopenedDatabase.query<{
+      file_mtime_ms: number;
+      content_indexed_mtime_ms: number;
+      content_indexed_size: number;
+    }>(`
+      select file_mtime_ms, content_indexed_mtime_ms, content_indexed_size
+      from agent_recall.sessions
+      where session_key = 'codex:tool-state'
+    `);
+    expect(preserved.rows).toEqual([{
+      file_mtime_ms: 789,
+      content_indexed_mtime_ms: 789,
+      content_indexed_size: 987,
+    }]);
+
+    await reopenedDatabase.close();
+  });
+
   it("upgrades Team Chat rooms to employee instances and directed messages", async () => {
     const database = new PostgresDatabase(new PGliteTestPool(), {
       migrationLock: false,
@@ -663,6 +751,10 @@ describe("AgentRecall PostgreSQL schema", () => {
           '<task-notification source="worker">done</task-notification>', '{}'::jsonb),
         ('turn:clean', 0, 0, 'user', 'real prompt', '{}'::jsonb);
     `);
+    await legacyDatabase.query(
+      "insert into agent_recall.schema_migrations (version, name) values ($1, $2)",
+      [41, "covered separately: persist incremental Codex tool-call reconciliation state"],
+    );
 
     const upgradedDatabase = new PostgresDatabase(pool, {
       migrationLock: false,
@@ -715,6 +807,10 @@ describe("AgentRecall PostgreSQL schema", () => {
           'Child', 'Child', now(), 333, 444, now(), 333, 444, true, 'parent'
         );
     `);
+    await legacyDatabase.query(
+      "insert into agent_recall.schema_migrations (version, name) values ($1, $2)",
+      [41, "covered separately: persist incremental Codex tool-call reconciliation state"],
+    );
 
     const upgradedDatabase = new PostgresDatabase(pool, {
       migrationLock: false,

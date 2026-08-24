@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type {
+  CodexIncrementalState,
   IndexedSession,
   SessionMessage,
   SessionTraceEvent,
@@ -128,6 +129,24 @@ describe("PostgresSessionRepository", () => {
   it("preserves paginated Codex history when migrating to a new Session key", async () => {
     const legacyKey = "ssh:dev:codex:legacy-paginated";
     const targetKey = "ssh:dev:codex-cli:legacy-paginated";
+    const toolCallState: NonNullable<CodexIncrementalState["toolCallState"]> = {
+      observations: [{
+        callId: "exec-parent#ast-0",
+        parentCallId: "exec-parent",
+        turnId: "legacy-turn-1",
+        namespace: null,
+        rawName: "exec_command",
+        input: { cmd: "pwd" },
+        cwd: "/repo",
+        status: "unknown",
+        evidence: "code-mode-ast",
+        durationMs: null,
+        timestamp: Date.parse("2026-07-30T08:00:00.000Z"),
+      }],
+      cwd: "/repo",
+      declaredSessionFormat: "paginated",
+      sawToolCompletion: false,
+    };
     await repository.upsertIndexedSession(
       session({ sessionKey: legacyKey, rawId: "legacy-paginated" }),
       [{
@@ -154,6 +173,7 @@ describe("PostgresSessionRepository", () => {
         historyMode: "paginated",
         messageProvenance: [{ messageIndex: 0, sourceRecordId: "response_item:legacy-answer" }],
         activeTurnIds: ["legacy-turn-1"],
+        toolCallState,
       },
     );
     await metadataRepository.upsertSessionSyncBinding({
@@ -173,6 +193,7 @@ describe("PostgresSessionRepository", () => {
       historyMode: "paginated",
       messageProvenance: [{ messageIndex: 0, sourceRecordId: "response_item:legacy-answer" }],
       activeTurnIds: ["legacy-turn-1"],
+      toolCallState,
     });
     await expect(metadataRepository.getSessionSyncBindingForLocalKey(legacyKey)).resolves.toBeNull();
     await expect(metadataRepository.getSessionSyncBindingForLocalKey(targetKey)).resolves.toMatchObject({

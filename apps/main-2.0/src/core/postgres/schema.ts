@@ -70,7 +70,8 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ai_summary_model text,
         ai_summary_at timestamptz,
         ai_summary_basis double precision,
-        codex_history_mode text
+        codex_history_mode text,
+        codex_tool_call_state jsonb
       );
 
       CREATE TABLE agent_recall.session_raw_events (
@@ -1654,6 +1655,21 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           content_indexed_mtime_ms = 0,
           content_indexed_size = 0
       WHERE source = 'deepseek-cli';
+    `,
+  ],
+}, {
+  version: 41,
+  name: "persist incremental Codex tool-call reconciliation state",
+  statements: [
+    `
+      ALTER TABLE agent_recall.sessions
+        ADD COLUMN IF NOT EXISTS codex_tool_call_state jsonb;
+
+      UPDATE agent_recall.sessions
+      SET file_mtime_ms = 0,
+          content_indexed_mtime_ms = 0,
+          content_indexed_size = 0
+      WHERE source IN ('codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli');
     `,
   ],
 }];

@@ -203,8 +203,11 @@ export class PostgresSessionTurnRepository {
 
   async getCodexIncrementalState(sessionKey: string): Promise<CodexIncrementalState> {
     const [sessionResult, messageResult, lifecycleResult] = await Promise.all([
-      this.database.query<{ codex_history_mode: string | null }>(
-        "select codex_history_mode from agent_recall.sessions where session_key = $1",
+      this.database.query<{
+        codex_history_mode: string | null;
+        codex_tool_call_state: Record<string, unknown> | string | null;
+      }>(
+        "select codex_history_mode, codex_tool_call_state from agent_recall.sessions where session_key = $1",
         [sessionKey],
       ),
       this.database.query<{
@@ -242,6 +245,7 @@ export class PostgresSessionTurnRepository {
       if (payload.eventType === "codex.turn.started") activeTurnIds.add(sourceTurnId);
       else activeTurnIds.delete(sourceTurnId);
     }
+    const toolCallState = nullableJsonValue(sessionResult.rows[0]?.codex_tool_call_state);
     return {
       historyMode: sessionResult.rows[0]?.codex_history_mode === "paginated" ? "paginated" : "legacy",
       messageProvenance: messageResult.rows.map((row) => {
@@ -253,6 +257,9 @@ export class PostgresSessionTurnRepository {
         };
       }),
       activeTurnIds: [...activeTurnIds],
+      ...(toolCallState && Array.isArray(toolCallState.observations)
+        ? { toolCallState: toolCallState as unknown as NonNullable<CodexIncrementalState["toolCallState"]> }
+        : {}),
     };
   }
 
