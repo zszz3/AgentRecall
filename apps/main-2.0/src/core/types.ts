@@ -228,6 +228,7 @@ export interface CodexIncrementalState {
   historyMode: CodexHistoryMode;
   messageProvenance: CodexMessageProvenance[];
   activeTurnIds: string[];
+  toolCallState?: import("./session-loaders/codex-tool-calls").CodexToolCallCollectorState;
   agentPath?: string | null;
   pendingInterAgentCommunication?: {
     triggerTurn: boolean;

@@ -41,6 +41,7 @@
     "build:mcp": "node scripts/build-mcp-bundle.mjs"
   },
   "dependencies": {
+    "@babel/parser": "^7.29.7",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",

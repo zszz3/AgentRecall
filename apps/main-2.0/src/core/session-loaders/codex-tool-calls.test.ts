@@ -45,8 +45,9 @@ describe("codex structured tool calls", () => {
     expect(calls.map((call) => call.canonicalName)).toEqual([
       "skills.read",
       "exec",
-      "shell",
-      "search",
+      "exec_command",
+      "exec_command",
+      "tool_search",
       "tool_search",
     ]);
     expect(calls[0]).toMatchObject({
@@ -58,8 +59,13 @@ describe("codex structured tool calls", () => {
     expect(calls[0].evidence).toHaveLength(1);
     expect(calls[0].evidence[0]).toMatchObject({ status: "requested", evidence: "response-item" });
     expect(calls[1].input).toBe("await tools.exec_command({ cmd: \"git status\" });");
-    expect(calls[2].input).toEqual({ type: "command", command: ["ls", "-la"] });
-    expect(calls[3].input).toBe("raw");
+    expect(calls[2]).toMatchObject({
+      parentCallId: "call-2",
+      input: { cmd: "git status" },
+      executionEvidence: "static-only",
+    });
+    expect(calls[3].input).toEqual({ type: "command", command: ["ls", "-la"] });
+    expect(calls[4].input).toBe("raw");
   });
 
   it("keeps unparsable function_call arguments as the raw string", () => {
@@ -120,17 +126,22 @@ describe("codex structured tool calls", () => {
     );
     const calls = correlateCodexToolCalls(observations);
     expect(calls.map((call) => [call.canonicalName, call.status, call.executionEvidence])).toEqual([
-      ["shell", "completed", "runtime-confirmed"],
-      ["shell", "failed", "runtime-confirmed"],
-      ["shell", "declined", "runtime-confirmed"],
-      ["shell", "unknown", "runtime-confirmed"],
+      ["exec_command", "completed", "runtime-confirmed"],
+      ["exec_command", "failed", "runtime-confirmed"],
+      ["exec_command", "declined", "runtime-confirmed"],
+      ["exec_command", "unknown", "runtime-confirmed"],
       ["skills.read", "completed", "runtime-confirmed"],
       ["exec", "failed", "runtime-confirmed"],
       ["mcp__docs.search", "completed", "runtime-confirmed"],
     ]);
     expect(calls[0]).toMatchObject({ callId: "exec-1", turnId: "turn-1", cwd: "/repo" });
-    expect(calls[0].input).toEqual({ command: "git status", cwd: "/repo", parsedCommand: [], exitCode: 0 });
-    expect(calls[0].evidence[0].rawName).toBe("shell");
+    expect(calls[0].input).toEqual({
+      cmd: "git status",
+      command: ["git", "status"],
+      commandActions: [],
+      exitCode: 0,
+    });
+    expect(calls[0].evidence[0].rawName).toBe("exec_command");
   });
 
   it("decodes single-key item wrappers and bare item_completed rows", () => {
@@ -144,7 +155,7 @@ describe("codex structured tool calls", () => {
         payload: { turn_id: "turn-2", item: { type: "McpToolCall", id: "mcp-1", server: "docs", tool: "get" } },
       },
     ]);
-    expect(calls.map((call) => call.canonicalName)).toEqual(["shell", "mcp__docs.get"]);
+    expect(calls.map((call) => call.canonicalName)).toEqual(["exec_command", "mcp__docs.get"]);
     expect(calls[0].cwd).toBe("C:\\repo");
     expect(calls[1].turnId).toBe("turn-2");
   });
@@ -170,12 +181,12 @@ describe("codex structured tool calls", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       callId: "command-1",
-      canonicalName: "shell",
+      canonicalName: "exec_command",
       cwd: "/repo",
       status: "completed",
       executionEvidence: "runtime-confirmed",
     });
-    expect(calls[0].input).toEqual({ command: "ls -la", cwd: "/repo", parsedCommand: null, exitCode: 0 });
+    expect(calls[0].input).toMatchObject({ cmd: "ls -la", command: ["ls", "-la"], exitCode: 0 });
     expect(calls[0].evidence).toHaveLength(2);
     expect(calls[0].evidence.map((observation) => observation.evidence)).toEqual([
       "response-item",
@@ -214,5 +225,133 @@ describe("codex structured tool calls", () => {
       },
     ]);
     expect(calls[0].evidence[0].timestamp).toBe(completedAtMs);
+  });
+
+  it("lets runtime failure signals override a generic completed status", () => {
+    const calls = extractCodexStructuredToolCalls([
+      completedRow({
+        type: "CommandExecution",
+        id: "command-failed",
+        command: ["false"],
+        status: "completed",
+        exit_code: 1,
+      }),
+      completedRow({
+        type: "DynamicToolCall",
+        id: "dynamic-failed",
+        tool: "read",
+        status: "completed",
+        success: false,
+      }),
+      completedRow({
+        type: "McpToolCall",
+        id: "mcp-failed",
+        server: "docs",
+        tool: "read",
+        status: "completed",
+        error: "connection closed",
+      }),
+    ]);
+
+    expect(calls.map((call) => call.status)).toEqual(["failed", "failed", "failed"]);
+  });
+
+  it("treats executed metadata as runtime evidence and merges it with Legacy AST evidence", () => {
+    const calls = extractCodexStructuredToolCalls([
+      { type: "session_meta", payload: { history_mode: "legacy", cwd: "/repo" } },
+      responseRow({
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "legacy-exec",
+        input: "await tools.skills__read({ package: 'e0/search' });",
+        internal_chat_message_metadata_passthrough: {
+          turn_id: "turn-legacy",
+          executed_tool_calls: [{ name: "skills__read", arguments: { package: "e0/search" } }],
+        },
+      }),
+    ]);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({
+      parentCallId: "legacy-exec",
+      turnId: "turn-legacy",
+      canonicalName: "skills.read",
+      executionEvidence: "runtime-confirmed",
+    });
+    expect(calls[1].evidence.map((item) => item.evidence)).toEqual([
+      "executed-tool-metadata",
+      "code-mode-ast",
+    ]);
+  });
+
+  it("associates arbitrary paginated completion ids without collapsing repeated executions", () => {
+    const calls = extractCodexStructuredToolCalls([
+      { type: "session_meta", payload: { history_mode: "paginated", cwd: "/repo" } },
+      responseRow({
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "page-exec",
+        input: [
+          "await tools.exec_command({ cmd: 'pwd' });",
+          "await tools.exec_command({ cmd: 'pwd' });",
+        ].join("\n"),
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-page" },
+      }),
+      completedRow({
+        type: "CommandExecution",
+        id: "runtime-a",
+        command: ["zsh", "-lc", "pwd"],
+        status: "completed",
+        exit_code: 0,
+      }, "turn-page"),
+      completedRow({
+        type: "CommandExecution",
+        id: "runtime-b",
+        command: ["zsh", "-lc", "pwd"],
+        status: "completed",
+        exit_code: 0,
+      }, "turn-page", "2026-08-01T10:00:06Z"),
+    ]);
+
+    const commands = calls.filter((call) => call.canonicalName === "exec_command");
+    expect(commands).toHaveLength(2);
+    expect(commands.map((call) => call.callId)).toEqual(["runtime-a", "runtime-b"]);
+    expect(commands.every((call) => (
+      call.parentCallId === "page-exec"
+      && call.executionEvidence === "runtime-confirmed"
+      && call.evidence.some((item) => item.evidence === "code-mode-ast")
+    ))).toBe(true);
+  });
+
+  it("does not guess a parent when identical nested calls are ambiguous", () => {
+    const calls = extractCodexStructuredToolCalls([
+      { type: "session_meta", payload: { history_mode: "paginated" } },
+      responseRow({
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "outer-a",
+        input: "await tools.skills__read({ package: 'e0/search' });",
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-page" },
+      }),
+      responseRow({
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "outer-b",
+        input: "await tools.skills__read({ package: 'e0/search' });",
+        internal_chat_message_metadata_passthrough: { turn_id: "turn-page" },
+      }),
+      completedRow({
+        type: "DynamicToolCall",
+        id: "runtime-read",
+        namespace: "skills",
+        tool: "read",
+        arguments: { package: "e0/search" },
+        status: "completed",
+        success: true,
+      }, "turn-page"),
+    ]);
+
+    expect(calls.filter((call) => call.canonicalName === "skills.read")).toHaveLength(3);
+    expect(calls.find((call) => call.callId === "runtime-read")?.parentCallId).toBeNull();
   });
 });

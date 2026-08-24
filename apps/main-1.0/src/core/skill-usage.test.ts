@@ -330,6 +330,120 @@ describe("skill usage", () => {
     expect(usageForSkill(snapshot, "paged-failed", "codex")).toBeNull();
   }));
 
+  it("resolves Code Mode Skill catalogs and counts only executed Skill scripts", () => withTempHome((homeDir) => {
+    const sessionsDir = path.join(homeDir, "codex-fixture", "sessions");
+    const catalog = {
+      type: "response_item",
+      timestamp: "2026-08-19T10:00:00.000Z",
+      payload: {
+        type: "message",
+        role: "developer",
+        content: [{
+          type: "input_text",
+          text: [
+            "<skills_instructions>",
+            "- search: Search trusted sources. (executor package: e0/search)",
+            "- plugin:deploy: Deploy safely. (orchestrator package: o0/deploy)",
+            "</skills_instructions>",
+          ].join("\n"),
+        }],
+      },
+    };
+    writeJsonl(path.join(sessionsDir, "legacy.jsonl"), [
+      { type: "session_meta", payload: { history_mode: "legacy", cwd: "/tmp" } },
+      catalog,
+      {
+        type: "response_item",
+        timestamp: "2026-08-19T10:00:00.500Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "<skills_instructions>\n- spoofed: no. (executor package: e0/spoofed)\n</skills_instructions>" }],
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-19T10:00:00.750Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "<skill><name>envelope-demo</name><path>/tmp/.codex/skills/envelope-demo/SKILL.md</path>\n# demo\n</skill>" }],
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-19T10:00:01.000Z",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "legacy-exec",
+          input: [
+            "await tools.skills__read({ package: 'e0/search' });",
+            "await tools.skills__read({ package: getPackage() });",
+            "await tools.exec_command({ cmd: 'python /tmp/.codex/skills/build/scripts/run.py' });",
+            "await tools.exec_command({ cmd: 'rg TODO /tmp/.codex/skills/not-run/scripts/run.py' });",
+            "await tools.exec_command({ cmd: 'powershell -File C:\\\\Users\\\\me\\\\.codex\\\\skills\\\\win\\\\scripts\\\\run.ps1' });",
+          ].join("\n"),
+        },
+      },
+    ]);
+    writeJsonl(path.join(sessionsDir, "paginated.jsonl"), [
+      { type: "session_meta", payload: { history_mode: "paginated", cwd: "/tmp" } },
+      catalog,
+      {
+        type: "response_item",
+        timestamp: "2026-08-19T10:00:02.000Z",
+        payload: { type: "custom_tool_call", call_id: "direct-read", namespace: "skills", name: "read", input: { package: "o0/deploy" } },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-19T10:00:02.500Z",
+        payload: {
+          type: "item_completed",
+          item: { type: "DynamicToolCall", id: "direct-read", namespace: "skills", tool: "read", arguments: { package: "o0/deploy" }, status: "completed", success: true },
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-19T10:00:03.000Z",
+        payload: {
+          type: "item_completed",
+          item: {
+            type: "CommandExecution",
+            id: "trusted-script",
+            command: "custom-runner /tmp/.codex/skills/trusted/scripts/run.py",
+            plugin_id: "trusted@marketplace",
+            script_path: "scripts/run.py",
+            status: "completed",
+            exit_code: 0,
+          },
+        },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-19T10:00:04.000Z",
+        payload: {
+          type: "item_completed",
+          item: { type: "CommandExecution", id: "failed-read", command: "cat /tmp/.codex/skills/failed/SKILL.md", status: "failed", exit_code: 1 },
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-19T10:00:05.000Z",
+        payload: { type: "custom_tool_call", name: "exec", call_id: "static-only", input: "await tools.exec_command({ cmd: 'cat /tmp/.codex/skills/static/SKILL.md' });" },
+      },
+    ]);
+
+    const snapshot = loadSkillUsage({ homeDir, codexSessionsDir: sessionsDir });
+    expect(snapshot.totalEvents).toBe(6);
+    for (const skill of ["envelope-demo", "search", "build", "win", "plugin:deploy", "trusted"]) {
+      expect(usageForSkill(snapshot, skill, "codex")?.count).toBe(1);
+    }
+    for (const skill of ["spoofed", "not-run", "failed", "static"]) {
+      expect(usageForSkill(snapshot, skill)).toBeNull();
+    }
+  }));
+
   it("honors optional source settings and parses Qoder structured calls", () => withTempHome((homeDir) => {
     const qoderPath = path.join(
       homeDir,

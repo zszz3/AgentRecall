@@ -459,8 +459,8 @@ export class PostgresSkillRepository {
   // Per-tool call outcomes for one skill's linked-turn triggers. Joins
   // skill_usage_events → sessions (LATERAL, session_id whitelist includes
   // codex) → session_turns (LATERAL time window) → trace_spans (kind='tool').
-  // Only status='failed' counts as failure; 'aborted' is a user interrupt,
-  // not a tool failure.
+  // Only terminal, non-static tool evidence participates. status='failed'
+  // counts as failure; running, unknown and user-aborted calls stay out.
   async listSkillToolOutcomes(skill: string): Promise<SkillToolOutcome[]> {
     const result = await this.database.query<{
       tool_name: string;
@@ -472,7 +472,10 @@ export class PostgresSkillRepository {
       `
         with linked_tool_spans as (
           select
-            spans.name as tool_name,
+            coalesce(
+              nullif(spans.attributes #>> '{tool,canonicalName}', ''),
+              spans.name
+            ) as tool_name,
             spans.id as span_id,
             spans.status as span_status,
             spans.error as span_error
@@ -505,6 +508,11 @@ export class PostgresSkillRepository {
           join agent_recall.trace_spans spans
             on spans.turn_id = turn.turn_id
             and spans.kind = 'tool'
+            and spans.status in ('completed', 'failed')
+            and coalesce(
+              nullif(spans.attributes #>> '{tool,executionEvidence}', ''),
+              'legacy'
+            ) <> 'static-only'
           where lower(events.skill) = lower($1)
         )
         select
@@ -515,7 +523,7 @@ export class PostgresSkillRepository {
           array_agg(distinct left(span_error, 200) order by left(span_error, 200)) filter (where span_status = 'failed' and span_error is not null) as sample_errors
         from linked_tool_spans
         group by tool_name
-        order by failure_count desc, call_count desc
+        order by failure_count desc, call_count desc, tool_name
       `,
       [skill],
     );

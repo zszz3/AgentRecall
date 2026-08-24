@@ -117,7 +117,6 @@ describe("asynchronous skill usage refresh", () => {
           },
         },
       ]);
-
       const sources = await listSkillUsageSourcesAsync({ homeDir, codexSessionsDir: path.dirname(sessionPath) });
       const source = sources.find((item) => item.path === sessionPath);
       const events = await readSkillUsageSourceEventsAsync(source!);
@@ -202,6 +201,120 @@ describe("asynchronous skill usage refresh", () => {
       await expect(readSkillUsageSourceEventsAsync(source!)).resolves.toEqual([
         expect.objectContaining({ agent: "codex", skill: "wrapped-review" }),
       ]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves paginated Code Mode catalogs and excludes unexecuted Skill scripts", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-structured-skill-"));
+    try {
+      const sessionPath = path.join(homeDir, ".codex", "sessions", "2026", "08", "rollout.jsonl");
+      writeJsonl(sessionPath, [
+        {
+          type: "session_meta",
+          timestamp: "2026-08-19T10:00:00.000Z",
+          payload: { id: "session-structured", cwd: "/repo", history_mode: "paginated" },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-08-19T10:00:00.100Z",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{
+              type: "input_text",
+              text: "<skills_instructions>\n- search: Search sources. (executor package: e0/search)\n</skills_instructions>",
+            }],
+          },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-08-19T10:00:01.000Z",
+          payload: {
+            type: "custom_tool_call",
+            call_id: "exec-container",
+            name: "exec",
+            internal_chat_message_metadata_passthrough: { turn_id: "turn-exec" },
+            input: [
+              "await tools.skills__read({ package: 'e0/search' });",
+              "await tools.exec_command({ cmd: \"sed -n '1,20p' /tmp/.codex/skills/review/SKILL.md\" });",
+              "await tools.exec_command({ cmd: \"rg TODO /tmp/.codex/skills/not-run/scripts/run.py\" });",
+              "await tools.exec_command({ cmd: 'powershell -File C:\\\\Users\\\\me\\\\.codex\\\\skills\\\\win\\\\scripts\\\\run.ps1' });",
+            ].join("\n"),
+          },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-08-19T10:00:02.000Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-exec",
+            item: { type: "DynamicToolCall", id: "search-runtime", namespace: "skills", tool: "read", arguments: { package: "e0/search" }, status: "completed", success: true },
+          },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-08-19T10:00:03.000Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-exec",
+            item: { type: "CommandExecution", id: "review-runtime", command: "sed -n '1,20p' /tmp/.codex/skills/review/SKILL.md", status: "completed", exit_code: 0 },
+          },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-08-19T10:00:04.000Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-exec",
+            item: { type: "CommandExecution", id: "win-runtime", command: "powershell -File C:\\Users\\me\\.codex\\skills\\win\\scripts\\run.ps1", status: "completed", exit_code: 0 },
+          },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-08-19T10:00:05.000Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-exec",
+            item: {
+              type: "CommandExecution",
+              id: "trusted-runtime",
+              command: "custom-runner /tmp/.codex/skills/trusted/scripts/run.py",
+              plugin_id: "trusted@marketplace",
+              script_path: "scripts/run.py",
+              status: "completed",
+              exit_code: 0,
+            },
+          },
+        },
+      ]);
+      const staticOnlyPath = path.join(path.dirname(sessionPath), "static-only.jsonl");
+      writeJsonl(staticOnlyPath, [
+        { type: "session_meta", payload: { id: "session-static", history_mode: "paginated" } },
+        {
+          type: "response_item",
+          timestamp: "2026-08-19T10:00:06.000Z",
+          payload: {
+            type: "custom_tool_call",
+            name: "exec",
+            call_id: "static-container",
+            input: "await tools.exec_command({ cmd: 'cat /tmp/.codex/skills/static/SKILL.md' });",
+          },
+        },
+      ]);
+
+      const sources = await listSkillUsageSourcesAsync({ homeDir, codexSessionsDir: path.dirname(sessionPath) });
+      const source = sources.find((item) => item.path === sessionPath);
+      const events = await readSkillUsageSourceEventsAsync(source!);
+      expect(events.map((event) => event.skill).sort()).toEqual(["review", "search", "trusted", "win"]);
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ skill: "search", sessionId: "session-structured", cwd: "/repo" }),
+        expect.objectContaining({ skill: "win", sessionId: "session-structured" }),
+      ]));
+      expect(events).not.toEqual(expect.arrayContaining([expect.objectContaining({ skill: "not-run" })]));
+      const staticOnlySource = sources.find((item) => item.path === staticOnlyPath);
+      await expect(readSkillUsageSourceEventsAsync(staticOnlySource!)).resolves.toEqual([]);
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }

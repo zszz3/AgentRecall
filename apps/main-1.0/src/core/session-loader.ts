@@ -19,6 +19,11 @@ import {
   formatCodexToolDetail,
   sanitizeCodexTraceValue,
 } from "./session-loaders/codex-rollout";
+import {
+  canonicalToolName,
+  CodexToolCallCollector,
+  type StructuredToolCall as CodexStructuredToolCall,
+} from "./session-loaders/codex-tool-calls";
 import { truncateTraceDetail } from "./trace-detail";
 import {
   DEEPSEEK_HARNESS_DIR,
@@ -526,7 +531,7 @@ function extractCodexResponseTrace(
         : payloadType === "tool_search_call" ? stringField(payload, "execution") || "tool search"
           : "tool";
     const rawName = stringField(payload, "name") || fallbackName;
-    const name = namespace ? `${namespace}.${rawName}` : rawName;
+    const name = canonicalToolName(namespace || null, rawName);
     const nestedTools = payloadType === "custom_tool_call" && rawName === "exec"
       ? extractCodexExecToolNames(args)
       : [];
@@ -557,6 +562,7 @@ function extractCodexResponseTrace(
         attributes: {
           input: safeInput,
           ...(nestedTools.length > 0 ? { nestedTools } : {}),
+          tool: { canonicalName: name, executionEvidence: "recorded-request" },
         },
       },
     ];
@@ -745,11 +751,95 @@ function extractCodexEventTrace(
   return [];
 }
 
+function applyStructuredCodexToolCalls(
+  traceEvents: TraceEventDraft[],
+  calls: readonly CodexStructuredToolCall[],
+): TraceEventDraft[] {
+  const callIds = new Set(calls.flatMap((call) => call.callId ? [call.callId] : []));
+  const events = traceEvents.filter((event) => {
+    const tool = isRecord(event.attributes?.tool) ? event.attributes.tool : null;
+    if (
+      !tool
+      || tool.executionEvidence !== "static-only"
+      || typeof tool.parentCallId !== "string"
+      || !event.callId
+      || callIds.has(event.callId)
+    ) return true;
+    return !calls.some((call) =>
+      call.parentCallId === tool.parentCallId
+      && call.canonicalName === tool.canonicalName
+      && call.executionEvidence !== "static-only",
+    );
+  });
+  const indexesByCallId = new Map<string, number>();
+  events.forEach((event, index) => {
+    if (event.callId && !indexesByCallId.has(event.callId)) indexesByCallId.set(event.callId, index);
+  });
+
+  for (const call of calls) {
+    const directIndex = call.callId ? indexesByCallId.get(call.callId) : undefined;
+    const parentIndex = call.parentCallId ? indexesByCallId.get(call.parentCallId) : undefined;
+    if (directIndex === undefined && parentIndex === undefined) continue;
+    const anchor = events[directIndex ?? parentIndex!];
+    const existing = directIndex === undefined ? null : events[directIndex];
+    const structuredInput = sanitizeCodexTraceValue(call.input);
+    const input = existing?.attributes && "input" in existing.attributes
+      ? existing.attributes.input
+      : structuredInput;
+    const existingSummary = existing?.title.includes(" · ")
+      ? existing.title.split(" · ").slice(1).join(" · ")
+      : "";
+    const summary = existingSummary
+      || (existing ? "" : firstStringField(call.input, ["command", "cmd", "query", "path", "file_path", "url"]));
+    const status = call.status === "unknown"
+      ? existing?.status ?? "unknown"
+      : call.status === "declined" ? "aborted" : call.status;
+    const timestamp = existing?.timestamp
+      ?? (call.timestamp > 0 ? new Date(call.timestamp).toISOString() : anchor.timestamp);
+    const existingToolAttributes = isRecord(existing?.attributes?.tool) ? existing.attributes.tool : {};
+    const attributes = {
+      ...(existing?.attributes ?? {}),
+      input,
+      ...(call.durationMs === null ? {} : { durationMs: call.durationMs }),
+      tool: {
+        ...existingToolAttributes,
+        canonicalName: call.canonicalName,
+        executionEvidence: call.executionEvidence,
+        ...(call.parentCallId ? { parentCallId: call.parentCallId } : {}),
+        ...(call.pluginId ? { pluginId: call.pluginId } : {}),
+        ...(call.scriptPath ? { scriptPath: call.scriptPath } : {}),
+      },
+    };
+    const normalized: TraceEventDraft = {
+      kind: existing?.kind ?? (call.executionEvidence === "runtime-confirmed" ? "tool_result" : "tool_call"),
+      source: "codex",
+      title: titleWithSummary(call.canonicalName, summary),
+      detail: existing?.detail ?? formatCodexToolDetail(structuredInput, null),
+      timestamp,
+      callId: call.callId,
+      eventType: existing?.eventType ?? "codex.structured_tool",
+      status,
+      sourceTurnId: call.turnId ?? existing?.sourceTurnId ?? anchor.sourceTurnId ?? null,
+      attributes,
+    };
+    if (directIndex === undefined) {
+      if (!call.callId) continue;
+      indexesByCallId.set(call.callId, events.length);
+      events.push(normalized);
+    } else {
+      events[directIndex] = normalized;
+    }
+  }
+  return events;
+}
+
 function extractCodexTraceEvents(rows: unknown[]): TraceEventDraft[] {
   const rollout = new CodexRolloutAccumulator();
+  const toolCalls = new CodexToolCallCollector();
   const events: TraceEventDraft[] = [];
   for (const row of rows) {
     if (!isRecord(row)) continue;
+    toolCalls.consume(row);
     const result = rollout.consume(row);
     events.push(
       ...extractCodexResponseTrace(row, result.sourceTurnId),
@@ -757,7 +847,7 @@ function extractCodexTraceEvents(rows: unknown[]): TraceEventDraft[] {
       ...result.traceEvents,
     );
   }
-  return events;
+  return applyStructuredCodexToolCalls(dedupeCodexTraceEvents(events), toolCalls.finish());
 }
 
 function extractCodexMessages(rows: unknown[]): {
@@ -2048,6 +2138,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
       ...(base.loaded.tokenEvents ?? []).map((event) => event.sourceTurnId),
     ],
   } : undefined);
+  const toolCalls = new CodexToolCallCollector(base?.loaded.codexIncrementalState?.toolCallState);
   const messageProvenance = new Map<SessionMessage, string | null>();
   const provenanceMessages = new Map<string, SessionMessage>();
   const sourceRecordIdByMessageIndex = new Map(
@@ -2113,12 +2204,16 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
           } else {
             const removedTurns = turns.splice(turns.length - (numTurns as number), numTurns as number);
             rollout.discardActiveTurnIds(removedTurns.flatMap((turn) => [...turn.sourceTurnIds]));
+            toolCalls.discardCallIds(new Set(removedTurns.flatMap((turn) =>
+              turn.traceEvents.flatMap((event) => event.callId ? [event.callId] : []),
+            )));
             currentTurn = turns.at(-1) ?? null;
           }
           return;
         }
       }
 
+      toolCalls.consume(row);
       const rolloutRecord = rollout.consume(row);
       if (
         isRecord(row)
@@ -2237,6 +2332,10 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
       const visibleTraces = invalidRollback
         ? allTraceEvents
         : [...preamble.traceEvents, ...turns.flatMap((turn) => turn.traceEvents)];
+      const structuredTraces = dedupeCodexTraceEvents(applyStructuredCodexToolCalls(
+        dedupeCodexTraceEvents(visibleTraces),
+        toolCalls.finish(),
+      ));
       const pendingInterAgentCommunication = rollout.getPendingInterAgentCommunication();
       const tokenEvents = new Map<string, TokenUsageEvent>();
       for (const event of base?.loaded.tokenEvents ?? []) putTokenEvent(tokenEvents, event);
@@ -2250,7 +2349,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
         meta,
         messages: visibleMessages.map((message, index) => ({ ...message, index })),
         tokenEvents: [...tokenEvents.values()],
-        traceEvents: dedupeCodexTraceEvents(visibleTraces),
+        traceEvents: structuredTraces,
         codexIncrementalState: {
           historyMode: rollout.historyMode,
           messageProvenance: visibleMessages.map((message, messageIndex) => ({
@@ -2258,6 +2357,7 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
             sourceRecordId: messageProvenance.get(message) ?? null,
           })),
           activeTurnIds: rollout.getActiveTurnIds(),
+          toolCallState: toolCalls.state,
           ...(rollout.agentPath === undefined || rollout.agentPath === "/root" ? {} : { agentPath: rollout.agentPath }),
           ...(pendingInterAgentCommunication
             ? { pendingInterAgentCommunication }

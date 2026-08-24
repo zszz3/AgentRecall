@@ -705,6 +705,78 @@ describe("Codex session loading", () => {
     }
   });
 
+  it("upgrades a paginated Code Mode trace across incremental reads", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-tool-state-"));
+    const filePath = path.join(root, "sessions", "2026", "08", "20", "rollout.jsonl");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, [
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-08-20T03:00:00Z",
+        payload: { id: "tool-state", cwd: "/repo", history_mode: "paginated" },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-20T03:00:01Z",
+        payload: { type: "task_started", turn_id: "turn-tool" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-08-20T03:00:02Z",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "code-mode-incremental",
+          internal_chat_message_metadata_passthrough: { turn_id: "turn-tool" },
+          input: "await tools.exec_command({ cmd: 'pwd' });",
+        },
+      }),
+      "",
+    ].join("\n"));
+
+    try {
+      const initial = loadCodexSessionFile(filePath);
+      if (!initial) throw new Error("expected initial Codex session");
+      const offset = fs.statSync(filePath).size;
+      fs.appendFileSync(filePath, `${JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-20T03:00:03Z",
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-tool",
+          item: {
+            type: "CommandExecution",
+            id: "exec-runtime-incremental",
+            command: ["/bin/zsh", "-lc", "pwd"],
+            cwd: "/repo",
+            status: "completed",
+            exit_code: 0,
+            duration: { secs: 1, nanos: 250_000_000 },
+          },
+        },
+      })}\n`);
+
+      const incremental = [...loadCodexSessionsIterator(root, undefined, {
+        incrementalCodexSessions: new Map([[filePath, { offset, loaded: initial }]]),
+      })][0];
+      const nestedCommands = incremental?.traceEvents?.filter((event) => {
+        const tool = event.attributes?.tool as Record<string, unknown> | undefined;
+        return tool?.parentCallId === "code-mode-incremental" && tool.canonicalName === "exec_command";
+      }) ?? [];
+      expect(nestedCommands).toHaveLength(1);
+      expect(nestedCommands[0]).toMatchObject({
+        callId: "exec-runtime-incremental",
+        status: "completed",
+        attributes: {
+          durationMs: 1_250,
+          tool: { executionEvidence: "runtime-confirmed" },
+        },
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps unknown Agent message direction across incremental reads for subagents without agent_path", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-null-agent-path-"));
     const filePath = path.join(root, "sessions", "2026", "08", "04", "rollout.jsonl");
@@ -1663,7 +1735,7 @@ describe("Codex session loading", () => {
 
     const loaded = loadCodexSessionFile(filePath);
 
-    expect(loaded?.traceEvents).toHaveLength(1);
+    expect(loaded?.traceEvents).toHaveLength(5);
     expect(loaded?.traceEvents?.[0]).toMatchObject({
       index: 0,
       kind: "tool_result",
@@ -1681,6 +1753,16 @@ describe("Codex session loading", () => {
     });
     expect(loaded?.traceEvents?.[0].detail).toContain(input);
     expect(loaded?.traceEvents?.[0].detail).toContain("query completed");
+    expect(loaded?.traceEvents?.slice(1).map((event) => ({
+      callId: event.callId,
+      name: (event.attributes?.tool as Record<string, unknown> | undefined)?.canonicalName,
+      evidence: (event.attributes?.tool as Record<string, unknown> | undefined)?.executionEvidence,
+    }))).toEqual([
+      { callId: "custom-1#ast-0", name: "exec_command", evidence: "static-only" },
+      { callId: "custom-1#ast-1", name: "web.run", evidence: "static-only" },
+      { callId: "custom-1#ast-2", name: "mcp__memory.search", evidence: "static-only" },
+      { callId: "custom-1#ast-3", name: "exec_command", evidence: "static-only" },
+    ]);
 
     fs.rmSync(dir, { recursive: true, force: true });
   });
@@ -1725,7 +1807,7 @@ describe("Codex session loading", () => {
       },
     ]);
 
-    expect(loaded?.traceEvents).toHaveLength(1);
+    expect(loaded?.traceEvents).toHaveLength(3);
     expect(loaded?.traceEvents?.[0]).toMatchObject({
       kind: "tool_result",
       title: "workspace.exec · exec_command, web.run",
@@ -1735,6 +1817,14 @@ describe("Codex session loading", () => {
         nestedTools: ["exec_command", "web__run"],
       },
     });
+    expect(loaded?.traceEvents?.slice(1).map((event) => ({
+      name: (event.attributes?.tool as Record<string, unknown> | undefined)?.canonicalName,
+      parentCallId: (event.attributes?.tool as Record<string, unknown> | undefined)?.parentCallId,
+      evidence: (event.attributes?.tool as Record<string, unknown> | undefined)?.executionEvidence,
+    }))).toEqual([
+      { name: "exec_command", parentCallId: "exec-1", evidence: "static-only" },
+      { name: "web.run", parentCallId: "exec-1", evidence: "static-only" },
+    ]);
   });
 
   it("preserves Codex tool identity and timing across intermediate call events", () => {

@@ -245,6 +245,79 @@ describe("PostgreSQL support repositories", () => {
     await expect(repository.listRecentSkillTriggers({ skill: "unknown" })).resolves.toEqual([]);
   });
 
+  it("uses structured execution evidence and canonical tool names for Skill Eval outcomes", async () => {
+    const repository = new PostgresSkillRepository(database);
+    const sessionRepository = new PostgresSessionRepository(database);
+    await sessionRepository.upsertIndexedSession({
+      ...session("local:codex:eval-tools"),
+      rawId: "codex-eval-tools",
+    }, []);
+    await database.query(
+      `
+        insert into agent_recall.session_turns (
+          id, session_key, turn_index, started_at, ended_at, derivation_version
+        )
+        values ('eval-turn', 'local:codex:eval-tools', 0, $1, $2, 1)
+      `,
+      [new Date(900).toISOString(), new Date(1_100).toISOString()],
+    );
+    await database.query(
+      `
+        insert into agent_recall.trace_spans (
+          id, turn_id, span_index, kind, name, status, attributes
+        )
+        values
+          ('runtime-failed', 'eval-turn', 0, 'tool', 'web', 'failed', $1::jsonb),
+          ('static-failed', 'eval-turn', 1, 'tool', 'exec_command', 'failed', $2::jsonb),
+          ('request-running', 'eval-turn', 2, 'tool', 'skills.read', 'running', $3::jsonb),
+          ('request-completed', 'eval-turn', 3, 'tool', 'shell', 'completed', $4::jsonb),
+          ('legacy-failed', 'eval-turn', 4, 'tool', 'legacy_tool', 'failed', '{}'::jsonb)
+      `,
+      [
+        JSON.stringify({ tool: { canonicalName: "web.run", executionEvidence: "runtime-confirmed" } }),
+        JSON.stringify({ tool: { canonicalName: "exec_command", executionEvidence: "static-only" } }),
+        JSON.stringify({ tool: { canonicalName: "skills.read", executionEvidence: "recorded-request" } }),
+        JSON.stringify({ tool: { canonicalName: "exec_command", executionEvidence: "recorded-request" } }),
+      ],
+    );
+    await repository.upsertSkillUsageSource({
+      agent: "codex",
+      kind: "codex-session",
+      path: "/fixtures/eval-tools.jsonl",
+      mtimeMs: 1,
+      fileSize: 1,
+    }, [{
+      agent: "codex",
+      skill: "review",
+      timestamp: 1_000,
+      sessionId: "codex-eval-tools",
+    }]);
+
+    await expect(repository.listSkillToolOutcomes("Review")).resolves.toEqual([
+      {
+        toolName: "legacy_tool",
+        callCount: 1,
+        failureCount: 1,
+        sampleSpanIds: ["legacy-failed"],
+        sampleErrors: [],
+      },
+      {
+        toolName: "web.run",
+        callCount: 1,
+        failureCount: 1,
+        sampleSpanIds: ["runtime-failed"],
+        sampleErrors: [],
+      },
+      {
+        toolName: "exec_command",
+        callCount: 1,
+        failureCount: 0,
+        sampleSpanIds: [],
+        sampleErrors: [],
+      },
+    ]);
+  });
+
   it("aggregates the skill live report across overview, signals, and version groups", async () => {
     const repository = new PostgresSkillRepository(database);
     const sessionRepository = new PostgresSessionRepository(database);

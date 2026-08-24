@@ -6,7 +6,10 @@ import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { scanCompleteJsonlAsync } from "./codex-jsonl-stream";
 import { isWorkBuddySessionFile } from "./session-loaders/workbuddy-paths";
-import { extractCodexStructuredToolCalls } from "./session-loaders/codex-tool-calls";
+import {
+  CodexToolCallCollector,
+  type StructuredToolCall as CodexStructuredToolCall,
+} from "./session-loaders/codex-tool-calls";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as {
@@ -120,6 +123,8 @@ export interface SkillUsageOptions {
 interface StructuredToolCall {
   name: string;
   input: unknown;
+  pluginId?: string | null;
+  scriptPath?: string | null;
   // Claude only: lets a call be dropped when its result reports an error.
   toolUseId?: string;
 }
@@ -519,7 +524,10 @@ function collectCodexUsageRecord(
   events: ScannedUsageEvent[],
   context: SessionFileContext,
 ): void {
-  if (readCodexSessionMeta(row, context)) return;
+  if (readCodexSessionMeta(row, context)) {
+    rows.push(row);
+    return;
+  }
   const timestamp = timestampFrom(row.timestamp ?? row.createdAt ?? row.created_at);
   const envelope = codexSkillEnvelopeEvent(row, timestamp, context);
   if (envelope) events.push(envelope);
@@ -535,17 +543,68 @@ function codexSessionUsageEvents(
   const defaultOwner = source.provider === "codex" || source.provider === "tcodex"
     ? "codex"
     : undefined;
-  return extractCodexStructuredToolCalls(rows)
-    .filter((call) => call.status !== "failed" && call.status !== "declined")
-    .flatMap((call) => usageEventsFromToolCall(
-    { name: call.canonicalName, input: unwrapCodexExecInput(call.input) },
-    Math.min(...call.evidence.map((item) => item.timestamp)),
-    defaultOwner,
-    ).map((event) => ({
-      ...event,
-      ...(context.sessionId ? { sessionId: context.sessionId } : {}),
-      ...(context.cwd ? { cwd: context.cwd } : {}),
-    })));
+  const collector = new CodexToolCallCollector();
+  const packages = new Map<string, string>();
+  for (const row of rows) {
+    collector.consume(row);
+    if (isRecord(row)) collectCodexSkillPackages(row, packages);
+  }
+  const events: ScannedUsageEvent[] = [];
+  for (const call of collector.finish()) {
+    if (collector.sessionFormat === "paginated" && call.executionEvidence !== "runtime-confirmed") continue;
+    if (call.status === "failed" || call.status === "declined" || call.canonicalName === "exec") continue;
+    const callEvents = call.canonicalName === "skills.read"
+      ? skillReadUsageEvents(call, packages)
+      : usageEventsFromToolCall({
+          name: call.canonicalName,
+          input: call.input,
+          pluginId: call.pluginId,
+          scriptPath: call.scriptPath,
+        }, call.timestamp, defaultOwner);
+    const cwd = call.cwd ?? context.cwd;
+    for (const event of callEvents) {
+      events.push({
+        ...event,
+        ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+        ...(cwd ? { cwd } : {}),
+      });
+    }
+  }
+  return events;
+}
+
+function skillReadUsageEvents(
+  call: CodexStructuredToolCall,
+  packages: Map<string, string>,
+): SkillUsageEvent[] {
+  const input = parseMaybeJson(call.input);
+  if (!isRecord(input) || input.cursor != null) return [];
+  const resource = typeof input.resource === "string" ? input.resource.trim() : "";
+  if (resource && !/(?:^|[/\\])SKILL\.md$/i.test(resource)) return [];
+  const packageId = typeof input.package === "string" ? input.package.trim() : "";
+  const skill = packages.get(packageId);
+  return skill ? [{ agent: "codex", skill, timestamp: call.timestamp }] : [];
+}
+
+function collectCodexSkillPackages(row: Record<string, unknown>, packages: Map<string, string>): void {
+  const payload = row.type === "response_item" ? recordField(row, "payload") : null;
+  if (
+    !payload
+    || payload.type !== "message"
+    || (payload.role !== "developer" && payload.role !== "system")
+    || !Array.isArray(payload.content)
+  ) return;
+  const body = payload.content
+    .map((item) => isRecord(item) && typeof item.text === "string" ? item.text : "")
+    .join("\n");
+  if (!body.includes("<skills_instructions>")) return;
+  const linePattern = /^\s*-\s+(.+?):\s+[^\n]*\((?:executor|orchestrator) package:\s*([^\s)]+)\)\s*$/gim;
+  let match: RegExpExecArray | null;
+  while ((match = linePattern.exec(body))) {
+    const skill = match[1].replace(/^`|`$/g, "").trim();
+    const packageId = match[2].replace(/^`|`$/g, "").trim();
+    if (skill && packageId) packages.set(packageId, skill);
+  }
 }
 
 function parseUsageRecordLine(line: string): Record<string, unknown> | null {
@@ -673,22 +732,6 @@ function collectFailedToolUseIds(row: Record<string, unknown>, context: SessionF
   }
 }
 
-// Codex Desktop's `exec` custom tool wraps the real shell command in a JS
-// snippet: `const r = await tools.exec_command({"cmd":"cat …/SKILL.md", …}); text(r.output)`.
-// Pull the exec_command argument object out so shell/skill detection sees the
-// actual command instead of the JS wrapper (whose trailing `; text(r.output)`
-// makes the read-only check reject it).
-function unwrapCodexExecInput(input: unknown): unknown {
-  if (typeof input !== "string" || !input.includes("exec_command(")) return input;
-  const match = input.match(/exec_command\(\s*(\{[\s\S]*\})\s*\)/);
-  if (!match) return input;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return input;
-  }
-}
-
 function codeBuddyToolCalls(row: Record<string, unknown>): StructuredToolCall[] {
   if (row.type === "function_call" && typeof row.name === "string") {
     return [{ name: row.name, input: row.input ?? row.arguments }];
@@ -750,6 +793,8 @@ function usageEventsFromToolCall(
   }
   if (isShellTool(normalizedName)) {
     const command = shellCommandText(input);
+    const scriptEvents = usageEventsFromSkillScript(command, timestamp, defaultOwner, call.scriptPath, call.pluginId);
+    if (scriptEvents.length) return scriptEvents;
     if (!isReadOnlySkillCommand(command)) return [];
   } else if (!isReadOnlyFileTool(normalizedName)) {
     return [];
@@ -761,6 +806,94 @@ function usageEventsFromToolCall(
     if (owner) events.set(`${owner}:${skill.toLowerCase()}`, { agent: owner, skill, timestamp });
   }
   return [...events.values()];
+}
+
+function usageEventsFromSkillScript(
+  command: string,
+  timestamp: number,
+  defaultOwner?: SkillUsageAgent,
+  attributedScriptPath?: string | null,
+  attributedPluginId?: string | null,
+): SkillUsageEvent[] {
+  const events = new Map<string, SkillUsageEvent>();
+  for (const { skill, path: scriptPath } of executedSkillScriptPaths(command, attributedScriptPath, attributedPluginId)) {
+    const owner = ownerFromSkillPath(scriptPath) ?? defaultOwner;
+    if (owner) events.set(`${owner}:${skill.toLowerCase()}`, { agent: owner, skill, timestamp });
+  }
+  return [...events.values()];
+}
+
+const SCRIPT_INTERPRETERS = new Set([
+  "bash", "bun", "deno", "fish", "node", "nodejs", "perl", "php", "py",
+  "python", "python2", "python3", "pwsh", "powershell", "ruby", "sh", "zsh",
+]);
+
+function executedSkillScriptPaths(
+  command: string,
+  attributedScriptPath?: string | null,
+  attributedPluginId?: string | null,
+): Array<{ skill: string; path: string }> {
+  const candidates = skillScriptPathsFromText(command);
+  if (!command.trim() || candidates.length === 0) return [];
+
+  if (attributedScriptPath && attributedPluginId) {
+    const attributed = normalizedCommandToken(attributedScriptPath).toLowerCase();
+    const matched = candidates.filter((candidate) => {
+      const candidatePath = candidate.path.replace(/\\/g, "/").toLowerCase();
+      return candidatePath === attributed || candidatePath.endsWith(`/${attributed}`);
+    });
+    if (matched.length === 1) return matched;
+    if (candidates.length === 1) return candidates;
+  }
+
+  const tokens = shellCommandTokens(command);
+  let index = 0;
+  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index += 1;
+  if (commandBaseName(tokens[index]) === "sudo") {
+    index += 1;
+    while (index < tokens.length && tokens[index].startsWith("-")) index += 1;
+  }
+  if (commandBaseName(tokens[index]) === "env") {
+    index += 1;
+    while (index < tokens.length && (tokens[index].startsWith("-") || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index]))) index += 1;
+  }
+
+  const executableToken = normalizedCommandToken(tokens[index]);
+  const direct = skillScriptPathsFromText(executableToken);
+  if (direct.length) return direct;
+  const executable = commandBaseName(executableToken);
+  if (!SCRIPT_INTERPRETERS.has(executable)) return [];
+  index += 1;
+
+  if (executable === "deno") {
+    if (commandBaseName(tokens[index]) !== "run") return [];
+    index += 1;
+  }
+  if (executable === "pwsh" || executable === "powershell") {
+    const fileFlag = tokens.findIndex((token, tokenIndex) => tokenIndex >= index && /^-file$/i.test(token));
+    if (fileFlag >= 0) return skillScriptPathsFromText(normalizedCommandToken(tokens[fileFlag + 1]));
+  }
+
+  for (; index < tokens.length; index += 1) {
+    const token = normalizedCommandToken(tokens[index]);
+    if (!token || token === "--") continue;
+    if (/^(?:-c|-e|-m|--command|--eval)$/i.test(token)) return [];
+    if (token.startsWith("-")) continue;
+    return skillScriptPathsFromText(token);
+  }
+  return [];
+}
+
+function shellCommandTokens(command: string): string[] {
+  return command.match(/"(?:\\.|[^"\\])*"|'[^']*'|[^\s]+/g) ?? [];
+}
+
+function normalizedCommandToken(value: string | undefined): string {
+  return (value ?? "").trim().replace(/^["']|["']$/g, "").replace(/[;&|]+$/g, "").replace(/\\\//g, "/");
+}
+
+function commandBaseName(value: string | undefined): string {
+  return normalizedCommandToken(value).split(/[/\\]/).pop()?.replace(/\.exe$/i, "").toLowerCase() ?? "";
 }
 
 function baseToolName(name: string): string {
@@ -841,6 +974,19 @@ function skillPathsFromText(text: string): Array<{ skill: string; path: string }
     if (!skill) continue;
     const skillPath = match[0];
     matches.set(`${skill.toLowerCase()}\0${skillPath.toLowerCase()}`, { skill, path: skillPath });
+  }
+  return [...matches.values()];
+}
+
+function skillScriptPathsFromText(text: string): Array<{ skill: string; path: string }> {
+  const normalized = text.replace(/\\\//g, "/");
+  const matches = new Map<string, { skill: string; path: string }>();
+  const pattern = /([^\s"'`]*[/\\]skills[/\\])([^/\\\s"'`]+)[/\\]scripts[/\\][^\s"'`]+/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(normalized))) {
+    const skill = match[2];
+    const scriptPath = match[0];
+    matches.set(`${skill.toLowerCase()}\0${scriptPath.toLowerCase()}`, { skill, path: scriptPath });
   }
   return [...matches.values()];
 }
