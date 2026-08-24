@@ -541,6 +541,80 @@ describe("indexer", () => {
     }
   });
 
+  it("reconciles persisted Code Mode tool state when runtime evidence arrives later", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-tool-state-tail-"));
+    try {
+      const filePath = writeCodexSession(homeDir, "codex-tool-state-tail", "run pwd", "Tool State Tail");
+      fs.appendFileSync(filePath, [
+        "",
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-08-20T03:00:00Z",
+          payload: { id: "codex-tool-state-tail", cwd: "/repo", history_mode: "paginated" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-08-20T03:00:01Z",
+          payload: { type: "task_started", turn_id: "turn-tool" },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-08-20T03:00:02Z",
+          payload: {
+            type: "custom_tool_call",
+            name: "exec",
+            call_id: "code-mode-incremental",
+            internal_chat_message_metadata_passthrough: { turn_id: "turn-tool" },
+            input: "await tools.exec_command({ cmd: 'pwd' });",
+          },
+        }),
+        "",
+      ].join("\n"));
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+
+      fs.appendFileSync(filePath, `${JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-20T03:00:03Z",
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-tool",
+          item: {
+            type: "CommandExecution",
+            id: "exec-runtime-incremental",
+            command: ["/bin/zsh", "-lc", "pwd"],
+            cwd: "/repo",
+            status: "completed",
+            exit_code: 0,
+            duration: { secs: 1, nanos: 250_000_000 },
+          },
+        },
+      })}\n`);
+      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
+
+      const nestedCommands = store.getTraceEvents("codex:codex-tool-state-tail").filter((event) => {
+        const tool = event.attributes?.tool as Record<string, unknown> | undefined;
+        return tool?.canonicalName === "exec_command";
+      });
+      expect(nestedCommands).toEqual([
+        expect.objectContaining({
+          callId: "exec-runtime-incremental",
+          status: "completed",
+          attributes: expect.objectContaining({
+            durationMs: 1_250,
+            tool: expect.objectContaining({
+              parentCallId: "code-mode-incremental",
+              executionEvidence: "runtime-confirmed",
+            }),
+          }),
+        }),
+      ]);
+    } finally {
+      store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("restores an active Codex turn when lifecycle records arrive in separate scans", async () => {
     const store = createInMemoryStore();
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-lifecycle-tail-"));
