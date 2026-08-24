@@ -6,8 +6,10 @@ import {
 } from "./openviking-artifact-resolver";
 
 describe("OpenViking artifact resolver", () => {
-  it("uses the runtime revision that forwards extraction reasoning effort", () => {
-    expect(OPENVIKING_RUNTIME_VERSION).toBe("0.4.11-r6");
+  it("uses the runtime revision that keeps the local vector index writable", () => {
+    // r7 pins xxhash below 4; xxhash 4 rejects str input, which made every
+    // local vector read and write throw and left memory recall permanently empty.
+    expect(OPENVIKING_RUNTIME_VERSION).toBe("0.4.11-r7");
   });
 
   it("loads the matching runtime manifest from the current AgentRecall release", async () => {

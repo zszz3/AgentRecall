@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  OPENVIKING_RUNTIME_VERSION: 0.4.11-r6
+  OPENVIKING_RUNTIME_VERSION: 0.4.11-r7
 
 jobs:
   plan:

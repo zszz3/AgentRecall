@@ -312,6 +312,15 @@ export class OpenVikingRuntimeService {
     const manifest = await this.readActiveManifest();
     if (!manifest) throw new Error("OpenViking runtime is not installed.");
     this.validateManifest(manifest);
+    // getStatus() reports a runtime from another release as "not-installed", so
+    // starting it anyway used to leave a live server the rest of the app never
+    // acknowledged: the hook manifest kept a null baseUrl and long-term memory
+    // stayed dead. Refuse instead, so the caller installs the matching runtime.
+    if (this.version !== undefined && manifest.version !== this.version) {
+      throw new Error(
+        `The installed OpenViking runtime is ${manifest.version}, but this build requires ${this.version}. Install the matching runtime before starting it.`,
+      );
+    }
     this.transientStatus = {
       state: "starting",
       version: manifest.version,

@@ -162,6 +162,9 @@ test("runtime builds require explicit isolated HOME and output directories", asy
       "--disable-pip-version-check",
       "openviking[local-embed]==0.4.11",
       "mcp>=1.27.0,<2",
+      // xxhash 4 rejects str input, which makes every local vector read and
+      // write throw inside openviking and silently indexes no memories.
+      "xxhash<4",
     ]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -193,6 +196,7 @@ test("Windows runtime builds use the pinned prebuilt llama.cpp wheel", () => {
     ].join(""),
     "openviking[local-embed]==0.4.11",
     "mcp>=1.27.0,<2",
+    "xxhash<4",
   ]);
 });
 

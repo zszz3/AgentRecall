@@ -17,6 +17,10 @@ interface OpenVikingHookManifestServiceOptions {
 
 interface WriteOpenVikingHookManifestInput {
   baseUrl: string | null;
+  // Diagnostic only: hooks cannot call the control plane without a baseUrl, but
+  // recording why it is missing separates "memory is off" from "the runtime is
+  // still installing or failed to start".
+  runtimeState?: string;
   integrations: {
     claude: boolean;
     codex: boolean;
@@ -100,6 +104,7 @@ export class OpenVikingHookManifestService {
     const manifest = {
       version: 2,
       baseUrl: input.baseUrl,
+      ...(input.runtimeState ? { runtimeState: input.runtimeState } : {}),
       stateDir: this.stateDir(),
       integrations: input.integrations,
       workspaces,

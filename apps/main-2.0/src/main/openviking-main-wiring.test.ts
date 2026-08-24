@@ -20,7 +20,15 @@ describe("OpenViking main-process wiring", () => {
     expect(mainSource).toContain(
       'process.env.AGENT_RECALL_NODE_PATH || process.env.npm_node_execpath || "node"',
     );
-    expect(mainSource).toContain("snapshot.workspaces.some((workspace) => workspace.managed)");
+    // Runtime bootstrap moved into its own service so the install/start
+    // sequence is unit-testable; index.ts only wires it, and the managed
+    // workspace gate has to keep living in that service.
+    expect(mainSource).toContain("bootstrapOpenVikingRuntime");
+    const bootstrapSource = await readFile(
+      path.join(process.cwd(), "src/main/services/openviking-runtime-bootstrap.ts"),
+      "utf8",
+    );
+    expect(bootstrapSource).toContain("snapshot.workspaces.some((workspace) => workspace.managed)");
     expect(mainSource).not.toContain("syncManagedWorkspaces");
     expect(mainSource).toContain("build-openviking-runtime.mjs");
     expect(mainSource).toContain("developmentFallback");

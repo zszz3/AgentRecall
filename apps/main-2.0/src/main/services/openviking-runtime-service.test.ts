@@ -626,6 +626,14 @@ describe("OpenVikingRuntimeService", () => {
     });
 
     await expect(service.getStatus()).resolves.toEqual({ state: "not-installed" });
+    // Starting it anyway would leave a live server the rest of the app treats as
+    // absent, which silently disables long-term memory for every hook.
+    await expect(
+      service.start({
+        embedding: { dense: { provider: "local", model: "model", dimension: 512 } },
+        vlm: { provider: "openai-codex", model: "gpt-5.4" },
+      }),
+    ).rejects.toThrow("this build requires 0.4.11-r4");
   });
 
   it("installs a checksummed local archive only when development mode enables it", async () => {

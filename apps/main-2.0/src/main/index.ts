@@ -123,7 +123,10 @@ import {
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
 import { QUOTA_EVENTS } from "../shared/ipc/quota";
-import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
+import {
+  OPENVIKING_LOCAL_EMBEDDING_MODEL,
+  type OpenVikingRuntimeInstallProgress,
+} from "../core/openviking-memory";
 import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
 import { registerTeamChatIpc } from "./ipc/team-chat";
@@ -171,6 +174,7 @@ import {
   OpenVikingRuntimeService,
   type OpenVikingRuntimeManifest,
 } from "./services/openviking-runtime-service";
+import { bootstrapOpenVikingRuntime } from "./services/openviking-runtime-bootstrap";
 import { NativeAutomationService } from "./services/automation-service";
 import {
   BuiltinSessionSearchServer,
@@ -1280,6 +1284,9 @@ async function refreshOpenVikingHookManifest(): Promise<void> {
   }
   const manifestPath = await openVikingHookManifestService.write({
     baseUrl,
+    // Hooks and diagnostics can tell "memory is off" apart from "the runtime is
+    // not reachable yet" only when the manifest names the runtime state.
+    runtimeState: runtimeStatus.state,
     integrations: openVikingIntegrations(getSettings()),
     workspaces: await store.listOpenVikingWorkspaces(),
     recallTokenBudget: getSettings().openVikingRecallTokenBudget,
@@ -1302,12 +1309,25 @@ function reconcileOpenVikingMemoryHooks(settings: AppSettings): void {
 }
 
 async function startConfiguredOpenVikingRuntime(settings: AppSettings): Promise<void> {
-  if (!openVikingControlService || !Object.values(openVikingIntegrations(settings)).some(Boolean)) return;
-  const snapshot = await openVikingControlService.snapshot();
-  const hasActiveWorkspace = snapshot.workspaces.some((workspace) => workspace.managed);
-  if (!hasActiveWorkspace) return;
-  if (snapshot.runtime.state === "stopped" && snapshot.model.installed) {
-    await openVikingControlService.startRuntime();
+  const control = openVikingControlService;
+  if (!control) return;
+  const outcome = await bootstrapOpenVikingRuntime({
+    memoryEnabled: Object.values(openVikingIntegrations(settings)).some(Boolean),
+    snapshot: () => control.snapshot(),
+    installRuntime: () => control.installRuntime(),
+    installModel: () => control.installModel(OPENVIKING_LOCAL_EMBEDDING_MODEL),
+    startRuntime: () => control.startRuntime(),
+    logInfo: (message) => console.info(message),
+    logError: (message) => console.error(message),
+  });
+  if (outcome.status === "started" && (outcome.installedRuntime || outcome.installedModel)) {
+    console.info(`OpenViking ${OPENVIKING_RUNTIME_VERSION} runtime is installed and running.`);
+    return;
+  }
+  // A runtime that never comes up disables long-term memory for every hook, so
+  // the reason has to reach the log instead of being dropped on the floor.
+  if (outcome.status === "skipped" && outcome.reason !== "memory-disabled") {
+    console.info(`OpenViking runtime bootstrap skipped: ${outcome.reason}.`);
   }
 }
 
