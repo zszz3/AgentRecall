@@ -8,8 +8,8 @@ import {
   dedupeCodexTraceEvents,
   extractCodexExecToolNames,
   formatCodexToolDetail,
-  sanitizeCodexTraceValue,
 } from "./session-loaders/codex-rollout";
+import { sanitizeCodexTraceValue } from "./session-loaders/codex-trace-value";
 import {
   canonicalToolName,
   CodexToolCallCollector,

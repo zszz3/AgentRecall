@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CodexToolCallCollector,
   collectCodexToolCallObservations,
   correlateCodexToolCalls,
   extractCodexStructuredToolCalls,
@@ -396,5 +397,30 @@ describe("codex structured tool calls", () => {
 
     expect(calls.filter((call) => call.canonicalName === "skills.read")).toHaveLength(3);
     expect(calls.find((call) => call.callId === "runtime-read")?.parentCallId).toBeNull();
+  });
+
+  it("sanitizes and bounds persisted collector observations", () => {
+    const collector = new CodexToolCallCollector();
+    collector.consume({ type: "session_meta", payload: { history_mode: "paginated", cwd: "/repo" } });
+    for (let index = 0; index < 40; index += 1) {
+      collector.consume(responseRow({
+        type: "function_call",
+        name: "apply_patch",
+        call_id: `large-call-${index}`,
+        arguments: JSON.stringify({
+          encrypted_payload: `secret-marker-${index}`,
+          image_url: `data:image/png;base64,${"A".repeat(20_000)}`,
+          patch: `patch-${index}-${"x".repeat(20_000)}`,
+        }),
+      }));
+    }
+
+    const state = collector.state;
+    const serialized = JSON.stringify(state);
+    expect(serialized).not.toContain("secret-marker");
+    expect(serialized).not.toContain("data:image/png;base64");
+    expect(serialized.length).toBeLessThanOrEqual(270_000);
+    expect(state.observations.length).toBeLessThan(40);
+    expect(state.observations.at(-1)?.callId).toBe("large-call-39");
   });
 });

@@ -5,6 +5,7 @@ import type {
   SessionTraceEvent,
 } from "../types";
 import { truncateTraceDetail } from "../trace-detail";
+import { sanitizeCodexTraceValue } from "./codex-trace-value";
 
 type TraceEventDraft = Omit<SessionTraceEvent, "index">;
 
@@ -114,47 +115,6 @@ function collectText(value: unknown): string[] {
   return Object.entries(object)
     .filter(([key]) => !key.toLocaleLowerCase().includes("encrypted"))
     .flatMap(([, nested]) => collectText(nested));
-}
-
-function sanitizeCodexTraceValuePart(value: unknown, key = "", preserveEncrypted = false): unknown {
-  if (typeof value === "string") {
-    const normalizedKey = key.toLocaleLowerCase();
-    const opaqueField = normalizedKey === "image_url"
-      || normalizedKey === "audio_url"
-      || normalizedKey === "result"
-      || normalizedKey === "data";
-    const looksLikeEncodedBinary = value.length > 1_024 && /^[a-z0-9+/=\r\n]+$/iu.test(value);
-    if (opaqueField && (value.startsWith("data:") || looksLikeEncodedBinary)) {
-      return "[binary omitted]";
-    }
-    return truncateTraceDetail(value);
-  }
-  if (Array.isArray(value)) return value.map((item) => sanitizeCodexTraceValuePart(item, "", preserveEncrypted));
-  const object = record(value);
-  if (!object) return value;
-  return Object.fromEntries(
-    Object.entries(object)
-      .filter(([nestedKey]) => preserveEncrypted || !nestedKey.toLocaleLowerCase().includes("encrypted"))
-      .map(([nestedKey, nestedValue]) => [
-        nestedKey,
-        sanitizeCodexTraceValuePart(nestedValue, nestedKey, preserveEncrypted),
-      ]),
-  );
-}
-
-function sanitizedCodexTraceValue(value: unknown, preserveEncrypted: boolean): unknown {
-  const existing = record(value);
-  if (existing && existing.truncated === true && typeof existing.preview === "string") return value;
-  const sanitized = sanitizeCodexTraceValuePart(value, "", preserveEncrypted);
-  if (!sanitized || typeof sanitized !== "object") return sanitized;
-  const serialized = JSON.stringify(sanitized);
-  return serialized.length > 0 && truncateTraceDetail(serialized) !== serialized
-    ? { preview: truncateTraceDetail(serialized), truncated: true }
-    : sanitized;
-}
-
-export function sanitizeCodexTraceValue(value: unknown): unknown {
-  return sanitizedCodexTraceValue(value, false);
 }
 
 function isJavascriptIdentifierCharacter(value: string | undefined): boolean {
@@ -652,7 +612,7 @@ function richResponseTrace(
     if (!payload.content && !author && !recipient) return null;
     const direction = agentMessageDirection(author, recipient, communication.agentPath);
     const messageType = agentMessageType(payload.content);
-    const output = sanitizedCodexTraceValue({
+    const output = sanitizeCodexTraceValue({
       message: payload,
       direction,
       triggerTurn: communication.triggerTurn,

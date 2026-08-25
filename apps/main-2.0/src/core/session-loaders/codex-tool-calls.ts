@@ -1,5 +1,7 @@
 import { parse as parseJavaScript } from "@babel/parser";
 
+import { sanitizeCodexTraceValue } from "./codex-trace-value";
+
 export type ToolCallStatus = "requested" | "completed" | "failed" | "declined" | "unknown";
 export type CodexSessionFormat = "legacy" | "paginated";
 export type ToolCallEvidence =
@@ -61,6 +63,7 @@ const EVIDENCE_PRIORITY: Record<ToolCallEvidence, number> = {
   "executed-tool-metadata": 2,
   "item-completed": 3,
 };
+const MAX_PERSISTED_OBSERVATION_CHARS = 256_000;
 
 /**
  * Session-scoped Codex adapter. It collects evidence first because paginated
@@ -85,8 +88,23 @@ export class CodexToolCallCollector {
   }
 
   get state(): CodexToolCallCollectorState {
+    const observations: ToolCallObservation[] = [];
+    let serializedChars = 2;
+    const groups = this.finish().map((call) => call.evidence.map((observation) => ({
+      ...observation,
+      input: sanitizeCodexTraceValue(observation.input),
+    })));
+    for (let index = groups.length - 1; index >= 0; index -= 1) {
+      const group = groups[index];
+      const groupChars = group.reduce((total, observation) => total + JSON.stringify(observation).length, 0)
+        + Math.max(0, group.length - 1);
+      const additionalChars = groupChars + (observations.length > 0 ? 1 : 0);
+      if (serializedChars + additionalChars > MAX_PERSISTED_OBSERVATION_CHARS) continue;
+      observations.unshift(...group);
+      serializedChars += additionalChars;
+    }
     return {
-      observations: this.observations.map(({ sequence: _sequence, ...observation }) => ({ ...observation })),
+      observations,
       cwd: this.cwd,
       declaredSessionFormat: this.declaredSessionFormat,
       sawToolCompletion: this.sawToolCompletion,
