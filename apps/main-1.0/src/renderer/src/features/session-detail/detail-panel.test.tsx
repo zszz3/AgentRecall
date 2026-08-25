@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { SessionSearchResult, SessionTraceEvent } from "../../../../core/types";
+import { storeToolEventsVisibility } from "../../tool-events-visibility";
 import { DetailPanel } from "./detail-panel";
 
 describe("DetailPanel Code Mode tool groups", () => {
@@ -13,6 +14,7 @@ describe("DetailPanel Code Mode tool groups", () => {
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    storeToolEventsVisibility(false);
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
