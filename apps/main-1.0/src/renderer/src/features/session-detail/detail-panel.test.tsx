@@ -23,56 +23,7 @@ describe("DetailPanel Code Mode tool groups", () => {
     container.remove();
   });
 
-  it("shows each parsed tool after its runtime result inside exec", async () => {
-    const commands = [
-      "sed -n '1,260p' pr.md",
-      "rg --files .github",
-      "git show --stat --oneline HEAD",
-      "git log --oneline origin/main..HEAD",
-      "sed -n '1,160p' .release-notes/structured-tool-call.md",
-    ];
-    const runtimeEvents: SessionTraceEvent[] = commands.map((cmd, index) => ({
-      index: index + 1,
-      kind: "tool_result",
-      source: "codex",
-      title: "exec_command",
-      detail: JSON.stringify({ cmd, exitCode: 0 }),
-      timestamp: `2026-08-13T09:17:00.0${index + 1}0Z`,
-      callId: `runtime-${index}`,
-      eventType: "codex.command_execution",
-      status: "completed",
-      attributes: {
-        input: { cmd },
-        tool: {
-          canonicalName: "exec_command",
-          executionEvidence: "runtime-confirmed",
-          parentCallId: "call-code-mode",
-          parsedFromCodeMode: true,
-        },
-      },
-    }));
-    const traceEvents: SessionTraceEvent[] = [
-      {
-        index: 0,
-        kind: "tool_call",
-        source: "codex",
-        title: "exec · exec_command",
-        detail: "await Promise.all([...])",
-        timestamp: "2026-08-13T09:17:00.000Z",
-        callId: "call-code-mode",
-        eventType: "codex.custom_tool",
-        status: "unknown",
-        attributes: {
-          nestedTools: ["exec_command"],
-          tool: {
-            canonicalName: "exec",
-            executionEvidence: "recorded-request",
-          },
-        },
-      },
-      ...runtimeEvents,
-    ];
-
+  async function renderTraceEvents(traceEvents: SessionTraceEvent[]): Promise<void> {
     await act(async () => {
       root.render(createElement(DetailPanel, {
         session: {
@@ -149,6 +100,59 @@ describe("DetailPanel Code Mode tool groups", () => {
         sessionFamily: { parent: null, children: [], truncated: false },
       }));
     });
+  }
+
+  it("shows each parsed tool after its runtime result inside exec", async () => {
+    const commands = [
+      "sed -n '1,260p' pr.md",
+      "rg --files .github",
+      "git show --stat --oneline HEAD",
+      "git log --oneline origin/main..HEAD",
+      "sed -n '1,160p' .release-notes/structured-tool-call.md",
+    ];
+    const runtimeEvents: SessionTraceEvent[] = commands.map((cmd, index) => ({
+      index: index + 1,
+      kind: "tool_result",
+      source: "codex",
+      title: "exec_command",
+      detail: JSON.stringify({ cmd, exitCode: 0 }),
+      timestamp: `2026-08-13T09:17:00.0${index + 1}0Z`,
+      callId: `runtime-${index}`,
+      eventType: "codex.command_execution",
+      status: "completed",
+      attributes: {
+        input: { cmd },
+        tool: {
+          canonicalName: "exec_command",
+          executionEvidence: "runtime-confirmed",
+          parentCallId: "call-code-mode",
+          parsedFromCodeMode: true,
+        },
+      },
+    }));
+    const traceEvents: SessionTraceEvent[] = [
+      {
+        index: 0,
+        kind: "tool_call",
+        source: "codex",
+        title: "exec · exec_command",
+        detail: "await Promise.all([...])",
+        timestamp: "2026-08-13T09:17:00.000Z",
+        callId: "call-code-mode",
+        eventType: "codex.custom_tool",
+        status: "unknown",
+        attributes: {
+          nestedTools: ["exec_command"],
+          tool: {
+            canonicalName: "exec",
+            executionEvidence: "recorded-request",
+          },
+        },
+      },
+      ...runtimeEvents,
+    ];
+
+    await renderTraceEvents(traceEvents);
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>(".conversation-tools-toggle")?.click();
@@ -175,5 +179,41 @@ describe("DetailPanel Code Mode tool groups", () => {
     expect(group?.querySelectorAll(".trace-parsed-result-label")).toHaveLength(5);
     for (const command of commands) expect(group?.textContent).toContain(command);
     expect(group?.textContent).not.toContain("静态识别");
+  });
+
+  it("shows terminal legacy Codex tool results instead of request-only evidence", async () => {
+    const statuses = ["completed", "failed", "aborted"] as const;
+    const traceEvents: SessionTraceEvent[] = statuses.map((status, index) => ({
+      index,
+      kind: "tool_result",
+      source: "codex",
+      title: `legacy-${status}`,
+      detail: "legacy output",
+      timestamp: `2026-08-13T09:17:00.00${index}Z`,
+      callId: `legacy-${status}`,
+      eventType: "codex.function_call",
+      status,
+      attributes: {
+        tool: {
+          canonicalName: "exec_command",
+          executionEvidence: "recorded-request",
+        },
+      },
+    }));
+
+    await renderTraceEvents(traceEvents);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".conversation-tools-toggle")?.click();
+    });
+
+    const rendered = [...container.querySelectorAll<HTMLElement>(".conversation > .trace-event")];
+    expect(rendered).toHaveLength(3);
+    expect(rendered.map((event) => event.querySelector(".trace-symbol")?.textContent)).toEqual(["✓", "✗", "■"]);
+    expect(rendered.map((event) => event.querySelector(".trace-status-label")?.textContent)).toEqual([
+      "已完成",
+      "失败",
+      "已中断",
+    ]);
+    expect(rendered.every((event) => !event.textContent?.includes("已请求"))).toBe(true);
   });
 });

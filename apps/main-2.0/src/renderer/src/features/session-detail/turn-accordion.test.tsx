@@ -656,6 +656,64 @@ describe("TurnAccordion span payloads", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows terminal legacy Codex tool results instead of request-only evidence", async () => {
+    const turn = createTurn("turn-legacy-status", 0, "run legacy tools", "");
+    const statuses = ["completed", "failed", "aborted"] as const;
+    const detail: SessionTurnDetail = {
+      ...turn,
+      messages: [],
+      spanCount: statuses.length,
+      spans: statuses.map((status, index) => ({
+        id: `span-${status}`,
+        parentSpanId: null,
+        spanIndex: index,
+        kind: "tool",
+        name: `legacy-${status}`,
+        status,
+        startedAt: `2026-08-13T09:17:00.00${index}Z`,
+        endedAt: `2026-08-13T09:17:00.01${index}Z`,
+        callId: `legacy-${status}`,
+        input: null,
+        output: { text: "legacy output" },
+        error: status === "failed" ? "failed" : null,
+        attributes: {
+          tool: {
+            canonicalName: "exec_command",
+            executionEvidence: "recorded-request",
+          },
+        },
+      })),
+    };
+
+    await act(async () => {
+      root.render(createElement(TurnAccordion, {
+        sessionKey: "codex:legacy-status",
+        turns: [turn],
+        loading: false,
+        matchedTurnId: null,
+        matchedMessageIndex: null,
+        showTools: true,
+        query: "",
+        language: "zh",
+        onLoadTurn: async () => detail,
+      }));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".turn-card-summary")?.click();
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll(".msg.tool")).toHaveLength(3);
+    });
+
+    const rendered = [...container.querySelectorAll<HTMLElement>(".msg.tool")];
+    expect(rendered.map((span) => span.querySelector(".msg-tool-status")?.textContent?.trim())).toEqual([
+      "✓ 已完成",
+      "✕ 失败",
+      "■ 已中断",
+    ]);
+    expect(rendered.every((span) => !span.classList.contains("evidence-recorded-request"))).toBe(true);
+  });
+
   it("shows each parsed tool after its runtime result inside exec", async () => {
     const commands = [
       "sed -n '1,260p' pr.md",

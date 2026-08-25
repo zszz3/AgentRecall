@@ -304,24 +304,23 @@ export function TurnMigrationContextMenu({
 function spanStatusSymbol(span: SessionTraceSpan): string {
   const evidence = spanExecutionEvidence(span);
   if (evidence === "static-only") return "◇";
-  if (evidence === "recorded-request") return "→";
   const status = span.status;
   if (status === "completed") return "✓";
   if (status === "failed") return "✕";
-  if (status === "running") return "→";
   if (status === "aborted") return "■";
+  if (evidence === "recorded-request" || status === "running") return "→";
   return "•";
 }
 
 function spanStatusLabel(span: SessionTraceSpan, language: LanguageMode): string {
   const evidence = spanExecutionEvidence(span);
   if (evidence === "static-only") return localize(language, "Statically identified", "静态识别");
-  if (evidence === "recorded-request") return localize(language, "Requested", "已请求");
   const status = span.status;
-  if (status === "running") return localize(language, "Running", "进行中");
   if (status === "completed") return localize(language, "Completed", "已完成");
   if (status === "failed") return localize(language, "Failed", "失败");
   if (status === "aborted") return localize(language, "Interrupted", "已中断");
+  if (evidence === "recorded-request") return localize(language, "Requested", "已请求");
+  if (status === "running") return localize(language, "Running", "进行中");
   return localize(language, "Status unknown", "状态未知");
 }
 
@@ -537,8 +536,12 @@ function TurnSpanBlock({
   const agentRelated = eventType.startsWith("codex.collaboration.") || span.name.startsWith("collaboration.");
   const SpanIcon = agentRelated ? BotMessageSquare : Wrench;
   const evidence = spanExecutionEvidence(span);
+  const terminal = span.status === "completed" || span.status === "failed" || span.status === "aborted";
+  const evidenceClass = evidence === "static-only" || (evidence === "recorded-request" && !terminal)
+    ? `evidence-${evidence}`
+    : "";
   return (
-    <details className={`msg tool ${span.status} ${children.length > 0 ? "msg-tool-group" : ""} ${evidence ? `evidence-${evidence}` : ""} ${target ? "match-target" : ""}`}>
+    <details className={`msg tool ${span.status} ${children.length > 0 ? "msg-tool-group" : ""} ${evidenceClass} ${target ? "match-target" : ""}`}>
       <summary className="msg-tool-summary">
         <span className="msg-avatar" aria-hidden>
           <SpanIcon size={agentRelated ? 13 : 11} />

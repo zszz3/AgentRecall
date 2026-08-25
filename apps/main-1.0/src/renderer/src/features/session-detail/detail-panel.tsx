@@ -879,21 +879,21 @@ function MessageBlock({
 function traceStatusSymbol(event: SessionTraceEvent): string {
   const evidence = traceToolAttribute(event, "executionEvidence");
   if (evidence === "static-only") return "◇";
-  if (evidence === "recorded-request" || event.kind === "tool_call") return "→";
   if (event.status === "completed") return "✓";
   if (event.status === "failed") return "✗";
   if (event.status === "aborted") return "■";
+  if (evidence === "recorded-request" || event.kind === "tool_call") return "→";
   return "•";
 }
 
 function traceStatusLabel(event: SessionTraceEvent, language: LanguageMode): string {
   const evidence = traceToolAttribute(event, "executionEvidence");
   if (evidence === "static-only") return localize(language, "Statically identified", "静态识别");
-  if (evidence === "recorded-request") return localize(language, "Requested", "已请求");
-  if (event.status === "running") return localize(language, "Running", "进行中");
   if (event.status === "completed") return localize(language, "Completed", "已完成");
   if (event.status === "failed") return localize(language, "Failed", "失败");
   if (event.status === "aborted") return localize(language, "Interrupted", "已中断");
+  if (evidence === "recorded-request") return localize(language, "Requested", "已请求");
+  if (event.status === "running") return localize(language, "Running", "进行中");
   return localize(language, "Status unknown", "状态未知");
 }
 
