@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { mergeApiConfigWithProfileDefaults, mergeClaudeApiConfigWithProfileDefaults } from "./api-config";
@@ -1165,6 +1165,46 @@ describe("migration cli process specs", () => {
     expect(getRemoteMigrationCliVersionCommand("codex", ["--version"])).toBe(
       'bash -lc \'if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi; codex --version\'',
     );
+  });
+
+  it.skipIf(process.platform === "win32")("probes bare migration CLI names through the user shell PATH", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-recall-migration-cli-"));
+    const appBin = path.join(root, "app-bin");
+    const userBin = path.join(root, "user-bin");
+    const shell = path.join(root, "test-shell");
+    const previous = {
+      path: process.env.PATH,
+      shell: process.env.SHELL,
+      userBin: process.env.AGENT_RECALL_TEST_CLI_BIN,
+    };
+    try {
+      mkdirSync(appBin);
+      mkdirSync(userBin);
+      writeFileSync(path.join(appBin, "claude"), "#!/bin/sh\nexit 9\n");
+      writeFileSync(path.join(userBin, "claude"), "#!/bin/sh\nprintf '2.1.233 (Claude Code)\\n'\n");
+      // Startup files print unrelated paths around the lookup result.
+      writeFileSync(
+        shell,
+        "#!/bin/sh\nprintf 'Restored session from /Users/example/.zsh_history\\n'\n"
+          + "printf '%s/claude\\n' \"$AGENT_RECALL_TEST_CLI_BIN\"\nprintf '/opt/homebrew/bin/node\\n'\n",
+      );
+      chmodSync(path.join(appBin, "claude"), 0o755);
+      chmodSync(path.join(userBin, "claude"), 0o755);
+      chmodSync(shell, 0o755);
+      process.env.PATH = appBin;
+      process.env.SHELL = shell;
+      process.env.AGENT_RECALL_TEST_CLI_BIN = userBin;
+
+      await expect(inspectMigrationCli("claude", defaultSettings)).resolves.toBeUndefined();
+    } finally {
+      if (previous.path === undefined) delete process.env.PATH;
+      else process.env.PATH = previous.path;
+      if (previous.shell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previous.shell;
+      if (previous.userBin === undefined) delete process.env.AGENT_RECALL_TEST_CLI_BIN;
+      else process.env.AGENT_RECALL_TEST_CLI_BIN = previous.userBin;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("does not echo potentially sensitive unparseable version output", async () => {

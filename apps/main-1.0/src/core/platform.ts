@@ -1327,7 +1327,39 @@ export function mergeProcessEnvOverrides(overrides?: Record<string, string>): No
   return { ...process.env, ...(overrides ?? {}) };
 }
 
-function runCliVersion(command: string, args: string[], env?: Record<string, string>): Promise<string> {
+function runCliVersionProcess(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs = 0,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { env, timeout: timeoutMs }, (error, stdout, stderr) => {
+      if (!error) {
+        resolve(stdout);
+        return;
+      }
+      const failure = error instanceof Error ? error : new Error(String(error));
+      reject(Object.assign(failure, { stdout, stderr }));
+    });
+  });
+}
+
+// Startup files often print banners around the lookup result, so accept only a
+// line that names the requested binary instead of the first path that appears.
+function absoluteCliFromShellOutput(output: string, command: string): string | null {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => path.isAbsolute(line) && path.basename(line) === command)
+    .at(-1) ?? null;
+}
+
+// Login and interactive startup files are where users put the PATH entries their
+// terminal relies on, but reading them means running arbitrary startup code.
+const SHELL_CLI_LOOKUP_TIMEOUT_MS = 5_000;
+
+async function runCliVersion(command: string, args: string[], env?: Record<string, string>): Promise<string> {
   if (process.platform === "win32") {
     // npm installs Windows CLI shims as .cmd files. PowerShell invokes those
     // shims, while single-quoted arguments keep paths and values literal.
@@ -1365,16 +1397,24 @@ function runCliVersion(command: string, args: string[], env?: Record<string, str
     );
   }
 
-  return new Promise((resolve, reject) => {
-    execFile(command, args, { env: mergeProcessEnvOverrides(env) }, (error, stdout, stderr) => {
-      if (!error) {
-        resolve(stdout);
-        return;
-      }
-      const failure = error instanceof Error ? error : new Error(String(error));
-      reject(Object.assign(failure, { stdout, stderr }));
-    });
-  });
+  const childEnv = mergeProcessEnvOverrides(env);
+  if (!path.isAbsolute(command) && !/[\\/]/.test(command)) {
+    const shell = childEnv.SHELL?.trim() || "/bin/sh";
+    try {
+      const resolvedOutput = await runCliVersionProcess(
+        shell,
+        ["-lic", 'command -v -- "$0"', command],
+        childEnv,
+        SHELL_CLI_LOOKUP_TIMEOUT_MS,
+      );
+      command = absoluteCliFromShellOutput(resolvedOutput, command) ?? command;
+    } catch {
+      // A custom shell may not support login/interactive flags, and a slow
+      // startup file can exhaust the lookup timeout. The inherited application
+      // PATH is still a valid fallback for directly installed CLIs.
+    }
+  }
+  return runCliVersionProcess(command, args, childEnv);
 }
 
 function quotePowerShellCliArg(value: string): string {
