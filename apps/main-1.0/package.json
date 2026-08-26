@@ -22,7 +22,10 @@
     "node": ">=22.13.0"
   },
   "files": [
-    "out",
+    "out/main",
+    "out/preload",
+    "out/renderer",
+    "out/mcp/*.js",
     "dist/main/index.js",
     "bin",
     "assets"
