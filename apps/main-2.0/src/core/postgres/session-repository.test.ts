@@ -466,6 +466,33 @@ describe("PostgresSessionRepository", () => {
     })).resolves.toEqual([traces[1]]);
   });
 
+  it("returns every trace event when no limit is requested", async () => {
+    const manyTraces: SessionTraceEvent[] = Array.from({ length: 150 }, (_, index) => ({
+      index,
+      kind: "event" as const,
+      source: "codex",
+      title: `event ${index}`,
+      detail: "",
+      timestamp: new Date(Date.parse("2026-07-20T08:00:00.000Z") + index * 1000).toISOString(),
+      eventType: "codex.turn.started",
+      status: "completed" as const,
+    }));
+    await repository.upsertIndexedSession(
+      session({ sessionKey: "codex:long-session", rawId: "long-session" }),
+      messages,
+      [],
+      manyTraces,
+    );
+
+    await expect(turnsRepository.getTraceEvents("codex:long-session"))
+      .resolves.toHaveLength(150);
+    await expect(turnsRepository.getTraceEvents("codex:long-session", { limit: 10 }))
+      .resolves.toHaveLength(10);
+    const latest = await turnsRepository.getTraceEvents("codex:long-session", { limit: 10 });
+    expect(latest[0]?.title).toBe("event 0");
+    expect(latest[9]?.title).toBe("event 9");
+  });
+
   it("normalizes legacy trace statuses when reading raw events", async () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
     await database.query(`

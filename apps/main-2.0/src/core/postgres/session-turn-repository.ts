@@ -277,7 +277,11 @@ export class PostgresSessionTurnRepository {
       values.push(options.endTimestamp);
       where.push(`occurred_at <= $${values.length}`);
     }
-    values.push(Math.max(0, options.limit ?? 100_000));
+    // An unset limit must return every event: callers feed the result back into
+    // upsertIndexedSession, which replaces stored events wholesale, so a capped
+    // default would permanently drop the newest events of long sessions.
+    const limit = Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit!)) : 0;
+    if (limit > 0) values.push(limit);
     const result = await this.database.query<{
       payload: Record<string, unknown> | string;
       occurred_at: Date | string | null;
@@ -287,7 +291,7 @@ export class PostgresSessionTurnRepository {
         from agent_recall.session_raw_events
         where ${where.join(" and ")}
         order by (payload->>'traceIndex')::integer
-        limit $${values.length}
+        ${limit > 0 ? `limit $${values.length}` : ""}
       `,
       values,
     );
