@@ -148,6 +148,23 @@ describe("AgentRecall bundled Skills", () => {
     expect(fs.existsSync(fileURLToPath(new URL("LICENSE", bundledSkillUrl)))).toBe(true);
   });
 
+  it("ships one-bite-teaching as an official built-in Skill with both language variants", () => {
+    expect(AGENT_RECALL_BUILTIN_SKILLS).toContainEqual({
+      id: "one-bite-teaching",
+      installId: "one-bite-teaching",
+      sourceUrl: "https://github.com/zszz3/AgentRecall/tree/main/apps/main-2.0/assets/bundled-skills/one-bite-teaching",
+      categoryId: "explore",
+    });
+    const bundledSkillUrl = new URL("../../assets/bundled-skills/one-bite-teaching/", import.meta.url);
+    expect(fs.existsSync(fileURLToPath(new URL("SKILL.md", bundledSkillUrl)))).toBe(true);
+    expect(fs.existsSync(fileURLToPath(new URL("SKILL.zh.md", bundledSkillUrl)))).toBe(true);
+    const metadata = JSON.parse(
+      fs.readFileSync(fileURLToPath(new URL("metadata.json", bundledSkillUrl)), "utf8"),
+    ) as Record<string, unknown>;
+    expect(metadata.categoryId).toBe("explore");
+    expect(metadata.tags).toContain("teaching");
+  });
+
   it("ships the adapted DeepSeek Harness quality Skills with their licenses", () => {
     const skills = [
       { id: "dsh-code-review", categoryId: "coding" },

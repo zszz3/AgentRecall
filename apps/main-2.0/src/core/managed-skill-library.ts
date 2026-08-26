@@ -83,6 +83,12 @@ export interface AgentRecallBuiltinSkillDefinition {
 
 export const AGENT_RECALL_BUILTIN_SKILLS: AgentRecallBuiltinSkillDefinition[] = [
   {
+    id: "one-bite-teaching",
+    installId: "one-bite-teaching",
+    sourceUrl: "https://github.com/zszz3/AgentRecall/tree/main/apps/main-2.0/assets/bundled-skills/one-bite-teaching",
+    categoryId: "explore",
+  },
+  {
     id: "aihot",
     installId: "aihot",
     sourceUrl: "https://github.com/KKKKhazix/khazix-skills/tree/main/aihot",
