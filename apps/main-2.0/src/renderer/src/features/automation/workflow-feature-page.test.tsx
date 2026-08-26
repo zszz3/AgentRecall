@@ -329,6 +329,7 @@ describe("WorkflowFeaturePage live output", () => {
 
     const choose = container.querySelector<HTMLButtonElement>(".workflow-core-workspace-actions .control-btn");
     if (!choose) throw new Error("Workflow directory chooser was not rendered");
+    expect(choose.textContent).toContain("选择目录");
     await act(async () => { choose.click(); await Promise.resolve(); });
     expect(api.pickDirectory).toHaveBeenCalledWith("/workspace/project");
     expect(container.querySelector<HTMLElement>(".workflow-core-workspace-summary")?.textContent).toContain("/workspace/project");
@@ -338,7 +339,7 @@ describe("WorkflowFeaturePage live output", () => {
     expect(api.saveWorkflowDefinition).toHaveBeenCalledWith(expect.objectContaining({ id: snapshot.definition.id, workDir: "/workflow/project" }));
     expect(container.querySelector<HTMLElement>(".workflow-core-workspace-summary")?.textContent).toContain("/workflow/project");
 
-    const clear = container.querySelector<HTMLButtonElement>("[aria-label='娓呴櫎 Workflow 鐩綍']");
+    const clear = container.querySelector<HTMLButtonElement>("[aria-label='清除 Workflow 目录']");
     if (!clear) throw new Error("Workflow directory clear action was not rendered");
     await act(async () => { clear.click(); await Promise.resolve(); });
     expect(api.saveWorkflowDefinition).toHaveBeenLastCalledWith(expect.objectContaining({ id: snapshot.definition.id, workDir: null }));
