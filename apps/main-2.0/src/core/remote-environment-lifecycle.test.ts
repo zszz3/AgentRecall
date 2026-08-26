@@ -296,6 +296,60 @@ describe("RemoteEnvironmentLifecycle", () => {
     });
   });
 
+  it("handles a fast sync rejection while an environment snapshot is still loading", async () => {
+    const store = createStore();
+    await store.upsertEnvironment({
+      id: "ssh-devbox",
+      kind: "ssh",
+      label: "devbox",
+      hostAlias: "bad-host",
+      enabled: true,
+    });
+    const originalListEnvironments = store.listEnvironments.bind(store);
+    const snapshotStarted = createDeferred();
+    const snapshotGate = createDeferred();
+    let listCalls = 0;
+    vi.spyOn(store, "listEnvironments").mockImplementation(async () => {
+      listCalls += 1;
+      if (listCalls === 2) {
+        snapshotStarted.resolve();
+        await snapshotGate.promise;
+      }
+      return originalListEnvironments();
+    });
+    const syncGate = createDeferred();
+    const syncError = new Error("Network is unreachable");
+    const lifecycle = new RemoteEnvironmentLifecycle({
+      store,
+      watchManager: createWatchManager(),
+      syncEnvironment: () => syncGate.promise,
+    });
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    await lifecycle.startEnabledEnvironments();
+    await snapshotStarted.promise;
+    syncGate.reject(syncError);
+
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandledRejections).toEqual([]);
+      snapshotGate.resolve();
+      await lifecycle.waitForIdle("ssh-devbox");
+      expect(await store.getEnvironment("ssh-devbox")).toMatchObject({
+        syncState: "error",
+        lastError: "Network is unreachable",
+      });
+    } finally {
+      snapshotGate.resolve();
+      await lifecycle.waitForIdle("ssh-devbox");
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+  });
+
   it("drops queued same-config syncs after the active sync fails", async () => {
     const store = createStore();
     const watchManager = createWatchManager();

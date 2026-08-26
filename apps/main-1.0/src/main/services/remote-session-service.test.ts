@@ -354,6 +354,35 @@ describe("RemoteSessionService cloud orchestration", () => {
     await expect(snapshot).resolves.toEqual({ status: { kind: "ready", setupSql: "setup sql" }, items: [] });
   });
 
+  it("returns a failed readiness status when the parallel session listing also fails", async () => {
+    const harness = createHarness({ settings: configuredSettings() });
+    const status: RemoteSessionStatus = {
+      kind: "error",
+      setupSql: "setup sql",
+      remediation: "settings",
+      message: "fetch failed",
+    };
+    vi.mocked(harness.client.checkStatus).mockResolvedValue(status);
+    vi.mocked(harness.client.listRemoteSessionsForSync).mockRejectedValue(new TypeError("fetch failed"));
+
+    await expect(harness.service.loadSyncSnapshot()).resolves.toEqual({ status, items: [] });
+  });
+
+  it("returns a readable status when session listing fails after the readiness check succeeds", async () => {
+    const harness = createHarness({ settings: configuredSettings() });
+    vi.mocked(harness.client.listRemoteSessionsForSync).mockRejectedValue(new TypeError("fetch failed"));
+
+    await expect(harness.service.loadSyncSnapshot()).resolves.toEqual({
+      status: {
+        kind: "error",
+        setupSql: "setup sql",
+        remediation: "settings",
+        message: "Could not reach Supabase. Check the Remote sync URL and your network connection, then try again.",
+      },
+      items: [],
+    });
+  });
+
   it("hydrates details before building an upload and records the resulting binding", async () => {
     const harness = createHarness({ settings: configuredSettings() });
 

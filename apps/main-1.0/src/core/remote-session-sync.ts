@@ -917,35 +917,44 @@ export class SupabaseRemoteSessionClient {
 
   async checkStatus(): Promise<RemoteSessionStatus> {
     const setupSql = buildRemoteSessionSetupSql();
-    const bucketResult = this.authenticatedRequest(`${this.baseUrl}/storage/v1/bucket/${REMOTE_SESSION_BUCKET}`, { method: "GET" })
-      .then((response) => ({ response }), (error: unknown) => ({ error }));
-    const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?select=${REMOTE_SESSION_COLUMNS}&limit=1`, { method: "GET" });
-    if (response.ok) {
-      const bucket = await bucketResult;
-      if ("error" in bucket) throw bucket.error;
-      const bucketResponse = bucket.response;
-      if (bucketResponse.ok) return { kind: "ready", setupSql };
-      const bucketBody = await readResponseBody(bucketResponse);
+    try {
+      const bucketResult = this.authenticatedRequest(`${this.baseUrl}/storage/v1/bucket/${REMOTE_SESSION_BUCKET}`, { method: "GET" })
+        .then((response) => ({ response }), (error: unknown) => ({ error }));
+      const response = await this.restRequest(`/${REMOTE_SESSION_TABLE}?select=${REMOTE_SESSION_COLUMNS}&limit=1`, { method: "GET" });
+      if (response.ok) {
+        const bucket = await bucketResult;
+        if ("error" in bucket) throw bucket.error;
+        const bucketResponse = bucket.response;
+        if (bucketResponse.ok) return { kind: "ready", setupSql };
+        const bucketBody = await readResponseBody(bucketResponse);
+        return {
+          kind: "missing-storage",
+          setupSql,
+          remediation: "sql",
+          message: `${supabaseErrorMessage(bucketResponse.status, bucketBody)} Run the latest setup SQL, then try again.`,
+        };
+      }
+      const body = await readResponseBody(response);
+      if (isMissingTableError(response.status, body)) {
+        return {
+          kind: "missing-table",
+          setupSql,
+          remediation: "sql",
+          message: `Supabase table ${REMOTE_SESSION_TABLE} was not found.`,
+        };
+      }
+      if (isMissingSchemaColumnError(body)) {
+        return { kind: "error", setupSql, remediation: "sql", message: "Remote session sync needs the latest setup SQL before it can compare local and cloud versions." };
+      }
+      return { kind: "error", setupSql, remediation: "settings", message: supabaseErrorMessage(response.status, body) };
+    } catch (error) {
       return {
-        kind: "missing-storage",
+        kind: "error",
         setupSql,
-        remediation: "sql",
-        message: `${supabaseErrorMessage(bucketResponse.status, bucketBody)} Run the latest setup SQL, then try again.`,
+        remediation: "settings",
+        message: supabaseConnectionErrorMessage(error),
       };
     }
-    const body = await readResponseBody(response);
-    if (isMissingTableError(response.status, body)) {
-      return {
-        kind: "missing-table",
-        setupSql,
-        remediation: "sql",
-        message: `Supabase table ${REMOTE_SESSION_TABLE} was not found.`,
-      };
-    }
-    if (isMissingSchemaColumnError(body)) {
-      return { kind: "error", setupSql, remediation: "sql", message: "Remote session sync needs the latest setup SQL before it can compare local and cloud versions." };
-    }
-    return { kind: "error", setupSql, remediation: "settings", message: supabaseErrorMessage(response.status, body) };
   }
 
   async listRemoteSessions(query = ""): Promise<RemoteSessionListItem[]> {
@@ -1631,6 +1640,12 @@ function supabaseErrorMessage(status: number, body: unknown): string {
   }
   if (typeof body === "string" && body.trim()) return body;
   return `Supabase request failed with status ${status}.`;
+}
+
+export function supabaseConnectionErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : String(error).trim();
+  if (message && message !== "fetch failed") return message;
+  return "Could not reach Supabase. Check the Remote sync URL and your network connection, then try again.";
 }
 
 function remoteSessionUploadErrorMessage(status: number, body: unknown): string {

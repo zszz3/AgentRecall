@@ -9,6 +9,7 @@ import {
   buildSessionSyncItems,
   findCursorSessionSyncBindingRepairs,
   remoteSessionId,
+  supabaseConnectionErrorMessage,
   SupabaseRemoteSessionClient,
   type RemoteSessionDeleteResult,
   type RemoteSessionDetailSnapshot,
@@ -193,7 +194,17 @@ export class RemoteSessionService {
     ]);
     if (statusResult.status === "rejected") throw statusResult.reason;
     if (statusResult.value.kind !== "ready") return { status: statusResult.value, items: [] };
-    if (itemsResult.status === "rejected") throw itemsResult.reason;
+    if (itemsResult.status === "rejected") {
+      return {
+        status: {
+          kind: "error",
+          setupSql: statusResult.value.setupSql,
+          remediation: "settings",
+          message: supabaseConnectionErrorMessage(itemsResult.reason),
+        },
+        items: [],
+      };
+    }
     return { status: statusResult.value, items: itemsResult.value };
   }
 

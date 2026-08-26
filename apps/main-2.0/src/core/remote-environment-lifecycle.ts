@@ -184,6 +184,9 @@ export class RemoteEnvironmentLifecycle {
     try {
       if (!(await this.isCurrent(environment, record.generation))) return;
       const sync = this.syncEnvironment(environment);
+      // Observe a fast SSH failure immediately, while preserving the existing
+      // ordering that publishes the "syncing" snapshot before its final state.
+      void sync.catch(() => undefined);
       await this.emitEnvironmentsUpdated();
       await sync;
     } catch (error) {

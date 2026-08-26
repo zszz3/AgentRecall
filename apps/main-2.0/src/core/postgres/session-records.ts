@@ -202,7 +202,28 @@ export function numberValue(value: unknown): number {
 }
 
 export function postgresText(value: string): string {
-  return value.includes("\u0000") ? value.replaceAll("\u0000", "\u2400") : value;
+  let normalized = "";
+  let chunkStart = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    let replacement: string | null = null;
+    if (codeUnit === 0) {
+      replacement = "\u2400";
+    } else if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      const nextCodeUnit = value.charCodeAt(index + 1);
+      if (nextCodeUnit >= 0xDC00 && nextCodeUnit <= 0xDFFF) {
+        index += 1;
+        continue;
+      }
+      replacement = "\uFFFD";
+    } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      replacement = "\uFFFD";
+    }
+    if (replacement === null) continue;
+    normalized += value.slice(chunkStart, index) + replacement;
+    chunkStart = index + 1;
+  }
+  return chunkStart === 0 ? value : normalized + value.slice(chunkStart);
 }
 
 export function postgresJsonValue<T>(value: T): T {

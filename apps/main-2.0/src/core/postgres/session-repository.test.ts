@@ -480,39 +480,49 @@ describe("PostgresSessionRepository", () => {
     expect(stored[1]?.status).toBe("failed");
   });
 
-  it("replaces unsupported NUL characters while indexing a session", async () => {
-    const messagesWithNul = messages.map((message, index) => (
-      index === 1 ? { ...message, content: "The cache\u0000key is stale." } : message
+  it("replaces unsupported NUL characters and unpaired surrogates while indexing a session", async () => {
+    const messagesWithUnsupportedText = messages.map((message, index) => (
+      index === 1
+        ? { ...message, content: "The cache\u0000key has \uD83D and \uDCA5; emoji 😀 stays." }
+        : message
     ));
-    const tracesWithNul = traces.map((event, index) => (
+    const tracesWithUnsupportedText = traces.map((event, index) => (
       index === 1 ? {
         ...event,
-        detail: "login\u0000test failed",
+        detail: "login\u0000test \uD83D failed \uDCA5",
         attributes: {
           output: {
-            text: "W\u0000s\u0000l",
-            values: ["keep 中文 😀", "nested\u0000value"],
-            "nul\u0000key": "key value",
+            text: "W\u0000s\u0000l\uD83D",
+            values: ["keep 中文 😀", "nested\u0000value", "low \uDCA5"],
+            "nul\u0000key\uD83D": "key value",
           },
         },
       } : event
     ));
 
-    await repository.upsertIndexedSession(session(), messagesWithNul, tokens, tracesWithNul);
+    await repository.upsertIndexedSession(
+      session(),
+      messagesWithUnsupportedText,
+      tokens,
+      tracesWithUnsupportedText,
+    );
 
     await expect(turnsRepository.getMessages("codex:session-a", 1, 1)).resolves.toEqual([
-      { ...messagesWithNul[1], content: "The cache\u2400key is stale." },
+      {
+        ...messagesWithUnsupportedText[1],
+        content: "The cache\u2400key has \uFFFD and \uFFFD; emoji 😀 stays.",
+      },
     ]);
     await expect(turnsRepository.getTraceEvents("codex:session-a")).resolves.toEqual([
-      tracesWithNul[0],
+      tracesWithUnsupportedText[0],
       {
-        ...tracesWithNul[1],
-        detail: "login\u2400test failed",
+        ...tracesWithUnsupportedText[1],
+        detail: "login\u2400test \uFFFD failed \uFFFD",
         attributes: {
           output: {
-            text: "W\u2400s\u2400l",
-            values: ["keep 中文 😀", "nested\u2400value"],
-            "nul\u2400key": "key value",
+            text: "W\u2400s\u2400l\uFFFD",
+            values: ["keep 中文 😀", "nested\u2400value", "low \uFFFD"],
+            "nul\u2400key\uFFFD": "key value",
           },
         },
       },
@@ -528,9 +538,9 @@ describe("PostgresSessionRepository", () => {
     expect(spans.rows).toEqual([
       expect.objectContaining({
         output: {
-          text: "W\u2400s\u2400l",
-          values: ["keep 中文 😀", "nested\u2400value"],
-          "nul\u2400key": "key value",
+          text: "W\u2400s\u2400l\uFFFD",
+          values: ["keep 中文 😀", "nested\u2400value", "low \uFFFD"],
+          "nul\u2400key\uFFFD": "key value",
         },
       }),
     ]);

@@ -164,6 +164,22 @@ describe("remote session sync model", () => {
     await expect(client.checkStatus()).resolves.toMatchObject({ kind: "error", remediation: "settings" });
   });
 
+  it("reports network failures as a status instead of rejecting", async () => {
+    const client = new SupabaseRemoteSessionClient({
+      url: "https://unavailable.supabase.co",
+      anonKey: "anon-key",
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+
+    await expect(client.checkStatus()).resolves.toMatchObject({
+      kind: "error",
+      remediation: "settings",
+      message: "Could not reach Supabase. Check the Remote sync URL and your network connection, then try again.",
+    });
+  });
+
   it("builds a stable remote upload payload with detail and portable object keys", () => {
     const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
     const first = buildRemoteSessionPayload({ session: SESSION, detail, portable: PORTABLE, now: 11_000 });
