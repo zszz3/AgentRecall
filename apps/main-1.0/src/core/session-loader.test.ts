@@ -2143,6 +2143,56 @@ describe("Codex session loading", () => {
     expect(JSON.stringify(loaded?.messages)).not.toContain("不能进入对话");
   });
 
+  it("keeps a single message when item_completed precedes its response_item", () => {
+    // Codex 0.149 起，event_msg/item_completed 会写在同 id 的 response_item 之前。
+    const rows = [
+      {
+        type: "session_meta",
+        timestamp: "2026-08-28T03:05:25Z",
+        payload: { id: "codex-reordered", cwd: "/repo", history_mode: "paginated" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-28T03:05:26Z",
+        payload: { type: "task_started", turn_id: "turn-1" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-08-28T03:05:27Z",
+        payload: {
+          type: "item_completed",
+          turn_id: "turn-1",
+          completed_at_ms: Date.parse("2026-08-28T03:05:27Z"),
+          item: {
+            type: "AgentMessage",
+            id: "agent-1",
+            phase: "final_answer",
+            content: [{ type: "output_text", text: "唯一的助手回答" }],
+          },
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-08-28T03:05:27.100Z",
+        payload: {
+          type: "message",
+          id: "agent-1",
+          role: "assistant",
+          content: [{ type: "output_text", text: "唯一的助手回答" }],
+        },
+      },
+    ];
+
+    const loaded = loadCodexSessionRows("/tmp/codex-reordered.jsonl", rows);
+
+    expect(loaded?.messages).toMatchObject([
+      { role: "assistant", content: "唯一的助手回答", sourceTurnId: "turn-1", phase: "final_answer" },
+    ]);
+    expect(loaded?.codexIncrementalState?.messageProvenance).toEqual([
+      { messageIndex: 0, sourceRecordId: "item_completed:agent-1" },
+    ]);
+  });
+
   it("cleans paginated item_completed user messages before indexing", () => {
     const userCompleted = (id: string, text: string) => ({
       type: "event_msg",

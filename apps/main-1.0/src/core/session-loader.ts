@@ -921,6 +921,16 @@ function extractCodexMessages(rows: unknown[]): {
     const parsed = adapter.parseLine(row);
     if (!parsed || (parsed.role === "user" && !isMeaningfulUserMessage(parsed.content))) continue;
     if (rollout.historyMode === "paginated" && parsed.role === "user") continue;
+    const completedRecordId = completedRecordIdFor(context?.sourceRecordId ?? null);
+    const completedIndex = completedRecordId ? provenanceIndexes.get(completedRecordId) ?? -1 : -1;
+    if (completedIndex >= 0) {
+      // 权威的 item_completed 记录已经先行写入，这里只补齐 response_item 独有的附件，
+      // 不再追加一条内容相同的消息。
+      if (parsed.attachments && !messages[completedIndex].attachments) {
+        messages[completedIndex] = { ...messages[completedIndex], attachments: parsed.attachments };
+      }
+      continue;
+    }
     const index = messages.length;
     messages.push({
       ...parsed,
@@ -947,6 +957,18 @@ function dedupeTraceEvents(events: TraceEventDraft[]): SessionTraceEvent[] {
   return events
     .filter((event) => !(event.kind === "tool_result" && event.callId && eventCallIds.has(event.callId)))
     .map((event, index) => ({ ...event, index }));
+}
+
+const CODEX_RESPONSE_RECORD_PREFIX = "response_item:";
+
+/**
+ * Codex 0.149 起，`event_msg/item_completed` 会先于同一条目的 `response_item` 落盘。
+ * 两条流描述的是同一条消息，这里由 `response_item:<id>` 反推出对应的
+ * `item_completed:<id>`，让后到的 `response_item` 能认出权威记录已经写入。
+ */
+function completedRecordIdFor(sourceRecordId: string | null): string | null {
+  if (!sourceRecordId || !sourceRecordId.startsWith(CODEX_RESPONSE_RECORD_PREFIX)) return null;
+  return `item_completed:${sourceRecordId.slice(CODEX_RESPONSE_RECORD_PREFIX.length)}`;
 }
 
 function extractTraceEvents(rows: unknown[], format: SessionFormat): SessionTraceEvent[] {
@@ -2550,6 +2572,17 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
             sourceTurnId: completed.sourceTurnId,
             phase: completed.phase,
           };
+        }
+      }
+      if (message && !rolloutRecord.completedMessage) {
+        const completedRecordId = completedRecordIdFor(rolloutRecord.message?.sourceRecordId ?? null);
+        const existingCompleted = completedRecordId ? provenanceMessages.get(completedRecordId) : undefined;
+        if (existingCompleted) {
+          // 同上：item_completed 先到并已成为权威记录，response_item 只补附件。
+          if (message.attachments && !existingCompleted.attachments) {
+            existingCompleted.attachments = message.attachments;
+          }
+          message = null;
         }
       }
       const traces = isRecord(row)
