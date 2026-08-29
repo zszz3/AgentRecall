@@ -718,6 +718,24 @@ export function SettingsDialog({
                 </label>
                 <label className="settings-field settings-toggle">
                   <div className="settings-field-text">
+                    <span className="settings-field-title">Include Qoder IDE</span>
+                    <span className="settings-field-sub">
+                      {l(
+                        "Indexes legacy Qoder IDE conversations from ~/.qoder/cache/projects.",
+                        "索引 ~/.qoder/cache/projects 中的旧版 Qoder IDE 对话记录。",
+                      )}
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="switch"
+                    checked={Boolean(settings?.includeQoderIde)}
+                    disabled={!settings}
+                    onChange={(event) => onSettingsChange({ includeQoderIde: event.currentTarget.checked })}
+                  />
+                </label>
+                <label className="settings-field settings-toggle">
+                  <div className="settings-field-text">
                     <span className="settings-field-title">Include DeepSeek Harness</span>
                     <span className="settings-field-sub">{l("Indexes local DeepSeek Harness (dsh) sessions from DSH_HOME (default: ~/.dsh).", "从 DSH_HOME（默认 ~/.dsh）索引本地 DeepSeek Harness（dsh）会话。")}</span>
                   </div>

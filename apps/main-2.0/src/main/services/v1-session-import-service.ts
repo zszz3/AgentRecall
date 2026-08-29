@@ -41,6 +41,7 @@ const V1_SETTINGS_KEYS = [
   "includeCursorAgent",
   "includeTrae",
   "includeQoder",
+  "includeQoderIde",
   "includePi",
   "includeKimiCli",
   "includeQwenCode",
