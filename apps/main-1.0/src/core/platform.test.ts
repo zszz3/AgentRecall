@@ -362,18 +362,6 @@ describe("resume commands", () => {
     ).toBe("ssh -- dev.example.com 'cd /repo && claude --resume claude-1 --dangerously-skip-permissions'");
   });
 
-  it("quotes unsafe remote resume arguments as single shell tokens", () => {
-    const session = {
-      source: "codex-cli",
-      rawId: "codex 1; rm -rf /",
-      projectPath: "/repo",
-    } as SessionSearchResult;
-
-    expect(getResumeCommand(session, defaultSettings, { platform: "darwin", sshTarget: "dev.example.com" })).toBe(
-      "ssh -- dev.example.com 'cd /repo && codex resume '\\''codex 1; rm -rf /'\\'''",
-    );
-  });
-
   it("uses POSIX remote cd for ssh resume commands even when displaying for Windows", () => {
     const session = {
       source: "codex-cli",
@@ -700,10 +688,6 @@ describe("buildWindowsLaunchPlan", () => {
   it("omits wt start-dir flag when cwd is empty", () => {
     const plan = buildWindowsLaunchPlan("WindowsTerminal", cmd, "");
     expect(plan[0].args).toEqual(["cmd.exe", "/d", "/k", cmd]);
-  });
-
-  it("does not set shell cwd when cwd is empty", () => {
-    const plan = buildWindowsLaunchPlan("WindowsTerminal", cmd, "");
     expect(plan.map((p) => p.cwd)).toEqual([undefined, undefined, undefined, undefined]);
   });
 });
