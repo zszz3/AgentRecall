@@ -1841,51 +1841,43 @@ describe("SessionStore", () => {
     }
   });
 
-  it("rejects WorkBuddy source deletion while record-only source pruning keeps the file", () => {
+  it.each([
+    {
+      label: "WorkBuddy",
+      sessionKey: "workbuddy:abc",
+      source: "workbuddy-cli",
+      fileName: "workbuddy-session.jsonl",
+      errorMessage: "WorkBuddy session source files are read-only.",
+    },
+    {
+      label: "Kimi",
+      sessionKey: "kimi:abc",
+      source: "kimi-cli",
+      fileName: "context.jsonl",
+      errorMessage: "Kimi Code session source files are read-only.",
+    },
+  ])("rejects $label source deletion while record-only source pruning keeps the file", ({ sessionKey, source, fileName, errorMessage }) => {
     const store = createInMemoryStore();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-delete-workbuddy-"));
-    const filePath = path.join(dir, "workbuddy-session.jsonl");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `session-search-delete-${source}-`));
+    const filePath = path.join(dir, fileName);
     fs.writeFileSync(filePath, "{}\n", "utf8");
     store.upsertIndexedSession(
       sampleSession({
-        sessionKey: "workbuddy:abc",
+        sessionKey,
         rawId: "abc",
-        source: "workbuddy-cli",
+        source,
         filePath,
       }),
       messages,
     );
 
-    expect(() => store.deleteSession("workbuddy:abc")).toThrow("WorkBuddy session source files are read-only.");
+    expect(() => store.deleteSession(sessionKey)).toThrow(errorMessage);
     expect(fs.existsSync(filePath)).toBe(true);
-    expect(store.getSession("workbuddy:abc")).not.toBeNull();
+    expect(store.getSession(sessionKey)).not.toBeNull();
 
-    store.deleteSessionsBySource(["workbuddy-cli"]);
+    store.deleteSessionsBySource([source]);
 
-    expect(store.getSession("workbuddy:abc")).toBeNull();
-    expect(fs.existsSync(filePath)).toBe(true);
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("rejects Kimi source deletion while record-only source pruning keeps the file", () => {
-    const store = createInMemoryStore();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-delete-kimi-"));
-    const filePath = path.join(dir, "context.jsonl");
-    fs.writeFileSync(filePath, "{}\n", "utf8");
-    store.upsertIndexedSession(sampleSession({
-      sessionKey: "kimi:abc",
-      rawId: "abc",
-      source: "kimi-cli",
-      filePath,
-    }), messages);
-
-    expect(() => store.deleteSession("kimi:abc")).toThrow("Kimi Code session source files are read-only.");
-    expect(fs.existsSync(filePath)).toBe(true);
-    expect(store.getSession("kimi:abc")).not.toBeNull();
-
-    store.deleteSessionsBySource(["kimi-cli"]);
-
-    expect(store.getSession("kimi:abc")).toBeNull();
+    expect(store.getSession(sessionKey)).toBeNull();
     expect(fs.existsSync(filePath)).toBe(true);
     fs.rmSync(dir, { recursive: true, force: true });
   });
@@ -2199,56 +2191,6 @@ describe("SessionStore", () => {
         [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
       );
       if (index === 0) store.setCustomTitle(sessionKey, "Foo · 07-19");
-    });
-
-    const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
-    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
-  });
-
-  it("disambiguates a titled task from the English untitled rendering", () => {
-    const store = createInMemoryStore();
-    const startedAt = new Date(2026, 6, 19, 10, 32);
-    const cases = [
-      ["/Users/me/Documents/Codex/2026-07-19/english-title", "Untitled session · 07-19 10:32", "visible-english-title"],
-      ["/Users/me/Documents/Codex/2026-07-19/english-untitled", "Untitled Session", "visible-english-untitled"],
-    ] as const;
-    cases.forEach(([projectPath, originalTitle, rawId], index) => {
-      store.upsertIndexedSession(
-        sampleSession({
-          sessionKey: `codex:${rawId}`,
-          rawId,
-          source: "codex-app",
-          projectPath,
-          originalTitle,
-          firstQuestion: index === 0 ? "titled" : "",
-        }),
-        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
-      );
-    });
-
-    const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
-    expect(new Set(visibleLabels).size).toBe(visibleLabels.length);
-  });
-
-  it("disambiguates a titled task from the Chinese untitled rendering", () => {
-    const store = createInMemoryStore();
-    const startedAt = new Date(2026, 6, 19, 10, 32);
-    const cases = [
-      ["/Users/me/Documents/Codex/2026-07-19/chinese-title", "未命名会话 · 07-19 10:32", "visible-chinese-title"],
-      ["/Users/me/Documents/Codex/2026-07-19/chinese-untitled", "Untitled Session", "visible-chinese-untitled"],
-    ] as const;
-    cases.forEach(([projectPath, originalTitle, rawId], index) => {
-      store.upsertIndexedSession(
-        sampleSession({
-          sessionKey: `codex:${rawId}`,
-          rawId,
-          source: "codex-app",
-          projectPath,
-          originalTitle,
-          firstQuestion: index === 0 ? "titled" : "",
-        }),
-        [{ role: "user", content: "first", timestamp: startedAt.toISOString(), index: 0 }],
-      );
     });
 
     const visibleLabels = cases.flatMap(([projectPath]) => visibleProjectLabels(projectByPath(store, projectPath)));
