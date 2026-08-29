@@ -2143,6 +2143,74 @@ describe("Codex session loading", () => {
     expect(JSON.stringify(loaded?.messages)).not.toContain("不能进入对话");
   });
 
+  it("removes an indexed user message when a paginated item_completed marks it injected noise", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-noise-"));
+    const filePath = path.join(root, "sessions", "2026", "08", "20", "rollout.jsonl");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, [
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2026-08-20T02:00:00Z",
+        payload: { id: "codex-noise", cwd: "/repo" },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-20T02:00:00.500Z",
+        payload: { type: "task_started", turn_id: "turn-1" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-08-20T02:00:01Z",
+        payload: {
+          type: "message",
+          id: "user-1",
+          role: "user",
+          content: [{ type: "input_text", text: "帮我修复登录问题" }],
+        },
+      }),
+      "",
+    ].join("\n"));
+
+    try {
+      const initial = loadCodexSessionFile(filePath);
+      if (!initial) throw new Error("expected initial Codex session");
+      expect(initial.messages).toMatchObject([{ role: "user", content: "帮我修复登录问题" }]);
+      const offset = fs.statSync(filePath).size;
+
+      // The session switches to paginated history mid-file; the completed item
+      // rewrites the earlier user message as pure injected noise.
+      fs.appendFileSync(filePath, [
+        JSON.stringify({
+          type: "session_meta",
+          timestamp: "2026-08-20T03:00:00Z",
+          payload: { id: "codex-noise", cwd: "/repo", history_mode: "paginated" },
+        }),
+        JSON.stringify({
+          type: "event_msg",
+          timestamp: "2026-08-20T03:00:01Z",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-1",
+            item: {
+              type: "UserMessage",
+              id: "user-1",
+              content: [{ type: "input_text", text: "<subagent_notification sender=\"sub\">noise</subagent_notification>" }],
+            },
+          },
+        }),
+        "",
+      ].join("\n"));
+
+      const incremental = [...loadCodexSessionsIterator(root, undefined, {
+        incrementalCodexSessions: new Map([[filePath, { offset, loaded: initial }]]),
+      })][0];
+      expect(incremental?.messages ?? []).toHaveLength(0);
+      expect(incremental?.codexIncrementalState?.messageProvenance ?? []).toHaveLength(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a single message when item_completed precedes its response_item", () => {
     // Codex 0.149 起，event_msg/item_completed 会写在同 id 的 response_item 之前。
     const rows = [
