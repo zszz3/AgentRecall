@@ -238,67 +238,63 @@ describe("remote session sync model", () => {
     expect(remoteSessionSearchText(SESSION, detail.messages, detail.traceEvents)).not.toContain("Turn started");
   });
 
-  it("builds remote upload payloads for Hermes sessions without enabling migration", () => {
-    const hermesSession: SessionSearchResult = {
-      ...SESSION,
-      sessionKey: "hermes:abc",
-      rawId: "abc",
-      source: "hermes",
-      filePath: "/home/.hermes/state.db",
-      displayTitle: "Hermes review",
-    };
-    const portable = remotePortableSessionFrom(hermesSession, MESSAGES);
-    const detail = buildRemoteSessionSnapshot(hermesSession, MESSAGES, [], 10_000);
-    const { payload } = buildRemoteSessionPayload({ session: hermesSession, detail, portable, now: 11_000 });
+  it.each([
+    {
+      label: "Hermes",
+      sessionOverrides: {
+        sessionKey: "hermes:abc",
+        rawId: "abc",
+        source: "hermes",
+        filePath: "/home/.hermes/state.db",
+        displayTitle: "Hermes review",
+      },
+      expectedAgent: "hermes",
+      expectedSource: "hermes",
+      expectedProjectPath: undefined,
+    },
+    {
+      label: "Pi",
+      sessionOverrides: {
+        sessionKey: "pi:abc",
+        rawId: "abc",
+        source: "pi-cli",
+        filePath: "/home/.pi/agent/sessions/abc.jsonl",
+        projectPath: "/work/pi-project",
+        displayTitle: "Pi review",
+      },
+      expectedAgent: "pi",
+      expectedSource: "pi-cli",
+      expectedProjectPath: "/work/pi-project",
+    },
+    {
+      label: "CodeWiz",
+      sessionOverrides: {
+        sessionKey: "codewiz:abc",
+        rawId: "abc",
+        source: "codewiz-cli",
+        filePath: "/home/.codewiz/sessions.db#abc",
+        displayTitle: "CodeWiz review",
+      },
+      expectedAgent: "codewiz",
+      expectedSource: "codewiz-cli",
+      expectedProjectPath: undefined,
+    },
+  ])("builds remote upload payloads for $label sessions", ({ sessionOverrides, expectedAgent, expectedSource, expectedProjectPath }) => {
+    const session: SessionSearchResult = { ...SESSION, ...sessionOverrides };
+    const portable = remotePortableSessionFrom(session, MESSAGES);
+    const detail = buildRemoteSessionSnapshot(session, MESSAGES, [], 10_000);
+    const { payload } = buildRemoteSessionPayload({ session, detail, portable, now: 11_000 });
 
-    expect(portable.sourceAgent).toBe("hermes");
-    expect(payload).toMatchObject({
-      source_agent: "hermes",
-      source_source: "hermes",
-    });
-    expect(parsePortableSession(portable).sourceAgent).toBe("hermes");
-  });
-
-  it("builds remote upload payloads for Pi sessions without enabling migration or resume", () => {
-    const piSession: SessionSearchResult = {
-      ...SESSION,
-      sessionKey: "pi:abc",
-      rawId: "abc",
-      source: "pi-cli",
-      filePath: "/home/.pi/agent/sessions/abc.jsonl",
-      projectPath: "/work/pi-project",
-      displayTitle: "Pi review",
-    };
-    const portable = remotePortableSessionFrom(piSession, MESSAGES);
-    const detail = buildRemoteSessionSnapshot(piSession, MESSAGES, [], 10_000);
-    const { payload } = buildRemoteSessionPayload({ session: piSession, detail, portable, now: 11_000 });
-
-    expect(portable.sourceAgent).toBe("pi");
-    expect(portable.projectPath).toBe("/work/pi-project");
-    expect(payload).toMatchObject({
-      source_agent: "pi",
-      source_source: "pi-cli",
-      project_path: "/work/pi-project",
-    });
-    expect(parsePortableSession(portable).sourceAgent).toBe("pi");
-  });
-
-  it("builds and parses remote upload payloads for CodeWiz sessions", () => {
-    const codeWizSession: SessionSearchResult = {
-      ...SESSION,
-      sessionKey: "codewiz:abc",
-      rawId: "abc",
-      source: "codewiz-cli",
-      filePath: "/home/.codewiz/sessions.db#abc",
-      displayTitle: "CodeWiz review",
-    };
-    const portable = remotePortableSessionFrom(codeWizSession, MESSAGES);
-    const detail = buildRemoteSessionSnapshot(codeWizSession, MESSAGES, [], 10_000);
-    const { payload } = buildRemoteSessionPayload({ session: codeWizSession, detail, portable, now: 11_000 });
-
-    expect(portable.sourceAgent).toBe("codewiz");
-    expect(payload.source_agent).toBe("codewiz");
-    expect(parsePortableSession(portable).sourceAgent).toBe("codewiz");
+    expect(portable.sourceAgent).toBe(expectedAgent);
+    if (expectedProjectPath !== undefined) {
+      expect(portable.projectPath).toBe(expectedProjectPath);
+    }
+    expect(payload.source_agent).toBe(expectedAgent);
+    expect(payload.source_source).toBe(expectedSource);
+    if (expectedProjectPath !== undefined) {
+      expect(payload.project_path).toBe(expectedProjectPath);
+    }
+    expect(parsePortableSession(portable).sourceAgent).toBe(expectedAgent);
   });
 
   it("builds upload payloads for indexed SSH remote sessions", async () => {
