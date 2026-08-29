@@ -13,6 +13,7 @@ export type OptionalSessionSourceSetting =
   | "includeCursorAgent"
   | "includeTrae"
   | "includeQoder"
+  | "includeQoderIde"
   | "includePi"
   | "includeKimiCli"
   | "includeQwenCode"
@@ -33,6 +34,7 @@ export type SessionSourceFamily =
   | "cursor"
   | "trae"
   | "qoder"
+  | "qoder-ide"
   | "pi"
   | "kimi"
   | "qwen"
@@ -165,6 +167,12 @@ export const SESSION_SOURCE_REGISTRY = {
     optionalSetting: "includeQoder", pendingKey: "qoder", remoteCollectorOptional: true, liveFamily: "qoder", migrationAgent: null,
     resumeTarget: null, remoteFamily: "qoder", nativeAppFamily: null,
     capabilities: { live: true, resume: false, migrate: false, sessionSync: false, openApp: false },
+  },
+  "qoder-ide": {
+    id: "qoder-ide", label: "Qoder IDE", format: "qoder", family: "qoder-ide", uiFamily: "other", statsGroup: null,
+    optionalSetting: "includeQoderIde", pendingKey: "qoder-ide", remoteCollectorOptional: false, liveFamily: null, migrationAgent: null,
+    resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
+    capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
   },
   "pi-cli": {
     id: "pi-cli", label: "Pi", format: "pi", family: "pi", uiFamily: "other", statsGroup: null,

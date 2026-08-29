@@ -115,6 +115,7 @@ describe("platform application resolution", () => {
     expect(defaultSettings.includeCursorAgent).toBe(false);
     expect(defaultSettings.includeTrae).toBe(false);
     expect(defaultSettings.includeQoder).toBe(false);
+    expect(defaultSettings.includeQoderIde).toBe(false);
     expect(defaultSettings.includePi).toBe(false);
     expect(defaultSettings.includeKimiCli).toBe(false);
     expect(defaultSettings.includeQwenCode).toBe(false);

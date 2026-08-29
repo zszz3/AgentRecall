@@ -21,4 +21,17 @@ describe("StepCode session source semantics", () => {
       capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
     });
   });
+
+  it("keeps legacy Qoder IDE sessions as a separate opt-in read-only source", () => {
+    expect(sessionSourceDescriptor("qoder-ide")).toMatchObject({
+      label: "Qoder IDE",
+      format: "qoder",
+      family: "qoder-ide",
+      optionalSetting: "includeQoderIde",
+      pendingKey: "qoder-ide",
+      liveFamily: null,
+      remoteFamily: null,
+      capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
+    });
+  });
 });

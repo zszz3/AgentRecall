@@ -17,6 +17,7 @@ export type SessionSource =
   | "cursor-agent"
   | "trae"
   | "qoder"
+  | "qoder-ide"
   | "pi-cli"
   | "deepseek-cli"
   | "kimi-cli"

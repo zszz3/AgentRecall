@@ -90,6 +90,7 @@ export interface AppSettings {
   includeCursorAgent: boolean;
   includeTrae: boolean;
   includeQoder: boolean;
+  includeQoderIde: boolean;
   includePi: boolean;
   includeKimiCli: boolean;
   includeQwenCode: boolean;
@@ -165,6 +166,7 @@ export const defaultSettings: AppSettings = {
   includeCursorAgent: false,
   includeTrae: false,
   includeQoder: false,
+  includeQoderIde: false,
   includePi: false,
   includeKimiCli: false,
   includeQwenCode: false,
