@@ -336,19 +336,25 @@ export function WorkflowFeaturePage({
 
   const load = useCallback(async (preferId?: string) => {
     const snapshot = await api.getWorkflowCore(preferId);
-    setDefinitions(snapshot.definitions);
+    // Unsaved drafts only exist in local state; a plain snapshot overwrite
+    // would silently drop them from the list.
+    const preserved = definitions.filter(
+      (item) => newDraftIds.has(item.id) && !snapshot.definitions.some((entry) => entry.id === item.id),
+    );
+    const merged = [...preserved, ...snapshot.definitions];
+    setDefinitions(merged);
     setRuns(snapshot.runs);
-    const preferredId = preferId && snapshot.definitions.some((item) => item.id === preferId)
+    const preferredId = preferId && merged.some((item) => item.id === preferId)
       ? preferId
       : undefined;
     const nextId = preferredId
-      ?? (snapshot.definitions.some((item) => item.id === selectedId) ? selectedId : undefined)
-      ?? snapshot.definitions.find((item) => !item.isTemplate)?.id
-      ?? snapshot.definitions[0]?.id;
+      ?? (merged.some((item) => item.id === selectedId) ? selectedId : undefined)
+      ?? merged.find((item) => !item.isTemplate)?.id
+      ?? merged[0]?.id;
     setSelectedId(nextId);
-    const next = snapshot.definitions.find((item) => item.id === nextId);
+    const next = merged.find((item) => item.id === nextId);
     if (next) setDraft(structuredClone(next));
-  }, [api, selectedId]);
+  }, [api, definitions, newDraftIds, selectedId]);
 
   const createNewWorkflow = (): void => {
     const next = createWorkflowDefinition(agents[0]?.id ?? "");
@@ -417,6 +423,13 @@ export function WorkflowFeaturePage({
     autoSelectedRunId.current = activeRun.id;
     setSelectedNodeId(activeNode.id);
   }, [activeRun, mode, selectedNodeId]);
+  // Keep the list entry of an unsaved draft current with the editor, so
+  // switching to another workflow and back restores the latest edits
+  // instead of the skeleton captured at creation time.
+  useEffect(() => {
+    if (!draft || !newDraftIds.has(draft.id)) return;
+    setDefinitions((current) => current.map((item) => (item.id === draft.id ? draft : item)));
+  }, [draft, newDraftIds]);
 
   const issues = draft ? validateWorkflowDefinition(draft, new Set(agents.map((agent) => agent.id))) : [];
   const templates = definitions.filter((definition) => definition.isTemplate);
