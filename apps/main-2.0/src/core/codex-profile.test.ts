@@ -1307,10 +1307,13 @@ describe("loadActiveCodexSummaryEndpointDefaults", () => {
       apiKey: "sk-test-official",
       apiFormat: "openai_responses",
     });
-  });
 
-  it("falls back to OPENAI_API_KEY when no model_provider is set", async () => {
-    writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    // Also falls back when no config.toml exists at all.
+    rmSync(path.join(codexHome, "config.toml"));
+    writeFileSync(
+      path.join(codexHome, "auth.json"),
+      JSON.stringify({ OPENAI_API_KEY: "sk-test" }),
+    );
     await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
       baseUrl: "",
       model: "",
