@@ -1344,6 +1344,15 @@ function createCodexScanAccumulator(base?: { offset: number; loaded: LoadedSessi
           if (existing) {
             const messageIndex = allMessages.indexOf(existing);
             if (messageIndex >= 0) allMessages.splice(messageIndex, 1);
+            // The visible output is assembled from preamble + turns, so the
+            // message must also be removed from the container that owns it or
+            // it survives the deletion.
+            for (const container of [preamble, ...turns]) {
+              const containerIndex = container.messages.indexOf(existing);
+              if (containerIndex < 0) continue;
+              container.messages.splice(containerIndex, 1);
+              break;
+            }
             messageProvenance.delete(existing);
             provenanceMessages.delete(completed.replacesSourceRecordId);
           }
