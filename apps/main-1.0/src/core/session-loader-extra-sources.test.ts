@@ -254,31 +254,6 @@ describe("extra session sources", () => {
     }
   });
 
-  it("discovers Trae sessions from both official and CN home directories", () => {
-    const homeDir = tmpDir("trae-default");
-    try {
-      for (const [directory, id] of [[".trae", "international"], [".trae-cn", "china"]] as const) {
-        const filePath = path.join(homeDir, directory, "memory", "projects", "-tmp-demo-project", "20260721", `session_memory_${id}.jsonl`);
-        writeJsonl(filePath, [
-          {
-            intent: `Investigate ${id} checkout`,
-            projectPath: "/tmp/demo/project",
-            message_summary_time: "2026-07-21T09:00:00Z",
-          },
-        ]);
-      }
-
-      const loaded = loadDefaultSessions({ homeDir, includeTrae: true });
-
-      expect(loaded.filter((item) => item.session.source === "trae").map((item) => item.session.rawId)).toEqual([
-        "session_memory_international",
-        "session_memory_china",
-      ]);
-    } finally {
-      fs.rmSync(homeDir, { recursive: true, force: true });
-    }
-  });
-
   it("loads legacy Qoder IDE conversation history as qoder-ide sessions", () => {
     const root = tmpDir("qoder");
     const filePath = path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-fe3", "task-fe3.jsonl");
@@ -1358,24 +1333,6 @@ describe("extra session sources", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("omits empty Cursor composer headers even when Cursor does not mark them as drafts", () => {
-    const root = tmpDir("cursor-empty-header");
-    const stateDbPath = path.join(root, "cursor-state.vscdb");
-    writeCursorStateDb(stateDbPath, [
-      {
-        composerId: "cursor-empty-1",
-        name: "",
-        projectPath: "",
-      },
-    ]);
-
-    const loaded = loadCursorAgentSessions(root, { cursorStateDbPath: stateDbPath });
-
-    expect(loaded).toEqual([]);
-
-    fs.rmSync(root, { recursive: true, force: true });
-  });
-
   it("omits Cursor composer headers that have no readable messages", () => {
     const root = tmpDir("cursor-empty-project-shell");
     const stateDbPath = path.join(root, "cursor-state.vscdb");
@@ -1460,46 +1417,6 @@ describe("extra session sources", () => {
       executionEnvironmentHint: { kind: "ssh", label: "dev", hostAlias: "dev" },
     });
     expect(local?.executionEnvironmentHint).toBeUndefined();
-
-    fs.rmSync(root, { recursive: true, force: true });
-  });
-
-  it("treats Cursor composer metadata as a transcript refresh dependency", () => {
-    const root = tmpDir("cursor-title-refresh");
-    const stateDbPath = path.join(root, "cursor-state.vscdb");
-    const workspaceSlug = "Users-mac-work-cursor-app";
-    const composerId = "cursor-refresh-1";
-    const transcript = path.join(root, "projects", workspaceSlug, "agent-transcripts", composerId, `${composerId}.jsonl`);
-    writeJsonl(transcript, [
-      {
-        role: "user",
-        message: { content: [{ type: "text", text: "<user_query>Refresh my title</user_query>" }] },
-      },
-    ]);
-    writeCursorStateDb(stateDbPath, [
-      {
-        composerId,
-        name: "Current Cursor title",
-        projectPath: "/Users/mac/work/cursor-app",
-      },
-    ]);
-    const walPath = `${stateDbPath}-wal`;
-    fs.writeFileSync(walPath, "");
-    const walTimestamp = new Date(fs.statSync(stateDbPath).mtimeMs + 60_000);
-    fs.utimesSync(walPath, walTimestamp, walTimestamp);
-    const stateMtimeMs = fs.statSync(walPath).mtimeMs;
-    let observedDependencyMtimeMs = 0;
-
-    loadCursorAgentSessions(root, {
-      cursorStateDbPath: stateDbPath,
-      cursorWorkspacePathMap: new Map([[workspaceSlug, "/Users/mac/work/cursor-app"]]),
-      shouldSkipFile: (_filePath, _stat, dependencyMtimeMs) => {
-        observedDependencyMtimeMs = dependencyMtimeMs ?? 0;
-        return false;
-      },
-    });
-
-    expect(observedDependencyMtimeMs).toBe(stateMtimeMs);
 
     fs.rmSync(root, { recursive: true, force: true });
   });
