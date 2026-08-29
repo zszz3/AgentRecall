@@ -1014,11 +1014,18 @@ export function loadQoderSessions(qoderDir = path.join(os.homedir(), QODER_DIR))
 }
 
 export function* loadQoderSessionsIterator(qoderDir = path.join(os.homedir(), QODER_DIR), options: SessionLoadOptions = {}): Generator<LoadedSession> {
-  yield* loadQoderIdeSessionsIterator(qoderDir, options);
-  yield* loadQoderCliSessionsIterator(qoderDir, options);
+  // Installing the new Qoder migrates Qoder IDE's conversations from
+  // `cache/projects` into `projects`, keeping copies of the same sessions under
+  // different ids in both trees. Once the new layout exists, skip the legacy
+  // tree so migrated history is not indexed twice.
+  if (fs.existsSync(path.join(qoderDir, "projects"))) {
+    yield* loadQoderProjectsSessionsIterator(qoderDir, options);
+    return;
+  }
+  yield* loadQoderLegacySessionsIterator(qoderDir, options);
 }
 
-function* loadQoderIdeSessionsIterator(qoderDir: string, options: SessionLoadOptions): Generator<LoadedSession> {
+function* loadQoderLegacySessionsIterator(qoderDir: string, options: SessionLoadOptions): Generator<LoadedSession> {
   const projectsDir = path.join(qoderDir, "cache", "projects");
   if (!fs.existsSync(projectsDir)) return;
   for (const projectEntry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
@@ -1036,29 +1043,58 @@ function* loadQoderIdeSessionsIterator(qoderDir: string, options: SessionLoadOpt
 }
 
 /**
- * The Qoder CLI stores transcripts under `projects/<slug>/`, either directly or
+ * The new Qoder stores transcripts under `projects/<slug>/`, either directly or
  * inside a `transcript/` subdirectory; both layouts are written concurrently,
  * so walk the tree instead of hardcoding either shape.
  */
-function* loadQoderCliSessionsIterator(qoderDir: string, options: SessionLoadOptions): Generator<LoadedSession> {
+function* loadQoderProjectsSessionsIterator(qoderDir: string, options: SessionLoadOptions): Generator<LoadedSession> {
   const projectsDir = path.join(qoderDir, "projects");
   if (!fs.existsSync(projectsDir)) return;
+  const loaded: LoadedSession[] = [];
   for (const filePath of walkJsonlFiles(projectsDir)) {
     const stat = safeStat(filePath);
     if (shouldSkipFile(options, filePath, stat)) continue;
     const rows = readJsonl(filePath);
-    if (!isQoderCliTranscript(rows)) continue;
-    const loaded = loadClaudeCliSessionRows(filePath, rows, { source: "qoder", keyPrefix: "qoder", stat });
-    if (loaded?.messages.length) yield loaded;
+    if (!isQoderProjectsTranscript(rows)) continue;
+    const session = loadClaudeCliSessionRows(filePath, rows, { source: "qoder", keyPrefix: "qoder", stat });
+    if (session?.messages.length) loaded.push(session);
   }
+  yield* dedupeQoderExecutionTranscripts(loaded);
 }
 
 /**
- * Qoder CLI transcripts are Claude-Code-shaped: conversation turns are typed
- * rows carrying a nested `message`. The Qoder IDE writes `{ role, message }`
- * without a `type`, so requiring both fields keeps the two apart.
+ * A long-running Qoder task can exist twice in the `projects` layout: the
+ * canonical session file and a `*.session.execution.jsonl` run transcript.
+ * The copies share no id, so match them on first question, project path and
+ * start second; drop transcripts that duplicate a canonical session while
+ * keeping transcripts of runs that have no session file.
  */
-function isQoderCliTranscript(rows: unknown[]): boolean {
+function dedupeQoderExecutionTranscripts(sessions: LoadedSession[]): LoadedSession[] {
+  const canonicalKeys = new Set<string>();
+  for (const session of sessions) {
+    if (!isQoderExecutionTranscript(session.session.filePath)) canonicalKeys.add(qoderSessionDedupeKey(session));
+  }
+  return sessions.filter(
+    (session) => !isQoderExecutionTranscript(session.session.filePath) || !canonicalKeys.has(qoderSessionDedupeKey(session)),
+  );
+}
+
+function isQoderExecutionTranscript(filePath: string): boolean {
+  return filePath.endsWith(".session.execution.jsonl");
+}
+
+function qoderSessionDedupeKey(session: LoadedSession): string {
+  const start = (session.messages[0]?.timestamp ?? "").slice(0, 19);
+  return `${session.session.firstQuestion}\u0000${session.session.projectPath}\u0000${start}`;
+}
+
+/**
+ * Transcripts in the `projects` layout are Claude-Code-shaped: conversation
+ * turns are typed rows carrying a nested `message`. The legacy Qoder IDE wrote
+ * `{ role, message }` without a `type`, so requiring both fields keeps the
+ * two formats apart.
+ */
+function isQoderProjectsTranscript(rows: unknown[]): boolean {
   return rows.some((row) => isRecord(row) && (row.type === "user" || row.type === "assistant") && isRecord(row.message));
 }
 

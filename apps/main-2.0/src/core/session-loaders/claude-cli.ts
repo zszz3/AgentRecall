@@ -27,6 +27,16 @@ export function claudeVisibleConversationRows(rows: unknown[]): unknown[] {
   const conversationRows = rows.filter((row) => isRecord(row) && (row.type === "user" || row.type === "assistant"));
   if (conversationRows.length === 0) return rows;
 
+  // Some transcripts (e.g. Qoder long-running task execution logs) do not chain
+  // turns through `parentUuid` at all. With no links to walk there is no hidden
+  // branch to filter, and collapsing to the last visible turn would discard the
+  // whole conversation except its final message.
+  const chained = conversationRows.some((row) => {
+    const parentUuid = unknownField(row, "parentUuid");
+    return parentUuid !== null && parentUuid !== undefined && parentUuid !== "";
+  });
+  if (!chained) return rows;
+
   const nodes = new Map<string, Record<string, unknown>>();
   for (const row of conversationRows) {
     if (!isRecord(row)) return rows;
