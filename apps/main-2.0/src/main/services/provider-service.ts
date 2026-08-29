@@ -190,6 +190,10 @@ export class ProviderService {
   private readonly operations: ProviderServiceOperations;
   private chatProxy: CodexChatProxyPort | null = null;
   private chatProxySignature: string | null = null;
+  // Startup restore and settings saves can race into the proxy lifecycle; queue
+  // every start/stop transition so the check-then-act always sees the result
+  // of the previous one instead of creating duplicate proxies on the same port.
+  private chatProxyLifecycle: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly dependencies: ProviderServiceDependencies) {
     this.operations = { ...defaultOperations, ...dependencies.operations };
@@ -716,6 +720,12 @@ export class ProviderService {
   }
 
   async stopCodexChatProxy(): Promise<null> {
+    const run = this.chatProxyLifecycle.then(() => this.stopChatProxyNow());
+    this.chatProxyLifecycle = run.catch(() => undefined);
+    return run;
+  }
+
+  private async stopChatProxyNow(): Promise<null> {
     const proxy = this.chatProxy;
     this.chatProxy = null;
     this.chatProxySignature = null;
@@ -789,6 +799,12 @@ export class ProviderService {
   }
 
   private async ensureChatProxy(apiConfig: ApiConfig): Promise<CodexChatProxyStatus> {
+    const run = this.chatProxyLifecycle.then(() => this.startOrReuseChatProxy(apiConfig));
+    this.chatProxyLifecycle = run.catch(() => undefined);
+    return run;
+  }
+
+  private async startOrReuseChatProxy(apiConfig: ApiConfig): Promise<CodexChatProxyStatus> {
     if (!apiConfig.customApiKey) throw new Error(`API key is required to start ${apiConfig.customProviderName} proxy.`);
     if (!apiConfig.customBaseUrl) throw new Error(`Base URL is required to start ${apiConfig.customProviderName} proxy.`);
 
@@ -807,7 +823,7 @@ export class ProviderService {
       return current;
     }
 
-    await this.stopCodexChatProxy();
+    await this.stopChatProxyNow();
     const proxy = this.operations.createCodexChatProxy({
       upstreamBaseUrl: apiConfig.customBaseUrl,
       apiKey: apiConfig.customApiKey,
