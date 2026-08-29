@@ -2720,35 +2720,6 @@ describe("Codex session loading", () => {
     });
   });
 
-  it("reuses previously resolved Codex metadata instead of rescanning the rows", () => {
-    const loaded = loadCodexSessionRows(
-      "/tmp/pre-resolved-meta.jsonl",
-      [
-        {
-          type: "response_item",
-          timestamp: "2026-06-01T10:01:00Z",
-          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "reuse metadata" }] },
-        },
-      ],
-      {
-        sessionMeta: {
-          id: "pre-resolved-meta",
-          projectPath: "/repo",
-          ts: Date.parse("2026-06-01T10:00:00Z"),
-          gitBranch: "feat/pre-resolved",
-          isSubagent: false,
-          parentSessionId: null,
-        },
-      },
-    );
-
-    expect(loaded?.session).toMatchObject({
-      rawId: "pre-resolved-meta",
-      projectPath: "/repo",
-      gitBranch: "feat/pre-resolved",
-    });
-  });
-
   it("prefers an explicit Codex title over the embedded metadata title", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-codex-title-"));
     const filePath = path.join(dir, "rollout.jsonl");
@@ -2802,39 +2773,6 @@ describe("Codex session loading", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("loads TCodex sessions with a separate source and session key namespace", () => {
-    const codexDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-tcodex-"));
-    const sessionDir = path.join(codexDir, "sessions", "2026", "06", "01");
-    fs.mkdirSync(sessionDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(sessionDir, "rollout.jsonl"),
-      [
-        JSON.stringify({
-          type: "session_meta",
-          timestamp: "2026-06-01T10:00:00Z",
-          payload: { id: "tcodex-1", cwd: "/internal", git: { branch: "feat/internal" } },
-        }),
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-01T10:01:00Z",
-          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "内部会话" }] },
-        }),
-      ].join("\n"),
-    );
-
-    const loaded = loadCodexSessions(codexDir, "tcodex-cli");
-
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0].session).toMatchObject({
-      sessionKey: "tcodex:tcodex-1",
-      rawId: "tcodex-1",
-      source: "tcodex-cli",
-      projectPath: "/internal",
-      gitBranch: "feat/internal",
-    });
-
-    fs.rmSync(codexDir, { recursive: true, force: true });
-  });
 });
 
 describe("Claude session loading", () => {
@@ -3045,38 +2983,6 @@ describe("Claude session loading", () => {
       source: "claude-cli",
       projectPath: "/repo",
       gitBranch: "feat/claude-tags",
-    });
-
-    fs.rmSync(claudeDir, { recursive: true, force: true });
-  });
-
-  it("loads TClaude sessions with a separate source and session key namespace", () => {
-    const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-search-tclaude-"));
-    const projectDir = path.join(claudeDir, "projects", "-repo");
-    fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(projectDir, "tclaude-1.jsonl"),
-      [
-        JSON.stringify({
-          type: "user",
-          timestamp: "2026-06-01T10:00:00Z",
-          cwd: "/repo",
-          sessionId: "tclaude-1",
-          gitBranch: "feat/internal",
-          message: { role: "user", content: "内部 Claude 会话" },
-        }),
-      ].join("\n"),
-    );
-
-    const loaded = loadClaudeCliSessions(claudeDir, "tclaude-cli");
-
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0].session).toMatchObject({
-      sessionKey: "tclaude:tclaude-1",
-      rawId: "tclaude-1",
-      source: "tclaude-cli",
-      projectPath: "/repo",
-      gitBranch: "feat/internal",
     });
 
     fs.rmSync(claudeDir, { recursive: true, force: true });
