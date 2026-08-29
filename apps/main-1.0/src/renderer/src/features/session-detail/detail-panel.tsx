@@ -445,7 +445,7 @@ export function DetailPanel({
         return;
       }
 
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
       const page = el.clientHeight * 0.9;
       switch (event.key) {
         case "Escape":
