@@ -549,19 +549,12 @@ describe("summaryFreshness / needsBackfill", () => {
 });
 
 describe("quoteWindowsArg", () => {
-  it("wraps a plain argument in double quotes", () => {
-    expect(quoteWindowsArg("codex")).toBe('"codex"');
-  });
-
-  it("doubles embedded double quotes so cmd.exe keeps them literal", () => {
-    expect(quoteWindowsArg('say "hi"')).toBe('"say ""hi"""');
-  });
-
-  it("escapes percent signs to avoid env-variable expansion", () => {
-    expect(quoteWindowsArg("100%done %PATH%")).toBe('"100%%done %%PATH%%"');
-  });
-
-  it("preserves newlines inside the quoted span (multi-line prompts)", () => {
-    expect(quoteWindowsArg("line1\nline2")).toBe('"line1\nline2"');
+  it.each([
+    ["plain argument", "codex", '"codex"'],
+    ["embedded double quotes", 'say "hi"', '"say ""hi"""'],
+    ["percent signs", "100%done %PATH%", '"100%%done %%PATH%%"'],
+    ["newlines inside quoted span", "line1\nline2", '"line1\nline2"'],
+  ] as const)("wraps %s correctly", (_label, input, expected) => {
+    expect(quoteWindowsArg(input)).toBe(expected);
   });
 });
