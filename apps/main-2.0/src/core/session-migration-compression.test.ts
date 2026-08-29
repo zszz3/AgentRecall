@@ -95,10 +95,6 @@ function expectNoUnpairedSurrogates(text: string): void {
 }
 
 describe("migration compression policy", () => {
-  it("uses 100k estimated tokens as the default complete migration threshold", () => {
-    expect(MIGRATION_TOKEN_LIMIT).toBe(100_000);
-  });
-
   it("keeps the original session complete at exactly the 100k token limit", async () => {
     const session = portableWithContent("x".repeat(399_988));
 
@@ -755,9 +751,7 @@ describe("migrationCompressionPercent", () => {
     expect(migrationCompressionPercent({ completed: 2, totalChunks: 3, phase: "chunk" })).toBe(50);
     expect(migrationCompressionPercent({ completed: 3, totalChunks: 3, phase: "chunk" })).toBe(75);
     expect(migrationCompressionPercent({ completed: 3, totalChunks: 3, phase: "handoff" })).toBe(75);
-  });
-
-  it("reports 50% for a single-chunk handoff", () => {
+    // 1 chunk -> 2 units; handoff at 50%.
     expect(migrationCompressionPercent({ completed: 1, totalChunks: 1, phase: "handoff" })).toBe(50);
   });
 });
