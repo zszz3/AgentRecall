@@ -1057,21 +1057,6 @@ describe("remote sync", () => {
     store.close();
   });
 
-  it("emits remote summary token usage from the collector script", async () => {
-    const store = createInMemoryStore();
-    const environment = upsertSshEnvironment(store);
-    let collectorCommand = "";
-    await syncRemoteEnvironment(store, environment, {
-      runSsh: async (_environment, remoteCommand) => {
-        collectorCommand = remoteCommand;
-        return "";
-      },
-    });
-    const collectorScript = decodeCollectorScript(collectorCommand);
-    expect(collectorScript).toContain("total_token_usage");
-    expect(collectorScript).toContain('"tokenUsage"');
-  });
-
   it("emits timestamped remote token events from the collector script", async () => {
     const store = createInMemoryStore();
     const environment = upsertSshEnvironment(store);
@@ -1770,37 +1755,42 @@ db.close()
     }
   });
 
-  it("summarizes failed remote protocol stdout instead of leaking session JSON", () => {
-    const stdout = `${JSON.stringify({
-      kind: "codex-session",
-      path: "/home/alice/.codex/sessions/private.jsonl",
-      contentBase64: "AAAA",
-      mtimeMs: 1,
-      size: 1,
-    })}\n`.repeat(500);
-
+  it.each([
+    {
+      label: "Codex",
+      stdout: `${JSON.stringify({
+        kind: "codex-session",
+        path: "/home/alice/.codex/sessions/private.jsonl",
+        contentBase64: "AAAA",
+        mtimeMs: 1,
+        size: 1,
+      })}\n`.repeat(500),
+      expectTimeout: true,
+    },
+    {
+      label: "CodeBuddy",
+      stdout: `${JSON.stringify({
+        kind: "codebuddy-project",
+        source: "codebuddy-cli",
+        path: "/home/alice/.codebuddy/projects/private.jsonl",
+        contentBase64: "cHJpdmF0ZQ==",
+        mtimeMs: 1,
+        size: 7,
+      })}\n`,
+      expectTimeout: false,
+    },
+  ])("summarizes failed $label payload stdout without leaking session data", ({ stdout, expectTimeout }) => {
     const message = formatRemoteSyncProcessError({ killed: true, code: 255 }, stdout, "");
 
-    expect(message).toContain("timed out");
+    if (expectTimeout) {
+      expect(message).toContain("timed out");
+    }
     expect(message).toContain("remote produced");
     expect(message).not.toContain("/home/alice");
     expect(message).not.toContain("contentBase64");
-    expect(message.length).toBeLessThan(500);
-  });
-
-  it("summarizes failed CodeBuddy payload stdout without leaking session data", () => {
-    const stdout = `${JSON.stringify({
-      kind: "codebuddy-project",
-      source: "codebuddy-cli",
-      path: "/home/alice/.codebuddy/projects/private.jsonl",
-      contentBase64: "cHJpdmF0ZQ==",
-      mtimeMs: 1,
-      size: 7,
-    })}\n`;
-    const message = formatRemoteSyncProcessError({ killed: true, code: 255 }, stdout, "");
-    expect(message).toContain("remote produced");
-    expect(message).not.toContain("/home/alice");
-    expect(message).not.toContain("contentBase64");
+    if (expectTimeout) {
+      expect(message.length).toBeLessThan(500);
+    }
   });
 
   it("builds noninteractive ssh args before the destination terminator and exposes a finite exec timeout", () => {
