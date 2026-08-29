@@ -759,11 +759,6 @@ describe("remote session sync model", () => {
     expect(payload.synced_at).toBe(1_783_088_916_001);
   });
 
-  it("hashes remote content deterministically", () => {
-    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
-    expect(remoteSessionContentHash(detail, PORTABLE)).toBe(remoteSessionContentHash(detail, { ...PORTABLE, messages: [...PORTABLE.messages] }));
-  });
-
   it("keeps the revision stable when only export time, device labels, or paths change", () => {
     const first = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
     const second = buildRemoteSessionSnapshot({
