@@ -1881,10 +1881,12 @@ async function maybeAutoBackfillSummaries(): Promise<void> {
   if (summaryBackfillRunning) return;
   const settings = getSettings();
   if (!settings.summaryAutoBackfill) return;
-  const endpoint = await resolveSummaryEndpointFromSettings();
-  if (!endpoint) return;
+  // Claim the flag before any await, so overlapping index completions cannot
+  // both pass the guard and start duplicate backfill runs.
   summaryBackfillRunning = true;
   try {
+    const endpoint = await resolveSummaryEndpointFromSettings();
+    if (!endpoint) return;
     const maxAgeMs = settings.summaryMaxAgeDays * 86_400_000;
     const candidates = store.listSessionsNeedingSummary(Date.now(), maxAgeMs, 25);
     for (const candidate of candidates) {
