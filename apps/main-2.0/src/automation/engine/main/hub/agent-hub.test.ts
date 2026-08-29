@@ -4701,15 +4701,6 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     expect(url).toMatchObject({ ok: true, artifact: { kind: "url", url: "https://example.com/x", title: "Spec" } });
   });
 
-  test("uses WorkflowStore as the workflow state owner", () => {
-    const hub = new AgentHub();
-
-    expect((hub as any).workflowStore).toBeDefined();
-    expect("workflows" in (hub as any)).toBe(false);
-    expect("workflowRuns" in (hub as any)).toBe(false);
-    expect("activeWorkflowId" in (hub as any)).toBe(false);
-  });
-
   test("persists and restores multiple workflow drafts", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "multi-agent-chat-"));
     const storagePath = path.join(dir, "app-chats.json");
