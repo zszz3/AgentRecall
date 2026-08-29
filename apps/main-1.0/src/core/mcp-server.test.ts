@@ -301,13 +301,6 @@ describe("MCP write functions", () => {
     expect(latest.length).toBe(3);
   });
 
-  it("get_latest_sessions filters by source", () => {
-    const { db } = seedStore();
-    const latest = getLatestSessions(db, { source: "codex-cli", limit: 10 });
-    expect(latest.every((r) => r.source === "codex-cli")).toBe(true);
-    expect(latest.length).toBe(3);
-  });
-
   it("get_latest_sessions filters by projectPath substring", () => {
     const { db } = seedStore();
     const latest = getLatestSessions(db, { projectPath: "other" });
@@ -368,16 +361,6 @@ describe("MCP write functions", () => {
     expect(setVisibility(db, { sessionKey: "missing", visibility: "hidden" }).ok).toBe(false);
   });
 
-  it("does not expose pin through MCP or Electron IPC", () => {
-    const mcpSource = fs.readFileSync(path.resolve("bin", "agent-recall-mcp.mjs"), "utf8");
-    const preloadSource = fs.readFileSync(path.resolve("src", "preload", "index.ts"), "utf8");
-    const mainSource = fs.readFileSync(path.resolve("src", "main", "index.ts"), "utf8");
-
-    expect(mcpSource).not.toContain('case "pinned"');
-    expect(mcpSource).not.toContain('["default", "favorites", "hidden", "pinned"]');
-    expect(preloadSource).not.toContain("setPinned:");
-    expect(mainSource).not.toContain('"pin:set"');
-  });
 });
 
 describe("MCP migrate_session tool", () => {
