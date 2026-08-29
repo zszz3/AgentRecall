@@ -9,11 +9,8 @@ import {
 const MAX_CODE_POINTS = 160;
 
 describe("normalizeTerminalTitle", () => {
-  it("collapses internal whitespace runs into a single space", () => {
+  it("collapses internal whitespace and strips carriage returns, tabs and newlines", () => {
     expect(normalizeTerminalTitle("build   the   thing")).toBe("build the thing");
-  });
-
-  it("strips carriage returns, tabs and newlines that would break the label", () => {
     expect(normalizeTerminalTitle("refactor\r\n\tsession loader")).toBe("refactor session loader");
   });
 
