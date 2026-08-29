@@ -389,9 +389,15 @@ export function WorkflowFeaturePage({
   const activeRun = runs.filter((run) => run.workflowId === selectedId).sort((left, right) => right.startedAt - left.startedAt)[0];
   useEffect(() => {
     if (!activeRun || (activeRun.status !== "running" && activeRun.status !== "waiting")) return;
-    const timer = window.setInterval(() => void load(selectedId).catch(() => undefined), 1200);
+    // Poll only run state: a full load would overwrite the definition draft
+    // the user may be editing while the run is in progress.
+    const timer = window.setInterval(() => {
+      void api.getWorkflowCore(selectedId)
+        .then((snapshot) => setRuns(snapshot.runs))
+        .catch(() => undefined);
+    }, 1200);
     return () => window.clearInterval(timer);
-  }, [activeRun?.id, activeRun?.status, load, selectedId]);
+  }, [activeRun?.id, activeRun?.status, api, selectedId]);
   useEffect(() => {
     if (mode !== "run" || selectedNodeId || !activeRun) return;
     const activeNode = activeRun.definition.nodes.find((node) => {

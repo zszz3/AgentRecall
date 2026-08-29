@@ -347,6 +347,46 @@ describe("WorkflowFeaturePage live output", () => {
     expect(api.chooseWorkDir).not.toHaveBeenCalled();
   });
 
+  it("keeps definition draft edits while a running workflow polls", async () => {
+    vi.useFakeTimers();
+    try {
+      const snapshot = runningWorkflow();
+      api.getWorkflowCore.mockResolvedValue({ definitions: [snapshot.definition], runs: [snapshot.run] });
+      await act(async () => {
+        root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />);
+        await Promise.resolve();
+      });
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>("[aria-label='Workflow properties']")?.click();
+        await Promise.resolve();
+      });
+
+      const nameField = [...container.querySelectorAll<HTMLElement>(".workflow-core-field")]
+        .find((field) => field.querySelector("span")?.textContent === "Name");
+      const nameInput = nameField?.querySelector("input");
+      if (!nameInput) throw new Error("Workflow name field was not rendered");
+
+      await act(async () => {
+        const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        setValue?.call(nameInput, "用户正在编辑");
+        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(nameInput.value).toBe("用户正在编辑");
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1200);
+      });
+
+      const refreshed = [...container.querySelectorAll<HTMLElement>(".workflow-core-field")]
+        .find((field) => field.querySelector("span")?.textContent === "Name")
+        ?.querySelector("input");
+      expect(refreshed?.value).toBe("用户正在编辑");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps new Workflow directory selection on the global default path", async () => {
     const snapshot = runningWorkflow();
     api.getWorkflowCore.mockResolvedValue({ definitions: [snapshot.definition], runs: [snapshot.run] });
