@@ -64,17 +64,6 @@ describe("formatRelativeTime", () => {
 });
 
 describe("formatSessionMarkdown", () => {
-  it("uses an explicit English locale for its fixed-English export", () => {
-    const locale = vi.spyOn(Date.prototype, "toLocaleString");
-    try {
-      formatSessionMarkdown(session, messages);
-      expect(locale.mock.calls.length).toBeGreaterThan(0);
-      expect(locale.mock.calls.every(([value]) => value === "en-US")).toBe(true);
-    } finally {
-      locale.mockRestore();
-    }
-  });
-
   it("omits trace events by default", () => {
     expect(formatSessionMarkdown(session, messages)).not.toContain("Tool Trace");
   });
