@@ -58,15 +58,13 @@ describe("app settings", () => {
     }
   });
 
-  it("keeps WorkBuddy indexing opt-in while accepting an explicit enable", () => {
-    expect(defaultSettings.includeWorkBuddy).toBe(false);
-    expect(mergeAppSettings(defaultSettings, { includeWorkBuddy: true }).includeWorkBuddy).toBe(true);
-  });
-
-  it("keeps Qwen Code indexing opt-in while accepting an explicit enable", () => {
-    expect(defaultSettings.includeQwenCode).toBe(false);
-    expect(mergeAppSettings(defaultSettings, { includeQwenCode: true }).includeQwenCode).toBe(true);
-  });
+  it.each(["includeWorkBuddy", "includeQwenCode"] as const)(
+    "keeps %s indexing opt-in while accepting an explicit enable",
+    (key) => {
+      expect(defaultSettings[key]).toBe(false);
+      expect(mergeAppSettings(defaultSettings, { [key]: true })[key]).toBe(true);
+    },
+  );
 
   it("keeps StepCode opt-in and resumes Codex and Claude sessions through the StepCode wrapper", () => {
     expect(defaultSettings.includeStepcode).toBe(false);
