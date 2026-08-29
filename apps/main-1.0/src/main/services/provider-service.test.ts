@@ -49,7 +49,10 @@ function proxyStatus(options: CodexChatProxyOptions): CodexChatProxyStatus {
   };
 }
 
-function createHarness(settings: AppSettings = cloneSettings()) {
+function createHarness(
+  settings: AppSettings = cloneSettings(),
+  extraOperations: Partial<ProviderServiceOperations> = {},
+) {
   const keys = new Map<string, string>();
   const getKey = vi.fn((target: "codex" | "claude", providerId: string) => (
     keys.get(`${target}:${providerId}`) ?? ""
@@ -115,6 +118,7 @@ function createHarness(settings: AppSettings = cloneSettings()) {
     }),
   };
   const logError = vi.fn();
+  Object.assign(operations, extraOperations);
   const service = new ProviderService({
     getSettings: () => settings,
     keys: {
@@ -1233,5 +1237,39 @@ describe("ProviderService Claude profile", () => {
         customApiKey: "",
       }),
     });
+  });
+});
+
+describe("Codex Chat proxy lifecycle", () => {
+  it("starts the proxy only once under concurrent restore calls", async () => {
+    const settings = cloneSettings();
+    settings.apiConfig = {
+      ...settings.apiConfig,
+      activeProvider: "custom",
+      customProviderId: "example-chat",
+      customProviderName: "Example Chat",
+      customBaseUrl: "https://api.example/v1",
+      customModel: "chat-model",
+      customApiFormat: "openai_chat",
+    };
+    const status = {
+      running: true,
+      host: "127.0.0.1",
+      port: 15721,
+      baseUrl: "http://127.0.0.1:15721/v1",
+      upstreamBaseUrl: "https://api.example/v1",
+      model: "chat-model",
+    };
+    const createCodexChatProxy = vi.fn(() => ({
+      start: async () => status,
+      stop: async () => undefined,
+      getStatus: () => status,
+    }));
+    const { service, keys } = createHarness(settings, { createCodexChatProxy });
+    keys.set("codex:example-chat", "sk-test-key");
+
+    await Promise.all([service.restoreCodexChatProxy(), service.restoreCodexChatProxy()]);
+
+    expect(createCodexChatProxy).toHaveBeenCalledTimes(1);
   });
 });
