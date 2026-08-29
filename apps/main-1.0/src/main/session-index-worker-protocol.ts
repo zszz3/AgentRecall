@@ -20,6 +20,7 @@ export type SessionIndexWorkerLoadOptions = Pick<
   | "includeCursorAgent"
   | "includeTrae"
   | "includeQoder"
+  | "includeQoderIde"
   | "includeDeepSeekCli"
 >;
 

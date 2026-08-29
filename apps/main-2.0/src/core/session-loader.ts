@@ -36,6 +36,7 @@ import {
   loadKimiSessionsIterator,
   loadQwenCodeSessionsIterator,
   loadQoderSessionsIterator,
+  loadQoderIdeSessionsIterator,
   loadTraeSessionsIterator,
   loadZcodeSessions,
 } from "./session-loaders/alternative-sources";
@@ -1900,6 +1901,7 @@ export function* loadDefaultSessionsIterator(options: SessionLoadOptions = {}): 
     for (const dirName of TRAE_DIR_NAMES) yield* loadTraeSessionsIterator(path.join(homeDir, dirName), options);
   }
   if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
+  if (options.includeQoderIde) yield* loadQoderIdeSessionsIterator(path.join(homeDir, QODER_DIR), options);
   if (options.includeDeepSeekCli) {
     const deepSeekDir = options.homeDir === undefined
       ? process.env.DSH_HOME?.trim() || path.join(homeDir, DEEPSEEK_HARNESS_DIR)
@@ -1953,6 +1955,7 @@ export async function* loadDefaultSessionsAsyncIterator(options: SessionLoadOpti
     for (const dirName of TRAE_DIR_NAMES) yield* loadTraeSessionsIterator(path.join(homeDir, dirName), options);
   }
   if (options.includeQoder) yield* loadQoderSessionsIterator(path.join(homeDir, QODER_DIR), options);
+  if (options.includeQoderIde) yield* loadQoderIdeSessionsIterator(path.join(homeDir, QODER_DIR), options);
   if (options.includeDeepSeekCli) {
     const deepSeekDir = options.homeDir === undefined
       ? process.env.DSH_HOME?.trim() || path.join(homeDir, DEEPSEEK_HARNESS_DIR)

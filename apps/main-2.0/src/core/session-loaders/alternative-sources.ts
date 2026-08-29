@@ -20,6 +20,7 @@ import type {
   LoadedSession,
   SessionFormat,
   SessionMessage,
+  SessionSource,
   SessionTraceEvent,
   SessionTraceKind,
   TokenUsage,
@@ -1013,19 +1014,37 @@ export function loadQoderSessions(qoderDir = path.join(os.homedir(), QODER_DIR))
   return [...loadQoderSessionsIterator(qoderDir)];
 }
 
+/**
+ * The new Qoder stores transcripts under `projects/<slug>/`, either directly or
+ * inside a `transcript/` subdirectory; both layouts are written concurrently,
+ * so walk the tree instead of hardcoding either shape.
+ */
 export function* loadQoderSessionsIterator(qoderDir = path.join(os.homedir(), QODER_DIR), options: SessionLoadOptions = {}): Generator<LoadedSession> {
-  // Installing the new Qoder migrates Qoder IDE's conversations from
-  // `cache/projects` into `projects`, keeping copies of the same sessions under
-  // different ids in both trees. Once the new layout exists, skip the legacy
-  // tree so migrated history is not indexed twice.
-  if (fs.existsSync(path.join(qoderDir, "projects"))) {
-    yield* loadQoderProjectsSessionsIterator(qoderDir, options);
-    return;
+  const projectsDir = path.join(qoderDir, "projects");
+  if (!fs.existsSync(projectsDir)) return;
+  const loaded: LoadedSession[] = [];
+  for (const filePath of walkJsonlFiles(projectsDir)) {
+    const stat = safeStat(filePath);
+    if (shouldSkipFile(options, filePath, stat)) continue;
+    const rows = readJsonl(filePath);
+    if (!isQoderProjectsTranscript(rows)) continue;
+    const session = loadClaudeCliSessionRows(filePath, rows, { source: "qoder", keyPrefix: "qoder", stat });
+    if (session?.messages.length) loaded.push(session);
   }
-  yield* loadQoderLegacySessionsIterator(qoderDir, options);
+  yield* dedupeQoderExecutionTranscripts(loaded);
 }
 
-function* loadQoderLegacySessionsIterator(qoderDir: string, options: SessionLoadOptions): Generator<LoadedSession> {
+export function loadQoderIdeSessions(qoderDir = path.join(os.homedir(), QODER_DIR)): LoadedSession[] {
+  return [...loadQoderIdeSessionsIterator(qoderDir)];
+}
+
+/**
+ * The legacy Qoder IDE stored conversations under
+ * `cache/projects/<slug>/conversation-history`. Installing the new Qoder copies
+ * them into `projects`; the two trees are indexed as separate sources, so
+ * conversations that were skipped or only partially migrated stay visible.
+ */
+export function* loadQoderIdeSessionsIterator(qoderDir = path.join(os.homedir(), QODER_DIR), options: SessionLoadOptions = {}): Generator<LoadedSession> {
   const projectsDir = path.join(qoderDir, "cache", "projects");
   if (!fs.existsSync(projectsDir)) return;
   for (const projectEntry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
@@ -1040,26 +1059,6 @@ function* loadQoderLegacySessionsIterator(qoderDir: string, options: SessionLoad
       if (loaded) yield loaded;
     }
   }
-}
-
-/**
- * The new Qoder stores transcripts under `projects/<slug>/`, either directly or
- * inside a `transcript/` subdirectory; both layouts are written concurrently,
- * so walk the tree instead of hardcoding either shape.
- */
-function* loadQoderProjectsSessionsIterator(qoderDir: string, options: SessionLoadOptions): Generator<LoadedSession> {
-  const projectsDir = path.join(qoderDir, "projects");
-  if (!fs.existsSync(projectsDir)) return;
-  const loaded: LoadedSession[] = [];
-  for (const filePath of walkJsonlFiles(projectsDir)) {
-    const stat = safeStat(filePath);
-    if (shouldSkipFile(options, filePath, stat)) continue;
-    const rows = readJsonl(filePath);
-    if (!isQoderProjectsTranscript(rows)) continue;
-    const session = loadClaudeCliSessionRows(filePath, rows, { source: "qoder", keyPrefix: "qoder", stat });
-    if (session?.messages.length) loaded.push(session);
-  }
-  yield* dedupeQoderExecutionTranscripts(loaded);
 }
 
 /**
@@ -1123,7 +1122,7 @@ function stripQoderWrapperTags(text: string): string {
 }
 
 function loadQoderConversationFile(filePath: string, slug: string, stat: VirtualSessionFileStat): LoadedSession | null {
-  return loadQoderSessionRows(filePath, readJsonl(filePath), { stat, slug });
+  return loadQoderSessionRows(filePath, readJsonl(filePath), { stat, slug, source: "qoder-ide" });
 }
 
 function extractQoderSlugFromPath(filePath: string): string {
@@ -1131,7 +1130,11 @@ function extractQoderSlugFromPath(filePath: string): string {
   return match?.[1] ?? path.basename(filePath);
 }
 
-export function loadQoderSessionRows(filePath: string, rows: unknown[], options: { stat: VirtualSessionFileStat; slug?: string }): LoadedSession | null {
+export function loadQoderSessionRows(
+  filePath: string,
+  rows: unknown[],
+  options: { stat: VirtualSessionFileStat; slug?: string; source?: SessionSource },
+): LoadedSession | null {
   const filteredRows = rows.filter(isRecord);
   if (filteredRows.length === 0) return null;
   const slug = options.slug ?? extractQoderSlugFromPath(filePath);
@@ -1147,12 +1150,13 @@ export function loadQoderSessionRows(filePath: string, rows: unknown[], options:
     messages.push(messageFromParts(role, content, "", messages.length));
   }
   if (messages.length === 0) return null;
+  const source = options.source ?? "qoder";
   const question = firstQuestion(messages);
   return {
     session: createIndexedSession({
-      keyPrefix: "qoder",
+      keyPrefix: source === "qoder-ide" ? "qoder-ide" : "qoder",
       rawId,
-      source: "qoder",
+      source,
       projectPath,
       filePath,
       originalTitle: cleanTitle(question) || rawId,

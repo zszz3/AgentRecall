@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { loadQoderSessions } from "./session-loader";
+import { loadQoderIdeSessions, loadQoderSessions } from "./session-loader";
 
 const temporaryRoots: string[] = [];
 
@@ -104,7 +104,7 @@ describe("Qoder session loading", () => {
     expect(loadQoderSessions(root)).toEqual([]);
   });
 
-  it("prefers the projects layout and skips the legacy tree once it exists", () => {
+  it("keeps legacy Qoder IDE sessions visible next to the new projects layout", () => {
     const root = temporaryRoot("prefer-projects");
     writeJsonl(path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-ide", "task-ide.jsonl"), [
       { role: "user", message: { content: [{ type: "text", text: "IDE question" }] } },
@@ -122,20 +122,27 @@ describe("Qoder session loading", () => {
       { kind: "summary", tokens: 42 },
     ]);
 
-    const loaded = loadQoderSessions(root);
+    const current = loadQoderSessions(root);
+    expect(current.map((entry) => entry.session.firstQuestion)).toEqual(["CLI question"]);
+    expect(current.map((entry) => entry.session.source)).toEqual(["qoder"]);
 
-    expect(loaded.map((entry) => entry.session.firstQuestion)).toEqual(["CLI question"]);
+    const legacy = loadQoderIdeSessions(root);
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0].session).toMatchObject({
+      source: "qoder-ide",
+      sessionKey: "qoder-ide:demo-app-1a2b3c4d/task-ide",
+      firstQuestion: "IDE question",
+    });
   });
 
-  it("falls back to the legacy conversation-history tree when the projects layout is absent", () => {
+  it("loads the legacy conversation-history tree when the projects layout is absent", () => {
     const root = temporaryRoot("legacy-only");
     writeJsonl(path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-ide", "task-ide.jsonl"), [
       { role: "user", message: { content: [{ type: "text", text: "IDE question" }] } },
     ]);
 
-    const loaded = loadQoderSessions(root);
-
-    expect(loaded.map((entry) => entry.session.firstQuestion)).toEqual(["IDE question"]);
+    expect(loadQoderSessions(root)).toEqual([]);
+    expect(loadQoderIdeSessions(root).map((entry) => entry.session.firstQuestion)).toEqual(["IDE question"]);
   });
 
   it("drops execution transcripts that duplicate a canonical session but keeps unique runs", () => {

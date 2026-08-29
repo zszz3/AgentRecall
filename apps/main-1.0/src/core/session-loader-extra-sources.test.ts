@@ -12,6 +12,7 @@ import {
   loadDefaultSessions,
   loadTraeSessions,
   loadQoderSessions,
+  loadQoderIdeSessions,
 } from "./session-loader";
 
 const require = createRequire(import.meta.url);
@@ -278,7 +279,7 @@ describe("extra session sources", () => {
     }
   });
 
-  it("loads Qoder conversation history JSONL as searchable sessions", () => {
+  it("loads legacy Qoder IDE conversation history as qoder-ide sessions", () => {
     const root = tmpDir("qoder");
     const filePath = path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-fe3", "task-fe3.jsonl");
     writeJsonl(filePath, [
@@ -286,13 +287,13 @@ describe("extra session sources", () => {
       { role: "assistant", message: { content: [{ type: "text", text: "I will check the auth module." }] } },
     ]);
 
-    const loaded = loadQoderSessions(root);
+    const loaded = loadQoderIdeSessions(root);
 
     expect(loaded).toHaveLength(1);
     expect(loaded[0].session).toMatchObject({
-      sessionKey: "qoder:demo-app-1a2b3c4d/task-fe3",
+      sessionKey: "qoder-ide:demo-app-1a2b3c4d/task-fe3",
       rawId: "demo-app-1a2b3c4d/task-fe3",
-      source: "qoder",
+      source: "qoder-ide",
       projectPath: "demo-app",
       firstQuestion: "Fix the login bug",
       originalTitle: "Fix the login bug",
@@ -313,7 +314,7 @@ describe("extra session sources", () => {
       { role: "user", message: { content: [{ type: "text", text: "First part" }, { type: "text", text: "Second part" }] } },
     ]);
 
-    const loaded = loadQoderSessions(root);
+    const loaded = loadQoderIdeSessions(root);
 
     expect(loaded).toHaveLength(1);
     expect(loaded[0].session.rawId).toBe("proj-aabbccdd/task-multi");
@@ -340,7 +341,7 @@ describe("extra session sources", () => {
       { role: "assistant", message: { content: [{ type: "text", text: "明白，开始执行。" }] } },
     ]);
 
-    const loaded = loadQoderSessions(root);
+    const loaded = loadQoderIdeSessions(root);
 
     expect(loaded).toHaveLength(1);
     expect(loaded[0].session.originalTitle).toBe("我的目标在：D:\\oss-contrib\\giki\\IMPROVEMENT-LOOP.md");
@@ -370,7 +371,7 @@ describe("extra session sources", () => {
       { role: "assistant", message: { content: [{ type: "text", text: "好的。" }] } },
     ]);
 
-    const loaded = loadQoderSessions(root);
+    const loaded = loadQoderIdeSessions(root);
 
     expect(loaded).toHaveLength(1);
     expect(loaded[0].session.originalTitle).toBe("直接帮我重构这个模块");
@@ -467,7 +468,7 @@ describe("extra session sources", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("prefers the projects layout and skips the legacy tree once it exists", () => {
+  it("keeps legacy Qoder IDE sessions visible next to the new projects layout", () => {
     const root = tmpDir("qoder-prefer-projects");
     writeJsonl(path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-ide", "task-ide.jsonl"), [
       { role: "user", message: { content: [{ type: "text", text: "IDE question" }] } },
@@ -485,22 +486,29 @@ describe("extra session sources", () => {
       { kind: "summary", tokens: 42 },
     ]);
 
-    const loaded = loadQoderSessions(root);
+    const current = loadQoderSessions(root);
+    expect(current.map((entry) => entry.session.firstQuestion)).toEqual(["CLI question"]);
+    expect(current.map((entry) => entry.session.source)).toEqual(["qoder"]);
 
-    expect(loaded.map((entry) => entry.session.firstQuestion)).toEqual(["CLI question"]);
+    const legacy = loadQoderIdeSessions(root);
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0].session).toMatchObject({
+      source: "qoder-ide",
+      sessionKey: "qoder-ide:demo-app-1a2b3c4d/task-ide",
+      firstQuestion: "IDE question",
+    });
 
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("falls back to the legacy conversation-history tree when the projects layout is absent", () => {
+  it("loads the legacy conversation-history tree when the projects layout is absent", () => {
     const root = tmpDir("qoder-legacy-only");
     writeJsonl(path.join(root, "cache", "projects", "demo-app-1a2b3c4d", "conversation-history", "task-ide", "task-ide.jsonl"), [
       { role: "user", message: { content: [{ type: "text", text: "IDE question" }] } },
     ]);
 
-    const loaded = loadQoderSessions(root);
-
-    expect(loaded.map((entry) => entry.session.firstQuestion)).toEqual(["IDE question"]);
+    expect(loadQoderSessions(root)).toEqual([]);
+    expect(loadQoderIdeSessions(root).map((entry) => entry.session.firstQuestion)).toEqual(["IDE question"]);
 
     fs.rmSync(root, { recursive: true, force: true });
   });

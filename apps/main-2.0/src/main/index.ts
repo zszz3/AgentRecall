@@ -1785,6 +1785,7 @@ function runIndexSync(): Promise<IndexStatus> {
         includeCursorAgent: settings.includeCursorAgent,
         includeTrae: settings.includeTrae,
         includeQoder: settings.includeQoder,
+        includeQoderIde: settings.includeQoderIde,
         includeDeepSeekCli: settings.includeDeepSeekCli,
       },
       indexFailureLogPath: indexFailureLogger.logPath,

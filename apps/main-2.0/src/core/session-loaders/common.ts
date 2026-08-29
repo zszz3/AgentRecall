@@ -32,6 +32,7 @@ export interface SessionLoadOptions {
   includeCursorAgent?: boolean;
   includeTrae?: boolean;
   includeQoder?: boolean;
+  includeQoderIde?: boolean;
   includePi?: boolean;
   includeKimiCli?: boolean;
   includeQwenCode?: boolean;
@@ -314,6 +315,7 @@ export function createIndexedSession(input: {
     | "cursor"
     | "trae"
     | "qoder"
+    | "qoder-ide"
     | "pi"
     | "kimi"
     | "qwen"
