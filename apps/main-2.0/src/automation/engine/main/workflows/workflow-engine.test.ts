@@ -245,6 +245,64 @@ describe("WorkflowEngine", () => {
     expect(seen).toEqual(["/workflow-project", "/global-project"]);
   });
 
+  test("approving one branch while a parallel branch is executing keeps both results", async () => {
+    const store = new MemoryStore();
+    const approval: WorkflowApprovalNode = {
+      id: "approval",
+      kind: "approval",
+      title: "Approval",
+      goal: "Choose.",
+      message: "Continue?",
+      options: [
+        { value: "yes", label: "Yes", description: "Continue." },
+        { value: "no", label: "No", description: "Stop." },
+      ],
+      allowComment: false,
+      inputs: [],
+      outputs: [output("decision")],
+      acceptanceCriteria: [],
+    };
+    const downstream = agent("downstream", ["approval"]);
+    downstream.inputs = [{ source: "node", nodeId: "approval", outputKey: "decision" }];
+    const parallel = agent("parallel");
+    let parallelAttempts = 0;
+    const runtime = engine(store, executor(async ({ node, signal }) => {
+      if (node.id === "parallel") {
+        parallelAttempts += 1;
+        if (parallelAttempts === 1) {
+          // First attempt belongs to the loop superseded by the approval: it
+          // only ends once that loop is aborted.
+          return new Promise<Record<string, unknown>>((_, reject) => {
+            signal.addEventListener("abort", () => reject(new Error("superseded")), { once: true });
+          });
+        }
+      }
+      return { value: node.id };
+    }));
+
+    const started = await runtime.start(definition([parallel, approval, downstream]), {});
+    // The parallel branch keeps the overall run "running"; wait for the approval
+    // node itself to reach waiting.
+    let waiting: WorkflowRun | undefined;
+    for (let attempt = 0; attempt < 100 && !waiting; attempt += 1) {
+      const candidate = await store.getRun(started.id);
+      if (candidate?.nodeRuns.approval?.status === "waiting") waiting = candidate;
+      else await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    if (!waiting) throw new Error("Approval node never reached waiting.");
+    expect(waiting.nodeRuns.parallel?.status).toBe("running");
+    expect(waiting.nodeRuns.approval?.status).toBe("waiting");
+
+    await runtime.resolveApproval(waiting.id, "approval", { decision: "yes" });
+
+    const completed = await waitForRun(store, started.id, "completed");
+    expect(completed.nodeRuns.approval?.status).toBe("completed");
+    expect(completed.nodeRuns.approval?.outputs).toEqual({ decision: "yes" });
+    expect(completed.nodeRuns.downstream?.status).toBe("completed");
+    expect(completed.nodeRuns.parallel?.status).toBe("completed");
+    expect(parallelAttempts).toBe(2);
+  });
+
   test("pauses an active node, records lifecycle events, and resumes it in the background", async () => {
     const store = new MemoryStore();
     let calls = 0;
