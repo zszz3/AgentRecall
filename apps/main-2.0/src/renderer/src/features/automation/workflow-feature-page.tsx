@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { Activity, ArrowLeft, Bot, Braces, CirclePause, Code2, Copy, File, FolderOpen, GitBranch, Hash, LayoutTemplate, List, Pause, Pencil, Play, Plus, RotateCcw, Save, Settings2, ShieldCheck, Square, ToggleLeft, Trash2, Type as TypeIcon, UserRound, X } from "lucide-react";
 import type {
   WorkflowDefinition,
@@ -398,13 +398,24 @@ export function WorkflowFeaturePage({
     }, 1200);
     return () => window.clearInterval(timer);
   }, [activeRun?.id, activeRun?.status, api, selectedId]);
+  // Auto-open the active node once per run. Re-asserting on every cleared
+  // selection would make the inspector bounce straight back when the user
+  // closes it (a finished run keeps its failed node, so it could never close).
+  const autoSelectedRunId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (mode !== "run" || selectedNodeId || !activeRun) return;
+    if (mode !== "run" || !activeRun) return;
+    if (autoSelectedRunId.current === activeRun.id) return;
+    if (selectedNodeId) {
+      autoSelectedRunId.current = activeRun.id;
+      return;
+    }
     const activeNode = activeRun.definition.nodes.find((node) => {
       const status = activeRun.nodeRuns[node.id]?.status;
       return status === "running" || status === "waiting" || status === "failed";
     });
-    if (activeNode) setSelectedNodeId(activeNode.id);
+    if (!activeNode) return;
+    autoSelectedRunId.current = activeRun.id;
+    setSelectedNodeId(activeNode.id);
   }, [activeRun, mode, selectedNodeId]);
 
   const issues = draft ? validateWorkflowDefinition(draft, new Set(agents.map((agent) => agent.id))) : [];
