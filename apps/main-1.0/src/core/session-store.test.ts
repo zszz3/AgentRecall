@@ -1856,7 +1856,7 @@ describe("SessionStore", () => {
       fileName: "context.jsonl",
       errorMessage: "Kimi Code session source files are read-only.",
     },
-  ])("rejects $label source deletion while record-only source pruning keeps the file", ({ sessionKey, source, fileName, errorMessage }) => {
+  ] as const)("rejects $label source deletion while record-only source pruning keeps the file", ({ sessionKey, source, fileName, errorMessage }) => {
     const store = createInMemoryStore();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), `session-search-delete-${source}-`));
     const filePath = path.join(dir, fileName);

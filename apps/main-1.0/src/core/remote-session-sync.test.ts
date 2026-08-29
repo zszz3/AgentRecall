@@ -279,7 +279,7 @@ describe("remote session sync model", () => {
       expectedSource: "codewiz-cli",
       expectedProjectPath: undefined,
     },
-  ])("builds remote upload payloads for $label sessions", ({ sessionOverrides, expectedAgent, expectedSource, expectedProjectPath }) => {
+  ] as const)("builds remote upload payloads for $label sessions", ({ sessionOverrides, expectedAgent, expectedSource, expectedProjectPath }) => {
     const session: SessionSearchResult = { ...SESSION, ...sessionOverrides };
     const portable = remotePortableSessionFrom(session, MESSAGES);
     const detail = buildRemoteSessionSnapshot(session, MESSAGES, [], 10_000);
