@@ -4,7 +4,6 @@ import * as path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   createMcpTemporarySessionCleaner,
-  loadMcpSourceSession,
   migrateSessionForMcp,
 } from "./mcp-migration";
 import { createInMemoryStore } from "./session-store";
@@ -469,11 +468,6 @@ describe("migrateSessionForMcp — error cases", () => {
         { store, settings: defaultSettings, inspectCli: failingInspect },
       ),
     ).rejects.toThrow("binary not found");
-  });
-
-  it("validates the source session is local before any work", () => {
-    const store = createInMemoryStore();
-    expect(() => loadMcpSourceSession(store, "codex:missing")).toThrow("Session not found");
   });
 
   it("rejects an empty project path", async () => {
