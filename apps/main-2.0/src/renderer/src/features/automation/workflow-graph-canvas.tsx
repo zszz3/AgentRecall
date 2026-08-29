@@ -127,10 +127,19 @@ export function WorkflowGraphCanvas({
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowGraphNode>(layoutNodes);
   const flow = useRef<ReactFlowInstance<WorkflowGraphNode, WorkflowGraphEdge> | undefined>(undefined);
   useEffect(() => setNodes(layoutNodes), [layoutNodes, setNodes]);
+  // Run polling rebuilds layoutNodes on every snapshot. Without this guard the
+  // viewport would be yanked back to the selected node each poll, even after
+  // the user panned away.
+  const lastCenteredNodeId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!selectedNodeId || !flow.current) return;
+    if (!selectedNodeId) {
+      lastCenteredNodeId.current = undefined;
+      return;
+    }
+    if (!flow.current || lastCenteredNodeId.current === selectedNodeId) return;
     const selected = layoutNodes.find((node) => node.id === selectedNodeId);
     if (!selected) return;
+    lastCenteredNodeId.current = selectedNodeId;
     void flow.current.setCenter(selected.position.x + 285, selected.position.y + 48, {
       zoom: Math.max(flow.current.getZoom(), 0.82),
       duration: 240,
