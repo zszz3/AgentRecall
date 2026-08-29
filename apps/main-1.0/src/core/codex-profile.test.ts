@@ -1295,28 +1295,25 @@ describe("loadActiveCodexSummaryEndpointDefaults", () => {
     await expect(readFile(borrowedMarker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("falls back to OPENAI_API_KEY for the official provider", async () => {
-    writeFileSync(path.join(codexHome, "config.toml"), 'model = "gpt-5.5"\n');
-    writeFileSync(
-      path.join(codexHome, "auth.json"),
-      JSON.stringify({ OPENAI_API_KEY: "sk-test-official" }),
-    );
-    await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
-      baseUrl: "",
-      model: "gpt-5.5",
+  it.each([
+    {
+      label: "official provider with config",
+      configContent: 'model = "gpt-5.5"\n',
       apiKey: "sk-test-official",
-      apiFormat: "openai_responses",
-    });
-  });
-
-  it("falls back to OPENAI_API_KEY when no model_provider is set", async () => {
-    writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
-    await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual({
-      baseUrl: "",
-      model: "",
+      expected: { baseUrl: "", model: "gpt-5.5", apiKey: "sk-test-official", apiFormat: "openai_responses" },
+    },
+    {
+      label: "no model_provider set",
+      configContent: null,
       apiKey: "sk-test",
-      apiFormat: "openai_responses",
-    });
+      expected: { baseUrl: "", model: "", apiKey: "sk-test", apiFormat: "openai_responses" },
+    },
+  ])("falls back to OPENAI_API_KEY for $label", async ({ configContent, apiKey, expected }) => {
+    if (configContent !== null) {
+      writeFileSync(path.join(codexHome, "config.toml"), configContent);
+    }
+    writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: apiKey }));
+    await expect(loadActiveCodexSummaryEndpointDefaults(codexHome)).resolves.toEqual(expected);
   });
 
   it("keeps custom provider endpoint resolution unchanged", async () => {
