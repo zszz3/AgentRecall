@@ -118,6 +118,7 @@ export function ProviderPage({
   const claudeConfigHydrationRef = useRef("");
   const codexConnectionTestIdRef = useRef(0);
   const claudeConnectionTestIdRef = useRef(0);
+  const summaryConnectionTestIdRef = useRef(0);
   const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
   const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
   const codexConnectionSignature = JSON.stringify(draftApiConfig);
@@ -457,6 +458,27 @@ export function ProviderPage({
   const summaryInheritsCodex = draftSummaryApiConfigMode === "inherit_codex";
   const effectiveSummaryApiConfig = summaryInheritsCodex ? draftApiConfig : draftSummaryApiConfig;
   const summaryClaudeRoute = summaryClaudeConfig?.route ?? {};
+  // Everything the connection-test request reads, so editing any of it while a test is in
+  // flight marks that test's result stale (same guard pattern as the Codex/Claude tabs).
+  const summaryConnectionSignature = JSON.stringify([
+    activeSummarySource,
+    effectiveSummaryApiConfig,
+    summaryClaudeRoute.customBaseUrl,
+    summaryClaudeRoute.customProviderId,
+    summaryClaudeRoute.customModel,
+    summaryClaudeRoute.customApiFormat,
+    summaryClaudeRoute.customApiKeyField,
+    draftSummaryClaudeModel,
+    draftSummaryClaudeConfigDir,
+    summaryCodexConfig?.activeProvider?.baseUrl,
+    summaryCodexConfig?.activeProviderId,
+    summaryCodexConfig?.activeModel,
+    summaryCodexConfig?.activeProvider?.wireApi,
+    draftSummaryCodexModel,
+    draftSummaryCodexConfigDir,
+  ]);
+  const summaryConnectionSignatureRef = useRef(summaryConnectionSignature);
+  summaryConnectionSignatureRef.current = summaryConnectionSignature;
 
   const refreshSummaryConfig = async () => {
     setSummaryConfigError("");
@@ -552,6 +574,8 @@ export function ProviderPage({
   };
 
   const testSummaryConnection = async () => {
+    const testId = ++summaryConnectionTestIdRef.current;
+    const testedSignature = summaryConnectionSignature;
     setSummaryConnectionStatus({ kind: "running", message: l("Testing connection...", "正在测试连接...") });
     try {
       const config = effectiveSummaryApiConfig;
@@ -587,6 +611,10 @@ export function ProviderPage({
               inherit: summaryInheritsCodex,
             };
       const result = await window.sessionSearch.testSummaryProviderConnection(request);
+      if (
+        testId !== summaryConnectionTestIdRef.current
+        || testedSignature !== summaryConnectionSignatureRef.current
+      ) return;
       setSummaryConnectionStatus({
         kind: "success",
         message: l(
@@ -595,6 +623,10 @@ export function ProviderPage({
         ),
       });
     } catch (error) {
+      if (
+        testId !== summaryConnectionTestIdRef.current
+        || testedSignature !== summaryConnectionSignatureRef.current
+      ) return;
       setSummaryConnectionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
   };
@@ -924,6 +956,11 @@ export function ProviderPage({
     claudeConnectionTestIdRef.current += 1;
     setClaudeConnectionStatus(null);
   }, [claudeConnectionSignature]);
+
+  useEffect(() => {
+    summaryConnectionTestIdRef.current += 1;
+    setSummaryConnectionStatus(null);
+  }, [summaryConnectionSignature]);
 
   useEffect(() => {
     // Re-read whenever the directory changes, otherwise the pane keeps showing the config
