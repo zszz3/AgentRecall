@@ -237,7 +237,9 @@ export function Sidebar(props: SidebarProps): ReactElement {
             const selectedProject = group.projects.find((project) =>
               project.path === projectPath && project.environmentId === projectEnvironmentId);
             if (selectedProject && !visibleProjects.includes(selectedProject)) visibleProjects.push(selectedProject);
-            const hiddenProjectCount = Math.max(0, group.projects.length - visibleProjectCount);
+            // Subtract the projects actually rendered (which includes a selected project pulled
+            // in from beyond the page), not just the page size, so "Show more" never overcounts.
+            const hiddenProjectCount = Math.max(0, group.projects.length - visibleProjects.length);
             const nextProjectCount = Math.min(SIDEBAR_PROJECT_PAGE_SIZE, hiddenProjectCount);
             return (
               <div key={groupId} className="tree-group">
