@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   ConfiguredAgent,
   EvaluationDataset,
@@ -187,7 +188,7 @@ export class EvaluationService {
 
     const execution = this.trackExecution(controller, async () => {
       const input = await this.prepareExperimentRun(experimentId);
-      const runId = `eval-run-${Date.now()}`;
+      const runId = `eval-run-${Date.now()}-${randomUUID()}`;
       this.activeRuns.set(runId, controller);
       try {
         await this.dependencies.store.saveRun({

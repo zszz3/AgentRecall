@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   EvaluationCaseResult,
   EvaluationDataset,
@@ -37,7 +38,7 @@ export async function runEvaluation(input: {
   ) => Promise<ExecutionResult>;
 }): Promise<EvaluationRun> {
   const startedAt = Date.now();
-  const runId = input.runId ?? `eval-run-${startedAt}`;
+  const runId = input.runId ?? `eval-run-${startedAt}-${randomUUID()}`;
   const results: EvaluationCaseResult[] = [];
   const repetitions = Math.max(1, Math.min(5, input.experiment.repetitions));
   const snapshot = (status: EvaluationRun["status"]): EvaluationRun => {
