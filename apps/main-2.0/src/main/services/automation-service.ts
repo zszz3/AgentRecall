@@ -304,13 +304,14 @@ export class NativeAutomationService {
       execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
     });
     const workflowRepository = new PostgresWorkflowCoreRepository(options.database);
-    const approvedScripts = new Set<string>();
+    const approvedScriptNodes = new Map<string, Set<string>>();
     this.workflowCore = dependencies.workflowCore ?? new WorkflowCoreService({
       repository: workflowRepository,
       engine: new WorkflowEngine({
         store: workflowRepository,
         createId: () => `workflow_run_${randomUUID()}`,
         defaultWorkDir: () => this.hubInstance.getWorkDir(),
+        onRunSettled: (runId) => approvedScriptNodes.delete(runId),
         executors: createWorkflowNodeExecutors({
           agentInvoker: {
             invoke: async ({ agentId, prompt, outputs, workDir, onEvent, signal }) => {
@@ -327,11 +328,14 @@ export class NativeAutomationService {
           scriptRunner: new WorkflowScriptProcessRunner(() => this.hubInstance.getWorkDir()),
           scriptAuthorizer: {
             authorize: async ({ runId, node, permissions }) => {
-              const key = `${runId}:${node.id}`;
-              if (approvedScripts.has(key)) return true;
+              if (approvedScriptNodes.get(runId)?.has(node.id)) return true;
               if (!options.confirmWorkflowScriptPermissions) return false;
               const approved = await options.confirmWorkflowScriptPermissions({ nodeTitle: node.title, permissions });
-              if (approved) approvedScripts.add(key);
+              if (approved) {
+                const nodes = approvedScriptNodes.get(runId) ?? new Set<string>();
+                nodes.add(node.id);
+                approvedScriptNodes.set(runId, nodes);
+              }
               return approved;
             },
           },

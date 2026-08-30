@@ -39,6 +39,9 @@ export interface WorkflowEngineOptions {
   createId: () => string;
   defaultWorkDir?: () => string;
   now?: () => number;
+  // Fired once a run reaches a terminal status (completed/failed/cancelled),
+  // so callers can drop per-run caches; pause/resume does not fire it.
+  onRunSettled?: (runId: string) => void;
 }
 
 function cloneRun(run: WorkflowRun): WorkflowRun {
@@ -55,6 +58,7 @@ export class WorkflowEngine {
   private readonly createId: () => string;
   private readonly defaultWorkDir: () => string;
   private readonly now: () => number;
+  private readonly onRunSettled?: (runId: string) => void;
   private readonly controllers = new Map<string, AbortController>();
   private readonly driveEpochs = new Map<string, number>();
 
@@ -64,6 +68,7 @@ export class WorkflowEngine {
     this.createId = options.createId;
     this.defaultWorkDir = options.defaultWorkDir ?? (() => process.cwd());
     this.now = options.now ?? Date.now;
+    this.onRunSettled = options.onRunSettled;
   }
 
   private workDir(definition: WorkflowDefinition): string {
@@ -187,6 +192,7 @@ export class WorkflowEngine {
     run.finishedAt = this.now();
     this.record(run, "run_cancelled");
     await this.store.saveRun(run);
+    this.onRunSettled?.(runId);
     return cloneRun(run);
   }
 
@@ -232,6 +238,7 @@ export class WorkflowEngine {
       current.finishedAt = this.now();
       this.record(current, "run_failed", { errorCode: failure.code });
       await this.store.saveRun(current);
+      this.onRunSettled?.(current.id);
     } finally {
       if (this.driveEpochs.get(run.id) === epoch) this.driveEpochs.delete(run.id);
     }
@@ -415,6 +422,7 @@ export class WorkflowEngine {
       if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
         run.finishedAt = this.now();
         this.record(run, run.status === "completed" ? "run_completed" : run.status === "failed" ? "run_failed" : "run_cancelled");
+        this.onRunSettled?.(run.id);
       }
       await this.store.saveRun(run);
       return cloneRun(run);
