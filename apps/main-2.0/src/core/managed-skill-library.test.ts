@@ -122,6 +122,16 @@ function replaceRealpathSync(replacement: typeof fs.realpathSync): () => void {
 }
 
 describe("AgentRecall bundled Skills", () => {
+  it("keeps every managed built-in definition backed by canonical assets", () => {
+    for (const definition of AGENT_RECALL_BUILTIN_SKILLS) {
+      const bundledSkillRoot = new URL(`../../assets/bundled-skills/${definition.id}/`, import.meta.url);
+      expect(
+        fs.existsSync(fileURLToPath(new URL("SKILL.md", bundledSkillRoot))),
+        `${definition.id} must have a canonical SKILL.md asset`,
+      ).toBe(true);
+    }
+  });
+
   it("ships aihot as an official built-in Skill", () => {
     expect(AGENT_RECALL_BUILTIN_SKILLS).toContainEqual({
       id: "aihot",
