@@ -1,5 +1,15 @@
+import { randomUUID } from "node:crypto";
 import type { AgentExecutionContext, AgentExecutor } from "../../hub/runtime/executor/agent-executor";
-import type { AgentId, AgentRuntime, RuntimeContinuationPolicy, RuntimeConversation, RuntimeExecutionMode } from "../../../shared/types";
+import type {
+  AgentEvent,
+  AgentId,
+  AgentRuntime,
+  RuntimeContinuationPolicy,
+  RuntimeConversation,
+  RuntimeExecutionMode,
+  RuntimeExecutionReference,
+  RuntimeInvocationRequest,
+} from "../../../shared/types";
 import {
   RuntimeDriverRegistry,
 } from "./runtime-driver";
@@ -14,6 +24,12 @@ import type {
 } from "./runtime-driver";
 import type { RuntimeCapabilities } from "./runtime-capabilities";
 import type { RuntimeStateCodec } from "./runtime-state-codec";
+import {
+  NOOP_RUNTIME_INVOCATION_RECORDER,
+  type RuntimeInvocationRecorder,
+  type RuntimeInvocationStatus,
+  type RuntimeSessionRelation,
+} from "./runtime-invocation-recorder";
 
 type RuntimeRequestLike = {
   runtimeId: AgentId;
@@ -23,7 +39,12 @@ type RuntimeRequestLike = {
 };
 
 export class RuntimeRouter {
-  constructor(private readonly registry: RuntimeDriverRegistry) {}
+  constructor(
+    private readonly registry: RuntimeDriverRegistry,
+    private readonly invocationRecorder: RuntimeInvocationRecorder = NOOP_RUNTIME_INVOCATION_RECORDER,
+    private readonly now: () => number = () => Date.now(),
+    private readonly createInvocationId: () => string = () => randomUUID(),
+  ) {}
 
   capabilitiesFor(runtime: AgentRuntime): RuntimeCapabilities {
     return this.registry.driverFor(runtime.id).getCapabilities(runtime);
@@ -41,7 +62,44 @@ export class RuntimeRouter {
     if (!driver.createOneShotExecutor) {
       throw new Error(`${context.runtimeId} runtime does not provide one-shot execution for ${surface}.`);
     }
-    return driver.createOneShotExecutor(input);
+    let lifecycle: RuntimeInvocationLifecycle | undefined;
+    let cancelling = false;
+    const emit = input.emit;
+    const onExit = input.onExit;
+    const wrappedInput: AgentExecutionContext = {
+      ...input,
+      emit: (event) => {
+        if (lifecycle) this.observeAgentEvent(lifecycle, event, cancelling);
+        emit(event);
+      },
+      onExit: (code) => {
+        if (lifecycle && !lifecycle.isFinished()) {
+          void lifecycle.finish(code && code !== 0 ? "failed" : "completed");
+        }
+        onExit(code);
+      },
+    };
+    const executor = driver.createOneShotExecutor(wrappedInput);
+    return {
+      start: async () => {
+        lifecycle = this.createLifecycle(input, input.channelId);
+        await lifecycle.begin(input.runtimeConversation);
+        try {
+          await executor.start();
+        } catch (error) {
+          await lifecycle.finish(this.statusForError(error), error);
+          throw error;
+        }
+      },
+      stop: async () => {
+        cancelling = true;
+        try {
+          await executor.stop();
+        } finally {
+          await lifecycle?.finish("cancelled");
+        }
+      },
+    };
   }
 
   createInteractiveSession(context: InteractiveSessionContext): InteractiveSession {
@@ -49,7 +107,68 @@ export class RuntimeRouter {
     if (!driver.createInteractiveSession) {
       throw new Error(`${context.runtimeId} runtime does not provide interactive chat sessions.`);
     }
-    return driver.createInteractiveSession(input);
+    let currentInput = input;
+    let lifecycle: RuntimeInvocationLifecycle | undefined;
+    let cancelling = false;
+    const wrap = (next: InteractiveSessionContext): InteractiveSessionContext => ({
+      ...next,
+      emit: (event) => {
+        if (lifecycle) this.observeAgentEvent(lifecycle, event, cancelling);
+        next.emit(event);
+      },
+    });
+    const session = driver.createInteractiveSession(wrap(input));
+    const ensureInvocation = async (): Promise<RuntimeInvocationLifecycle> => {
+      if (lifecycle && !lifecycle.isFinished()) return lifecycle;
+      cancelling = false;
+      lifecycle = this.createLifecycle(currentInput, currentInput.channelId);
+      await lifecycle.begin(currentInput.runtimeConversation);
+      return lifecycle;
+    };
+    return {
+      reconfigure: (next) => {
+        currentInput = next;
+        session.reconfigure(wrap(next));
+      },
+      ensureAttached: async () => {
+        const active = await ensureInvocation();
+        try {
+          await session.ensureAttached();
+        } catch (error) {
+          await active.finish(this.statusForError(error), error);
+          throw error;
+        }
+      },
+      sendPrompt: async (prompt) => {
+        const active = await ensureInvocation();
+        try {
+          await session.sendPrompt(prompt);
+          await active.finish("completed");
+        } catch (error) {
+          await active.finish(this.statusForError(error), error);
+          throw error;
+        }
+      },
+      interrupt: async () => {
+        cancelling = true;
+        try {
+          await session.interrupt();
+        } finally {
+          await lifecycle?.finish("cancelled");
+        }
+      },
+      detach: async (reason) => {
+        try {
+          await session.detach(reason);
+        } finally {
+          if (lifecycle && !lifecycle.isFinished()) {
+            await lifecycle.finish(reason === "error" ? "failed" : "cancelled");
+          }
+        }
+      },
+      detachIfStillExpired: (detachInput) => session.detachIfStillExpired(detachInput),
+      snapshot: () => session.snapshot(),
+    };
   }
 
   async askWorkflow(input: RuntimeWorkflowRequestContext) {
@@ -57,7 +176,31 @@ export class RuntimeRouter {
     if (!driver.askWorkflow) {
       throw new Error(`${input.runtimeId} runtime does not provide workflow execution.`);
     }
-    return driver.askWorkflow(normalizedInput);
+    const lifecycle = this.createLifecycle(normalizedInput, normalizedInput.channelId);
+    await lifecycle.begin(normalizedInput.runtimeConversation);
+    const reportExecutionReference = normalizedInput.reportExecutionReference;
+    try {
+      const response = await driver.askWorkflow({
+        ...normalizedInput,
+        reportExecutionReference: (reference) => {
+          lifecycle.bindReference(reference);
+          reportExecutionReference?.(reference);
+        },
+        onEvent: (event) => {
+          if (event.type === "completed" && event.runtimeConversation) {
+            lifecycle.bindConversation(event.runtimeConversation);
+          }
+          normalizedInput.onEvent?.(event);
+        },
+      });
+      if (response.runtimeConversation) lifecycle.bindConversation(response.runtimeConversation);
+      if (response.executionReference) lifecycle.bindReference(response.executionReference);
+      await lifecycle.finish("completed");
+      return response;
+    } catch (error) {
+      await lifecycle.finish(this.statusForError(error, normalizedInput.signal), error);
+      throw error;
+    }
   }
 
   async testChannel(runtimeId: AgentId, input: RuntimeChannelTestContext): Promise<string> {
@@ -65,7 +208,24 @@ export class RuntimeRouter {
     if (!driver.testChannel) {
       throw new Error(`${runtimeId} runtime testing is not configured.`);
     }
-    return driver.testChannel(input);
+    const lifecycle = this.createLifecycle({
+      runtimeId,
+      continuationPolicy: "fresh",
+      invocation: {
+        surface: "system",
+        role: "channel_test",
+        ownerReference: { channelId: input.channelId },
+      },
+    }, input.channelId);
+    await lifecycle.begin();
+    try {
+      const result = await driver.testChannel(input);
+      await lifecycle.finish("completed");
+      return result;
+    } catch (error) {
+      await lifecycle.finish(this.statusForError(error), error);
+      throw error;
+    }
   }
 
   async deleteSessionArtifacts(runtimeId: AgentId, input: RuntimeSessionCleanupContext): Promise<void> {
@@ -182,5 +342,133 @@ export class RuntimeRouter {
     if (conversation.runtimeId !== runtimeId) {
       throw new Error(`${runtimeId} cannot use runtimeConversation owned by ${conversation.runtimeId}.`);
     }
+  }
+
+  private createLifecycle(
+    input: {
+      runtimeId: AgentId;
+      continuationPolicy: RuntimeContinuationPolicy;
+      runtimeConversation?: RuntimeConversation;
+      invocation: RuntimeInvocationRequest;
+    },
+    channelId?: string,
+  ): RuntimeInvocationLifecycle {
+    return new RuntimeInvocationLifecycle({
+      recorder: this.invocationRecorder,
+      invocationId: this.createInvocationId(),
+      invocation: input.invocation,
+      runtimeId: input.runtimeId,
+      channelId,
+      relation: input.runtimeConversation ? "continued" : "created",
+      now: this.now,
+      sessionIdFromConversation: (conversation) => this.sessionIdFromConversation(conversation),
+    });
+  }
+
+  private observeAgentEvent(
+    lifecycle: RuntimeInvocationLifecycle,
+    event: AgentEvent,
+    cancelling: boolean,
+  ): void {
+    if (event.type === "runtime_conversation") lifecycle.bindConversation(event.runtimeConversation);
+    else if (event.type === "completed") void lifecycle.finish("completed");
+    else if (event.type === "error") {
+      void lifecycle.finish(cancelling ? "cancelled" : this.statusForError(event.error), event.error);
+    }
+  }
+
+  private sessionIdFromConversation(conversation: RuntimeConversation): string | undefined {
+    const payload = conversation.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+    const native = (payload as Record<string, unknown>).native;
+    if (!native || typeof native !== "object" || Array.isArray(native)) return undefined;
+    const record = native as Record<string, unknown>;
+    const value = conversation.runtimeId === "codex" ? record.threadId : record.sessionId;
+    return typeof value === "string" && value ? value : undefined;
+  }
+
+  private statusForError(error: unknown, signal?: AbortSignal): Exclude<RuntimeInvocationStatus, "pending" | "completed"> {
+    const name = error instanceof Error ? error.name : "";
+    const message = error instanceof Error ? error.message : String(error);
+    if (name === "TimeoutError" || /timed out|timeout/iu.test(message)) return "timed_out";
+    if (signal?.aborted || name === "AbortError" || /interrupt|cancel/iu.test(message)) return "cancelled";
+    return "failed";
+  }
+}
+
+class RuntimeInvocationLifecycle {
+  private writeQueue: Promise<void> = Promise.resolve();
+  private finished = false;
+
+  constructor(private readonly options: {
+    recorder: RuntimeInvocationRecorder;
+    invocationId: string;
+    invocation: RuntimeInvocationRequest;
+    runtimeId: AgentId;
+    channelId?: string;
+    relation: RuntimeSessionRelation;
+    now: () => number;
+    sessionIdFromConversation: (conversation: RuntimeConversation) => string | undefined;
+  }) {}
+
+  async begin(conversation?: RuntimeConversation): Promise<void> {
+    await this.options.recorder.begin({
+      id: this.options.invocationId,
+      initiator: "agentrecall",
+      invocation: this.options.invocation,
+      runtimeId: this.options.runtimeId,
+      ...(this.options.channelId ? { channelId: this.options.channelId } : {}),
+      environmentId: "local",
+      startedAt: this.options.now(),
+    });
+    if (conversation) {
+      const sessionId = this.options.sessionIdFromConversation(conversation);
+      if (sessionId) await this.bindReference({ sessionId });
+    }
+  }
+
+  bindConversation(conversation: RuntimeConversation): void {
+    const sessionId = this.options.sessionIdFromConversation(conversation);
+    if (sessionId) void this.bindReference({ sessionId });
+  }
+
+  async bindReference(reference: RuntimeExecutionReference): Promise<void> {
+    if (!reference.sessionId) return;
+    const binding = {
+      runtimeId: this.options.runtimeId,
+      ...(this.options.channelId ? { channelId: this.options.channelId } : {}),
+      environmentId: "local",
+      sessionId: reference.sessionId,
+      ...(reference.turnId ? { turnId: reference.turnId } : {}),
+      relation: this.options.relation,
+      boundAt: this.options.now(),
+    } as const;
+    this.writeQueue = this.writeQueue.then(() =>
+      this.options.recorder.bind(this.options.invocationId, binding));
+    await this.writeQueue;
+  }
+
+  isFinished(): boolean {
+    return this.finished;
+  }
+
+  async finish(
+    status: Exclude<RuntimeInvocationStatus, "pending">,
+    error?: unknown,
+  ): Promise<void> {
+    if (this.finished) return this.writeQueue;
+    this.finished = true;
+    const message = error === undefined
+      ? undefined
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    this.writeQueue = this.writeQueue.then(() => this.options.recorder.finish(
+      this.options.invocationId,
+      status,
+      this.options.now(),
+      message,
+    ));
+    await this.writeQueue;
   }
 }

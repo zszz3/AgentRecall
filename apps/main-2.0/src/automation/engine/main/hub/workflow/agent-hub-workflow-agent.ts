@@ -84,6 +84,7 @@ export function buildWorkflowAgentExecution<TResolved extends {
   continuationPolicy: WorkflowAgentRequest["continuationPolicy"];
   runtimeConfig: WorkflowAgentRequest["runtimeConfig"];
   runtimeConversation?: RuntimeConversation;
+  invocation: WorkflowAgentRequest["invocation"];
   agentRecallMcp?: WorkflowAgentRequest["agentRecallMcp"];
   prompt: string;
   runtime: NonNullable<TResolved["runtime"]>;
@@ -127,6 +128,7 @@ export function buildWorkflowAgentExecution<TResolved extends {
     continuationPolicy: input.request.continuationPolicy,
     runtimeConfig: input.request.runtimeConfig,
     ...(runtimeConversation ? { runtimeConversation } : {}),
+    invocation: structuredClone(input.request.invocation),
     prompt,
     runtime: resolved.runtime,
     channelId: resolved.channel.id,

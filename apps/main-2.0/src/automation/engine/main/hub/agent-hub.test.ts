@@ -528,6 +528,7 @@ test("workflow and generic Agent execution use the correct instruction scope", a
   })]);
 
   const response = await hub.askWorkflowAgent({
+    invocation: { surface: "workflow" },
     prompt: "Plan the repo",
     configuredAgentId: "hermes-agent",
     runtimeId: "hermes",
@@ -546,6 +547,7 @@ test("workflow and generic Agent execution use the correct instruction scope", a
   }));
 
   await hub.askConfiguredAgent({
+    invocation: { surface: "evaluation" },
     prompt: "Evaluate the answer",
     configuredAgentId: "hermes-agent",
     runtimeId: "hermes",
@@ -3428,6 +3430,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       : agent));
 
     await hub.askWorkflowAgent({
+      invocation: { surface: "workflow" },
       requestId: "bound-mcp-codex",
       prompt: "Use the bound server.",
       configuredAgentId: TEST_CODEX_AGENT_ID,
@@ -3558,6 +3561,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     (hub as any).runtimes.set("claude", { id: "claude", label: "Claude", command: "claude", version: "test", available: true });
 
     await hub.askWorkflowAgent({
+      invocation: { surface: "workflow" },
       requestId: "bound-mcp-claude",
       prompt: "Use the bound server.",
       configuredAgentId: "claude-agent",

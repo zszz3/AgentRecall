@@ -74,6 +74,8 @@ export async function runClaudeWorkflow(
         }
         if (event.type === "runtime_conversation") {
           runtimeConversation = cloneClaudeRuntimeConversation(event.runtimeConversation);
+          const sessionId = claudeSessionIdFromConversation(runtimeConversation);
+          if (sessionId) input.reportExecutionReference?.({ sessionId });
           return;
         }
         if (event.type === "tool_call" || event.type === "tool_result") {

@@ -1416,3 +1416,37 @@
     padding-left: 10px;
   }
 }
+.runtime-invocation-history {
+  margin: 0 20px 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.runtime-invocation-history-title,
+.runtime-invocation-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.runtime-invocation-history-title {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.runtime-invocation-history-list {
+  display: grid;
+  gap: 6px;
+}
+
+.runtime-invocation-history-item {
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.runtime-invocation-history-item button {
+  margin-left: auto;
+}

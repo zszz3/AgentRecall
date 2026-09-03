@@ -2,6 +2,7 @@ import { cleanTitle } from "../format-adapters";
 import type {
   EnvironmentKind,
   SessionSearchResult,
+  RuntimeInvocationSummary,
   SessionSource,
   SessionTurnMatch,
   SessionTurnStatus,
@@ -57,6 +58,8 @@ export interface SessionRow extends Record<string, unknown> {
   best_turn_started_at?: Date | string | null;
   best_turn_search_text?: string | null;
   turn_match_count?: number | string | null;
+  created_by_agent_recall: boolean;
+  runtime_invocations: unknown;
 }
 
 export interface SessionTurnSummaryRow extends Record<string, unknown> {
@@ -154,6 +157,35 @@ export const SESSION_ACTIVITY_SQL = `
   )
 `;
 
+export const RUNTIME_SESSION_BINDING_MATCH_SQL = `
+  bindings.environment_id = sessions.environment_id
+  and bindings.runtime_session_id = sessions.raw_id
+  and (
+    (bindings.runtime_id = 'codex' and sessions.source in (
+      'codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli'
+    ))
+    or (bindings.runtime_id = 'claude' and sessions.source in (
+      'claude-cli', 'claude-app', 'stepcode-claude', 'tclaude-cli'
+    ))
+    or (bindings.runtime_id = 'dsh' and sessions.source = 'deepseek-cli')
+    or (bindings.runtime_id = 'hermes' and sessions.source = 'hermes')
+    or (bindings.runtime_id = 'opencode' and sessions.source = 'opencode-cli')
+    or (bindings.runtime_id = 'openclaw' and sessions.source = 'openclaw')
+  )
+`;
+
+export const AGENTRECALL_CREATED_SESSION_SQL = `
+  exists (
+    select 1
+    from agent_recall.runtime_session_bindings bindings
+    join agent_recall.runtime_invocations invocations
+      on invocations.id = bindings.invocation_id
+    where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+      and bindings.relation = 'created'
+      and invocations.initiator = 'agentrecall'
+  )
+`;
+
 export const SESSION_SELECT_SQL = `
   sessions.*,
   coalesce(
@@ -189,6 +221,36 @@ export const SESSION_SELECT_SQL = `
     ),
     array[]::text[]
   ) as tag_names
+  ,${AGENTRECALL_CREATED_SESSION_SQL} as created_by_agent_recall
+  ,coalesce(
+    (
+      select jsonb_agg(
+        jsonb_build_object(
+          'invocationId', invocations.id,
+          'surface', invocations.surface,
+          'role', invocations.role,
+          'ownerReference', invocations.owner_reference,
+          'runtimeId', bindings.runtime_id,
+          'channelId', nullif(bindings.channel_id, ''),
+          'environmentId', bindings.environment_id,
+          'status', invocations.status,
+          'startedAt', extract(epoch from invocations.started_at) * 1000,
+          'finishedAt', case when invocations.finished_at is null then null
+            else extract(epoch from invocations.finished_at) * 1000 end,
+          'error', invocations.error,
+          'relation', bindings.relation,
+          'runtimeSessionId', bindings.runtime_session_id,
+          'runtimeTurnId', bindings.runtime_turn_id
+        ) order by invocations.started_at desc, invocations.id desc
+      )
+      from agent_recall.runtime_session_bindings bindings
+      join agent_recall.runtime_invocations invocations
+        on invocations.id = bindings.invocation_id
+      where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+        and invocations.initiator = 'agentrecall'
+    ),
+    '[]'::jsonb
+  ) as runtime_invocations
 `;
 
 export function numberValue(value: unknown): number {
@@ -465,7 +527,56 @@ export function hydrateSession(
     parentSessionId: row.parent_session_id,
     bestTurn,
     turnMatchCount: numberValue(row.turn_match_count),
+    createdByAgentRecall: Boolean(row.created_by_agent_recall),
+    runtimeInvocations: runtimeInvocationSummaries(row.runtime_invocations),
   };
   if (queryTerms.length > 0 && !bestTurn) result.metadataMatch = metadataMatch(result, queryTerms);
   return result;
+}
+
+function runtimeInvocationSummaries(value: unknown): RuntimeInvocationSummary[] {
+  let entries: unknown = value;
+  if (typeof entries === "string") {
+    try {
+      entries = JSON.parse(entries);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry): RuntimeInvocationSummary[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.invocationId !== "string"
+      || typeof record.surface !== "string"
+      || typeof record.runtimeId !== "string"
+      || typeof record.environmentId !== "string"
+      || typeof record.runtimeSessionId !== "string"
+      || (record.relation !== "created" && record.relation !== "continued")
+      || !["pending", "completed", "failed", "cancelled", "timed_out"].includes(String(record.status))
+    ) return [];
+    const ownerReference = jsonValue(record.ownerReference);
+    return [{
+      invocationId: record.invocationId,
+      surface: record.surface,
+      role: typeof record.role === "string" ? record.role : null,
+      ownerReference: Object.fromEntries(
+        Object.entries(ownerReference).flatMap(([key, nested]) =>
+          typeof nested === "string" ? [[key, nested]] : []),
+      ),
+      runtimeId: record.runtimeId,
+      channelId: typeof record.channelId === "string" ? record.channelId : null,
+      environmentId: record.environmentId,
+      status: record.status as RuntimeInvocationSummary["status"],
+      startedAt: numberValue(record.startedAt),
+      finishedAt: record.finishedAt === null || record.finishedAt === undefined
+        ? null
+        : numberValue(record.finishedAt),
+      error: typeof record.error === "string" ? record.error : null,
+      relation: record.relation,
+      runtimeSessionId: record.runtimeSessionId,
+      runtimeTurnId: typeof record.runtimeTurnId === "string" ? record.runtimeTurnId : null,
+    }];
+  });
 }

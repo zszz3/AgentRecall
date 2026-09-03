@@ -53,6 +53,7 @@ import {
 import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths";
 import { EvaluationService, type EvaluationServiceDependencies } from "./evaluation-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
+import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
 import { TeamChatService } from "../team-chat/team-chat-service";
 import { PostgresTeamChatStore } from "../team-chat/postgres-team-chat-store";
 import { McpAutomationModule } from "./mcp-automation-module";
@@ -307,7 +308,14 @@ export class NativeAutomationService {
     dependencies: AutomationServiceDependencies = {},
   ) {
     this.paths = resolveAutomationPaths(options.userDataPath);
-    this.hubInstance = dependencies.hub ?? new AgentHub();
+    this.hubInstance = dependencies.hub ?? new AgentHub(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new PostgresRuntimeInvocationRepository(options.database),
+    );
     this.appStore = new PostgresAppStore(options.database, this.paths.fileStoragePath);
     this.registryInstance = dependencies.registry ?? new McpRegistryStore(options.database);
     this.loadWorkflows = dependencies.loadBundledWorkflows ?? loadBundledWorkflows;
@@ -351,6 +359,11 @@ export class NativeAutomationService {
                   ].join("\n"),
                   workDir,
                   workflowExecution: { workflowId, runId, nodeId, executionId },
+                  invocation: {
+                    surface: "workflow",
+                    role: "node",
+                    ownerReference: { workflowId, runId, nodeId, executionId },
+                  },
                 }, onEvent, signal);
                 const submitted = this.workflowCoreOutputs.finish(executionId);
                 return submitted ?? parseWorkflowAgentOutputs(response.output);
@@ -386,6 +399,11 @@ export class NativeAutomationService {
           {
             configuredAgentId: input.configuredAgentId,
             prompt: input.prompt,
+            invocation: {
+              surface: "evaluation",
+              role: input.role,
+              ownerReference: input.ownerReference,
+            },
             ...(input.developerInstructions
               ? { developerInstructions: input.developerInstructions }
               : {}),
@@ -419,7 +437,14 @@ export class NativeAutomationService {
     this.teamChat = dependencies.teamChats ?? new TeamChatService({
       storeFactory: () => new PostgresTeamChatStore(options.database),
       configuredAgents: () => this.hubInstance.snapshot().configuredAgents,
-      executeAgent: (input, onEvent, signal) => this.configuredAgentExecutor.runConversation(input, onEvent, signal),
+      executeAgent: (input, onEvent, signal) => this.configuredAgentExecutor.runConversation({
+        ...input,
+        invocation: {
+          surface: "team_chat",
+          role: "member",
+          ownerReference: input.ownerReference,
+        },
+      }, onEvent, signal),
     });
     this.runtime = this.hubInstance;
     this.workflows = this.hubInstance;
@@ -773,6 +798,11 @@ export class NativeAutomationService {
     const result = await this.configuredAgentExecutor.runOneShot({
       configuredAgentId: agent.id,
       prompt,
+      invocation: {
+        surface: "skill",
+        role: "discovery",
+        ownerReference: { channelId: channel.id },
+      },
     });
     return result.output;
   }

@@ -71,6 +71,7 @@ interface TeamChatServiceDependencies {
       runtimeConversation?: RuntimeConversation;
       developerInstructions?: string;
       agentRecallMcp?: AgentRecallMcpContext;
+      ownerReference: Record<string, string>;
     },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
@@ -1067,6 +1068,13 @@ export class TeamChatService {
               ...(currentSession ? { runtimeConversation: currentSession.runtimeConversation } : {}),
               developerInstructions: buildStudioDeveloperInstructions(input.room, target),
               agentRecallMcp: { studioToken },
+              ownerReference: {
+                roomId: input.room.id,
+                messageId: input.sourceMessage.id,
+                dispatchId,
+                attemptId,
+                ...(dispatch.taskId ? { taskId: dispatch.taskId } : {}),
+              },
             },
             (event) => {
               if (eventSequence < MAX_ATTEMPT_EVENTS) {

@@ -66,6 +66,7 @@ function workflowInput(
       instructionScope: "agent",
       onEvent: (event) => events.push(event),
       ...overrides,
+      invocation: overrides.invocation ?? { surface: "workflow" },
     },
     events,
   };

@@ -124,6 +124,7 @@ export async function runDshChannelTest(
       executionMode: "oneshot",
       continuationPolicy: "fresh",
       runtimeConfig: { model: input.modelId },
+      invocation: { surface: "system", role: "channel_test", ownerReference: { channelId: input.channelId } },
       runtime: input.runtime as AgentRuntime,
       channelId: input.channelId,
       workDir: input.workDir,

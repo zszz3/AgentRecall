@@ -5,6 +5,7 @@ import { formatMessageTime } from "../../../../core/format-session";
 import { traceCompactionSummary, traceDetailText, traceDurationLabel, tracePresentation } from "../../../../core/trace-presentation";
 import type {
   SessionMessage,
+  RuntimeInvocationSummary,
   SessionSearchResult,
   SessionTraceEvent,
   SessionTurnDetail,
@@ -127,6 +128,50 @@ function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all
     : localize(language, "No Assistant messages in the loaded conversation.", "当前已加载内容中没有助手消息。");
 }
 
+function invocationSurfaceLabel(surface: string, language: LanguageMode): string {
+  const labels: Record<string, [string, string]> = {
+    workflow: ["Workflow", "工作流"],
+    evaluation: ["Evaluation", "评测"],
+    team_chat: ["Team Chat", "团队会话"],
+    agent: ["Agent", "智能体"],
+    skill: ["Skill", "技能"],
+    system: ["System", "系统"],
+  };
+  const label = labels[surface];
+  return label ? localize(language, label[0], label[1]) : surface;
+}
+
+function invocationRoleLabel(role: string | null, language: LanguageMode): string | null {
+  if (!role) return null;
+  const labels: Record<string, [string, string]> = {
+    recovery_manager: ["Recovery manager", "恢复管理"],
+    reviewer: ["Reviewer", "审核"],
+    node: ["Node", "节点"],
+    draft: ["Draft", "草稿生成"],
+    chat: ["Chat", "对话"],
+    task: ["Task", "任务"],
+    subject: ["Subject", "受测对象"],
+    judge: ["Judge", "裁判"],
+    member: ["Member", "成员"],
+    discovery: ["Discovery", "探索"],
+    channel_test: ["Connection test", "连接测试"],
+  };
+  const label = labels[role];
+  return label ? localize(language, label[0], label[1]) : role;
+}
+
+function invocationStatusLabel(status: RuntimeInvocationSummary["status"], language: LanguageMode): string {
+  const labels: Record<RuntimeInvocationSummary["status"], [string, string]> = {
+    pending: ["Running", "进行中"],
+    completed: ["Completed", "已完成"],
+    failed: ["Failed", "失败"],
+    cancelled: ["Cancelled", "已取消"],
+    timed_out: ["Timed out", "已超时"],
+  };
+  const label = labels[status];
+  return localize(language, label[0], label[1]);
+}
+
 export function DetailPanel({
   session,
   turns,
@@ -176,6 +221,7 @@ export function DetailPanel({
   onOpenFamilySession,
   sessionFamilyLoadFailed = false,
   onRetrySessionFamily,
+  onOpenInvocationOwner,
 }: {
   session: SessionSearchResult;
   turns: SessionTurnSummary[] | null;
@@ -225,6 +271,7 @@ export function DetailPanel({
   onOpenFamilySession?: (sessionKey: string) => void;
   sessionFamilyLoadFailed?: boolean;
   onRetrySessionFamily?: () => void;
+  onOpenInvocationOwner?: (invocation: RuntimeInvocationSummary) => void;
 }): ReactElement {
   const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
@@ -530,6 +577,37 @@ export function DetailPanel({
             </button>
           </div>
         </div>
+        {(session.runtimeInvocations?.length ?? 0) > 0 ? (
+          <section className="runtime-invocation-history" aria-label={l("AgentRecall invocation history", "AgentRecall 调用记录")}>
+            <div className="runtime-invocation-history-title">
+              <strong>{session.createdByAgentRecall
+                ? l("Created by AgentRecall", "由 AgentRecall 创建")
+                : l("Continued by AgentRecall", "曾由 AgentRecall 续接")}</strong>
+              <span>{l(
+                `${session.runtimeInvocations?.length ?? 0} invocations`,
+                `${session.runtimeInvocations?.length ?? 0} 次调用`,
+              )}</span>
+            </div>
+            <div className="runtime-invocation-history-list">
+              {session.runtimeInvocations?.map((invocation) => (
+                <div className="runtime-invocation-history-item" key={invocation.invocationId}>
+                  <span>{invocationSurfaceLabel(invocation.surface, language)}
+                    {invocationRoleLabel(invocation.role, language)
+                      ? ` · ${invocationRoleLabel(invocation.role, language)}`
+                      : ""}</span>
+                  <span>{invocationStatusLabel(invocation.status, language)} · {new Date(invocation.startedAt).toLocaleString(
+                    language === "zh" ? "zh-CN" : "en-US",
+                  )}</span>
+                  {onOpenInvocationOwner && Object.keys(invocation.ownerReference).length > 0 ? (
+                    <button type="button" onClick={() => onOpenInvocationOwner(invocation)}>
+                      {l("Back to source", "返回调用来源")}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {!readOnly ? <div className="detail-actions">
           <div className="detail-action-group">
             {canResume ? (

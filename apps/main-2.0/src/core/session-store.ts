@@ -608,6 +608,13 @@ export class SessionStore {
     return this.sessions.findByRawId(rawId);
   }
 
+  async findByRuntimeInvocationOwner(
+    ownerReference: Record<string, string>,
+  ): Promise<SessionSearchResult | null> {
+    await this.ready;
+    return this.sessions.findByRuntimeInvocationOwner(ownerReference);
+  }
+
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {
     await this.ready;
     return this.sessions.setAiSummary(sessionKey, summary, model);

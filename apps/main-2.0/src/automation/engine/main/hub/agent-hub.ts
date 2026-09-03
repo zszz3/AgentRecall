@@ -101,6 +101,7 @@ import { InteractiveSessionManager } from "../agents/runtime/interactive-session
 import type { CodexRpcClient } from "../agents/codex/codex-rpc";
 import type { RuntimeCapabilities } from "../agents/runtime/runtime-capabilities";
 import type { InteractiveSessionContext, InteractiveSessionSnapshot, RuntimeDriverRegistry, RuntimeSurface } from "../agents/runtime/runtime-driver";
+import type { RuntimeInvocationRecorder } from "../agents/runtime/runtime-invocation-recorder";
 import { RuntimeRouter } from "../agents/runtime/runtime-router";
 import { createRuntimeDriverRegistry, RuntimeAgentExecutorFactory, type AgentExecutorFactory } from "./runtime/executor/agent-executor";
 import { queryProviderBalance, type ProviderBalanceQueryOptions } from "../channels/provider-balance";
@@ -424,6 +425,7 @@ export class AgentHub {
     runtimeDrivers?: RuntimeDriverRegistry,
     modelCatalogDiscoverer: ModelCatalogDiscoverer = discoverChannelModels,
     private readonly workflowMessageProvider?: WorkflowMessageProvider,
+    runtimeInvocationRecorder?: RuntimeInvocationRecorder,
   ) {
     this.executables = resolveRuntimeExecutables(executables);
     this.modelCatalogDiscoverer = modelCatalogDiscoverer;
@@ -437,7 +439,7 @@ export class AgentHub {
         mcpServersForAgent: (configuredAgentId, allowedMcpTools) => this.boundMcpServersForAgent(configuredAgentId, allowedMcpTools),
         requestApproval: this.runtimeApprovals.request,
       });
-    this.runtimeRouter = new RuntimeRouter(this.runtimeDrivers);
+    this.runtimeRouter = new RuntimeRouter(this.runtimeDrivers, runtimeInvocationRecorder);
     this.workflowStore = new WorkflowStore({
       normalizeDraft: (draft) => this.cloneWorkflowDraft(draft),
       now: () => Date.now(),
@@ -590,6 +592,11 @@ export class AgentHub {
         const executionMode = this.selectExecutionMode(resolved.runtimeAgentId, "workflow", "oneshot");
         const response = await this.askWorkflowAgent({
           workflowRunId: runId,
+          invocation: {
+            surface: "workflow",
+            role: "recovery_manager",
+            ownerReference: { workflowId, runId },
+          },
           prompt: [
             "You are the read-only Manager Agent for transaction recovery.",
             "Use only the supplied evidence. Do not call tools, modify files, send messages, execute compensation, or change transaction state.",
@@ -1483,7 +1490,7 @@ export class AgentHub {
     try {
       await this.workflowGenerationReviewCoordinator.run({
         workflow,
-        askReviewer: (prompt, onEvent, signal) => this.askWorkflowAgent({ planningWorkflowId: workflow.workflowId, workflowReviewRevision: workflow.revision, prompt, configuredAgentId: workflow.reviewerConfiguredAgentId, runtimeId: reviewer.runtimeAgentId, executionMode, continuationPolicy: this.defaultContinuationPolicy(reviewer.runtimeAgentId, "workflow", executionMode), runtimeConfig: { model: reviewer.modelId, ...(reviewer.reasoningEffort ? { reasoningEffort: reviewer.reasoningEffort } : {}) }, workDir: workflow.workDir || this.workDir }, onEvent, signal),
+        askReviewer: (prompt, onEvent, signal) => this.askWorkflowAgent({ planningWorkflowId: workflow.workflowId, workflowReviewRevision: workflow.revision, invocation: { surface: "workflow", role: "reviewer", ownerReference: { workflowId: workflow.workflowId, revision: String(workflow.revision) } }, prompt, configuredAgentId: workflow.reviewerConfiguredAgentId, runtimeId: reviewer.runtimeAgentId, executionMode, continuationPolicy: this.defaultContinuationPolicy(reviewer.runtimeAgentId, "workflow", executionMode), runtimeConfig: { model: reviewer.modelId, ...(reviewer.reasoningEffort ? { reasoningEffort: reviewer.reasoningEffort } : {}) }, workDir: workflow.workDir || this.workDir }, onEvent, signal),
         publish: (next) => { this.workflowStore.workflows.set(next.workflowId, next); this.emitWorkflow(); },
         current: () => this.workflowStore.workflows.get(workflow.workflowId),
         flush: () => this.flushPersistence(),
@@ -2356,6 +2363,16 @@ export class AgentHub {
       workflowRunId: input.runId,
       workflowNodeId: input.nodeId,
       workflowNodeExecutionId: completionExecutionId,
+      invocation: {
+        surface: "workflow",
+        role: "node",
+        ownerReference: {
+          workflowId: input.workflowId,
+          runId: input.runId,
+          nodeId: input.nodeId,
+          executionId: completionExecutionId,
+        },
+      },
       developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, resolved.agent.instructions, input.developerInstructions, input.contextDocument ? `# Runtime context\n${input.contextDocument}` : undefined].filter(Boolean).join("\n\n"),
       emit: (event) => {
         if (event.type === "runtime_conversation") latestRuntimeConversation = this.runtimeRouter.cloneConversation(event.runtimeConversation);
@@ -2480,6 +2497,11 @@ export class AgentHub {
         channelId: resolved.channel.id,
         workDir: input.workDir,
         planningWorkflowId: input.workflowId,
+        invocation: {
+          surface: "workflow",
+          role: "draft",
+          ownerReference: { workflowId: input.workflowId, requestId: input.requestId },
+        },
         developerInstructions: [WORKFLOW_DEVELOPER_INSTRUCTIONS, resolved.agent.instructions]
           .filter(Boolean)
           .join("\n\n"),

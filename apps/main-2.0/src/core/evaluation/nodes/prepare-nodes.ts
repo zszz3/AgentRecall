@@ -140,6 +140,12 @@ export function createRunAgentNode(
           {
             agentId: context.config.agentId,
             prompt: task.input,
+            role: "subject",
+            ownerReference: {
+              caseId: task.caseId,
+              datasetItemId: task.datasetItemId,
+              repetition: String(task.repetition),
+            },
             ...(instructions.text ? { developerInstructions: instructions.text } : {}),
           },
           context.signal,

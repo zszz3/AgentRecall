@@ -57,6 +57,7 @@ function buildTaskContext(overrides: Partial<AgentExecutionContext> = {}): Agent
     emit: () => undefined,
     onExit: () => undefined,
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "agent", role: "task" },
   };
 }
 
@@ -76,6 +77,7 @@ function buildInteractiveContext(
     developerInstructions: "",
     emit: () => undefined,
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "agent", role: "chat" },
   };
 }
 
@@ -93,6 +95,7 @@ function buildWorkflowContext(
     channelId: "api-default",
     workDir: "C:/repo",
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "workflow" },
   };
 }
 
@@ -125,7 +128,10 @@ describe("runtime onboarding contract", () => {
     } as const;
 
     expect(registry.driverFor("api").surfaceSupport).toEqual(declaredSupport);
-    expect(router.createOneShotExecutor(buildTaskContext())).toBe(executor);
+    expect(router.createOneShotExecutor(buildTaskContext())).toEqual({
+      start: expect.any(Function),
+      stop: expect.any(Function),
+    });
     await expect(router.askWorkflow(buildWorkflowContext())).resolves.toEqual({ content: "workflow ok" });
 
     expect(() =>

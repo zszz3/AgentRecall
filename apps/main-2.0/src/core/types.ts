@@ -365,6 +365,7 @@ export interface LoadedSession {
 }
 
 export type SessionSourceFilter = SessionSource | "claude" | "codex" | "stepcode" | "all";
+export type SessionOriginFilter = "ordinary" | "agentrecall" | "all";
 
 export interface SearchOptions {
   query?: string;
@@ -382,6 +383,7 @@ export interface SearchOptions {
   offset?: number;
   excludeSubagents?: boolean;
   prioritizeFavorites?: boolean;
+  origin?: SessionOriginFilter;
 }
 
 export interface ProjectQueryOptions {
@@ -440,6 +442,25 @@ export interface SessionSearchResult extends IndexedSession {
   metadataMatch?: "title" | "project" | "summary" | null;
   bestTurn?: SessionTurnMatch | null;
   turnMatchCount?: number;
+  createdByAgentRecall?: boolean;
+  runtimeInvocations?: RuntimeInvocationSummary[];
+}
+
+export interface RuntimeInvocationSummary {
+  invocationId: string;
+  surface: string;
+  role: string | null;
+  ownerReference: Record<string, string>;
+  runtimeId: string;
+  channelId: string | null;
+  environmentId: string;
+  status: "pending" | "completed" | "failed" | "cancelled" | "timed_out";
+  startedAt: number;
+  finishedAt: number | null;
+  error: string | null;
+  relation: "created" | "continued";
+  runtimeSessionId: string;
+  runtimeTurnId: string | null;
 }
 
 export interface SessionMatchHit {
@@ -465,6 +486,11 @@ export interface SessionSearchPage {
   sessions: SessionSearchResult[];
   totalCount: number;
   hasMore: boolean;
+  originCounts: {
+    ordinary: number;
+    agentRecall: number;
+    all: number;
+  };
 }
 
 export interface SessionStatsSummary extends TokenUsage {

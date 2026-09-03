@@ -10,6 +10,7 @@ import type { PostgresDatabase } from "./database";
 import {
   SESSION_ACTIVITY_SQL,
   SESSION_SELECT_SQL,
+  AGENTRECALL_CREATED_SESSION_SQL,
   escapeLike,
   hydrateSession,
   isoValue,
@@ -141,6 +142,10 @@ export class PostgresSessionSearchRepository {
       filters.push(`(best_turn.id is not null or (${metadataPredicates.join(" and ")}))`);
     }
 
+    const originCountFilters = [...filters];
+    const originCountValues = [...values];
+    if (options.origin === "ordinary") filters.push(`not (${AGENTRECALL_CREATED_SESSION_SQL})`);
+    else if (options.origin === "agentrecall") filters.push(AGENTRECALL_CREATED_SESSION_SQL);
     const countValues = [...values];
     const sortBy = options.sortBy ?? "smart";
     let rankingColumns = "";
@@ -238,7 +243,7 @@ export class PostgresSessionSearchRepository {
         null::text as best_turn_search_text,
         null::bigint as turn_match_count,
       `;
-    const filteredSessionsSql = `
+    const buildFilteredSessionsSql = (activeFilters: readonly string[]): string => `
       from (
         select
           base_sessions.*,
@@ -284,8 +289,10 @@ export class PostgresSessionSearchRepository {
       join agent_recall.environments environments on environments.id = sessions.environment_id
       ${bestTurnJoin}
       where sessions.source_rank = 1
-        and ${filters.join(" and ")}
+        and ${activeFilters.join(" and ")}
     `;
+    const filteredSessionsSql = buildFilteredSessionsSql(filters);
+    const originFilteredSessionsSql = buildFilteredSessionsSql(originCountFilters);
     const result = await this.database.query<SessionRow>(
       `
         select
@@ -308,10 +315,29 @@ export class PostgresSessionSearchRepository {
           `select count(*) as total_count ${filteredSessionsSql}`,
           countValues,
         )).rows[0]?.total_count);
+    const originCountRow = (await this.database.query<{
+      ordinary_count: number | string;
+      agentrecall_count: number | string;
+      all_count: number | string;
+    }>(
+      `
+        select
+          count(*) filter (where not (${AGENTRECALL_CREATED_SESSION_SQL})) as ordinary_count,
+          count(*) filter (where ${AGENTRECALL_CREATED_SESSION_SQL}) as agentrecall_count,
+          count(*) as all_count
+        ${originFilteredSessionsSql}
+      `,
+      originCountValues,
+    )).rows[0];
     return {
       sessions,
       totalCount,
       hasMore: offset + sessions.length < totalCount,
+      originCounts: {
+        ordinary: numberValue(originCountRow?.ordinary_count),
+        agentRecall: numberValue(originCountRow?.agentrecall_count),
+        all: numberValue(originCountRow?.all_count),
+      },
     };
   }
 

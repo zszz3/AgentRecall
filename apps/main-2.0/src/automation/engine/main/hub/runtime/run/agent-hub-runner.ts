@@ -74,6 +74,9 @@ export async function runAgentExecution(input: {
       ? input.defaultContinuationPolicy(input.resolved.runtimeAgentId, "chat", executionMode)
       : input.run.continuationPolicy;
   const runtimeConversation = input.cloneConversationForPolicy(continuationPolicy, input.run.runtimeConversation);
+  const workflowOwned = input.run.kind === "task" && Boolean(
+    input.run.planningWorkflowId || input.run.workflowRunId,
+  );
   const executor = input.executorFactory.create({
     runId: input.run.id,
     runKind: input.run.kind,
@@ -84,6 +87,22 @@ export async function runAgentExecution(input: {
     runtimeConfig: {
       model: input.resolved.modelId,
       ...(input.resolved.reasoningEffort ? { reasoningEffort: input.resolved.reasoningEffort } : {}),
+    },
+    invocation: {
+      surface: workflowOwned ? "workflow" : "agent",
+      role: input.run.kind,
+      ownerReference: {
+        ...(input.run.kind === "chat" ? { chatId: input.run.id } : { taskId: input.run.id }),
+        ...(input.run.kind === "task" && input.run.planningWorkflowId
+          ? { workflowId: input.run.planningWorkflowId }
+          : {}),
+        ...(input.run.kind === "task" && input.run.workflowRunId
+          ? { runId: input.run.workflowRunId }
+          : {}),
+        ...(input.run.kind === "task" && input.run.workflowNodeId
+          ? { nodeId: input.run.workflowNodeId }
+          : {}),
+      },
     },
     ...(runtimeConversation ? { runtimeConversation } : {}),
     ...(input.run.kind === "task" && input.run.planningWorkflowId ? { planningWorkflowId: input.run.planningWorkflowId } : {}),

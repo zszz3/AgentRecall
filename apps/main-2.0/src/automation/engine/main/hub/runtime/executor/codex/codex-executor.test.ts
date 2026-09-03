@@ -37,6 +37,7 @@ function context(overrides: Partial<AgentExecutionContext> = {}): AgentExecution
     emit: () => undefined,
     onExit: () => undefined,
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "agent", role: "task" },
   };
 }
 

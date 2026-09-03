@@ -33,6 +33,8 @@ export type EvaluationExecutionRequest = {
   configuredAgentId: string;
   prompt: string;
   developerInstructions?: string;
+  role: string;
+  ownerReference: Record<string, string>;
 };
 
 export interface EvaluationExecutionResult {
@@ -64,6 +66,8 @@ export interface RunEvaluationInput {
   executeJudge?: (
     runtimeId: string,
     prompt: string,
+    role: string,
+    ownerReference: Record<string, string>,
     signal?: AbortSignal,
   ) => Promise<{ output: string; durationMs: number }>;
   /** Reads the SKILL.md bytes and hash of the skill this experiment injects. */
@@ -113,6 +117,8 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
         {
           configuredAgentId: request.agentId,
           prompt: request.prompt,
+          role: request.role,
+          ownerReference: { runId, ...request.ownerReference },
           ...(request.developerInstructions
             ? { developerInstructions: request.developerInstructions }
             : {}),
@@ -122,7 +128,10 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     ...(input.executeJudge
       ? {
           executeJudge: (request, signal) =>
-            input.executeJudge!(request.runtimeId, request.prompt, signal),
+            input.executeJudge!(request.runtimeId, request.prompt, request.role, {
+              runId,
+              ...request.ownerReference,
+            }, signal),
         }
       : {}),
     ...(input.readSkill ? { readSkill: input.readSkill } : {}),

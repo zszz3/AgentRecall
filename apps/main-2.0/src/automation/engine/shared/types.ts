@@ -346,6 +346,20 @@ export type ExecutionStyle = "oneshot" | "interactive";
 export type RuntimeExecutionMode = ExecutionStyle;
 export type RuntimeContinuationPolicy = "fresh" | "resume-preferred" | "resume-required";
 
+export type AgentRecallInvocationSurface =
+  | "workflow"
+  | "evaluation"
+  | "team_chat"
+  | "agent"
+  | "skill"
+  | "system";
+
+export interface RuntimeInvocationRequest {
+  surface: AgentRecallInvocationSurface;
+  role?: string;
+  ownerReference?: Record<string, string>;
+}
+
 export interface RuntimeConfig {
   model: string;
   reasoningEffort?: string;
@@ -369,6 +383,7 @@ export interface RuntimeRequest {
   agentRecallMcp?: AgentRecallMcpContext;
   workflowNodeExecutionId?: string;
   allowedMcpTools?: string[];
+  invocation: RuntimeInvocationRequest;
 }
 
 export interface RuntimeResumeCapabilities {

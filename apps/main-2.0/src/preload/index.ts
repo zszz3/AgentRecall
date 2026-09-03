@@ -62,6 +62,9 @@ const api = {
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   findSessionByRawId: (rawId: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:find-by-raw-id", rawId),
+  findSessionByRuntimeInvocationOwner: (
+    ownerReference: Record<string, string>,
+  ): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:find-by-runtime-owner", ownerReference),
   getSessionContextComponents: (sessionKey: string): Promise<SessionContextComponents> =>
     ipcRenderer.invoke("session:context-components", sessionKey),
   getMessages: (sessionKey: string, offset?: number, limit?: number): Promise<SessionMessage[]> =>

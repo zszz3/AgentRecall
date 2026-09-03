@@ -423,6 +423,7 @@ type ExecuteInput = {
   runtimeConversation?: RuntimeConversation;
   developerInstructions?: string;
   agentRecallMcp?: { studioToken?: string };
+  ownerReference: Record<string, string>;
 };
 
 async function createFixture(options: {
@@ -979,6 +980,12 @@ describe("TeamChatService studio employees", () => {
     }
 
     expect(calls[0]?.runtimeConversation).toBeUndefined();
+    expect(calls[0]?.ownerReference).toMatchObject({
+      roomId: fixture.room.id,
+      messageId: expect.any(String),
+      dispatchId: expect.any(String),
+      attemptId: expect.any(String),
+    });
     expect(calls[1]?.runtimeConversation).toBeUndefined();
     expect(calls[2]?.runtimeConversation).toEqual(conversation("one-thread-1"));
     expect(calls[3]?.runtimeConversation).toEqual(conversation("two-thread-2"));

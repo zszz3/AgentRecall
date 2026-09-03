@@ -25,6 +25,8 @@ export function registerSessionCatalogIpc(
   ipc.handle("search:session-page", (_event, options: SearchOptions) => service.searchPage(options));
   ipc.handle("session:get", (_event, sessionKey: string) => service.get(sessionKey));
   ipc.handle("session:find-by-raw-id", (_event, rawId: string) => service.findByRawId(rawId));
+  ipc.handle("session:find-by-runtime-owner", (_event, ownerReference: unknown) =>
+    service.findByRuntimeInvocationOwner(runtimeInvocationOwnerReference(ownerReference)));
   ipc.handle("session:turns", (_event, sessionKey: string) => service.listTurns(sessionKey));
   ipc.handle("session:turn", (_event, sessionKey: string, turnId: string) =>
     service.getTurn(sessionKey, turnId));
@@ -69,4 +71,20 @@ export function registerSessionCatalogIpc(
     service.bulkDeleteSessions(request));
   ipc.handle("index:refresh", () => service.refreshIndex());
   ipc.handle("index:status", () => service.getIndexStatus());
+}
+
+function runtimeInvocationOwnerReference(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Runtime invocation owner reference must be an object.");
+  }
+  const entries = Object.entries(value);
+  if (entries.length === 0 || entries.length > 32) {
+    throw new Error("Runtime invocation owner reference must contain between 1 and 32 fields.");
+  }
+  for (const [key, nested] of entries) {
+    if (!key || key.length > 80 || typeof nested !== "string" || !nested || nested.length > 1_000) {
+      throw new Error("Runtime invocation owner reference contains an invalid field.");
+    }
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }

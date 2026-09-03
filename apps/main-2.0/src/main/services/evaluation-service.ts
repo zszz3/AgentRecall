@@ -34,6 +34,8 @@ export type EvaluationAgentExecution = (
     prompt: string;
     /** Injected with the task; carries the selected skill's instructions. */
     developerInstructions?: string;
+    role: string;
+    ownerReference: Record<string, string>;
   },
   signal?: AbortSignal,
 ) => Promise<{
@@ -369,11 +371,7 @@ export class EvaluationService {
     readArtifactFiles?: EvaluationServiceDependencies["readArtifactFiles"];
     runJudgeScript?: EvaluationServiceDependencies["runJudgeScript"];
     execute: EvaluationAgentExecution;
-    executeJudge: (
-      runtimeId: string,
-      prompt: string,
-      signal?: AbortSignal,
-    ) => Promise<{ output: string; durationMs: number }>;
+    executeJudge: NonNullable<RunEvaluationInput["executeJudge"]>;
   }> {
     const experiment = (await this.dependencies.store.listExperiments()).find(
       (item) => item.id === experimentId,
@@ -442,14 +440,19 @@ export class EvaluationService {
         ? { runJudgeScript: this.dependencies.runJudgeScript }
         : {}),
       execute: this.dependencies.executeAgent,
-      executeJudge: (runtimeId, prompt, signal) => {
+      executeJudge: (runtimeId, prompt, role, ownerReference, signal) => {
         const judge = judgesByRuntime.get(runtimeId);
         if (!judge) {
           throw new Error(
             `Runtime channel ${runtimeId} does not have an execution Agent for LLM Judge.`,
           );
         }
-        return this.dependencies.executeAgent({ configuredAgentId: judge.id, prompt }, signal);
+        return this.dependencies.executeAgent({
+          configuredAgentId: judge.id,
+          prompt,
+          role,
+          ownerReference,
+        }, signal);
       },
     };
   }

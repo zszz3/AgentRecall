@@ -187,6 +187,7 @@ export async function runCodexWorkflow(
           ...(threadId ? { sessionId: threadId } : {}),
           ...(turnId ? { turnId } : {}),
         };
+        input.reportExecutionReference?.(executionReference);
       } catch (error) {
         settle(() => reject(error instanceof Error ? error : new Error(String(error))));
       }

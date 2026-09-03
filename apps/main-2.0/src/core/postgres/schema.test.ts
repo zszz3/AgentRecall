@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PostgresDatabase } from "./database";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
+import { PostgresSessionRepository } from "./session-repository";
 
 describe("AgentRecall PostgreSQL schema", () => {
   it("uses one stable record per migration version", () => {
@@ -33,6 +34,8 @@ describe("AgentRecall PostgreSQL schema", () => {
       "session_attachments",
       "saved_searches",
       "search_history",
+      "runtime_invocations",
+      "runtime_session_bindings",
       "trace_spans",
       "token_events",
       "skill_usage_events",
@@ -68,7 +71,7 @@ describe("AgentRecall PostgreSQL schema", () => {
       "openviking_operation_events",
       "openviking_recall_traces",
     ]));
-    expect(names).toHaveLength(65);
+    expect(names).toHaveLength(67);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;
@@ -1019,6 +1022,79 @@ describe("AgentRecall PostgreSQL schema", () => {
        order by dimension
     `);
     expect(dimensions.rows.map((row) => row.dimension)).toEqual(["judge", "正确性"]);
+    await upgradedDatabase.close();
+  });
+
+  it("backfills only durable historical evaluation Session links", async () => {
+    const pool = new PGliteTestPool();
+    const legacyDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 46),
+    });
+    await legacyDatabase.initialize();
+    const sessions = new PostgresSessionRepository(legacyDatabase);
+    await sessions.upsertIndexedSession({
+      sessionKey: "codex:historical-runtime",
+      rawId: "historical-runtime",
+      source: "codex-cli",
+      projectPath: "/workspace",
+      filePath: "/fixtures/historical-runtime.jsonl",
+      originalTitle: "Historical evaluation",
+      firstQuestion: "Evaluate this",
+      timestamp: Date.parse("2026-08-01T00:00:00.000Z"),
+      fileMtimeMs: Date.parse("2026-08-01T00:00:00.000Z"),
+      fileSize: 1,
+      prUrl: null,
+      prNumber: null,
+    }, []);
+    await legacyDatabase.query(`
+      insert into agent_recall.evaluation_datasets (
+        id, name, description, created_at, updated_at
+      ) values ('dataset-history', 'history', '', now(), now());
+      insert into agent_recall.evaluation_experiments (
+        id, name, dataset_id, agent_id, repetitions, created_at, updated_at
+      ) values ('experiment-history', 'history', 'dataset-history', 'agent', 1, now(), now());
+      insert into agent_recall.evaluation_runs (
+        id, experiment_id, status, started_at, finished_at
+      ) values ('run-history', 'experiment-history', 'completed', now(), now());
+      insert into agent_recall.evaluation_case_results (
+        id, run_id, dataset_item_id, repetition, input, output, duration_ms, session_key
+      ) values (
+        'case-history', 'run-history', 'item', 1, 'input', 'output', 1,
+        'codex:historical-runtime'
+      );
+    `);
+
+    const upgradedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await upgradedDatabase.initialize();
+    const linked = await upgradedDatabase.query<{
+      surface: string;
+      runtime_id: string;
+      runtime_session_id: string;
+      relation: string;
+    }>(`
+      select invocations.surface, bindings.runtime_id,
+             bindings.runtime_session_id, bindings.relation
+      from agent_recall.runtime_invocations invocations
+      join agent_recall.runtime_session_bindings bindings
+        on bindings.invocation_id = invocations.id
+      where invocations.id = 'legacy-evaluation:case-history'
+    `);
+    expect(linked.rows).toEqual([{
+      surface: "evaluation",
+      runtime_id: "codex",
+      runtime_session_id: "historical-runtime",
+      relation: "created",
+    }]);
+
+    await upgradedDatabase.query(`
+      insert into agent_recall.runtime_invocations (
+        id, initiator, surface, runtime_id, status, started_at
+      ) values ('future-surface', 'agentrecall', 'future_surface', 'codex', 'completed', now())
+    `);
     await upgradedDatabase.close();
   });
 });

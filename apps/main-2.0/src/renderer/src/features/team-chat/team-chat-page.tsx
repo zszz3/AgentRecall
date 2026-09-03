@@ -161,9 +161,11 @@ export function TeamChatRoomTitle({
 export function TeamChatPage({
   language,
   preferredRoomId,
+  onOpenSession,
 }: {
   language: LanguageMode;
   preferredRoomId?: string;
+  onOpenSession?: (sessionKey: string) => void;
 }): ReactElement {
   const l = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const api = useMemo(() => window.sessionSearch.teamChat, []);
@@ -217,6 +219,22 @@ export function TeamChatPage({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const skipNextAutoScrollRef = useRef(false);
+
+  const openLatestRoomSession = async (): Promise<void> => {
+    if (!activeRoom) return;
+    try {
+      const session = await window.sessionSearch.findSessionByRuntimeInvocationOwner({
+        roomId: activeRoom.id,
+      });
+      if (!session) {
+        setContextFeedback(l("This room's latest Session has not been indexed yet.", "该工作室最近的 Session 尚未完成索引。"));
+        return;
+      }
+      onOpenSession?.(session.sessionKey);
+    } catch (error) {
+      setContextFeedback(errorMessage(error));
+    }
+  };
 
   const isCurrentRoomScope = useCallback((roomId: string, epoch: number): boolean =>
     selectedRoomIdRef.current === roomId && roomEpochRef.current === epoch, []);
@@ -1012,6 +1030,14 @@ export function TeamChatPage({
                     <span title={activeRoom.workDir}>{activeRoom.workDir || l("No working directory", "未设置工作目录")}</span>
                   </div>
                   <div className="team-chat-room-actions">
+                    <button
+                      type="button"
+                      onClick={() => void openLatestRoomSession()}
+                      title={l("Open latest Session", "打开最近 Session")}
+                      aria-label={l("Open latest Session", "打开最近 Session")}
+                    >
+                      <MessageCircleMore size={16} />
+                    </button>
                     <button
                       type="button"
                       aria-haspopup="menu"

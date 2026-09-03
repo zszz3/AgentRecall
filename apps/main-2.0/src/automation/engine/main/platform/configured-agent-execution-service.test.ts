@@ -33,6 +33,7 @@ describe("ConfiguredAgentExecutionService", () => {
     await service.runOneShot({
       configuredAgentId: agent.id,
       prompt: "Complete the node",
+      invocation: { surface: "workflow", role: "node" },
       workflowExecution: {
         workflowId: "workflow",
         runId: "run",
@@ -46,6 +47,7 @@ describe("ConfiguredAgentExecutionService", () => {
       workflowRunId: "run",
       workflowNodeId: "review",
       workflowNodeExecutionId: "execution",
+      invocation: { surface: "workflow", role: "node" },
     }));
   });
 });

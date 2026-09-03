@@ -168,7 +168,13 @@ export interface EvaluationNodeDependencies {
     skillName: string,
   ) => Promise<{ content: string; hash: string } | null>;
   runAgent: (
-    input: { agentId: string; prompt: string; developerInstructions?: string },
+    input: {
+      agentId: string;
+      prompt: string;
+      developerInstructions?: string;
+      role: string;
+      ownerReference: Record<string, string>;
+    },
     signal?: AbortSignal,
   ) => Promise<{
     output: string;
@@ -176,7 +182,12 @@ export interface EvaluationNodeDependencies {
     executionReference?: EvaluationExecutionReference;
   }>;
   executeJudge?: (
-    input: { runtimeId: string; prompt: string },
+    input: {
+      runtimeId: string;
+      prompt: string;
+      role: string;
+      ownerReference: Record<string, string>;
+    },
     signal?: AbortSignal,
   ) => Promise<{ output: string; durationMs: number }>;
   /** Resolves a runtime-native session id to an indexed AgentRecall session. */

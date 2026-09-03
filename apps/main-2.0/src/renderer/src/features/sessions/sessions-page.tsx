@@ -102,6 +102,8 @@ export interface SessionsPageModel {
   collapsedProjectGroups: Set<string>;
   expandedTreeProjects: Set<string>;
   source: SearchOptions["source"];
+  origin: NonNullable<SearchOptions["origin"]>;
+  originCounts: { ordinary: number; agentRecall: number; all: number };
   sourceFilters: Array<{ label: string; value: SearchOptions["source"] }>;
   visibility: "default" | "favorites" | "hidden";
   searchRef: RefObject<HTMLInputElement | null>;
@@ -135,6 +137,7 @@ export interface SessionsPageActions {
   toggleProjectTag(project: ProjectSummary, tagName: string): void;
   deleteTag(tagName: string): void;
   setSource(source: SearchOptions["source"]): void;
+  setOrigin(origin: NonNullable<SearchOptions["origin"]>): void;
   setTag(tag: string | undefined): void;
   setVisibility(visibility: SessionsPageModel["visibility"]): void;
   search(query: string): void;
@@ -470,6 +473,30 @@ export function SessionsPage({
 
         <div className="result-count">
           <div className="bulk-result-actions">
+            <div className="live-filter session-origin-filter" role="group" aria-label={l("Session origin", "会话来源") }>
+              <button
+                type="button"
+                className={model.origin === "ordinary" ? "active" : ""}
+                onClick={() => actions.setOrigin("ordinary")}
+              >
+                {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
+              </button>
+              <button
+                type="button"
+                className={model.origin === "agentrecall" ? "active" : ""}
+                aria-expanded={model.origin === "agentrecall"}
+                onClick={() => actions.setOrigin(model.origin === "agentrecall" ? "ordinary" : "agentrecall")}
+              >
+                {l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}
+              </button>
+              <button
+                type="button"
+                className={model.origin === "all" ? "active" : ""}
+                onClick={() => actions.setOrigin("all")}
+              >
+                {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
+              </button>
+            </div>
             {model.bulkSelectionActive ? <input
               type="checkbox"
               checked={model.sessions.length > 0 && model.sessions.every((session) => model.bulkSelectedKeys.has(session.sessionKey))}

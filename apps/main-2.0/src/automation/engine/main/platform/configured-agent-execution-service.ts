@@ -3,6 +3,7 @@ import type {
   AgentChannel,
   ConfiguredAgent,
   RuntimeConversation,
+  RuntimeInvocationRequest,
   WorkflowAgentEvent,
   WorkflowAgentRequest,
   WorkflowAgentResponse,
@@ -45,6 +46,7 @@ export class ConfiguredAgentExecutionService {
         nodeId: string;
         executionId: string;
       };
+      invocation: RuntimeInvocationRequest;
     },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
@@ -71,6 +73,7 @@ export class ConfiguredAgentExecutionService {
       runtimeConversation?: RuntimeConversation;
       developerInstructions?: string;
       agentRecallMcp?: AgentRecallMcpContext;
+      invocation: RuntimeInvocationRequest;
     },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
@@ -91,6 +94,7 @@ export class ConfiguredAgentExecutionService {
       runtimeConversation?: RuntimeConversation;
       developerInstructions?: string;
       agentRecallMcp?: AgentRecallMcpContext;
+      invocation: RuntimeInvocationRequest;
       workflowExecution?: {
         workflowId: string;
         runId: string;
@@ -128,6 +132,7 @@ export class ConfiguredAgentExecutionService {
         ? { developerInstructions: input.developerInstructions.trim() }
         : {}),
       ...(input.agentRecallMcp ? { agentRecallMcp: { ...input.agentRecallMcp } } : {}),
+      invocation: structuredClone(input.invocation),
       ...(input.workflowExecution ? {
         planningWorkflowId: input.workflowExecution.workflowId,
         workflowRunId: input.workflowExecution.runId,

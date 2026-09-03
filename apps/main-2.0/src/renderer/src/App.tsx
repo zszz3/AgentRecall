@@ -321,6 +321,9 @@ export function App(): ReactElement {
     setQuery,
     source,
     setSource,
+    origin,
+    setOrigin,
+    originCounts,
     environmentId,
     setEnvironmentId,
     tag,
@@ -1863,6 +1866,8 @@ export function App(): ReactElement {
                 collapsedProjectGroups,
                 expandedTreeProjects: collapsedTreeProjects,
                 source,
+                origin,
+                originCounts,
                 sourceFilters: visibleSourceFilters,
                 visibility,
                 searchRef,
@@ -1913,6 +1918,7 @@ export function App(): ReactElement {
                 },
                 deleteTag: setDeleteTagName,
                 setSource,
+                setOrigin,
                 setTag,
                 setVisibility,
                 search: setQuery,
@@ -2003,10 +2009,23 @@ export function App(): ReactElement {
               runtimeReviewEnabled={Boolean(appSettings?.workflowRuntimeReviewEnabled)}
               initialRequest={workflowInitialRequest}
               onInitialRequestConsumed={() => setWorkflowInitialRequest(undefined)}
+              onOpenSession={(sessionKey) => {
+                void window.sessionSearch.getSession(sessionKey).then((session) => {
+                  if (session) void openDetail(session);
+                });
+              }}
             /> : null}
 
             {activePage === "team-chat" ? (
-              <TeamChatPage language={language} preferredRoomId={preferredTeamChatRoomId} />
+              <TeamChatPage
+                language={language}
+                preferredRoomId={preferredTeamChatRoomId}
+                onOpenSession={(sessionKey) => {
+                  void window.sessionSearch.getSession(sessionKey).then((session) => {
+                    if (session) void openDetail(session);
+                  });
+                }}
+              />
             ) : null}
 
             {activePage === "evaluation" ? (
@@ -2146,6 +2165,27 @@ export function App(): ReactElement {
             t("Plain text copied.", "纯文本已复制。"),
           ),
           deleteSession: requestDeleteSession,
+          openInvocationOwner: (invocation) => {
+            closeDetail();
+            if (invocation.surface === "workflow") {
+              const workflowId = invocation.ownerReference.workflowId;
+              void openWorkflows(workflowId ? { workflowId } : undefined);
+              return;
+            }
+            if (invocation.surface === "team_chat") {
+              setPreferredTeamChatRoomId(invocation.ownerReference.roomId);
+              void navigateToPage("team-chat");
+              return;
+            }
+            const page: AppPage = invocation.surface === "evaluation"
+              ? "evaluation"
+              : invocation.surface === "skill"
+                ? "skills"
+                : invocation.surface === "system"
+                  ? "runtimes"
+                  : "workbench";
+            void navigateToPage(page);
+          },
           reveal: (session) => void runAction(
             `Opening ${FILE_MANAGER_LABEL}`,
             () => window.sessionSearch.revealSession(session.sessionKey),

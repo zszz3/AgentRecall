@@ -6,6 +6,7 @@ import { PostgresSessionRepository } from "./session-repository";
 import { PostgresSessionSearchRepository } from "./session-search-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
+import { PostgresRuntimeInvocationRepository } from "./runtime-invocation-repository";
 
 function session(
   sessionKey: string,
@@ -238,6 +239,82 @@ describe("PostgreSQL Turn search", () => {
     expect(emptyPage.sessions).toEqual([]);
     expect(emptyPage.totalCount).toBe(4);
     expect(emptyPage.hasMore).toBe(false);
+  });
+
+  it("groups only sessions explicitly created by AgentRecall and keeps continued user sessions ordinary", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-created",
+      initiator: "agentrecall",
+      invocation: {
+        surface: "evaluation",
+        role: "subject",
+        ownerReference: { runId: "run-1", caseResultId: "case-1" },
+      },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-20T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-created", {
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      sessionId: "one",
+      turnId: "turn-1",
+      relation: "created",
+      boundAt: Date.parse("2026-07-20T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-created", "completed", Date.parse("2026-07-20T08:00:02.000Z"));
+
+    await invocations.begin({
+      id: "inv-continued",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "room-1" } },
+      runtimeId: "claude",
+      channelId: "claude-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-21T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-continued", {
+      runtimeId: "claude",
+      channelId: "claude-default",
+      environmentId: "local",
+      sessionId: "two",
+      relation: "continued",
+      boundAt: Date.parse("2026-07-21T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-continued", "cancelled", Date.parse("2026-07-21T08:00:02.000Z"));
+
+    const ordinary = await searchRepository.searchSessionPage({ origin: "ordinary", excludeSubagents: true });
+    expect(ordinary.sessions.map((item) => item.sessionKey).sort()).toEqual(["codex:roles", "codex:two"]);
+    expect(ordinary.originCounts).toEqual({ ordinary: 2, agentRecall: 1, all: 3 });
+    expect(ordinary.sessions.find((item) => item.sessionKey === "codex:two")).toMatchObject({
+      createdByAgentRecall: false,
+      runtimeInvocations: [expect.objectContaining({
+        invocationId: "inv-continued",
+        relation: "continued",
+        surface: "team_chat",
+        status: "cancelled",
+      })],
+    });
+
+    const created = await searchRepository.searchSessionPage({ origin: "agentrecall", excludeSubagents: true });
+    expect(created.sessions).toHaveLength(1);
+    expect(created.sessions[0]).toMatchObject({
+      sessionKey: "codex:one",
+      createdByAgentRecall: true,
+      runtimeInvocations: [expect.objectContaining({
+        invocationId: "inv-created",
+        relation: "created",
+        runtimeTurnId: "turn-1",
+        ownerReference: { runId: "run-1", caseResultId: "case-1" },
+      })],
+    });
+    await expect(repository.findByRuntimeInvocationOwner({ runId: "run-1" }))
+      .resolves.toMatchObject({ sessionKey: "codex:one" });
+    await expect(repository.findByRuntimeInvocationOwner({ runId: "missing" }))
+      .resolves.toBeNull();
   });
 
   it("filters both Claude and Codex StepCode variants as one source", async () => {

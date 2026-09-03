@@ -31,6 +31,7 @@ import type { PostgresDatabase, PostgresQueryable } from "./database";
 import {
   SESSION_ACTIVITY_SQL,
   SESSION_SELECT_SQL,
+  RUNTIME_SESSION_BINDING_MATCH_SQL,
   hydrateSession,
   numberValue,
   postgresJsonValue,
@@ -1907,6 +1908,32 @@ export class PostgresSessionRepository {
         limit 1
       `,
       [rawId],
+    );
+    return result.rows[0] ? hydrateSession(result.rows[0]) : null;
+  }
+
+  async findByRuntimeInvocationOwner(
+    ownerReference: Record<string, string>,
+  ): Promise<SessionSearchResult | null> {
+    if (Object.keys(ownerReference).length === 0) return null;
+    const result = await this.database.query<SessionRow>(
+      `
+        select ${SESSION_SELECT_SQL}
+        from agent_recall.sessions sessions
+        join agent_recall.environments environments on environments.id = sessions.environment_id
+        where exists (
+          select 1
+          from agent_recall.runtime_session_bindings bindings
+          join agent_recall.runtime_invocations invocations
+            on invocations.id = bindings.invocation_id
+          where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+            and invocations.initiator = 'agentrecall'
+            and invocations.owner_reference @> $1::jsonb
+        )
+        order by ${SESSION_ACTIVITY_SQL} desc, sessions.session_key
+        limit 1
+      `,
+      [postgresJsonValue(ownerReference)],
     );
     return result.rows[0] ? hydrateSession(result.rows[0]) : null;
   }

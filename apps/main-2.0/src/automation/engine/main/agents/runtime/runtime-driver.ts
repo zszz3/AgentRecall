@@ -7,6 +7,7 @@ import type {
   RuntimeContinuationPolicy,
   RuntimeConversation,
   RuntimeExecutionMode,
+  RuntimeExecutionReference,
   RuntimeRequest,
   WorkflowAgentEvent,
   WorkflowAgentResponse,
@@ -52,6 +53,7 @@ export interface RuntimeWorkflowRequestContext extends RuntimeRequest {
   workDir: string;
   onEvent?: ((event: WorkflowAgentEvent) => void) | undefined;
   signal?: AbortSignal | undefined;
+  reportExecutionReference?: ((reference: RuntimeExecutionReference) => void) | undefined;
 }
 
 export interface RuntimeChannelTestContext {

@@ -46,6 +46,7 @@ describe("TeamChatPage rooms", () => {
   let root: Root;
   let fixture: ReturnType<typeof createTeamChatFixture>;
   let teamChat: ReturnType<typeof createTeamChatFixture>;
+  let findSessionByRuntimeInvocationOwner = vi.fn();
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -54,9 +55,10 @@ describe("TeamChatPage rooms", () => {
     root = createRoot(container);
     fixture = createTeamChatFixture();
     teamChat = fixture;
+    findSessionByRuntimeInvocationOwner = vi.fn(async () => null);
     Object.defineProperty(window, "sessionSearch", {
       configurable: true,
-      value: { teamChat },
+      value: { teamChat, findSessionByRuntimeInvocationOwner },
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
@@ -137,6 +139,31 @@ describe("TeamChatPage rooms", () => {
       expect(container.textContent).toContain("Alpha stays visible");
       expect(composer(container).value).toBe("Keep this draft");
     });
+  });
+
+  it("opens the latest Session recorded for the active room", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
+    findSessionByRuntimeInvocationOwner.mockResolvedValue({ sessionKey: "session-1" });
+    const onOpenSession = vi.fn();
+
+    await act(async () => root.render(
+      <TeamChatPage language="en" onOpenSession={onOpenSession} />,
+    ));
+    await vi.waitFor(() => expect(
+      container.querySelector(".team-chat-room-title strong")?.textContent,
+    ).toBe("Alpha"));
+    const sessionButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open latest Session"]',
+    );
+    if (!sessionButton) throw new Error("Open latest Session button was not rendered");
+
+    await act(async () => {
+      sessionButton.click();
+      await Promise.resolve();
+    });
+
+    expect(findSessionByRuntimeInvocationOwner).toHaveBeenCalledWith({ roomId: "room-alpha" });
+    expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });
 
   it("clears deleted room details after switching rooms during a pending delete", async () => {

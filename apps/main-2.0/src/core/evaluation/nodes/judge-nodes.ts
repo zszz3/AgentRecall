@@ -202,7 +202,17 @@ export function createLlmJudgeNode(
 
       let judged: { output: string; durationMs: number };
       try {
-        judged = await dependencies.executeJudge({ runtimeId, prompt }, context.signal);
+        judged = await dependencies.executeJudge({
+          runtimeId,
+          prompt,
+          role: "judge",
+          ownerReference: {
+            caseId: task.caseId,
+            datasetItemId: task.datasetItemId,
+            repetition: String(task.repetition),
+            evaluatorId,
+          },
+        }, context.signal);
       } catch (cause) {
         return evaluationExcused.infra(
           cause instanceof Error ? cause.message : String(cause),

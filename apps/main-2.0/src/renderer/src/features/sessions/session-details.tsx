@@ -3,6 +3,7 @@ import type { RemoteSessionDetailSnapshot } from "../../../../core/remote-sessio
 import type { SessionFamily } from "../../../../core/session-family";
 import type {
   SessionSearchResult,
+  RuntimeInvocationSummary,
   SessionTurnDetail,
   SessionTurnSummary,
 } from "../../../../core/types";
@@ -50,6 +51,7 @@ export interface SessionDetailsActions {
   copyPlain(session: SessionSearchResult): void;
   deleteSession(session: SessionSearchResult): void;
   reveal(session: SessionSearchResult): void;
+  openInvocationOwner(invocation: RuntimeInvocationSummary): void;
 }
 
 export function SessionDetails({
@@ -147,6 +149,7 @@ export function SessionDetails({
         }}
         sessionFamilyLoadFailed={familyLoadFailed}
         onRetrySessionFamily={() => setFamilyRetryVersion((current) => current + 1)}
+        onOpenInvocationOwner={actions.openInvocationOwner}
         messages={[]}
         matchedContextMessages={[]}
         matchedMessageIndex={matchedMessageIndex}

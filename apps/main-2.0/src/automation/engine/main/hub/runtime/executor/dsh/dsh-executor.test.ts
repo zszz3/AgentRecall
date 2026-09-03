@@ -57,6 +57,7 @@ function executionContext(
       emit: (event) => events.push(event),
       onExit: (code) => exits.push(code),
       ...overrides,
+      invocation: overrides.invocation ?? { surface: "agent", role: "task" },
     },
     events,
     exits,

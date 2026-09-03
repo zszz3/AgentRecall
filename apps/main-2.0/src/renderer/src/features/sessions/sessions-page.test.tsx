@@ -57,6 +57,12 @@ describe("SessionsPage search tools", () => {
     await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
     expect(container.querySelector(".toolbar-primary .searchbox")).not.toBeNull();
     expect(container.querySelector(".toolbar-secondary .toolbar-filters")).not.toBeNull();
+    const invocationGroup = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-filter button")]
+      .find((button) => button.textContent?.includes("AgentRecall calls"));
+    expect(invocationGroup?.textContent).toContain("(2)");
+    expect(invocationGroup?.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => invocationGroup?.click());
+    expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
 
     const advancedButton = buttonByLabel(container, "Advanced search");
     await act(async () => advancedButton.click());
@@ -111,6 +117,8 @@ function createModel(): SessionsPageModel {
     language: "en",
     indexStatus: null,
     sessionTotalCount: 0,
+    origin: "ordinary",
+    originCounts: { ordinary: 3, agentRecall: 2, all: 5 },
     sidebarSections: { environments: false, remaining: false, sources: false, views: false },
     environmentId: "all",
     tags: ["important"],
@@ -156,6 +164,7 @@ function createActions(): SessionsPageActions {
     toggleProjectTag: vi.fn(),
     deleteTag: vi.fn(),
     setSource: vi.fn(),
+    setOrigin: vi.fn(),
     setTag: vi.fn(),
     setVisibility: vi.fn(),
     search: vi.fn(),
