@@ -117,17 +117,14 @@ function metadataFor(skillId: string): BundledSkillMetadata {
 }
 
 function orderedSkillEntries(): Array<[string, string]> {
-  const order = new Map(BUNDLED_SKILL_ORDER.map((id, index) => [id, index]));
-  return Object.entries(skillMarkdownFiles)
-    .filter(([filePath]) => order.has(skillIdFromPath(filePath)))
-    .sort(([leftPath], [rightPath]) => {
-      const leftId = skillIdFromPath(leftPath);
-      const rightId = skillIdFromPath(rightPath);
-      const leftOrder = order.get(leftId) ?? Number.MAX_SAFE_INTEGER;
-      const rightOrder = order.get(rightId) ?? Number.MAX_SAFE_INTEGER;
-      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-      return leftId.localeCompare(rightId);
-    });
+  return BUNDLED_SKILL_ORDER.map((skillId) => {
+    const filePath = `${BUNDLED_SKILL_ROOT}/${skillId}/SKILL.md`;
+    const prompt = skillMarkdownFiles[filePath];
+    if (prompt === undefined) {
+      throw new Error(`Bundled Automation Skill is missing its canonical asset: ${filePath}`);
+    }
+    return [filePath, prompt];
+  });
 }
 
 export function loadBundledSkillTemplates(): SkillTemplate[] {
