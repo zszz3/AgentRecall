@@ -24,7 +24,7 @@ import { reduceWorkflowRunStream, workflowRunStreamKey, type WorkflowRunStreamSt
 type EditorMode = "definition" | "run";
 
 export type WorkflowInitialRequest =
-  | { workflowId: string }
+  | { workflowId: string; runId?: string; nodeId?: string }
   | { createNew: true };
 
 const valueTypes: WorkflowValueType[] = ["text", "number", "boolean", "file", "object", "list"];
@@ -391,6 +391,7 @@ export function WorkflowFeaturePage({
     setSelectedId(nextId);
     const next = merged.find((item) => item.id === nextId);
     if (next) setDraft(structuredClone(next));
+    return snapshot;
   }, [api, definitions, newDraftIds, selectedId]);
 
   const createNewWorkflow = (): void => {
@@ -407,8 +408,16 @@ export function WorkflowFeaturePage({
   useEffect(() => {
     void (async () => {
       try {
-        await load(initialRequest && "workflowId" in initialRequest ? initialRequest.workflowId : undefined);
+        const snapshot = await load(initialRequest && "workflowId" in initialRequest ? initialRequest.workflowId : undefined);
         if (initialRequest && "createNew" in initialRequest) createNewWorkflow();
+        if (initialRequest && "workflowId" in initialRequest && initialRequest.runId) {
+          const requestedRun = snapshot.runs.find((run) => run.id === initialRequest.runId);
+          if (requestedRun) {
+            setSelectedRunId(requestedRun.id);
+            setMode("run");
+            setSelectedNodeId(initialRequest.nodeId);
+          }
+        }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -583,6 +592,7 @@ export function WorkflowFeaturePage({
       const session = await window.sessionSearch.findSessionByRuntimeInvocationOwner({
         workflowId: draft.id,
         runId: selectedRun.id,
+        ...(selectedNodeId ? { nodeId: selectedNodeId } : {}),
       });
       if (!session) {
         setError(localize(language, "The Session for this run has not been indexed yet.", "该运行对应的 Session 尚未完成索引。"));

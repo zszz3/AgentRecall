@@ -166,6 +166,39 @@ describe("TeamChatPage rooms", () => {
     expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });
 
+  it("opens the Session recorded for an individual agent message", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
+    fixture.setRoomMessages("room-alpha", [{
+      ...messageFixture("agent-message", "room-alpha", 2, "Done"),
+      senderType: "agent",
+      senderAgentId: "member-1",
+      senderName: "Builder",
+      sourceMessageId: "human-message",
+    }]);
+    findSessionByRuntimeInvocationOwner.mockResolvedValue({ sessionKey: "session-message" });
+    const onOpenSession = vi.fn();
+
+    await act(async () => root.render(
+      <TeamChatPage language="en" onOpenSession={onOpenSession} />,
+    ));
+    await vi.waitFor(() => expect(container.textContent).toContain("Done"));
+    const sessionButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open Session for Builder"]',
+    );
+    if (!sessionButton) throw new Error("Message Session button was not rendered");
+
+    await act(async () => {
+      sessionButton.click();
+      await Promise.resolve();
+    });
+
+    expect(findSessionByRuntimeInvocationOwner).toHaveBeenCalledWith({
+      roomId: "room-alpha",
+      messageId: "human-message",
+    });
+    expect(onOpenSession).toHaveBeenCalledWith("session-message");
+  });
+
   it("clears deleted room details after switching rooms during a pending delete", async () => {
     fixture.setRooms([
       roomFixture("room-alpha", "Alpha"),

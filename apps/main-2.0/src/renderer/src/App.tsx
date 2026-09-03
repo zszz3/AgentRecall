@@ -219,6 +219,7 @@ export function App(): ReactElement {
   const [workbenchMemoryLoading, setWorkbenchMemoryLoading] = useState(true);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredTeamChatRoomId, setPreferredTeamChatRoomId] = useState<string>();
+  const [preferredTeamChatMessageId, setPreferredTeamChatMessageId] = useState<string>();
   useEffect(() => {
     if (activePage !== "workbench") return;
     let active = true;
@@ -2020,6 +2021,7 @@ export function App(): ReactElement {
               <TeamChatPage
                 language={language}
                 preferredRoomId={preferredTeamChatRoomId}
+                preferredMessageId={preferredTeamChatMessageId}
                 onOpenSession={(sessionKey) => {
                   void window.sessionSearch.getSession(sessionKey).then((session) => {
                     if (session) void openDetail(session);
@@ -2169,11 +2171,16 @@ export function App(): ReactElement {
             closeDetail();
             if (invocation.surface === "workflow") {
               const workflowId = invocation.ownerReference.workflowId;
-              void openWorkflows(workflowId ? { workflowId } : undefined);
+              void openWorkflows(workflowId ? {
+                workflowId,
+                ...(invocation.ownerReference.runId ? { runId: invocation.ownerReference.runId } : {}),
+                ...(invocation.ownerReference.nodeId ? { nodeId: invocation.ownerReference.nodeId } : {}),
+              } : undefined);
               return;
             }
             if (invocation.surface === "team_chat") {
               setPreferredTeamChatRoomId(invocation.ownerReference.roomId);
+              setPreferredTeamChatMessageId(invocation.ownerReference.messageId);
               void navigateToPage("team-chat");
               return;
             }

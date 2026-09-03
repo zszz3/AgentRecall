@@ -115,6 +115,7 @@ export function handleAgentEvent(input: {
       ...("name" in event && event.name ? { name: event.name } : {}),
       ...("fromAgentId" in event && event.fromAgentId ? { fromAgentId: event.fromAgentId } : {}),
       ...("toAgentId" in event && event.toAgentId ? { toAgentId: event.toAgentId } : {}),
+      ...(event.invocationId ? { invocationId: event.invocationId } : {}),
       ...("metadata" in event && event.metadata ? { metadata: event.metadata } : {}),
     });
     run.updatedAt = Date.now();
@@ -131,6 +132,7 @@ export function handleAgentEvent(input: {
       requestId: event.requestId,
       requestState: "live",
       timestamp: Date.now(),
+      ...(event.invocationId ? { invocationId: event.invocationId } : {}),
       ...(event.metadata ? { metadata: event.metadata } : {}),
     });
     run.updatedAt = Date.now();
@@ -148,6 +150,7 @@ export function handleAgentEvent(input: {
       requestId: event.requestId,
       timestamp: Date.now(),
       ...(event.type === "approval_response" ? { decision: event.decision } : {}),
+      ...(event.invocationId ? { invocationId: event.invocationId } : {}),
       ...(event.metadata ? { metadata: event.metadata } : {}),
     });
     run.updatedAt = Date.now();

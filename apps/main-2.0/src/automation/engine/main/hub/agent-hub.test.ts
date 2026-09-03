@@ -3363,11 +3363,12 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       executionReference: { sessionId: "thread-1", turnId: "turn-1" },
     });
     expect(events).toEqual([
-      { requestId: "workflow-test", type: "delta", content: "artifact-1" },
+      { requestId: "workflow-test", type: "delta", content: "artifact-1", invocationId: expect.any(String) },
       {
         requestId: "workflow-test",
         type: "completed",
         content: "artifact-1",
+        invocationId: expect.any(String),
         runtimeConversation: runtimeConversation("codex", { native: { threadId: "thread-1" } }),
       },
     ]);
@@ -3489,11 +3490,12 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       executionReference: { sessionId: "claude-session-7" },
     });
     expect(events).toEqual([
-      { requestId: "claude-workflow-test", type: "delta", content: "workflow-sdk" },
+      { requestId: "claude-workflow-test", type: "delta", content: "workflow-sdk", invocationId: expect.any(String) },
       {
         requestId: "claude-workflow-test",
         type: "completed",
         content: "workflow-sdk",
+        invocationId: expect.any(String),
         runtimeConversation: runtimeConversation("claude", { native: { sessionId: "claude-session-7" } }),
       },
     ]);

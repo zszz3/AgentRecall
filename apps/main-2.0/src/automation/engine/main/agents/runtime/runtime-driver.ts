@@ -61,6 +61,10 @@ export interface RuntimeChannelTestContext {
   channelId: string;
   modelId: string;
   workDir: string;
+  /** Stable identifier shared by the channel-test request and its logs. */
+  invocationId?: string;
+  /** Execution environment used to scope native Session identifiers. */
+  environmentId?: string;
   emit: (event: Omit<AgentTestEvent, "agentId" | "timestamp">) => void;
 }
 

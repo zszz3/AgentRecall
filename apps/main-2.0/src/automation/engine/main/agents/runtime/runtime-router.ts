@@ -36,6 +36,8 @@ type RuntimeRequestLike = {
   executionMode: RuntimeExecutionMode;
   continuationPolicy: RuntimeContinuationPolicy;
   runtimeConversation?: RuntimeConversation;
+  invocationId?: string;
+  environmentId?: string;
 };
 
 export class RuntimeRouter {
@@ -50,6 +52,7 @@ export class RuntimeRouter {
     return this.registry.driverFor(runtime.id).getCapabilities(runtime);
   }
 
+  /** Returns whether a registered Runtime can serve the requested application surface. */
   supportsSurface(runtimeId: AgentId, surface: RuntimeSurface): boolean {
     return this.registry
       .maybeDriverFor(runtimeId)
@@ -62,30 +65,63 @@ export class RuntimeRouter {
     if (!driver.createOneShotExecutor) {
       throw new Error(`${context.runtimeId} runtime does not provide one-shot execution for ${surface}.`);
     }
+    const invocationId = this.createInvocationId();
     let lifecycle: RuntimeInvocationLifecycle | undefined;
     let cancelling = false;
+    let exitDelivered = false;
+    let persistenceFailureReported = false;
+    let callbackQueue = Promise.resolve();
     const emit = input.emit;
     const onExit = input.onExit;
+    const reportPersistenceFailure = (error: unknown): void => {
+      if (persistenceFailureReported) return;
+      persistenceFailureReported = true;
+      const message = error instanceof Error ? error.message : String(error);
+      emit({
+        type: "error",
+        error: `Runtime invocation tracking failed: ${message}`,
+        invocationId,
+      });
+      if (!exitDelivered) {
+        exitDelivered = true;
+        onExit(1);
+      }
+    };
+    const enqueue = (operation: () => Promise<void>): void => {
+      callbackQueue = callbackQueue.then(operation).catch((error) => {
+        reportPersistenceFailure(error);
+      });
+    };
     const wrappedInput: AgentExecutionContext = {
       ...input,
+      invocationId,
       emit: (event) => {
-        if (lifecycle) this.observeAgentEvent(lifecycle, event, cancelling);
-        emit(event);
+        enqueue(async () => {
+          if (lifecycle) await this.observeAgentEvent(lifecycle, event, cancelling);
+          emit({ ...event, invocationId });
+        });
       },
       onExit: (code) => {
-        if (lifecycle && !lifecycle.isFinished()) {
-          void lifecycle.finish(code && code !== 0 ? "failed" : "completed");
-        }
-        onExit(code);
+        enqueue(async () => {
+          if (lifecycle) {
+            const status: Exclude<RuntimeInvocationStatus, "pending"> =
+              code === null || cancelling ? "cancelled" : code !== 0 ? "failed" : "completed";
+            await lifecycle.finish(status);
+          }
+          if (exitDelivered) return;
+          exitDelivered = true;
+          onExit(code);
+        });
       },
     };
     const executor = driver.createOneShotExecutor(wrappedInput);
     return {
       start: async () => {
-        lifecycle = this.createLifecycle(input, input.channelId);
-        await lifecycle.begin(input.runtimeConversation);
+        lifecycle = this.createLifecycle({ ...input, invocationId }, input.channelId);
+        await lifecycle.begin();
         try {
           await executor.start();
+          await callbackQueue;
         } catch (error) {
           await lifecycle.finish(this.statusForError(error), error);
           throw error;
@@ -95,6 +131,7 @@ export class RuntimeRouter {
         cancelling = true;
         try {
           await executor.stop();
+          await callbackQueue;
         } finally {
           await lifecycle?.finish("cancelled");
         }
@@ -110,11 +147,15 @@ export class RuntimeRouter {
     let currentInput = input;
     let lifecycle: RuntimeInvocationLifecycle | undefined;
     let cancelling = false;
+    let callbackQueue = Promise.resolve();
     const wrap = (next: InteractiveSessionContext): InteractiveSessionContext => ({
       ...next,
       emit: (event) => {
-        if (lifecycle) this.observeAgentEvent(lifecycle, event, cancelling);
-        next.emit(event);
+        callbackQueue = callbackQueue.then(async () => {
+          if (lifecycle) await this.observeAgentEvent(lifecycle, event, cancelling);
+          next.emit({ ...event, ...(lifecycle ? { invocationId: lifecycle.id } : {}) });
+        });
+        void callbackQueue.catch(() => undefined);
       },
     });
     const session = driver.createInteractiveSession(wrap(input));
@@ -122,7 +163,9 @@ export class RuntimeRouter {
       if (lifecycle && !lifecycle.isFinished()) return lifecycle;
       cancelling = false;
       lifecycle = this.createLifecycle(currentInput, currentInput.channelId);
-      await lifecycle.begin(currentInput.runtimeConversation);
+      await lifecycle.begin();
+      currentInput = { ...currentInput, invocationId: lifecycle.id };
+      session.reconfigure(wrap(currentInput));
       return lifecycle;
     };
     return {
@@ -134,6 +177,7 @@ export class RuntimeRouter {
         const active = await ensureInvocation();
         try {
           await session.ensureAttached();
+          await callbackQueue;
         } catch (error) {
           await active.finish(this.statusForError(error), error);
           throw error;
@@ -143,6 +187,7 @@ export class RuntimeRouter {
         const active = await ensureInvocation();
         try {
           await session.sendPrompt(prompt);
+          await callbackQueue;
           await active.finish("completed");
         } catch (error) {
           await active.finish(this.statusForError(error), error);
@@ -153,6 +198,7 @@ export class RuntimeRouter {
         cancelling = true;
         try {
           await session.interrupt();
+          await callbackQueue;
         } finally {
           await lifecycle?.finish("cancelled");
         }
@@ -177,24 +223,35 @@ export class RuntimeRouter {
       throw new Error(`${input.runtimeId} runtime does not provide workflow execution.`);
     }
     const lifecycle = this.createLifecycle(normalizedInput, normalizedInput.channelId);
-    await lifecycle.begin(normalizedInput.runtimeConversation);
+    await lifecycle.begin();
     const reportExecutionReference = normalizedInput.reportExecutionReference;
+    let callbackQueue = Promise.resolve();
+    const enqueue = (operation: () => Promise<void>): void => {
+      callbackQueue = callbackQueue.then(operation);
+      void callbackQueue.catch(() => undefined);
+    };
     try {
       const response = await driver.askWorkflow({
         ...normalizedInput,
+        invocationId: lifecycle.id,
         reportExecutionReference: (reference) => {
-          lifecycle.bindReference(reference);
-          reportExecutionReference?.(reference);
+          enqueue(async () => {
+            await lifecycle.bindReference(reference);
+            reportExecutionReference?.(reference);
+          });
         },
         onEvent: (event) => {
-          if (event.type === "completed" && event.runtimeConversation) {
-            lifecycle.bindConversation(event.runtimeConversation);
-          }
-          normalizedInput.onEvent?.(event);
+          enqueue(async () => {
+            if (event.type === "completed" && event.runtimeConversation) {
+              await lifecycle.bindConversation(event.runtimeConversation);
+            }
+            normalizedInput.onEvent?.({ ...event, invocationId: lifecycle.id });
+          });
         },
       });
-      if (response.runtimeConversation) lifecycle.bindConversation(response.runtimeConversation);
-      if (response.executionReference) lifecycle.bindReference(response.executionReference);
+      await callbackQueue;
+      if (response.runtimeConversation) await lifecycle.bindConversation(response.runtimeConversation);
+      if (response.executionReference) await lifecycle.bindReference(response.executionReference);
       await lifecycle.finish("completed");
       return response;
     } catch (error) {
@@ -211,6 +268,7 @@ export class RuntimeRouter {
     const lifecycle = this.createLifecycle({
       runtimeId,
       continuationPolicy: "fresh",
+      environmentId: input.environmentId,
       invocation: {
         surface: "system",
         role: "channel_test",
@@ -219,7 +277,7 @@ export class RuntimeRouter {
     }, input.channelId);
     await lifecycle.begin();
     try {
-      const result = await driver.testChannel(input);
+      const result = await driver.testChannel({ ...input, invocationId: lifecycle.id });
       await lifecycle.finish("completed");
       return result;
     } catch (error) {
@@ -349,31 +407,36 @@ export class RuntimeRouter {
       runtimeId: AgentId;
       continuationPolicy: RuntimeContinuationPolicy;
       runtimeConversation?: RuntimeConversation;
+      invocationId?: string;
+      environmentId?: string;
       invocation: RuntimeInvocationRequest;
     },
     channelId?: string,
   ): RuntimeInvocationLifecycle {
     return new RuntimeInvocationLifecycle({
       recorder: this.invocationRecorder,
-      invocationId: this.createInvocationId(),
+      invocationId: input.invocationId ?? this.createInvocationId(),
       invocation: input.invocation,
       runtimeId: input.runtimeId,
       channelId,
-      relation: input.runtimeConversation ? "continued" : "created",
+      environmentId: input.environmentId,
+      continuedSessionId: input.runtimeConversation
+        ? this.sessionIdFromConversation(input.runtimeConversation)
+        : undefined,
       now: this.now,
       sessionIdFromConversation: (conversation) => this.sessionIdFromConversation(conversation),
     });
   }
 
-  private observeAgentEvent(
+  private async observeAgentEvent(
     lifecycle: RuntimeInvocationLifecycle,
     event: AgentEvent,
     cancelling: boolean,
-  ): void {
-    if (event.type === "runtime_conversation") lifecycle.bindConversation(event.runtimeConversation);
-    else if (event.type === "completed") void lifecycle.finish("completed");
+  ): Promise<void> {
+    if (event.type === "runtime_conversation") await lifecycle.bindConversation(event.runtimeConversation);
+    else if (event.type === "completed") await lifecycle.finish("completed");
     else if (event.type === "error") {
-      void lifecycle.finish(cancelling ? "cancelled" : this.statusForError(event.error), event.error);
+      await lifecycle.finish(cancelling ? "cancelled" : this.statusForError(event.error), event.error);
     }
   }
 
@@ -399,6 +462,7 @@ export class RuntimeRouter {
 class RuntimeInvocationLifecycle {
   private writeQueue: Promise<void> = Promise.resolve();
   private finished = false;
+  private hasBinding = false;
 
   constructor(private readonly options: {
     recorder: RuntimeInvocationRecorder;
@@ -406,46 +470,61 @@ class RuntimeInvocationLifecycle {
     invocation: RuntimeInvocationRequest;
     runtimeId: AgentId;
     channelId?: string;
-    relation: RuntimeSessionRelation;
+    environmentId?: string;
+    continuedSessionId?: string;
     now: () => number;
     sessionIdFromConversation: (conversation: RuntimeConversation) => string | undefined;
   }) {}
 
-  async begin(conversation?: RuntimeConversation): Promise<void> {
+  get id(): string {
+    return this.options.invocationId;
+  }
+
+  async begin(): Promise<void> {
     await this.options.recorder.begin({
       id: this.options.invocationId,
       initiator: "agentrecall",
       invocation: this.options.invocation,
       runtimeId: this.options.runtimeId,
       ...(this.options.channelId ? { channelId: this.options.channelId } : {}),
-      environmentId: "local",
+      environmentId: this.options.environmentId ?? "local",
       startedAt: this.options.now(),
     });
-    if (conversation) {
-      const sessionId = this.options.sessionIdFromConversation(conversation);
-      if (sessionId) await this.bindReference({ sessionId });
-    }
   }
 
-  bindConversation(conversation: RuntimeConversation): void {
+  async bindConversation(conversation: RuntimeConversation): Promise<void> {
     const sessionId = this.options.sessionIdFromConversation(conversation);
-    if (sessionId) void this.bindReference({ sessionId });
+    if (sessionId) await this.bindReference({ sessionId });
   }
 
   async bindReference(reference: RuntimeExecutionReference): Promise<void> {
     if (!reference.sessionId) return;
+    this.hasBinding = true;
+    this.enqueueBinding(
+      {
+        sessionId: reference.sessionId,
+        ...(reference.turnId ? { turnId: reference.turnId } : {}),
+      },
+      this.options.continuedSessionId === reference.sessionId ? "continued" : "created",
+    );
+    await this.writeQueue;
+  }
+
+  private enqueueBinding(
+    reference: { sessionId: string; turnId?: string },
+    relation: RuntimeSessionRelation,
+  ): void {
     const binding = {
       runtimeId: this.options.runtimeId,
       ...(this.options.channelId ? { channelId: this.options.channelId } : {}),
-      environmentId: "local",
+      environmentId: this.options.environmentId ?? "local",
       sessionId: reference.sessionId,
       ...(reference.turnId ? { turnId: reference.turnId } : {}),
-      relation: this.options.relation,
+      relation,
       boundAt: this.options.now(),
     } as const;
     this.writeQueue = this.writeQueue.then(() =>
       this.options.recorder.bind(this.options.invocationId, binding));
-    await this.writeQueue;
   }
 
   isFinished(): boolean {
@@ -458,17 +537,28 @@ class RuntimeInvocationLifecycle {
   ): Promise<void> {
     if (this.finished) return this.writeQueue;
     this.finished = true;
+    if (!this.hasBinding && this.options.continuedSessionId) {
+      this.hasBinding = true;
+      this.enqueueBinding({ sessionId: this.options.continuedSessionId }, "continued");
+    }
     const message = error === undefined
       ? undefined
       : error instanceof Error
         ? error.message
         : String(error);
-    this.writeQueue = this.writeQueue.then(() => this.options.recorder.finish(
+    const pendingWrites = this.writeQueue;
+    this.writeQueue = pendingWrites.catch(() => undefined).then(() => this.options.recorder.finish(
       this.options.invocationId,
       status,
       this.options.now(),
       message,
     ));
+    try {
+      await pendingWrites;
+    } catch (writeError) {
+      await this.writeQueue;
+      throw writeError;
+    }
     await this.writeQueue;
   }
 }

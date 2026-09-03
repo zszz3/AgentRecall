@@ -161,10 +161,12 @@ export function TeamChatRoomTitle({
 export function TeamChatPage({
   language,
   preferredRoomId,
+  preferredMessageId,
   onOpenSession,
 }: {
   language: LanguageMode;
   preferredRoomId?: string;
+  preferredMessageId?: string;
   onOpenSession?: (sessionKey: string) => void;
 }): ReactElement {
   const l = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
@@ -218,6 +220,7 @@ export function TeamChatPage({
   const roomSelectButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const focusedMessageIdRef = useRef<string | undefined>(undefined);
   const skipNextAutoScrollRef = useRef(false);
 
   const openLatestRoomSession = async (): Promise<void> => {
@@ -228,6 +231,23 @@ export function TeamChatPage({
       });
       if (!session) {
         setContextFeedback(l("This room's latest Session has not been indexed yet.", "该工作室最近的 Session 尚未完成索引。"));
+        return;
+      }
+      onOpenSession?.(session.sessionKey);
+    } catch (error) {
+      setContextFeedback(errorMessage(error));
+    }
+  };
+
+  const openMessageSession = async (message: TeamChatMessage): Promise<void> => {
+    const messageId = message.sourceMessageId ?? message.id;
+    try {
+      const session = await window.sessionSearch.findSessionByRuntimeInvocationOwner({
+        roomId: message.roomId,
+        messageId,
+      });
+      if (!session) {
+        setContextFeedback(l("This message's Session has not been indexed yet.", "该消息对应的 Session 尚未完成索引。"));
         return;
       }
       onOpenSession?.(session.sessionKey);
@@ -522,6 +542,16 @@ export function TeamChatPage({
     }
     transcriptEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, streams]);
+
+  useEffect(() => {
+    if (!preferredMessageId || focusedMessageIdRef.current === preferredMessageId) return;
+    const target = [...document.querySelectorAll<HTMLElement>("[data-message-id]")]
+      .find((element) => element.dataset.messageId === preferredMessageId);
+    if (!target) return;
+    focusedMessageIdRef.current = preferredMessageId;
+    target.scrollIntoView?.({ block: "center" });
+    target.focus?.();
+  }, [messages, preferredMessageId]);
 
   const loadEarlierMessages = useCallback(async (): Promise<void> => {
     const roomId = selectedRoomIdRef.current;
@@ -1095,6 +1125,7 @@ export function TeamChatPage({
                       member={activeRoom.agents.find((member) => member.agentId === message.senderAgentId)}
                       recipient={activeRoom.agents.find((member) => member.agentId === message.recipientMemberId)}
                       language={language}
+                      onOpenSession={message.senderType === "agent" ? () => void openMessageSession(message) : undefined}
                     />
                   ))}
                   {Object.values(streams).map((stream) => (
@@ -1651,19 +1682,31 @@ function TeamChatMessageCard({
   member,
   recipient,
   language,
+  onOpenSession,
 }: {
   message: TeamChatMessage;
   member?: TeamChatRoomAgent;
   recipient?: TeamChatRoomAgent;
   language: LanguageMode;
+  onOpenSession?: () => void;
 }): ReactElement {
   return (
-    <article className={`team-chat-message is-${message.senderType} ${message.status === "error" ? "is-error" : ""}`}>
+    <article tabIndex={-1} data-message-id={message.sourceMessageId ?? message.id} className={`team-chat-message is-${message.senderType} ${message.status === "error" ? "is-error" : ""}`}>
       <header>
         <strong>{message.senderName}</strong>
         {recipient ? <span className="team-chat-message-recipient">→ {recipient.displayName}</span> : null}
         {message.deliveryType === "post" ? <span>{localize(language, "post", "公告")}</span> : null}
         {member ? <span className="team-chat-runtime-badge">{member.runtimeId}</span> : null}
+        {onOpenSession ? (
+          <button
+            type="button"
+            onClick={onOpenSession}
+            title={localize(language, "Open Session", "打开 Session")}
+            aria-label={localize(language, `Open Session for ${message.senderName}`, `打开 ${message.senderName} 的 Session`)}
+          >
+            <MessageCircleMore size={13} />
+          </button>
+        ) : null}
         <time>{formatMessageTime(message.createdAt, language)}</time>
       </header>
       <div className="team-chat-message-content">

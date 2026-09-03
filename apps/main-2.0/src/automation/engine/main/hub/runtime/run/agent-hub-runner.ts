@@ -102,6 +102,9 @@ export async function runAgentExecution(input: {
         ...(input.run.kind === "task" && input.run.workflowNodeId
           ? { nodeId: input.run.workflowNodeId }
           : {}),
+        ...(input.run.kind === "task" && input.run.workflowNodeExecutionId
+          ? { executionId: input.run.workflowNodeExecutionId }
+          : {}),
       },
     },
     ...(runtimeConversation ? { runtimeConversation } : {}),

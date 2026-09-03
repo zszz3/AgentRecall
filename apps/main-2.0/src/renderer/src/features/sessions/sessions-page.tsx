@@ -176,7 +176,10 @@ export function SessionsPage({
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
+  const [agentRecallGroupOpen, setAgentRecallGroupOpen] = useState(false);
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
+  const ordinarySessions = model.sessions.filter((session) => !session.createdByAgentRecall);
+  const agentRecallSessions = model.sessions.filter((session) => session.createdByAgentRecall);
   const queryBuilderState = useMemo<QueryBuilderState>(() => ({
     source: model.source === "all" ? undefined : model.source,
     tag: model.tag,
@@ -238,6 +241,30 @@ export function SessionsPage({
       const currentIndex = GROUP_MODES.indexOf(current);
       return GROUP_MODES[(currentIndex + 1) % GROUP_MODES.length];
     });
+  }
+
+  function renderSessionResults(sessions: SessionSearchResult[]): ReactElement {
+    return <GroupedResults
+      sessions={sessions}
+      groupMode={groupMode}
+      sortBy={model.sortBy}
+      selectedKey={model.selected?.sessionKey ?? null}
+      liveStateFor={(session) => getLiveSessionState(
+        session,
+        model.liveSessionKeys,
+        model.liveDetectionFailed,
+      )}
+      language={model.language}
+      onOpenMatch={actions.openMatch}
+      onSelect={actions.selectSession}
+      onOpen={actions.openSession}
+      onRename={actions.renameSession}
+      onFavorite={actions.toggleFavorite}
+      onContextMenu={actions.openContextMenu}
+      bulkSelectionActive={model.bulkSelectionActive}
+      bulkSelectedKeys={model.bulkSelectedKeys}
+      onToggleBulk={actions.toggleBulkSession}
+    />;
   }
 
   return (
@@ -484,7 +511,6 @@ export function SessionsPage({
               <button
                 type="button"
                 className={model.origin === "agentrecall" ? "active" : ""}
-                aria-expanded={model.origin === "agentrecall"}
                 onClick={() => actions.setOrigin(model.origin === "agentrecall" ? "ordinary" : "agentrecall")}
               >
                 {l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}
@@ -528,27 +554,30 @@ export function SessionsPage({
         </div>
 
         <div key={model.currentPage} className="results">
-          <GroupedResults
-            sessions={model.sessions}
-            groupMode={groupMode}
-            sortBy={model.sortBy}
-            selectedKey={model.selected?.sessionKey ?? null}
-            liveStateFor={(session) => getLiveSessionState(
-              session,
-              model.liveSessionKeys,
-              model.liveDetectionFailed,
-            )}
-            language={model.language}
-            onOpenMatch={actions.openMatch}
-            onSelect={actions.selectSession}
-            onOpen={actions.openSession}
-            onRename={actions.renameSession}
-            onFavorite={actions.toggleFavorite}
-            onContextMenu={actions.openContextMenu}
-            bulkSelectionActive={model.bulkSelectionActive}
-            bulkSelectedKeys={model.bulkSelectedKeys}
-            onToggleBulk={actions.toggleBulkSession}
-          />
+          {model.origin === "all" ? (
+            <>
+              {renderSessionResults(ordinarySessions)}
+              {model.originCounts.agentRecall > 0 ? (
+                <section className="result-group session-origin-group">
+                  <button
+                    type="button"
+                    className="result-group-head"
+                    aria-expanded={agentRecallGroupOpen}
+                    onClick={() => setAgentRecallGroupOpen((current) => !current)}
+                  >
+                    {agentRecallGroupOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    <span className="result-group-label">{l("AgentRecall calls", "AgentRecall 调用")}</span>
+                    <span className="result-group-count">{model.originCounts.agentRecall}</span>
+                  </button>
+                  {agentRecallGroupOpen ? (
+                    renderSessionResults(agentRecallSessions)
+                  ) : null}
+                </section>
+              ) : null}
+            </>
+          ) : (
+            renderSessionResults(model.sessions)
+          )}
           {model.sessions.length === 0
             ? <div className="empty">{l("No sessions found.", "没有找到会话。")}</div>
             : null}

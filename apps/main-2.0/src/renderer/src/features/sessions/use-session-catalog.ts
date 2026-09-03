@@ -41,7 +41,7 @@ export function useSessionCatalog({
 }) {
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchOptions["source"]>("all");
-  const [origin, setOrigin] = useState<NonNullable<SearchOptions["origin"]>>("ordinary");
+  const [origin, setOrigin] = useState<NonNullable<SearchOptions["origin"]>>("all");
   const [environmentId, setEnvironmentId] = useState<string | "all">("all");
   const [tag, setTag] = useState<string | undefined>();
   const [projectPath, setProjectPath] = useState<string | undefined>();

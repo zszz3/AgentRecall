@@ -55,7 +55,7 @@ describe("useSessionCatalog pagination", () => {
     }
 
     await act(async () => root.render(createElement(Harness)));
-    await vi.waitFor(() => expect(searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, origin: "ordinary" })));
+    await vi.waitFor(() => expect(searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, origin: "all" })));
 
     await act(async () => catalog.goToPage(3));
     await vi.waitFor(() => expect(searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ offset: 60 })));

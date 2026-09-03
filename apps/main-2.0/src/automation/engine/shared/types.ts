@@ -388,6 +388,10 @@ export interface RuntimeRequest {
   agentRecallMcp?: AgentRecallMcpContext;
   workflowNodeExecutionId?: string;
   allowedMcpTools?: string[];
+  /** Stable identifier shared by the Runtime request, status, and emitted logs. */
+  invocationId?: string;
+  /** Runtime execution environment used to scope native Session identifiers. */
+  environmentId?: string;
   /** Identifies the AgentRecall caller and the exact owner record for this dispatch. */
   invocation: RuntimeInvocationRequest;
 }
@@ -418,7 +422,7 @@ export interface ChatRuntimeSessionState {
   capabilities: RuntimeResumeCapabilities & RuntimeInteractionCapabilities;
 }
 
-export type AgentEvent =
+export type AgentEvent = (
   | { type: "runtime_conversation"; runtimeConversation: RuntimeConversation }
   | { type: "usage"; usage: RuntimeUsage }
   | { type: "delta"; content: string }
@@ -432,7 +436,11 @@ export type AgentEvent =
   | { type: "user_input_request"; requestId: string; content: string; metadata?: Record<string, unknown> }
   | { type: "user_input_response"; requestId: string; content: string; metadata?: Record<string, unknown> }
   | { type: "completed"; content?: string }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string }
+) & {
+  /** Stable identifier for the Runtime invocation that emitted this event. */
+  invocationId?: string;
+};
 
 export interface SendPromptRequest {
   prompt: string;
@@ -471,6 +479,8 @@ export interface ChatEvent {
   requestId?: string;
   requestState?: InteractionRequestState;
   decision?: ApprovalDecision;
+  /** Stable Runtime invocation identifier for this persisted event. */
+  invocationId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -549,13 +559,17 @@ export interface RuntimeExecutionReference {
   turnId?: string;
 }
 
-export type WorkflowAgentEvent =
+export type WorkflowAgentEvent = (
   | { requestId: string; type: "delta"; content: string }
   | { requestId: string; type: "tool_call" | "tool_result"; content: string; name?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "approval_request"; approvalRequestId: string; content: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "approval_response"; approvalRequestId: string; decision: ApprovalDecision; content?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "completed"; content: string; runtimeConversation?: RuntimeConversation }
-  | { requestId: string; type: "error"; error: string };
+  | { requestId: string; type: "error"; error: string }
+) & {
+  /** Stable identifier for the Runtime invocation that emitted this event. */
+  invocationId?: string;
+};
 
 export type AgentTeamMode = "pipeline" | "parallel" | "supervisor";
 export type AgentWorkflowTargetKind = "workspace" | "task" | "custom";

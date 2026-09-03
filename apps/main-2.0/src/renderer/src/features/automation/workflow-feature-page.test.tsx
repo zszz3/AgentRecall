@@ -269,6 +269,7 @@ describe("WorkflowFeaturePage live output", () => {
     expect(sessionSearch.findSessionByRuntimeInvocationOwner).toHaveBeenCalledWith({
       workflowId: "workflow-1",
       runId: "run-1",
+      nodeId: "inspect-code",
     });
     expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });

@@ -60,9 +60,14 @@ describe("SessionsPage search tools", () => {
     const invocationGroup = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-filter button")]
       .find((button) => button.textContent?.includes("AgentRecall calls"));
     expect(invocationGroup?.textContent).toContain("(2)");
-    expect(invocationGroup?.getAttribute("aria-expanded")).toBe("false");
     await act(async () => invocationGroup?.click());
     expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
+    const collapsedGroup = container.querySelector<HTMLButtonElement>(".session-origin-group .result-group-head");
+    expect(collapsedGroup?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".session-origin-group .grouped-results")).toBeNull();
+    await act(async () => collapsedGroup?.click());
+    expect(collapsedGroup?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".session-origin-group .grouped-results")).not.toBeNull();
 
     const advancedButton = buttonByLabel(container, "Advanced search");
     await act(async () => advancedButton.click());
@@ -117,7 +122,7 @@ function createModel(): SessionsPageModel {
     language: "en",
     indexStatus: null,
     sessionTotalCount: 0,
-    origin: "ordinary",
+    origin: "all",
     originCounts: { ordinary: 3, agentRecall: 2, all: 5 },
     sidebarSections: { environments: false, remaining: false, sources: false, views: false },
     environmentId: "all",
@@ -142,13 +147,53 @@ function createModel(): SessionsPageModel {
     aiAssistantOpen: false,
     remoteSessionsOpen: false,
     selected: null,
-    sessions: [],
+    sessions: [session("ordinary", false), session("agentrecall", true)],
     currentPage: 1,
     totalPages: 1,
     liveSessionKeys: new Set(),
     liveDetectionFailed: false,
     bulkSelectionActive: false,
     bulkSelectedKeys: new Set(),
+  };
+}
+
+function session(sessionKey: string, createdByAgentRecall: boolean): SessionsPageModel["sessions"][number] {
+  return {
+    sessionKey,
+    rawId: sessionKey,
+    source: "codex-cli",
+    projectPath: "/workspace",
+    filePath: `/fixtures/${sessionKey}.jsonl`,
+    originalTitle: sessionKey,
+    firstQuestion: sessionKey,
+    timestamp: 1,
+    fileMtimeMs: 1,
+    fileSize: 1,
+    prUrl: null,
+    prNumber: null,
+    environmentId: "local",
+    environmentKind: "local",
+    environmentLabel: "Local",
+    tokenUsage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningOutputTokens: 0,
+      totalTokens: 0,
+    },
+    customTitle: null,
+    displayTitle: sessionKey,
+    favorited: false,
+    hidden: false,
+    tags: [],
+    matchSnippet: null,
+    lastOpenedAt: null,
+    lastResumedAt: null,
+    lastActivityAt: 1,
+    messageCount: 0,
+    aiSummary: null,
+    aiSummaryStale: false,
+    createdByAgentRecall,
   };
 }
 

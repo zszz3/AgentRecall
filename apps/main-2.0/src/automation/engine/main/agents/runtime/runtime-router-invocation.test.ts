@@ -67,7 +67,7 @@ function driver(askWorkflow: NonNullable<RuntimeDriver["askWorkflow"]>): Runtime
     surfaceSupport: [{
       surface: "workflow",
       executionModes: ["oneshot"],
-      continuationPolicies: ["fresh", "resume-required"],
+      continuationPolicies: ["fresh", "resume-preferred", "resume-required"],
     }],
     runtimeStateCodec: codexRuntimeStateCodec,
     getCapabilities: () => ({
@@ -138,4 +138,188 @@ describe("RuntimeRouter invocation lifecycle", () => {
     expect(events.filter((event) => event === "bind:thread-existing:continued").length).toBeGreaterThan(0);
     expect(events.at(-1)).toBe("finish:completed");
   });
+
+  test("propagates one invocation id through the Runtime request and emitted events", async () => {
+    const events: string[] = [];
+    const onEvent = vi.fn();
+    const runtimeDriver = driver(async (input) => {
+      expect(input.invocationId).toBe("invocation-propagated");
+      expect(input.environmentId).toBe("ssh-dev");
+      input.onEvent?.({ requestId: input.requestId, type: "delta", content: "working" });
+      input.reportExecutionReference?.({ sessionId: "thread-propagated" });
+      return { content: "done" };
+    });
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      recorder(events),
+      () => 3_000,
+      () => "invocation-propagated",
+    );
+
+    await router.askWorkflow({ ...request(), environmentId: "ssh-dev", onEvent });
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "delta",
+      invocationId: "invocation-propagated",
+    }));
+  });
+
+  test("marks a resume-preferred fallback as created when the Runtime returns a new Session", async () => {
+    const events: string[] = [];
+    const runtimeDriver = driver(async (input) => {
+      input.reportExecutionReference?.({ sessionId: "thread-new" });
+      return { content: "done", runtimeConversation: conversation("thread-new") };
+    });
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      recorder(events),
+      () => 4_000,
+      () => "invocation-fallback",
+    );
+
+    await router.askWorkflow({
+      ...request(conversation("thread-old")),
+      continuationPolicy: "resume-preferred",
+    });
+
+    expect(events).toContain("bind:thread-new:created");
+    expect(events).not.toContain("bind:thread-new:continued");
+    expect(events).not.toContain("bind:thread-old:continued");
+  });
+
+  test("reports binding failures instead of publishing a successful Workflow result", async () => {
+    const bindingError = new Error("binding failed");
+    const failingRecorder: RuntimeInvocationRecorder = {
+      begin: vi.fn(async () => undefined),
+      bind: vi.fn(async () => { throw bindingError; }),
+      finish: vi.fn(async () => undefined),
+    };
+    const runtimeDriver = driver(async (input) => {
+      input.reportExecutionReference?.({ sessionId: "thread-unbound" });
+      return { content: "done" };
+    });
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      failingRecorder,
+      () => 5_000,
+      () => "invocation-bind-failure",
+    );
+
+    await expect(router.askWorkflow(request())).rejects.toThrow("binding failed");
+  });
+
+  test("records a null one-shot exit as cancelled", async () => {
+    const events: string[] = [];
+    const onExit = vi.fn();
+    const runtimeDriver: RuntimeDriver = {
+      ...driver(async () => ({ content: "unused" })),
+      surfaceSupport: [{
+        surface: "task",
+        executionModes: ["oneshot"],
+        continuationPolicies: ["fresh"],
+      }],
+      createOneShotExecutor: (input) => ({
+        start: async () => { input.onExit(null); },
+        stop: async () => undefined,
+      }),
+    };
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      recorder(events),
+      () => 6_000,
+      () => "invocation-cancelled",
+    );
+    const executor = router.createOneShotExecutor({
+      runId: "task-1",
+      runKind: "task",
+      runtimeId: "codex",
+      executionMode: "oneshot",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: "default" },
+      invocation: { surface: "agent", role: "task", ownerReference: { taskId: "task-1" } },
+      runtime,
+      channelId: "codex-default",
+      prompt: "Run it",
+      workDir: "/workspace",
+      developerInstructions: "",
+      emit: vi.fn(),
+      onExit,
+    });
+
+    await executor.start();
+
+    expect(events).toContain("finish:cancelled");
+    expect(events).not.toContain("finish:completed");
+    expect(onExit).toHaveBeenCalledWith(null);
+  });
+
+  test("publishes a terminal one-shot event only after the invocation is durable", async () => {
+    const finishGate = deferred<void>();
+    const emitted = vi.fn();
+    const onExit = vi.fn();
+    const durableRecorder: RuntimeInvocationRecorder = {
+      begin: vi.fn(async () => undefined),
+      bind: vi.fn(async () => undefined),
+      finish: vi.fn(async () => finishGate.promise),
+    };
+    const runtimeDriver: RuntimeDriver = {
+      ...driver(async () => ({ content: "unused" })),
+      surfaceSupport: [{
+        surface: "task",
+        executionModes: ["oneshot"],
+        continuationPolicies: ["fresh"],
+      }],
+      createOneShotExecutor: (input) => ({
+        start: async () => {
+          input.emit({ type: "completed" });
+          input.onExit(0);
+        },
+        stop: async () => undefined,
+      }),
+    };
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      durableRecorder,
+      () => 7_000,
+      () => "invocation-durable",
+    );
+    const executor = router.createOneShotExecutor({
+      runId: "task-2",
+      runKind: "task",
+      runtimeId: "codex",
+      executionMode: "oneshot",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: "default" },
+      invocation: { surface: "agent", role: "task", ownerReference: { taskId: "task-2" } },
+      runtime,
+      channelId: "codex-default",
+      prompt: "Run it",
+      workDir: "/workspace",
+      developerInstructions: "",
+      emit: emitted,
+      onExit,
+    });
+
+    const start = executor.start();
+    await vi.waitFor(() => expect(durableRecorder.finish).toHaveBeenCalled());
+    expect(emitted).not.toHaveBeenCalled();
+    expect(onExit).not.toHaveBeenCalled();
+
+    finishGate.resolve();
+    await start;
+
+    expect(emitted).toHaveBeenCalledWith(expect.objectContaining({
+      type: "completed",
+      invocationId: "invocation-durable",
+    }));
+    expect(onExit).toHaveBeenCalledWith(0);
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}

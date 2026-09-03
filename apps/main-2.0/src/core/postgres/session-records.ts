@@ -157,6 +157,7 @@ export const SESSION_ACTIVITY_SQL = `
   )
 `;
 
+/** SQL predicate matching a Runtime binding to its indexed Session family. */
 export const RUNTIME_SESSION_BINDING_MATCH_SQL = `
   bindings.environment_id = sessions.environment_id
   and bindings.runtime_session_id = sessions.raw_id
@@ -174,6 +175,7 @@ export const RUNTIME_SESSION_BINDING_MATCH_SQL = `
   )
 `;
 
+/** SQL predicate identifying Sessions created by a persisted AgentRecall invocation. */
 export const AGENTRECALL_CREATED_SESSION_SQL = `
   exists (
     select 1
