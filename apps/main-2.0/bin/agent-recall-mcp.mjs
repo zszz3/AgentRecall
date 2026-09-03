@@ -855,6 +855,10 @@ async function recordMcpRecall(db, input) {
         durationMs,
         JSON.stringify({
           source: "mcp",
+          traceId,
+          userQuery: input.query,
+          contextualQuery: input.query,
+          targetUri: "viking://user/memories",
           candidateCount: input.candidates.length,
           returnedCount: returnedUris.length,
           searchedScopes: input.searchedScopes,

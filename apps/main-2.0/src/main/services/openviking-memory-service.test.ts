@@ -328,10 +328,68 @@ describe("OpenVikingMemoryService", () => {
     await h.service.deleteMemory(retained.id, "viking://user/memories/manual/note.md");
 
     expect(h.client.searchMemories).toHaveBeenCalledWith(workspaceAuth, "query", 20);
+    expect(h.store.recordOpenVikingOperationEvent).toHaveBeenCalledWith(expect.objectContaining({
+      phase: "search",
+      status: "completed",
+      details: expect.objectContaining({
+        source: "memory-page",
+        userQuery: "query",
+        contextualQuery: "query",
+        searchedScopes: [retained.id],
+        searchedTypes: ["events"],
+        targetUri: "viking://user/memories",
+        limit: 20,
+        candidateCount: 1,
+        returnedCount: 1,
+      }),
+    }));
     expect(h.client.deleteMemory).toHaveBeenCalledWith(
       workspaceAuth,
       "viking://user/memories/manual/note.md",
     );
+  });
+
+  it("reads a historical commit diff and returns its concrete memory changes", async () => {
+    const retained = workspace();
+    const workspaceAuth = {
+      accountId: OPENVIKING_ACCOUNT_ID,
+      userId: retained.userId,
+      apiKey: "retained-key",
+    };
+    const h = harness({
+      initialWorkspaces: [retained],
+      credentials: { [retained.id]: workspaceAuth },
+    });
+    h.client.readSessionArtifact.mockResolvedValue(JSON.stringify({
+      operations: {
+        adds: [{
+          uri: "viking://user/memories/preferences/editor.md",
+          memory_type: "preferences",
+          after: "Prefer concise diffs.",
+        }],
+        updates: [{
+          uri: "viking://user/memories/events/release.md",
+          before: "Release weekly.",
+          after: "Release daily.",
+        }],
+        deletes: [],
+      },
+    }));
+    const uri = `viking://user/${retained.userId}/sessions/session-1/history/archive-1/memory_diff.json`;
+
+    await expect(h.service.readCommitChanges(retained.id, uri)).resolves.toEqual([{
+      kind: "add",
+      uri: "viking://user/memories/preferences/editor.md",
+      memoryType: "preferences",
+      after: "Prefer concise diffs.",
+    }, {
+      kind: "update",
+      uri: "viking://user/memories/events/release.md",
+      memoryType: "events",
+      before: "Release weekly.",
+      after: "Release daily.",
+    }]);
+    expect(h.client.readSessionArtifact).toHaveBeenCalledWith(workspaceAuth, uri);
   });
 
   it("turns every user edit into a locked authoritative version and reads it before OpenViking", async () => {

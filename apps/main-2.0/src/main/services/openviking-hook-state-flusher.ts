@@ -2,15 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { canonicalOpenVikingMemoryUri } from "../../core/openviking-memory";
 import {
-  inferOpenVikingMemoryType,
   type OpenVikingApplyCommitInput,
   type OpenVikingCommitRun,
   type OpenVikingMemoryChange,
   type OpenVikingOperationEvent,
   type OpenVikingRecallTrace,
 } from "../../core/openviking-memory-control";
+import { parseOpenVikingMemoryDiff } from "../../core/openviking-memory-diff";
 import type { OpenVikingClientPort } from "./openviking-client";
 import type { OpenVikingCredentialStorePort } from "./openviking-memory-service";
 
@@ -408,7 +407,7 @@ export class OpenVikingHookStateFlusher {
           continue;
         }
         try {
-          changes = parseMemoryDiff(memoryDiff, auth.userId);
+          changes = parseOpenVikingMemoryDiff(memoryDiff, auth.userId);
         } catch (error) {
           const completedAt = new Date(now).toISOString();
           await this.recordFailedCommitTask(
@@ -517,7 +516,8 @@ export class OpenVikingHookStateFlusher {
     const events: OpenVikingOperationEvent[] = [
       eventForPhase(run, "summary", "completed", completedAt, timings.get("summary"), {}),
       eventForPhase(run, "long-term-memory", "completed", completedAt, timings.get("long-term-memory"), {
-        changes: changes.length,
+        changeCount: changes.length,
+        memoryChanges: changes,
         extracted,
       }),
       eventForPhase(
@@ -657,48 +657,6 @@ function toCommitRun(
     startedAt,
     updatedAt,
   };
-}
-
-function parseMemoryDiff(content: string, userId: string): OpenVikingMemoryChange[] {
-  const value = JSON.parse(content) as Record<string, unknown>;
-  const operations = objectValue(value.operations);
-  if (!operations) return [];
-  const changes: OpenVikingMemoryChange[] = [];
-  for (const [kind, key] of [["add", "adds"], ["update", "updates"], ["delete", "deletes"]] as const) {
-    const values = Array.isArray(operations[key]) ? operations[key] : [];
-    for (const candidate of values) {
-      const record = objectValue(candidate);
-      if (!record) continue;
-      const uri = normalizeMemoryUri(stringValue(record.uri), userId);
-      if (!uri) continue;
-      changes.push({
-        kind,
-        uri,
-        memoryType: stringValue(record.memory_type) || inferOpenVikingMemoryType(uri),
-        ...(stringValue(record.before) ? { before: stringValue(record.before) } : {}),
-        ...(stringValue(record.after) ? { after: stringValue(record.after) } : {}),
-        ...(stringValue(record.deleted_content) ? { before: stringValue(record.deleted_content) } : {}),
-      });
-    }
-  }
-  return changes;
-}
-
-function normalizeMemoryUri(uri: string, userId: string): string {
-  const normalized = uri.trim().replaceAll("\\", "/");
-  try {
-    return canonicalOpenVikingMemoryUri(normalized, userId);
-  } catch {
-    // OpenViking Memory Diff may use its internal memory/user/<id>/... path.
-  }
-  const prefix = `memory/user/${userId}/`;
-  if (!normalized.startsWith(prefix)) return "";
-  const suffix = normalized.slice(prefix.length);
-  try {
-    return canonicalOpenVikingMemoryUri(`viking://user/memories/${suffix}`, userId);
-  } catch {
-    return "";
-  }
 }
 
 function taskError(task: OpenVikingTaskRecord): string {

@@ -1047,6 +1047,13 @@ test("recall filters invalid evidence, prefers user-locked content and persists 
   const trace = JSON.parse(fs.readFileSync(path.join(stateDir, "recall-traces", traceFiles[0]), "utf8"));
   assert.equal(trace.injectedUris.includes("viking://user/memories/preferences/editor.md"), true);
   assert.equal(trace.candidates.find((candidate) => candidate.uri.endsWith("obsolete.md")).reason, "lifecycle-invalidated");
+  const recallEvent = fs.readdirSync(path.join(stateDir, "operation-events"))
+    .map((name) => JSON.parse(fs.readFileSync(path.join(stateDir, "operation-events", name), "utf8")))
+    .find((event) => event.phase === "recall");
+  assert.equal(recallEvent.details.userQuery, "How should I format this change?");
+  assert.equal(recallEvent.details.contextualQuery.includes("How should I format this change?"), true);
+  assert.deepEqual(recallEvent.details.searchedScopes, ["workspace-1"]);
+  assert.equal(recallEvent.details.targetUri, "viking://user/memories");
 });
 
 test("strict recall hides uncontrolled and in-flight model memories while keeping locked user content", async (context) => {

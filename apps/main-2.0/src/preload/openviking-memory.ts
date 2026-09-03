@@ -2,6 +2,7 @@ import type { IpcRenderer } from "electron";
 
 import type {
   OpenVikingMemoryControl,
+  OpenVikingMemoryChange,
   OpenVikingMemoryDetails,
   OpenVikingMemoryFeedbackKind,
 } from "../core/openviking-memory-control";
@@ -39,6 +40,11 @@ export function createOpenVikingMemoryApi(ipc: OpenVikingMemoryIpcRenderer) {
       ipc.invoke(OPENVIKING_MEMORY_IPC.search.channel, workspaceId, query, limit),
     readOpenVikingMemory: (workspaceId: string, uri: string): Promise<string> =>
       ipc.invoke(OPENVIKING_MEMORY_IPC.read.channel, workspaceId, uri),
+    readOpenVikingCommitChanges: (
+      workspaceId: string,
+      memoryDiffUri: string,
+    ): Promise<OpenVikingMemoryChange[]> =>
+      ipc.invoke(OPENVIKING_MEMORY_IPC.readCommitChanges.channel, workspaceId, memoryDiffUri),
     getOpenVikingMemoryDetails: (
       workspaceId: string,
       uri: string,

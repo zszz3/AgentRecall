@@ -1328,6 +1328,86 @@
   white-space: nowrap;
 }
 
+.openviking-directory-tracking {
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel-bg);
+}
+
+.openviking-directory-tracking.warning {
+  border-color: color-mix(in srgb, var(--running-text) 35%, var(--border));
+}
+
+.openviking-directory-summary {
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.openviking-directory-summary:hover {
+  background: var(--panel-hover);
+}
+
+.openviking-directory-summary > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.openviking-directory-summary strong,
+.openviking-directory-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-directory-summary strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.openviking-directory-summary small {
+  color: var(--text-faint);
+  font-size: 9.5px;
+}
+
+.openviking-directory-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success-text) 10%, transparent);
+  color: var(--success-text);
+}
+
+.openviking-directory-tracking.warning .openviking-directory-icon {
+  background: var(--running-bg);
+  color: var(--running-text);
+}
+
+.openviking-directory-content {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.openviking-directory-content > p {
+  margin: 0;
+  padding: 8px 11px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-faint);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
 .openviking-runtime-workspaces {
   display: grid;
   gap: 8px;
@@ -1389,6 +1469,124 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.openviking-recall-overview {
+  display: grid;
+  gap: 10px;
+  padding: 11px 14px 13px;
+  background: color-mix(in srgb, var(--accent) 2.5%, var(--panel-bg));
+}
+
+.openviking-recall-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.openviking-recall-metrics > article {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--panel-bg);
+}
+
+.openviking-recall-metrics > article > span {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.openviking-recall-metrics article > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.openviking-recall-metrics small,
+.openviking-recall-metrics strong,
+.openviking-recall-metrics em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-recall-metrics small {
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 680;
+  text-transform: uppercase;
+}
+
+.openviking-recall-metrics strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.openviking-recall-metrics em {
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-style: normal;
+}
+
+.openviking-recall-funnel {
+  display: grid;
+  gap: 6px;
+}
+
+.openviking-recall-funnel > div {
+  display: flex;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-subtle);
+}
+
+.openviking-recall-funnel > div > span {
+  min-width: 0;
+  transition: width .2s ease;
+}
+
+.openviking-recall-funnel .injected {
+  background: var(--success-text);
+}
+
+.openviking-recall-funnel .filtered {
+  background: var(--text-faint);
+}
+
+.openviking-recall-funnel .budget {
+  background: var(--running-text);
+}
+
+.openviking-recall-funnel > p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+.openviking-recall-funnel > p span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.openviking-recall-funnel > p i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
 .openviking-control-column {
   min-width: 0;
   border-right: 1px solid var(--border-subtle);
@@ -1412,12 +1610,31 @@
 
 .openviking-control-row {
   display: grid;
+  width: 100%;
   min-height: 58px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
   padding: 8px 11px;
+  border: 0;
   border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.openviking-control-row:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.openviking-control-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .openviking-control-row:last-child {
@@ -1473,6 +1690,401 @@
 
 .openviking-runtime-state.degraded,
 .openviking-runtime-state.skipped {
+  background: var(--running-bg);
+  color: var(--running-text);
+}
+
+.openviking-control-detail-backdrop {
+  display: flex;
+  z-index: 90;
+  width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  align-items: stretch;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding: 0;
+}
+
+.openviking-control-detail {
+  display: grid;
+  flex: 0 1 680px;
+  width: min(680px, 78vw);
+  min-width: 520px;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--panel-bg);
+  box-shadow: -18px 0 48px color-mix(in srgb, black 24%, transparent);
+}
+
+.openviking-control-detail > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.openviking-control-detail > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.openviking-control-detail h3,
+.openviking-control-detail > header p {
+  margin: 0;
+}
+
+.openviking-control-detail h3 {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.openviking-control-detail > header p {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-control-detail > header button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+}
+
+.openviking-control-detail-body {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px 24px;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
+}
+
+.openviking-control-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.openviking-control-detail-facts article {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--panel-subtle);
+}
+
+.openviking-control-detail-facts small {
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 680;
+  text-transform: uppercase;
+}
+
+.openviking-control-detail-facts strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-control-detail-alert {
+  display: grid;
+  gap: 3px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: 9px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 10.5px;
+}
+
+.openviking-control-detail-section {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+}
+
+.openviking-control-detail-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--panel-subtle);
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.openviking-control-detail-section > header span {
+  color: var(--text-faint);
+}
+
+.openviking-control-detail-section > pre,
+.openviking-control-detail-query {
+  margin: 0;
+  padding: 11px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.openviking-memory-changes {
+  display: grid;
+  gap: 10px;
+}
+
+.openviking-memory-changes > article {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface-raised) 76%, transparent);
+}
+
+.openviking-memory-changes > article > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.openviking-memory-changes > article > header strong {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-memory-changes > article > header em {
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-style: normal;
+}
+
+.openviking-memory-change-kind {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.openviking-memory-change-kind.add {
+  background: color-mix(in srgb, var(--success-text) 12%, transparent);
+  color: var(--success-text);
+}
+
+.openviking-memory-change-kind.update {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.openviking-memory-change-kind.delete {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.openviking-memory-change-diff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.openviking-memory-change-content {
+  min-width: 0;
+  padding: 10px 11px;
+}
+
+.openviking-memory-change-content + .openviking-memory-change-content {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.openviking-memory-change-content small {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.openviking-memory-change-content.before {
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+}
+
+.openviking-memory-change-content.after {
+  background: color-mix(in srgb, var(--success-text) 4%, transparent);
+}
+
+.openviking-memory-change-content pre {
+  overflow: auto;
+  max-height: 260px;
+  margin: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.openviking-control-detail-section > pre {
+  font-family: var(--font-mono);
+}
+
+.openviking-control-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 11px;
+}
+
+.openviking-control-detail-tags span,
+.openviking-recall-candidates footer span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.openviking-control-detail-empty {
+  margin: 0;
+  padding: 18px 11px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.openviking-control-detail-kv {
+  display: grid;
+  margin: 0;
+}
+
+.openviking-control-detail-kv > div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 10px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.openviking-control-detail-kv > div:last-child {
+  border-bottom: 0;
+}
+
+.openviking-control-detail-kv dt,
+.openviking-control-detail-kv dd {
+  margin: 0;
+  font-size: 10px;
+}
+
+.openviking-control-detail-kv dt {
+  color: var(--text-faint);
+}
+
+.openviking-control-detail-kv dd {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.openviking-recall-candidates {
+  display: grid;
+}
+
+.openviking-recall-candidates > article {
+  display: grid;
+  gap: 6px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.openviking-recall-candidates > article:last-child {
+  border-bottom: 0;
+}
+
+.openviking-recall-candidates article > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.openviking-recall-candidates header strong {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openviking-recall-candidates header em,
+.openviking-recall-candidates article > p {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-style: normal;
+}
+
+.openviking-recall-candidates footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.openviking-recall-decision {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 8.5px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.openviking-recall-decision.injected {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.openviking-recall-decision.filtered {
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+}
+
+.openviking-recall-decision.budget {
   background: var(--running-bg);
   color: var(--running-text);
 }
@@ -1706,6 +2318,25 @@
     grid-template-columns: 1fr;
   }
 
+  .openviking-recall-metrics,
+  .openviking-control-detail-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .openviking-control-detail {
+    width: 100vw;
+    min-width: 0;
+  }
+
+  .openviking-memory-change-diff {
+    grid-template-columns: 1fr;
+  }
+
+  .openviking-memory-change-content + .openviking-memory-change-content {
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+
   .openviking-runtime-workspace > header,
   .openviking-runtime-section > header {
     align-items: flex-start;
@@ -1720,6 +2351,18 @@
   .openviking-runtime-task-list > div > small {
     grid-column: 2 / -1;
     text-align: left;
+  }
+}
+
+@media (max-width: 520px) {
+  .openviking-recall-metrics,
+  .openviking-control-detail-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .openviking-control-detail-kv > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 }
 

@@ -351,6 +351,18 @@ describe("OpenVikingHookStateFlusher", () => {
       durationMs: 5_000,
       details: expect.objectContaining({ timingSource: "remote-task" }),
     }));
+    expect(memoryControl.recordOpenVikingOperationEvent).toHaveBeenCalledWith(expect.objectContaining({
+      phase: "long-term-memory",
+      details: expect.objectContaining({
+        changeCount: 1,
+        memoryChanges: [{
+          kind: "add",
+          uri: "viking://user/memories/events/release.md",
+          memoryType: "events",
+          after: "Release requires one user-facing note.",
+        }],
+      }),
+    }));
     expect(JSON.parse(await readFile(statePath, "utf8"))).toMatchObject({ commitTasks: [] });
   });
 

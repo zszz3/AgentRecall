@@ -69,6 +69,7 @@ function service(): OpenVikingMemoryIpcService & Record<keyof OpenVikingMemoryIp
     addWorkspace: vi.fn(async () => workspace),
     search: vi.fn(async () => []),
     read: vi.fn(async () => "content"),
+    readCommitChanges: vi.fn(async () => []),
     memoryDetails: vi.fn(async () => ({
       control: {
         workspaceId: workspace.id,
@@ -137,6 +138,11 @@ describe("OpenViking memory IPC", () => {
       "workspace-1",
       "viking://user/workspace_user/memories/one.md",
     );
+    await handlers.get(OPENVIKING_MEMORY_IPC.readCommitChanges.channel)?.(
+      event,
+      "workspace-1",
+      "viking://user/workspace_user/sessions/session-1/history/archive-1/memory_diff.json",
+    );
     await handlers.get(OPENVIKING_MEMORY_IPC.details.channel)?.(
       event,
       "workspace-1",
@@ -175,6 +181,10 @@ describe("OpenViking memory IPC", () => {
       "workspace-1",
       "viking://user/workspace_user/memories/one.md",
     );
+    expect(target.readCommitChanges).toHaveBeenCalledWith(
+      "workspace-1",
+      "viking://user/workspace_user/sessions/session-1/history/archive-1/memory_diff.json",
+    );
     expect(target.save).toHaveBeenCalledWith("workspace-1", {
       id: "manual-1",
       title: "Note",
@@ -205,10 +215,16 @@ describe("OpenViking memory IPC", () => {
       event,
       "../../workspace",
     )).toThrow(IpcInputError);
+    expect(() => handlers.get(OPENVIKING_MEMORY_IPC.readCommitChanges.channel)?.(
+      event,
+      "workspace-1",
+      "viking://user/workspace_user/sessions/../secret.json",
+    )).toThrow(IpcInputError);
     expect(target.previewDirectory).not.toHaveBeenCalled();
     expect(target.search).not.toHaveBeenCalled();
     expect(target.deleteMemory).not.toHaveBeenCalled();
     expect(target.deleteWorkspace).not.toHaveBeenCalled();
+    expect(target.readCommitChanges).not.toHaveBeenCalled();
   });
 
   it("uses the same channels from preload", async () => {
@@ -222,6 +238,10 @@ describe("OpenViking memory IPC", () => {
     await api.addOpenVikingWorkspace("/repo");
     await api.searchOpenVikingMemories("workspace-1", "query", 10);
     await api.readOpenVikingMemory("workspace-1", "viking://user/memories/one.md");
+    await api.readOpenVikingCommitChanges(
+      "workspace-1",
+      "viking://user/workspace_user/sessions/session-1/history/archive-1/memory_diff.json",
+    );
     await api.getOpenVikingMemoryDetails("workspace-1", "viking://user/memories/one.md");
     await api.saveOpenVikingMemory("workspace-1", { title: "Note", content: "content" });
     await api.sendOpenVikingMemoryFeedback(

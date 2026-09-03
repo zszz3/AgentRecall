@@ -14,6 +14,16 @@ const memoryUriInput = z.string().trim().min(1).max(8_192)
     (value) => tryCanonicalOpenVikingMemoryUri(value) !== null,
     "Memory URI must stay under the user memory scope.",
   );
+const sessionArtifactUriInput = z.string().trim().min(1).max(8_192)
+  .refine(
+    (value) => value.startsWith("viking://user/")
+      && !value.includes("\0")
+      && !value.includes("\\")
+      && !value.includes("?")
+      && !value.includes("#")
+      && !value.split("/").some((segment) => segment === "." || segment === ".."),
+    "Session artifact URI is invalid.",
+  );
 const memoryInput = z.object({
   id: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/u).optional(),
   uri: memoryUriInput.optional(),
@@ -36,6 +46,10 @@ export const OPENVIKING_MEMORY_IPC = {
     z.tuple([workspaceIdInput, queryInput, z.number().int().min(1).max(200).optional()]),
   ),
   read: defineIpcRequest("openviking-memory:read", z.tuple([workspaceIdInput, memoryUriInput])),
+  readCommitChanges: defineIpcRequest(
+    "openviking-memory:read-commit-changes",
+    z.tuple([workspaceIdInput, sessionArtifactUriInput]),
+  ),
   details: defineIpcRequest("openviking-memory:details", z.tuple([workspaceIdInput, memoryUriInput])),
   save: defineIpcRequest("openviking-memory:save", z.tuple([workspaceIdInput, memoryInput])),
   feedback: defineIpcRequest(

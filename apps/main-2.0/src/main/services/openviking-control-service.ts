@@ -1,6 +1,7 @@
 import type { AppSettings } from "../../core/platform";
 import type {
   OpenVikingMemoryControl,
+  OpenVikingMemoryChange,
   OpenVikingMemoryDetails,
   OpenVikingMemoryFeedbackKind,
 } from "../../core/openviking-memory-control";
@@ -123,6 +124,17 @@ export class OpenVikingControlService implements OpenVikingMemoryIpcService {
   read(workspaceId: string, uri: string): Promise<string> {
     this.requireEnabled();
     return this.runDataOperation(workspaceId, () => this.options.memory.readMemory(workspaceId, uri));
+  }
+
+  readCommitChanges(
+    workspaceId: string,
+    memoryDiffUri: string,
+  ): Promise<OpenVikingMemoryChange[]> {
+    this.requireEnabled();
+    return this.runDataOperation(
+      workspaceId,
+      () => this.options.memory.readCommitChanges(workspaceId, memoryDiffUri),
+    );
   }
 
   async save(workspaceId: string, input: SaveOpenVikingMemoryInput): Promise<OpenVikingMemoryItem> {

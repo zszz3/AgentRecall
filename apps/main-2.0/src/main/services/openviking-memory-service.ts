@@ -28,8 +28,10 @@ import {
   type OpenVikingMemoryEvidence,
   type OpenVikingMemoryFeedback,
   type OpenVikingMemoryFeedbackKind,
+  type OpenVikingMemoryChange,
   type OpenVikingOperationEvent,
 } from "../../core/openviking-memory-control";
+import { parseOpenVikingMemoryDiff } from "../../core/openviking-memory-diff";
 import type {
   AddOpenVikingWorkspaceInput,
   RecordOpenVikingMemoryFeedbackInput,
@@ -196,6 +198,14 @@ export class OpenVikingMemoryService {
     query: string,
     limit?: number,
   ): Promise<OpenVikingMemoryItem[]> {
+    const details: Record<string, unknown> = {
+      source: "memory-page",
+      userQuery: query,
+      contextualQuery: query,
+      searchedScopes: [workspaceId],
+      targetUri: "viking://user/memories",
+      limit: limit ?? 20,
+    };
     return this.runObserved(workspaceId, "search", async () => {
       const workspace = await this.requireWorkspace(workspaceId);
       const [memories, controls] = await Promise.all([
@@ -207,11 +217,15 @@ export class OpenVikingMemoryService {
         this.options.store.listOpenVikingMemoryControls(workspaceId),
       ]);
       const controlsByUri = new Map(controls.map((control) => [control.uri, control]));
-      return memories.map((memory) => withControl(
+      const results = memories.map((memory) => withControl(
         { ...memory, workspaceId },
         controlsByUri.get(memory.id) ?? defaultOpenVikingMemoryControl(workspaceId, memory.id),
       ));
-    }, { queryChars: query.length, limit: limit ?? 20 });
+      details.candidateCount = memories.length;
+      details.returnedCount = results.length;
+      details.searchedTypes = [...new Set(results.map((memory) => memory.memoryType))];
+      return results;
+    }, details);
   }
 
   async readMemory(workspaceId: string, uri: string): Promise<string> {
@@ -222,6 +236,18 @@ export class OpenVikingMemoryService {
       if (control?.locked && control.lockedContent !== undefined) return control.lockedContent;
       return this.options.client.readMemory(await this.requireAuth(workspace), memoryUri);
     }, { uri: canonicalOpenVikingMemoryUri(uri) });
+  }
+
+  async readCommitChanges(
+    workspaceId: string,
+    memoryDiffUri: string,
+  ): Promise<OpenVikingMemoryChange[]> {
+    const workspace = await this.requireWorkspace(workspaceId);
+    const content = await this.options.client.readSessionArtifact(
+      await this.requireAuth(workspace),
+      memoryDiffUri,
+    );
+    return parseOpenVikingMemoryDiff(content, workspace.userId);
   }
 
   async saveMemory(

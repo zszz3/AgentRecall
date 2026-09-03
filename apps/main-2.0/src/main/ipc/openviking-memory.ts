@@ -1,5 +1,6 @@
 import type {
   OpenVikingMemoryControl,
+  OpenVikingMemoryChange,
   OpenVikingMemoryDetails,
   OpenVikingMemoryFeedbackKind,
 } from "../../core/openviking-memory-control";
@@ -28,6 +29,7 @@ export interface OpenVikingMemoryIpcService {
   addWorkspace(rootPath: string): Promise<OpenVikingWorkspace>;
   search(workspaceId: string, query: string, limit?: number): Promise<OpenVikingMemoryItem[]>;
   read(workspaceId: string, uri: string): Promise<string>;
+  readCommitChanges(workspaceId: string, memoryDiffUri: string): Promise<OpenVikingMemoryChange[]>;
   memoryDetails(workspaceId: string, uri: string): Promise<OpenVikingMemoryDetails>;
   save(workspaceId: string, input: SaveOpenVikingMemoryInput): Promise<OpenVikingMemoryItem>;
   feedback(
@@ -62,6 +64,8 @@ export function registerOpenVikingMemoryIpc(
       service.search(workspaceId, query, limit)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.read, (_event, workspaceId, uri) =>
       service.read(workspaceId, uri)),
+    registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.readCommitChanges, (_event, workspaceId, memoryDiffUri) =>
+      service.readCommitChanges(workspaceId, memoryDiffUri)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.details, (_event, workspaceId, uri) =>
       service.memoryDetails(workspaceId, uri)),
     registerIpcHandler(ipc, OPENVIKING_MEMORY_IPC.save, (_event, workspaceId, input) =>
