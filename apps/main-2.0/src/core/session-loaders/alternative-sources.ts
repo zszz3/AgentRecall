@@ -966,6 +966,23 @@ function geminiChatFileNameUsable(name: string): boolean {
   return name.endsWith(".jsonl") || name.endsWith(".json");
 }
 
+function walkGeminiChatFiles(dir: string): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    // A missing or inaccessible subagent directory must not hide other sessions.
+    return [];
+  }
+  const files: string[] = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...walkGeminiChatFiles(fullPath));
+    else if (geminiChatFileNameUsable(entry.name)) files.push(fullPath);
+  }
+  return files;
+}
+
 export function* loadGeminiCliSessionsIterator(root: string, options: SessionLoadOptions): Generator<LoadedSession> {
   const tmpRoot = path.join(root, "tmp");
   let projectDirs: string[] = [];
@@ -995,7 +1012,7 @@ export function* loadGeminiCliSessionsIterator(root: string, options: SessionLoa
       if (entry.name.startsWith(".")) continue;
       const childPath = path.join(chats, entry.name);
       if (entry.isDirectory()) {
-        for (const filePath of walkJsonlFiles(childPath)) {
+        for (const filePath of walkGeminiChatFiles(childPath)) {
           const stat = safeStat(filePath);
           if (shouldSkipFile(options, filePath, stat, dependencyMtimeMs, "gemini-cli")) continue;
           const loaded = loadGeminiCliSessionFile(filePath, projectPath, stat, entry.name);
