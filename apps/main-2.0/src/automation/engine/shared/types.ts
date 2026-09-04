@@ -346,6 +346,7 @@ export type ExecutionStyle = "oneshot" | "interactive";
 export type RuntimeExecutionMode = ExecutionStyle;
 export type RuntimeContinuationPolicy = "fresh" | "resume-preferred" | "resume-required";
 
+/** Product surface that initiated a persisted AgentRecall Runtime invocation. */
 export type AgentRecallInvocationSurface =
   | "workflow"
   | "evaluation"
@@ -354,9 +355,13 @@ export type AgentRecallInvocationSurface =
   | "skill"
   | "system";
 
+/** Stable business metadata attached to every Runtime dispatch. */
 export interface RuntimeInvocationRequest {
+  /** Runtime caller category used for Session grouping and history labels. */
   surface: AgentRecallInvocationSurface;
+  /** Optional role within the selected surface, such as node or judge. */
   role?: string;
+  /** Exact stable identifiers used to navigate back to the owning record. */
   ownerReference?: Record<string, string>;
 }
 
@@ -383,6 +388,7 @@ export interface RuntimeRequest {
   agentRecallMcp?: AgentRecallMcpContext;
   workflowNodeExecutionId?: string;
   allowedMcpTools?: string[];
+  /** Identifies the AgentRecall caller and the exact owner record for this dispatch. */
   invocation: RuntimeInvocationRequest;
 }
 

@@ -7,6 +7,7 @@ import type {
 import type { PostgresDatabase } from "./database";
 import { postgresJsonValue, postgresText } from "./session-records";
 
+/** Stores AgentRecall Runtime invocation lifecycle records in PostgreSQL. */
 export class PostgresRuntimeInvocationRepository implements RuntimeInvocationRecorder {
   constructor(private readonly database: PostgresDatabase) {}
 

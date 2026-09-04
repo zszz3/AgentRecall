@@ -365,6 +365,7 @@ export interface LoadedSession {
 }
 
 export type SessionSourceFilter = SessionSource | "claude" | "codex" | "stepcode" | "all";
+/** Selects ordinary Sessions, AgentRecall-created Sessions, or both. */
 export type SessionOriginFilter = "ordinary" | "agentrecall" | "all";
 
 export interface SearchOptions {
@@ -446,20 +447,35 @@ export interface SessionSearchResult extends IndexedSession {
   runtimeInvocations?: RuntimeInvocationSummary[];
 }
 
+/** Runtime invocation history attached to an indexed Session. */
 export interface RuntimeInvocationSummary {
+  /** Durable invocation identifier. */
   invocationId: string;
+  /** Caller surface, including unknown future values preserved as text. */
   surface: string;
+  /** Optional caller role. */
   role: string | null;
+  /** Exact owner identifiers for returning to the source page. */
   ownerReference: Record<string, string>;
+  /** Runtime that owns the native Session. */
   runtimeId: string;
+  /** Optional Runtime channel. */
   channelId: string | null;
+  /** Execution environment containing the Session. */
   environmentId: string;
+  /** Terminal or in-progress invocation state. */
   status: "pending" | "completed" | "failed" | "cancelled" | "timed_out";
+  /** Unix epoch timestamp when dispatch started. */
   startedAt: number;
+  /** Unix epoch timestamp when dispatch reached a terminal state. */
   finishedAt: number | null;
+  /** Persisted failure detail, when available. */
   error: string | null;
+  /** Whether this invocation created or continued the Session. */
   relation: "created" | "continued";
+  /** Native Runtime Session identifier. */
   runtimeSessionId: string;
+  /** Optional native Runtime Turn identifier. */
   runtimeTurnId: string | null;
 }
 
@@ -486,6 +502,7 @@ export interface SessionSearchPage {
   sessions: SessionSearchResult[];
   totalCount: number;
   hasMore: boolean;
+  /** Counts for each origin under the active non-origin filters. */
   originCounts: {
     ordinary: number;
     agentRecall: number;

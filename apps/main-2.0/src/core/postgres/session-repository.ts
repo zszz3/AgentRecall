@@ -1912,6 +1912,7 @@ export class PostgresSessionRepository {
     return result.rows[0] ? hydrateSession(result.rows[0]) : null;
   }
 
+  /** Finds the indexed Session linked to an exact persisted invocation owner reference. */
   async findByRuntimeInvocationOwner(
     ownerReference: Record<string, string>,
   ): Promise<SessionSearchResult | null> {

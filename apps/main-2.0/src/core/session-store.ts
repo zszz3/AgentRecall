@@ -608,6 +608,7 @@ export class SessionStore {
     return this.sessions.findByRawId(rawId);
   }
 
+  /** Resolves a Session through its exact Runtime invocation owner reference. */
   async findByRuntimeInvocationOwner(
     ownerReference: Record<string, string>,
   ): Promise<SessionSearchResult | null> {

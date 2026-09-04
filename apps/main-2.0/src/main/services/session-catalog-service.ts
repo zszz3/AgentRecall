@@ -80,6 +80,7 @@ export class SessionCatalogService {
     return this.dependencies.store.findByRawId(rawId);
   }
 
+  /** Returns the indexed Session owned by an exact Runtime invocation reference. */
   async findByRuntimeInvocationOwner(
     ownerReference: Record<string, string>,
   ): Promise<SessionSearchResult | null> {

@@ -62,6 +62,7 @@ const api = {
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   findSessionByRawId: (rawId: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:find-by-raw-id", rawId),
+  /** Opens the Session associated with an exact AgentRecall invocation owner. */
   findSessionByRuntimeInvocationOwner: (
     ownerReference: Record<string, string>,
   ): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:find-by-runtime-owner", ownerReference),
