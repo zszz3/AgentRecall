@@ -386,6 +386,51 @@ describe("PostgreSQL Turn search", () => {
       .resolves.toEqual({ status: "not_indexed", invocationId: "inv-awaiting-index" });
   });
 
+  it("resolves the newest bound invocation when a newer retry has no Session reference", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-retry-bound",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "room-retry", messageId: "message-retry" } },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-retry-bound", {
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      sessionId: "one",
+      relation: "created",
+      boundAt: Date.parse("2026-07-25T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-retry-bound", "completed", Date.parse("2026-07-25T08:00:02.000Z"));
+
+    await invocations.begin({
+      id: "inv-retry-unbound",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "room-retry", messageId: "message-retry" } },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:03.000Z"),
+    });
+    await invocations.finish("inv-retry-unbound", "failed", Date.parse("2026-07-25T08:00:04.000Z"));
+
+    await expect(repository.resolveRuntimeInvocationSession({
+      surface: "team_chat",
+      role: "member",
+      ownerReference: { roomId: "room-retry", messageId: "message-retry" },
+    })).resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
+    await expect(repository.resolveRuntimeInvocationSession({ invocationId: "inv-retry-unbound" }))
+      .resolves.toEqual({
+        status: "no_session_reference",
+        invocationId: "inv-retry-unbound",
+        invocationStatus: "failed",
+      });
+  });
+
   it("keeps list history bounded while a Session detail retains every invocation", async () => {
     const invocations = new PostgresRuntimeInvocationRepository(database);
     for (let index = 0; index < 22; index += 1) {
@@ -418,6 +463,61 @@ describe("PostgreSQL Turn search", () => {
       ]),
     });
     expect((await repository.getSession("codex:one"))?.runtimeInvocations).toHaveLength(22);
+  });
+
+  it("does not attribute a Session when channel-scoped bindings disagree", async () => {
+    await repository.upsertIndexedSession(
+      session("codex:channel-shared", "Channel scoped Session", "2026-07-25T08:00:00.000Z"),
+      [message("user", "channel collision", "2026-07-25T08:00:00.000Z", 0)],
+    );
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-channel-a",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "channel-run-a" } },
+      runtimeId: "codex",
+      channelId: "codex-channel-a",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:01.000Z"),
+    });
+    await invocations.bind("inv-channel-a", {
+      runtimeId: "codex",
+      channelId: "codex-channel-a",
+      environmentId: "local",
+      sessionId: "channel-shared",
+      relation: "created",
+      boundAt: Date.parse("2026-07-25T08:00:02.000Z"),
+    });
+    await invocations.finish("inv-channel-a", "completed", Date.parse("2026-07-25T08:00:03.000Z"));
+
+    await expect(searchRepository.searchSessionPage({ origin: "agentrecall" }))
+      .resolves.toMatchObject({
+        sessions: [expect.objectContaining({ sessionKey: "codex:channel-shared", createdByAgentRecall: true })],
+      });
+
+    await invocations.begin({
+      id: "inv-channel-b",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "channel-run-b" } },
+      runtimeId: "codex",
+      channelId: "codex-channel-b",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:04.000Z"),
+    });
+    await invocations.bind("inv-channel-b", {
+      runtimeId: "codex",
+      channelId: "codex-channel-b",
+      environmentId: "local",
+      sessionId: "channel-shared",
+      relation: "created",
+      boundAt: Date.parse("2026-07-25T08:00:05.000Z"),
+    });
+    await invocations.finish("inv-channel-b", "completed", Date.parse("2026-07-25T08:00:06.000Z"));
+
+    const ambiguous = await searchRepository.searchSessionPage({ origin: "agentrecall" });
+    expect(ambiguous.sessions.some((item) => item.sessionKey === "codex:channel-shared")).toBe(false);
+    await expect(repository.resolveRuntimeInvocationSession({ invocationId: "inv-channel-a" }))
+      .resolves.toEqual({ status: "not_indexed", invocationId: "inv-channel-a" });
   });
 
   it("filters both Claude and Codex StepCode variants as one source", async () => {

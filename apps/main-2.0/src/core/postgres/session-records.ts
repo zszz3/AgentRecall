@@ -158,10 +158,25 @@ export const SESSION_ACTIVITY_SQL = `
   )
 `;
 
-/** SQL predicate matching a Runtime binding to its indexed Session family. */
+/**
+ * SQL predicate matching a Runtime binding to its indexed Session family.
+ *
+ * Indexed Sessions do not carry a trustworthy channel identifier. When the
+ * same Runtime/environment/native Session id is observed on more than one
+ * channel, refusing to project either binding is safer than attributing one
+ * channel's Session to another.
+ */
 export const RUNTIME_SESSION_BINDING_MATCH_SQL = `
   bindings.environment_id = sessions.environment_id
   and bindings.runtime_session_id = sessions.raw_id
+  and not exists (
+    select 1
+    from agent_recall.runtime_session_bindings conflicting_bindings
+    where conflicting_bindings.environment_id = bindings.environment_id
+      and conflicting_bindings.runtime_id = bindings.runtime_id
+      and conflicting_bindings.runtime_session_id = bindings.runtime_session_id
+      and nullif(conflicting_bindings.channel_id, '') is distinct from nullif(bindings.channel_id, '')
+  )
   and (
     (bindings.runtime_id = 'codex' and sessions.source in (
       'codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli'

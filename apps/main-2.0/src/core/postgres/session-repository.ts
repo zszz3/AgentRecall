@@ -1919,34 +1919,44 @@ export class PostgresSessionRepository {
     return result.rows[0] ? hydrateSession(result.rows[0]) : null;
   }
 
-  /** Resolves an exact invocation owner without conflating missing bindings with indexing delay. */
+  /** Resolves an invocation owner without letting an unbound retry hide a usable Session. */
   async resolveRuntimeInvocationSession(
     lookup: RuntimeInvocationLookup,
   ): Promise<RuntimeInvocationSessionResolution> {
     if (!lookup.invocationId && Object.keys(lookup.ownerReference ?? {}).length === 0) {
       return { status: "not_recorded" };
     }
-    const conditions = ["initiator = 'agentrecall'"];
+    const conditions = ["runtime_invocations.initiator = 'agentrecall'"];
     const parameters: unknown[] = [];
     const addCondition = (condition: string, value: unknown): void => {
       parameters.push(value);
       conditions.push(condition.replace("?", `$${parameters.length}`));
     };
-    if (lookup.invocationId) addCondition("id = ?", postgresText(lookup.invocationId));
-    if (lookup.surface) addCondition("surface = ?", lookup.surface);
-    if (lookup.role) addCondition("role = ?", postgresText(lookup.role));
+    if (lookup.invocationId) addCondition("runtime_invocations.id = ?", postgresText(lookup.invocationId));
+    if (lookup.surface) addCondition("runtime_invocations.surface = ?", lookup.surface);
+    if (lookup.role) addCondition("runtime_invocations.role = ?", postgresText(lookup.role));
     if (lookup.ownerReference && Object.keys(lookup.ownerReference).length > 0) {
-      addCondition("owner_reference @> ?::jsonb", postgresJsonValue(lookup.ownerReference));
+      addCondition("runtime_invocations.owner_reference @> ?::jsonb", postgresJsonValue(lookup.ownerReference));
     }
     const invocation = (await this.database.query<{
       id: string;
       status: RuntimeInvocationSummary["status"];
     }>(
       `
-        select id, status
+        select runtime_invocations.id, runtime_invocations.status
         from agent_recall.runtime_invocations
         where ${conditions.join("\n          and ")}
-        order by started_at desc, id desc
+        order by ${lookup.invocationId
+          ? "runtime_invocations.started_at desc, runtime_invocations.id desc"
+          : `
+            case when exists (
+              select 1
+              from agent_recall.runtime_session_bindings candidate_bindings
+              where candidate_bindings.invocation_id = runtime_invocations.id
+            ) then 0 else 1 end,
+            runtime_invocations.started_at desc,
+            runtime_invocations.id desc`
+        }
         limit 1
       `,
       parameters,
