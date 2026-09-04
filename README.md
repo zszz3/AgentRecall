@@ -127,10 +127,6 @@ npm run dev:v1
 
 提交前请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)，并确保 `npm test`、`npm run typecheck` 与 `npm run release-note:check` 通过。
 
-### 自动 Review 与合并
-
-PR 可能会收到 [@LANSGANBS](https://github.com/LANSGANBS) 账号发起的 AI 自动 Review。触发后，请按 [贡献指南](./CONTRIBUTING.md#code-review) 处理 Review 评论；尚未解决且并非误报的 `P0` 或 `P1` 问题会阻止合并，满足全部条件后 PR 会由维护流程自动合并。
-
 ### Collaborators
 
 <!-- readme: collaborators -start -->
