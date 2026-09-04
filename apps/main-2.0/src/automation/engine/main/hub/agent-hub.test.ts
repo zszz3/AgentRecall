@@ -7,7 +7,7 @@ import { DEFAULT_MODEL_ID } from "../../shared/models";
 import { projectNodeStates } from "../../shared/workflow-v2/runtime-utils";
 import { createWorkflowV2InlineScriptSpec } from "../../shared/workflow-v2/definition";
 import { createDirectWorkflowTransactionPolicy } from "../../shared/workflow-v2/transaction";
-import type { AgentChannel, AgentId, ChatRuntimeSessionState, ConfiguredAgent, RuntimeConversation } from "../../shared/types";
+import type { AgentChannel, AgentEvent, AgentId, ChatRuntimeSessionState, ConfiguredAgent, RuntimeConversation } from "../../shared/types";
 import { createRuntimeDriverRegistry, RuntimeDriverRegistry } from "./runtime/executor/agent-executor";
 import type {
   AgentExecutionContext,
@@ -1241,7 +1241,74 @@ describe("AgentHub chat sessions", () => {
     }
   });
 
-  test("interrupts an idle workflow draft invocation as timed out", async () => {
+  test("waits for an idle workflow draft invocation to finish timing out before rejecting", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new AgentHub();
+      (hub as any).runtimes.set("codex", {
+        id: "codex",
+        label: "Codex",
+        command: "codex",
+        version: "test",
+        available: true,
+      });
+      const interactiveSessions = (hub as any).interactiveSessions;
+      let emitAfterTimeout: ((event: AgentEvent) => void) | undefined;
+      vi.spyOn(interactiveSessions, "dispatch").mockImplementation((...args: unknown[]) => {
+        const context = args[1] as { emit: (event: AgentEvent) => void };
+        emitAfterTimeout = context.emit;
+        return new Promise<void>(() => undefined);
+      });
+      let finishInterrupt: (() => void) | undefined;
+      const interrupt = vi.spyOn(interactiveSessions, "interrupt").mockImplementation(
+        () => new Promise<void>((resolve) => {
+          finishInterrupt = resolve;
+        }),
+      );
+
+      const response = (hub as any).askWorkflowDraftAgent({
+        workflowId: "workflow-timeout",
+        requestId: "request-timeout",
+        prompt: "Plan the workflow",
+        configuredAgentId: TEST_CODEX_AGENT_ID,
+        modelId: DEFAULT_MODEL_ID,
+        workDir: "/workspace",
+        starting: true,
+      });
+      let responseSettled = false;
+      void response.then(
+        () => { responseSettled = true; },
+        () => { responseSettled = true; },
+      );
+      const rejection = expect(response).rejects.toThrow(
+        "Workflow planning agent timed out after 10 minutes without activity",
+      );
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(interrupt).toHaveBeenCalledWith(
+        "workflow-draft:workflow-timeout",
+        {
+          status: "timed_out",
+          error: expect.objectContaining({
+            message: "Workflow planning agent timed out after 10 minutes without activity",
+          }),
+        },
+      );
+      expect(responseSettled).toBe(false);
+
+      emitAfterTimeout?.({ type: "completed", content: "Late completion" });
+      await Promise.resolve();
+      expect(responseSettled).toBe(false);
+
+      finishInterrupt?.();
+      await rejection;
+      expect(responseSettled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("rejects an idle workflow draft invocation when its timeout interruption fails", async () => {
     vi.useFakeTimers();
     try {
       const hub = new AgentHub();
@@ -1256,7 +1323,8 @@ describe("AgentHub chat sessions", () => {
       vi.spyOn(interactiveSessions, "dispatch").mockImplementation(
         () => new Promise<void>(() => undefined),
       );
-      const interrupt = vi.spyOn(interactiveSessions, "interrupt").mockResolvedValue(undefined);
+      const interruptError = new Error("Failed to persist the timed out invocation");
+      vi.spyOn(interactiveSessions, "interrupt").mockRejectedValue(interruptError);
 
       const response = (hub as any).askWorkflowDraftAgent({
         workflowId: "workflow-timeout",
@@ -1267,21 +1335,10 @@ describe("AgentHub chat sessions", () => {
         workDir: "/workspace",
         starting: true,
       });
-      const rejection = expect(response).rejects.toThrow(
-        "Workflow planning agent timed out after 10 minutes without activity",
-      );
-      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      const rejection = expect(response).rejects.toThrow(interruptError.message);
 
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
       await rejection;
-      expect(interrupt).toHaveBeenCalledWith(
-        "workflow-draft:workflow-timeout",
-        {
-          status: "timed_out",
-          error: expect.objectContaining({
-            message: "Workflow planning agent timed out after 10 minutes without activity",
-          }),
-        },
-      );
     } finally {
       vi.useRealTimers();
     }

@@ -2468,11 +2468,12 @@ export class AgentHub {
     let content = "";
     let latestRuntimeConversation = runtimeConversation;
     let settled = false;
+    let timingOut = false;
     let timeout: ReturnType<typeof createWorkflowAgentTimeout> | undefined;
 
     return new Promise<WorkflowAgentResponse>((resolve, reject) => {
       const settle = (callback: () => void): void => {
-        if (settled) return;
+        if (settled || timingOut) return;
         settled = true;
         timeout?.clear();
         callback();
@@ -2481,14 +2482,25 @@ export class AgentHub {
         const normalized = error instanceof Error ? error : new Error(String(error));
         settle(() => reject(normalized));
       };
+      const finishTimeout = (error: unknown): void => {
+        if (settled || !timingOut) return;
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        timingOut = false;
+        settled = true;
+        reject(normalized);
+      };
 
       timeout = createWorkflowAgentTimeout({
         timeoutMs: WORKFLOW_AGENT_IDLE_TIMEOUT_MS,
         onTimeout: () => {
+          if (settled || timingOut) return;
+          timingOut = true;
+          timeout?.clear();
           const error = new Error("Workflow planning agent timed out after 10 minutes without activity");
           this.runtimeApprovals.cancelOwner(sessionKey);
-          void this.interactiveSessions.interrupt(sessionKey, { status: "timed_out", error });
-          fail(error);
+          void this.interactiveSessions
+            .interrupt(sessionKey, { status: "timed_out", error })
+            .then(() => finishTimeout(error), finishTimeout);
         },
       });
 
@@ -2516,7 +2528,7 @@ export class AgentHub {
           .filter(Boolean)
           .join("\n\n"),
         emit: (event) => {
-          if (settled) return;
+          if (settled || timingOut) return;
           timeout?.refresh();
           if (emitWorkflowAgentApprovalEvent({ requestId: input.requestId, onEvent }, event)) return;
           if (event.type === "runtime_conversation") {
@@ -2559,7 +2571,7 @@ export class AgentHub {
           if (event.type === "error") fail(new Error(event.error));
         },
         syncState: (state) => {
-          if (settled) return;
+          if (settled || timingOut) return;
           if (state.runtimeConversation) {
             latestRuntimeConversation = this.runtimeRouter.cloneConversation(state.runtimeConversation);
           }
