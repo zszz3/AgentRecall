@@ -455,6 +455,54 @@ describe("TeamChatPage rooms", () => {
     });
   });
 
+  it("focuses the exact agent response when multiple members reply to one message", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha", {
+      name: "Alpha",
+      workDir: "/workspace/project",
+      members: [
+        { configuredAgentId: "builder-profile", displayName: "Builder" },
+        { configuredAgentId: "reviewer-profile", displayName: "Reviewer" },
+      ],
+    })]);
+    fixture.setRoomMessages("room-alpha", [
+      messageFixture("human-message", "room-alpha", 1, "Please review this"),
+      {
+        ...messageFixture("builder-response", "room-alpha", 2, "Builder response"),
+        senderType: "agent",
+        senderAgentId: "member-1",
+        senderName: "Builder",
+        sourceMessageId: "human-message",
+      },
+      {
+        ...messageFixture("reviewer-response", "room-alpha", 3, "Reviewer response"),
+        senderType: "agent",
+        senderAgentId: "member-2",
+        senderName: "Reviewer",
+        sourceMessageId: "human-message",
+      },
+    ]);
+    const onPreferredConsumed = vi.fn();
+
+    await act(async () => root.render(
+      <TeamChatPage
+        language="en"
+        preferredRoomId="room-alpha"
+        preferredMessageId="human-message"
+        preferredAgentId="member-2"
+        onPreferredConsumed={onPreferredConsumed}
+      />,
+    ));
+
+    await vi.waitFor(() => {
+      const target = container.querySelector<HTMLElement>(
+        '[data-message-id="human-message"][data-agent-id="member-2"]',
+      );
+      expect(target).not.toBeNull();
+      expect(document.activeElement).toBe(target);
+      expect(onPreferredConsumed).toHaveBeenCalledOnce();
+    });
+  });
+
   it("ignores an earlier-message response after switching rooms", async () => {
     fixture.setRooms([
       roomFixture("room-alpha", "Alpha"),

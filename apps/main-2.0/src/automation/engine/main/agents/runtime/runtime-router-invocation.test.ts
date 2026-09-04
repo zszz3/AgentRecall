@@ -410,6 +410,88 @@ describe("RuntimeRouter invocation lifecycle", () => {
     expect(onExit).toHaveBeenCalledWith(null);
   });
 
+  test("keeps an interactive timeout status when interrupting the active prompt", async () => {
+    const events: string[] = [];
+    const durableRecorder = recorder(events);
+    let releasePrompt!: () => void;
+    const pendingPrompt = new Promise<void>((resolve) => {
+      releasePrompt = resolve;
+    });
+    const runtimeDriver: RuntimeDriver = {
+      ...driver(async () => ({ content: "unused" })),
+      surfaceSupport: [{
+        surface: "chat",
+        executionModes: ["interactive"],
+        continuationPolicies: ["fresh"],
+      }],
+      createInteractiveSession: () => ({
+        reconfigure: vi.fn(),
+        ensureAttached: async () => undefined,
+        sendPrompt: async () => pendingPrompt,
+        interrupt: async () => {
+          releasePrompt();
+        },
+        detach: async () => undefined,
+        detachIfStillExpired: async () => undefined,
+        snapshot: () => ({
+          runtimeState: {
+            executionStyle: "interactive",
+            attachmentState: "running",
+            attachmentGeneration: 1,
+            capabilities: {
+              supportsInProcessConversationResume: true,
+              supportsResumeAfterDetach: true,
+              supportsResumeAfterAppRestart: true,
+              supportsTurnResume: true,
+              supportsInterrupt: true,
+              supportsContinue: true,
+              supportsApprovalRequests: true,
+              supportsUserInputRequests: true,
+            },
+          },
+        }),
+      }),
+    };
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      durableRecorder,
+      () => 6_500,
+      () => "invocation-timeout",
+    );
+    const session = router.createInteractiveSession({
+      chatId: "workflow-draft:workflow-1",
+      configuredAgentId: "agent-1",
+      runtimeId: "codex",
+      executionMode: "interactive",
+      continuationPolicy: "fresh",
+      runtimeConfig: { model: "default" },
+      invocation: {
+        surface: "workflow",
+        role: "draft",
+        ownerReference: { workflowId: "workflow-1", requestId: "request-1" },
+      },
+      runtime,
+      channelId: "codex-default",
+      workDir: "/workspace",
+      developerInstructions: "",
+      emit: vi.fn(),
+    });
+    const sending = session.sendPrompt("Plan it");
+    await vi.waitFor(() => expect(durableRecorder.begin).toHaveBeenCalled());
+    const timeoutError = new Error("Workflow planning agent timed out");
+
+    await session.interrupt({ status: "timed_out", error: timeoutError });
+    await expect(sending).resolves.toBeUndefined();
+
+    expect(events.filter((event) => event.startsWith("finish:"))).toEqual(["finish:timed_out"]);
+    expect(durableRecorder.finish).toHaveBeenCalledWith(
+      "invocation-timeout",
+      "timed_out",
+      6_500,
+      "Workflow planning agent timed out",
+    );
+  });
+
   test("publishes a terminal one-shot event only after the invocation is durable", async () => {
     const finishGate = deferred<void>();
     const emitted = vi.fn();

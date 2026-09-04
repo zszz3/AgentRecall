@@ -163,12 +163,14 @@ export function TeamChatPage({
   language,
   preferredRoomId,
   preferredMessageId,
+  preferredAgentId,
   onPreferredConsumed,
   onOpenSession,
 }: {
   language: LanguageMode;
   preferredRoomId?: string;
   preferredMessageId?: string;
+  preferredAgentId?: string;
   onPreferredConsumed?: () => void;
   onOpenSession?: (sessionKey: string) => void;
 }): ReactElement {
@@ -223,12 +225,12 @@ export function TeamChatPage({
   const roomSelectButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
-  const focusedMessageIdRef = useRef<string | undefined>(undefined);
+  const focusedMessageTargetRef = useRef<string | undefined>(undefined);
   const skipNextAutoScrollRef = useRef(false);
 
   useEffect(() => {
-    focusedMessageIdRef.current = undefined;
-  }, [preferredMessageId, preferredRoomId]);
+    focusedMessageTargetRef.current = undefined;
+  }, [preferredAgentId, preferredMessageId, preferredRoomId]);
 
   useEffect(() => {
     if (
@@ -622,11 +624,16 @@ export function TeamChatPage({
   }, [activeRoom?.id, api, isCurrentRoomScope, nextBefore, setContextFeedback]);
 
   useEffect(() => {
-    if (!preferredMessageId || focusedMessageIdRef.current === preferredMessageId) return;
+    if (!preferredMessageId) return;
+    const preferredTarget = JSON.stringify([preferredMessageId, preferredAgentId]);
+    if (focusedMessageTargetRef.current === preferredTarget) return;
     const target = [...document.querySelectorAll<HTMLElement>("[data-message-id]")]
-      .find((element) => element.dataset.messageId === preferredMessageId);
+      .find((element) => (
+        element.dataset.messageId === preferredMessageId
+        && (!preferredAgentId || element.dataset.agentId === preferredAgentId)
+      ));
     if (target) {
-      focusedMessageIdRef.current = preferredMessageId;
+      focusedMessageTargetRef.current = preferredTarget;
       target.scrollIntoView?.({ block: "center" });
       target.focus?.();
       onPreferredConsumed?.();
@@ -648,7 +655,7 @@ export function TeamChatPage({
       && !loadingEarlier
       && !nextBefore
     ) {
-      focusedMessageIdRef.current = preferredMessageId;
+      focusedMessageTargetRef.current = preferredTarget;
       onPreferredConsumed?.();
     }
   }, [
@@ -659,6 +666,7 @@ export function TeamChatPage({
     messages,
     nextBefore,
     onPreferredConsumed,
+    preferredAgentId,
     preferredMessageId,
     preferredRoomId,
     selectedRoomId,
@@ -1764,7 +1772,12 @@ function TeamChatMessageCard({
   onOpenSession?: () => void;
 }): ReactElement {
   return (
-    <article tabIndex={-1} data-message-id={message.sourceMessageId ?? message.id} className={`team-chat-message is-${message.senderType} ${message.status === "error" ? "is-error" : ""}`}>
+    <article
+      tabIndex={-1}
+      data-message-id={message.sourceMessageId ?? message.id}
+      data-agent-id={message.senderAgentId}
+      className={`team-chat-message is-${message.senderType} ${message.status === "error" ? "is-error" : ""}`}
+    >
       <header>
         <strong>{message.senderName}</strong>
         {recipient ? <span className="team-chat-message-recipient">→ {recipient.displayName}</span> : null}

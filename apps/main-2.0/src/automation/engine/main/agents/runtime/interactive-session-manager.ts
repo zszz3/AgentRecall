@@ -1,4 +1,8 @@
-import type { InteractiveSession, InteractiveSessionContext } from "./runtime-driver";
+import type {
+  InteractiveSession,
+  InteractiveSessionContext,
+  InteractiveSessionInterruption,
+} from "./runtime-driver";
 import { ProcessLease } from "../shared/process-lease";
 
 interface InteractiveSessionManagerOptions {
@@ -67,10 +71,10 @@ export class InteractiveSessionManager {
     await run;
   }
 
-  async interrupt(chatId: string): Promise<void> {
+  async interrupt(chatId: string, interruption?: InteractiveSessionInterruption): Promise<void> {
     const managed = this.sessions.get(chatId);
     if (!managed) return;
-    await managed.session.interrupt();
+    await managed.session.interrupt(interruption);
   }
 
   async dispose(chatId: string, reason: "idle_timeout" | "app_shutdown" | "error"): Promise<void> {

@@ -220,6 +220,7 @@ export function App(): ReactElement {
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredTeamChatRoomId, setPreferredTeamChatRoomId] = useState<string>();
   const [preferredTeamChatMessageId, setPreferredTeamChatMessageId] = useState<string>();
+  const [preferredTeamChatAgentId, setPreferredTeamChatAgentId] = useState<string>();
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
   const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
   const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
@@ -2042,9 +2043,11 @@ export function App(): ReactElement {
                 language={language}
                 preferredRoomId={preferredTeamChatRoomId}
                 preferredMessageId={preferredTeamChatMessageId}
+                preferredAgentId={preferredTeamChatAgentId}
                 onPreferredConsumed={() => {
                   setPreferredTeamChatRoomId(undefined);
                   setPreferredTeamChatMessageId(undefined);
+                  setPreferredTeamChatAgentId(undefined);
                 }}
                 onOpenSession={(sessionKey) => {
                   void (async () => {
@@ -2228,6 +2231,7 @@ export function App(): ReactElement {
               const roomId = invocation.ownerReference.roomId;
               setPreferredTeamChatRoomId(roomId);
               setPreferredTeamChatMessageId(roomId ? invocation.ownerReference.messageId : undefined);
+              setPreferredTeamChatAgentId(roomId ? invocation.ownerReference.agentId : undefined);
               void navigateToPage("team-chat");
               return;
             }

@@ -31,6 +31,7 @@ const harness = vi.hoisted(() => ({
   sessionDetails: vi.fn((_props: unknown) => null),
   skillsPage: vi.fn((_props: unknown) => null),
   runtimeFeaturePage: vi.fn((_props: unknown) => null),
+  teamChatPage: vi.fn((_props: unknown) => null),
   remoteSessionsDialog: vi.fn((_props: unknown) => null),
   loadCatalog: vi.fn(async () => undefined),
   loadWorkbenchSessions: vi.fn(async () => undefined),
@@ -50,6 +51,7 @@ vi.mock("./features/sessions/sessions-page", () => ({ SessionsPage: harness.sess
 vi.mock("./features/sessions/session-details", () => ({ SessionDetails: harness.sessionDetails }));
 vi.mock("./features/skills/skills-page", () => ({ SkillsPage: harness.skillsPage }));
 vi.mock("./features/automation/runtime-feature-page", () => ({ RuntimeFeaturePage: harness.runtimeFeaturePage }));
+vi.mock("./features/team-chat/team-chat-page", () => ({ TeamChatPage: harness.teamChatPage }));
 vi.mock("./features/remote-sessions/remote-sessions-dialog", () => ({
   RemoteSessionsDialog: harness.remoteSessionsDialog,
 }));
@@ -409,7 +411,7 @@ describe("external session opening", () => {
     }
   });
 
-  it("returns Agent and Skill invocation history to their exact product surfaces", async () => {
+  it("returns invocation history to exact product surfaces", async () => {
     harness.detail = {
       sessionKey: "codex:runtime-owner",
       source: "codex-cli",
@@ -466,6 +468,35 @@ describe("external session opening", () => {
       initialDiscoveryOpen: true,
     });
 
+    await act(async () => {
+      detailsProps.actions.openInvocationOwner({
+        invocationId: "team-chat-invocation",
+        surface: "team_chat",
+        role: "member",
+        ownerReference: {
+          roomId: "room-1",
+          messageId: "message-1",
+          agentId: "member-2",
+        },
+        runtimeId: "codex",
+        channelId: "codex-default",
+        environmentId: "local",
+        status: "completed",
+        startedAt: 5,
+        finishedAt: 6,
+        relation: "created",
+        runtimeSessionId: "session-3",
+        runtimeTurnId: null,
+      });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.teamChatPage).toHaveBeenCalled());
+    expect(harness.teamChatPage.mock.calls.at(-1)?.[0]).toMatchObject({
+      preferredRoomId: "room-1",
+      preferredMessageId: "message-1",
+      preferredAgentId: "member-2",
+    });
+
     const skillPageCalls = harness.skillsPage.mock.calls.length;
     harness.workbenchPage.mockClear();
     await act(async () => {
@@ -478,10 +509,10 @@ describe("external session opening", () => {
         channelId: "codex-default",
         environmentId: "local",
         status: "completed",
-        startedAt: 5,
-        finishedAt: 6,
+        startedAt: 7,
+        finishedAt: 8,
         relation: "created",
-        runtimeSessionId: "session-3",
+        runtimeSessionId: "session-4",
         runtimeTurnId: null,
       });
       await Promise.resolve();

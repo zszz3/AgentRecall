@@ -29,6 +29,11 @@ export interface InteractiveSessionSnapshot {
   runtimeConversation?: RuntimeConversation;
 }
 
+export interface InteractiveSessionInterruption {
+  status: "cancelled" | "timed_out";
+  error?: unknown;
+}
+
 export interface InteractiveSessionContext extends RuntimeRequest {
   chatId: string;
   configuredAgentId: string;
@@ -79,7 +84,7 @@ export interface InteractiveSession {
   reconfigure(context: InteractiveSessionContext): void;
   ensureAttached(): Promise<void>;
   sendPrompt(prompt: string): Promise<void>;
-  interrupt(): Promise<void>;
+  interrupt(interruption?: InteractiveSessionInterruption): Promise<void>;
   detach(reason: "idle_timeout" | "app_shutdown" | "error"): Promise<void>;
   detachIfStillExpired(input: {
     expectedGeneration: number;

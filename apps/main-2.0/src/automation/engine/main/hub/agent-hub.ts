@@ -2485,9 +2485,10 @@ export class AgentHub {
       timeout = createWorkflowAgentTimeout({
         timeoutMs: WORKFLOW_AGENT_IDLE_TIMEOUT_MS,
         onTimeout: () => {
+          const error = new Error("Workflow planning agent timed out after 10 minutes without activity");
           this.runtimeApprovals.cancelOwner(sessionKey);
-          void this.interactiveSessions.interrupt(sessionKey);
-          fail(new Error("Workflow planning agent timed out after 10 minutes without activity"));
+          void this.interactiveSessions.interrupt(sessionKey, { status: "timed_out", error });
+          fail(error);
         },
       });
 

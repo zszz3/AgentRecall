@@ -1241,6 +1241,52 @@ describe("AgentHub chat sessions", () => {
     }
   });
 
+  test("interrupts an idle workflow draft invocation as timed out", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new AgentHub();
+      (hub as any).runtimes.set("codex", {
+        id: "codex",
+        label: "Codex",
+        command: "codex",
+        version: "test",
+        available: true,
+      });
+      const interactiveSessions = (hub as any).interactiveSessions;
+      vi.spyOn(interactiveSessions, "dispatch").mockImplementation(
+        () => new Promise<void>(() => undefined),
+      );
+      const interrupt = vi.spyOn(interactiveSessions, "interrupt").mockResolvedValue(undefined);
+
+      const response = (hub as any).askWorkflowDraftAgent({
+        workflowId: "workflow-timeout",
+        requestId: "request-timeout",
+        prompt: "Plan the workflow",
+        configuredAgentId: TEST_CODEX_AGENT_ID,
+        modelId: DEFAULT_MODEL_ID,
+        workDir: "/workspace",
+        starting: true,
+      });
+      const rejection = expect(response).rejects.toThrow(
+        "Workflow planning agent timed out after 10 minutes without activity",
+      );
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      await rejection;
+      expect(interrupt).toHaveBeenCalledWith(
+        "workflow-draft:workflow-timeout",
+        {
+          status: "timed_out",
+          error: expect.objectContaining({
+            message: "Workflow planning agent timed out after 10 minutes without activity",
+          }),
+        },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("stores tool calls and results as structured chat events", () => {
     const hub = new AgentHub();
     const chatId = hub.snapshot().activeChatId!;

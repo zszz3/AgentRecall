@@ -16,6 +16,7 @@ import {
 import type {
   InteractiveSession,
   InteractiveSessionContext,
+  InteractiveSessionInterruption,
   RuntimeChannelTestContext,
   RuntimeDriver,
   RuntimeSessionCleanupContext,
@@ -100,7 +101,13 @@ export class RuntimeRouter {
       invocationId,
       emit: (event) => {
         enqueue(async () => {
-          if (lifecycle) await this.observeAgentEvent(lifecycle, event, cancelling);
+          if (lifecycle) {
+            await this.observeAgentEvent(
+              lifecycle,
+              event,
+              cancelling ? { status: "cancelled" } : undefined,
+            );
+          }
           emit({ ...event, invocationId });
         });
       },
@@ -153,13 +160,13 @@ export class RuntimeRouter {
     }
     let currentInput = input;
     let lifecycle: RuntimeInvocationLifecycle | undefined;
-    let cancelling = false;
+    let interruption: InteractiveSessionInterruption | undefined;
     let callbackQueue = Promise.resolve();
     const wrap = (next: InteractiveSessionContext): InteractiveSessionContext => ({
       ...next,
       emit: (event) => {
         callbackQueue = callbackQueue.then(async () => {
-          if (lifecycle) await this.observeAgentEvent(lifecycle, event, cancelling);
+          if (lifecycle) await this.observeAgentEvent(lifecycle, event, interruption);
           next.emit({ ...event, ...(lifecycle ? { invocationId: lifecycle.id } : {}) });
         });
         void callbackQueue.catch(() => undefined);
@@ -168,7 +175,7 @@ export class RuntimeRouter {
     const session = driver.createInteractiveSession(wrap(input));
     const ensureInvocation = async (): Promise<RuntimeInvocationLifecycle> => {
       if (lifecycle && !lifecycle.isFinished()) return lifecycle;
-      cancelling = false;
+      interruption = undefined;
       lifecycle = this.createLifecycle(currentInput, currentInput.channelId);
       await lifecycle.begin();
       currentInput = { ...currentInput, invocationId: lifecycle.id };
@@ -189,7 +196,10 @@ export class RuntimeRouter {
           try {
             await callbackQueue;
           } finally {
-            await active.finish(this.statusForError(error), error);
+            await active.finish(
+              interruption?.status ?? this.statusForError(error),
+              interruption?.error ?? error,
+            );
           }
           throw error;
         }
@@ -199,23 +209,26 @@ export class RuntimeRouter {
         try {
           await session.sendPrompt(prompt);
           await callbackQueue;
-          await active.finish("completed");
+          await active.finish(interruption?.status ?? "completed", interruption?.error);
         } catch (error) {
           try {
             await callbackQueue;
           } finally {
-            await active.finish(this.statusForError(error), error);
+            await active.finish(
+              interruption?.status ?? this.statusForError(error),
+              interruption?.error ?? error,
+            );
           }
           throw error;
         }
       },
-      interrupt: async () => {
-        cancelling = true;
+      interrupt: async (requestedInterruption) => {
+        interruption ??= requestedInterruption ?? { status: "cancelled" };
         try {
           await session.interrupt();
           await callbackQueue;
         } finally {
-          await lifecycle?.finish("cancelled");
+          await lifecycle?.finish(interruption.status, interruption.error);
         }
       },
       detach: async (reason) => {
@@ -474,12 +487,17 @@ export class RuntimeRouter {
   private async observeAgentEvent(
     lifecycle: RuntimeInvocationLifecycle,
     event: AgentEvent,
-    cancelling: boolean,
+    interruption?: InteractiveSessionInterruption,
   ): Promise<void> {
     if (event.type === "runtime_conversation") await lifecycle.bindConversation(event.runtimeConversation);
-    else if (event.type === "completed") await lifecycle.finish("completed");
+    else if (event.type === "completed") {
+      await lifecycle.finish(interruption?.status ?? "completed", interruption?.error);
+    }
     else if (event.type === "error") {
-      await lifecycle.finish(cancelling ? "cancelled" : this.statusForError(event.error), event.error);
+      await lifecycle.finish(
+        interruption?.status ?? this.statusForError(event.error),
+        interruption?.error ?? event.error,
+      );
     }
   }
 
