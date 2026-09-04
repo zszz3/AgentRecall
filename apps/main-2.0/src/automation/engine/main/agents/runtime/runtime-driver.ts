@@ -65,6 +65,8 @@ export interface RuntimeChannelTestContext {
   invocationId?: string;
   /** Execution environment used to scope native Session identifiers. */
   environmentId?: string;
+  /** Reports a native Session or Turn created while testing the channel. */
+  reportExecutionReference?: ((reference: RuntimeExecutionReference) => void) | undefined;
   emit: (event: Omit<AgentTestEvent, "agentId" | "timestamp">) => void;
 }
 

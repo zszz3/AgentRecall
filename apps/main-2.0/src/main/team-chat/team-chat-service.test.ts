@@ -983,6 +983,7 @@ describe("TeamChatService studio employees", () => {
     expect(calls[0]?.ownerReference).toMatchObject({
       roomId: fixture.room.id,
       messageId: expect.any(String),
+      agentId: one!.agentId,
       dispatchId: expect.any(String),
       attemptId: expect.any(String),
     });

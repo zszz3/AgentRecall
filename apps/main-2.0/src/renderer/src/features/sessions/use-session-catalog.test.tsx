@@ -55,7 +55,7 @@ describe("useSessionCatalog pagination", () => {
     }
 
     await act(async () => root.render(createElement(Harness)));
-    await vi.waitFor(() => expect(searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, origin: "all" })));
+    await vi.waitFor(() => expect(searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, origin: "ordinary" })));
 
     await act(async () => catalog.goToPage(3));
     await vi.waitFor(() => expect(searchSessionPage).toHaveBeenCalledWith(expect.objectContaining({ offset: 60 })));
@@ -113,6 +113,14 @@ describe("useSessionCatalog pagination", () => {
       expect.objectContaining({ sortBy: "smart", offset: 0 }),
     ));
     expect(catalog.currentPage).toBe(1);
+
+    await act(async () => {
+      catalog.setOrigin("agentrecall");
+      catalog.setInvocationSurface("workflow");
+    });
+    await vi.waitFor(() => expect(searchSessionPage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ origin: "agentrecall", invocationSurface: "workflow", offset: 0 }),
+    ));
   });
 });
 

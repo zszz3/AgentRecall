@@ -46,7 +46,7 @@ describe("TeamChatPage rooms", () => {
   let root: Root;
   let fixture: ReturnType<typeof createTeamChatFixture>;
   let teamChat: ReturnType<typeof createTeamChatFixture>;
-  let findSessionByRuntimeInvocationOwner = vi.fn();
+  let resolveRuntimeInvocationSession = vi.fn();
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -55,10 +55,10 @@ describe("TeamChatPage rooms", () => {
     root = createRoot(container);
     fixture = createTeamChatFixture();
     teamChat = fixture;
-    findSessionByRuntimeInvocationOwner = vi.fn(async () => null);
+    resolveRuntimeInvocationSession = vi.fn(async () => ({ status: "not_recorded" as const }));
     Object.defineProperty(window, "sessionSearch", {
       configurable: true,
-      value: { teamChat, findSessionByRuntimeInvocationOwner },
+      value: { teamChat, resolveRuntimeInvocationSession },
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
@@ -143,7 +143,10 @@ describe("TeamChatPage rooms", () => {
 
   it("opens the latest Session recorded for the active room", async () => {
     fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
-    findSessionByRuntimeInvocationOwner.mockResolvedValue({ sessionKey: "session-1" });
+    resolveRuntimeInvocationSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "session-1" },
+    });
     const onOpenSession = vi.fn();
 
     await act(async () => root.render(
@@ -162,7 +165,7 @@ describe("TeamChatPage rooms", () => {
       await Promise.resolve();
     });
 
-    expect(findSessionByRuntimeInvocationOwner).toHaveBeenCalledWith({ roomId: "room-alpha" });
+    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({ roomId: "room-alpha" });
     expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });
 
@@ -175,7 +178,10 @@ describe("TeamChatPage rooms", () => {
       senderName: "Builder",
       sourceMessageId: "human-message",
     }]);
-    findSessionByRuntimeInvocationOwner.mockResolvedValue({ sessionKey: "session-message" });
+    resolveRuntimeInvocationSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "session-message" },
+    });
     const onOpenSession = vi.fn();
 
     await act(async () => root.render(
@@ -192,9 +198,10 @@ describe("TeamChatPage rooms", () => {
       await Promise.resolve();
     });
 
-    expect(findSessionByRuntimeInvocationOwner).toHaveBeenCalledWith({
+    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
       roomId: "room-alpha",
       messageId: "human-message",
+      agentId: "member-1",
     });
     expect(onOpenSession).toHaveBeenCalledWith("session-message");
   });
@@ -400,6 +407,43 @@ describe("TeamChatPage rooms", () => {
       expect(container.textContent).toContain("Alpha earlier");
       expect(container.textContent).toContain("Alpha recent");
       expect(earlierMessagesButton(container)).toBeUndefined();
+    });
+  });
+
+  it("loads older pages until the preferred source message can be focused", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
+    const onPreferredConsumed = vi.fn();
+    teamChat.listMessages.mockImplementation(async (request: ListTeamChatMessagesRequest) => {
+      if (request.before === "alpha-before") {
+        return {
+          messages: [messageFixture("target-message", "room-alpha", 1, "Original request")],
+        };
+      }
+      return {
+        messages: [messageFixture("recent-message", "room-alpha", 2, "Recent reply")],
+        nextBefore: "alpha-before",
+      };
+    });
+
+    await act(async () => root.render(
+      <TeamChatPage
+        language="en"
+        preferredRoomId="room-alpha"
+        preferredMessageId="target-message"
+        onPreferredConsumed={onPreferredConsumed}
+      />,
+    ));
+
+    await vi.waitFor(() => expect(teamChat.listMessages).toHaveBeenCalledWith({
+      roomId: "room-alpha",
+      before: "alpha-before",
+      limit: 100,
+    }));
+    await vi.waitFor(() => {
+      const target = container.querySelector<HTMLElement>('[data-message-id="target-message"]');
+      expect(target).not.toBeNull();
+      expect(document.activeElement).toBe(target);
+      expect(onPreferredConsumed).toHaveBeenCalledOnce();
     });
   });
 

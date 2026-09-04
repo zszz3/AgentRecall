@@ -289,6 +289,15 @@ describe("PostgreSQL Turn search", () => {
     const ordinary = await searchRepository.searchSessionPage({ origin: "ordinary", excludeSubagents: true });
     expect(ordinary.sessions.map((item) => item.sessionKey).sort()).toEqual(["codex:roles", "codex:two"]);
     expect(ordinary.originCounts).toEqual({ ordinary: 2, agentRecall: 1, all: 3 });
+    expect(ordinary.invocationSurfaceCounts).toEqual({
+      workflow: 0,
+      evaluation: 1,
+      team_chat: 0,
+      agent: 0,
+      skill: 0,
+      system: 0,
+      all: 1,
+    });
     expect(ordinary.sessions.find((item) => item.sessionKey === "codex:two")).toMatchObject({
       createdByAgentRecall: false,
       runtimeInvocations: [expect.objectContaining({
@@ -311,10 +320,61 @@ describe("PostgreSQL Turn search", () => {
         ownerReference: { runId: "run-1", caseResultId: "case-1" },
       })],
     });
-    await expect(repository.findByRuntimeInvocationOwner({ runId: "run-1" }))
-      .resolves.toMatchObject({ sessionKey: "codex:one" });
-    await expect(repository.findByRuntimeInvocationOwner({ runId: "missing" }))
-      .resolves.toBeNull();
+    const evaluationSessions = await searchRepository.searchSessionPage({
+      origin: "agentrecall",
+      invocationSurface: "evaluation",
+      excludeSubagents: true,
+    });
+    expect(evaluationSessions.sessions.map((item) => item.sessionKey)).toEqual(["codex:one"]);
+    expect(evaluationSessions.originCounts).toEqual({ ordinary: 2, agentRecall: 1, all: 3 });
+    const workflowSessions = await searchRepository.searchSessionPage({
+      origin: "agentrecall",
+      invocationSurface: "workflow",
+      excludeSubagents: true,
+    });
+    expect(workflowSessions.sessions).toEqual([]);
+    await expect(repository.resolveRuntimeInvocationSession({ runId: "run-1" }))
+      .resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
+    await expect(repository.resolveRuntimeInvocationSession({ runId: "missing" }))
+      .resolves.toEqual({ status: "not_recorded" });
+
+    await invocations.begin({
+      id: "inv-no-reference",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "run-no-reference" } },
+      runtimeId: "dsh",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-22T08:00:00.000Z"),
+    });
+    await invocations.finish(
+      "inv-no-reference",
+      "failed",
+      Date.parse("2026-07-22T08:00:01.000Z"),
+    );
+    await expect(repository.resolveRuntimeInvocationSession({ runId: "run-no-reference" }))
+      .resolves.toEqual({
+        status: "no_session_reference",
+        invocationId: "inv-no-reference",
+        invocationStatus: "failed",
+      });
+
+    await invocations.begin({
+      id: "inv-awaiting-index",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "run-awaiting-index" } },
+      runtimeId: "codex",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-23T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-awaiting-index", {
+      runtimeId: "codex",
+      environmentId: "local",
+      sessionId: "not-indexed-yet",
+      relation: "created",
+      boundAt: Date.parse("2026-07-23T08:00:01.000Z"),
+    });
+    await expect(repository.resolveRuntimeInvocationSession({ runId: "run-awaiting-index" }))
+      .resolves.toEqual({ status: "not_indexed", invocationId: "inv-awaiting-index" });
   });
 
   it("filters both Claude and Codex StepCode variants as one source", async () => {

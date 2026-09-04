@@ -17,6 +17,7 @@ import type {
   ProjectQueryOptions,
   ProjectSummary,
   ProjectTagEntry,
+  RuntimeInvocationSessionResolution,
   SearchOptions,
   SessionEnvironment,
   SessionMessage,
@@ -80,11 +81,11 @@ export class SessionCatalogService {
     return this.dependencies.store.findByRawId(rawId);
   }
 
-  /** Returns the indexed Session owned by an exact Runtime invocation reference. */
-  async findByRuntimeInvocationOwner(
+  /** Resolves an invocation owner to a Session or an explicit unavailable reason. */
+  async resolveRuntimeInvocationSession(
     ownerReference: Record<string, string>,
-  ): Promise<SessionSearchResult | null> {
-    return this.dependencies.store.findByRuntimeInvocationOwner(ownerReference);
+  ): Promise<RuntimeInvocationSessionResolution> {
+    return this.dependencies.store.resolveRuntimeInvocationSession(ownerReference);
   }
 
   async get(sessionKey: string): Promise<SessionSearchResult | null> {

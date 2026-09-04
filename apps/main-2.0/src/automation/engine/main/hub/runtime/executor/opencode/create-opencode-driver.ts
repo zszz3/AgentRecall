@@ -27,6 +27,7 @@ export function createOpenCodeDriver(options: RuntimeAgentExecutorFactoryOptions
       ? new AcpWorkflowOneShotExecutor(context, {
           executable: context.runtime.command || options.executables.opencode,
           args: ["acp", "--cwd", context.workDir],
+          runtimeStateCodec: openCodeRuntimeStateCodec,
           modelId: context.runtimeConfig.model,
           mcpServers: [
             ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),

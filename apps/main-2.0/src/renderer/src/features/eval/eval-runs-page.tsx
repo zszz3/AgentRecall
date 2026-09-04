@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   AlertTriangle,
@@ -44,9 +44,13 @@ import {
 export function EvalRunsPage({
   language,
   onOpenSession,
+  initialRunId,
+  onInitialRunConsumed,
 }: {
   language: LanguageMode;
   onOpenSession: (sessionKey: string) => void;
+  initialRunId?: string;
+  onInitialRunConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [runs, setRuns] = useState<EvaluationRunSummary[] | null>(null);
@@ -58,6 +62,14 @@ export function EvalRunsPage({
   const [run, setRun] = useState<EvaluationRun | null>(null);
   const [loadingRun, setLoadingRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestedRunIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!initialRunId) return;
+    requestedRunIdRef.current = initialRunId;
+    setSelectedRunId(initialRunId);
+    onInitialRunConsumed?.();
+  }, [initialRunId, onInitialRunConsumed]);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -86,7 +98,7 @@ export function EvalRunsPage({
         )),
       ));
       setSelectedRunId((current) => (
-        current && nextRuns.some((item) => item.id === current)
+        current && (nextRuns.some((item) => item.id === current) || current === requestedRunIdRef.current)
           ? current
           : nextRuns[0]?.id ?? null
       ));
@@ -141,7 +153,10 @@ export function EvalRunsPage({
     void (async () => {
       try {
         const next = await window.sessionSearch.automation.getEvaluationRun(selectedRunId);
-        if (!cancelled) setRun(next ?? null);
+        if (!cancelled) {
+          setRun(next ?? null);
+          if (selectedRunId === requestedRunIdRef.current) requestedRunIdRef.current = undefined;
+        }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       } finally {

@@ -42,6 +42,7 @@ import { modelDisplayLabel } from "../../../../automation/engine/shared/models";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { useAutomationDetails } from "../automation/automation-provider";
+import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 
 interface StreamDraft {
   dispatchId: string;
@@ -162,11 +163,13 @@ export function TeamChatPage({
   language,
   preferredRoomId,
   preferredMessageId,
+  onPreferredConsumed,
   onOpenSession,
 }: {
   language: LanguageMode;
   preferredRoomId?: string;
   preferredMessageId?: string;
+  onPreferredConsumed?: () => void;
   onOpenSession?: (sessionKey: string) => void;
 }): ReactElement {
   const l = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
@@ -223,17 +226,43 @@ export function TeamChatPage({
   const focusedMessageIdRef = useRef<string | undefined>(undefined);
   const skipNextAutoScrollRef = useRef(false);
 
+  useEffect(() => {
+    focusedMessageIdRef.current = undefined;
+  }, [preferredMessageId, preferredRoomId]);
+
+  useEffect(() => {
+    if (
+      !preferredRoomId
+      || preferredMessageId
+      || selectedRoomId !== preferredRoomId
+      || activeRoom?.id !== preferredRoomId
+      || loadingMessages
+    ) return;
+    onPreferredConsumed?.();
+  }, [
+    activeRoom?.id,
+    loadingMessages,
+    onPreferredConsumed,
+    preferredMessageId,
+    preferredRoomId,
+    selectedRoomId,
+  ]);
+
   const openLatestRoomSession = async (): Promise<void> => {
     if (!activeRoom) return;
     try {
-      const session = await window.sessionSearch.findSessionByRuntimeInvocationOwner({
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
         roomId: activeRoom.id,
       });
-      if (!session) {
-        setContextFeedback(l("This room's latest Session has not been indexed yet.", "该工作室最近的 Session 尚未完成索引。"));
+      if (resolution.status !== "found") {
+        setContextFeedback(runtimeSessionUnavailableMessage(
+          resolution,
+          { en: "this room's latest reply", zh: "该工作室最近一次回复" },
+          language,
+        ));
         return;
       }
-      onOpenSession?.(session.sessionKey);
+      onOpenSession?.(resolution.session.sessionKey);
     } catch (error) {
       setContextFeedback(errorMessage(error));
     }
@@ -242,15 +271,20 @@ export function TeamChatPage({
   const openMessageSession = async (message: TeamChatMessage): Promise<void> => {
     const messageId = message.sourceMessageId ?? message.id;
     try {
-      const session = await window.sessionSearch.findSessionByRuntimeInvocationOwner({
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
         roomId: message.roomId,
         messageId,
+        ...(message.senderAgentId ? { agentId: message.senderAgentId } : {}),
       });
-      if (!session) {
-        setContextFeedback(l("This message's Session has not been indexed yet.", "该消息对应的 Session 尚未完成索引。"));
+      if (resolution.status !== "found") {
+        setContextFeedback(runtimeSessionUnavailableMessage(
+          resolution,
+          { en: "this message", zh: "该消息" },
+          language,
+        ));
         return;
       }
-      onOpenSession?.(session.sessionKey);
+      onOpenSession?.(resolution.session.sessionKey);
     } catch (error) {
       setContextFeedback(errorMessage(error));
     }
@@ -543,16 +577,6 @@ export function TeamChatPage({
     transcriptEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, streams]);
 
-  useEffect(() => {
-    if (!preferredMessageId || focusedMessageIdRef.current === preferredMessageId) return;
-    const target = [...document.querySelectorAll<HTMLElement>("[data-message-id]")]
-      .find((element) => element.dataset.messageId === preferredMessageId);
-    if (!target) return;
-    focusedMessageIdRef.current = preferredMessageId;
-    target.scrollIntoView?.({ block: "center" });
-    target.focus?.();
-  }, [messages, preferredMessageId]);
-
   const loadEarlierMessages = useCallback(async (): Promise<void> => {
     const roomId = selectedRoomIdRef.current;
     if (!roomId || activeRoom?.id !== roomId || !nextBefore || loadingEarlierRef.current) return;
@@ -590,6 +614,49 @@ export function TeamChatPage({
       }
     }
   }, [activeRoom?.id, api, isCurrentRoomScope, nextBefore, setContextFeedback]);
+
+  useEffect(() => {
+    if (!preferredMessageId || focusedMessageIdRef.current === preferredMessageId) return;
+    const target = [...document.querySelectorAll<HTMLElement>("[data-message-id]")]
+      .find((element) => element.dataset.messageId === preferredMessageId);
+    if (target) {
+      focusedMessageIdRef.current = preferredMessageId;
+      target.scrollIntoView?.({ block: "center" });
+      target.focus?.();
+      onPreferredConsumed?.();
+      return;
+    }
+    if (
+      selectedRoomId === preferredRoomId
+      && nextBefore
+      && !loadingMessages
+      && !loadingEarlier
+    ) {
+      void loadEarlierMessages();
+      return;
+    }
+    if (
+      selectedRoomId === preferredRoomId
+      && activeRoom?.id === preferredRoomId
+      && !loadingMessages
+      && !loadingEarlier
+      && !nextBefore
+    ) {
+      focusedMessageIdRef.current = preferredMessageId;
+      onPreferredConsumed?.();
+    }
+  }, [
+    activeRoom?.id,
+    loadEarlierMessages,
+    loadingEarlier,
+    loadingMessages,
+    messages,
+    nextBefore,
+    onPreferredConsumed,
+    preferredMessageId,
+    preferredRoomId,
+    selectedRoomId,
+  ]);
 
   const sendMessage = useCallback(async (): Promise<void> => {
     const content = composer.trim();

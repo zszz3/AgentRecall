@@ -276,8 +276,18 @@ export class RuntimeRouter {
       },
     }, input.channelId);
     await lifecycle.begin();
+    let callbackQueue = Promise.resolve();
     try {
-      const result = await driver.testChannel({ ...input, invocationId: lifecycle.id });
+      const result = await driver.testChannel({
+        ...input,
+        invocationId: lifecycle.id,
+        emit: (event) => input.emit({ ...event, invocationId: lifecycle.id }),
+        reportExecutionReference: (reference) => {
+          callbackQueue = callbackQueue.then(() => lifecycle.bindReference(reference));
+          void callbackQueue.catch(() => undefined);
+        },
+      });
+      await callbackQueue;
       await lifecycle.finish("completed");
       return result;
     } catch (error) {

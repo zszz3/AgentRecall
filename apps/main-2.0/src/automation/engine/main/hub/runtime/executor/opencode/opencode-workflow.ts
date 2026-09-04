@@ -1,6 +1,7 @@
-import type { AgentRuntime, WorkflowAgentResponse } from "../../../../../shared/types";
+import type { AgentRuntime, RuntimeConversation, WorkflowAgentResponse } from "../../../../../shared/types";
 import { runtimeModelId } from "../../../../../shared/models";
 import { OpenCodeRunner } from "../../../../agents/opencode/opencode-runner";
+import { openCodeRuntimeStateCodec } from "../../../../agents/opencode/opencode-runtime-state-codec";
 import type { RuntimeChannelTestContext, RuntimeWorkflowRequestContext } from "../../../../agents/runtime/runtime-driver";
 import { developerInstructionsForWorkflowRequest, modelFromRuntimeConfig, type RuntimeWorkflowExecutionOptions } from "../workflow/agent-executor-workflow-shared";
 import { promptWithDeveloperInstructions } from "../runtime-instructions";
@@ -15,6 +16,7 @@ export async function runOpenCodeWorkflow(
   let exitCode: number | null = 0;
   let stderr = "";
   let runnerError: string | undefined;
+  let runtimeConversation: RuntimeConversation | undefined;
 
   const runner = new OpenCodeRunner({
     executable: input.runtime.command || options.executables.opencode,
@@ -25,6 +27,12 @@ export async function runOpenCodeWorkflow(
     ),
     modelId: modelFromRuntimeConfig(input.runtimeConfig),
     onEvent: (event) => {
+      if (event.type === "runtime_conversation") {
+        runtimeConversation = event.runtimeConversation;
+        const sessionId = openCodeRuntimeStateCodec.decodeConversation(runtimeConversation)?.native.sessionId;
+        if (sessionId) input.reportExecutionReference?.({ sessionId });
+        return;
+      }
       if (event.type === "delta") {
         content += event.content;
         input.onEvent?.({ requestId: input.requestId, type: "delta", content: event.content });
@@ -32,7 +40,12 @@ export async function runOpenCodeWorkflow(
       }
       if (event.type === "completed") {
         if (!content && event.content) content = event.content;
-        input.onEvent?.({ requestId: input.requestId, type: "completed", content: content.trim() });
+        input.onEvent?.({
+          requestId: input.requestId,
+          type: "completed",
+          content: content.trim(),
+          ...(runtimeConversation ? { runtimeConversation } : {}),
+        });
         return;
       }
       if (event.type === "error") {
@@ -59,7 +72,12 @@ export async function runOpenCodeWorkflow(
     throw new Error(`OpenCode exited with ${exitCode ?? "unknown"}: ${(stderr.trim() || output || "no output").slice(0, 800)}`);
   }
   if (!output) throw new Error("OpenCode completed without assistant text.");
-  return { content: output };
+  const sessionId = openCodeRuntimeStateCodec.decodeConversation(runtimeConversation)?.native.sessionId;
+  return {
+    content: output,
+    ...(runtimeConversation ? { runtimeConversation } : {}),
+    ...(sessionId ? { executionReference: { sessionId } } : {}),
+  };
 }
 
 export async function runOpenCodeChannelTest(
@@ -76,10 +94,12 @@ export async function runOpenCodeChannelTest(
       executionMode: "oneshot",
       continuationPolicy: "fresh",
       runtimeConfig: { model: input.modelId },
+      invocationId: input.invocationId,
       invocation: { surface: "system", role: "channel_test", ownerReference: { channelId: input.channelId } },
       runtime: input.runtime as AgentRuntime,
       channelId: input.channelId,
       workDir: input.workDir,
+      reportExecutionReference: input.reportExecutionReference,
       onEvent: (event) => {
         if (event.type === "error") input.emit({ type: "error", content: event.error });
       },

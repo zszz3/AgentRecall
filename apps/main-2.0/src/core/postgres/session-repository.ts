@@ -5,6 +5,8 @@ import type {
   ProjectQueryOptions,
   ProjectSummary,
   ProjectTagEntry,
+  RuntimeInvocationSessionResolution,
+  RuntimeInvocationSummary,
   SessionMessage,
   SessionMessageEvent,
   SessionSearchResult,
@@ -1912,11 +1914,26 @@ export class PostgresSessionRepository {
     return result.rows[0] ? hydrateSession(result.rows[0]) : null;
   }
 
-  /** Finds the indexed Session linked to an exact persisted invocation owner reference. */
-  async findByRuntimeInvocationOwner(
+  /** Resolves an exact invocation owner without conflating missing bindings with indexing delay. */
+  async resolveRuntimeInvocationSession(
     ownerReference: Record<string, string>,
-  ): Promise<SessionSearchResult | null> {
-    if (Object.keys(ownerReference).length === 0) return null;
+  ): Promise<RuntimeInvocationSessionResolution> {
+    if (Object.keys(ownerReference).length === 0) return { status: "not_recorded" };
+    const invocation = (await this.database.query<{
+      id: string;
+      status: RuntimeInvocationSummary["status"];
+    }>(
+      `
+        select id, status
+        from agent_recall.runtime_invocations
+        where initiator = 'agentrecall'
+          and owner_reference @> $1::jsonb
+        order by started_at desc, id desc
+        limit 1
+      `,
+      [postgresJsonValue(ownerReference)],
+    )).rows[0];
+    if (!invocation) return { status: "not_recorded" };
     const result = await this.database.query<SessionRow>(
       `
         select ${SESSION_SELECT_SQL}
@@ -1929,14 +1946,32 @@ export class PostgresSessionRepository {
             on invocations.id = bindings.invocation_id
           where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
             and invocations.initiator = 'agentrecall'
-            and invocations.owner_reference @> $1::jsonb
+            and invocations.id = $1
         )
         order by ${SESSION_ACTIVITY_SQL} desc, sessions.session_key
         limit 1
       `,
-      [postgresJsonValue(ownerReference)],
+      [invocation.id],
     );
-    return result.rows[0] ? hydrateSession(result.rows[0]) : null;
+    if (result.rows[0]) {
+      return { status: "found", session: hydrateSession(result.rows[0]) };
+    }
+    const bindingExists = Boolean((await this.database.query<{ found: boolean }>(
+      `
+        select exists (
+          select 1
+          from agent_recall.runtime_session_bindings
+          where invocation_id = $1
+        ) as found
+      `,
+      [invocation.id],
+    )).rows[0]?.found);
+    if (bindingExists) return { status: "not_indexed", invocationId: invocation.id };
+    return {
+      status: "no_session_reference",
+      invocationId: invocation.id,
+      invocationStatus: invocation.status,
+    };
   }
 
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {

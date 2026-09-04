@@ -5,6 +5,7 @@ import type { RuntimeUsage } from "../../../shared/runtime/usage";
 import type { WorkflowNodeConversation } from "./workflow-v2/conversation";
 import type { ConfiguredAgent } from "./agent/types";
 import type { WorkflowDraftState, WorkflowStoreState } from "./workflow/draft";
+import type { AgentRecallInvocationSurface } from "../../../shared/runtime-invocation";
 export {
   isWorkflowRunTerminalStatus,
   type WorkflowArtifactReference,
@@ -18,6 +19,7 @@ export {
 export type { ResourceSourceType } from "./resource";
 export type { RuntimeConversation } from "./runtime/conversation";
 export type { RuntimeUsage } from "../../../shared/runtime/usage";
+export type { AgentRecallInvocationSurface } from "../../../shared/runtime-invocation";
 export type { AgentRevision, AgentType, ConfiguredAgent } from "./agent/types";
 export type {
   AgentMcpBinding,
@@ -301,7 +303,7 @@ export interface ProviderBalanceResult {
   queriedAt: number;
 }
 
-export type AgentTestEvent =
+export type AgentTestEvent = (
   | { agentId: string; type: "phase"; content: string; timestamp: number }
   | { agentId: string; type: "user"; content: string; timestamp: number }
   | { agentId: string; type: "assistant_delta"; content: string; timestamp: number }
@@ -309,7 +311,11 @@ export type AgentTestEvent =
   | { agentId: string; type: "tool"; content: string; timestamp: number }
   | { agentId: string; type: "warning"; content: string; timestamp: number }
   | { agentId: string; type: "stderr"; content: string; timestamp: number }
-  | { agentId: string; type: "error"; content: string; timestamp: number };
+  | { agentId: string; type: "error"; content: string; timestamp: number }
+) & {
+  /** Stable Runtime invocation shared by channel-test status and logs. */
+  invocationId?: string;
+};
 
 export interface GeneratedConfigFile {
   channelId: string;
@@ -345,15 +351,6 @@ export interface ClaudeDefaultConfig {
 export type ExecutionStyle = "oneshot" | "interactive";
 export type RuntimeExecutionMode = ExecutionStyle;
 export type RuntimeContinuationPolicy = "fresh" | "resume-preferred" | "resume-required";
-
-/** Product surface that initiated a persisted AgentRecall Runtime invocation. */
-export type AgentRecallInvocationSurface =
-  | "workflow"
-  | "evaluation"
-  | "team_chat"
-  | "agent"
-  | "skill"
-  | "system";
 
 /** Stable business metadata attached to every Runtime dispatch. */
 export interface RuntimeInvocationRequest {

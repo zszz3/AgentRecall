@@ -164,6 +164,51 @@ describe("RuntimeRouter invocation lifecycle", () => {
     }));
   });
 
+  test("binds the native Session created by a channel test", async () => {
+    const events: string[] = [];
+    const runtimeDriver: RuntimeDriver = {
+      ...driver(async () => ({ content: "unused" })),
+      surfaceSupport: [{
+        surface: "channel-test",
+        executionModes: ["oneshot"],
+        continuationPolicies: ["fresh"],
+      }],
+      testChannel: async (input) => {
+        expect(input.invocationId).toBe("invocation-channel-test");
+        input.emit({ type: "phase", content: "Runtime started" });
+        input.reportExecutionReference?.({ sessionId: "thread-channel-test" });
+        return "OK";
+      },
+    };
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      recorder(events),
+      () => 3_500,
+      () => "invocation-channel-test",
+    );
+
+    const emit = vi.fn();
+    await expect(router.testChannel("codex", {
+      runtime,
+      channelId: "codex-default",
+      modelId: "default",
+      workDir: "/workspace",
+      emit,
+    })).resolves.toBe("OK");
+
+    expect(emit).toHaveBeenCalledWith({
+      type: "phase",
+      content: "Runtime started",
+      invocationId: "invocation-channel-test",
+    });
+
+    expect(events).toEqual([
+      "begin:system",
+      "bind:thread-channel-test:created",
+      "finish:completed",
+    ]);
+  });
+
   test("marks a resume-preferred fallback as created when the Runtime returns a new Session", async () => {
     const events: string[] = [];
     const runtimeDriver = driver(async (input) => {

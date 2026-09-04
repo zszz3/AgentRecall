@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
 }));
 
 const sessionSearch = vi.hoisted(() => ({
-  findSessionByRuntimeInvocationOwner: vi.fn(),
+  resolveRuntimeInvocationSession: vi.fn(),
 }));
 
 vi.mock("../../../../automation/engine/renderer/src/app/services/agent-recall-service", () => ({
@@ -236,7 +236,10 @@ describe("WorkflowFeaturePage live output", () => {
   it("opens the Session recorded for the selected Workflow run", async () => {
     const snapshot = completedWorkflow();
     const onOpenSession = vi.fn();
-    sessionSearch.findSessionByRuntimeInvocationOwner.mockResolvedValue({ sessionKey: "session-1" });
+    sessionSearch.resolveRuntimeInvocationSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "session-1" },
+    });
     api.getWorkflowCore.mockResolvedValue({ definitions: [snapshot.definition], runs: [snapshot.run] });
 
     await act(async () => {
@@ -266,7 +269,7 @@ describe("WorkflowFeaturePage live output", () => {
       await Promise.resolve();
     });
 
-    expect(sessionSearch.findSessionByRuntimeInvocationOwner).toHaveBeenCalledWith({
+    expect(sessionSearch.resolveRuntimeInvocationSession).toHaveBeenCalledWith({
       workflowId: "workflow-1",
       runId: "run-1",
       nodeId: "inspect-code",

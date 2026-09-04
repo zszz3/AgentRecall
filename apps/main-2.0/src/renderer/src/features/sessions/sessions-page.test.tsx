@@ -30,6 +30,7 @@ describe("SessionsPage search tools", () => {
       options: {
         query: "migration",
         source: "codex",
+        origin: "agentrecall",
         tag: "important",
         visibility: "favorites",
         dateFrom: Date.parse("2026-07-01T00:00:00.000Z"),
@@ -40,13 +41,14 @@ describe("SessionsPage search tools", () => {
       useCount: 0,
     };
     const listSavedSearches = vi.fn(async () => [savedSearch]);
+    const createSavedSearch = vi.fn(async () => savedSearch);
     const touchSavedSearch = vi.fn(async () => undefined);
     Object.defineProperty(window, "sessionSearch", {
       configurable: true,
       value: {
         platform: "win32",
         listSavedSearches,
-        createSavedSearch: vi.fn(async () => savedSearch),
+        createSavedSearch,
         deleteSavedSearch: vi.fn(async () => true),
         touchSavedSearch,
       },
@@ -57,17 +59,21 @@ describe("SessionsPage search tools", () => {
     await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
     expect(container.querySelector(".toolbar-primary .searchbox")).not.toBeNull();
     expect(container.querySelector(".toolbar-secondary .toolbar-filters")).not.toBeNull();
-    const invocationGroup = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-filter button")]
-      .find((button) => button.textContent?.includes("AgentRecall calls"));
+    const invocationGroup = container.querySelector<HTMLButtonElement>(".agentrecall-session-group-header");
     expect(invocationGroup?.textContent).toContain("(2)");
     await act(async () => invocationGroup?.click());
     expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
-    const collapsedGroup = container.querySelector<HTMLButtonElement>(".session-origin-group .result-group-head");
-    expect(collapsedGroup?.getAttribute("aria-expanded")).toBe("false");
-    expect(container.querySelector(".session-origin-group .grouped-results")).toBeNull();
-    await act(async () => collapsedGroup?.click());
-    expect(collapsedGroup?.getAttribute("aria-expanded")).toBe("true");
-    expect(container.querySelector(".session-origin-group .grouped-results")).not.toBeNull();
+    expect(actions.setInvocationSurface).toHaveBeenCalledWith("all");
+    await act(async () => root.render(
+      <SessionsPage model={{ ...model, origin: "agentrecall" }} actions={actions} />,
+    ));
+    expect(container.querySelector(".agentrecall-session-surfaces")).not.toBeNull();
+    const workflowSurface = [...container.querySelectorAll<HTMLButtonElement>(".agentrecall-session-surfaces button")]
+      .find((button) => button.textContent?.includes("Workflow"));
+    await act(async () => workflowSurface?.click());
+    expect(actions.setInvocationSurface).toHaveBeenCalledWith("workflow");
+    expect(container.querySelector(".grouped-results")?.textContent).toContain("ordinary");
+    expect(container.querySelector(".grouped-results")?.textContent).toContain("agentrecall");
 
     const advancedButton = buttonByLabel(container, "Advanced search");
     await act(async () => advancedButton.click());
@@ -86,10 +92,25 @@ describe("SessionsPage search tools", () => {
       <SessionsPage model={{ ...model, sessionTotalCount: 1 }} actions={actions} />,
     ));
     expect(container.querySelector<HTMLSelectElement>(".query-builder select")?.value).toBe("codex");
+    const saveButton = [...container.querySelectorAll<HTMLButtonElement>(".query-builder-actions button")]
+      .find((button) => button.textContent?.trim() === "Save");
+    await act(async () => saveButton?.click());
+    const saveName = container.querySelector<HTMLInputElement>('.query-builder-save input');
+    if (!saveName) throw new Error("Expected saved-search name input");
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(saveName, "Runtime calls");
+    await act(async () => saveName.dispatchEvent(new Event("input", { bubbles: true })));
+    const saveSearchButton = [...container.querySelectorAll<HTMLButtonElement>(".query-builder-save button")]
+      .find((button) => button.textContent?.includes("Save search"));
+    await act(async () => saveSearchButton?.click());
+    expect(createSavedSearch).toHaveBeenCalledWith("Runtime calls", expect.objectContaining({
+      origin: "all",
+      source: "codex",
+    }));
     const applyButton = [...container.querySelectorAll<HTMLButtonElement>(".query-builder button")]
       .find((button) => button.textContent?.includes("Apply"));
     await act(async () => applyButton?.click());
     expect(actions.setSource).toHaveBeenCalledWith("codex");
+    expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
 
     const groupButton = buttonByLabel(container, "Group results");
     await act(async () => groupButton.click());
@@ -101,7 +122,7 @@ describe("SessionsPage search tools", () => {
     expect(actions.setSortBy).toHaveBeenCalledWith("activity");
 
     await act(async () => buttonByLabel(container, "Saved searches").click());
-    await vi.waitFor(() => expect(listSavedSearches).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(listSavedSearches).toHaveBeenCalledTimes(2));
     const savedSearchButton = container.querySelector<HTMLButtonElement>(".saved-search-apply");
     expect(savedSearchButton?.textContent).toContain("Codex favorites");
     await act(async () => savedSearchButton?.click());
@@ -124,6 +145,16 @@ function createModel(): SessionsPageModel {
     sessionTotalCount: 0,
     origin: "all",
     originCounts: { ordinary: 3, agentRecall: 2, all: 5 },
+    invocationSurface: "all",
+    invocationSurfaceCounts: {
+      workflow: 1,
+      evaluation: 0,
+      team_chat: 1,
+      agent: 0,
+      skill: 0,
+      system: 0,
+      all: 2,
+    },
     sidebarSections: { environments: false, remaining: false, sources: false, views: false },
     environmentId: "all",
     tags: ["important"],
@@ -210,6 +241,7 @@ function createActions(): SessionsPageActions {
     deleteTag: vi.fn(),
     setSource: vi.fn(),
     setOrigin: vi.fn(),
+    setInvocationSurface: vi.fn(),
     setTag: vi.fn(),
     setVisibility: vi.fn(),
     search: vi.fn(),

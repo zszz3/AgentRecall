@@ -842,6 +842,69 @@
 .bulk-result-actions button:hover { color: var(--text); }
 .bulk-result-actions .bulk-delete-button { color: var(--danger); }
 
+.agentrecall-session-group {
+  margin: 0 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--panel-bg);
+}
+
+.agentrecall-session-group.is-open {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
+}
+
+.agentrecall-session-group-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.agentrecall-session-group-header:hover,
+.agentrecall-session-group.is-open .agentrecall-session-group-header {
+  color: var(--text);
+}
+
+.agentrecall-session-group-header strong {
+  min-width: 22px;
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  font-size: 11px;
+  text-align: center;
+}
+
+.agentrecall-session-surfaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 10px 31px;
+}
+
+.agentrecall-session-surfaces button {
+  min-height: 25px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.agentrecall-session-surfaces button:hover,
+.agentrecall-session-surfaces button.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
 .selected-path {
   max-width: 52%;
   overflow: hidden;

@@ -41,6 +41,7 @@ import type {
   SessionSortBy,
 } from "../../../../core/types";
 import type { SavedSearch } from "../../../../core/store/saved-searches";
+import { AGENT_RECALL_INVOCATION_SURFACES } from "../../../../shared/runtime-invocation";
 import {
   DATE_RANGE_OPTIONS,
   dateRangeLabel,
@@ -104,6 +105,8 @@ export interface SessionsPageModel {
   source: SearchOptions["source"];
   origin: NonNullable<SearchOptions["origin"]>;
   originCounts: { ordinary: number; agentRecall: number; all: number };
+  invocationSurface: NonNullable<SearchOptions["invocationSurface"]>;
+  invocationSurfaceCounts: Record<NonNullable<SearchOptions["invocationSurface"]>, number>;
   sourceFilters: Array<{ label: string; value: SearchOptions["source"] }>;
   visibility: "default" | "favorites" | "hidden";
   searchRef: RefObject<HTMLInputElement | null>;
@@ -138,6 +141,7 @@ export interface SessionsPageActions {
   deleteTag(tagName: string): void;
   setSource(source: SearchOptions["source"]): void;
   setOrigin(origin: NonNullable<SearchOptions["origin"]>): void;
+  setInvocationSurface(surface: NonNullable<SearchOptions["invocationSurface"]>): void;
   setTag(tag: string | undefined): void;
   setVisibility(visibility: SessionsPageModel["visibility"]): void;
   search(query: string): void;
@@ -176,10 +180,7 @@ export function SessionsPage({
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
-  const [agentRecallGroupOpen, setAgentRecallGroupOpen] = useState(false);
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
-  const ordinarySessions = model.sessions.filter((session) => !session.createdByAgentRecall);
-  const agentRecallSessions = model.sessions.filter((session) => session.createdByAgentRecall);
   const queryBuilderState = useMemo<QueryBuilderState>(() => ({
     source: model.source === "all" ? undefined : model.source,
     tag: model.tag,
@@ -210,7 +211,12 @@ export function SessionsPage({
 
   function saveCurrentSearch(name: string, state: QueryBuilderState): void {
     void window.sessionSearch
-      .createSavedSearch(name, { query: model.query, ...toSearchOptionsPatch(state) })
+      .createSavedSearch(name, {
+        query: model.query,
+        origin: model.origin,
+        invocationSurface: model.invocationSurface,
+        ...toSearchOptionsPatch(state),
+      })
       .then(loadSavedSearches)
       .catch(() => undefined);
   }
@@ -218,6 +224,8 @@ export function SessionsPage({
   function applySavedSearch(saved: SavedSearch): void {
     if (saved.options.query !== undefined) actions.search(saved.options.query);
     actions.setSource(saved.options.source ?? "all");
+    actions.setOrigin(saved.options.origin ?? "ordinary");
+    actions.setInvocationSurface(saved.options.invocationSurface ?? "all");
     actions.setTag(saved.options.tag);
     actions.setVisibility(saved.options.visibility ?? "default");
     if (Number.isFinite(saved.options.dateFrom) && Number.isFinite(saved.options.dateTo)) {
@@ -504,21 +512,20 @@ export function SessionsPage({
               <button
                 type="button"
                 className={model.origin === "ordinary" ? "active" : ""}
-                onClick={() => actions.setOrigin("ordinary")}
+                onClick={() => {
+                  actions.setInvocationSurface("all");
+                  actions.setOrigin("ordinary");
+                }}
               >
                 {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
               </button>
               <button
                 type="button"
-                className={model.origin === "agentrecall" ? "active" : ""}
-                onClick={() => actions.setOrigin(model.origin === "agentrecall" ? "ordinary" : "agentrecall")}
-              >
-                {l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}
-              </button>
-              <button
-                type="button"
                 className={model.origin === "all" ? "active" : ""}
-                onClick={() => actions.setOrigin("all")}
+                onClick={() => {
+                  actions.setInvocationSurface("all");
+                  actions.setOrigin("all");
+                }}
               >
                 {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
               </button>
@@ -553,31 +560,46 @@ export function SessionsPage({
             : null}
         </div>
 
+        <section className={`agentrecall-session-group ${model.origin === "agentrecall" ? "is-open" : ""}`}>
+          <button
+            type="button"
+            className="agentrecall-session-group-header"
+            aria-expanded={model.origin === "agentrecall"}
+            onClick={() => {
+              const opening = model.origin !== "agentrecall";
+              actions.setInvocationSurface("all");
+              actions.setOrigin(opening ? "agentrecall" : "ordinary");
+            }}
+          >
+            {model.origin === "agentrecall" ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span>{l("AgentRecall calls", "AgentRecall 调用")}</span>
+            <strong>({model.originCounts.agentRecall})</strong>
+          </button>
+          {model.origin === "agentrecall" ? (
+            <div className="agentrecall-session-surfaces" role="group" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
+              <button
+                type="button"
+                className={model.invocationSurface === "all" ? "active" : ""}
+                onClick={() => actions.setInvocationSurface("all")}
+              >
+                {l("All", "全部")} ({model.invocationSurfaceCounts.all})
+              </button>
+              {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
+                <button
+                  type="button"
+                  key={surface}
+                  className={model.invocationSurface === surface ? "active" : ""}
+                  onClick={() => actions.setInvocationSurface(surface)}
+                >
+                  {invocationSurfaceFilterLabel(surface, model.language)} ({model.invocationSurfaceCounts[surface]})
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
         <div key={model.currentPage} className="results">
-          {model.origin === "all" ? (
-            <>
-              {renderSessionResults(ordinarySessions)}
-              {model.originCounts.agentRecall > 0 ? (
-                <section className="result-group session-origin-group">
-                  <button
-                    type="button"
-                    className="result-group-head"
-                    aria-expanded={agentRecallGroupOpen}
-                    onClick={() => setAgentRecallGroupOpen((current) => !current)}
-                  >
-                    {agentRecallGroupOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    <span className="result-group-label">{l("AgentRecall calls", "AgentRecall 调用")}</span>
-                    <span className="result-group-count">{model.originCounts.agentRecall}</span>
-                  </button>
-                  {agentRecallGroupOpen ? (
-                    renderSessionResults(agentRecallSessions)
-                  ) : null}
-                </section>
-              ) : null}
-            </>
-          ) : (
-            renderSessionResults(model.sessions)
-          )}
+          {renderSessionResults(model.sessions)}
           {model.sessions.length === 0
             ? <div className="empty">{l("No sessions found.", "没有找到会话。")}</div>
             : null}
@@ -613,6 +635,21 @@ export function SessionsPage({
       </section>
     </div>
   );
+}
+
+function invocationSurfaceFilterLabel(
+  surface: Exclude<NonNullable<SearchOptions["invocationSurface"]>, "all">,
+  language: LanguageMode,
+): string {
+  const labels = {
+    workflow: ["Workflow", "Workflow"],
+    evaluation: ["Eval", "评估"],
+    team_chat: ["Team Chat", "团队聊天"],
+    agent: ["Agent", "Agent"],
+    skill: ["Skill", "Skill"],
+    system: ["System", "系统任务"],
+  } as const;
+  return labels[surface][language === "zh" ? 1 : 0];
 }
 
 function paginationItems(currentPage: number, totalPages: number): number[] {

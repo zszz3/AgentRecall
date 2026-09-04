@@ -65,6 +65,11 @@ function createRunner(
       ...overrides,
     }, {
       platform: "linux",
+      createSessionDiscovery: () => ({
+        prepare: () => undefined,
+        observe: () => undefined,
+        finish: async () => undefined,
+      }),
       ...dependencies,
     }),
     events,
@@ -99,6 +104,31 @@ describe("DshRunner", () => {
 
     expect(events).toEqual([{ type: "completed", content: "最终答案" }]);
     expect(exits).toEqual([0]);
+  });
+
+  test("reports the Session discovered during the owned headless run", async () => {
+    const proc = createProcess();
+    const createSessionDiscovery = vi.fn((_sessionsRoot: string, onSessionId: (sessionId: string) => void) => ({
+      prepare: () => undefined,
+      observe: () => onSessionId("session-dsh-created"),
+      finish: async () => undefined,
+    }));
+    const { runner, events } = createRunner({}, { createSessionDiscovery });
+    const started = runner.start();
+
+    proc.stdout.write("Done");
+    proc.emit("close", 0, null);
+    await started;
+
+    expect(createSessionDiscovery).toHaveBeenCalledOnce();
+    expect(events[0]).toMatchObject({
+      type: "runtime_conversation",
+      runtimeConversation: {
+        runtimeId: "dsh",
+        payload: { native: { sessionId: "session-dsh-created" } },
+      },
+    });
+    expect(events[1]).toEqual({ type: "completed", content: "Done" });
   });
 
   test("reports a successful process that produced no assistant text", async () => {

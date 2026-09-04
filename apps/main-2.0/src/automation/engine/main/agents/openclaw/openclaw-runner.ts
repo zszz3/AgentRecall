@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { AgentEvent } from "../../../shared/types";
 import { runtimeModelId } from "../../../shared/models";
 import { spawnCli } from "../../platform/cli-launcher";
+import { openClawRuntimeStateCodec } from "./openclaw-runtime-state-codec";
 
 const MAX_STDERR_CHARS = 8_000;
 
@@ -10,7 +11,7 @@ export interface OpenClawRunOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   prompt: string;
-  sessionKey: string;
+  sessionId: string;
   modelId?: string;
   onEvent: (event: AgentEvent) => void;
   onStderr?: (text: string) => void;
@@ -61,8 +62,8 @@ export class OpenClawRunner {
   async start(): Promise<void> {
     const args = [
       "agent",
-      "--session-key",
-      this.options.sessionKey,
+      "--session-id",
+      this.options.sessionId,
       "--message",
       this.options.prompt,
       "--json",
@@ -82,6 +83,16 @@ export class OpenClawRunner {
       this.proc = undefined;
       throw new Error("OpenClaw runner failed to create stdout/stderr pipes.");
     }
+    this.options.onEvent({
+      type: "runtime_conversation",
+      runtimeConversation: openClawRuntimeStateCodec.encodeConversation({
+        native: { sessionId: this.options.sessionId },
+        appContext: {
+          cwd: this.options.cwd,
+          ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
+        },
+      }),
+    });
 
     let stdout = "";
     let stderr = "";

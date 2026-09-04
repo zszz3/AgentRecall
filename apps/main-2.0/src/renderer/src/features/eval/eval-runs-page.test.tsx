@@ -141,6 +141,28 @@ async function render(): Promise<void> {
 }
 
 describe("EvalRunsPage", () => {
+  it("opens an explicitly requested run even when it is older than the listed page", async () => {
+    harness.listRuns.mockResolvedValue({ items: [summary()], total: 51, offset: 0, limit: 50 });
+    harness.getRun.mockImplementation(async (runId: string) => ({
+      ...graphRun(),
+      id: runId,
+      startedAt: 99,
+    }));
+    const onInitialRunConsumed = vi.fn();
+
+    await act(async () => {
+      root.render(createElement(EvalRunsPage, {
+        language: "zh",
+        onOpenSession: () => undefined,
+        initialRunId: "run-older",
+        onInitialRunConsumed,
+      }));
+    });
+
+    await vi.waitFor(() => expect(harness.getRun).toHaveBeenCalledWith("run-older"));
+    expect(onInitialRunConsumed).toHaveBeenCalledOnce();
+  });
+
   it("groups each task's runs under an independently collapsible heading", async () => {
     harness.listExperiments.mockResolvedValue([
       experiment(),

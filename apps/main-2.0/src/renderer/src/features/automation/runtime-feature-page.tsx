@@ -35,12 +35,16 @@ export function reconcileEditableAgentsAfterChannelSave(
 
 export function RuntimeFeaturePage({
   language,
+  initialChannelId,
+  onInitialChannelConsumed,
   onNavigationGuardChange,
 }: {
   language: LanguageMode;
+  initialChannelId?: string;
+  onInitialChannelConsumed?: () => void;
   onNavigationGuardChange?: (guard: (() => Promise<boolean>) | null) => void;
 }): ReactElement {
-  const { api, snapshot, setSnapshot, loading, error, refresh } = useAutomationDetails();
+  const { api, snapshot, setSnapshot, detailsLoaded, loading, error, refresh } = useAutomationDetails();
   const [view, setView] = useState<"channels" | "agents">("channels");
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>(readProviderKeys);
   const [editableAgents, setEditableAgents] = useState<ConfiguredAgent[]>(snapshot.configuredAgents);
@@ -62,6 +66,15 @@ export function RuntimeFeaturePage({
     setEditableAgents(reconciled);
   }, []);
   const manager = useRuntimeConfigManager({ chatApi: api, snapshot, setSnapshot, runtimeViewActive: true, onChannelsSaved });
+
+  useEffect(() => {
+    if (!initialChannelId || !detailsLoaded) return;
+    if (manager.configChannels.some((channel) => channel.id === initialChannelId)) {
+      setView("channels");
+      manager.selectConfigChannel(initialChannelId);
+    }
+    onInitialChannelConsumed?.();
+  }, [detailsLoaded, initialChannelId, manager.configChannels, manager.selectConfigChannel, onInitialChannelConsumed]);
 
   const requestUnsavedDecision = useCallback((message: string): Promise<RuntimeUnsavedDecision> => (
     new Promise((resolve) => {

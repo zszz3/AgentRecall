@@ -2,6 +2,7 @@ import { claudeCliModelForChannel } from "../../../../agents/claude/claude-env";
 import type { ClaudeAgentSdkAdapter } from "../../../../agents/claude/claude-agent-sdk";
 import type { RuntimeChannelTestContext } from "../../../../agents/runtime/runtime-driver";
 import type { RuntimeAgentExecutorFactoryOptions } from "../agent-executor-types";
+import { claudeSessionIdFromConversation } from "../agent-executor-conversation";
 import { RUNTIME_CHANNEL_TEST_PROMPT } from "../runtime-test-constants";
 
 export async function runClaudeChannelTest(
@@ -25,6 +26,11 @@ export async function runClaudeChannelTest(
       cwd: input.workDir,
       ...(sdkModel ? { modelId: sdkModel } : {}),
       onEvent: (event) => {
+        if (event.type === "runtime_conversation") {
+          const sessionId = claudeSessionIdFromConversation(event.runtimeConversation);
+          if (sessionId) input.reportExecutionReference?.({ sessionId });
+          return;
+        }
         if (event.type === "delta") {
           output += event.content;
           input.emit({ type: "assistant_delta", content: event.content });

@@ -59,6 +59,7 @@ import type {
   ProjectQueryOptions,
   ProjectSummary,
   ProjectTagEntry,
+  RuntimeInvocationSessionResolution,
   SearchOptions,
   SessionEnvironment,
   SessionMessage,
@@ -608,12 +609,12 @@ export class SessionStore {
     return this.sessions.findByRawId(rawId);
   }
 
-  /** Resolves a Session through its exact Runtime invocation owner reference. */
-  async findByRuntimeInvocationOwner(
+  /** Resolves a Runtime invocation owner and preserves binding diagnostics. */
+  async resolveRuntimeInvocationSession(
     ownerReference: Record<string, string>,
-  ): Promise<SessionSearchResult | null> {
+  ): Promise<RuntimeInvocationSessionResolution> {
     await this.ready;
-    return this.sessions.findByRuntimeInvocationOwner(ownerReference);
+    return this.sessions.resolveRuntimeInvocationSession(ownerReference);
   }
 
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {

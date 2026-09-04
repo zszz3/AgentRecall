@@ -1939,6 +1939,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           execution_attempts.*,
           dispatches.room_id,
           dispatches.source_message_id,
+          dispatches.target_agent_id,
           dispatches.task_id,
           room_agents.channel_id,
           row_number() OVER (
@@ -1964,6 +1965,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         jsonb_strip_nulls(jsonb_build_object(
           'roomId', room_id,
           'messageId', source_message_id,
+          'agentId', target_agent_id,
           'dispatchId', dispatch_id,
           'taskId', task_id,
           'attemptId', id

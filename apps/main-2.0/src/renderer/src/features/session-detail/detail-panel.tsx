@@ -172,6 +172,24 @@ function invocationStatusLabel(status: RuntimeInvocationSummary["status"], langu
   return localize(language, label[0], label[1]);
 }
 
+function invocationOwnerActionLabel(
+  invocation: RuntimeInvocationSummary,
+  language: LanguageMode,
+): string {
+  const exactOwner =
+    (invocation.surface === "workflow" && Boolean(invocation.ownerReference.workflowId))
+    || (invocation.surface === "team_chat" && Boolean(invocation.ownerReference.roomId))
+    || (invocation.surface === "evaluation" && Boolean(invocation.ownerReference.runId))
+    || (invocation.surface === "system" && Boolean(invocation.ownerReference.channelId));
+  if (exactOwner) return localize(language, "Back to source", "返回调用来源");
+  if (invocation.surface === "skill") return localize(language, "Open Skills", "打开 Skills");
+  if (invocation.surface === "workflow") return localize(language, "Open Workflows", "打开工作流");
+  if (invocation.surface === "team_chat") return localize(language, "Open Team Chat", "打开团队聊天");
+  if (invocation.surface === "evaluation") return localize(language, "Open Evaluations", "打开评测");
+  if (invocation.surface === "system") return localize(language, "Open Runtimes", "打开 Runtime");
+  return localize(language, "Open Workbench", "打开工作台");
+}
+
 export function DetailPanel({
   session,
   turns,
@@ -600,7 +618,7 @@ export function DetailPanel({
                   )}</span>
                   {onOpenInvocationOwner && Object.keys(invocation.ownerReference).length > 0 ? (
                     <button type="button" onClick={() => onOpenInvocationOwner(invocation)}>
-                      {l("Back to source", "返回调用来源")}
+                      {invocationOwnerActionLabel(invocation, language)}
                     </button>
                   ) : null}
                 </div>

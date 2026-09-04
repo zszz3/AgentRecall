@@ -25,8 +25,8 @@ export function registerSessionCatalogIpc(
   ipc.handle("search:session-page", (_event, options: SearchOptions) => service.searchPage(options));
   ipc.handle("session:get", (_event, sessionKey: string) => service.get(sessionKey));
   ipc.handle("session:find-by-raw-id", (_event, rawId: string) => service.findByRawId(rawId));
-  ipc.handle("session:find-by-runtime-owner", (_event, ownerReference: unknown) =>
-    service.findByRuntimeInvocationOwner(runtimeInvocationOwnerReference(ownerReference)));
+  ipc.handle("session:resolve-runtime-owner", (_event, ownerReference: unknown) =>
+    service.resolveRuntimeInvocationSession(runtimeInvocationOwnerReference(ownerReference)));
   ipc.handle("session:turns", (_event, sessionKey: string) => service.listTurns(sessionKey));
   ipc.handle("session:turn", (_event, sessionKey: string, turnId: string) =>
     service.getTurn(sessionKey, turnId));

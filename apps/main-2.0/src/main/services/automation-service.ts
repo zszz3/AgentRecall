@@ -275,6 +275,7 @@ export class NativeAutomationService {
   readonly teamChat: TeamChatService;
   readonly portableWorkflows: WorkflowPortableService;
   private readonly hubInstance: AgentHub;
+  private readonly runtimeInvocations: PostgresRuntimeInvocationRepository;
   private readonly appStore: PostgresAppStore;
   private readonly configuredAgentExecutor: ConfiguredAgentExecutionService;
   private readonly registryInstance: McpRegistryStore;
@@ -308,13 +309,14 @@ export class NativeAutomationService {
     dependencies: AutomationServiceDependencies = {},
   ) {
     this.paths = resolveAutomationPaths(options.userDataPath);
+    this.runtimeInvocations = new PostgresRuntimeInvocationRepository(options.database);
     this.hubInstance = dependencies.hub ?? new AgentHub(
       {},
       undefined,
       undefined,
       undefined,
       undefined,
-      new PostgresRuntimeInvocationRepository(options.database),
+      this.runtimeInvocations,
     );
     this.appStore = new PostgresAppStore(options.database, this.paths.fileStoragePath);
     this.registryInstance = dependencies.registry ?? new McpRegistryStore(options.database);
@@ -609,6 +611,7 @@ export class NativeAutomationService {
 
   private async initializeInternal(): Promise<void> {
     await this.prepare();
+    await this.runtimeInvocations.recoverPending(Date.now());
     this.router = await this.startRouterService({ channels: () => this.hubInstance.snapshot().channels });
     this.setRouterBaseUrl(this.router.baseUrl);
     this.bridge = await this.startBridgeService(this.hubInstance, {

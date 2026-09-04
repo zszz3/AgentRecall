@@ -3,6 +3,11 @@ import { StringDecoder } from "node:string_decoder";
 import type { AgentEvent } from "../../../shared/types";
 import { spawnCli } from "../../platform/cli-launcher";
 import { resolveWindowsDshInvocation } from "./dsh-windows-launcher";
+import {
+  DshSessionDiscovery,
+  dshSessionsRoot,
+  type DshSessionDiscoveryHandle,
+} from "./dsh-session-discovery";
 
 const MAX_STDERR_CHARS = 8_000;
 const MAX_POSIX_PROMPT_BYTES = 120_000;
@@ -24,6 +29,10 @@ interface DshRunnerDependencies {
   spawnProcess: typeof spawn;
   killProcess: typeof process.kill;
   resolveWindowsInvocation: typeof resolveWindowsDshInvocation;
+  createSessionDiscovery: (
+    sessionsRoot: string,
+    onSessionId: (sessionId: string) => void,
+  ) => DshSessionDiscoveryHandle;
 }
 
 interface ActiveDshRun {
@@ -39,10 +48,17 @@ interface ActiveDshRun {
   stopTimer?: ReturnType<typeof setTimeout>;
   terminalTimer?: ReturnType<typeof setTimeout>;
   stopPromise?: Promise<void>;
+  sessionDiscovery: DshSessionDiscoveryHandle;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function abortError(): Error {
+  const error = new Error("DSH runner start was cancelled.");
+  error.name = "AbortError";
+  return error;
 }
 
 function boundedAppend(current: string, text: string): string {
@@ -51,6 +67,7 @@ function boundedAppend(current: string, text: string): string {
 
 export class DshRunner {
   private active: ActiveDshRun | undefined;
+  private pendingStartAbort: AbortController | undefined;
   private readonly dependencies: DshRunnerDependencies;
 
   constructor(
@@ -62,12 +79,16 @@ export class DshRunner {
       spawnProcess: spawn,
       killProcess: process.kill,
       resolveWindowsInvocation: resolveWindowsDshInvocation,
+      createSessionDiscovery: (sessionsRoot, onSessionId) =>
+        new DshSessionDiscovery(sessionsRoot, onSessionId),
       ...dependencies,
     };
   }
 
   async start(): Promise<void> {
-    if (this.active) throw new Error("DSH runner is already running.");
+    if (this.active || this.pendingStartAbort) {
+      throw new Error("DSH runner is already running.");
+    }
 
     let exitReported = false;
     const reportExit = (code: number | null): void => {
@@ -78,6 +99,20 @@ export class DshRunner {
 
     let proc: ChildProcess;
     let activeCreated = false;
+    const startAbort = new AbortController();
+    this.pendingStartAbort = startAbort;
+    const environment = this.options.env ?? process.env;
+    const sessionDiscovery = this.dependencies.createSessionDiscovery(
+      dshSessionsRoot(environment),
+      (sessionId) => this.options.onEvent({
+        type: "runtime_conversation",
+        runtimeConversation: {
+          runtimeId: "dsh",
+          codecVersion: "v1",
+          payload: { native: { sessionId } },
+        },
+      }),
+    );
     try {
       if (
         this.dependencies.platform !== "win32"
@@ -87,6 +122,9 @@ export class DshRunner {
           "The DSH prompt is too large for a single command-line argument. Shorten the request or attached instructions.",
         );
       }
+      const preparation = sessionDiscovery.prepare(startAbort.signal);
+      if (preparation) await preparation;
+      if (startAbort.signal.aborted) throw abortError();
       let executable = this.options.executable;
       let args = ["--profile", "headless", this.options.prompt];
       let stdin: string | undefined;
@@ -95,7 +133,7 @@ export class DshRunner {
         const invocation = this.dependencies.resolveWindowsInvocation({
           executable,
           args,
-          environment: this.options.env ?? process.env,
+          environment,
           workingDirectory: this.options.cwd,
         });
         executable = invocation.executable;
@@ -107,7 +145,7 @@ export class DshRunner {
         executable,
         args,
         cwd: this.options.cwd,
-        env: this.options.env ?? process.env,
+        env: environment,
         stdio: supportsIpcInterrupt
           ? [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe", "ipc"]
           : [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -128,9 +166,12 @@ export class DshRunner {
         rejectCompletion,
         finished: false,
         stopping: false,
+        sessionDiscovery,
       };
       this.active = active;
+      this.pendingStartAbort = undefined;
       activeCreated = true;
+      sessionDiscovery.observe();
 
       const stdoutDecoder = new StringDecoder("utf8");
       const stderrDecoder = new StringDecoder("utf8");
@@ -146,10 +187,10 @@ export class DshRunner {
         this.options.onStderr?.(text);
       });
 
-      const finish = (
+      const finish = async (
         code: number | null,
         processError?: unknown,
-      ): void => {
+      ): Promise<void> => {
         if (active.finished) return;
         active.finished = true;
         stdout += stdoutDecoder.end();
@@ -158,6 +199,11 @@ export class DshRunner {
         if (this.active === active) this.active = undefined;
 
         let callbackError: unknown;
+        try {
+          await active.sessionDiscovery.finish();
+        } catch (error) {
+          callbackError = error;
+        }
         try {
           if (active.terminalError) {
             this.options.onEvent({
@@ -190,7 +236,7 @@ export class DshRunner {
             }
           }
         } catch (error) {
-          callbackError = error;
+          callbackError ??= error;
         }
         try {
           reportExit(
@@ -215,12 +261,12 @@ export class DshRunner {
         this.forceTerminateProcessTree(active);
         active.terminalTimer = setTimeout(() => {
           active.terminalTimer = undefined;
-          finish(null, new Error(message));
+          void finish(null, new Error(message));
         }, TERMINATION_GRACE_MS + TERMINATION_CLOSE_MS);
       };
 
-      proc.once("close", (code) => finish(code));
-      proc.once("error", (error) => finish(null, error));
+      proc.once("close", (code) => void finish(code));
+      proc.once("error", (error) => void finish(null, error));
 
       const missingPipes = [
         !proc.stdout ? "stdout" : undefined,
@@ -250,8 +296,25 @@ export class DshRunner {
       await completion;
       return;
     } catch (error) {
+      let discoveryCleanupError: unknown;
+      try {
+        await sessionDiscovery.finish();
+      } catch (cleanupError) {
+        discoveryCleanupError = cleanupError;
+      }
+      if (this.pendingStartAbort === startAbort) this.pendingStartAbort = undefined;
+      if (startAbort.signal.aborted) {
+        reportExit(null);
+        return;
+      }
       if (activeCreated) throw error;
-      const runtimeError = new Error(`DSH process error: ${errorMessage(error)}`);
+      const runtimeError = new Error(
+        `DSH process error: ${errorMessage(error)}${
+          discoveryCleanupError === undefined
+            ? ""
+            : `; Session discovery cleanup failed: ${errorMessage(discoveryCleanupError)}`
+        }`,
+      );
       try {
         this.options.onEvent({ type: "error", error: runtimeError.message });
       } finally {
@@ -262,6 +325,10 @@ export class DshRunner {
   }
 
   async stop(): Promise<void> {
+    if (this.pendingStartAbort) {
+      this.pendingStartAbort.abort();
+      return;
+    }
     const active = this.active;
     if (!active) return;
     if (!active.stopPromise) {

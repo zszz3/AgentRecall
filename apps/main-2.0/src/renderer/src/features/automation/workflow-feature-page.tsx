@@ -16,6 +16,7 @@ import { validateWorkflowDefinition } from "../../../../automation/engine/shared
 import { agentRecallAutomationService } from "../../../../automation/engine/renderer/src/app/services/agent-recall-service";
 import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
+import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 import { useAutomationStoreSnapshot } from "./automation-provider";
 import { addWorkflowNode, createWorkflowCopy, createWorkflowDefinition, type WorkflowNodeKind } from "./workflow-editor-model";
 import { WorkflowGraphCanvas } from "./workflow-graph-canvas";
@@ -589,16 +590,16 @@ export function WorkflowFeaturePage({
     if (!draft || !selectedRun) return;
     setError(undefined);
     try {
-      const session = await window.sessionSearch.findSessionByRuntimeInvocationOwner({
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
         workflowId: draft.id,
         runId: selectedRun.id,
         ...(selectedNodeId ? { nodeId: selectedNodeId } : {}),
       });
-      if (!session) {
-        setError(localize(language, "The Session for this run has not been indexed yet.", "该运行对应的 Session 尚未完成索引。"));
+      if (resolution.status !== "found") {
+        setError(runtimeSessionUnavailableMessage(resolution, { en: "this run", zh: "该运行" }, language));
         return;
       }
-      onOpenSession?.(session.sessionKey);
+      onOpenSession?.(resolution.session.sessionKey);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }

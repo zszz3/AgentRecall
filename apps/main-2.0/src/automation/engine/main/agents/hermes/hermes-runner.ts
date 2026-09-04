@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { AgentEvent } from "../../../shared/types";
 import { runtimeModelId } from "../../../shared/models";
 import { spawnCli } from "../../platform/cli-launcher";
+import { hermesRuntimeStateCodec } from "./hermes-runtime-state-codec";
 
 export interface HermesRunOptions {
   executable: string;
@@ -21,11 +22,12 @@ export class HermesRunner {
   constructor(private readonly options: HermesRunOptions) {}
 
   async start(): Promise<void> {
-    const args = ["-z", this.options.prompt];
+    const args = ["chat", "--quiet", "--query", this.options.prompt];
     const modelArg = runtimeModelId(this.options.modelId ?? "");
     if (modelArg) {
       args.push("--model", modelArg);
     }
+    args.push("--source", "tool");
 
     const proc = spawnCli({
       executable: this.options.executable,
@@ -65,6 +67,19 @@ export class HermesRunner {
         finish(() => {
           const content = stdout.trim();
           if (!this.stopping && code === 0) {
+            const sessionId = hermesSessionIdFromStderr(stderr);
+            if (sessionId) {
+              this.options.onEvent({
+                type: "runtime_conversation",
+                runtimeConversation: hermesRuntimeStateCodec.encodeConversation({
+                  native: { sessionId },
+                  appContext: {
+                    cwd: this.options.cwd,
+                    ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
+                  },
+                }),
+              });
+            }
             if (content) this.options.onEvent({ type: "completed", content });
             else this.options.onEvent({ type: "error", error: "Hermes completed without assistant text." });
           } else if (!this.stopping) {
@@ -92,4 +107,11 @@ export class HermesRunner {
     this.stopping = true;
     this.proc?.kill("SIGINT");
   }
+}
+
+/** Reads the machine-readable session reference emitted by `hermes chat --quiet`. */
+export function hermesSessionIdFromStderr(stderr: string): string | undefined {
+  let sessionId: string | undefined;
+  for (const match of stderr.matchAll(/^session_id:\s*(\S+)\s*$/gm)) sessionId = match[1];
+  return sessionId;
 }

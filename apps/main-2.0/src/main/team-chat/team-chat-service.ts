@@ -1071,6 +1071,7 @@ export class TeamChatService {
               ownerReference: {
                 roomId: input.room.id,
                 messageId: input.sourceMessage.id,
+                agentId: target.agentId,
                 dispatchId,
                 attemptId,
                 ...(dispatch.taskId ? { taskId: dispatch.taskId } : {}),

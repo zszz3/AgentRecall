@@ -139,6 +139,14 @@ Session 页面用于索引、搜索、查看和整理不同编码 Agent 的历�
 
 WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的消息、工具轨迹、标题及用量信息；暂不支持实时跟踪、Resume、迁移、同步或从 AgentRecall 打开 WorkBuddy。
 
+### AgentRecall 发起的 Runtime 会话
+
+Workflow、Eval、Team Chat、Agent、Skill 探索和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。由这些调用新建的 Session 默认收在 **AgentRecall 调用**分组中，不会挤占普通会话列表；分组标题会显示当前搜索条件下的匹配数量。
+
+展开分组后，可以查看全部 AgentRecall Session，或继续按 Workflow、Eval、Team Chat、Agent、Skill 和系统任务筛选。切换到 **全部**会同时显示普通 Session 与 AgentRecall 创建的 Session。收藏、标签、隐藏和批量操作仍按原有规则工作，自动归组不会修改这些状态。
+
+Session 详情会显示关联调用的用途、状态、时间和可用的业务返回入口。Workflow 运行记录、Eval 结果和 Team Chat 消息也可以直接打开对应 Session。如果 Runtime 尚未返回 Session 引用、Session 仍在等待索引，或业务记录没有可追溯的调用，页面会分别显示原因。
+
 ### 搜索和筛选
 
 在 Session 页面按 `Cmd+F`（macOS）或 `Ctrl+F`（Windows）聚焦搜索框，输入关键词后按 Enter。
@@ -151,6 +159,7 @@ WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的�
 - 顶部的全部、进行中和已结束状态。
 - 今天、7 天、30 天或全部时间。
 - 最近搜索记录。
+- 普通会话、AgentRecall 调用、全部会话及 AgentRecall 调用类型。
 - **AI 找会话**，用自然语言描述要寻找的内容。
 
 选中的环境、项目、标签或单日范围会显示在搜索框附近，点击对应条件即可清除。

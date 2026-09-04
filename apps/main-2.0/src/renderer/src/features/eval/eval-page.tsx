@@ -40,6 +40,8 @@ export function EvalPage({
   onNavigationGuardChange,
   preselectedSkill,
   onPreselectedConsumed,
+  initialRunId,
+  onInitialRunConsumed,
 }: {
   language: LanguageMode;
   enabled: boolean;
@@ -48,6 +50,8 @@ export function EvalPage({
   onNavigationGuardChange?: (guard: (() => Promise<boolean>) | null) => void;
   preselectedSkill?: string | null;
   onPreselectedConsumed?: () => void;
+  initialRunId?: string;
+  onInitialRunConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [tab, setTab] = useState<EvalTab>("skills");
@@ -160,6 +164,10 @@ export function EvalPage({
     }
   }, [preselectedSkill, onPreselectedConsumed]);
 
+  useEffect(() => {
+    if (initialRunId) setTab("runs");
+  }, [initialRunId]);
+
   return (
     <div className="eval-page">
       <header className="app-page-head">
@@ -201,7 +209,12 @@ export function EvalPage({
           onOpenRuns={() => switchTab("runs")}
         />
       ) : tab === "runs" ? (
-        <EvalRunsPage language={language} onOpenSession={onOpenSession} />
+        <EvalRunsPage
+          language={language}
+          onOpenSession={onOpenSession}
+          initialRunId={initialRunId}
+          onInitialRunConsumed={onInitialRunConsumed}
+        />
       ) : !enabled ? (
         <section className="eval-disabled-state">
           <span><Beaker size={24} /></span>

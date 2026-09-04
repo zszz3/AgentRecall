@@ -6,6 +6,8 @@ import {
 import type { AgentExecutionContext, AgentExecutor } from "./agent-executor-types";
 import { promptWithDeveloperInstructions } from "./runtime-instructions";
 import { workflowMcpScopeForContext } from "../../../../shared/workflow-mcp-policy";
+import type { AcpRuntimeConversationPayload } from "../../../agents/acp/acp-runtime-state-codec";
+import type { RuntimeStateCodec } from "../../../agents/runtime/runtime-state-codec";
 
 interface AcpOneShotClient {
   attach(): Promise<string>;
@@ -19,6 +21,7 @@ interface AcpWorkflowOneShotOptions {
   args: string[];
   mcpServers: acp.McpServer[];
   modelId?: string;
+  runtimeStateCodec: RuntimeStateCodec<AcpRuntimeConversationPayload>;
   requestApproval?: AcpInteractiveClientOptions["requestApproval"];
   createClient?: (options: AcpInteractiveClientOptions) => AcpOneShotClient;
 }
@@ -48,7 +51,18 @@ export class AcpWorkflowOneShotExecutor implements AgentExecutor {
     this.client = client;
     this.detachPromise = undefined;
     try {
-      await client.attach();
+      const sessionId = await client.attach();
+      this.context.emit({
+        type: "runtime_conversation",
+        runtimeConversation: this.options.runtimeStateCodec.encodeConversation({
+          native: { sessionId },
+          appContext: {
+            cwd: this.context.workDir,
+            ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
+            transport: "acp",
+          },
+        }),
+      });
       await client.prompt(promptWithDeveloperInstructions(this.context.prompt, this.context.developerInstructions));
       this.context.onExit(0);
     } catch (error) {

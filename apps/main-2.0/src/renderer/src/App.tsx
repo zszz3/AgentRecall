@@ -220,6 +220,8 @@ export function App(): ReactElement {
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
   const [preferredTeamChatRoomId, setPreferredTeamChatRoomId] = useState<string>();
   const [preferredTeamChatMessageId, setPreferredTeamChatMessageId] = useState<string>();
+  const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
+  const [preferredRuntimeChannelId, setPreferredRuntimeChannelId] = useState<string>();
   useEffect(() => {
     if (activePage !== "workbench") return;
     let active = true;
@@ -325,6 +327,9 @@ export function App(): ReactElement {
     origin,
     setOrigin,
     originCounts,
+    invocationSurface,
+    setInvocationSurface,
+    invocationSurfaceCounts,
     environmentId,
     setEnvironmentId,
     tag,
@@ -1844,6 +1849,7 @@ export function App(): ReactElement {
               onShowMcp={() => void navigateToPage("mcp")}
               onShowChat={(roomId) => {
                 setPreferredTeamChatRoomId(roomId);
+                setPreferredTeamChatMessageId(undefined);
                 void navigateToPage("team-chat");
               }}
               onShowMemories={() => void navigateToPage("memories")}
@@ -1869,6 +1875,8 @@ export function App(): ReactElement {
                 source,
                 origin,
                 originCounts,
+                invocationSurface,
+                invocationSurfaceCounts,
                 sourceFilters: visibleSourceFilters,
                 visibility,
                 searchRef,
@@ -1920,6 +1928,7 @@ export function App(): ReactElement {
                 deleteTag: setDeleteTagName,
                 setSource,
                 setOrigin,
+                setInvocationSurface,
                 setTag,
                 setVisibility,
                 search: setQuery,
@@ -2022,6 +2031,10 @@ export function App(): ReactElement {
                 language={language}
                 preferredRoomId={preferredTeamChatRoomId}
                 preferredMessageId={preferredTeamChatMessageId}
+                onPreferredConsumed={() => {
+                  setPreferredTeamChatRoomId(undefined);
+                  setPreferredTeamChatMessageId(undefined);
+                }}
                 onOpenSession={(sessionKey) => {
                   void window.sessionSearch.getSession(sessionKey).then((session) => {
                     if (session) void openDetail(session);
@@ -2036,6 +2049,8 @@ export function App(): ReactElement {
                 enabled={Boolean(appSettings?.evalEnabled)}
                 preselectedSkill={evalPreselectedSkill}
                 onPreselectedConsumed={() => setEvalPreselectedSkill(null)}
+                initialRunId={preferredEvaluationRunId}
+                onInitialRunConsumed={() => setPreferredEvaluationRunId(undefined)}
                 onOpenSettings={() => {
                   setSettingsInitialSection("eval");
                   setSettingsOpen(true);
@@ -2051,7 +2066,12 @@ export function App(): ReactElement {
             ) : null}
 
             {activePage === "runtimes" ? (
-              <RuntimeFeaturePage language={language} onNavigationGuardChange={setPageNavigationGuard} />
+              <RuntimeFeaturePage
+                language={language}
+                initialChannelId={preferredRuntimeChannelId}
+                onInitialChannelConsumed={() => setPreferredRuntimeChannelId(undefined)}
+                onNavigationGuardChange={setPageNavigationGuard}
+              />
             ) : null}
 
             {activePage === "mcp" ? <McpFeaturePage language={language} /> : null}
@@ -2179,18 +2199,23 @@ export function App(): ReactElement {
               return;
             }
             if (invocation.surface === "team_chat") {
-              setPreferredTeamChatRoomId(invocation.ownerReference.roomId);
-              setPreferredTeamChatMessageId(invocation.ownerReference.messageId);
+              const roomId = invocation.ownerReference.roomId;
+              setPreferredTeamChatRoomId(roomId);
+              setPreferredTeamChatMessageId(roomId ? invocation.ownerReference.messageId : undefined);
               void navigateToPage("team-chat");
               return;
             }
-            const page: AppPage = invocation.surface === "evaluation"
-              ? "evaluation"
-              : invocation.surface === "skill"
-                ? "skills"
-                : invocation.surface === "system"
-                  ? "runtimes"
-                  : "workbench";
+            if (invocation.surface === "evaluation") {
+              setPreferredEvaluationRunId(invocation.ownerReference.runId);
+              void navigateToPage("evaluation");
+              return;
+            }
+            if (invocation.surface === "system") {
+              setPreferredRuntimeChannelId(invocation.ownerReference.channelId);
+              void navigateToPage("runtimes");
+              return;
+            }
+            const page: AppPage = invocation.surface === "skill" ? "skills" : "workbench";
             void navigateToPage(page);
           },
           reveal: (session) => void runAction(

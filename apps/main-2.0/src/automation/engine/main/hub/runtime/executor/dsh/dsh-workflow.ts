@@ -1,4 +1,4 @@
-import type { AgentRuntime, WorkflowAgentResponse } from "../../../../../shared/types";
+import type { AgentRuntime, RuntimeConversation, WorkflowAgentResponse } from "../../../../../shared/types";
 import { DshRunner } from "../../../../agents/dsh/dsh-runner";
 import type {
   RuntimeChannelTestContext,
@@ -42,6 +42,8 @@ export async function runDshWorkflow(
   if (input.signal?.aborted) throw workflowAbortError(input.signal);
 
   let content = "";
+  let runtimeConversation: RuntimeConversation | undefined;
+  let sessionId: string | undefined;
   let runnerError: string | undefined;
   const runner = createRunner({
     executable: input.runtime.command || options.executables.dsh,
@@ -52,6 +54,21 @@ export async function runDshWorkflow(
       developerInstructionsForWorkflowRequest(input),
     ),
     onEvent: (event) => {
+      if (event.type === "runtime_conversation") {
+        runtimeConversation = structuredClone(event.runtimeConversation);
+        const payload = runtimeConversation.payload;
+        const native = payload && typeof payload === "object"
+          ? (payload as Record<string, unknown>).native
+          : undefined;
+        const nativeRecord = native && typeof native === "object"
+          ? native as Record<string, unknown>
+          : undefined;
+        sessionId = typeof nativeRecord?.sessionId === "string"
+          ? nativeRecord.sessionId
+          : undefined;
+        if (sessionId) input.reportExecutionReference?.({ sessionId });
+        return;
+      }
       if (event.type === "completed") {
         content = event.content?.trim() ?? "";
         input.onEvent?.({
@@ -102,7 +119,11 @@ export async function runDshWorkflow(
   if (input.signal?.aborted) throw workflowAbortError(input.signal);
   if (runnerError) throw new Error(runnerError);
   if (!content) throw new Error("DSH completed without assistant text.");
-  return { content };
+  return {
+    content,
+    ...(runtimeConversation ? { runtimeConversation } : {}),
+    ...(sessionId ? { executionReference: { sessionId } } : {}),
+  };
 }
 
 export async function runDshChannelTest(
@@ -130,6 +151,7 @@ export async function runDshChannelTest(
       workDir: input.workDir,
       instructionScope: "agent",
       signal: AbortSignal.timeout(RUNTIME_CHANNEL_TEST_TIMEOUT_MS),
+      reportExecutionReference: input.reportExecutionReference,
       onEvent: (event) => {
         if (event.type === "error") {
           input.emit({ type: "error", content: event.error });

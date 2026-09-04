@@ -6,21 +6,24 @@ import { registerSessionCatalogIpc } from "./session-catalog";
 describe("Session catalog IPC Runtime owner boundary", () => {
   test("accepts a bounded string map and rejects malformed owner references", async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
-    const findByRuntimeInvocationOwner = vi.fn(async () => ({ sessionKey: "codex:one" }));
+    const resolveRuntimeInvocationSession = vi.fn(async () => ({
+      status: "found" as const,
+      session: { sessionKey: "codex:one" },
+    }));
     registerSessionCatalogIpc({
       handle: (channel, listener) => {
         handlers.set(channel, listener as (...args: unknown[]) => unknown);
         return undefined as never;
       },
     }, {
-      findByRuntimeInvocationOwner,
+      resolveRuntimeInvocationSession,
     } as unknown as SessionCatalogService);
-    const handler = handlers.get("session:find-by-runtime-owner");
+    const handler = handlers.get("session:resolve-runtime-owner");
     expect(handler).toBeTypeOf("function");
 
     await expect(handler?.({}, { workflowId: "workflow-1", runId: "run-1" }))
-      .resolves.toEqual({ sessionKey: "codex:one" });
-    expect(findByRuntimeInvocationOwner).toHaveBeenCalledWith({
+      .resolves.toEqual({ status: "found", session: { sessionKey: "codex:one" } });
+    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
       workflowId: "workflow-1",
       runId: "run-1",
     });

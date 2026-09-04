@@ -79,4 +79,19 @@ export class PostgresRuntimeInvocationRepository implements RuntimeInvocationRec
       ],
     );
   }
+
+  /** Marks invocations left pending by a previous application process as failed. */
+  async recoverPending(finishedAt: number): Promise<number> {
+    const result = await this.database.query(
+      `
+        update agent_recall.runtime_invocations
+        set status = 'failed',
+            finished_at = $1,
+            error = 'AgentRecall stopped before this Runtime invocation finished.'
+        where status = 'pending'
+      `,
+      [new Date(finishedAt).toISOString()],
+    );
+    return result.rowCount;
+  }
 }

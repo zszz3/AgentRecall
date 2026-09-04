@@ -1,3 +1,7 @@
+import type { SessionInvocationSurfaceFilter } from "../shared/runtime-invocation";
+
+export type { SessionInvocationSurfaceFilter } from "../shared/runtime-invocation";
+
 export type SessionSource =
   | "claude-cli"
   | "claude-app"
@@ -367,7 +371,6 @@ export interface LoadedSession {
 export type SessionSourceFilter = SessionSource | "claude" | "codex" | "stepcode" | "all";
 /** Selects ordinary Sessions, AgentRecall-created Sessions, or both. */
 export type SessionOriginFilter = "ordinary" | "agentrecall" | "all";
-
 export interface SearchOptions {
   query?: string;
   tag?: string;
@@ -385,6 +388,7 @@ export interface SearchOptions {
   excludeSubagents?: boolean;
   prioritizeFavorites?: boolean;
   origin?: SessionOriginFilter;
+  invocationSurface?: SessionInvocationSurfaceFilter;
 }
 
 export interface ProjectQueryOptions {
@@ -479,6 +483,17 @@ export interface RuntimeInvocationSummary {
   runtimeTurnId: string | null;
 }
 
+/** Outcome of resolving a business record to its Runtime Session. */
+export type RuntimeInvocationSessionResolution =
+  | { status: "found"; session: SessionSearchResult }
+  | { status: "not_indexed"; invocationId: string }
+  | {
+      status: "no_session_reference";
+      invocationId: string;
+      invocationStatus: RuntimeInvocationSummary["status"];
+    }
+  | { status: "not_recorded" };
+
 export interface SessionMatchHit {
   messageIndex: number;
   role: SessionMessage["role"];
@@ -508,6 +523,8 @@ export interface SessionSearchPage {
     agentRecall: number;
     all: number;
   };
+  /** AgentRecall-created Session counts under active non-origin and non-surface filters. */
+  invocationSurfaceCounts: Record<SessionInvocationSurfaceFilter, number>;
 }
 
 export interface SessionStatsSummary extends TokenUsage {
