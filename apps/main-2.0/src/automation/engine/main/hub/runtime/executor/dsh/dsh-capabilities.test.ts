@@ -4,6 +4,7 @@ import {
   type InteractiveSessionContext,
 } from "../../../../agents/runtime/runtime-driver";
 import { RuntimeRouter } from "../../../../agents/runtime/runtime-router";
+import { NOOP_RUNTIME_INVOCATION_RECORDER } from "../../../../agents/runtime/runtime-invocation-recorder";
 import type { AgentExecutionContext } from "../agent-executor-types";
 import type { RuntimeAgentExecutorFactoryOptions } from "../agent-executor-types";
 import { createDshDriver } from "./create-dsh-driver";
@@ -70,7 +71,10 @@ describe("DSH runtime driver", () => {
       executables: { dsh: "dsh" } as RuntimeAgentExecutorFactoryOptions["executables"],
       channelById: () => undefined,
     };
-    const router = new RuntimeRouter(new RuntimeDriverRegistry([createDshDriver(options)]));
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([createDshDriver(options)]),
+      NOOP_RUNTIME_INVOCATION_RECORDER,
+    );
     const context: AgentExecutionContext = {
       runId: "task-1",
       runKind: "task",

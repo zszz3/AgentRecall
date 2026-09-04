@@ -552,6 +552,8 @@ export interface WorkflowAgentResponse {
 }
 
 export interface RuntimeExecutionReference {
+  /** AgentRecall ledger row that owns this native reference. */
+  invocationId?: string;
   sessionId?: string;
   turnId?: string;
 }

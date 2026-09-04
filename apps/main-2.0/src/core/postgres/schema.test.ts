@@ -1054,13 +1054,25 @@ describe("AgentRecall PostgreSQL schema", () => {
       insert into agent_recall.evaluation_experiments (
         id, name, dataset_id, agent_id, repetitions, created_at, updated_at
       ) values ('experiment-history', 'history', 'dataset-history', 'agent', 1, now(), now());
+      insert into agent_recall.evaluation_experiments (
+        id, name, dataset_id, agent_id, repetitions, source, created_at, updated_at
+      ) values ('experiment-existing-session', 'existing', 'dataset-history', 'agent', 1, 'session', now(), now());
       insert into agent_recall.evaluation_runs (
         id, experiment_id, status, started_at, finished_at
       ) values ('run-history', 'experiment-history', 'completed', now(), now());
+      insert into agent_recall.evaluation_runs (
+        id, experiment_id, status, started_at, finished_at
+      ) values ('run-existing-session', 'experiment-existing-session', 'completed', now(), now());
       insert into agent_recall.evaluation_case_results (
         id, run_id, dataset_item_id, repetition, input, output, duration_ms, session_key
       ) values (
         'case-history', 'run-history', 'item', 1, 'input', 'output', 1,
+        'codex:historical-runtime'
+      );
+      insert into agent_recall.evaluation_case_results (
+        id, run_id, dataset_item_id, repetition, input, output, duration_ms, session_key
+      ) values (
+        'case-existing-session', 'run-existing-session', 'item', 1, 'input', 'output', 1,
         'codex:historical-runtime'
       );
     `);
@@ -1072,11 +1084,12 @@ describe("AgentRecall PostgreSQL schema", () => {
     await upgradedDatabase.initialize();
     const linked = await upgradedDatabase.query<{
       surface: string;
+      owner_reference: Record<string, string>;
       runtime_id: string;
       runtime_session_id: string;
       relation: string;
     }>(`
-      select invocations.surface, bindings.runtime_id,
+      select invocations.surface, invocations.owner_reference, bindings.runtime_id,
              bindings.runtime_session_id, bindings.relation
       from agent_recall.runtime_invocations invocations
       join agent_recall.runtime_session_bindings bindings
@@ -1085,10 +1098,21 @@ describe("AgentRecall PostgreSQL schema", () => {
     `);
     expect(linked.rows).toEqual([{
       surface: "evaluation",
+      owner_reference: {
+        experimentId: "experiment-history",
+        runId: "run-history",
+        caseId: "case-history",
+      },
       runtime_id: "codex",
       runtime_session_id: "historical-runtime",
       relation: "created",
     }]);
+    const existingSessionBackfill = await upgradedDatabase.query<{ count: string }>(`
+      select count(*)::text as count
+      from agent_recall.runtime_invocations
+      where id = 'legacy-evaluation:case-existing-session'
+    `);
+    expect(existingSessionBackfill.rows[0]?.count).toBe("0");
 
     await upgradedDatabase.query(`
       insert into agent_recall.runtime_invocations (

@@ -93,6 +93,7 @@ export async function runAgentExecution(input: {
       role: input.run.kind,
       ownerReference: {
         ...(input.run.kind === "chat" ? { chatId: input.run.id } : { taskId: input.run.id }),
+        agentId: input.resolved.agent.id,
         ...(input.run.kind === "task" && input.run.planningWorkflowId
           ? { workflowId: input.run.planningWorkflowId }
           : {}),

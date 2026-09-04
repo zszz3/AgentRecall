@@ -206,7 +206,7 @@ export function createSessionLinkNode(
     inputs: { execution_ref: EXECUTION_REF_PORT },
     outputs: { trajectory: TRAJECTORY_PORT },
     async run(context) {
-      const rawId = context.in.execution_ref.sessionId?.trim();
+      const rawId = context.in.execution_ref.sessionId;
       if (!rawId) return evaluationExcused.infra("runtime_reported_no_session");
       if (!dependencies.resolveSession || !dependencies.readTrajectory) {
         return evaluationExcused.infra("session_lookup_unavailable", { facts: { rawId } });
@@ -219,7 +219,7 @@ export function createSessionLinkNode(
             facts: { rawId, attempt },
           });
         }
-        const session = await dependencies.resolveSession(rawId);
+        const session = await dependencies.resolveSession(context.in.execution_ref);
         if (session) {
           const trajectory = await dependencies.readTrajectory(session.sessionKey);
           if (!trajectory) {

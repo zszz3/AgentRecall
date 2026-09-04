@@ -4,6 +4,7 @@ import type {
   RuntimeInvocationStatus,
   RuntimeSessionBinding,
 } from "../../automation/engine/main/agents/runtime/runtime-invocation-recorder";
+import { runtimeInvocationErrorMessage } from "../../automation/engine/main/agents/runtime/runtime-invocation-recorder";
 import type { PostgresDatabase } from "./database";
 import { postgresJsonValue, postgresText } from "./session-records";
 
@@ -75,7 +76,7 @@ export class PostgresRuntimeInvocationRepository implements RuntimeInvocationRec
         postgresText(invocationId),
         status,
         new Date(finishedAt).toISOString(),
-        error ? postgresText(error) : null,
+        error ? postgresText(runtimeInvocationErrorMessage(error)) : null,
       ],
     );
   }

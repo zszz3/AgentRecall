@@ -11,6 +11,7 @@ import type {
   TokenUsage,
 } from "../types";
 import type { PostgresDatabase } from "./database";
+import { sessionOriginPredicate } from "./session-records";
 
 interface StatsRange {
   period: SessionStatsPeriod;
@@ -189,7 +190,15 @@ export class PostgresSessionStatsRepository {
     includePrevious = true,
   ): Promise<SessionStats> {
     const range = resolveStatsRange(options, now);
-    const subagentPredicate = options.excludeSubagents ? "and sessions.is_subagent = false" : "";
+    const originPredicate = sessionOriginPredicate(options.origin);
+    const sessionPredicates = [
+      ...(options.excludeSubagents ? ["sessions.is_subagent = false"] : []),
+      ...(originPredicate ? [originPredicate] : []),
+    ];
+    const sessionWhere = sessionPredicates.length > 0
+      ? `where ${sessionPredicates.join(" and ")}`
+      : "";
+    const sessionAnd = sessionPredicates.map((predicate) => `and ${predicate}`).join(" ");
     const rangeValues = range.since === null
       ? []
       : [
@@ -200,7 +209,7 @@ export class PostgresSessionStatsRepository {
       ? `
         select source, count(*) as session_count
         from agent_recall.sessions sessions
-        ${options.excludeSubagents ? "where sessions.is_subagent = false" : ""}
+        ${sessionWhere}
         group by source
       `
       : `
@@ -208,12 +217,12 @@ export class PostgresSessionStatsRepository {
           select sessions.source, sessions.session_key
           from agent_recall.sessions sessions
           join agent_recall.session_message_events events on events.session_key = sessions.session_key
-          where events.occurred_at >= $1 and events.occurred_at <= $2 ${subagentPredicate}
+          where events.occurred_at >= $1 and events.occurred_at <= $2 ${sessionAnd}
           union
           select sessions.source, sessions.session_key
           from agent_recall.sessions sessions
           join agent_recall.token_events events on events.session_key = sessions.session_key
-          where events.occurred_at >= $1 and events.occurred_at <= $2 ${subagentPredicate}
+          where events.occurred_at >= $1 and events.occurred_at <= $2 ${sessionAnd}
         )
         select source, count(distinct session_key) as session_count
         from active
@@ -223,19 +232,19 @@ export class PostgresSessionStatsRepository {
       ? `
         select source, coalesce(sum(message_count), 0) as message_count
         from agent_recall.sessions sessions
-        ${options.excludeSubagents ? "where sessions.is_subagent = false" : ""}
+        ${sessionWhere}
         group by source
       `
       : `
         select sessions.source, count(*) as message_count
         from agent_recall.session_message_events events
         join agent_recall.sessions sessions on sessions.session_key = events.session_key
-        where events.occurred_at >= $1 and events.occurred_at <= $2 ${subagentPredicate}
+        where events.occurred_at >= $1 and events.occurred_at <= $2 ${sessionAnd}
         group by sessions.source
       `;
     const tokenWhere = [
       ...(range.since === null ? [] : ["events.occurred_at >= $1 and events.occurred_at <= $2"]),
-      ...(options.excludeSubagents ? ["sessions.is_subagent = false"] : []),
+      ...sessionPredicates,
     ];
     const tokensSql = `
       with ranked as (
@@ -318,7 +327,7 @@ export class PostgresSessionStatsRepository {
             coalesce(sum(reasoning_output_tokens), 0) as reasoning_output_tokens,
             coalesce(sum(total_tokens), 0) as total_tokens
           from agent_recall.sessions sessions
-          ${options.excludeSubagents ? "where sessions.is_subagent = false" : ""}
+          ${sessionWhere}
           group by source
         `,
       );
@@ -387,7 +396,7 @@ export class PostgresSessionStatsRepository {
           from agent_recall.token_events events
           join agent_recall.sessions sessions on sessions.session_key = events.session_key
           where events.occurred_at >= $1 and events.occurred_at <= $2
-            ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
+            ${sessionAnd}
         )
         select
           occurred_at, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
@@ -443,6 +452,14 @@ export class PostgresSessionStatsRepository {
     const period = options.period ?? "today";
     const window = resolveStatsTrendWindow(period, now);
     if (!window) return { period, granularity: null, buckets: [] };
+    const originPredicate = sessionOriginPredicate(options.origin);
+    const trendSessionPredicates = [
+      ...(options.excludeSubagents ? ["sessions.is_subagent = false"] : []),
+      ...(originPredicate ? [originPredicate] : []),
+    ];
+    const sessionAnd = trendSessionPredicates
+      .map((predicate) => `and ${predicate}`)
+      .join(" ");
 
     const result = await this.database.query<{
       occurred_at: Date | string;
@@ -470,7 +487,7 @@ export class PostgresSessionStatsRepository {
           join agent_recall.sessions sessions on sessions.session_key = events.session_key
           where events.occurred_at >= $1
             and events.occurred_at <= $2
-            ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
+            ${sessionAnd}
         )
         select occurred_at, total_tokens
         from ranked

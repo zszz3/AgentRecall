@@ -90,7 +90,10 @@ export function buildInteractiveChatContext(input: {
     invocation: {
       surface: "agent",
       role: "chat",
-      ownerReference: { chatId: input.chat.id },
+      ownerReference: {
+        chatId: input.chat.id,
+        agentId: input.chat.configuredAgentId,
+      },
     },
     ...(runtimeConversation ? { runtimeConversation } : {}),
     runtime: input.resolved.runtime as AgentRuntime,

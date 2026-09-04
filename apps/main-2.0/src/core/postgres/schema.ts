@@ -1872,8 +1872,10 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           case_results.error
         FROM agent_recall.evaluation_case_results case_results
         JOIN agent_recall.evaluation_runs runs ON runs.id = case_results.run_id
+        JOIN agent_recall.evaluation_experiments experiments ON experiments.id = runs.experiment_id
         JOIN agent_recall.sessions sessions ON sessions.session_key = case_results.session_key
         WHERE case_results.session_key IS NOT NULL
+          AND coalesce(experiments.source, 'run_agent') = 'run_agent'
       )
       INSERT INTO agent_recall.runtime_invocations (
         id, initiator, surface, role, owner_reference, runtime_id,
@@ -1887,14 +1889,14 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         jsonb_build_object(
           'experimentId', experiment_id,
           'runId', run_id,
-          'caseResultId', case_result_id
+          'caseId', case_result_id
         ),
         runtime_id,
         environment_id,
         CASE WHEN error IS NULL THEN 'completed' ELSE 'failed' END,
         started_at,
         coalesce(finished_at, started_at),
-        error
+        left(error, 4000)
       FROM linked_evaluations
       WHERE runtime_id IS NOT NULL
       ON CONFLICT (id) DO NOTHING;
@@ -1916,8 +1918,10 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           coalesce(runs.finished_at, runs.started_at) AS bound_at
         FROM agent_recall.evaluation_case_results case_results
         JOIN agent_recall.evaluation_runs runs ON runs.id = case_results.run_id
+        JOIN agent_recall.evaluation_experiments experiments ON experiments.id = runs.experiment_id
         JOIN agent_recall.sessions sessions ON sessions.session_key = case_results.session_key
         WHERE case_results.session_key IS NOT NULL
+          AND coalesce(experiments.source, 'run_agent') = 'run_agent'
       )
       INSERT INTO agent_recall.runtime_session_bindings (
         invocation_id, runtime_id, environment_id, runtime_session_id, relation, bound_at
@@ -1943,7 +1947,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           dispatches.task_id,
           room_agents.channel_id,
           row_number() OVER (
-            PARTITION BY execution_attempts.runtime_id, execution_attempts.runtime_session_ref
+            PARTITION BY execution_attempts.runtime_id, coalesce(room_agents.channel_id, ''), execution_attempts.runtime_session_ref
             ORDER BY execution_attempts.started_at, execution_attempts.id
           ) AS session_sequence
         FROM agent_recall.chat_dispatch_attempts execution_attempts
@@ -1980,7 +1984,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         END,
         started_at,
         coalesce(finished_at, started_at),
-        error
+        left(error, 4000)
       FROM attempts
       ON CONFLICT (id) DO NOTHING;
 
@@ -1989,7 +1993,7 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
           execution_attempts.*,
           room_agents.channel_id,
           row_number() OVER (
-            PARTITION BY execution_attempts.runtime_id, execution_attempts.runtime_session_ref
+            PARTITION BY execution_attempts.runtime_id, coalesce(room_agents.channel_id, ''), execution_attempts.runtime_session_ref
             ORDER BY execution_attempts.started_at, execution_attempts.id
           ) AS session_sequence
         FROM agent_recall.chat_dispatch_attempts execution_attempts

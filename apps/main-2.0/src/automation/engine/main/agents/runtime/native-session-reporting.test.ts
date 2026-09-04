@@ -116,4 +116,61 @@ describe("native Runtime Session reporting", () => {
     });
     expect(events[1]).toEqual({ type: "completed", content: "Done" });
   });
+
+  it("reports Hermes' session id before a non-zero exit", async () => {
+    const process = createProcess();
+    const events: AgentEvent[] = [];
+    const runner = new HermesRunner({
+      executable: "hermes",
+      cwd: "/repo",
+      prompt: "Review",
+      onEvent: (event) => events.push(event),
+      onExit: vi.fn(),
+    });
+
+    const started = runner.start();
+    process.stderr.write("session_id: session-hermes-failed\n");
+    process.stderr.write("provider failed\n");
+    process.emit("exit", 1);
+    await started;
+
+    expect(events[0]).toMatchObject({
+      type: "runtime_conversation",
+      runtimeConversation: {
+        runtimeId: "hermes",
+        payload: { native: { sessionId: "session-hermes-failed" } },
+      },
+    });
+    expect(events[1]).toMatchObject({ type: "error" });
+  });
+
+  it("does not bind a partial Hermes session id split across stderr chunks", async () => {
+    const process = createProcess();
+    const events: AgentEvent[] = [];
+    const runner = new HermesRunner({
+      executable: "hermes",
+      cwd: "/repo",
+      prompt: "Review",
+      onEvent: (event) => events.push(event),
+      onExit: vi.fn(),
+    });
+
+    const started = runner.start();
+    process.stderr.write("session_id: session-part");
+    expect(events).toEqual([]);
+    process.stderr.write("-complete\n");
+    process.stdout.write("Done\n");
+    process.emit("exit", 0);
+    await started;
+
+    expect(events.filter((event) => event.type === "runtime_conversation")).toEqual([
+      expect.objectContaining({
+        runtimeConversation: {
+          runtimeId: "hermes",
+          codecVersion: "v1",
+          payload: expect.objectContaining({ native: { sessionId: "session-part-complete" } }),
+        },
+      }),
+    ]);
+  });
 });

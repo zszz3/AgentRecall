@@ -41,6 +41,8 @@ export function EvalPage({
   preselectedSkill,
   onPreselectedConsumed,
   initialRunId,
+  initialCaseId,
+  initialEvaluatorId,
   onInitialRunConsumed,
 }: {
   language: LanguageMode;
@@ -51,6 +53,8 @@ export function EvalPage({
   preselectedSkill?: string | null;
   onPreselectedConsumed?: () => void;
   initialRunId?: string;
+  initialCaseId?: string;
+  initialEvaluatorId?: string;
   onInitialRunConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
@@ -213,6 +217,8 @@ export function EvalPage({
           language={language}
           onOpenSession={onOpenSession}
           initialRunId={initialRunId}
+          initialCaseId={initialCaseId}
+          initialEvaluatorId={initialEvaluatorId}
           onInitialRunConsumed={onInitialRunConsumed}
         />
       ) : !enabled ? (

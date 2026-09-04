@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AgentRecallMcpContext,
   AgentChannel,
@@ -121,6 +122,7 @@ export class ConfiguredAgentExecutionService {
         ? structuredClone(input.runtimeConversation)
         : undefined;
     const request: WorkflowAgentRequest = {
+      invocationId: randomUUID(),
       configuredAgentId: input.configuredAgentId,
       prompt: input.prompt,
       runtimeId: target.runtimeId,

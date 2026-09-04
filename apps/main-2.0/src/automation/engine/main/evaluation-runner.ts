@@ -72,8 +72,8 @@ export interface RunEvaluationInput {
   ) => Promise<{ output: string; durationMs: number }>;
   /** Reads the SKILL.md bytes and hash of the skill this experiment injects. */
   readSkill?: (skillName: string) => Promise<{ content: string; hash: string } | null>;
-  /** Resolves a runtime session id to the indexed AgentRecall session. */
-  resolveSession?: (rawId: string) => Promise<{ sessionKey: string } | null>;
+  /** Resolves an exact Runtime invocation to the indexed AgentRecall session. */
+  resolveSession?: (reference: EvaluationExecutionReference) => Promise<{ sessionKey: string } | null>;
   readTrajectory?: (sessionKey: string) => Promise<EvaluationTrajectoryValue | null>;
   readSessionArtifact?: (
     sessionKey: string,

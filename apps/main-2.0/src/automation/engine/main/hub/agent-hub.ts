@@ -101,7 +101,11 @@ import { InteractiveSessionManager } from "../agents/runtime/interactive-session
 import type { CodexRpcClient } from "../agents/codex/codex-rpc";
 import type { RuntimeCapabilities } from "../agents/runtime/runtime-capabilities";
 import type { InteractiveSessionContext, InteractiveSessionSnapshot, RuntimeDriverRegistry, RuntimeSurface } from "../agents/runtime/runtime-driver";
-import type { RuntimeInvocationRecorder } from "../agents/runtime/runtime-invocation-recorder";
+import {
+  MISSING_RUNTIME_INVOCATION_RECORDER,
+  NOOP_RUNTIME_INVOCATION_RECORDER,
+  type RuntimeInvocationRecorder,
+} from "../agents/runtime/runtime-invocation-recorder";
 import { RuntimeRouter } from "../agents/runtime/runtime-router";
 import { createRuntimeDriverRegistry, RuntimeAgentExecutorFactory, type AgentExecutorFactory } from "./runtime/executor/agent-executor";
 import { queryProviderBalance, type ProviderBalanceQueryOptions } from "../channels/provider-balance";
@@ -439,7 +443,12 @@ export class AgentHub {
         mcpServersForAgent: (configuredAgentId, allowedMcpTools) => this.boundMcpServersForAgent(configuredAgentId, allowedMcpTools),
         requestApproval: this.runtimeApprovals.request,
       });
-    this.runtimeRouter = new RuntimeRouter(this.runtimeDrivers, runtimeInvocationRecorder);
+    // Unit-level AgentHub fixtures intentionally have no PostgreSQL owner. The
+    // application always supplies its repository; any other omission fails
+    // before a Runtime process starts instead of silently dropping the ledger.
+    const recorder = runtimeInvocationRecorder
+      ?? (process.env.VITEST ? NOOP_RUNTIME_INVOCATION_RECORDER : MISSING_RUNTIME_INVOCATION_RECORDER);
+    this.runtimeRouter = new RuntimeRouter(this.runtimeDrivers, recorder);
     this.workflowStore = new WorkflowStore({
       normalizeDraft: (draft) => this.cloneWorkflowDraft(draft),
       now: () => Date.now(),

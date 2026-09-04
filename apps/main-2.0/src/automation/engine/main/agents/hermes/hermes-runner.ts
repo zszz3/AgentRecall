@@ -4,6 +4,8 @@ import { runtimeModelId } from "../../../shared/models";
 import { spawnCli } from "../../platform/cli-launcher";
 import { hermesRuntimeStateCodec } from "./hermes-runtime-state-codec";
 
+const MAX_STDERR_CHARS = 8_000;
+
 export interface HermesRunOptions {
   executable: string;
   cwd: string;
@@ -45,6 +47,26 @@ export class HermesRunner {
 
     let stdout = "";
     let stderr = "";
+    let reportedSessionId: string | undefined;
+    const reportSessionReference = (includeIncompleteFinalLine = false): void => {
+      const lastLineBreak = stderr.lastIndexOf("\n");
+      const parseableStderr = includeIncompleteFinalLine
+        ? stderr
+        : lastLineBreak >= 0 ? stderr.slice(0, lastLineBreak + 1) : "";
+      const sessionId = hermesSessionIdFromStderr(parseableStderr);
+      if (!sessionId || sessionId === reportedSessionId) return;
+      reportedSessionId = sessionId;
+      this.options.onEvent({
+        type: "runtime_conversation",
+        runtimeConversation: hermesRuntimeStateCodec.encodeConversation({
+          native: { sessionId },
+          appContext: {
+            cwd: this.options.cwd,
+            ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
+          },
+        }),
+      });
+    };
     proc.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
@@ -52,6 +74,8 @@ export class HermesRunner {
       const text = chunk.toString();
       stderr += text;
       this.options.onStderr?.(text);
+      reportSessionReference();
+      stderr = stderr.slice(-MAX_STDERR_CHARS);
     });
 
     return await new Promise<void>((resolve, reject) => {
@@ -66,20 +90,8 @@ export class HermesRunner {
       proc.once("exit", (code) => {
         finish(() => {
           const content = stdout.trim();
+          reportSessionReference(true);
           if (!this.stopping && code === 0) {
-            const sessionId = hermesSessionIdFromStderr(stderr);
-            if (sessionId) {
-              this.options.onEvent({
-                type: "runtime_conversation",
-                runtimeConversation: hermesRuntimeStateCodec.encodeConversation({
-                  native: { sessionId },
-                  appContext: {
-                    cwd: this.options.cwd,
-                    ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
-                  },
-                }),
-              });
-            }
             if (content) this.options.onEvent({ type: "completed", content });
             else this.options.onEvent({ type: "error", error: "Hermes completed without assistant text." });
           } else if (!this.stopping) {

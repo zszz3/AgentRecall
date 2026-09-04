@@ -141,9 +141,9 @@ WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的�
 
 ### AgentRecall 发起的 Runtime 会话
 
-Workflow、Eval、Team Chat、Agent、Skill 探索和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。由这些调用新建的 Session 默认收在 **AgentRecall 调用**分组中，不会挤占普通会话列表；分组标题会显示当前搜索条件下的匹配数量。
+Workflow、Eval、Team Chat、Agent、Skill 探索和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。Runtime 返回可靠 Session 引用后，由这些调用新建的 Session 默认收在 **AgentRecall 调用**分组中，不会挤占普通会话列表；分组标题会显示当前搜索条件下的匹配数量。Runtime 没有提供 Session 引用时，AgentRecall 会保留调用记录并说明原因，不会根据目录变化、标题、路径或时间猜测归属。
 
-展开分组后，可以查看全部 AgentRecall Session，或继续按 Workflow、Eval、Team Chat、Agent、Skill 和系统任务筛选。切换到 **全部**会同时显示普通 Session 与 AgentRecall 创建的 Session。收藏、标签、隐藏和批量操作仍按原有规则工作，自动归组不会修改这些状态。
+展开分组后，可以查看全部 AgentRecall Session，或继续按 Workflow、Eval、Team Chat、Agent、Skill 和系统任务筛选。切换到 **全部**会同时显示普通 Session 与 AgentRecall 创建的 Session。Workbench 用量和项目计数可按相同口径切换。收藏、标签、隐藏和批量操作仍按原有规则工作，自动归组不会修改这些状态。
 
 Session 详情会显示关联调用的用途、状态、时间和可用的业务返回入口。Workflow 运行记录、Eval 结果和 Team Chat 消息也可以直接打开对应 Session。如果 Runtime 尚未返回 Session 引用、Session 仍在等待索引，或业务记录没有可追溯的调用，页面会分别显示原因。
 

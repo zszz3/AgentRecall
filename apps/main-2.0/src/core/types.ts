@@ -1,4 +1,7 @@
-import type { SessionInvocationSurfaceFilter } from "../shared/runtime-invocation";
+import type {
+  AgentRecallInvocationSurface,
+  SessionInvocationSurfaceFilter,
+} from "../shared/runtime-invocation";
 
 export type { SessionInvocationSurfaceFilter } from "../shared/runtime-invocation";
 
@@ -394,6 +397,7 @@ export interface SearchOptions {
 export interface ProjectQueryOptions {
   excludeSubagents?: boolean;
   environmentId?: string;
+  origin?: SessionOriginFilter;
 }
 
 export interface TagListOptions {
@@ -473,8 +477,6 @@ export interface RuntimeInvocationSummary {
   startedAt: number;
   /** Unix epoch timestamp when dispatch reached a terminal state. */
   finishedAt: number | null;
-  /** Persisted failure detail, when available. */
-  error: string | null;
   /** Whether this invocation created or continued the Session. */
   relation: "created" | "continued";
   /** Native Runtime Session identifier. */
@@ -493,6 +495,14 @@ export type RuntimeInvocationSessionResolution =
       invocationStatus: RuntimeInvocationSummary["status"];
     }
   | { status: "not_recorded" };
+
+/** Exact ledger selector used to navigate from a business record to its Runtime Session. */
+export interface RuntimeInvocationLookup {
+  invocationId?: string;
+  surface?: AgentRecallInvocationSurface;
+  role?: string;
+  ownerReference?: Record<string, string>;
+}
 
 export interface SessionMatchHit {
   messageIndex: number;
@@ -547,6 +557,7 @@ export type SessionStatsTrendGranularity = "day" | "week" | "month";
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
   excludeSubagents?: boolean;
+  origin?: SessionOriginFilter;
 }
 
 export interface SessionStatsTrendBucket {

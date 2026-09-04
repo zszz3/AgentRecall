@@ -177,6 +177,8 @@ export async function runCodexWorkflow(
           runtimeConversation = codexRuntimeStateCodec.encodeConversation({
             native: { threadId },
           });
+          executionReference = { sessionId: threadId };
+          input.reportExecutionReference?.(executionReference);
         }
         const turnResult = await client.request("turn/start", {
           threadId,

@@ -327,15 +327,24 @@ describe("PostgreSQL Turn search", () => {
     });
     expect(evaluationSessions.sessions.map((item) => item.sessionKey)).toEqual(["codex:one"]);
     expect(evaluationSessions.originCounts).toEqual({ ordinary: 2, agentRecall: 1, all: 3 });
+    await expect(repository.listProjects({ origin: "ordinary", excludeSubagents: true }))
+      .resolves.toEqual([expect.objectContaining({ sessionCount: 2 })]);
+    await expect(repository.listProjects({ origin: "agentrecall", excludeSubagents: true }))
+      .resolves.toEqual([expect.objectContaining({ sessionCount: 1 })]);
     const workflowSessions = await searchRepository.searchSessionPage({
       origin: "agentrecall",
       invocationSurface: "workflow",
       excludeSubagents: true,
     });
     expect(workflowSessions.sessions).toEqual([]);
-    await expect(repository.resolveRuntimeInvocationSession({ runId: "run-1" }))
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "run-1" } }))
       .resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
-    await expect(repository.resolveRuntimeInvocationSession({ runId: "missing" }))
+    await expect(repository.resolveRuntimeInvocationSession({
+      invocationId: "inv-created",
+      surface: "evaluation",
+      role: "subject",
+    })).resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "missing" } }))
       .resolves.toEqual({ status: "not_recorded" });
 
     await invocations.begin({
@@ -351,7 +360,7 @@ describe("PostgreSQL Turn search", () => {
       "failed",
       Date.parse("2026-07-22T08:00:01.000Z"),
     );
-    await expect(repository.resolveRuntimeInvocationSession({ runId: "run-no-reference" }))
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "run-no-reference" } }))
       .resolves.toEqual({
         status: "no_session_reference",
         invocationId: "inv-no-reference",
@@ -373,8 +382,42 @@ describe("PostgreSQL Turn search", () => {
       relation: "created",
       boundAt: Date.parse("2026-07-23T08:00:01.000Z"),
     });
-    await expect(repository.resolveRuntimeInvocationSession({ runId: "run-awaiting-index" }))
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "run-awaiting-index" } }))
       .resolves.toEqual({ status: "not_indexed", invocationId: "inv-awaiting-index" });
+  });
+
+  it("keeps list history bounded while a Session detail retains every invocation", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    for (let index = 0; index < 22; index += 1) {
+      const id = `inv-history-${String(index).padStart(2, "0")}`;
+      await invocations.begin({
+        id,
+        initiator: "agentrecall",
+        invocation: { surface: "workflow", ownerReference: { runId: id } },
+        runtimeId: "codex",
+        environmentId: "local",
+        startedAt: Date.parse("2026-07-20T08:00:00.000Z") + index,
+      });
+      await invocations.bind(id, {
+        runtimeId: "codex",
+        environmentId: "local",
+        sessionId: "one",
+        relation: index === 0 ? "created" : "continued",
+        boundAt: Date.parse("2026-07-20T08:00:00.000Z") + index,
+      });
+      await invocations.finish(id, "completed", Date.parse("2026-07-20T08:01:00.000Z") + index);
+    }
+
+    const listed = await searchRepository.searchSessionPage({ origin: "agentrecall" });
+    expect(listed.sessions.find((item) => item.sessionKey === "codex:one")?.runtimeInvocations)
+      .toHaveLength(20);
+    await expect(repository.getSession("codex:one")).resolves.toMatchObject({
+      runtimeInvocations: expect.arrayContaining([
+        expect.objectContaining({ invocationId: "inv-history-00" }),
+        expect.objectContaining({ invocationId: "inv-history-21" }),
+      ]),
+    });
+    expect((await repository.getSession("codex:one"))?.runtimeInvocations).toHaveLength(22);
   });
 
   it("filters both Claude and Codex StepCode variants as one source", async () => {

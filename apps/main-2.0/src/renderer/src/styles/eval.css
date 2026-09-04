@@ -1195,6 +1195,11 @@
   box-shadow: var(--shadow-xs);
 }
 
+.eval-graph-case.contains-selection {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-subtle));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 .eval-graph-case header {
   display: flex;
   align-items: center;
@@ -1229,11 +1234,16 @@
 
 .eval-graph-nodes li {
   display: grid;
-  grid-template-columns: 16px minmax(88px, 130px) auto auto minmax(0, 1fr);
+  grid-template-columns: 16px minmax(88px, 130px) auto auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: baseline;
   font-size: var(--text-xs);
   counter-increment: eval-graph-step;
+}
+
+.eval-graph-nodes li.contains-selection {
+  border-radius: var(--radius);
+  background: var(--row-selected-bg);
 }
 
 .eval-graph-nodes li::before {

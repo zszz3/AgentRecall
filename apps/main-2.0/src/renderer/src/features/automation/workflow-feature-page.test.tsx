@@ -270,9 +270,12 @@ describe("WorkflowFeaturePage live output", () => {
     });
 
     expect(sessionSearch.resolveRuntimeInvocationSession).toHaveBeenCalledWith({
-      workflowId: "workflow-1",
-      runId: "run-1",
-      nodeId: "inspect-code",
+      surface: "workflow",
+      ownerReference: {
+        workflowId: "workflow-1",
+        runId: "run-1",
+        nodeId: "inspect-code",
+      },
     });
     expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });

@@ -25,11 +25,14 @@ import type {
 import type { RuntimeCapabilities } from "./runtime-capabilities";
 import type { RuntimeStateCodec } from "./runtime-state-codec";
 import {
-  NOOP_RUNTIME_INVOCATION_RECORDER,
+  MISSING_RUNTIME_INVOCATION_RECORDER,
+  runtimeInvocationErrorMessage,
   type RuntimeInvocationRecorder,
   type RuntimeInvocationStatus,
   type RuntimeSessionRelation,
 } from "./runtime-invocation-recorder";
+
+const MAX_RUNTIME_REFERENCE_CHARACTERS = 1_000;
 
 type RuntimeRequestLike = {
   runtimeId: AgentId;
@@ -43,7 +46,7 @@ type RuntimeRequestLike = {
 export class RuntimeRouter {
   constructor(
     private readonly registry: RuntimeDriverRegistry,
-    private readonly invocationRecorder: RuntimeInvocationRecorder = NOOP_RUNTIME_INVOCATION_RECORDER,
+    private readonly invocationRecorder: RuntimeInvocationRecorder = MISSING_RUNTIME_INVOCATION_RECORDER,
     private readonly now: () => number = () => Date.now(),
     private readonly createInvocationId: () => string = () => randomUUID(),
   ) {}
@@ -123,7 +126,11 @@ export class RuntimeRouter {
           await executor.start();
           await callbackQueue;
         } catch (error) {
-          await lifecycle.finish(this.statusForError(error), error);
+          try {
+            await callbackQueue;
+          } finally {
+            await lifecycle.finish(this.statusForError(error), error);
+          }
           throw error;
         }
       },
@@ -179,7 +186,11 @@ export class RuntimeRouter {
           await session.ensureAttached();
           await callbackQueue;
         } catch (error) {
-          await active.finish(this.statusForError(error), error);
+          try {
+            await callbackQueue;
+          } finally {
+            await active.finish(this.statusForError(error), error);
+          }
           throw error;
         }
       },
@@ -190,7 +201,11 @@ export class RuntimeRouter {
           await callbackQueue;
           await active.finish("completed");
         } catch (error) {
-          await active.finish(this.statusForError(error), error);
+          try {
+            await callbackQueue;
+          } finally {
+            await active.finish(this.statusForError(error), error);
+          }
           throw error;
         }
       },
@@ -206,6 +221,7 @@ export class RuntimeRouter {
       detach: async (reason) => {
         try {
           await session.detach(reason);
+          await callbackQueue;
         } finally {
           if (lifecycle && !lifecycle.isFinished()) {
             await lifecycle.finish(reason === "error" ? "failed" : "cancelled");
@@ -235,9 +251,10 @@ export class RuntimeRouter {
         ...normalizedInput,
         invocationId: lifecycle.id,
         reportExecutionReference: (reference) => {
+          const invocationReference = { ...reference, invocationId: lifecycle.id };
           enqueue(async () => {
-            await lifecycle.bindReference(reference);
-            reportExecutionReference?.(reference);
+            await lifecycle.bindReference(invocationReference);
+            reportExecutionReference?.(invocationReference);
           });
         },
         onEvent: (event) => {
@@ -253,9 +270,21 @@ export class RuntimeRouter {
       if (response.runtimeConversation) await lifecycle.bindConversation(response.runtimeConversation);
       if (response.executionReference) await lifecycle.bindReference(response.executionReference);
       await lifecycle.finish("completed");
-      return response;
+      return normalizedInput.invocationId
+        ? {
+            ...response,
+            executionReference: {
+              ...response.executionReference,
+              invocationId: lifecycle.id,
+            },
+          }
+        : response;
     } catch (error) {
-      await lifecycle.finish(this.statusForError(error, normalizedInput.signal), error);
+      try {
+        await callbackQueue;
+      } finally {
+        await lifecycle.finish(this.statusForError(error, normalizedInput.signal), error);
+      }
       throw error;
     }
   }
@@ -291,7 +320,11 @@ export class RuntimeRouter {
       await lifecycle.finish("completed");
       return result;
     } catch (error) {
-      await lifecycle.finish(this.statusForError(error), error);
+      try {
+        await callbackQueue;
+      } finally {
+        await lifecycle.finish(this.statusForError(error), error);
+      }
       throw error;
     }
   }
@@ -503,12 +536,23 @@ class RuntimeInvocationLifecycle {
   }
 
   async bindConversation(conversation: RuntimeConversation): Promise<void> {
+    if (conversation.runtimeId !== this.options.runtimeId) {
+      throw new Error(
+        `${this.options.runtimeId} Runtime reported a Session owned by ${conversation.runtimeId}.`,
+      );
+    }
     const sessionId = this.options.sessionIdFromConversation(conversation);
     if (sessionId) await this.bindReference({ sessionId });
   }
 
   async bindReference(reference: RuntimeExecutionReference): Promise<void> {
     if (!reference.sessionId) return;
+    if (reference.sessionId.length > MAX_RUNTIME_REFERENCE_CHARACTERS) {
+      throw new Error("Runtime reported a Session identifier that exceeds the supported limit.");
+    }
+    if (reference.turnId && reference.turnId.length > MAX_RUNTIME_REFERENCE_CHARACTERS) {
+      throw new Error("Runtime reported a Turn identifier that exceeds the supported limit.");
+    }
     this.hasBinding = true;
     this.enqueueBinding(
       {
@@ -551,11 +595,7 @@ class RuntimeInvocationLifecycle {
       this.hasBinding = true;
       this.enqueueBinding({ sessionId: this.options.continuedSessionId }, "continued");
     }
-    const message = error === undefined
-      ? undefined
-      : error instanceof Error
-        ? error.message
-        : String(error);
+    const message = error === undefined ? undefined : runtimeInvocationErrorMessage(error);
     const pendingWrites = this.writeQueue;
     this.writeQueue = pendingWrites.catch(() => undefined).then(() => this.options.recorder.finish(
       this.options.invocationId,

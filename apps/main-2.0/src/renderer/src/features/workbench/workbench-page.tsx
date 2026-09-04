@@ -31,6 +31,7 @@ import type { WorkflowWorkbenchItem } from "../../../../shared/ipc/automation";
 import type { TeamChatRoomSummary } from "../../../../shared/team-chat";
 import type {
   SessionSearchResult,
+  SessionOriginFilter,
   SessionDailyTokenUsage,
   SessionStats,
   SessionStatsPeriod,
@@ -59,6 +60,7 @@ import {
 } from "../../session-ui";
 
 const PERIODS: SessionStatsPeriod[] = ["today", "sevenDay", "thirtyDay", "allTime"];
+const ORIGINS: SessionOriginFilter[] = ["ordinary", "agentrecall", "all"];
 const WORKBENCH_CARD_ORDER_STORAGE_KEY = "agent-recall.workbench-card-order.v2";
 
 export const DEFAULT_WORKBENCH_CARD_ORDER = [
@@ -123,6 +125,7 @@ function loadWorkbenchCardOrder(): WorkbenchCardId[] {
 export interface WorkbenchPageProps {
   stats: SessionStats;
   statsPeriod: SessionStatsPeriod;
+  statsOrigin: SessionOriginFilter;
   statsRefreshing: boolean;
   statsFeedback: StatsFeedback;
   quotas: UsageQuotaSnapshot;
@@ -135,6 +138,7 @@ export interface WorkbenchPageProps {
   platform: NodeJS.Platform;
   language: LanguageMode;
   onStatsPeriodChange: (period: SessionStatsPeriod) => void;
+  onStatsOriginChange: (origin: SessionOriginFilter) => void;
   onRefreshStats: () => void;
   onRefreshQuotas: () => void;
   onOpenSettings: () => void;
@@ -171,6 +175,7 @@ export interface WorkbenchPageProps {
 export function WorkbenchPage({
   stats,
   statsPeriod,
+  statsOrigin,
   statsRefreshing,
   statsFeedback,
   quotas,
@@ -183,6 +188,7 @@ export function WorkbenchPage({
   platform,
   language,
   onStatsPeriodChange,
+  onStatsOriginChange,
   onRefreshStats,
   onRefreshQuotas,
   onOpenSettings,
@@ -336,6 +342,22 @@ export function WorkbenchPage({
           <div className="workbench-usage-head">
             <strong>{l("Usage", "用量")}</strong>
             <div className="workbench-usage-actions">
+              <select
+                className="workbench-period-select"
+                value={statsOrigin}
+                onChange={(event) => onStatsOriginChange(event.currentTarget.value as SessionOriginFilter)}
+                aria-label={l("Session origin", "会话来源")}
+              >
+                {ORIGINS.map((origin) => (
+                  <option key={origin} value={origin}>
+                    {origin === "ordinary"
+                      ? l("Ordinary", "普通")
+                      : origin === "agentrecall"
+                        ? "AgentRecall"
+                        : l("All", "全部")}
+                  </option>
+                ))}
+              </select>
               <select
                 className="workbench-period-select"
                 value={statsPeriod}

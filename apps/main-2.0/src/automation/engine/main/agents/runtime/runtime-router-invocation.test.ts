@@ -9,6 +9,7 @@ import type {
   RuntimeInvocationStatus,
   RuntimeSessionBinding,
 } from "./runtime-invocation-recorder";
+import { runtimeInvocationErrorMessage } from "./runtime-invocation-recorder";
 import { RuntimeRouter } from "./runtime-router";
 
 const runtime: AgentRuntime = {
@@ -92,6 +93,79 @@ function driver(askWorkflow: NonNullable<RuntimeDriver["askWorkflow"]>): Runtime
 }
 
 describe("RuntimeRouter invocation lifecycle", () => {
+  test("fails before Runtime dispatch when the durable recorder is missing", async () => {
+    const askWorkflow = vi.fn(async () => ({ content: "must not run" }));
+    const router = new RuntimeRouter(new RuntimeDriverRegistry([driver(askWorkflow)]));
+
+    await expect(router.askWorkflow(request())).rejects.toThrow(/durable Runtime invocation recorder/i);
+    expect(askWorkflow).not.toHaveBeenCalled();
+  });
+
+  test("redacts and bounds persisted Runtime errors", () => {
+    const message = runtimeInvocationErrorMessage(
+      `Authorization: Bearer private-token\npassword=visible\n${"x".repeat(5_000)}`,
+    );
+
+    expect(message).not.toContain("private-token");
+    expect(message).not.toContain("password=visible");
+    expect(message).toContain("Authorization: [REDACTED]");
+    expect(message.length).toBeLessThanOrEqual(4_000);
+  });
+
+  test("rejects oversized identifiers reported by an untrusted Runtime", async () => {
+    const runtimeDriver = driver(async (input) => {
+      input.reportExecutionReference?.({ sessionId: "s".repeat(1_001) });
+      return { content: "must not succeed" };
+    });
+    const events: string[] = [];
+    const durableRecorder = recorder(events);
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      durableRecorder,
+      () => 1_000,
+      () => "invocation-oversized-reference",
+    );
+
+    await expect(router.askWorkflow(request())).rejects.toThrow(/Session identifier.*limit/i);
+    expect(durableRecorder.bind).not.toHaveBeenCalled();
+    expect(durableRecorder.finish).toHaveBeenCalledWith(
+      "invocation-oversized-reference",
+      "failed",
+      1_000,
+      expect.stringMatching(/Session identifier.*limit/i),
+    );
+  });
+
+  test("rejects a Session envelope owned by a different Runtime", async () => {
+    const runtimeDriver = driver(async () => ({
+      content: "must not succeed",
+      runtimeConversation: {
+        runtimeId: "claude",
+        codecVersion: "test",
+        payload: { native: { sessionId: "claude-session" } },
+      },
+    }));
+    const events: string[] = [];
+    const durableRecorder = recorder(events);
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      durableRecorder,
+      () => 1_000,
+      () => "invocation-wrong-runtime",
+    );
+
+    await expect(router.askWorkflow(request())).rejects.toThrow(
+      /codex Runtime reported a Session owned by claude/i,
+    );
+    expect(durableRecorder.bind).not.toHaveBeenCalled();
+    expect(durableRecorder.finish).toHaveBeenCalledWith(
+      "invocation-wrong-runtime",
+      "failed",
+      1_000,
+      expect.stringMatching(/owned by claude/i),
+    );
+  });
+
   test("persists pending before dispatch and binds a created Session even when Runtime fails", async () => {
     const events: string[] = [];
     const runtimeDriver = driver(async (input) => {
@@ -113,6 +187,38 @@ describe("RuntimeRouter invocation lifecycle", () => {
       "bind:thread-created:created",
       "finish:failed",
     ]);
+  });
+
+  test("waits for an observed Session binding before finalizing a failed invocation", async () => {
+    const binding = deferred<void>();
+    const finish = vi.fn(async () => undefined);
+    const durableRecorder: RuntimeInvocationRecorder = {
+      begin: vi.fn(async () => undefined),
+      bind: vi.fn(async () => binding.promise),
+      finish,
+    };
+    const runtimeDriver = driver(async (input) => {
+      input.reportExecutionReference?.({ sessionId: "thread-before-failure" });
+      throw new Error("turn failed");
+    });
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      durableRecorder,
+      () => 1_500,
+      () => "invocation-binding-order",
+    );
+
+    const execution = router.askWorkflow(request());
+    await vi.waitFor(() => expect(durableRecorder.bind).toHaveBeenCalled());
+    expect(finish).not.toHaveBeenCalled();
+    binding.resolve();
+    await expect(execution).rejects.toThrow("turn failed");
+    expect(finish).toHaveBeenCalledWith(
+      "invocation-binding-order",
+      "failed",
+      1_500,
+      "turn failed",
+    );
   });
 
   test("records another invocation as continued when it resumes the same Session", async () => {
@@ -156,12 +262,18 @@ describe("RuntimeRouter invocation lifecycle", () => {
       () => "invocation-propagated",
     );
 
-    await router.askWorkflow({ ...request(), environmentId: "ssh-dev", onEvent });
+    const response = await router.askWorkflow({
+      ...request(),
+      invocationId: "invocation-propagated",
+      environmentId: "ssh-dev",
+      onEvent,
+    });
 
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: "delta",
       invocationId: "invocation-propagated",
     }));
+    expect(response.executionReference).toEqual({ invocationId: "invocation-propagated" });
   });
 
   test("binds the native Session created by a channel test", async () => {

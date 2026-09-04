@@ -37,11 +37,15 @@ export function RuntimeFeaturePage({
   language,
   initialChannelId,
   onInitialChannelConsumed,
+  initialAgentId,
+  onInitialAgentConsumed,
   onNavigationGuardChange,
 }: {
   language: LanguageMode;
   initialChannelId?: string;
   onInitialChannelConsumed?: () => void;
+  initialAgentId?: string;
+  onInitialAgentConsumed?: () => void;
   onNavigationGuardChange?: (guard: (() => Promise<boolean>) | null) => void;
 }): ReactElement {
   const { api, snapshot, setSnapshot, detailsLoaded, loading, error, refresh } = useAutomationDetails();
@@ -75,6 +79,15 @@ export function RuntimeFeaturePage({
     }
     onInitialChannelConsumed?.();
   }, [detailsLoaded, initialChannelId, manager.configChannels, manager.selectConfigChannel, onInitialChannelConsumed]);
+
+  useEffect(() => {
+    if (!initialAgentId || !detailsLoaded) return;
+    setView("agents");
+    if (snapshot.configuredAgents.some((agent) => agent.id === initialAgentId)) {
+      setSelectedAgentId(initialAgentId);
+    }
+    onInitialAgentConsumed?.();
+  }, [detailsLoaded, initialAgentId, onInitialAgentConsumed, snapshot.configuredAgents]);
 
   const requestUnsavedDecision = useCallback((message: string): Promise<RuntimeUnsavedDecision> => (
     new Promise((resolve) => {

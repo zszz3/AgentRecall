@@ -4,7 +4,7 @@ import type { SessionCatalogService } from "../services/session-catalog-service"
 import { registerSessionCatalogIpc } from "./session-catalog";
 
 describe("Session catalog IPC Runtime owner boundary", () => {
-  test("accepts a bounded string map and rejects malformed owner references", async () => {
+  test("accepts an exact bounded lookup and rejects malformed owner references", async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const resolveRuntimeInvocationSession = vi.fn(async () => ({
       status: "found" as const,
@@ -21,14 +21,20 @@ describe("Session catalog IPC Runtime owner boundary", () => {
     const handler = handlers.get("session:resolve-runtime-owner");
     expect(handler).toBeTypeOf("function");
 
-    await expect(handler?.({}, { workflowId: "workflow-1", runId: "run-1" }))
+    await expect(handler?.({}, {
+      surface: "workflow",
+      role: "node",
+      ownerReference: { workflowId: "workflow-1", runId: "run-1" },
+    }))
       .resolves.toEqual({ status: "found", session: { sessionKey: "codex:one" } });
     expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
-      workflowId: "workflow-1",
-      runId: "run-1",
+      surface: "workflow",
+      role: "node",
+      ownerReference: { workflowId: "workflow-1", runId: "run-1" },
     });
     expect(() => handler?.({}, [])).toThrow(/must be an object/i);
-    expect(() => handler?.({}, { workflowId: 1 })).toThrow(/invalid field/i);
-    expect(() => handler?.({}, {})).toThrow(/between 1 and 32 fields/i);
+    expect(() => handler?.({}, { ownerReference: { workflowId: 1 } })).toThrow(/invalid field/i);
+    expect(() => handler?.({}, { ownerReference: {} })).toThrow(/between 1 and 32 fields/i);
+    expect(() => handler?.({}, { surface: "unknown", ownerReference: { runId: "1" } })).toThrow(/invalid surface/i);
   });
 });

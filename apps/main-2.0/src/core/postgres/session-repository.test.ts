@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { PostgresDatabase } from "./database";
 import { PostgresMetadataRepository } from "./metadata-repository";
+import { PostgresRuntimeInvocationRepository } from "./runtime-invocation-repository";
 import { PostgresSessionRepository } from "./session-repository";
 import { PostgresSessionStatsRepository } from "./session-stats-repository";
 import { PostgresSessionTurnRepository } from "./session-turn-repository";
@@ -798,6 +799,23 @@ describe("PostgresSessionRepository", () => {
         { index: 1, timestamp: Date.parse("2026-07-20T08:00:01.000Z") },
       ],
     );
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-stats",
+      initiator: "agentrecall",
+      invocation: { surface: "evaluation", ownerReference: { runId: "run-stats" } },
+      runtimeId: "codex",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-20T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-stats", {
+      runtimeId: "codex",
+      environmentId: "local",
+      sessionId: "session-a",
+      relation: "created",
+      boundAt: Date.parse("2026-07-20T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-stats", "completed", Date.parse("2026-07-20T08:00:02.000Z"));
 
     const stats = await statsRepository.getStats(
       { period: "allTime" },
@@ -819,6 +837,10 @@ describe("PostgresSessionRepository", () => {
     ]);
     expect(stats.dailyTokenUsage).toHaveLength(7);
     expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(175);
+    await expect(statsRepository.getStats({ period: "allTime", origin: "ordinary" }))
+      .resolves.toMatchObject({ total: { sessionCount: 1, messageCount: 2 } });
+    await expect(statsRepository.getStats({ period: "allTime", origin: "agentrecall" }))
+      .resolves.toMatchObject({ total: { sessionCount: 1, messageCount: messages.length } });
   });
 
   it("compares the previous period and returns a trimmed Token trend", async () => {

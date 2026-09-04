@@ -2,6 +2,10 @@ import type {
   AgentId,
   RuntimeInvocationRequest,
 } from "../../../shared/types";
+import { sanitizeWorkflowTransactionValue } from "../../../shared/workflow-v2/transaction";
+
+const MAX_RUNTIME_INVOCATION_ERROR_CHARACTERS = 4_000;
+const TRUNCATED_RUNTIME_INVOCATION_ERROR_SUFFIX = "\n...";
 
 /** Durable lifecycle state for one AgentRecall Runtime dispatch. */
 export type RuntimeInvocationStatus =
@@ -65,9 +69,34 @@ export interface RuntimeInvocationRecorder {
   ): Promise<void>;
 }
 
-/** No-op recorder used by isolated RuntimeHub instances without a database owner. */
+/** Redacts credential-shaped data and bounds errors before they enter durable history. */
+export function runtimeInvocationErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const sanitized = sanitizeWorkflowTransactionValue(raw);
+  const value = typeof sanitized === "string" ? sanitized : String(sanitized);
+  return value.length <= MAX_RUNTIME_INVOCATION_ERROR_CHARACTERS
+    ? value
+    : `${value.slice(
+        0,
+        MAX_RUNTIME_INVOCATION_ERROR_CHARACTERS
+          - TRUNCATED_RUNTIME_INVOCATION_ERROR_SUFFIX.length,
+      )}${TRUNCATED_RUNTIME_INVOCATION_ERROR_SUFFIX}`;
+}
+
+/** No-op recorder used only by isolated tests without a database owner. */
 export const NOOP_RUNTIME_INVOCATION_RECORDER: RuntimeInvocationRecorder = {
   begin: async () => undefined,
   bind: async () => undefined,
   finish: async () => undefined,
+};
+
+const missingRecorder = async (): Promise<never> => {
+  throw new Error("A durable Runtime invocation recorder is required before dispatch.");
+};
+
+/** Fails before dispatch when production wiring omitted the durable ledger. */
+export const MISSING_RUNTIME_INVOCATION_RECORDER: RuntimeInvocationRecorder = {
+  begin: missingRecorder,
+  bind: missingRecorder,
+  finish: missingRecorder,
 };

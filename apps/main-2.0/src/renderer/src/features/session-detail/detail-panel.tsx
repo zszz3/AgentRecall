@@ -180,7 +180,8 @@ function invocationOwnerActionLabel(
     (invocation.surface === "workflow" && Boolean(invocation.ownerReference.workflowId))
     || (invocation.surface === "team_chat" && Boolean(invocation.ownerReference.roomId))
     || (invocation.surface === "evaluation" && Boolean(invocation.ownerReference.runId))
-    || (invocation.surface === "system" && Boolean(invocation.ownerReference.channelId));
+    || (invocation.surface === "system" && Boolean(invocation.ownerReference.channelId))
+    || (invocation.surface === "agent" && Boolean(invocation.ownerReference.agentId));
   if (exactOwner) return localize(language, "Back to source", "返回调用来源");
   if (invocation.surface === "skill") return localize(language, "Open Skills", "打开 Skills");
   if (invocation.surface === "workflow") return localize(language, "Open Workflows", "打开工作流");

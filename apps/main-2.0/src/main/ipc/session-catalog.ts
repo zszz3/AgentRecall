@@ -7,10 +7,12 @@ import {
 } from "../../core/session-bulk-delete";
 import type {
   ProjectQueryOptions,
+  RuntimeInvocationLookup,
   SearchOptions,
   SessionStatsOptions,
   TagListOptions,
 } from "../../core/types";
+import { AGENT_RECALL_INVOCATION_SURFACES } from "../../shared/runtime-invocation";
 import type { SessionCatalogService } from "../services/session-catalog-service";
 
 /**
@@ -25,8 +27,8 @@ export function registerSessionCatalogIpc(
   ipc.handle("search:session-page", (_event, options: SearchOptions) => service.searchPage(options));
   ipc.handle("session:get", (_event, sessionKey: string) => service.get(sessionKey));
   ipc.handle("session:find-by-raw-id", (_event, rawId: string) => service.findByRawId(rawId));
-  ipc.handle("session:resolve-runtime-owner", (_event, ownerReference: unknown) =>
-    service.resolveRuntimeInvocationSession(runtimeInvocationOwnerReference(ownerReference)));
+  ipc.handle("session:resolve-runtime-owner", (_event, lookup: unknown) =>
+    service.resolveRuntimeInvocationSession(runtimeInvocationLookup(lookup)));
   ipc.handle("session:turns", (_event, sessionKey: string) => service.listTurns(sessionKey));
   ipc.handle("session:turn", (_event, sessionKey: string, turnId: string) =>
     service.getTurn(sessionKey, turnId));
@@ -73,6 +75,37 @@ export function registerSessionCatalogIpc(
   ipc.handle("index:status", () => service.getIndexStatus());
 }
 
+function runtimeInvocationLookup(value: unknown): RuntimeInvocationLookup {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Runtime invocation lookup must be an object.");
+  }
+  const record = value as Record<string, unknown>;
+  const invocationId = optionalLookupString(record.invocationId, "invocationId");
+  const role = optionalLookupString(record.role, "role");
+  const surface = record.surface;
+  if (
+    surface !== undefined
+    && (
+      typeof surface !== "string"
+      || !(AGENT_RECALL_INVOCATION_SURFACES as readonly string[]).includes(surface)
+    )
+  ) {
+    throw new Error("Runtime invocation lookup contains an invalid surface.");
+  }
+  const ownerReference = record.ownerReference === undefined
+    ? undefined
+    : runtimeInvocationOwnerReference(record.ownerReference);
+  if (!invocationId && !ownerReference) {
+    throw new Error("Runtime invocation lookup requires invocationId or ownerReference.");
+  }
+  return {
+    ...(invocationId ? { invocationId } : {}),
+    ...(surface ? { surface: surface as RuntimeInvocationLookup["surface"] } : {}),
+    ...(role ? { role } : {}),
+    ...(ownerReference ? { ownerReference } : {}),
+  };
+}
+
 function runtimeInvocationOwnerReference(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Runtime invocation owner reference must be an object.");
@@ -87,4 +120,12 @@ function runtimeInvocationOwnerReference(value: unknown): Record<string, string>
     }
   }
   return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function optionalLookupString(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value || value.length > 1_000) {
+    throw new Error(`Runtime invocation lookup contains an invalid ${field}.`);
+  }
+  return value;
 }

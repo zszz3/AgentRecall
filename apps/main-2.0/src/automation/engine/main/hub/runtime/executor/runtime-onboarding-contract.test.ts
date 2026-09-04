@@ -8,6 +8,7 @@ import type {
 } from "../../../agents/runtime/runtime-driver";
 import { RuntimeDriverRegistry } from "../../../agents/runtime/runtime-driver";
 import { RuntimeRouter } from "../../../agents/runtime/runtime-router";
+import { NOOP_RUNTIME_INVOCATION_RECORDER } from "../../../agents/runtime/runtime-invocation-recorder";
 import { support } from "./agent-executor-capabilities";
 import { createOneShotRuntimeDriver } from "./agent-executor-driver-factories";
 
@@ -120,7 +121,7 @@ describe("runtime onboarding contract", () => {
       deleteSessionArtifacts: undefined,
     });
     const registry = new RuntimeDriverRegistry([driver]);
-    const router = new RuntimeRouter(registry);
+    const router = new RuntimeRouter(registry, NOOP_RUNTIME_INVOCATION_RECORDER);
     const runtimeConversation = {
       runtimeId: "api",
       codecVersion: "v1",

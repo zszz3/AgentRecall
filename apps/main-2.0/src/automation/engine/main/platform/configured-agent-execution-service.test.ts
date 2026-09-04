@@ -43,6 +43,7 @@ describe("ConfiguredAgentExecutionService", () => {
     });
 
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      invocationId: expect.any(String),
       planningWorkflowId: "workflow",
       workflowRunId: "run",
       workflowNodeId: "review",

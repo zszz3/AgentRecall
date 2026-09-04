@@ -252,7 +252,9 @@ export function TeamChatPage({
     if (!activeRoom) return;
     try {
       const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
-        roomId: activeRoom.id,
+        surface: "team_chat",
+        role: "member",
+        ownerReference: { roomId: activeRoom.id },
       });
       if (resolution.status !== "found") {
         setContextFeedback(runtimeSessionUnavailableMessage(
@@ -272,9 +274,13 @@ export function TeamChatPage({
     const messageId = message.sourceMessageId ?? message.id;
     try {
       const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
-        roomId: message.roomId,
-        messageId,
-        ...(message.senderAgentId ? { agentId: message.senderAgentId } : {}),
+        surface: "team_chat",
+        role: "member",
+        ownerReference: {
+          roomId: message.roomId,
+          messageId,
+          ...(message.senderAgentId ? { agentId: message.senderAgentId } : {}),
+        },
       });
       if (resolution.status !== "found") {
         setContextFeedback(runtimeSessionUnavailableMessage(

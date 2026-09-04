@@ -165,7 +165,11 @@ describe("TeamChatPage rooms", () => {
       await Promise.resolve();
     });
 
-    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({ roomId: "room-alpha" });
+    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
+      surface: "team_chat",
+      role: "member",
+      ownerReference: { roomId: "room-alpha" },
+    });
     expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });
 
@@ -199,9 +203,13 @@ describe("TeamChatPage rooms", () => {
     });
 
     expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
-      roomId: "room-alpha",
-      messageId: "human-message",
-      agentId: "member-1",
+      surface: "team_chat",
+      role: "member",
+      ownerReference: {
+        roomId: "room-alpha",
+        messageId: "human-message",
+        agentId: "member-1",
+      },
     });
     expect(onOpenSession).toHaveBeenCalledWith("session-message");
   });

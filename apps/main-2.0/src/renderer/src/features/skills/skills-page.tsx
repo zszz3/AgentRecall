@@ -49,6 +49,8 @@ export function SkillsPage({
   onDelete,
   evalBadgeCounts,
   onNavigateToEval,
+  initialDiscoveryOpen,
+  onInitialDiscoveryConsumed,
 }: {
   snapshot: InstalledSkillsSnapshot;
   syncSnapshot: SkillSyncSnapshot;
@@ -75,6 +77,8 @@ export function SkillsPage({
   onDelete: (skill: InstalledSkill) => Promise<void>;
   evalBadgeCounts?: { skill: string; low: number; medium: number }[];
   onNavigateToEval?: (skillName: string) => void;
+  initialDiscoveryOpen?: boolean;
+  onInitialDiscoveryConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const managedSkills = useMemo(() => snapshot.skills.filter(isManagedSkill), [snapshot.skills]);
@@ -127,6 +131,12 @@ export function SkillsPage({
     refreshedLocalOnMountRef.current = true;
     onRefreshLoadedLocal();
   }, [onRefreshLoadedLocal]);
+
+  useEffect(() => {
+    if (!initialDiscoveryOpen) return;
+    setDiscoveryOpen(true);
+    onInitialDiscoveryConsumed?.();
+  }, [initialDiscoveryOpen, onInitialDiscoveryConsumed]);
 
   useEffect(() => {
     if (selectedRemoteFingerprint) {

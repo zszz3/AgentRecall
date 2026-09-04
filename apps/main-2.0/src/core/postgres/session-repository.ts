@@ -6,6 +6,7 @@ import type {
   ProjectSummary,
   ProjectTagEntry,
   RuntimeInvocationSessionResolution,
+  RuntimeInvocationLookup,
   RuntimeInvocationSummary,
   SessionMessage,
   SessionMessageEvent,
@@ -32,7 +33,9 @@ import {
 import type { PostgresDatabase, PostgresQueryable } from "./database";
 import {
   SESSION_ACTIVITY_SQL,
+  SESSION_DETAIL_SELECT_SQL,
   SESSION_SELECT_SQL,
+  sessionOriginPredicate,
   RUNTIME_SESSION_BINDING_MATCH_SQL,
   hydrateSession,
   numberValue,
@@ -1453,6 +1456,8 @@ export class PostgresSessionRepository {
     const values: unknown[] = [];
     const conditions = ["trim(sessions.project_path) <> ''"];
     if (options.excludeSubagents) conditions.push("sessions.is_subagent = false");
+    const originPredicate = sessionOriginPredicate(options.origin);
+    if (originPredicate) conditions.push(originPredicate);
     if (options.environmentId && options.environmentId !== "all") {
       values.push(options.environmentId);
       conditions.push(`sessions.environment_id = $${values.length}`);
@@ -1889,7 +1894,7 @@ export class PostgresSessionRepository {
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
     const result = await this.database.query<SessionRow>(
       `
-        select ${SESSION_SELECT_SQL}
+        select ${SESSION_DETAIL_SELECT_SQL}
         from agent_recall.sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where sessions.session_key = $1
@@ -1916,9 +1921,23 @@ export class PostgresSessionRepository {
 
   /** Resolves an exact invocation owner without conflating missing bindings with indexing delay. */
   async resolveRuntimeInvocationSession(
-    ownerReference: Record<string, string>,
+    lookup: RuntimeInvocationLookup,
   ): Promise<RuntimeInvocationSessionResolution> {
-    if (Object.keys(ownerReference).length === 0) return { status: "not_recorded" };
+    if (!lookup.invocationId && Object.keys(lookup.ownerReference ?? {}).length === 0) {
+      return { status: "not_recorded" };
+    }
+    const conditions = ["initiator = 'agentrecall'"];
+    const parameters: unknown[] = [];
+    const addCondition = (condition: string, value: unknown): void => {
+      parameters.push(value);
+      conditions.push(condition.replace("?", `$${parameters.length}`));
+    };
+    if (lookup.invocationId) addCondition("id = ?", postgresText(lookup.invocationId));
+    if (lookup.surface) addCondition("surface = ?", lookup.surface);
+    if (lookup.role) addCondition("role = ?", postgresText(lookup.role));
+    if (lookup.ownerReference && Object.keys(lookup.ownerReference).length > 0) {
+      addCondition("owner_reference @> ?::jsonb", postgresJsonValue(lookup.ownerReference));
+    }
     const invocation = (await this.database.query<{
       id: string;
       status: RuntimeInvocationSummary["status"];
@@ -1926,12 +1945,11 @@ export class PostgresSessionRepository {
       `
         select id, status
         from agent_recall.runtime_invocations
-        where initiator = 'agentrecall'
-          and owner_reference @> $1::jsonb
+        where ${conditions.join("\n          and ")}
         order by started_at desc, id desc
         limit 1
       `,
-      [postgresJsonValue(ownerReference)],
+      parameters,
     )).rows[0];
     if (!invocation) return { status: "not_recorded" };
     const result = await this.database.query<SessionRow>(

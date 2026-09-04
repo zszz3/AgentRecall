@@ -735,10 +735,18 @@ function createAutomationService(): NativeAutomationService {
       },
     },
     readEvaluationSkill: (skillName) => skillService.readSkillInstructions(skillName),
-    resolveEvaluationSession: async (rawId) => {
-      const session = await store.findByRawId(rawId);
-      return session
-        ? { sessionKey: session.sessionKey, source: session.source, rawId: session.rawId }
+    resolveEvaluationSession: async (reference) => {
+      if (!reference.invocationId) return null;
+      const resolution = await store.resolveRuntimeInvocationSession({
+        invocationId: reference.invocationId,
+        surface: "evaluation",
+      });
+      return resolution.status === "found"
+        ? {
+            sessionKey: resolution.session.sessionKey,
+            source: resolution.session.source,
+            rawId: resolution.session.rawId,
+          }
         : null;
     },
     readEvaluationTrajectory: (sessionKey) => readEvaluationTrajectory(sessionKey),
@@ -1044,6 +1052,7 @@ function codexDesktopHome(): string {
 
 async function listVisibleProjects(options: ProjectQueryOptions = {}): Promise<ProjectSummary[]> {
   const indexed = await store.listProjects(options);
+  if (options.origin === "agentrecall") return indexed;
   if (options.environmentId && options.environmentId !== "all" && options.environmentId !== "local") return indexed;
   return mergeCodexDesktopProjects(indexed, await readCodexDesktopProjects(codexDesktopHome()));
 }

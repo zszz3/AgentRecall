@@ -59,6 +59,7 @@ import type {
   ProjectQueryOptions,
   ProjectSummary,
   ProjectTagEntry,
+  RuntimeInvocationLookup,
   RuntimeInvocationSessionResolution,
   SearchOptions,
   SessionEnvironment,
@@ -611,10 +612,10 @@ export class SessionStore {
 
   /** Resolves a Runtime invocation owner and preserves binding diagnostics. */
   async resolveRuntimeInvocationSession(
-    ownerReference: Record<string, string>,
+    lookup: RuntimeInvocationLookup,
   ): Promise<RuntimeInvocationSessionResolution> {
     await this.ready;
-    return this.sessions.resolveRuntimeInvocationSession(ownerReference);
+    return this.sessions.resolveRuntimeInvocationSession(lookup);
   }
 
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {

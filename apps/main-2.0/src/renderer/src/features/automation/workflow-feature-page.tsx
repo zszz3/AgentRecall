@@ -591,9 +591,12 @@ export function WorkflowFeaturePage({
     setError(undefined);
     try {
       const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
-        workflowId: draft.id,
-        runId: selectedRun.id,
-        ...(selectedNodeId ? { nodeId: selectedNodeId } : {}),
+        surface: "workflow",
+        ownerReference: {
+          workflowId: draft.id,
+          runId: selectedRun.id,
+          ...(selectedNodeId ? { nodeId: selectedNodeId } : {}),
+        },
       });
       if (resolution.status !== "found") {
         setError(runtimeSessionUnavailableMessage(resolution, { en: "this run", zh: "该运行" }, language));

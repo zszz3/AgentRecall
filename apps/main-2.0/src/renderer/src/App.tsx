@@ -221,7 +221,11 @@ export function App(): ReactElement {
   const [preferredTeamChatRoomId, setPreferredTeamChatRoomId] = useState<string>();
   const [preferredTeamChatMessageId, setPreferredTeamChatMessageId] = useState<string>();
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
+  const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
+  const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
   const [preferredRuntimeChannelId, setPreferredRuntimeChannelId] = useState<string>();
+  const [preferredRuntimeAgentId, setPreferredRuntimeAgentId] = useState<string>();
+  const [openSkillDiscoveryFromSession, setOpenSkillDiscoveryFromSession] = useState(false);
   useEffect(() => {
     if (activePage !== "workbench") return;
     let active = true;
@@ -303,6 +307,8 @@ export function App(): ReactElement {
     stats,
     statsPeriod,
     setStatsPeriod,
+    statsOrigin,
+    setStatsOrigin,
     statsRefreshing,
     statsFeedback,
     quotas,
@@ -506,7 +512,7 @@ export function App(): ReactElement {
     const requestId = ++metadataLoadSeqRef.current;
     const [nextTags, nextProjects, nextEnvironments, nextProjectTags] = await Promise.all([
       window.sessionSearch.listTags(),
-      window.sessionSearch.listProjects(),
+      window.sessionSearch.listProjects({ origin }),
       window.sessionSearch.listEnvironments(),
       window.sessionSearch.listTagsByProject(),
     ]);
@@ -515,7 +521,7 @@ export function App(): ReactElement {
     setProjects(nextProjects);
     setEnvironments(nextEnvironments);
     setProjectTags(nextProjectTags);
-  }, []);
+  }, [origin]);
 
   useEffect(() => {
     void loadSidebarMetadata();
@@ -1786,6 +1792,7 @@ export function App(): ReactElement {
             <WorkbenchPage
               stats={stats}
               statsPeriod={statsPeriod}
+              statsOrigin={statsOrigin}
               statsRefreshing={statsRefreshing}
               statsFeedback={statsFeedback}
               quotas={quotas}
@@ -1798,6 +1805,7 @@ export function App(): ReactElement {
               platform={RUNTIME_PLATFORM}
               language={language}
               onStatsPeriodChange={setStatsPeriod}
+              onStatsOriginChange={setStatsOrigin}
               onRefreshStats={() => void refreshStats()}
               onRefreshQuotas={() => void loadQuotas("manual")}
               onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
@@ -2010,6 +2018,8 @@ export function App(): ReactElement {
                   setEvalPreselectedSkill(skillName);
                   void navigateToPage("evaluation");
                 }}
+                initialDiscoveryOpen={openSkillDiscoveryFromSession}
+                onInitialDiscoveryConsumed={() => setOpenSkillDiscoveryFromSession(false)}
               />
             ) : null}
 
@@ -2020,9 +2030,10 @@ export function App(): ReactElement {
               initialRequest={workflowInitialRequest}
               onInitialRequestConsumed={() => setWorkflowInitialRequest(undefined)}
               onOpenSession={(sessionKey) => {
-                void window.sessionSearch.getSession(sessionKey).then((session) => {
-                  if (session) void openDetail(session);
-                });
+                void (async () => {
+                  const session = await window.sessionSearch.getSession(sessionKey);
+                  if (session) await openDetail(session);
+                })().catch(reportSessionDetailError);
               }}
             /> : null}
 
@@ -2036,9 +2047,10 @@ export function App(): ReactElement {
                   setPreferredTeamChatMessageId(undefined);
                 }}
                 onOpenSession={(sessionKey) => {
-                  void window.sessionSearch.getSession(sessionKey).then((session) => {
-                    if (session) void openDetail(session);
-                  });
+                  void (async () => {
+                    const session = await window.sessionSearch.getSession(sessionKey);
+                    if (session) await openDetail(session);
+                  })().catch(reportSessionDetailError);
                 }}
               />
             ) : null}
@@ -2050,7 +2062,13 @@ export function App(): ReactElement {
                 preselectedSkill={evalPreselectedSkill}
                 onPreselectedConsumed={() => setEvalPreselectedSkill(null)}
                 initialRunId={preferredEvaluationRunId}
-                onInitialRunConsumed={() => setPreferredEvaluationRunId(undefined)}
+                initialCaseId={preferredEvaluationCaseId}
+                initialEvaluatorId={preferredEvaluationEvaluatorId}
+                onInitialRunConsumed={() => {
+                  setPreferredEvaluationRunId(undefined);
+                  setPreferredEvaluationCaseId(undefined);
+                  setPreferredEvaluationEvaluatorId(undefined);
+                }}
                 onOpenSettings={() => {
                   setSettingsInitialSection("eval");
                   setSettingsOpen(true);
@@ -2069,7 +2087,15 @@ export function App(): ReactElement {
               <RuntimeFeaturePage
                 language={language}
                 initialChannelId={preferredRuntimeChannelId}
-                onInitialChannelConsumed={() => setPreferredRuntimeChannelId(undefined)}
+                onInitialChannelConsumed={() => {
+                  setPreferredRuntimeChannelId(undefined);
+                  setPreferredRuntimeAgentId(undefined);
+                }}
+                initialAgentId={preferredRuntimeAgentId}
+                onInitialAgentConsumed={() => {
+                  setPreferredRuntimeAgentId(undefined);
+                  setPreferredRuntimeChannelId(undefined);
+                }}
                 onNavigationGuardChange={setPageNavigationGuard}
               />
             ) : null}
@@ -2207,16 +2233,34 @@ export function App(): ReactElement {
             }
             if (invocation.surface === "evaluation") {
               setPreferredEvaluationRunId(invocation.ownerReference.runId);
+              setPreferredEvaluationCaseId(invocation.ownerReference.caseId);
+              setPreferredEvaluationEvaluatorId(invocation.ownerReference.evaluatorId);
               void navigateToPage("evaluation");
               return;
             }
             if (invocation.surface === "system") {
               setPreferredRuntimeChannelId(invocation.ownerReference.channelId);
+              setPreferredRuntimeAgentId(undefined);
               void navigateToPage("runtimes");
               return;
             }
-            const page: AppPage = invocation.surface === "skill" ? "skills" : "workbench";
-            void navigateToPage(page);
+            if (invocation.surface === "agent") {
+              const agentId = invocation.ownerReference.agentId;
+              if (agentId) {
+                setPreferredRuntimeAgentId(agentId);
+                setPreferredRuntimeChannelId(undefined);
+                void navigateToPage("runtimes");
+              } else {
+                void navigateToPage("workbench");
+              }
+              return;
+            }
+            if (invocation.surface === "skill") {
+              setOpenSkillDiscoveryFromSession(true);
+              void navigateToPage("skills");
+              return;
+            }
+            void navigateToPage("workbench");
           },
           reveal: (session) => void runAction(
             `Opening ${FILE_MANAGER_LABEL}`,

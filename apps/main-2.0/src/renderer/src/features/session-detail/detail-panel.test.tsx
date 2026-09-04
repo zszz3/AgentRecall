@@ -110,7 +110,6 @@ describe("DetailPanel Turn controls", () => {
               status: "completed",
               startedAt: Date.parse("2026-08-10T10:00:00.000Z"),
               finishedAt: Date.parse("2026-08-10T10:00:01.000Z"),
-              error: null,
               relation: "created",
               runtimeSessionId: "test-session",
               runtimeTurnId: "turn-1",

@@ -42,7 +42,7 @@ export type EvaluationAgentExecution = (
   output: string;
   durationMs: number;
   /** Runtime-native ids used to link this run to its session. */
-  executionReference?: { sessionId?: string; turnId?: string };
+  executionReference?: { invocationId?: string; sessionId?: string; turnId?: string };
 }>;
 
 // Rubric for auto-provisioned judges. The runner appends the JSON return
@@ -83,7 +83,9 @@ export interface EvaluationServiceDependencies {
    * AgentRecall session. The trajectory half of a run is skipped when this and
    * `readTrajectory` are not both wired.
    */
-  resolveSession?: (rawId: string) => Promise<{ sessionKey: string } | null>;
+  resolveSession?: (
+    reference: { invocationId?: string; sessionId?: string; turnId?: string },
+  ) => Promise<{ sessionKey: string } | null>;
   readTrajectory?: (sessionKey: string) => Promise<EvaluationTrajectoryValue | null>;
   /** Reads a session's answer, for evaluating a session that already happened. */
   readSessionArtifact?: (

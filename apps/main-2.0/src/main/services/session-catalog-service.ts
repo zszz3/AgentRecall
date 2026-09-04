@@ -18,6 +18,7 @@ import type {
   ProjectSummary,
   ProjectTagEntry,
   RuntimeInvocationSessionResolution,
+  RuntimeInvocationLookup,
   SearchOptions,
   SessionEnvironment,
   SessionMessage,
@@ -83,9 +84,9 @@ export class SessionCatalogService {
 
   /** Resolves an invocation owner to a Session or an explicit unavailable reason. */
   async resolveRuntimeInvocationSession(
-    ownerReference: Record<string, string>,
+    lookup: RuntimeInvocationLookup,
   ): Promise<RuntimeInvocationSessionResolution> {
-    return this.dependencies.store.resolveRuntimeInvocationSession(ownerReference);
+    return this.dependencies.store.resolveRuntimeInvocationSession(lookup);
   }
 
   async get(sessionKey: string): Promise<SessionSearchResult | null> {

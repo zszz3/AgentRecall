@@ -1,8 +1,9 @@
 import { cleanTitle } from "../format-adapters";
 import type {
   EnvironmentKind,
-  SessionSearchResult,
   RuntimeInvocationSummary,
+  SessionOriginFilter,
+  SessionSearchResult,
   SessionSource,
   SessionTurnMatch,
   SessionTurnStatus,
@@ -188,7 +189,17 @@ export const AGENTRECALL_CREATED_SESSION_SQL = `
   )
 `;
 
-export const SESSION_SELECT_SQL = `
+export function sessionOriginPredicate(origin: SessionOriginFilter | undefined): string | undefined {
+  if (origin === "agentrecall") return AGENTRECALL_CREATED_SESSION_SQL;
+  if (origin === "ordinary") return `not (${AGENTRECALL_CREATED_SESSION_SQL})`;
+  return undefined;
+}
+
+function sessionSelectSql(runtimeInvocationLimit?: number): string {
+  const runtimeInvocationLimitSql = runtimeInvocationLimit === undefined
+    ? ""
+    : `limit ${runtimeInvocationLimit}`;
+  return `
   sessions.*,
   coalesce(
     (
@@ -222,38 +233,50 @@ export const SESSION_SELECT_SQL = `
       where session_tags.session_key = sessions.session_key
     ),
     array[]::text[]
-  ) as tag_names
-  ,${AGENTRECALL_CREATED_SESSION_SQL} as created_by_agent_recall
-  ,coalesce(
+  ) as tag_names,
+  ${AGENTRECALL_CREATED_SESSION_SQL} as created_by_agent_recall,
+  coalesce(
     (
       select jsonb_agg(
-        jsonb_build_object(
-          'invocationId', invocations.id,
-          'surface', invocations.surface,
-          'role', invocations.role,
-          'ownerReference', invocations.owner_reference,
-          'runtimeId', bindings.runtime_id,
-          'channelId', nullif(bindings.channel_id, ''),
-          'environmentId', bindings.environment_id,
-          'status', invocations.status,
-          'startedAt', extract(epoch from invocations.started_at) * 1000,
-          'finishedAt', case when invocations.finished_at is null then null
-            else extract(epoch from invocations.finished_at) * 1000 end,
-          'error', invocations.error,
-          'relation', bindings.relation,
-          'runtimeSessionId', bindings.runtime_session_id,
-          'runtimeTurnId', bindings.runtime_turn_id
-        ) order by invocations.started_at desc, invocations.id desc
+        history.payload order by history.started_at desc, history.invocation_id desc
       )
-      from agent_recall.runtime_session_bindings bindings
-      join agent_recall.runtime_invocations invocations
-        on invocations.id = bindings.invocation_id
-      where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
-        and invocations.initiator = 'agentrecall'
+      from (
+        select
+          invocations.started_at,
+          invocations.id as invocation_id,
+          jsonb_build_object(
+            'invocationId', invocations.id,
+            'surface', invocations.surface,
+            'role', invocations.role,
+            'ownerReference', invocations.owner_reference,
+            'runtimeId', bindings.runtime_id,
+            'channelId', nullif(bindings.channel_id, ''),
+            'environmentId', bindings.environment_id,
+            'status', invocations.status,
+            'startedAt', extract(epoch from invocations.started_at) * 1000,
+            'finishedAt', case when invocations.finished_at is null then null
+              else extract(epoch from invocations.finished_at) * 1000 end,
+            'relation', bindings.relation,
+            'runtimeSessionId', bindings.runtime_session_id,
+            'runtimeTurnId', bindings.runtime_turn_id
+          ) as payload
+        from agent_recall.runtime_session_bindings bindings
+        join agent_recall.runtime_invocations invocations
+          on invocations.id = bindings.invocation_id
+        where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+          and invocations.initiator = 'agentrecall'
+        order by invocations.started_at desc, invocations.id desc
+        ${runtimeInvocationLimitSql}
+      ) history
     ),
     '[]'::jsonb
   ) as runtime_invocations
 `;
+}
+
+/** List projection keeps navigation payload bounded; detail loading restores full history. */
+export const SESSION_SELECT_SQL = sessionSelectSql(20);
+export const SESSION_DETAIL_SELECT_SQL = sessionSelectSql();
 
 export function numberValue(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -575,7 +598,6 @@ function runtimeInvocationSummaries(value: unknown): RuntimeInvocationSummary[] 
       finishedAt: record.finishedAt === null || record.finishedAt === undefined
         ? null
         : numberValue(record.finishedAt),
-      error: typeof record.error === "string" ? record.error : null,
       relation: record.relation,
       runtimeSessionId: record.runtimeSessionId,
       runtimeTurnId: typeof record.runtimeTurnId === "string" ? record.runtimeTurnId : null,
