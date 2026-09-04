@@ -6,6 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { build as viteBuild } from "vite";
 import { packReleaseArchive } from "./pack-release.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -15,6 +16,7 @@ const packDir = path.join(tempRoot, "pack");
 const prefix = path.join(tempRoot, "prefix");
 const stageRoot = path.join(tempRoot, "stage");
 const home = path.join(tempRoot, "home");
+const skillVerifierRoot = path.join(tempRoot, "skill-verifier");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const environment = {
   ...process.env,
@@ -125,8 +127,6 @@ try {
   await Promise.all([
     access(path.join(installedRoot, "out", "main", "index.js")),
     access(path.join(installedRoot, "out", "main", "live-session-worker.js")),
-    access(path.join(installedRoot, "out", "main", "bundled-skill-library.js")),
-    access(path.join(installedRoot, "out", "main", "managed-skill-library.js")),
   ]);
   await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "dist", "main", "index.js"));
@@ -148,7 +148,31 @@ try {
     throw new Error("Packaged diagram Skill must include all 66 SVG samples.");
   }
 
-  const bundledSkillLibrary = await import(pathToFileURL(path.join(installedRoot, "out", "main", "bundled-skill-library.js")).href);
+  // Keep smoke-only entry points out of out/main. The installed package is the
+  // Vite root so absolute asset globs read the exact files in the archive.
+  await viteBuild({
+    root: installedRoot,
+    configFile: false,
+    publicDir: false,
+    logLevel: "warn",
+    build: {
+      ssr: true,
+      target: "node22",
+      outDir: skillVerifierRoot,
+      emptyOutDir: true,
+      rollupOptions: {
+        input: {
+          "bundled-skill-library": path.join(root, "src", "automation", "engine", "shared", "bundled-skill-library.ts"),
+          "managed-skill-library": path.join(root, "src", "core", "managed-skill-library.ts"),
+        },
+        output: {
+          entryFileNames: "[name].mjs",
+        },
+      },
+    },
+  });
+
+  const bundledSkillLibrary = await import(pathToFileURL(path.join(skillVerifierRoot, "bundled-skill-library.mjs")).href);
   const loadBundledSkillTemplates = bundledSkillLibrary.loadBundledSkillTemplates ?? bundledSkillLibrary.default?.loadBundledSkillTemplates;
   const bundledSkillAssetsFor = bundledSkillLibrary.bundledSkillAssetsFor ?? bundledSkillLibrary.default?.bundledSkillAssetsFor;
   if (typeof loadBundledSkillTemplates !== "function" || typeof bundledSkillAssetsFor !== "function") {
@@ -165,7 +189,7 @@ try {
     throw new Error("Packaged Automation loader must embed all 66 diagram SVG samples.");
   }
 
-  const managedSkillLibraryModule = await import(pathToFileURL(path.join(installedRoot, "out", "main", "managed-skill-library.js")).href);
+  const managedSkillLibraryModule = await import(pathToFileURL(path.join(skillVerifierRoot, "managed-skill-library.mjs")).href);
   const ManagedSkillLibrary = managedSkillLibraryModule.ManagedSkillLibrary ?? managedSkillLibraryModule.default?.ManagedSkillLibrary;
   if (typeof ManagedSkillLibrary !== "function") throw new Error("Packaged managed Skill library was not exported.");
   const managedLibrary = new ManagedSkillLibrary({

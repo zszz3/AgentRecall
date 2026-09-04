@@ -10,8 +10,6 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           "live-session-worker": resolve("src/main/live-session-worker.ts"),
-          "bundled-skill-library": resolve("src/automation/engine/shared/bundled-skill-library.ts"),
-          "managed-skill-library": resolve("src/core/managed-skill-library.ts"),
         },
       },
     },
