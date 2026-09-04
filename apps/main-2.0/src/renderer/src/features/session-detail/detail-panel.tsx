@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, Eye, EyeOff, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, CornerUpLeft, Download, Edit3, Eye, EyeOff, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
 import { traceCompactionSummary, traceDetailText, traceDurationLabel, tracePresentation } from "../../../../core/trace-presentation";
 import type {
@@ -617,11 +617,6 @@ export function DetailPanel({
                   <span>{invocationStatusLabel(invocation.status, language)} · {new Date(invocation.startedAt).toLocaleString(
                     language === "zh" ? "zh-CN" : "en-US",
                   )}</span>
-                  {onOpenInvocationOwner && Object.keys(invocation.ownerReference).length > 0 ? (
-                    <button type="button" onClick={() => onOpenInvocationOwner(invocation)}>
-                      {invocationOwnerActionLabel(invocation, language)}
-                    </button>
-                  ) : null}
                 </div>
               ))}
             </div>
@@ -713,6 +708,17 @@ export function DetailPanel({
               <button className="danger" onClick={onDelete} disabled={actionRunning}>
                 <Trash2 size={15} /> {session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete", "删除")}
               </button>
+            </div>
+          ) : null}
+          {onOpenInvocationOwner && session.runtimeInvocations?.some((invocation) => Object.keys(invocation.ownerReference).length > 0) ? (
+            <div className="detail-action-group">
+              {session.runtimeInvocations
+                .filter((invocation) => Object.keys(invocation.ownerReference).length > 0)
+                .map((invocation) => (
+                  <button type="button" key={invocation.invocationId} onClick={() => onOpenInvocationOwner(invocation)}>
+                    <CornerUpLeft size={15} /> {invocationOwnerActionLabel(invocation, language)}
+                  </button>
+                ))}
             </div>
           ) : null}
         </div> : null}

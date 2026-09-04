@@ -153,7 +153,6 @@ describe("DetailPanel Turn controls", () => {
           onCopyPlain={vi.fn()}
           onDelete={vi.fn()}
           onReveal={vi.fn()}
-          readOnly
           sessionFamily={{ parent: null, children: [], truncated: false }}
           onOpenInvocationOwner={onOpenInvocationOwner}
         />,
@@ -162,8 +161,10 @@ describe("DetailPanel Turn controls", () => {
 
     expect(container.querySelector(".runtime-invocation-history")?.textContent)
       .toContain("Created by AgentRecall");
-    const sourceButton = [...container.querySelectorAll<HTMLButtonElement>(".runtime-invocation-history button")]
-      .find((button) => button.textContent?.includes("Back to source"));
+    expect(container.querySelector(".runtime-invocation-history button")).toBeNull();
+    const actionButtons = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button")];
+    const sourceButton = actionButtons.at(-1);
+    expect(sourceButton?.textContent).toContain("Back to source");
     await act(async () => sourceButton?.click());
     expect(onOpenInvocationOwner).toHaveBeenCalledWith(expect.objectContaining({
       invocationId: "invocation-1",

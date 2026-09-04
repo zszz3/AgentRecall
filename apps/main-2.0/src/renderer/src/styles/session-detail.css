@@ -1446,7 +1446,3 @@
   color: var(--text-secondary);
   font-size: 12px;
 }
-
-.runtime-invocation-history-item button {
-  margin-left: auto;
-}
