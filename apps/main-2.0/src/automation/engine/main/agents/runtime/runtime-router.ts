@@ -523,7 +523,6 @@ export class RuntimeRouter {
 class RuntimeInvocationLifecycle {
   private writeQueue: Promise<void> = Promise.resolve();
   private finished = false;
-  private hasBinding = false;
 
   constructor(private readonly options: {
     recorder: RuntimeInvocationRecorder;
@@ -571,7 +570,6 @@ class RuntimeInvocationLifecycle {
     if (reference.turnId && reference.turnId.length > MAX_RUNTIME_REFERENCE_CHARACTERS) {
       throw new Error("Runtime reported a Turn identifier that exceeds the supported limit.");
     }
-    this.hasBinding = true;
     this.enqueueBinding(
       {
         sessionId: reference.sessionId,
@@ -609,10 +607,6 @@ class RuntimeInvocationLifecycle {
   ): Promise<void> {
     if (this.finished) return this.writeQueue;
     this.finished = true;
-    if (!this.hasBinding && this.options.continuedSessionId) {
-      this.hasBinding = true;
-      this.enqueueBinding({ sessionId: this.options.continuedSessionId }, "continued");
-    }
     const message = error === undefined ? undefined : runtimeInvocationErrorMessage(error);
     const pendingWrites = this.writeQueue;
     this.writeQueue = pendingWrites.catch(() => undefined).then(() => this.options.recorder.finish(

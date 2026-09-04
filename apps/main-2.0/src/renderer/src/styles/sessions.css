@@ -842,67 +842,63 @@
 .bulk-result-actions button:hover { color: var(--text); }
 .bulk-result-actions .bulk-delete-button { color: var(--danger); }
 
-.agentrecall-session-group {
-  margin: 0 0 8px;
+.session-origin-agentrecall {
+  position: relative;
+  display: flex;
+  height: 32px;
+  align-items: stretch;
+}
+
+.session-origin-agentrecall-trigger > svg {
+  flex: 0 0 auto;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.session-origin-agentrecall-trigger.is-open > svg {
+  transform: rotate(180deg);
+}
+
+.session-origin-agentrecall-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  width: max-content;
+  min-width: 174px;
+  max-height: min(336px, calc(100vh - 180px));
+  gap: 2px;
+  padding: 6px;
+  overflow-y: auto;
   border: 1px solid var(--border-subtle);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--panel-bg);
+  box-shadow: var(--shadow-popover);
 }
 
-.agentrecall-session-group.is-open {
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
-}
-
-.agentrecall-session-group-header {
-  display: flex;
+.bulk-result-actions .session-origin-agentrecall-menu button {
+  justify-content: space-between;
   width: 100%;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.agentrecall-session-group-header:hover,
-.agentrecall-session-group.is-open .agentrecall-session-group-header {
-  color: var(--text);
-}
-
-.agentrecall-session-group-header strong {
-  min-width: 22px;
-  margin-left: auto;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-bright);
-  font-size: 11px;
-  text-align: center;
-}
-
-.agentrecall-session-surfaces {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 10px 10px 31px;
-}
-
-.agentrecall-session-surfaces button {
-  min-height: 25px;
-  padding: 0 8px;
-  border: 1px solid var(--border-subtle);
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
   color: var(--text-muted);
   font-size: 11px;
+  font-weight: 600;
 }
 
-.agentrecall-session-surfaces button:hover,
-.agentrecall-session-surfaces button.active {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+.bulk-result-actions .session-origin-agentrecall-menu button:hover,
+.bulk-result-actions .session-origin-agentrecall-menu button.active {
   background: var(--accent-soft);
   color: var(--accent-bright);
+}
+
+.session-origin-agentrecall-menu strong {
+  margin-left: 16px;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .selected-path {

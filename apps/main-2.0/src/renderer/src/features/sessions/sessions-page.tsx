@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MouseEvent as ReactMouseEvent,
   ReactElement,
@@ -180,6 +180,8 @@ export function SessionsPage({
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
+  const [invocationMenuOpen, setInvocationMenuOpen] = useState(false);
+  const invocationMenuRef = useRef<HTMLDivElement>(null);
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
   const queryBuilderState = useMemo<QueryBuilderState>(() => ({
     source: model.source === "all" ? undefined : model.source,
@@ -200,6 +202,28 @@ export function SessionsPage({
   useEffect(() => {
     if (savedSearchesOpen) void loadSavedSearches();
   }, [loadSavedSearches, savedSearchesOpen]);
+
+  useEffect(() => {
+    if (!invocationMenuOpen) return;
+    const closeOnPointerDown = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !invocationMenuRef.current?.contains(event.target)) {
+        setInvocationMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setInvocationMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [invocationMenuOpen]);
+
+  useEffect(() => {
+    if (model.origin !== "agentrecall") setInvocationMenuOpen(false);
+  }, [model.origin]);
 
   function applyQueryBuilder(state: QueryBuilderState): void {
     actions.setSource(state.source ?? "all");
@@ -513,16 +537,69 @@ export function SessionsPage({
                 type="button"
                 className={model.origin === "ordinary" ? "active" : ""}
                 onClick={() => {
+                  setInvocationMenuOpen(false);
                   actions.setInvocationSurface("all");
                   actions.setOrigin("ordinary");
                 }}
               >
                 {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
               </button>
+              <div className="session-origin-agentrecall" ref={invocationMenuRef}>
+                <button
+                  type="button"
+                  className={`session-origin-agentrecall-trigger ${model.origin === "agentrecall" ? "active" : ""} ${invocationMenuOpen ? "is-open" : ""}`}
+                  aria-haspopup="menu"
+                  aria-expanded={invocationMenuOpen}
+                  onClick={() => {
+                    if (model.origin !== "agentrecall") {
+                      actions.setInvocationSurface("all");
+                      actions.setOrigin("agentrecall");
+                    }
+                    setInvocationMenuOpen((current) => !current);
+                  }}
+                >
+                  <span>{l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}</span>
+                  <ChevronDown size={12} aria-hidden="true" />
+                </button>
+                {invocationMenuOpen ? (
+                  <div className="session-origin-agentrecall-menu" role="menu" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={model.invocationSurface === "all"}
+                      className={model.invocationSurface === "all" ? "active" : ""}
+                      onClick={() => {
+                        actions.setInvocationSurface("all");
+                        setInvocationMenuOpen(false);
+                      }}
+                    >
+                      <span>{l("All", "全部")}</span>
+                      <strong>({model.invocationSurfaceCounts.all})</strong>
+                    </button>
+                    {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={model.invocationSurface === surface}
+                        key={surface}
+                        className={model.invocationSurface === surface ? "active" : ""}
+                        onClick={() => {
+                          actions.setInvocationSurface(surface);
+                          setInvocationMenuOpen(false);
+                        }}
+                      >
+                        <span>{surface === "evaluation" ? "eval" : surface === "team_chat" ? "chat" : surface}</span>
+                        <strong>({model.invocationSurfaceCounts[surface]})</strong>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
                 className={model.origin === "all" ? "active" : ""}
                 onClick={() => {
+                  setInvocationMenuOpen(false);
                   actions.setInvocationSurface("all");
                   actions.setOrigin("all");
                 }}
@@ -559,44 +636,6 @@ export function SessionsPage({
               </span>
             : null}
         </div>
-
-        <section className={`agentrecall-session-group ${model.origin === "agentrecall" ? "is-open" : ""}`}>
-          <button
-            type="button"
-            className="agentrecall-session-group-header"
-            aria-expanded={model.origin === "agentrecall"}
-            onClick={() => {
-              const opening = model.origin !== "agentrecall";
-              actions.setInvocationSurface("all");
-              actions.setOrigin(opening ? "agentrecall" : "ordinary");
-            }}
-          >
-            {model.origin === "agentrecall" ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span>{l("AgentRecall calls", "AgentRecall 调用")}</span>
-            <strong>({model.originCounts.agentRecall})</strong>
-          </button>
-          {model.origin === "agentrecall" ? (
-            <div className="agentrecall-session-surfaces" role="group" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
-              <button
-                type="button"
-                className={model.invocationSurface === "all" ? "active" : ""}
-                onClick={() => actions.setInvocationSurface("all")}
-              >
-                {l("All", "全部")} ({model.invocationSurfaceCounts.all})
-              </button>
-              {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
-                <button
-                  type="button"
-                  key={surface}
-                  className={model.invocationSurface === surface ? "active" : ""}
-                  onClick={() => actions.setInvocationSurface(surface)}
-                >
-                  {invocationSurfaceFilterLabel(surface, model.language)} ({model.invocationSurfaceCounts[surface]})
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </section>
 
         <div key={model.currentPage} className="results">
           {renderSessionResults(model.sessions)}
@@ -635,21 +674,6 @@ export function SessionsPage({
       </section>
     </div>
   );
-}
-
-function invocationSurfaceFilterLabel(
-  surface: Exclude<NonNullable<SearchOptions["invocationSurface"]>, "all">,
-  language: LanguageMode,
-): string {
-  const labels = {
-    workflow: ["Workflow", "Workflow"],
-    evaluation: ["Eval", "评估"],
-    team_chat: ["Team Chat", "团队聊天"],
-    agent: ["Agent", "Agent"],
-    skill: ["Skill", "Skill"],
-    system: ["System", "系统任务"],
-  } as const;
-  return labels[surface][language === "zh" ? 1 : 0];
 }
 
 function paginationItems(currentPage: number, totalPages: number): number[] {

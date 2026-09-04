@@ -59,19 +59,37 @@ describe("SessionsPage search tools", () => {
     await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
     expect(container.querySelector(".toolbar-primary .searchbox")).not.toBeNull();
     expect(container.querySelector(".toolbar-secondary .toolbar-filters")).not.toBeNull();
-    const invocationGroup = container.querySelector<HTMLButtonElement>(".agentrecall-session-group-header");
-    expect(invocationGroup?.textContent).toContain("(2)");
-    await act(async () => invocationGroup?.click());
+    const originButtons = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-filter > button, .session-origin-agentrecall > button")];
+    expect(originButtons.map((button) => button.textContent)).toEqual([
+      "Regular (3)",
+      "AgentRecall calls (2)",
+      "All (5)",
+    ]);
+    expect(originButtons[1]?.querySelector("svg")).not.toBeNull();
+    expect(container.querySelector(".session-origin-agentrecall-menu")).toBeNull();
+    await act(async () => originButtons[1]?.click());
     expect(actions.setOrigin).toHaveBeenCalledWith("agentrecall");
     expect(actions.setInvocationSurface).toHaveBeenCalledWith("all");
     await act(async () => root.render(
       <SessionsPage model={{ ...model, origin: "agentrecall" }} actions={actions} />,
     ));
-    expect(container.querySelector(".agentrecall-session-surfaces")).not.toBeNull();
-    const workflowSurface = [...container.querySelectorAll<HTMLButtonElement>(".agentrecall-session-surfaces button")]
-      .find((button) => button.textContent?.includes("Workflow"));
-    await act(async () => workflowSurface?.click());
-    expect(actions.setInvocationSurface).toHaveBeenCalledWith("workflow");
+    const invocationMenu = container.querySelector(".session-origin-agentrecall-menu");
+    expect(invocationMenu).not.toBeNull();
+    expect([...invocationMenu?.querySelectorAll("button > span") ?? []].map((label) => label.textContent)).toEqual([
+      "All",
+      "workflow",
+      "eval",
+      "chat",
+      "agent",
+      "skill",
+      "system",
+    ]);
+    expect(container.querySelector(".agentrecall-session-group")).toBeNull();
+    const evaluationSurface = [...container.querySelectorAll<HTMLButtonElement>(".session-origin-agentrecall-menu button")]
+      .find((button) => button.textContent?.includes("eval"));
+    await act(async () => evaluationSurface?.click());
+    expect(actions.setInvocationSurface).toHaveBeenCalledWith("evaluation");
+    expect(container.querySelector(".session-origin-agentrecall-menu")).toBeNull();
     expect(container.querySelector(".grouped-results")?.textContent).toContain("ordinary");
     expect(container.querySelector(".grouped-results")?.textContent).toContain("agentrecall");
 
@@ -135,6 +153,28 @@ describe("SessionsPage search tools", () => {
       dayEndExclusive: Date.parse("2026-08-01T00:00:00.000Z"),
     });
     expect(touchSavedSearch).toHaveBeenCalledWith(7);
+  });
+
+  it("keeps the all option localized while showing invocation types with English labels", async () => {
+    const actions = createActions();
+    const model = { ...createModel(), language: "zh" as const, origin: "agentrecall" as const };
+    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
+
+    const trigger = container.querySelector<HTMLButtonElement>(".session-origin-agentrecall-trigger");
+    expect(trigger?.textContent).toContain("AgentRecall 调用 (2)");
+    expect(container.querySelector(".session-origin-agentrecall-menu")).toBeNull();
+    await act(async () => trigger?.click());
+
+    expect([...container.querySelectorAll(".session-origin-agentrecall-menu button > span")]
+      .map((label) => label.textContent)).toEqual([
+      "全部",
+      "workflow",
+      "eval",
+      "chat",
+      "agent",
+      "skill",
+      "system",
+    ]);
   });
 });
 

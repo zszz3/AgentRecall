@@ -245,6 +245,26 @@ describe("RuntimeRouter invocation lifecycle", () => {
     expect(events.at(-1)).toBe("finish:completed");
   });
 
+  test("does not bind the requested Session when continuation fails before Runtime reports a reference", async () => {
+    const events: string[] = [];
+    const runtimeDriver = driver(async () => {
+      throw new Error("resume failed before attach");
+    });
+    const router = new RuntimeRouter(
+      new RuntimeDriverRegistry([runtimeDriver]),
+      recorder(events),
+      () => 2_500,
+      () => "invocation-resume-before-reference",
+    );
+
+    await expect(router.askWorkflow(request(conversation("thread-requested"))))
+      .rejects.toThrow("resume failed before attach");
+    expect(events).toEqual([
+      "begin:workflow",
+      "finish:failed",
+    ]);
+  });
+
   test("propagates one invocation id through the Runtime request and emitted events", async () => {
     const events: string[] = [];
     const onEvent = vi.fn();
