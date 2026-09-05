@@ -49,8 +49,9 @@ async function uninstall(options = {}) {
     }
 
     if (process.platform === "darwin") {
-      const macosApp = uninstallMacosApp({ homeDir });
+      const macosApp = uninstallMacosApp({ homeDir, packagePath: path.resolve(__dirname, "..") });
       if (macosApp.status === "error") errors.push(`macOS app launcher: ${macosApp.detail}`);
+      else if (macosApp.status === "kept") messages.push("Kept the agent-recall-v2.app launcher; it points at another AgentRecall install.");
       else messages.push(macosApp.status === "removed" ? "Removed the agent-recall-v2.app launcher." : "macOS app launcher did not need changes.");
     }
 

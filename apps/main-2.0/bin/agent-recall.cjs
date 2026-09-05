@@ -173,9 +173,15 @@ async function main() {
     if (!isElectronRuntimeReady(packagePath)) throw error;
     if (process.stdout.isTTY) process.stdout.write("Electron 运行时校验失败，已检测到可用运行时，继续启动应用。\n");
   }
-  if (process.platform === "darwin" && process.stdout.isTTY) {
-    const { findInstalledMacosApp } = require("./install-macos-app.cjs");
-    if (!findInstalledMacosApp()) {
+  if (process.platform === "darwin") {
+    const { findInstalledMacosApp, installMacosApp, readInstalledMacosAppVersion } = require("./install-macos-app.cjs");
+    const installedApp = findInstalledMacosApp();
+    if (installedApp) {
+      // The app bundle only regenerates on install-app, so its baked paths and
+      // plist version go stale across upgrades; refresh it whenever the
+      // recorded version drifts from the running install (#499).
+      if (readInstalledMacosAppVersion(installedApp) !== version) installMacosApp();
+    } else if (process.stdout.isTTY) {
       process.stdout.write("提示：运行 `agent-recall install-app` 后，可以像普通 App 一样从 Launchpad / Spotlight 打开。\n");
     }
   }

@@ -7,7 +7,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 
 const require = createRequire(import.meta.url);
-const { BUNDLE_IDENTIFIER, findInstalledMacosApp, installMacosApp, uninstallMacosApp } = require("../bin/install-macos-app.cjs");
+const { BUNDLE_IDENTIFIER, findInstalledMacosApp, installMacosApp, readInstalledMacosAppVersion, uninstallMacosApp } = require("../bin/install-macos-app.cjs");
 const temporaryDirectories = new Set();
 
 after(async () => {
@@ -56,8 +56,12 @@ test("installMacosApp creates a launchable wrapper bundle", async () => {
   assert.match(plist, /<string>1\.2\.3<\/string>/);
   const launcherPath = path.join(appPath, "Contents", "MacOS", "AgentRecall");
   const launcher = fs.readFileSync(launcherPath, "utf8");
+  assert.match(launcher, /command -v agent-recall/);
+  assert.match(launcher, /exec "\$\{resolved\}"/);
   assert.match(launcher, /exec "\/fake\/node" ".*agent-recall\.cjs"/);
-  assert.match(launcher, /exec \/bin\/zsh -lc 'agent-recall'/);
+  // The login-shell resolution must win over the baked absolute paths.
+  assert.ok(launcher.indexOf(`command -v agent-recall`) < launcher.indexOf('exec "/fake/node"'));
+  assert.equal(readInstalledMacosAppVersion(appPath), "1.2.3");
   if (process.platform !== "win32") {
     // Windows has no Unix execute bits; chmod is a no-op there.
     assert.equal(fs.statSync(launcherPath).mode & 0o111, 0o111);
@@ -137,4 +141,64 @@ test("findInstalledMacosApp and uninstallMacosApp only touch our bundle", async 
   fs.writeFileSync(path.join(foreignApp, "Info.plist"), "<key>CFBundleIdentifier</key><string>com.someone-else.app</string>");
   assert.equal(uninstallMacosApp({ homeDir }).status, "absent");
   assert.equal(fs.existsSync(path.join(foreignApp, "Info.plist")), true);
+});
+
+test("uninstallMacosApp keeps bundles owned by another install", async () => {
+  const packagePath = await makeFakePackage();
+  const otherPackagePath = await makeFakePackage();
+  const homeDir = await makeTempDir("agent-recall-app-owned-");
+  const appsDir = path.join(homeDir, "Applications");
+  fs.mkdirSync(appsDir, { recursive: true });
+  const options = { platform: "darwin", packagePath, nodePath: "/fake/node", applicationsDirs: [appsDir], buildIcns: fakeBuildIcns };
+  assert.equal(installMacosApp(options).status, "installed");
+  const appPath = path.join(appsDir, "AgentRecall.app");
+
+  const kept = uninstallMacosApp({ homeDir, packagePath: otherPackagePath });
+  assert.equal(kept.status, "kept");
+  assert.equal(fs.existsSync(appPath), true);
+
+  const removed = uninstallMacosApp({ homeDir, packagePath });
+  assert.equal(removed.status, "removed");
+  assert.equal(fs.existsSync(appPath), false);
+
+  // Without package context the historical remove behavior is preserved.
+  assert.equal(installMacosApp(options).status, "installed");
+  assert.equal(uninstallMacosApp({ homeDir }).status, "removed");
+});
+
+test("launcher prefers the current install over stale baked paths", { skip: process.platform !== "darwin" }, async () => {
+  const { spawnSync } = await import("node:child_process");
+  const packagePath = await makeFakePackage();
+  // The baked CLI stands in for the older install that generated the launcher.
+  fs.writeFileSync(path.join(packagePath, "bin", "agent-recall.cjs"), 'console.log("stale-install");\n');
+  const homeDir = await makeTempDir("agent-recall-launch-home-");
+  const appsDir = path.join(homeDir, "Applications");
+  fs.mkdirSync(appsDir, { recursive: true });
+  assert.equal(installMacosApp({
+    platform: "darwin",
+    packagePath,
+    nodePath: process.execPath,
+    applicationsDirs: [appsDir],
+    buildIcns: fakeBuildIcns,
+  }).status, "installed");
+  const launcherPath = path.join(appsDir, "AgentRecall.app", "Contents", "MacOS", "AgentRecall");
+
+  // A current install visible on the login-shell PATH must win over the
+  // baked absolute paths of the older install (#499 version drift).
+  const binDir = path.join(homeDir, "bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const currentCli = path.join(binDir, "agent-recall");
+  fs.writeFileSync(currentCli, '#!/bin/zsh\necho "current-install"\n');
+  fs.chmodSync(currentCli, 0o755);
+  fs.writeFileSync(path.join(homeDir, ".zprofile"), `export PATH="${binDir}:$PATH"\n`);
+  const viaPath = spawnSync(launcherPath, { encoding: "utf8", env: { HOME: homeDir, PATH: "/usr/bin:/bin" } });
+  assert.equal(viaPath.status, 0, viaPath.stderr);
+  assert.match(viaPath.stdout, /current-install/);
+
+  // When the login shell cannot resolve the command, the baked absolute
+  // paths still launch the app instead of failing.
+  const bareHome = await makeTempDir("agent-recall-launch-bare-");
+  const viaBaked = spawnSync(launcherPath, { encoding: "utf8", env: { HOME: bareHome, PATH: "/usr/bin:/bin" } });
+  assert.equal(viaBaked.status, 0, viaBaked.stderr);
+  assert.match(viaBaked.stdout, /stale-install/);
 });
