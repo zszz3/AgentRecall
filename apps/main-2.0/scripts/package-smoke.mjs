@@ -133,9 +133,26 @@ try {
   await access(path.join(installedRoot, "bin", "openviking-opencode-plugin.mjs"));
   await access(path.join(installedRoot, "bin", "setup-openviking-memory-hooks.cjs"));
   await access(path.join(installedRoot, "THIRD_PARTY_NOTICES.md"));
-  await access(path.join(installedRoot, "assets", "bundled-skills", "rewrite-technical-tutorial", "SKILL.md"));
+  const automationSkillIds = [
+    "brainstorming",
+    "frontend-design",
+    "feishu-tech-diagram",
+    "handoff",
+    "skill-creator",
+    "systematic-debugging",
+    "personal-finance-planning",
+    "resume-optimization",
+    "paper-writing",
+    "rewrite-technical-tutorial",
+    "refactor-review-knowledge",
+    "code-review-and-quality",
+  ];
+  await Promise.all(
+    automationSkillIds.map((id) =>
+      access(path.join(installedRoot, "assets", "bundled-skills", id, "SKILL.md")),
+    ),
+  );
   const diagramSkillRoot = path.join(installedRoot, "assets", "bundled-skills", "feishu-tech-diagram");
-  await access(path.join(diagramSkillRoot, "SKILL.md"));
   await access(path.join(diagramSkillRoot, "tests", "validate_assets.py"));
   const diagramSpecs = JSON.parse(await readFile(path.join(diagramSkillRoot, "references", "template-specs.json"), "utf8"));
   if (!Array.isArray(diagramSpecs) || diagramSpecs.length !== 66) {

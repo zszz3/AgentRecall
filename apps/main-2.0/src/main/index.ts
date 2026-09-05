@@ -530,11 +530,7 @@ function bundledAutomationWorkflowsPath(): string {
 }
 
 function bundledSkillsPath(): string {
-  const candidates = [
-    path.join(app.getAppPath(), "assets", "bundled-skills"),
-    path.join(app.getAppPath(), "src", "automation", "engine", "shared", "bundled-skills"),
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+  return path.join(app.getAppPath(), "assets", "bundled-skills");
 }
 
 /**
