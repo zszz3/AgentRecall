@@ -1544,8 +1544,11 @@ export function App(): ReactElement {
     if (options.metadata) await loadSidebarMetadata();
     if (options.stats) await loadStats();
     if (detail) {
-      const fresh = await window.sessionSearch.getSession(detail.sessionKey);
-      if (fresh) setDetail(fresh);
+      const sessionKey = detail.sessionKey;
+      const fresh = await window.sessionSearch.getSession(sessionKey);
+      // Only apply if the panel still shows this session: it may have been closed
+      // or switched to another session while the action was in flight.
+      if (fresh) setDetail((current) => (current?.sessionKey === sessionKey ? fresh : current));
     }
   }
 
@@ -1623,7 +1626,7 @@ export function App(): ReactElement {
     setActionStatus({ kind: "running", message: t("Generating AI summary...", "正在生成 AI 摘要...") });
     try {
       const updated = await window.sessionSearch.summarizeSession(session.sessionKey);
-      if (updated) setDetail(updated);
+      if (updated) setDetail((current) => (current?.sessionKey === updated.sessionKey ? updated : current));
       await refreshAfterAction();
       const message = t("AI summary generated.", "AI 摘要已生成。");
       setActionStatus({ kind: "success", message });
@@ -1642,8 +1645,11 @@ export function App(): ReactElement {
     else await load();
     await loadSidebarMetadata();
     if (detail) {
-      const fresh = await window.sessionSearch.getSession(detail.sessionKey);
-      if (fresh) setDetail(fresh);
+      const sessionKey = detail.sessionKey;
+      const fresh = await window.sessionSearch.getSession(sessionKey);
+      // Only apply if the panel still shows this session: it may have been closed
+      // or switched to another session while the action was in flight.
+      if (fresh) setDetail((current) => (current?.sessionKey === sessionKey ? fresh : current));
     }
   }
 
