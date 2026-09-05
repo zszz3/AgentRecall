@@ -102,6 +102,8 @@ interface OpenVikingTaskResult extends Record<string, unknown> {
 const DEFAULT_IDLE_MS = 120_000;
 const DEFAULT_INTERVAL_MS = 10_000;
 const COMMIT_REQUEST_STALE_MS = 5 * 60_000;
+/** Ceiling for one remote commit task; past this a non-terminal task is failed, not polled forever. */
+const COMMIT_TASK_TIMEOUT_MS = 30 * 60_000;
 const SUBMITTED_TURN_STALE_MS = 24 * 60 * 60_000;
 const STATE_LOCK_RETRY_MS = 10;
 const STATE_LOCK_TIMEOUT_MS = 5_000;
@@ -376,6 +378,16 @@ export class OpenVikingHookStateFlusher {
       const taskId = String(task?.taskId || "");
       if (!taskId) continue;
       const run = toCommitRun(state, task, "running");
+      // Bound polling: a task stuck non-terminal, lost, or failing its locked-memory
+      // restore would otherwise be re-polled every flush forever and pin its run
+      // "running". Fail it past the commit window so recall recovers on the next commit.
+      if (now - Date.parse(run.startedAt) >= COMMIT_TASK_TIMEOUT_MS) {
+        const completedAt = new Date(now).toISOString();
+        await this.recordFailedCommitTask(state, run, taskId, "OpenViking commit task timed out.", completedAt);
+        completedTaskIds.add(taskId);
+        lastOutcome = { taskId, state: "failed" };
+        continue;
+      }
       await this.options.control.upsertOpenVikingCommitRun(run);
       let remoteTask: OpenVikingTaskRecord | null;
       let userId: string;
