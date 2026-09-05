@@ -104,6 +104,10 @@ export async function extractSessionContextComponents(options: {
       ? await extractCodexContextComponents(options.filePath)
       : await extractClaudeContextComponents(options.filePath);
     const result = { ...base, components };
+    // Delete before set: Map#set keeps an existing key at its old position, so a
+    // refreshed stale entry would not move to the newest slot and could be evicted
+    // right after access. The delete is a no-op on a true miss.
+    extractCache.delete(cacheKey);
     extractCache.set(cacheKey, { mtimeMs: stat.mtimeMs, size: stat.size, result });
     // Map preserves insertion order, so the first key is the least-recently-used.
     while (extractCache.size > EXTRACT_CACHE_MAX_ENTRIES) {
