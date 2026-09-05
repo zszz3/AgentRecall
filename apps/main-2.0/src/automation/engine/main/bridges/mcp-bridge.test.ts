@@ -519,7 +519,7 @@ describe("MCP bridge", () => {
     const skillTemplates = (await (await bridgeRequest("/mcp/skill-templates/list", bridge.token, {})).json()) as any;
     expect(skillTemplates).toMatchObject({
       ok: true,
-      templates: expect.arrayContaining([expect.objectContaining({ id: "brainstorming", sourcePath: "src/shared/bundled-skills/brainstorming/SKILL.md" })]),
+      templates: expect.arrayContaining([expect.objectContaining({ id: "brainstorming", sourcePath: "assets/bundled-skills/brainstorming/SKILL.md" })]),
     });
 
     const skillSearch = (await (await bridgeRequest("/mcp/skills/search-online", bridge.token, { query: "frontend design anthropic" })).json()) as any;

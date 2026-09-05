@@ -1,4 +1,0 @@
-interface:
-  display_name: "技术教程写作与审校"
-  short_description: "改写和审校中文技术教程，补齐因果链、代码语境与图文关系"
-  default_prompt: "Use $rewrite-technical-tutorial to restructure and review this Chinese technical tutorial for clarity, evidence, and implementation accuracy."

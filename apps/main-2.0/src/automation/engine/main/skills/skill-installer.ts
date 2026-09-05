@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { cp, lstat, mkdir, readdir, readFile, readlink, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, readlink, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { bundledSkillAssetsFor } from "../../shared/bundled-skill-library";
 import { parseSkillMarkdown } from "../../shared/online-skills";
 import { SKILL_TEMPLATES } from "../../shared/skill-templates";
@@ -70,27 +68,12 @@ interface ImportedSkillMetadata {
   importedFromId?: string;
 }
 
-function bundledSkillSourceDir(template: SkillTemplate): string | undefined {
-  if (!template.sourcePath?.startsWith("src/shared/bundled-skills/")) return undefined;
-  const relativeDir = path.dirname(template.sourcePath);
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(process.cwd(), relativeDir),
-    path.resolve(moduleDir, "..", "..", relativeDir),
-    path.resolve(moduleDir, "..", "shared", "bundled-skills", template.id),
-  ];
-  return candidates.find((candidate) => pathExistsSync(candidate));
-}
-
-function pathExistsSync(filePath: string): boolean {
-  return existsSync(filePath);
-}
-
 async function writeEmbeddedSkillSource(template: SkillTemplate, sourceDir: string): Promise<void> {
   const assets = bundledSkillAssetsFor(template.id);
   await mkdir(sourceDir, { recursive: true });
   const skillAsset = assets.find((asset) => asset.relativePath === "SKILL.md");
-  await writeFile(path.join(sourceDir, "SKILL.md"), skillAsset?.contents ?? `${template.prompt.trim()}\n`, "utf8");
+  if (!skillAsset) throw new Error(`Bundled Skill ${template.id} is missing SKILL.md.`);
+  await writeFile(path.join(sourceDir, "SKILL.md"), skillAsset.contents, "utf8");
   for (const asset of assets) {
     if (asset.relativePath === "SKILL.md") continue;
     const targetPath = path.join(sourceDir, asset.relativePath);
@@ -194,12 +177,7 @@ export async function installBundledSkill(request: InstallSkillRequest, homeDir:
   const existed = await pathExists(linkPath);
   if (!imported) {
     await rm(sourceDir, { recursive: true, force: true });
-    const bundledSourceDir = bundledSkillSourceDir(template);
-    if (bundledSourceDir) {
-      await cp(bundledSourceDir, sourceDir, { recursive: true });
-    } else {
-      await writeEmbeddedSkillSource(template, sourceDir);
-    }
+    await writeEmbeddedSkillSource(template, sourceDir);
   }
   await mkdir(path.dirname(linkPath), { recursive: true });
   if (existed) {

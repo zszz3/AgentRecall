@@ -6,6 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { build as viteBuild } from "vite";
 import { packReleaseArchive } from "./pack-release.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -15,6 +16,7 @@ const packDir = path.join(tempRoot, "pack");
 const prefix = path.join(tempRoot, "prefix");
 const stageRoot = path.join(tempRoot, "stage");
 const home = path.join(tempRoot, "home");
+const skillVerifierRoot = path.join(tempRoot, "skill-verifier");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const environment = {
   ...process.env,
@@ -144,6 +146,71 @@ try {
   const diagramSamples = await readdir(path.join(diagramSkillRoot, "assets", "samples"));
   if (diagramSamples.filter((entry) => entry.endsWith(".svg")).length !== 66) {
     throw new Error("Packaged diagram Skill must include all 66 SVG samples.");
+  }
+
+  // Keep smoke-only entry points out of out/main. The installed package is the
+  // Vite root so absolute asset globs read the exact files in the archive.
+  await viteBuild({
+    root: installedRoot,
+    configFile: false,
+    publicDir: false,
+    logLevel: "warn",
+    build: {
+      ssr: true,
+      target: "node22",
+      outDir: skillVerifierRoot,
+      emptyOutDir: true,
+      rollupOptions: {
+        input: {
+          "bundled-skill-library": path.join(root, "src", "automation", "engine", "shared", "bundled-skill-library.ts"),
+          "managed-skill-library": path.join(root, "src", "core", "managed-skill-library.ts"),
+        },
+        output: {
+          entryFileNames: "[name].mjs",
+        },
+      },
+    },
+  });
+
+  const bundledSkillLibrary = await import(pathToFileURL(path.join(skillVerifierRoot, "bundled-skill-library.mjs")).href);
+  const loadBundledSkillTemplates = bundledSkillLibrary.loadBundledSkillTemplates ?? bundledSkillLibrary.default?.loadBundledSkillTemplates;
+  const bundledSkillAssetsFor = bundledSkillLibrary.bundledSkillAssetsFor ?? bundledSkillLibrary.default?.bundledSkillAssetsFor;
+  if (typeof loadBundledSkillTemplates !== "function" || typeof bundledSkillAssetsFor !== "function") {
+    throw new Error("Packaged bundled Skill loader did not expose its template and asset APIs.");
+  }
+  const bundledTemplates = loadBundledSkillTemplates();
+  for (const templateId of ["rewrite-technical-tutorial", "feishu-tech-diagram"]) {
+    if (!bundledTemplates.some((template) => template.id === templateId && template.sourceType === "official")) {
+      throw new Error(`Packaged Automation templates did not discover ${templateId}.`);
+    }
+  }
+  const packagedDiagramAssets = bundledSkillAssetsFor("feishu-tech-diagram");
+  if (packagedDiagramAssets.filter((asset) => asset.relativePath.startsWith("assets/samples/") && asset.relativePath.endsWith(".svg")).length !== 66) {
+    throw new Error("Packaged Automation loader must embed all 66 diagram SVG samples.");
+  }
+
+  const managedSkillLibraryModule = await import(pathToFileURL(path.join(skillVerifierRoot, "managed-skill-library.mjs")).href);
+  const ManagedSkillLibrary = managedSkillLibraryModule.ManagedSkillLibrary ?? managedSkillLibraryModule.default?.ManagedSkillLibrary;
+  if (typeof ManagedSkillLibrary !== "function") throw new Error("Packaged managed Skill library was not exported.");
+  const managedLibrary = new ManagedSkillLibrary({
+    libraryRoot: path.join(tempRoot, "managed-skills"),
+    homeDir: path.join(tempRoot, "managed-home"),
+  });
+  managedLibrary.ensureBuiltinSkills(path.join(installedRoot, "assets", "bundled-skills"));
+  for (const skillId of ["rewrite-technical-tutorial", "feishu-tech-diagram"]) {
+    if (!managedLibrary.list().skills.some((skill) => skill.managedId === skillId)) {
+      throw new Error(`Packaged managed Skill library did not import ${skillId}.`);
+    }
+  }
+  const managedDiagram = managedLibrary.list().skills.find((skill) => skill.managedId === "feishu-tech-diagram");
+  if (!managedDiagram) throw new Error("Packaged managed Skill library did not import feishu-tech-diagram.");
+  const managedDiagramSpecs = JSON.parse(await readFile(path.join(managedDiagram.directoryPath, "references", "template-specs.json")));
+  if (!Array.isArray(managedDiagramSpecs) || managedDiagramSpecs.length !== 66) {
+    throw new Error("Managed Skill import did not retain all 66 diagram template specifications.");
+  }
+  const managedDiagramSamples = await readdir(path.join(managedDiagram.directoryPath, "assets", "samples"));
+  if (managedDiagramSamples.filter((entry) => entry.endsWith(".svg")).length !== 66) {
+    throw new Error("Managed Skill import did not retain all 66 diagram SVG samples.");
   }
   const installedRequire = createRequire(path.join(installedRoot, "package.json"));
   const {

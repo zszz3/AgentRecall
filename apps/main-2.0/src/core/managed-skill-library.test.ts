@@ -11,6 +11,7 @@ import {
   ManagedSkillLibrary,
   type SkillInstallTarget,
 } from "./managed-skill-library";
+import { loadBundledSkillTemplates } from "../automation/engine/shared/bundled-skill-library";
 
 const temporaryDirectories: string[] = [];
 
@@ -122,6 +123,30 @@ function replaceRealpathSync(replacement: typeof fs.realpathSync): () => void {
 }
 
 describe("AgentRecall bundled Skills", () => {
+  it("registers every canonical Skill as an Automation template or managed built-in", () => {
+    const bundledSkillsRoot = fileURLToPath(new URL("../../assets/bundled-skills/", import.meta.url));
+    const canonicalSkillIds = fs.readdirSync(bundledSkillsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(bundledSkillsRoot, entry.name, "SKILL.md")))
+      .map((entry) => entry.name)
+      .sort();
+    const registeredSkillIds = new Set([
+      ...loadBundledSkillTemplates().map((template) => template.id),
+      ...AGENT_RECALL_BUILTIN_SKILLS.map((definition) => definition.id),
+    ]);
+
+    expect([...registeredSkillIds].sort()).toEqual(canonicalSkillIds);
+  });
+
+  it("keeps every managed built-in definition backed by canonical assets", () => {
+    for (const definition of AGENT_RECALL_BUILTIN_SKILLS) {
+      const bundledSkillRoot = new URL(`../../assets/bundled-skills/${definition.id}/`, import.meta.url);
+      expect(
+        fs.existsSync(fileURLToPath(new URL("SKILL.md", bundledSkillRoot))),
+        `${definition.id} must have a canonical SKILL.md asset`,
+      ).toBe(true);
+    }
+  });
+
   it("ships aihot as an official built-in Skill", () => {
     expect(AGENT_RECALL_BUILTIN_SKILLS).toContainEqual({
       id: "aihot",
