@@ -13,6 +13,10 @@ const api = vi.hoisted(() => ({
   saveWorkflowDefinition: vi.fn(),
 }));
 
+const sessionSearch = vi.hoisted(() => ({
+  resolveRuntimeInvocationSession: vi.fn(),
+}));
+
 vi.mock("../../../../automation/engine/renderer/src/app/services/agent-recall-service", () => ({
   agentRecallAutomationService: () => api,
 }));
@@ -118,6 +122,10 @@ describe("WorkflowFeaturePage live output", () => {
     root = createRoot(container);
     const snapshot = runningWorkflow();
     api.getWorkflowCore.mockResolvedValue({ definitions: [snapshot.definition], runs: [snapshot.run] });
+    Object.defineProperty(window, "sessionSearch", {
+      configurable: true,
+      value: sessionSearch,
+    });
   });
 
   afterEach(async () => {
@@ -223,6 +231,53 @@ describe("WorkflowFeaturePage live output", () => {
     expect(container.querySelector<HTMLButtonElement>('[data-workflow-run-id="run-older"]')?.getAttribute("aria-pressed")).toBe("true");
     expect(output?.textContent).toContain("较早一次的结果");
     expect(output?.textContent).not.toContain("最新一次的结果");
+  });
+
+  it("opens the Session recorded for the selected Workflow run", async () => {
+    const snapshot = completedWorkflow();
+    const onOpenSession = vi.fn();
+    sessionSearch.resolveRuntimeInvocationSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "session-1" },
+    });
+    api.getWorkflowCore.mockResolvedValue({ definitions: [snapshot.definition], runs: [snapshot.run] });
+
+    await act(async () => {
+      root.render(
+        <WorkflowFeaturePage
+          language="zh"
+          globalReviewEnabled
+          runtimeReviewEnabled
+          onOpenSession={onOpenSession}
+        />,
+      );
+      await Promise.resolve();
+    });
+    const runTab = [...container.querySelectorAll<HTMLButtonElement>(".workflow-core-mode button")]
+      .find((button) => button.textContent?.includes("运行记录"));
+    if (!runTab) throw new Error("Run history tab was not rendered");
+    await act(async () => {
+      runTab.click();
+      await Promise.resolve();
+    });
+    const sessionButton = [...container.querySelectorAll<HTMLButtonElement>(".workflow-core-toolbar-actions button")]
+      .find((button) => button.textContent?.includes("Session"));
+    if (!sessionButton) throw new Error("Session button was not rendered");
+
+    await act(async () => {
+      sessionButton.click();
+      await Promise.resolve();
+    });
+
+    expect(sessionSearch.resolveRuntimeInvocationSession).toHaveBeenCalledWith({
+      surface: "workflow",
+      ownerReference: {
+        workflowId: "workflow-1",
+        runId: "run-1",
+        nodeId: "inspect-code",
+      },
+    });
+    expect(onOpenSession).toHaveBeenCalledWith("session-1");
   });
 
   it("checks the right-clicked Workflow before enabling deletion", async () => {

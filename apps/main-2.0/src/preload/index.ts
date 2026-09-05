@@ -21,6 +21,8 @@ import type {
   ProjectSummary,
   ProjectQueryOptions,
   ProjectTagEntry,
+  RuntimeInvocationLookup,
+  RuntimeInvocationSessionResolution,
   SearchOptions,
   SessionEnvironment,
   SessionMessage,
@@ -62,6 +64,10 @@ const api = {
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),
   getSession: (sessionKey: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:get", sessionKey),
   findSessionByRawId: (rawId: string): Promise<SessionSearchResult | null> => ipcRenderer.invoke("session:find-by-raw-id", rawId),
+  /** Resolves the Session associated with an exact AgentRecall invocation owner. */
+  resolveRuntimeInvocationSession: (
+    lookup: RuntimeInvocationLookup,
+  ): Promise<RuntimeInvocationSessionResolution> => ipcRenderer.invoke("session:resolve-runtime-owner", lookup),
   getSessionContextComponents: (sessionKey: string): Promise<SessionContextComponents> =>
     ipcRenderer.invoke("session:context-components", sessionKey),
   getMessages: (sessionKey: string, offset?: number, limit?: number): Promise<SessionMessage[]> =>

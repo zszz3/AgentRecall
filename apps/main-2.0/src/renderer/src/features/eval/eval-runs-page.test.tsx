@@ -17,6 +17,7 @@ const harness = vi.hoisted(() => ({
   listExperiments: vi.fn(),
   listEvaluators: vi.fn(),
   confirm: vi.fn(),
+  resolveSession: vi.fn(),
 }));
 
 function summary(overrides: Partial<EvaluationRunSummary> = {}): EvaluationRunSummary {
@@ -85,6 +86,7 @@ function graphRun(): EvaluationRun {
             role: "judge",
             status: "excused",
             attribution: { type: "infra_failure", reason: "judge_runtime_not_configured" },
+            facts: { evaluatorId: "judge-1" },
           },
           {
             nodeId: "skill-use",
@@ -112,9 +114,11 @@ beforeEach(() => {
   harness.listEvaluators.mockReset().mockResolvedValue([]);
   harness.deleteRun.mockReset().mockResolvedValue(true);
   harness.confirm.mockReset().mockReturnValue(true);
+  harness.resolveSession.mockReset().mockResolvedValue({ status: "not_recorded" });
   Object.assign(window, {
     confirm: harness.confirm,
     sessionSearch: {
+      resolveRuntimeInvocationSession: harness.resolveSession,
       automation: {
         listEvaluationRuns: harness.listRuns,
         getEvaluationRun: harness.getRun,
@@ -141,6 +145,35 @@ async function render(): Promise<void> {
 }
 
 describe("EvalRunsPage", () => {
+  it("opens an explicitly requested run even when it is older than the listed page", async () => {
+    harness.listRuns.mockResolvedValue({ items: [summary()], total: 51, offset: 0, limit: 50 });
+    harness.getRun.mockImplementation(async (runId: string) => ({
+      ...graphRun(),
+      id: runId,
+      startedAt: 99,
+    }));
+    const onInitialRunConsumed = vi.fn();
+
+    await act(async () => {
+      root.render(createElement(EvalRunsPage, {
+        language: "zh",
+        onOpenSession: () => undefined,
+        initialRunId: "run-older",
+        initialCaseId: "run-1:item-1:1",
+        initialEvaluatorId: "judge-1",
+        onInitialRunConsumed,
+      }));
+    });
+
+    await vi.waitFor(() => expect(harness.getRun).toHaveBeenCalledWith("run-older"));
+    expect(onInitialRunConsumed).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-eval-case-id="run-1:item-1:1"]')?.className)
+      .toContain("contains-selection");
+    expect([...container.querySelectorAll(".eval-graph-nodes li")]
+      .find((item) => item.textContent?.includes("模型评判"))?.className)
+      .toContain("contains-selection");
+  });
+
   it("groups each task's runs under an independently collapsible heading", async () => {
     harness.listExperiments.mockResolvedValue([
       experiment(),
@@ -219,6 +252,71 @@ describe("EvalRunsPage", () => {
     // Skill use is unobservable here, which must not read as "went unused".
     expect(text).toContain("无法观测是否使用");
     expect(text).not.toContain("未使用该 Skill");
+  });
+
+  it("opens exact subject and judge invocations, including failed runs", async () => {
+    harness.listRuns.mockResolvedValue({ items: [summary()], total: 1, offset: 0, limit: 50 });
+    harness.getRun.mockResolvedValue(graphRun());
+    harness.resolveSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "codex:linked" },
+    });
+    const onOpenSession = vi.fn();
+
+    await act(async () => {
+      root.render(createElement(EvalRunsPage, { language: "zh", onOpenSession }));
+    });
+    const subject = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("被测会话"));
+    const judge = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("评分会话"));
+    if (!subject || !judge) throw new Error("Evaluation Session links were not rendered");
+
+    await act(async () => {
+      subject.click();
+      await Promise.resolve();
+    });
+    expect(harness.resolveSession).toHaveBeenLastCalledWith({
+      surface: "evaluation",
+      role: "subject",
+      ownerReference: { runId: "run-1", caseId: "run-1:item-1:1" },
+    });
+
+    await act(async () => {
+      judge.click();
+      await Promise.resolve();
+    });
+    expect(harness.resolveSession).toHaveBeenLastCalledWith({
+      surface: "evaluation",
+      role: "judge",
+      ownerReference: {
+        runId: "run-1",
+        caseId: "run-1:item-1:1",
+        evaluatorId: "judge-1",
+      },
+    });
+    expect(onOpenSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a reliable no-reference result instead of guessing a Session", async () => {
+    harness.listRuns.mockResolvedValue({ items: [summary()], total: 1, offset: 0, limit: 50 });
+    harness.getRun.mockResolvedValue(graphRun());
+    harness.resolveSession.mockResolvedValue({
+      status: "no_session_reference",
+      invocationId: "inv-dsh",
+      invocationStatus: "failed",
+    });
+    await render();
+    const subject = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("被测会话"));
+    if (!subject) throw new Error("Subject Session link was not rendered");
+
+    await act(async () => {
+      subject.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("未返回 Session 引用");
   });
 
   it("explains that a run recorded before the graph engine has no steps", async () => {

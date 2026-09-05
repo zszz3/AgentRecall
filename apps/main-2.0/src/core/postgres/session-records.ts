@@ -1,6 +1,8 @@
 import { cleanTitle } from "../format-adapters";
 import type {
   EnvironmentKind,
+  RuntimeInvocationSummary,
+  SessionOriginFilter,
   SessionSearchResult,
   SessionSource,
   SessionTurnMatch,
@@ -57,6 +59,8 @@ export interface SessionRow extends Record<string, unknown> {
   best_turn_started_at?: Date | string | null;
   best_turn_search_text?: string | null;
   turn_match_count?: number | string | null;
+  created_by_agent_recall: boolean;
+  runtime_invocations: unknown;
 }
 
 export interface SessionTurnSummaryRow extends Record<string, unknown> {
@@ -154,7 +158,63 @@ export const SESSION_ACTIVITY_SQL = `
   )
 `;
 
-export const SESSION_SELECT_SQL = `
+/**
+ * SQL predicate matching a Runtime binding to its indexed Session family.
+ *
+ * Indexed Sessions do not carry a trustworthy channel identifier. When the
+ * same Runtime/environment/native Session id is observed on more than one
+ * channel, refusing to project either binding is safer than attributing one
+ * channel's Session to another.
+ */
+export const RUNTIME_SESSION_BINDING_MATCH_SQL = `
+  bindings.environment_id = sessions.environment_id
+  and bindings.runtime_session_id = sessions.raw_id
+  and not exists (
+    select 1
+    from agent_recall.runtime_session_bindings conflicting_bindings
+    where conflicting_bindings.environment_id = bindings.environment_id
+      and conflicting_bindings.runtime_id = bindings.runtime_id
+      and conflicting_bindings.runtime_session_id = bindings.runtime_session_id
+      and nullif(conflicting_bindings.channel_id, '') is distinct from nullif(bindings.channel_id, '')
+  )
+  and (
+    (bindings.runtime_id = 'codex' and sessions.source in (
+      'codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli'
+    ))
+    or (bindings.runtime_id = 'claude' and sessions.source in (
+      'claude-cli', 'claude-app', 'stepcode-claude', 'tclaude-cli'
+    ))
+    or (bindings.runtime_id = 'dsh' and sessions.source = 'deepseek-cli')
+    or (bindings.runtime_id = 'hermes' and sessions.source = 'hermes')
+    or (bindings.runtime_id = 'opencode' and sessions.source = 'opencode-cli')
+    or (bindings.runtime_id = 'openclaw' and sessions.source = 'openclaw')
+  )
+`;
+
+/** SQL predicate identifying Sessions created by a persisted AgentRecall invocation. */
+export const AGENTRECALL_CREATED_SESSION_SQL = `
+  exists (
+    select 1
+    from agent_recall.runtime_session_bindings bindings
+    join agent_recall.runtime_invocations invocations
+      on invocations.id = bindings.invocation_id
+    where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+      and bindings.relation = 'created'
+      and invocations.initiator = 'agentrecall'
+  )
+`;
+
+export function sessionOriginPredicate(origin: SessionOriginFilter | undefined): string | undefined {
+  if (origin === "agentrecall") return AGENTRECALL_CREATED_SESSION_SQL;
+  if (origin === "ordinary") return `not (${AGENTRECALL_CREATED_SESSION_SQL})`;
+  return undefined;
+}
+
+function sessionSelectSql(runtimeInvocationLimit?: number): string {
+  const runtimeInvocationLimitSql = runtimeInvocationLimit === undefined
+    ? ""
+    : `limit ${runtimeInvocationLimit}`;
+  return `
   sessions.*,
   coalesce(
     (
@@ -188,8 +248,50 @@ export const SESSION_SELECT_SQL = `
       where session_tags.session_key = sessions.session_key
     ),
     array[]::text[]
-  ) as tag_names
+  ) as tag_names,
+  ${AGENTRECALL_CREATED_SESSION_SQL} as created_by_agent_recall,
+  coalesce(
+    (
+      select jsonb_agg(
+        history.payload order by history.started_at desc, history.invocation_id desc
+      )
+      from (
+        select
+          invocations.started_at,
+          invocations.id as invocation_id,
+          jsonb_build_object(
+            'invocationId', invocations.id,
+            'surface', invocations.surface,
+            'role', invocations.role,
+            'ownerReference', invocations.owner_reference,
+            'runtimeId', bindings.runtime_id,
+            'channelId', nullif(bindings.channel_id, ''),
+            'environmentId', bindings.environment_id,
+            'status', invocations.status,
+            'startedAt', extract(epoch from invocations.started_at) * 1000,
+            'finishedAt', case when invocations.finished_at is null then null
+              else extract(epoch from invocations.finished_at) * 1000 end,
+            'relation', bindings.relation,
+            'runtimeSessionId', bindings.runtime_session_id,
+            'runtimeTurnId', bindings.runtime_turn_id
+          ) as payload
+        from agent_recall.runtime_session_bindings bindings
+        join agent_recall.runtime_invocations invocations
+          on invocations.id = bindings.invocation_id
+        where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+          and invocations.initiator = 'agentrecall'
+        order by invocations.started_at desc, invocations.id desc
+        ${runtimeInvocationLimitSql}
+      ) history
+    ),
+    '[]'::jsonb
+  ) as runtime_invocations
 `;
+}
+
+/** List projection keeps navigation payload bounded; detail loading restores full history. */
+export const SESSION_SELECT_SQL = sessionSelectSql(20);
+export const SESSION_DETAIL_SELECT_SQL = sessionSelectSql();
 
 export function numberValue(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
@@ -465,7 +567,55 @@ export function hydrateSession(
     parentSessionId: row.parent_session_id,
     bestTurn,
     turnMatchCount: numberValue(row.turn_match_count),
+    createdByAgentRecall: Boolean(row.created_by_agent_recall),
+    runtimeInvocations: runtimeInvocationSummaries(row.runtime_invocations),
   };
   if (queryTerms.length > 0 && !bestTurn) result.metadataMatch = metadataMatch(result, queryTerms);
   return result;
+}
+
+function runtimeInvocationSummaries(value: unknown): RuntimeInvocationSummary[] {
+  let entries: unknown = value;
+  if (typeof entries === "string") {
+    try {
+      entries = JSON.parse(entries);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry): RuntimeInvocationSummary[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.invocationId !== "string"
+      || typeof record.surface !== "string"
+      || typeof record.runtimeId !== "string"
+      || typeof record.environmentId !== "string"
+      || typeof record.runtimeSessionId !== "string"
+      || (record.relation !== "created" && record.relation !== "continued")
+      || !["pending", "completed", "failed", "cancelled", "timed_out"].includes(String(record.status))
+    ) return [];
+    const ownerReference = jsonValue(record.ownerReference);
+    return [{
+      invocationId: record.invocationId,
+      surface: record.surface,
+      role: typeof record.role === "string" ? record.role : null,
+      ownerReference: Object.fromEntries(
+        Object.entries(ownerReference).flatMap(([key, nested]) =>
+          typeof nested === "string" ? [[key, nested]] : []),
+      ),
+      runtimeId: record.runtimeId,
+      channelId: typeof record.channelId === "string" ? record.channelId : null,
+      environmentId: record.environmentId,
+      status: record.status as RuntimeInvocationSummary["status"],
+      startedAt: numberValue(record.startedAt),
+      finishedAt: record.finishedAt === null || record.finishedAt === undefined
+        ? null
+        : numberValue(record.finishedAt),
+      relation: record.relation,
+      runtimeSessionId: record.runtimeSessionId,
+      runtimeTurnId: typeof record.runtimeTurnId === "string" ? record.runtimeTurnId : null,
+    }];
+  });
 }

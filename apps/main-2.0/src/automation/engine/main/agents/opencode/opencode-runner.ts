@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import type { AgentEvent } from "../../../shared/types";
 import { runtimeModelId } from "../../../shared/models";
 import { spawnCli } from "../../platform/cli-launcher";
+import { openCodeRuntimeStateCodec } from "./opencode-runtime-state-codec";
 
 const MAX_STDERR_CHARS = 8_000;
 
@@ -98,6 +99,7 @@ export class OpenCodeRunner {
     let content = "";
     let stderr = "";
     let runtimeError: string | undefined;
+    let reportedSessionId: string | undefined;
     const handleLine = (line: string): void => {
       const trimmed = line.trim();
       if (!trimmed) return;
@@ -108,6 +110,23 @@ export class OpenCodeRunner {
         runtimeError = `OpenCode emitted invalid JSON: ${trimmed.slice(0, 400)}`;
         this.options.onEvent({ type: "error", error: runtimeError });
         return;
+      }
+      if (
+        typeof record.sessionID === "string"
+        && record.sessionID
+        && record.sessionID !== reportedSessionId
+      ) {
+        reportedSessionId = record.sessionID;
+        this.options.onEvent({
+          type: "runtime_conversation",
+          runtimeConversation: openCodeRuntimeStateCodec.encodeConversation({
+            native: { sessionId: record.sessionID },
+            appContext: {
+              cwd: this.options.cwd,
+              ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
+            },
+          }),
+        });
       }
       for (const event of agentEventsFromOpenCodeJson(record)) {
         if (event.type === "delta") content += event.content;

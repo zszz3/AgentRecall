@@ -6,6 +6,7 @@ import { PostgresSessionRepository } from "./session-repository";
 import { PostgresSessionSearchRepository } from "./session-search-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
+import { PostgresRuntimeInvocationRepository } from "./runtime-invocation-repository";
 
 function session(
   sessionKey: string,
@@ -238,6 +239,285 @@ describe("PostgreSQL Turn search", () => {
     expect(emptyPage.sessions).toEqual([]);
     expect(emptyPage.totalCount).toBe(4);
     expect(emptyPage.hasMore).toBe(false);
+  });
+
+  it("groups only sessions explicitly created by AgentRecall and keeps continued user sessions ordinary", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-created",
+      initiator: "agentrecall",
+      invocation: {
+        surface: "evaluation",
+        role: "subject",
+        ownerReference: { runId: "run-1", caseResultId: "case-1" },
+      },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-20T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-created", {
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      sessionId: "one",
+      turnId: "turn-1",
+      relation: "created",
+      boundAt: Date.parse("2026-07-20T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-created", "completed", Date.parse("2026-07-20T08:00:02.000Z"));
+
+    await invocations.begin({
+      id: "inv-continued",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "room-1" } },
+      runtimeId: "claude",
+      channelId: "claude-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-21T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-continued", {
+      runtimeId: "claude",
+      channelId: "claude-default",
+      environmentId: "local",
+      sessionId: "two",
+      relation: "continued",
+      boundAt: Date.parse("2026-07-21T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-continued", "cancelled", Date.parse("2026-07-21T08:00:02.000Z"));
+
+    const ordinary = await searchRepository.searchSessionPage({ origin: "ordinary", excludeSubagents: true });
+    expect(ordinary.sessions.map((item) => item.sessionKey).sort()).toEqual(["codex:roles", "codex:two"]);
+    expect(ordinary.originCounts).toEqual({ ordinary: 2, agentRecall: 1, all: 3 });
+    expect(ordinary.invocationSurfaceCounts).toEqual({
+      workflow: 0,
+      evaluation: 1,
+      team_chat: 0,
+      agent: 0,
+      skill: 0,
+      system: 0,
+      all: 1,
+    });
+    expect(ordinary.sessions.find((item) => item.sessionKey === "codex:two")).toMatchObject({
+      createdByAgentRecall: false,
+      runtimeInvocations: [expect.objectContaining({
+        invocationId: "inv-continued",
+        relation: "continued",
+        surface: "team_chat",
+        status: "cancelled",
+      })],
+    });
+
+    const created = await searchRepository.searchSessionPage({ origin: "agentrecall", excludeSubagents: true });
+    expect(created.sessions).toHaveLength(1);
+    expect(created.sessions[0]).toMatchObject({
+      sessionKey: "codex:one",
+      createdByAgentRecall: true,
+      runtimeInvocations: [expect.objectContaining({
+        invocationId: "inv-created",
+        relation: "created",
+        runtimeTurnId: "turn-1",
+        ownerReference: { runId: "run-1", caseResultId: "case-1" },
+      })],
+    });
+    const evaluationSessions = await searchRepository.searchSessionPage({
+      origin: "agentrecall",
+      invocationSurface: "evaluation",
+      excludeSubagents: true,
+    });
+    expect(evaluationSessions.sessions.map((item) => item.sessionKey)).toEqual(["codex:one"]);
+    expect(evaluationSessions.originCounts).toEqual({ ordinary: 2, agentRecall: 1, all: 3 });
+    await expect(repository.listProjects({ origin: "ordinary", excludeSubagents: true }))
+      .resolves.toEqual([expect.objectContaining({ sessionCount: 2 })]);
+    await expect(repository.listProjects({ origin: "agentrecall", excludeSubagents: true }))
+      .resolves.toEqual([expect.objectContaining({ sessionCount: 1 })]);
+    const workflowSessions = await searchRepository.searchSessionPage({
+      origin: "agentrecall",
+      invocationSurface: "workflow",
+      excludeSubagents: true,
+    });
+    expect(workflowSessions.sessions).toEqual([]);
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "run-1" } }))
+      .resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
+    await expect(repository.resolveRuntimeInvocationSession({
+      invocationId: "inv-created",
+      surface: "evaluation",
+      role: "subject",
+    })).resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "missing" } }))
+      .resolves.toEqual({ status: "not_recorded" });
+
+    await invocations.begin({
+      id: "inv-no-reference",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "run-no-reference" } },
+      runtimeId: "dsh",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-22T08:00:00.000Z"),
+    });
+    await invocations.finish(
+      "inv-no-reference",
+      "failed",
+      Date.parse("2026-07-22T08:00:01.000Z"),
+    );
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "run-no-reference" } }))
+      .resolves.toEqual({
+        status: "no_session_reference",
+        invocationId: "inv-no-reference",
+        invocationStatus: "failed",
+      });
+
+    await invocations.begin({
+      id: "inv-awaiting-index",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "run-awaiting-index" } },
+      runtimeId: "codex",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-23T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-awaiting-index", {
+      runtimeId: "codex",
+      environmentId: "local",
+      sessionId: "not-indexed-yet",
+      relation: "created",
+      boundAt: Date.parse("2026-07-23T08:00:01.000Z"),
+    });
+    await expect(repository.resolveRuntimeInvocationSession({ ownerReference: { runId: "run-awaiting-index" } }))
+      .resolves.toEqual({ status: "not_indexed", invocationId: "inv-awaiting-index" });
+  });
+
+  it("resolves the newest bound invocation when a newer retry has no Session reference", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-retry-bound",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "room-retry", messageId: "message-retry" } },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:00.000Z"),
+    });
+    await invocations.bind("inv-retry-bound", {
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      sessionId: "one",
+      relation: "created",
+      boundAt: Date.parse("2026-07-25T08:00:01.000Z"),
+    });
+    await invocations.finish("inv-retry-bound", "completed", Date.parse("2026-07-25T08:00:02.000Z"));
+
+    await invocations.begin({
+      id: "inv-retry-unbound",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "room-retry", messageId: "message-retry" } },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:03.000Z"),
+    });
+    await invocations.finish("inv-retry-unbound", "failed", Date.parse("2026-07-25T08:00:04.000Z"));
+
+    await expect(repository.resolveRuntimeInvocationSession({
+      surface: "team_chat",
+      role: "member",
+      ownerReference: { roomId: "room-retry", messageId: "message-retry" },
+    })).resolves.toMatchObject({ status: "found", session: { sessionKey: "codex:one" } });
+    await expect(repository.resolveRuntimeInvocationSession({ invocationId: "inv-retry-unbound" }))
+      .resolves.toEqual({
+        status: "no_session_reference",
+        invocationId: "inv-retry-unbound",
+        invocationStatus: "failed",
+      });
+  });
+
+  it("keeps list history bounded while a Session detail retains every invocation", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    for (let index = 0; index < 22; index += 1) {
+      const id = `inv-history-${String(index).padStart(2, "0")}`;
+      await invocations.begin({
+        id,
+        initiator: "agentrecall",
+        invocation: { surface: "workflow", ownerReference: { runId: id } },
+        runtimeId: "codex",
+        environmentId: "local",
+        startedAt: Date.parse("2026-07-20T08:00:00.000Z") + index,
+      });
+      await invocations.bind(id, {
+        runtimeId: "codex",
+        environmentId: "local",
+        sessionId: "one",
+        relation: index === 0 ? "created" : "continued",
+        boundAt: Date.parse("2026-07-20T08:00:00.000Z") + index,
+      });
+      await invocations.finish(id, "completed", Date.parse("2026-07-20T08:01:00.000Z") + index);
+    }
+
+    const listed = await searchRepository.searchSessionPage({ origin: "agentrecall" });
+    expect(listed.sessions.find((item) => item.sessionKey === "codex:one")?.runtimeInvocations)
+      .toHaveLength(20);
+    await expect(repository.getSession("codex:one")).resolves.toMatchObject({
+      runtimeInvocations: expect.arrayContaining([
+        expect.objectContaining({ invocationId: "inv-history-00" }),
+        expect.objectContaining({ invocationId: "inv-history-21" }),
+      ]),
+    });
+    expect((await repository.getSession("codex:one"))?.runtimeInvocations).toHaveLength(22);
+  });
+
+  it("does not attribute a Session when channel-scoped bindings disagree", async () => {
+    await repository.upsertIndexedSession(
+      session("codex:channel-shared", "Channel scoped Session", "2026-07-25T08:00:00.000Z"),
+      [message("user", "channel collision", "2026-07-25T08:00:00.000Z", 0)],
+    );
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "inv-channel-a",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "channel-run-a" } },
+      runtimeId: "codex",
+      channelId: "codex-channel-a",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:01.000Z"),
+    });
+    await invocations.bind("inv-channel-a", {
+      runtimeId: "codex",
+      channelId: "codex-channel-a",
+      environmentId: "local",
+      sessionId: "channel-shared",
+      relation: "created",
+      boundAt: Date.parse("2026-07-25T08:00:02.000Z"),
+    });
+    await invocations.finish("inv-channel-a", "completed", Date.parse("2026-07-25T08:00:03.000Z"));
+
+    await expect(searchRepository.searchSessionPage({ origin: "agentrecall" }))
+      .resolves.toMatchObject({
+        sessions: [expect.objectContaining({ sessionKey: "codex:channel-shared", createdByAgentRecall: true })],
+      });
+
+    await invocations.begin({
+      id: "inv-channel-b",
+      initiator: "agentrecall",
+      invocation: { surface: "workflow", ownerReference: { runId: "channel-run-b" } },
+      runtimeId: "codex",
+      channelId: "codex-channel-b",
+      environmentId: "local",
+      startedAt: Date.parse("2026-07-25T08:00:04.000Z"),
+    });
+    await invocations.bind("inv-channel-b", {
+      runtimeId: "codex",
+      channelId: "codex-channel-b",
+      environmentId: "local",
+      sessionId: "channel-shared",
+      relation: "created",
+      boundAt: Date.parse("2026-07-25T08:00:05.000Z"),
+    });
+    await invocations.finish("inv-channel-b", "completed", Date.parse("2026-07-25T08:00:06.000Z"));
+
+    const ambiguous = await searchRepository.searchSessionPage({ origin: "agentrecall" });
+    expect(ambiguous.sessions.some((item) => item.sessionKey === "codex:channel-shared")).toBe(false);
+    await expect(repository.resolveRuntimeInvocationSession({ invocationId: "inv-channel-a" }))
+      .resolves.toEqual({ status: "not_indexed", invocationId: "inv-channel-a" });
   });
 
   it("filters both Claude and Codex StepCode variants as one source", async () => {

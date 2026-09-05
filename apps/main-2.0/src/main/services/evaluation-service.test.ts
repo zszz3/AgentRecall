@@ -113,12 +113,12 @@ describe("EvaluationService", () => {
 
     expect(executeAgent).toHaveBeenNthCalledWith(
       1,
-      { configuredAgentId: "target-agent", prompt: "Explain the result" },
+      expect.objectContaining({ configuredAgentId: "target-agent", prompt: "Explain the result", role: "subject" }),
       expect.any(AbortSignal),
     );
     expect(executeAgent).toHaveBeenNthCalledWith(
       2,
-      { configuredAgentId: "judge-agent", prompt: expect.stringContaining("subject output") },
+      expect.objectContaining({ configuredAgentId: "judge-agent", prompt: expect.stringContaining("subject output"), role: "judge" }),
       expect.any(AbortSignal),
     );
     expect(saveRun).toHaveBeenCalledWith(expect.objectContaining({
@@ -158,7 +158,7 @@ describe("EvaluationService", () => {
 
     await expect(service.runExperiment("experiment-1")).resolves.toMatchObject({ passRate: 1 });
     expect(executeAgent).toHaveBeenCalledWith(
-      { configuredAgentId: "judge-agent", prompt: expect.any(String) },
+      expect.objectContaining({ configuredAgentId: "judge-agent", prompt: expect.any(String), role: "judge" }),
       expect.any(AbortSignal),
     );
   });

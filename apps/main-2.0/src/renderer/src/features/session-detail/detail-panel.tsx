@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, Download, Edit3, Eye, EyeOff, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronUp, CloudUpload, Container, Copy, CornerUpLeft, Download, Edit3, Eye, EyeOff, FolderOpen, Laptop, Paperclip, Play, Search, Server, Sparkles, Star, Tag, Terminal as TerminalIcon, Trash2, X } from "lucide-react";
 import { formatMessageTime } from "../../../../core/format-session";
 import { traceCompactionSummary, traceDetailText, traceDurationLabel, tracePresentation } from "../../../../core/trace-presentation";
 import type {
   SessionMessage,
+  RuntimeInvocationSummary,
   SessionSearchResult,
   SessionTraceEvent,
   SessionTurnDetail,
@@ -127,6 +128,90 @@ function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all
     : localize(language, "No Assistant messages in the loaded conversation.", "当前已加载内容中没有助手消息。");
 }
 
+/** Owner-navigation buttons shown before the "show all" toggle collapses the rest. */
+const INVOCATION_OWNER_ACTION_LIMIT = 3;
+
+/**
+ * Collapses the invocation history to one button per distinct navigation
+ * target. Invocations arrive newest-first, so the first occurrence of each
+ * surface + owner reference combination is its most recent invocation.
+ */
+function distinctInvocationOwnerActions(invocations: readonly RuntimeInvocationSummary[]): RuntimeInvocationSummary[] {
+  const actions: RuntimeInvocationSummary[] = [];
+  const seenOwnerReferences = new Set<string>();
+  for (const invocation of invocations) {
+    if (Object.keys(invocation.ownerReference).length === 0) continue;
+    const ownerKey = `${invocation.surface}:${JSON.stringify(invocation.ownerReference)}`;
+    if (seenOwnerReferences.has(ownerKey)) continue;
+    seenOwnerReferences.add(ownerKey);
+    actions.push(invocation);
+  }
+  return actions;
+}
+
+function invocationSurfaceLabel(surface: string, language: LanguageMode): string {
+  const labels: Record<string, [string, string]> = {
+    workflow: ["Workflow", "工作流"],
+    evaluation: ["Evaluation", "评测"],
+    team_chat: ["Team Chat", "团队会话"],
+    agent: ["Agent", "智能体"],
+    skill: ["Skill", "技能"],
+    system: ["System", "系统"],
+  };
+  const label = labels[surface];
+  return label ? localize(language, label[0], label[1]) : surface;
+}
+
+function invocationRoleLabel(role: string | null, language: LanguageMode): string | null {
+  if (!role) return null;
+  const labels: Record<string, [string, string]> = {
+    recovery_manager: ["Recovery manager", "恢复管理"],
+    reviewer: ["Reviewer", "审核"],
+    node: ["Node", "节点"],
+    draft: ["Draft", "草稿生成"],
+    chat: ["Chat", "对话"],
+    task: ["Task", "任务"],
+    subject: ["Subject", "受测对象"],
+    judge: ["Judge", "裁判"],
+    member: ["Member", "成员"],
+    discovery: ["Discovery", "探索"],
+    channel_test: ["Connection test", "连接测试"],
+  };
+  const label = labels[role];
+  return label ? localize(language, label[0], label[1]) : role;
+}
+
+function invocationStatusLabel(status: RuntimeInvocationSummary["status"], language: LanguageMode): string {
+  const labels: Record<RuntimeInvocationSummary["status"], [string, string]> = {
+    pending: ["Running", "进行中"],
+    completed: ["Completed", "已完成"],
+    failed: ["Failed", "失败"],
+    cancelled: ["Cancelled", "已取消"],
+    timed_out: ["Timed out", "已超时"],
+  };
+  const label = labels[status];
+  return localize(language, label[0], label[1]);
+}
+
+function invocationOwnerActionLabel(
+  invocation: RuntimeInvocationSummary,
+  language: LanguageMode,
+): string {
+  const exactOwner =
+    (invocation.surface === "workflow" && Boolean(invocation.ownerReference.workflowId))
+    || (invocation.surface === "team_chat" && Boolean(invocation.ownerReference.roomId))
+    || (invocation.surface === "evaluation" && Boolean(invocation.ownerReference.runId))
+    || (invocation.surface === "system" && Boolean(invocation.ownerReference.channelId))
+    || (invocation.surface === "agent" && Boolean(invocation.ownerReference.agentId));
+  if (exactOwner) return localize(language, "Back to source", "返回调用来源");
+  if (invocation.surface === "skill") return localize(language, "Open Skills", "打开 Skills");
+  if (invocation.surface === "workflow") return localize(language, "Open Workflows", "打开工作流");
+  if (invocation.surface === "team_chat") return localize(language, "Open Team Chat", "打开团队聊天");
+  if (invocation.surface === "evaluation") return localize(language, "Open Evaluations", "打开评测");
+  if (invocation.surface === "system") return localize(language, "Open Runtimes", "打开 Runtime");
+  return localize(language, "Open Workbench", "打开工作台");
+}
+
 export function DetailPanel({
   session,
   turns,
@@ -176,6 +261,7 @@ export function DetailPanel({
   onOpenFamilySession,
   sessionFamilyLoadFailed = false,
   onRetrySessionFamily,
+  onOpenInvocationOwner,
 }: {
   session: SessionSearchResult;
   turns: SessionTurnSummary[] | null;
@@ -225,6 +311,7 @@ export function DetailPanel({
   onOpenFamilySession?: (sessionKey: string) => void;
   sessionFamilyLoadFailed?: boolean;
   onRetrySessionFamily?: () => void;
+  onOpenInvocationOwner?: (invocation: RuntimeInvocationSummary) => void;
 }): ReactElement {
   const context = matchedContextMessages;
   const actionRunning = actionStatus?.kind === "running";
@@ -248,6 +335,8 @@ export function DetailPanel({
   const [roleFilter, setRoleFilter] = useState<ConversationRoleFilter>("all");
   const [showTools, setShowTools] = useState(readInitialToolEventsVisibility);
   const [exportMarkdownMenuOpen, setExportMarkdownMenuOpen] = useState(false);
+  const [showAllInvocationOwners, setShowAllInvocationOwners] = useState(false);
+  const invocationOwnerActions = distinctInvocationOwnerActions(session.runtimeInvocations ?? []);
   const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
   const visibleTimelineItems = useMemo(
     () => filterConversationTimeline(timelineItems, roleFilter, showTools),
@@ -273,6 +362,7 @@ export function DetailPanel({
   }, [exportMarkdownMenuOpen]);
 
   useEffect(() => setExportMarkdownMenuOpen(false), [session.sessionKey]);
+  useEffect(() => setShowAllInvocationOwners(false), [session.sessionKey]);
   const roleFilterEmpty = !loading
     && messages.length > 0
     && roleFilter !== "all"
@@ -530,6 +620,32 @@ export function DetailPanel({
             </button>
           </div>
         </div>
+        {(session.runtimeInvocations?.length ?? 0) > 0 ? (
+          <section className="runtime-invocation-history" aria-label={l("AgentRecall invocation history", "AgentRecall 调用记录")}>
+            <div className="runtime-invocation-history-title">
+              <strong>{session.createdByAgentRecall
+                ? l("Created by AgentRecall", "由 AgentRecall 创建")
+                : l("Continued by AgentRecall", "曾由 AgentRecall 续接")}</strong>
+              <span>{l(
+                `${session.runtimeInvocations?.length ?? 0} invocations`,
+                `${session.runtimeInvocations?.length ?? 0} 次调用`,
+              )}</span>
+            </div>
+            <div className="runtime-invocation-history-list">
+              {session.runtimeInvocations?.map((invocation) => (
+                <div className="runtime-invocation-history-item" key={invocation.invocationId}>
+                  <span>{invocationSurfaceLabel(invocation.surface, language)}
+                    {invocationRoleLabel(invocation.role, language)
+                      ? ` · ${invocationRoleLabel(invocation.role, language)}`
+                      : ""}</span>
+                  <span>{invocationStatusLabel(invocation.status, language)} · {new Date(invocation.startedAt).toLocaleString(
+                    language === "zh" ? "zh-CN" : "en-US",
+                  )}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {!readOnly ? <div className="detail-actions">
           <div className="detail-action-group">
             {canResume ? (
@@ -616,6 +732,31 @@ export function DetailPanel({
               <button className="danger" onClick={onDelete} disabled={actionRunning}>
                 <Trash2 size={15} /> {session.sourceAvailable === false ? l("Delete Cache", "删除缓存") : l("Delete", "删除")}
               </button>
+            </div>
+          ) : null}
+          {onOpenInvocationOwner && invocationOwnerActions.length > 0 ? (
+            <div className="detail-action-group">
+              {(showAllInvocationOwners
+                ? invocationOwnerActions
+                : invocationOwnerActions.slice(0, INVOCATION_OWNER_ACTION_LIMIT))
+                .map((invocation) => (
+                  <button type="button" key={invocation.invocationId} onClick={() => onOpenInvocationOwner(invocation)}>
+                    <CornerUpLeft size={15} /> {invocationOwnerActionLabel(invocation, language)}
+                  </button>
+                ))}
+              {invocationOwnerActions.length > INVOCATION_OWNER_ACTION_LIMIT ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllInvocationOwners((open) => !open)}
+                >
+                  {showAllInvocationOwners
+                    ? l("Show fewer", "收起")
+                    : l(
+                      `Show all ${invocationOwnerActions.length}`,
+                      `查看全部 ${invocationOwnerActions.length} 处`,
+                    )}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div> : null}

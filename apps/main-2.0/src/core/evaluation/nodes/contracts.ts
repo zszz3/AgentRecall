@@ -92,6 +92,7 @@ export interface EvaluationArtifactValue {
 
 /** Runtime-native ids a fresh run reports, used to find its session. */
 export interface EvaluationExecutionReference {
+  invocationId?: string;
   sessionId?: string;
   turnId?: string;
 }
@@ -168,7 +169,13 @@ export interface EvaluationNodeDependencies {
     skillName: string,
   ) => Promise<{ content: string; hash: string } | null>;
   runAgent: (
-    input: { agentId: string; prompt: string; developerInstructions?: string },
+    input: {
+      agentId: string;
+      prompt: string;
+      developerInstructions?: string;
+      role: string;
+      ownerReference: Record<string, string>;
+    },
     signal?: AbortSignal,
   ) => Promise<{
     output: string;
@@ -176,11 +183,16 @@ export interface EvaluationNodeDependencies {
     executionReference?: EvaluationExecutionReference;
   }>;
   executeJudge?: (
-    input: { runtimeId: string; prompt: string },
+    input: {
+      runtimeId: string;
+      prompt: string;
+      role: string;
+      ownerReference: Record<string, string>;
+    },
     signal?: AbortSignal,
   ) => Promise<{ output: string; durationMs: number }>;
-  /** Resolves a runtime-native session id to an indexed AgentRecall session. */
-  resolveSession?: (rawId: string) => Promise<{ sessionKey: string } | null>;
+  /** Resolves an exact Runtime invocation to an indexed AgentRecall session. */
+  resolveSession?: (reference: EvaluationExecutionReference) => Promise<{ sessionKey: string } | null>;
   /** Reads an indexed session's trajectory. */
   readTrajectory?: (sessionKey: string) => Promise<EvaluationTrajectoryValue | null>;
   /** Reads a session's final answer, for evaluating a session that already exists. */

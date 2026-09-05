@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import type {
   AgentRecallMcpContext,
   AgentChannel,
   ConfiguredAgent,
   RuntimeConversation,
+  RuntimeInvocationRequest,
   WorkflowAgentEvent,
   WorkflowAgentRequest,
   WorkflowAgentResponse,
@@ -45,6 +47,7 @@ export class ConfiguredAgentExecutionService {
         nodeId: string;
         executionId: string;
       };
+      invocation: RuntimeInvocationRequest;
     },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
@@ -71,6 +74,7 @@ export class ConfiguredAgentExecutionService {
       runtimeConversation?: RuntimeConversation;
       developerInstructions?: string;
       agentRecallMcp?: AgentRecallMcpContext;
+      invocation: RuntimeInvocationRequest;
     },
     onEvent?: (event: WorkflowAgentEvent) => void,
     signal?: AbortSignal,
@@ -91,6 +95,7 @@ export class ConfiguredAgentExecutionService {
       runtimeConversation?: RuntimeConversation;
       developerInstructions?: string;
       agentRecallMcp?: AgentRecallMcpContext;
+      invocation: RuntimeInvocationRequest;
       workflowExecution?: {
         workflowId: string;
         runId: string;
@@ -117,6 +122,7 @@ export class ConfiguredAgentExecutionService {
         ? structuredClone(input.runtimeConversation)
         : undefined;
     const request: WorkflowAgentRequest = {
+      invocationId: randomUUID(),
       configuredAgentId: input.configuredAgentId,
       prompt: input.prompt,
       runtimeId: target.runtimeId,
@@ -128,6 +134,7 @@ export class ConfiguredAgentExecutionService {
         ? { developerInstructions: input.developerInstructions.trim() }
         : {}),
       ...(input.agentRecallMcp ? { agentRecallMcp: { ...input.agentRecallMcp } } : {}),
+      invocation: structuredClone(input.invocation),
       ...(input.workflowExecution ? {
         planningWorkflowId: input.workflowExecution.workflowId,
         workflowRunId: input.workflowExecution.runId,

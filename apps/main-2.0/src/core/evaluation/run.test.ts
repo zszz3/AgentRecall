@@ -189,11 +189,11 @@ describe("evaluation run", () => {
           durationMs: 5,
           executionReference: { sessionId: "thread-9" },
         }),
-        resolveSession: async (rawId) => {
+        resolveSession: async (reference) => {
           attempts += 1;
           return attempts < 3
             ? null
-            : { sessionKey: `claude:${rawId}`, source: "claude", rawId };
+            : { sessionKey: `claude:${reference.sessionId}` };
         },
         readTrajectory: async () => trajectory(),
         wait: async (ms) => {
@@ -223,7 +223,7 @@ describe("evaluation run", () => {
           durationMs: 5,
           executionReference: { sessionId: "thread-9" },
         }),
-        resolveSession: async (rawId) => ({ sessionKey: `claude:${rawId}` }),
+        resolveSession: async (reference) => ({ sessionKey: `claude:${reference.sessionId}` }),
         readTrajectory: async () => trajectory(),
         readArtifactFiles: async () => [{ path: "src/a.ts", status: "added" }],
       }),
@@ -249,7 +249,7 @@ describe("evaluation run", () => {
           durationMs: 5,
           executionReference: { sessionId: "thread-9" },
         }),
-        resolveSession: async (rawId) => ({ sessionKey: `claude:${rawId}` }),
+        resolveSession: async (reference) => ({ sessionKey: `claude:${reference.sessionId}` }),
         readTrajectory: async () => trajectory(),
         readArtifactFiles: async () => {
           throw new Error("trace unavailable");

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MouseEvent as ReactMouseEvent,
   ReactElement,
@@ -41,6 +41,7 @@ import type {
   SessionSortBy,
 } from "../../../../core/types";
 import type { SavedSearch } from "../../../../core/store/saved-searches";
+import { AGENT_RECALL_INVOCATION_SURFACES } from "../../../../shared/runtime-invocation";
 import {
   DATE_RANGE_OPTIONS,
   dateRangeLabel,
@@ -102,6 +103,10 @@ export interface SessionsPageModel {
   collapsedProjectGroups: Set<string>;
   expandedTreeProjects: Set<string>;
   source: SearchOptions["source"];
+  origin: NonNullable<SearchOptions["origin"]>;
+  originCounts: { ordinary: number; agentRecall: number; all: number };
+  invocationSurface: NonNullable<SearchOptions["invocationSurface"]>;
+  invocationSurfaceCounts: Record<NonNullable<SearchOptions["invocationSurface"]>, number>;
   sourceFilters: Array<{ label: string; value: SearchOptions["source"] }>;
   visibility: "default" | "favorites" | "hidden";
   searchRef: RefObject<HTMLInputElement | null>;
@@ -135,6 +140,8 @@ export interface SessionsPageActions {
   toggleProjectTag(project: ProjectSummary, tagName: string): void;
   deleteTag(tagName: string): void;
   setSource(source: SearchOptions["source"]): void;
+  setOrigin(origin: NonNullable<SearchOptions["origin"]>): void;
+  setInvocationSurface(surface: NonNullable<SearchOptions["invocationSurface"]>): void;
   setTag(tag: string | undefined): void;
   setVisibility(visibility: SessionsPageModel["visibility"]): void;
   search(query: string): void;
@@ -173,6 +180,8 @@ export function SessionsPage({
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [groupMode, setGroupMode] = useState<GroupMode>("flat");
+  const [invocationMenuOpen, setInvocationMenuOpen] = useState(false);
+  const invocationMenuRef = useRef<HTMLDivElement>(null);
   const l = (en: string, zh: string): string => model.language === "zh" ? zh : en;
   const queryBuilderState = useMemo<QueryBuilderState>(() => ({
     source: model.source === "all" ? undefined : model.source,
@@ -194,6 +203,28 @@ export function SessionsPage({
     if (savedSearchesOpen) void loadSavedSearches();
   }, [loadSavedSearches, savedSearchesOpen]);
 
+  useEffect(() => {
+    if (!invocationMenuOpen) return;
+    const closeOnPointerDown = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !invocationMenuRef.current?.contains(event.target)) {
+        setInvocationMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setInvocationMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [invocationMenuOpen]);
+
+  useEffect(() => {
+    if (model.origin !== "agentrecall") setInvocationMenuOpen(false);
+  }, [model.origin]);
+
   function applyQueryBuilder(state: QueryBuilderState): void {
     actions.setSource(state.source ?? "all");
     actions.setTag(state.tag);
@@ -204,7 +235,12 @@ export function SessionsPage({
 
   function saveCurrentSearch(name: string, state: QueryBuilderState): void {
     void window.sessionSearch
-      .createSavedSearch(name, { query: model.query, ...toSearchOptionsPatch(state) })
+      .createSavedSearch(name, {
+        query: model.query,
+        origin: model.origin,
+        invocationSurface: model.invocationSurface,
+        ...toSearchOptionsPatch(state),
+      })
       .then(loadSavedSearches)
       .catch(() => undefined);
   }
@@ -212,6 +248,8 @@ export function SessionsPage({
   function applySavedSearch(saved: SavedSearch): void {
     if (saved.options.query !== undefined) actions.search(saved.options.query);
     actions.setSource(saved.options.source ?? "all");
+    actions.setOrigin(saved.options.origin ?? "ordinary");
+    actions.setInvocationSurface(saved.options.invocationSurface ?? "all");
     actions.setTag(saved.options.tag);
     actions.setVisibility(saved.options.visibility ?? "default");
     if (Number.isFinite(saved.options.dateFrom) && Number.isFinite(saved.options.dateTo)) {
@@ -235,6 +273,30 @@ export function SessionsPage({
       const currentIndex = GROUP_MODES.indexOf(current);
       return GROUP_MODES[(currentIndex + 1) % GROUP_MODES.length];
     });
+  }
+
+  function renderSessionResults(sessions: SessionSearchResult[]): ReactElement {
+    return <GroupedResults
+      sessions={sessions}
+      groupMode={groupMode}
+      sortBy={model.sortBy}
+      selectedKey={model.selected?.sessionKey ?? null}
+      liveStateFor={(session) => getLiveSessionState(
+        session,
+        model.liveSessionKeys,
+        model.liveDetectionFailed,
+      )}
+      language={model.language}
+      onOpenMatch={actions.openMatch}
+      onSelect={actions.selectSession}
+      onOpen={actions.openSession}
+      onRename={actions.renameSession}
+      onFavorite={actions.toggleFavorite}
+      onContextMenu={actions.openContextMenu}
+      bulkSelectionActive={model.bulkSelectionActive}
+      bulkSelectedKeys={model.bulkSelectedKeys}
+      onToggleBulk={actions.toggleBulkSession}
+    />;
   }
 
   return (
@@ -470,6 +532,81 @@ export function SessionsPage({
 
         <div className="result-count">
           <div className="bulk-result-actions">
+            <div className="live-filter session-origin-filter" role="group" aria-label={l("Session origin", "会话来源") }>
+              <button
+                type="button"
+                className={model.origin === "ordinary" ? "active" : ""}
+                onClick={() => {
+                  setInvocationMenuOpen(false);
+                  actions.setInvocationSurface("all");
+                  actions.setOrigin("ordinary");
+                }}
+              >
+                {l(`Regular (${model.originCounts.ordinary})`, `普通会话 (${model.originCounts.ordinary})`)}
+              </button>
+              <div className="session-origin-agentrecall" ref={invocationMenuRef}>
+                <button
+                  type="button"
+                  className={`session-origin-agentrecall-trigger ${model.origin === "agentrecall" ? "active" : ""} ${invocationMenuOpen ? "is-open" : ""}`}
+                  aria-haspopup="menu"
+                  aria-expanded={invocationMenuOpen}
+                  onClick={() => {
+                    if (model.origin !== "agentrecall") {
+                      actions.setInvocationSurface("all");
+                      actions.setOrigin("agentrecall");
+                    }
+                    setInvocationMenuOpen((current) => !current);
+                  }}
+                >
+                  <span>{l(`AgentRecall calls (${model.originCounts.agentRecall})`, `AgentRecall 调用 (${model.originCounts.agentRecall})`)}</span>
+                  <ChevronDown size={12} aria-hidden="true" />
+                </button>
+                {invocationMenuOpen ? (
+                  <div className="session-origin-agentrecall-menu" role="menu" aria-label={l("AgentRecall call type", "AgentRecall 调用类型")}>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={model.invocationSurface === "all"}
+                      className={model.invocationSurface === "all" ? "active" : ""}
+                      onClick={() => {
+                        actions.setInvocationSurface("all");
+                        setInvocationMenuOpen(false);
+                      }}
+                    >
+                      <span>{l("All", "全部")}</span>
+                      <strong>({model.invocationSurfaceCounts.all})</strong>
+                    </button>
+                    {AGENT_RECALL_INVOCATION_SURFACES.map((surface) => (
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={model.invocationSurface === surface}
+                        key={surface}
+                        className={model.invocationSurface === surface ? "active" : ""}
+                        onClick={() => {
+                          actions.setInvocationSurface(surface);
+                          setInvocationMenuOpen(false);
+                        }}
+                      >
+                        <span>{surface === "evaluation" ? "eval" : surface === "team_chat" ? "chat" : surface}</span>
+                        <strong>({model.invocationSurfaceCounts[surface]})</strong>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className={model.origin === "all" ? "active" : ""}
+                onClick={() => {
+                  setInvocationMenuOpen(false);
+                  actions.setInvocationSurface("all");
+                  actions.setOrigin("all");
+                }}
+              >
+                {l(`All (${model.originCounts.all})`, `全部 (${model.originCounts.all})`)}
+              </button>
+            </div>
             {model.bulkSelectionActive ? <input
               type="checkbox"
               checked={model.sessions.length > 0 && model.sessions.every((session) => model.bulkSelectedKeys.has(session.sessionKey))}
@@ -501,27 +638,7 @@ export function SessionsPage({
         </div>
 
         <div key={model.currentPage} className="results">
-          <GroupedResults
-            sessions={model.sessions}
-            groupMode={groupMode}
-            sortBy={model.sortBy}
-            selectedKey={model.selected?.sessionKey ?? null}
-            liveStateFor={(session) => getLiveSessionState(
-              session,
-              model.liveSessionKeys,
-              model.liveDetectionFailed,
-            )}
-            language={model.language}
-            onOpenMatch={actions.openMatch}
-            onSelect={actions.selectSession}
-            onOpen={actions.openSession}
-            onRename={actions.renameSession}
-            onFavorite={actions.toggleFavorite}
-            onContextMenu={actions.openContextMenu}
-            bulkSelectionActive={model.bulkSelectionActive}
-            bulkSelectedKeys={model.bulkSelectedKeys}
-            onToggleBulk={actions.toggleBulkSession}
-          />
+          {renderSessionResults(model.sessions)}
           {model.sessions.length === 0
             ? <div className="empty">{l("No sessions found.", "没有找到会话。")}</div>
             : null}

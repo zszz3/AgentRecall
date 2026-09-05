@@ -42,6 +42,7 @@ import { modelDisplayLabel } from "../../../../automation/engine/shared/models";
 import { localize, type LanguageMode } from "../../language";
 import { Markdown } from "../../markdown";
 import { useAutomationDetails } from "../automation/automation-provider";
+import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 
 interface StreamDraft {
   dispatchId: string;
@@ -161,9 +162,17 @@ export function TeamChatRoomTitle({
 export function TeamChatPage({
   language,
   preferredRoomId,
+  preferredMessageId,
+  preferredAgentId,
+  onPreferredConsumed,
+  onOpenSession,
 }: {
   language: LanguageMode;
   preferredRoomId?: string;
+  preferredMessageId?: string;
+  preferredAgentId?: string;
+  onPreferredConsumed?: () => void;
+  onOpenSession?: (sessionKey: string) => void;
 }): ReactElement {
   const l = useCallback((en: string, zh: string) => localize(language, en, zh), [language]);
   const api = useMemo(() => window.sessionSearch.teamChat, []);
@@ -216,7 +225,78 @@ export function TeamChatPage({
   const roomSelectButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const focusedMessageTargetRef = useRef<string | undefined>(undefined);
   const skipNextAutoScrollRef = useRef(false);
+
+  useEffect(() => {
+    focusedMessageTargetRef.current = undefined;
+  }, [preferredAgentId, preferredMessageId, preferredRoomId]);
+
+  useEffect(() => {
+    if (
+      !preferredRoomId
+      || preferredMessageId
+      || selectedRoomId !== preferredRoomId
+      || activeRoom?.id !== preferredRoomId
+      || loadingMessages
+    ) return;
+    onPreferredConsumed?.();
+  }, [
+    activeRoom?.id,
+    loadingMessages,
+    onPreferredConsumed,
+    preferredMessageId,
+    preferredRoomId,
+    selectedRoomId,
+  ]);
+
+  const openLatestRoomSession = async (): Promise<void> => {
+    if (!activeRoom) return;
+    try {
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
+        surface: "team_chat",
+        role: "member",
+        ownerReference: { roomId: activeRoom.id },
+      });
+      if (resolution.status !== "found") {
+        setContextFeedback(runtimeSessionUnavailableMessage(
+          resolution,
+          { en: "this room's latest reply", zh: "该工作室最近一次回复" },
+          language,
+        ));
+        return;
+      }
+      onOpenSession?.(resolution.session.sessionKey);
+    } catch (error) {
+      setContextFeedback(errorMessage(error));
+    }
+  };
+
+  const openMessageSession = async (message: TeamChatMessage): Promise<void> => {
+    const messageId = message.sourceMessageId ?? message.id;
+    try {
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
+        surface: "team_chat",
+        role: "member",
+        ownerReference: {
+          roomId: message.roomId,
+          messageId,
+          ...(message.senderAgentId ? { agentId: message.senderAgentId } : {}),
+        },
+      });
+      if (resolution.status !== "found") {
+        setContextFeedback(runtimeSessionUnavailableMessage(
+          resolution,
+          { en: "this message", zh: "该消息" },
+          language,
+        ));
+        return;
+      }
+      onOpenSession?.(resolution.session.sessionKey);
+    } catch (error) {
+      setContextFeedback(errorMessage(error));
+    }
+  };
 
   const isCurrentRoomScope = useCallback((roomId: string, epoch: number): boolean =>
     selectedRoomIdRef.current === roomId && roomEpochRef.current === epoch, []);
@@ -542,6 +622,55 @@ export function TeamChatPage({
       }
     }
   }, [activeRoom?.id, api, isCurrentRoomScope, nextBefore, setContextFeedback]);
+
+  useEffect(() => {
+    if (!preferredMessageId) return;
+    const preferredTarget = JSON.stringify([preferredMessageId, preferredAgentId]);
+    if (focusedMessageTargetRef.current === preferredTarget) return;
+    const target = [...document.querySelectorAll<HTMLElement>("[data-message-id]")]
+      .find((element) => (
+        element.dataset.messageId === preferredMessageId
+        && (!preferredAgentId || element.dataset.agentId === preferredAgentId)
+      ));
+    if (target) {
+      focusedMessageTargetRef.current = preferredTarget;
+      target.scrollIntoView?.({ block: "center" });
+      target.focus?.();
+      onPreferredConsumed?.();
+      return;
+    }
+    if (
+      selectedRoomId === preferredRoomId
+      && nextBefore
+      && !loadingMessages
+      && !loadingEarlier
+    ) {
+      void loadEarlierMessages();
+      return;
+    }
+    if (
+      selectedRoomId === preferredRoomId
+      && activeRoom?.id === preferredRoomId
+      && !loadingMessages
+      && !loadingEarlier
+      && !nextBefore
+    ) {
+      focusedMessageTargetRef.current = preferredTarget;
+      onPreferredConsumed?.();
+    }
+  }, [
+    activeRoom?.id,
+    loadEarlierMessages,
+    loadingEarlier,
+    loadingMessages,
+    messages,
+    nextBefore,
+    onPreferredConsumed,
+    preferredAgentId,
+    preferredMessageId,
+    preferredRoomId,
+    selectedRoomId,
+  ]);
 
   const sendMessage = useCallback(async (): Promise<void> => {
     const content = composer.trim();
@@ -1014,6 +1143,14 @@ export function TeamChatPage({
                   <div className="team-chat-room-actions">
                     <button
                       type="button"
+                      onClick={() => void openLatestRoomSession()}
+                      title={l("Open latest Session", "打开最近 Session")}
+                      aria-label={l("Open latest Session", "打开最近 Session")}
+                    >
+                      <MessageCircleMore size={16} />
+                    </button>
+                    <button
+                      type="button"
                       aria-haspopup="menu"
                       aria-expanded={roomActionsOpen}
                       onClick={() => setRoomActionsOpen((current) => !current)}
@@ -1069,6 +1206,7 @@ export function TeamChatPage({
                       member={activeRoom.agents.find((member) => member.agentId === message.senderAgentId)}
                       recipient={activeRoom.agents.find((member) => member.agentId === message.recipientMemberId)}
                       language={language}
+                      onOpenSession={message.senderType === "agent" ? () => void openMessageSession(message) : undefined}
                     />
                   ))}
                   {Object.values(streams).map((stream) => (
@@ -1625,19 +1763,36 @@ function TeamChatMessageCard({
   member,
   recipient,
   language,
+  onOpenSession,
 }: {
   message: TeamChatMessage;
   member?: TeamChatRoomAgent;
   recipient?: TeamChatRoomAgent;
   language: LanguageMode;
+  onOpenSession?: () => void;
 }): ReactElement {
   return (
-    <article className={`team-chat-message is-${message.senderType} ${message.status === "error" ? "is-error" : ""}`}>
+    <article
+      tabIndex={-1}
+      data-message-id={message.sourceMessageId ?? message.id}
+      data-agent-id={message.senderAgentId}
+      className={`team-chat-message is-${message.senderType} ${message.status === "error" ? "is-error" : ""}`}
+    >
       <header>
         <strong>{message.senderName}</strong>
         {recipient ? <span className="team-chat-message-recipient">→ {recipient.displayName}</span> : null}
         {message.deliveryType === "post" ? <span>{localize(language, "post", "公告")}</span> : null}
         {member ? <span className="team-chat-runtime-badge">{member.runtimeId}</span> : null}
+        {onOpenSession ? (
+          <button
+            type="button"
+            onClick={onOpenSession}
+            title={localize(language, "Open Session", "打开 Session")}
+            aria-label={localize(language, `Open Session for ${message.senderName}`, `打开 ${message.senderName} 的 Session`)}
+          >
+            <MessageCircleMore size={13} />
+          </button>
+        ) : null}
         <time>{formatMessageTime(message.createdAt, language)}</time>
       </header>
       <div className="team-chat-message-content">

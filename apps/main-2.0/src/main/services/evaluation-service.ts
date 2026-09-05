@@ -34,13 +34,15 @@ export type EvaluationAgentExecution = (
     prompt: string;
     /** Injected with the task; carries the selected skill's instructions. */
     developerInstructions?: string;
+    role: string;
+    ownerReference: Record<string, string>;
   },
   signal?: AbortSignal,
 ) => Promise<{
   output: string;
   durationMs: number;
   /** Runtime-native ids used to link this run to its session. */
-  executionReference?: { sessionId?: string; turnId?: string };
+  executionReference?: { invocationId?: string; sessionId?: string; turnId?: string };
 }>;
 
 // Rubric for auto-provisioned judges. The runner appends the JSON return
@@ -81,7 +83,9 @@ export interface EvaluationServiceDependencies {
    * AgentRecall session. The trajectory half of a run is skipped when this and
    * `readTrajectory` are not both wired.
    */
-  resolveSession?: (rawId: string) => Promise<{ sessionKey: string } | null>;
+  resolveSession?: (
+    reference: { invocationId?: string; sessionId?: string; turnId?: string },
+  ) => Promise<{ sessionKey: string } | null>;
   readTrajectory?: (sessionKey: string) => Promise<EvaluationTrajectoryValue | null>;
   /** Reads a session's answer, for evaluating a session that already happened. */
   readSessionArtifact?: (
@@ -369,11 +373,7 @@ export class EvaluationService {
     readArtifactFiles?: EvaluationServiceDependencies["readArtifactFiles"];
     runJudgeScript?: EvaluationServiceDependencies["runJudgeScript"];
     execute: EvaluationAgentExecution;
-    executeJudge: (
-      runtimeId: string,
-      prompt: string,
-      signal?: AbortSignal,
-    ) => Promise<{ output: string; durationMs: number }>;
+    executeJudge: NonNullable<RunEvaluationInput["executeJudge"]>;
   }> {
     const experiment = (await this.dependencies.store.listExperiments()).find(
       (item) => item.id === experimentId,
@@ -442,14 +442,19 @@ export class EvaluationService {
         ? { runJudgeScript: this.dependencies.runJudgeScript }
         : {}),
       execute: this.dependencies.executeAgent,
-      executeJudge: (runtimeId, prompt, signal) => {
+      executeJudge: (runtimeId, prompt, role, ownerReference, signal) => {
         const judge = judgesByRuntime.get(runtimeId);
         if (!judge) {
           throw new Error(
             `Runtime channel ${runtimeId} does not have an execution Agent for LLM Judge.`,
           );
         }
-        return this.dependencies.executeAgent({ configuredAgentId: judge.id, prompt }, signal);
+        return this.dependencies.executeAgent({
+          configuredAgentId: judge.id,
+          prompt,
+          role,
+          ownerReference,
+        }, signal);
       },
     };
   }

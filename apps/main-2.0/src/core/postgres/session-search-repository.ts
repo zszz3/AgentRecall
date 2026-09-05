@@ -5,11 +5,14 @@ import type {
   SessionSearchPage,
   SessionSearchResult,
 } from "../types";
+import { AGENT_RECALL_INVOCATION_SURFACES } from "../../shared/runtime-invocation";
 import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS } from "../refresh-policy";
 import type { PostgresDatabase } from "./database";
 import {
   SESSION_ACTIVITY_SQL,
   SESSION_SELECT_SQL,
+  AGENTRECALL_CREATED_SESSION_SQL,
+  RUNTIME_SESSION_BINDING_MATCH_SQL,
   escapeLike,
   hydrateSession,
   isoValue,
@@ -34,6 +37,21 @@ const LIVE_SESSION_KEY_SQL = `
     else null
   end
 `;
+
+function agentRecallCreatedSurfaceSql(surface: string, bind: (value: unknown) => string): string {
+  return `
+    exists (
+      select 1
+      from agent_recall.runtime_session_bindings bindings
+      join agent_recall.runtime_invocations invocations
+        on invocations.id = bindings.invocation_id
+      where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+        and bindings.relation = 'created'
+        and invocations.initiator = 'agentrecall'
+        and invocations.surface = ${bind(surface)}
+    )
+  `;
+}
 
 export class PostgresSessionSearchRepository {
   constructor(private readonly database: PostgresDatabase) {}
@@ -141,6 +159,18 @@ export class PostgresSessionSearchRepository {
       filters.push(`(best_turn.id is not null or (${metadataPredicates.join(" and ")}))`);
     }
 
+    const invocationSurfaceCountFilters = [...filters];
+    const invocationSurfaceCountValues = [...values];
+    const originCountFilters = [...filters];
+    const originCountValues = [...values];
+    if (options.invocationSurface && options.invocationSurface !== "all") {
+      if (!AGENT_RECALL_INVOCATION_SURFACES.includes(options.invocationSurface)) {
+        throw new Error(`Unsupported Runtime invocation surface: ${options.invocationSurface}`);
+      }
+      filters.push(agentRecallCreatedSurfaceSql(options.invocationSurface, bind));
+    }
+    if (options.origin === "ordinary") filters.push(`not (${AGENTRECALL_CREATED_SESSION_SQL})`);
+    else if (options.origin === "agentrecall") filters.push(AGENTRECALL_CREATED_SESSION_SQL);
     const countValues = [...values];
     const sortBy = options.sortBy ?? "smart";
     let rankingColumns = "";
@@ -238,7 +268,7 @@ export class PostgresSessionSearchRepository {
         null::text as best_turn_search_text,
         null::bigint as turn_match_count,
       `;
-    const filteredSessionsSql = `
+    const buildFilteredSessionsSql = (activeFilters: readonly string[]): string => `
       from (
         select
           base_sessions.*,
@@ -284,8 +314,11 @@ export class PostgresSessionSearchRepository {
       join agent_recall.environments environments on environments.id = sessions.environment_id
       ${bestTurnJoin}
       where sessions.source_rank = 1
-        and ${filters.join(" and ")}
+        and ${activeFilters.join(" and ")}
     `;
+    const filteredSessionsSql = buildFilteredSessionsSql(filters);
+    const originFilteredSessionsSql = buildFilteredSessionsSql(originCountFilters);
+    const invocationSurfaceFilteredSessionsSql = buildFilteredSessionsSql(invocationSurfaceCountFilters);
     const result = await this.database.query<SessionRow>(
       `
         select
@@ -308,10 +341,53 @@ export class PostgresSessionSearchRepository {
           `select count(*) as total_count ${filteredSessionsSql}`,
           countValues,
         )).rows[0]?.total_count);
+    const originCountRow = (await this.database.query<{
+      ordinary_count: number | string;
+      agentrecall_count: number | string;
+      all_count: number | string;
+    }>(
+      `
+        select
+          count(*) filter (where not (${AGENTRECALL_CREATED_SESSION_SQL})) as ordinary_count,
+          count(*) filter (where ${AGENTRECALL_CREATED_SESSION_SQL}) as agentrecall_count,
+          count(*) as all_count
+        ${originFilteredSessionsSql}
+      `,
+      originCountValues,
+    )).rows[0];
+    const invocationSurfaceCountParams = [...invocationSurfaceCountValues];
+    const invocationSurfaceCountBind = (value: unknown): string => {
+      invocationSurfaceCountParams.push(value);
+      return `$${invocationSurfaceCountParams.length}`;
+    };
+    const invocationSurfaceCountRow = (await this.database.query<Record<string, number | string>>(
+      `
+        select
+          ${AGENT_RECALL_INVOCATION_SURFACES.map((surface) =>
+            `count(*) filter (where ${agentRecallCreatedSurfaceSql(surface, invocationSurfaceCountBind)}) as ${surface}_count`).join(",\n          ")},
+          count(*) filter (where ${AGENTRECALL_CREATED_SESSION_SQL}) as all_count
+        ${invocationSurfaceFilteredSessionsSql}
+      `,
+      invocationSurfaceCountParams,
+    )).rows[0];
     return {
       sessions,
       totalCount,
       hasMore: offset + sessions.length < totalCount,
+      originCounts: {
+        ordinary: numberValue(originCountRow?.ordinary_count),
+        agentRecall: numberValue(originCountRow?.agentrecall_count),
+        all: numberValue(originCountRow?.all_count),
+      },
+      invocationSurfaceCounts: {
+        workflow: numberValue(invocationSurfaceCountRow?.workflow_count),
+        evaluation: numberValue(invocationSurfaceCountRow?.evaluation_count),
+        team_chat: numberValue(invocationSurfaceCountRow?.team_chat_count),
+        agent: numberValue(invocationSurfaceCountRow?.agent_count),
+        skill: numberValue(invocationSurfaceCountRow?.skill_count),
+        system: numberValue(invocationSurfaceCountRow?.system_count),
+        all: numberValue(invocationSurfaceCountRow?.all_count),
+      },
     };
   }
 

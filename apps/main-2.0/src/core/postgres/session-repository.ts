@@ -5,6 +5,9 @@ import type {
   ProjectQueryOptions,
   ProjectSummary,
   ProjectTagEntry,
+  RuntimeInvocationSessionResolution,
+  RuntimeInvocationLookup,
+  RuntimeInvocationSummary,
   SessionMessage,
   SessionMessageEvent,
   SessionSearchResult,
@@ -30,7 +33,10 @@ import {
 import type { PostgresDatabase, PostgresQueryable } from "./database";
 import {
   SESSION_ACTIVITY_SQL,
+  SESSION_DETAIL_SELECT_SQL,
   SESSION_SELECT_SQL,
+  sessionOriginPredicate,
+  RUNTIME_SESSION_BINDING_MATCH_SQL,
   hydrateSession,
   numberValue,
   postgresJsonValue,
@@ -1450,6 +1456,8 @@ export class PostgresSessionRepository {
     const values: unknown[] = [];
     const conditions = ["trim(sessions.project_path) <> ''"];
     if (options.excludeSubagents) conditions.push("sessions.is_subagent = false");
+    const originPredicate = sessionOriginPredicate(options.origin);
+    if (originPredicate) conditions.push(originPredicate);
     if (options.environmentId && options.environmentId !== "all") {
       values.push(options.environmentId);
       conditions.push(`sessions.environment_id = $${values.length}`);
@@ -1886,7 +1894,7 @@ export class PostgresSessionRepository {
   async getSession(sessionKey: string): Promise<SessionSearchResult | null> {
     const result = await this.database.query<SessionRow>(
       `
-        select ${SESSION_SELECT_SQL}
+        select ${SESSION_DETAIL_SELECT_SQL}
         from agent_recall.sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where sessions.session_key = $1
@@ -1909,6 +1917,89 @@ export class PostgresSessionRepository {
       [rawId],
     );
     return result.rows[0] ? hydrateSession(result.rows[0]) : null;
+  }
+
+  /** Resolves an invocation owner without letting an unbound retry hide a usable Session. */
+  async resolveRuntimeInvocationSession(
+    lookup: RuntimeInvocationLookup,
+  ): Promise<RuntimeInvocationSessionResolution> {
+    if (!lookup.invocationId && Object.keys(lookup.ownerReference ?? {}).length === 0) {
+      return { status: "not_recorded" };
+    }
+    const conditions = ["runtime_invocations.initiator = 'agentrecall'"];
+    const parameters: unknown[] = [];
+    const addCondition = (condition: string, value: unknown): void => {
+      parameters.push(value);
+      conditions.push(condition.replace("?", `$${parameters.length}`));
+    };
+    if (lookup.invocationId) addCondition("runtime_invocations.id = ?", postgresText(lookup.invocationId));
+    if (lookup.surface) addCondition("runtime_invocations.surface = ?", lookup.surface);
+    if (lookup.role) addCondition("runtime_invocations.role = ?", postgresText(lookup.role));
+    if (lookup.ownerReference && Object.keys(lookup.ownerReference).length > 0) {
+      addCondition("runtime_invocations.owner_reference @> ?::jsonb", postgresJsonValue(lookup.ownerReference));
+    }
+    const invocation = (await this.database.query<{
+      id: string;
+      status: RuntimeInvocationSummary["status"];
+    }>(
+      `
+        select runtime_invocations.id, runtime_invocations.status
+        from agent_recall.runtime_invocations
+        where ${conditions.join("\n          and ")}
+        order by ${lookup.invocationId
+          ? "runtime_invocations.started_at desc, runtime_invocations.id desc"
+          : `
+            case when exists (
+              select 1
+              from agent_recall.runtime_session_bindings candidate_bindings
+              where candidate_bindings.invocation_id = runtime_invocations.id
+            ) then 0 else 1 end,
+            runtime_invocations.started_at desc,
+            runtime_invocations.id desc`
+        }
+        limit 1
+      `,
+      parameters,
+    )).rows[0];
+    if (!invocation) return { status: "not_recorded" };
+    const result = await this.database.query<SessionRow>(
+      `
+        select ${SESSION_SELECT_SQL}
+        from agent_recall.sessions sessions
+        join agent_recall.environments environments on environments.id = sessions.environment_id
+        where exists (
+          select 1
+          from agent_recall.runtime_session_bindings bindings
+          join agent_recall.runtime_invocations invocations
+            on invocations.id = bindings.invocation_id
+          where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
+            and invocations.initiator = 'agentrecall'
+            and invocations.id = $1
+        )
+        order by ${SESSION_ACTIVITY_SQL} desc, sessions.session_key
+        limit 1
+      `,
+      [invocation.id],
+    );
+    if (result.rows[0]) {
+      return { status: "found", session: hydrateSession(result.rows[0]) };
+    }
+    const bindingExists = Boolean((await this.database.query<{ found: boolean }>(
+      `
+        select exists (
+          select 1
+          from agent_recall.runtime_session_bindings
+          where invocation_id = $1
+        ) as found
+      `,
+      [invocation.id],
+    )).rows[0]?.found);
+    if (bindingExists) return { status: "not_indexed", invocationId: invocation.id };
+    return {
+      status: "no_session_reference",
+      invocationId: invocation.id,
+      invocationStatus: invocation.status,
+    };
   }
 
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {

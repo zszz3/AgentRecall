@@ -87,6 +87,14 @@ export function buildInteractiveChatContext(input: {
       model: input.resolved.modelId,
       ...(input.resolved.reasoningEffort ? { reasoningEffort: input.resolved.reasoningEffort } : {}),
     },
+    invocation: {
+      surface: "agent",
+      role: "chat",
+      ownerReference: {
+        chatId: input.chat.id,
+        agentId: input.chat.configuredAgentId,
+      },
+    },
     ...(runtimeConversation ? { runtimeConversation } : {}),
     runtime: input.resolved.runtime as AgentRuntime,
     channelId: input.resolved.channel.id,

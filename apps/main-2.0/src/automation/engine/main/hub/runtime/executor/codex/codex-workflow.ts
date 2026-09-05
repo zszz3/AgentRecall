@@ -177,6 +177,8 @@ export async function runCodexWorkflow(
           runtimeConversation = codexRuntimeStateCodec.encodeConversation({
             native: { threadId },
           });
+          executionReference = { sessionId: threadId };
+          input.reportExecutionReference?.(executionReference);
         }
         const turnResult = await client.request("turn/start", {
           threadId,
@@ -187,6 +189,7 @@ export async function runCodexWorkflow(
           ...(threadId ? { sessionId: threadId } : {}),
           ...(turnId ? { turnId } : {}),
         };
+        input.reportExecutionReference?.(executionReference);
       } catch (error) {
         settle(() => reject(error instanceof Error ? error : new Error(String(error))));
       }

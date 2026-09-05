@@ -16,6 +16,7 @@ import { validateWorkflowDefinition } from "../../../../automation/engine/shared
 import { agentRecallAutomationService } from "../../../../automation/engine/renderer/src/app/services/agent-recall-service";
 import type { LanguageMode } from "../../language";
 import { localize } from "../../language";
+import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 import { useAutomationStoreSnapshot } from "./automation-provider";
 import { addWorkflowNode, createWorkflowCopy, createWorkflowDefinition, type WorkflowNodeKind } from "./workflow-editor-model";
 import { WorkflowGraphCanvas } from "./workflow-graph-canvas";
@@ -24,7 +25,7 @@ import { reduceWorkflowRunStream, workflowRunStreamKey, type WorkflowRunStreamSt
 type EditorMode = "definition" | "run";
 
 export type WorkflowInitialRequest =
-  | { workflowId: string }
+  | { workflowId: string; runId?: string; nodeId?: string }
   | { createNew: true };
 
 const valueTypes: WorkflowValueType[] = ["text", "number", "boolean", "file", "object", "list"];
@@ -341,12 +342,14 @@ export function WorkflowFeaturePage({
   language,
   initialRequest,
   onInitialRequestConsumed,
+  onOpenSession,
 }: {
   language: LanguageMode;
   globalReviewEnabled: boolean;
   runtimeReviewEnabled: boolean;
   initialRequest?: WorkflowInitialRequest;
   onInitialRequestConsumed?: () => void;
+  onOpenSession?: (sessionKey: string) => void;
 }): ReactElement {
   const api = useMemo(() => agentRecallAutomationService(), []);
   const automation = useAutomationStoreSnapshot();
@@ -389,6 +392,7 @@ export function WorkflowFeaturePage({
     setSelectedId(nextId);
     const next = merged.find((item) => item.id === nextId);
     if (next) setDraft(structuredClone(next));
+    return snapshot;
   }, [api, definitions, newDraftIds, selectedId]);
 
   const createNewWorkflow = (): void => {
@@ -405,8 +409,16 @@ export function WorkflowFeaturePage({
   useEffect(() => {
     void (async () => {
       try {
-        await load(initialRequest && "workflowId" in initialRequest ? initialRequest.workflowId : undefined);
+        const snapshot = await load(initialRequest && "workflowId" in initialRequest ? initialRequest.workflowId : undefined);
         if (initialRequest && "createNew" in initialRequest) createNewWorkflow();
+        if (initialRequest && "workflowId" in initialRequest && initialRequest.runId) {
+          const requestedRun = snapshot.runs.find((run) => run.id === initialRequest.runId);
+          if (requestedRun) {
+            setSelectedRunId(requestedRun.id);
+            setMode("run");
+            setSelectedNodeId(initialRequest.nodeId);
+          }
+        }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -574,6 +586,27 @@ export function WorkflowFeaturePage({
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setBusy(false); }
   };
   const menuDefinition = personalMenu ? personalDefinitions.find((definition) => definition.id === personalMenu.definitionId) : undefined;
+  const openSelectedRunSession = async (): Promise<void> => {
+    if (!draft || !selectedRun) return;
+    setError(undefined);
+    try {
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
+        surface: "workflow",
+        ownerReference: {
+          workflowId: draft.id,
+          runId: selectedRun.id,
+          ...(selectedNodeId ? { nodeId: selectedNodeId } : {}),
+        },
+      });
+      if (resolution.status !== "found") {
+        setError(runtimeSessionUnavailableMessage(resolution, { en: "this run", zh: "该运行" }, language));
+        return;
+      }
+      onOpenSession?.(resolution.session.sessionKey);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   return <div className="automation-page automation-workflow-page workflow-core-page" data-page="workflows">
     <header className="app-page-head automation-page-head"><div><h2>Workflow</h2><p>{localize(language, "Build dependable automations from explicit inputs, nodes, and described outputs.", "用明确的输入、节点和带描述的输出构建可靠自动化。")}</p></div></header>
@@ -587,6 +620,7 @@ export function WorkflowFeaturePage({
       </div> : null}
       {!draft ? <main className="workflow-core-empty">Create a Workflow to begin.</main> : <main className="workflow-core-main">
         <header className="workflow-core-toolbar"><div className="workflow-core-toolbar-leading"><button type="button" className="workflow-core-title" onClick={() => { if (isTemplate) return; setSelectedNodeId(undefined); setDefinitionInspectorOpen(true); }}><strong>{draft.name}</strong><span>{draft.nodes.length} nodes · {isTemplate ? "只读模板" : `${draft.inputs.length} inputs`}</span></button>{!isTemplate ? <div className="workflow-core-mode"><button type="button" className={mode === "definition" ? "is-active" : ""} onClick={() => setMode("definition")}>{localize(language, "Definition", "定义")}</button><button type="button" className={mode === "run" ? "is-active" : ""} onClick={() => { setMode("run"); setDefinitionInspectorOpen(false); }}>{localize(language, "Run history", "运行记录")}{workflowRuns.length > 0 ? ` · ${workflowRuns.length}` : ""}</button></div> : <span className="workflow-core-template-badge"><LayoutTemplate size={11} /> 模板预览</span>}</div><div className="workflow-core-toolbar-actions">
+          {!isTemplate && mode === "run" && selectedRun ? <button type="button" className="control-btn compact" onClick={() => void openSelectedRunSession()}><Activity size={13} /> Session</button> : null}
           {isTemplate ? <button type="button" className="send-btn compact" disabled={busy} onClick={() => void useTemplate()}><Copy size={13} /> 使用模板</button> : <>{mode === "definition" ? <button type="button" className="icon-btn" title="Workflow properties" aria-label="Workflow properties" onClick={() => { setSelectedNodeId(undefined); setDefinitionInspectorOpen(true); }}><Settings2 size={14} /></button> : null}<button type="button" className="control-btn compact" disabled={busy} onClick={() => void save()}><Save size={13} /> Save</button>{controllableRun?.status === "running" ? <><button type="button" className="control-btn compact" disabled={busy} onClick={() => void changeRunState(() => api.pauseWorkflowRun(controllableRun.id))}><Pause size={13} /> 暂停</button><button type="button" className="control-btn compact is-danger" disabled={busy} onClick={() => void changeRunState(() => api.cancelWorkflowRun(controllableRun.id))}><Square size={12} /> 取消</button></> : controllableRun?.status === "paused" ? <><button type="button" className="send-btn compact" disabled={busy} onClick={() => void changeRunState(() => api.resumeWorkflowRun(controllableRun.id))}><Play size={13} /> 继续</button><button type="button" className="control-btn compact is-danger" disabled={busy} onClick={() => void changeRunState(() => api.cancelWorkflowRun(controllableRun.id))}><Square size={12} /> 取消</button></> : controllableRun?.status === "waiting" ? <button type="button" className="control-btn compact is-danger" disabled={busy} onClick={() => void changeRunState(() => api.cancelWorkflowRun(controllableRun.id))}><Square size={12} /> 取消</button> : <button type="button" className="send-btn compact" disabled={busy || issues.length > 0} onClick={() => void start()}><GitBranch size={13} /> Run</button>}<button type="button" className="icon-btn" aria-label="Delete Workflow" disabled={busy || Boolean(controllableRun)} onClick={() => void deletePersonalWorkflow(draft)}><Trash2 size={14} /></button></>}
         </div></header>
         {error ? <div className="workflow-core-banner is-error">{error}</div> : null}

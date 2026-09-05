@@ -1,9 +1,11 @@
 import type {
   AgentRuntime,
+  RuntimeConversation,
   WorkflowAgentResponse,
 } from "../../../../../shared/types";
 import { runtimeModelId } from "../../../../../shared/models";
 import { HermesRunner } from "../../../../agents/hermes/hermes-runner";
+import { hermesRuntimeStateCodec } from "../../../../agents/hermes/hermes-runtime-state-codec";
 import type {
   RuntimeChannelTestContext,
   RuntimeWorkflowRequestContext,
@@ -25,6 +27,7 @@ export async function runHermesWorkflow(
   let exitCode: number | null = 0;
   let stderr = "";
   let runnerError: string | undefined;
+  let runtimeConversation: RuntimeConversation | undefined;
 
   const runner = new HermesRunner({
     executable: input.runtime.command || options.executables.hermes,
@@ -35,9 +38,20 @@ export async function runHermesWorkflow(
     ),
     modelId: modelFromRuntimeConfig(input.runtimeConfig),
     onEvent: (event) => {
+      if (event.type === "runtime_conversation") {
+        runtimeConversation = event.runtimeConversation;
+        const sessionId = hermesRuntimeStateCodec.decodeConversation(runtimeConversation)?.native.sessionId;
+        if (sessionId) input.reportExecutionReference?.({ sessionId });
+        return;
+      }
       if (event.type === "completed") {
         content = typeof event.content === "string" ? event.content : content;
-        input.onEvent?.({ requestId: input.requestId, type: "completed", content: content.trim() });
+        input.onEvent?.({
+          requestId: input.requestId,
+          type: "completed",
+          content: content.trim(),
+          ...(runtimeConversation ? { runtimeConversation } : {}),
+        });
         return;
       }
       if (event.type === "error") {
@@ -65,7 +79,12 @@ export async function runHermesWorkflow(
     throw new Error(`Hermes exited with ${exitCode ?? "unknown"}: ${(stderr.trim() || output || "no output").slice(0, 800)}`);
   }
   if (!output) throw new Error("Hermes completed without assistant text.");
-  return { content: output };
+  const sessionId = hermesRuntimeStateCodec.decodeConversation(runtimeConversation)?.native.sessionId;
+  return {
+    content: output,
+    ...(runtimeConversation ? { runtimeConversation } : {}),
+    ...(sessionId ? { executionReference: { sessionId } } : {}),
+  };
 }
 
 export async function runHermesChannelTest(
@@ -83,9 +102,12 @@ export async function runHermesChannelTest(
       executionMode: "oneshot",
       continuationPolicy: "fresh",
       runtimeConfig: { model: input.modelId },
+      invocationId: input.invocationId,
+      invocation: { surface: "system", role: "channel_test", ownerReference: { channelId: input.channelId } },
       runtime: input.runtime as AgentRuntime,
       channelId: input.channelId,
       workDir: input.workDir,
+      reportExecutionReference: input.reportExecutionReference,
       onEvent: (event) => {
         if (event.type === "error") input.emit({ type: "error", content: event.error });
       },

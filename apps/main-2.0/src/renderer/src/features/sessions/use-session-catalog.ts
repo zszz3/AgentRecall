@@ -25,6 +25,15 @@ import { resolveSearchScope } from "../search/search-scope";
 export type SessionVisibility = "default" | "favorites" | "hidden";
 
 const SESSION_PAGE_SIZE = 30;
+const EMPTY_INVOCATION_SURFACE_COUNTS = {
+  workflow: 0,
+  evaluation: 0,
+  team_chat: 0,
+  agent: 0,
+  skill: 0,
+  system: 0,
+  all: 0,
+};
 
 export function useSessionCatalog({
   active,
@@ -41,6 +50,8 @@ export function useSessionCatalog({
 }) {
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchOptions["source"]>("all");
+  const [origin, setOrigin] = useState<NonNullable<SearchOptions["origin"]>>("ordinary");
+  const [invocationSurface, setInvocationSurface] = useState<NonNullable<SearchOptions["invocationSurface"]>>("all");
   const [environmentId, setEnvironmentId] = useState<string | "all">("all");
   const [tag, setTag] = useState<string | undefined>();
   const [projectPath, setProjectPath] = useState<string | undefined>();
@@ -57,6 +68,8 @@ export function useSessionCatalog({
     page: 1,
   });
   const [sessionTotalCount, setSessionTotalCount] = useState(0);
+  const [originCounts, setOriginCounts] = useState({ ordinary: 0, agentRecall: 0, all: 0 });
+  const [invocationSurfaceCounts, setInvocationSurfaceCounts] = useState(EMPTY_INVOCATION_SURFACE_COUNTS);
   const [results, setResults] = useState<SessionSearchResult[]>([]);
   const [resultsScopeKey, setResultsScopeKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -74,6 +87,8 @@ export function useSessionCatalog({
       JSON.stringify([
         query,
         source,
+        origin,
+        invocationSurface,
         environmentId,
         tag ?? "",
         projectPath ?? "",
@@ -88,6 +103,8 @@ export function useSessionCatalog({
     [
       query,
       source,
+      origin,
+      invocationSurface,
       environmentId,
       tag,
       projectPath,
@@ -121,6 +138,8 @@ export function useSessionCatalog({
     const options: SearchOptions = {
       query,
       source,
+      origin,
+      invocationSurface,
       tag,
       projectPath: searchScope.projectPath,
       environmentId: searchScope.environmentId,
@@ -134,7 +153,13 @@ export function useSessionCatalog({
       liveSessionKeys: liveDetectionFailed ? [] : liveSearchKeys,
     };
     const page = searchScope.projectEnvironmentConflict
-      ? { sessions: [], totalCount: 0, hasMore: false }
+      ? {
+          sessions: [],
+          totalCount: 0,
+          hasMore: false,
+          originCounts: { ordinary: 0, agentRecall: 0, all: 0 },
+          invocationSurfaceCounts: EMPTY_INVOCATION_SURFACE_COUNTS,
+        }
       : await window.sessionSearch.searchSessionPage(options);
     if (requestId !== loadSeqRef.current) return;
     const lastPage = Math.max(1, Math.ceil(page.totalCount / SESSION_PAGE_SIZE));
@@ -147,6 +172,8 @@ export function useSessionCatalog({
       setResults(page.sessions);
       setResultsScopeKey(requestScopeKey);
       setSessionTotalCount(page.totalCount);
+      setOriginCounts(page.originCounts ?? { ordinary: page.totalCount, agentRecall: 0, all: page.totalCount });
+      setInvocationSurfaceCounts(page.invocationSurfaceCounts ?? EMPTY_INVOCATION_SURFACE_COUNTS);
       setSelectedKey((current) =>
         current &&
         !page.sessions.some((session) => session.sessionKey === current)
@@ -157,6 +184,8 @@ export function useSessionCatalog({
   }, [
     query,
     source,
+    origin,
+    invocationSurface,
     environmentId,
     tag,
     projectPath,
@@ -183,6 +212,8 @@ export function useSessionCatalog({
     const page = await window.sessionSearch.searchSessionPage({
       query,
       source,
+      origin,
+      invocationSurface,
       tag,
       projectPath: searchScope.projectPath,
       environmentId: searchScope.environmentId,
@@ -196,7 +227,7 @@ export function useSessionCatalog({
     });
     if (page.hasMore) throw new Error("More than 100,000 sessions match. Narrow the filters first.");
     return page.sessions;
-  }, [environmentId, projectPath, projectEnvironmentId, customDateRange, dateRange, query, source, tag, visibility, sortBy, liveStatus, liveDetectionFailed, liveSearchKeys]);
+  }, [environmentId, projectPath, projectEnvironmentId, customDateRange, dateRange, query, source, origin, invocationSurface, tag, visibility, sortBy, liveStatus, liveDetectionFailed, liveSearchKeys]);
 
   const clearProjectFilter = useCallback((): void => {
     setProjectPath(undefined);
@@ -324,6 +355,12 @@ export function useSessionCatalog({
     setQuery,
     source,
     setSource,
+    origin,
+    setOrigin,
+    originCounts,
+    invocationSurface,
+    setInvocationSurface,
+    invocationSurfaceCounts,
     environmentId,
     setEnvironmentId,
     tag,

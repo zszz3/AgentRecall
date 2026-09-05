@@ -59,6 +59,8 @@ import type {
   ProjectQueryOptions,
   ProjectSummary,
   ProjectTagEntry,
+  RuntimeInvocationLookup,
+  RuntimeInvocationSessionResolution,
   SearchOptions,
   SessionEnvironment,
   SessionMessage,
@@ -606,6 +608,14 @@ export class SessionStore {
   async findByRawId(rawId: string): Promise<SessionSearchResult | null> {
     await this.ready;
     return this.sessions.findByRawId(rawId);
+  }
+
+  /** Resolves a Runtime invocation owner and preserves binding diagnostics. */
+  async resolveRuntimeInvocationSession(
+    lookup: RuntimeInvocationLookup,
+  ): Promise<RuntimeInvocationSessionResolution> {
+    await this.ready;
+    return this.sessions.resolveRuntimeInvocationSession(lookup);
   }
 
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {

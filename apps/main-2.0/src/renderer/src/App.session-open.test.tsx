@@ -8,6 +8,7 @@ import {
   type SessionBulkDeletePreview,
 } from "../../core/session-bulk-delete";
 import type {
+  RuntimeInvocationSummary,
   SessionMigrationProgress,
   SessionMigrationResult,
   SessionSearchResult,
@@ -25,7 +26,12 @@ const harness = vi.hoisted(() => ({
   searchAllMatching: vi.fn(async () => [] as SessionSearchResult[]),
   openLocal: vi.fn(),
   setSelectedKey: vi.fn(),
+  workbenchPage: vi.fn((_props: unknown) => null),
   sessionsPage: vi.fn((_props: unknown) => null),
+  sessionDetails: vi.fn((_props: unknown) => null),
+  skillsPage: vi.fn((_props: unknown) => null),
+  runtimeFeaturePage: vi.fn((_props: unknown) => null),
+  teamChatPage: vi.fn((_props: unknown) => null),
   remoteSessionsDialog: vi.fn((_props: unknown) => null),
   loadCatalog: vi.fn(async () => undefined),
   loadWorkbenchSessions: vi.fn(async () => undefined),
@@ -40,9 +46,12 @@ const harness = vi.hoisted(() => ({
 }));
 
 vi.mock("./components/app-navigation", () => ({ AppNavigation: () => null }));
-vi.mock("./features/workbench/workbench-page", () => ({ WorkbenchPage: () => null }));
+vi.mock("./features/workbench/workbench-page", () => ({ WorkbenchPage: harness.workbenchPage }));
 vi.mock("./features/sessions/sessions-page", () => ({ SessionsPage: harness.sessionsPage }));
-vi.mock("./features/sessions/session-details", () => ({ SessionDetails: () => null }));
+vi.mock("./features/sessions/session-details", () => ({ SessionDetails: harness.sessionDetails }));
+vi.mock("./features/skills/skills-page", () => ({ SkillsPage: harness.skillsPage }));
+vi.mock("./features/automation/runtime-feature-page", () => ({ RuntimeFeaturePage: harness.runtimeFeaturePage }));
+vi.mock("./features/team-chat/team-chat-page", () => ({ TeamChatPage: harness.teamChatPage }));
 vi.mock("./features/remote-sessions/remote-sessions-dialog", () => ({
   RemoteSessionsDialog: harness.remoteSessionsDialog,
 }));
@@ -400,5 +409,115 @@ describe("external session opening", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("returns invocation history to exact product surfaces", async () => {
+    harness.detail = {
+      sessionKey: "codex:runtime-owner",
+      source: "codex-cli",
+      displayTitle: "Runtime owner",
+    } as SessionSearchResult;
+    await act(async () => root.render(createElement((await import("./App")).App)));
+    const detailsProps = harness.sessionDetails.mock.calls.at(-1)?.[0] as {
+      actions: { openInvocationOwner: (invocation: RuntimeInvocationSummary) => void };
+    };
+
+    await act(async () => {
+      detailsProps.actions.openInvocationOwner({
+        invocationId: "agent-invocation",
+        surface: "agent",
+        role: "chat",
+        ownerReference: { chatId: "chat-1", agentId: "agent-1" },
+        runtimeId: "codex",
+        channelId: "codex-default",
+        environmentId: "local",
+        status: "completed",
+        startedAt: 1,
+        finishedAt: 2,
+        relation: "created",
+        runtimeSessionId: "session-1",
+        runtimeTurnId: null,
+      });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.runtimeFeaturePage).toHaveBeenCalled());
+    expect(harness.runtimeFeaturePage.mock.calls.at(-1)?.[0]).toMatchObject({
+      initialAgentId: "agent-1",
+    });
+
+    await act(async () => {
+      detailsProps.actions.openInvocationOwner({
+        invocationId: "skill-invocation",
+        surface: "skill",
+        role: "discovery",
+        ownerReference: { channelId: "codex-default" },
+        runtimeId: "codex",
+        channelId: "codex-default",
+        environmentId: "local",
+        status: "completed",
+        startedAt: 3,
+        finishedAt: 4,
+        relation: "created",
+        runtimeSessionId: "session-2",
+        runtimeTurnId: null,
+      });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.skillsPage).toHaveBeenCalled());
+    expect(harness.skillsPage.mock.calls.at(-1)?.[0]).toMatchObject({
+      initialDiscoveryOpen: true,
+    });
+
+    await act(async () => {
+      detailsProps.actions.openInvocationOwner({
+        invocationId: "team-chat-invocation",
+        surface: "team_chat",
+        role: "member",
+        ownerReference: {
+          roomId: "room-1",
+          messageId: "message-1",
+          agentId: "member-2",
+        },
+        runtimeId: "codex",
+        channelId: "codex-default",
+        environmentId: "local",
+        status: "completed",
+        startedAt: 5,
+        finishedAt: 6,
+        relation: "created",
+        runtimeSessionId: "session-3",
+        runtimeTurnId: null,
+      });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.teamChatPage).toHaveBeenCalled());
+    expect(harness.teamChatPage.mock.calls.at(-1)?.[0]).toMatchObject({
+      preferredRoomId: "room-1",
+      preferredMessageId: "message-1",
+      preferredAgentId: "member-2",
+    });
+
+    const skillPageCalls = harness.skillsPage.mock.calls.length;
+    harness.workbenchPage.mockClear();
+    await act(async () => {
+      detailsProps.actions.openInvocationOwner({
+        invocationId: "future-invocation",
+        surface: "future_surface",
+        role: null,
+        ownerReference: { futureId: "future-1" },
+        runtimeId: "codex",
+        channelId: "codex-default",
+        environmentId: "local",
+        status: "completed",
+        startedAt: 7,
+        finishedAt: 8,
+        relation: "created",
+        runtimeSessionId: "session-4",
+        runtimeTurnId: null,
+      });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.workbenchPage).toHaveBeenCalled());
+    expect(harness.skillsPage).toHaveBeenCalledTimes(skillPageCalls);
   });
 });

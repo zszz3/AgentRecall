@@ -92,10 +92,29 @@ describe("DetailPanel Turn controls", () => {
   });
 
   it("opens in-conversation find with Ctrl+F and exposes role filters in Turn mode", async () => {
+    const onOpenInvocationOwner = vi.fn();
     await act(async () => {
       root.render(
         <DetailPanel
-          session={session}
+          session={{
+            ...session,
+            createdByAgentRecall: true,
+            runtimeInvocations: [{
+              invocationId: "invocation-1",
+              surface: "workflow",
+              role: "node",
+              ownerReference: { workflowId: "workflow-1", runId: "run-1" },
+              runtimeId: "codex",
+              channelId: "codex-default",
+              environmentId: "local",
+              status: "completed",
+              startedAt: Date.parse("2026-08-10T10:00:00.000Z"),
+              finishedAt: Date.parse("2026-08-10T10:00:01.000Z"),
+              relation: "created",
+              runtimeSessionId: "test-session",
+              runtimeTurnId: "turn-1",
+            }],
+          }}
           turns={[turn]}
           turnsLoading={false}
           matchedTurnId={null}
@@ -134,11 +153,23 @@ describe("DetailPanel Turn controls", () => {
           onCopyPlain={vi.fn()}
           onDelete={vi.fn()}
           onReveal={vi.fn()}
-          readOnly
           sessionFamily={{ parent: null, children: [], truncated: false }}
+          onOpenInvocationOwner={onOpenInvocationOwner}
         />,
       );
     });
+
+    expect(container.querySelector(".runtime-invocation-history")?.textContent)
+      .toContain("Created by AgentRecall");
+    expect(container.querySelector(".runtime-invocation-history button")).toBeNull();
+    const actionButtons = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button")];
+    const sourceButton = actionButtons.at(-1);
+    expect(sourceButton?.textContent).toContain("Back to source");
+    await act(async () => sourceButton?.click());
+    expect(onOpenInvocationOwner).toHaveBeenCalledWith(expect.objectContaining({
+      invocationId: "invocation-1",
+      ownerReference: { workflowId: "workflow-1", runId: "run-1" },
+    }));
 
     const roleGroup = container.querySelector('[role="group"][aria-label="Conversation role filter"]');
     expect(roleGroup?.querySelectorAll("button")).toHaveLength(3);

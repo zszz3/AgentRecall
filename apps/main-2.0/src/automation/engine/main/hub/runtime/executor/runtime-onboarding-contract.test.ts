@@ -8,6 +8,7 @@ import type {
 } from "../../../agents/runtime/runtime-driver";
 import { RuntimeDriverRegistry } from "../../../agents/runtime/runtime-driver";
 import { RuntimeRouter } from "../../../agents/runtime/runtime-router";
+import { NOOP_RUNTIME_INVOCATION_RECORDER } from "../../../agents/runtime/runtime-invocation-recorder";
 import { support } from "./agent-executor-capabilities";
 import { createOneShotRuntimeDriver } from "./agent-executor-driver-factories";
 
@@ -57,6 +58,7 @@ function buildTaskContext(overrides: Partial<AgentExecutionContext> = {}): Agent
     emit: () => undefined,
     onExit: () => undefined,
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "agent", role: "task" },
   };
 }
 
@@ -76,6 +78,7 @@ function buildInteractiveContext(
     developerInstructions: "",
     emit: () => undefined,
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "agent", role: "chat" },
   };
 }
 
@@ -93,6 +96,7 @@ function buildWorkflowContext(
     channelId: "api-default",
     workDir: "C:/repo",
     ...overrides,
+    invocation: overrides.invocation ?? { surface: "workflow" },
   };
 }
 
@@ -117,7 +121,7 @@ describe("runtime onboarding contract", () => {
       deleteSessionArtifacts: undefined,
     });
     const registry = new RuntimeDriverRegistry([driver]);
-    const router = new RuntimeRouter(registry);
+    const router = new RuntimeRouter(registry, NOOP_RUNTIME_INVOCATION_RECORDER);
     const runtimeConversation = {
       runtimeId: "api",
       codecVersion: "v1",
@@ -125,7 +129,10 @@ describe("runtime onboarding contract", () => {
     } as const;
 
     expect(registry.driverFor("api").surfaceSupport).toEqual(declaredSupport);
-    expect(router.createOneShotExecutor(buildTaskContext())).toBe(executor);
+    expect(router.createOneShotExecutor(buildTaskContext())).toEqual({
+      start: expect.any(Function),
+      stop: expect.any(Function),
+    });
     await expect(router.askWorkflow(buildWorkflowContext())).resolves.toEqual({ content: "workflow ok" });
 
     expect(() =>

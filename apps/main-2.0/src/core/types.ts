@@ -1,3 +1,10 @@
+import type {
+  AgentRecallInvocationSurface,
+  SessionInvocationSurfaceFilter,
+} from "../shared/runtime-invocation";
+
+export type { SessionInvocationSurfaceFilter } from "../shared/runtime-invocation";
+
 export type SessionSource =
   | "claude-cli"
   | "claude-app"
@@ -365,7 +372,8 @@ export interface LoadedSession {
 }
 
 export type SessionSourceFilter = SessionSource | "claude" | "codex" | "stepcode" | "all";
-
+/** Selects ordinary Sessions, AgentRecall-created Sessions, or both. */
+export type SessionOriginFilter = "ordinary" | "agentrecall" | "all";
 export interface SearchOptions {
   query?: string;
   tag?: string;
@@ -382,11 +390,14 @@ export interface SearchOptions {
   offset?: number;
   excludeSubagents?: boolean;
   prioritizeFavorites?: boolean;
+  origin?: SessionOriginFilter;
+  invocationSurface?: SessionInvocationSurfaceFilter;
 }
 
 export interface ProjectQueryOptions {
   excludeSubagents?: boolean;
   environmentId?: string;
+  origin?: SessionOriginFilter;
 }
 
 export interface TagListOptions {
@@ -440,6 +451,57 @@ export interface SessionSearchResult extends IndexedSession {
   metadataMatch?: "title" | "project" | "summary" | null;
   bestTurn?: SessionTurnMatch | null;
   turnMatchCount?: number;
+  createdByAgentRecall?: boolean;
+  runtimeInvocations?: RuntimeInvocationSummary[];
+}
+
+/** Runtime invocation history attached to an indexed Session. */
+export interface RuntimeInvocationSummary {
+  /** Durable invocation identifier. */
+  invocationId: string;
+  /** Caller surface, including unknown future values preserved as text. */
+  surface: string;
+  /** Optional caller role. */
+  role: string | null;
+  /** Exact owner identifiers for returning to the source page. */
+  ownerReference: Record<string, string>;
+  /** Runtime that owns the native Session. */
+  runtimeId: string;
+  /** Optional Runtime channel. */
+  channelId: string | null;
+  /** Execution environment containing the Session. */
+  environmentId: string;
+  /** Terminal or in-progress invocation state. */
+  status: "pending" | "completed" | "failed" | "cancelled" | "timed_out";
+  /** Unix epoch timestamp when dispatch started. */
+  startedAt: number;
+  /** Unix epoch timestamp when dispatch reached a terminal state. */
+  finishedAt: number | null;
+  /** Whether this invocation created or continued the Session. */
+  relation: "created" | "continued";
+  /** Native Runtime Session identifier. */
+  runtimeSessionId: string;
+  /** Optional native Runtime Turn identifier. */
+  runtimeTurnId: string | null;
+}
+
+/** Outcome of resolving a business record to its Runtime Session. */
+export type RuntimeInvocationSessionResolution =
+  | { status: "found"; session: SessionSearchResult }
+  | { status: "not_indexed"; invocationId: string }
+  | {
+      status: "no_session_reference";
+      invocationId: string;
+      invocationStatus: RuntimeInvocationSummary["status"];
+    }
+  | { status: "not_recorded" };
+
+/** Exact ledger selector used to navigate from a business record to its Runtime Session. */
+export interface RuntimeInvocationLookup {
+  invocationId?: string;
+  surface?: AgentRecallInvocationSurface;
+  role?: string;
+  ownerReference?: Record<string, string>;
 }
 
 export interface SessionMatchHit {
@@ -465,6 +527,14 @@ export interface SessionSearchPage {
   sessions: SessionSearchResult[];
   totalCount: number;
   hasMore: boolean;
+  /** Counts for each origin under the active non-origin filters. */
+  originCounts: {
+    ordinary: number;
+    agentRecall: number;
+    all: number;
+  };
+  /** AgentRecall-created Session counts under active non-origin and non-surface filters. */
+  invocationSurfaceCounts: Record<SessionInvocationSurfaceFilter, number>;
 }
 
 export interface SessionStatsSummary extends TokenUsage {
@@ -487,6 +557,7 @@ export type SessionStatsTrendGranularity = "day" | "week" | "month";
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
   excludeSubagents?: boolean;
+  origin?: SessionOriginFilter;
 }
 
 export interface SessionStatsTrendBucket {

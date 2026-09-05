@@ -18,7 +18,7 @@ export class OpenClawAgentExecutor implements AgentExecutor {
         this.context.prompt,
         this.context.developerInstructions,
       ),
-      sessionKey: `agent-recall-${this.context.runId}`,
+      sessionId: this.context.invocationId ?? this.context.runId,
       modelId: modelFromRuntimeConfig(this.context.runtimeConfig),
       onEvent: this.context.emit,
       onExit: this.context.onExit,

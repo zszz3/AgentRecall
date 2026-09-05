@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   History,
   RefreshCw,
   Trash2,
@@ -19,6 +20,7 @@ import type {
 } from "../../../../automation/contracts";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
+import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 import { EvalCaseArtifact } from "./eval-case-artifact";
 import { EvalDimensionCard } from "./eval-dimension-card";
 import {
@@ -44,9 +46,17 @@ import {
 export function EvalRunsPage({
   language,
   onOpenSession,
+  initialRunId,
+  initialCaseId,
+  initialEvaluatorId,
+  onInitialRunConsumed,
 }: {
   language: LanguageMode;
   onOpenSession: (sessionKey: string) => void;
+  initialRunId?: string;
+  initialCaseId?: string;
+  initialEvaluatorId?: string;
+  onInitialRunConsumed?: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [runs, setRuns] = useState<EvaluationRunSummary[] | null>(null);
@@ -58,6 +68,21 @@ export function EvalRunsPage({
   const [run, setRun] = useState<EvaluationRun | null>(null);
   const [loadingRun, setLoadingRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestedRunIdRef = useRef<string | undefined>(undefined);
+  const requestedCaseIdRef = useRef<string | undefined>(undefined);
+  const requestedEvaluatorIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!initialRunId) return;
+    requestedRunIdRef.current = initialRunId;
+    setSelectedRunId(initialRunId);
+    onInitialRunConsumed?.();
+  }, [initialRunId, onInitialRunConsumed]);
+
+  useEffect(() => {
+    requestedCaseIdRef.current = initialCaseId;
+    requestedEvaluatorIdRef.current = initialEvaluatorId;
+  }, [initialCaseId, initialEvaluatorId]);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -86,7 +111,7 @@ export function EvalRunsPage({
         )),
       ));
       setSelectedRunId((current) => (
-        current && nextRuns.some((item) => item.id === current)
+        current && (nextRuns.some((item) => item.id === current) || current === requestedRunIdRef.current)
           ? current
           : nextRuns[0]?.id ?? null
       ));
@@ -141,7 +166,10 @@ export function EvalRunsPage({
     void (async () => {
       try {
         const next = await window.sessionSearch.automation.getEvaluationRun(selectedRunId);
-        if (!cancelled) setRun(next ?? null);
+        if (!cancelled) {
+          setRun(next ?? null);
+          if (selectedRunId === requestedRunIdRef.current) requestedRunIdRef.current = undefined;
+        }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
@@ -264,6 +292,8 @@ export function EvalRunsPage({
                 experiment={experiments?.find((item) => item.id === run.experimentId)}
                 evaluators={evaluators ?? []}
                 onOpenSession={onOpenSession}
+                focusedCaseId={requestedCaseIdRef.current}
+                focusedEvaluatorId={requestedEvaluatorIdRef.current}
               />
             )}
         </div>
@@ -278,15 +308,20 @@ function RunGraph({
   experiment,
   evaluators,
   onOpenSession,
+  focusedCaseId,
+  focusedEvaluatorId,
 }: {
   language: LanguageMode;
   run: EvaluationRun;
   experiment?: EvaluationExperiment;
   evaluators: EvaluationEvaluator[];
   onOpenSession: (sessionKey: string) => void;
+  focusedCaseId?: string;
+  focusedEvaluatorId?: string;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [selectedDimension, setSelectedDimension] = useState<string | null>(null);
+  const [sessionFeedback, setSessionFeedback] = useState<string | null>(null);
   const threshold = experiment?.scoring?.resolvedThreshold ?? 0.6;
   const evaluatorNames = new Map(evaluators.map((item) => [item.id, item.name || item.id]));
   const evaluatorDimensions = new Map(
@@ -295,7 +330,29 @@ function RunGraph({
 
   useEffect(() => {
     setSelectedDimension(null);
+    setSessionFeedback(null);
   }, [run.id]);
+  const openInvocationSession = async (
+    role: "subject" | "judge",
+    ownerReference: Record<string, string>,
+    label: { en: string; zh: string },
+  ): Promise<void> => {
+    setSessionFeedback(null);
+    try {
+      const resolution = await window.sessionSearch.resolveRuntimeInvocationSession({
+        surface: "evaluation",
+        role,
+        ownerReference,
+      });
+      if (resolution.status !== "found") {
+        setSessionFeedback(runtimeSessionUnavailableMessage(resolution, label, language));
+        return;
+      }
+      onOpenSession(resolution.session.sessionKey);
+    } catch (cause) {
+      setSessionFeedback(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
   return (
     <>
       <div className="eval-graph-summary">
@@ -361,6 +418,7 @@ function RunGraph({
         />
       ) : null}
       {run.error ? <p className="eval-error" role="alert">{run.error}</p> : null}
+      {sessionFeedback ? <p className="eval-error" role="alert">{sessionFeedback}</p> : null}
       {run.engine === undefined ? (
         <p className="eval-muted">
           <AlertTriangle size={12} />{" "}
@@ -384,7 +442,11 @@ function RunGraph({
               && result.scores.every((score) => score.passed)
             ));
             return (
-              <li key={result.id} className="eval-graph-case">
+              <li
+                key={result.id}
+                className={`eval-graph-case ${focusedCaseId === result.id ? "contains-selection" : ""}`}
+                data-eval-case-id={result.id}
+              >
                 <header>
                   <span className="eval-graph-case-title">
                     {l(`Case ${index + 1}`, `用例 ${index + 1}`)}
@@ -399,6 +461,19 @@ function RunGraph({
                     <span className="eval-muted" title={result.skillInjection.skillHash}>
                       Skill {result.skillInjection.skillName}@{result.skillInjection.skillHash.slice(0, 8)}
                     </span>
+                  ) : null}
+                  {(experiment?.source ?? "run_agent") === "run_agent" ? (
+                    <button
+                      type="button"
+                      className="eval-trigger-session"
+                      onClick={() => void openInvocationSession(
+                        "subject",
+                        { runId: run.id, caseId: result.id },
+                        { en: "this case's subject run", zh: "该用例的被测运行" },
+                      )}
+                    >
+                      <ExternalLink size={11} />{l("Subject Session", "被测会话")}
+                    </button>
                   ) : null}
                 </header>
                 <p className="eval-graph-case-input">{result.input}</p>
@@ -452,7 +527,17 @@ function RunGraph({
                 {result.nodes?.length ? (
                   <ol className="eval-graph-nodes">
                     {result.nodes.map((node) => (
-                      <GraphNodeRow key={node.nodeId} language={language} node={node} />
+                      <GraphNodeRow
+                        key={node.nodeId}
+                        language={language}
+                        node={node}
+                        focusedEvaluatorId={focusedEvaluatorId}
+                        onOpenJudgeSession={(evaluatorId) => void openInvocationSession(
+                          "judge",
+                          { runId: run.id, caseId: result.id, evaluatorId },
+                          { en: "this judge run", zh: "该评分运行" },
+                        )}
+                      />
                     ))}
                   </ol>
                 ) : (
@@ -630,14 +715,21 @@ function DimensionDiagnostics({
 function GraphNodeRow({
   language,
   node,
+  focusedEvaluatorId,
+  onOpenJudgeSession,
 }: {
   language: LanguageMode;
   node: EvaluationNodeRecord;
+  focusedEvaluatorId?: string;
+  onOpenJudgeSession: (evaluatorId: string) => void;
 }): ReactElement {
   const reason = node.attribution?.reason ?? node.pendingReason;
   const skillUse = node.nodeType === "skill_use_observe" ? skillUseText(language, node.facts) : null;
+  const evaluatorId = node.role === "judge" && typeof node.facts?.evaluatorId === "string"
+    ? node.facts.evaluatorId
+    : undefined;
   return (
-    <li>
+    <li className={evaluatorId === focusedEvaluatorId ? "contains-selection" : ""}>
       <span className="eval-graph-node-name">{nodeLabel(language, node)}</span>
       <span className={`eval-badge ${nodeStatusClass(node.status)}`}>
         {nodeStatusText(language, node.status)}
@@ -650,6 +742,16 @@ function GraphNodeRow({
           .filter(Boolean)
           .join(" · ")}
       </span>
+      {evaluatorId ? (
+        <button
+          type="button"
+          className="eval-trigger-session"
+          onClick={() => onOpenJudgeSession(evaluatorId)}
+        >
+          <ExternalLink size={11} />
+          {localize(language, "Judge Session", "评分会话")}
+        </button>
+      ) : null}
     </li>
   );
 }

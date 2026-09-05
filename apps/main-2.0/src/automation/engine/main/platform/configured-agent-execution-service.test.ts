@@ -33,6 +33,7 @@ describe("ConfiguredAgentExecutionService", () => {
     await service.runOneShot({
       configuredAgentId: agent.id,
       prompt: "Complete the node",
+      invocation: { surface: "workflow", role: "node" },
       workflowExecution: {
         workflowId: "workflow",
         runId: "run",
@@ -42,10 +43,12 @@ describe("ConfiguredAgentExecutionService", () => {
     });
 
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      invocationId: expect.any(String),
       planningWorkflowId: "workflow",
       workflowRunId: "run",
       workflowNodeId: "review",
       workflowNodeExecutionId: "execution",
+      invocation: { surface: "workflow", role: "node" },
     }));
   });
 });

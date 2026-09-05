@@ -1810,4 +1810,214 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD PRIMARY KEY (case_result_id, evaluator_id, dimension);
     `,
   ],
+}, {
+  version: 47,
+  name: "record AgentRecall Runtime invocations and Session bindings",
+  statements: [
+    `
+      CREATE TABLE agent_recall.runtime_invocations (
+        id text PRIMARY KEY,
+        initiator text NOT NULL CHECK (initiator = 'agentrecall'),
+        surface text NOT NULL,
+        role text,
+        owner_reference jsonb NOT NULL DEFAULT '{}'::jsonb,
+        runtime_id text NOT NULL,
+        channel_id text,
+        environment_id text NOT NULL DEFAULT 'local',
+        status text NOT NULL CHECK (status IN ('pending', 'completed', 'failed', 'cancelled', 'timed_out')),
+        started_at timestamptz NOT NULL,
+        finished_at timestamptz,
+        error text
+      );
+
+      CREATE TABLE agent_recall.runtime_session_bindings (
+        invocation_id text NOT NULL REFERENCES agent_recall.runtime_invocations(id) ON DELETE CASCADE,
+        runtime_id text NOT NULL,
+        channel_id text NOT NULL DEFAULT '',
+        environment_id text NOT NULL DEFAULT 'local',
+        runtime_session_id text NOT NULL,
+        runtime_turn_id text,
+        relation text NOT NULL CHECK (relation IN ('created', 'continued')),
+        bound_at timestamptz NOT NULL,
+        PRIMARY KEY (invocation_id, runtime_id, channel_id, environment_id, runtime_session_id)
+      );
+
+      CREATE INDEX runtime_session_bindings_session_idx
+        ON agent_recall.runtime_session_bindings
+          (environment_id, runtime_id, runtime_session_id, relation);
+      CREATE INDEX runtime_invocations_owner_idx
+        ON agent_recall.runtime_invocations USING gin (owner_reference);
+      CREATE INDEX runtime_invocations_started_idx
+        ON agent_recall.runtime_invocations (started_at DESC, id DESC);
+    `,
+    `
+      WITH linked_evaluations AS (
+        SELECT
+          case_results.id AS case_result_id,
+          case_results.run_id,
+          runs.experiment_id,
+          sessions.environment_id,
+          sessions.raw_id AS runtime_session_id,
+          CASE
+            WHEN sessions.source IN ('codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli') THEN 'codex'
+            WHEN sessions.source IN ('claude-cli', 'claude-app', 'stepcode-claude', 'tclaude-cli') THEN 'claude'
+            WHEN sessions.source = 'deepseek-cli' THEN 'dsh'
+            WHEN sessions.source = 'hermes' THEN 'hermes'
+            WHEN sessions.source = 'opencode-cli' THEN 'opencode'
+            WHEN sessions.source = 'openclaw' THEN 'openclaw'
+            ELSE NULL
+          END AS runtime_id,
+          runs.started_at,
+          runs.finished_at,
+          case_results.error
+        FROM agent_recall.evaluation_case_results case_results
+        JOIN agent_recall.evaluation_runs runs ON runs.id = case_results.run_id
+        JOIN agent_recall.evaluation_experiments experiments ON experiments.id = runs.experiment_id
+        JOIN agent_recall.sessions sessions ON sessions.session_key = case_results.session_key
+        WHERE case_results.session_key IS NOT NULL
+          AND coalesce(experiments.source, 'run_agent') = 'run_agent'
+      )
+      INSERT INTO agent_recall.runtime_invocations (
+        id, initiator, surface, role, owner_reference, runtime_id,
+        environment_id, status, started_at, finished_at, error
+      )
+      SELECT
+        'legacy-evaluation:' || case_result_id,
+        'agentrecall',
+        'evaluation',
+        'subject',
+        jsonb_build_object(
+          'experimentId', experiment_id,
+          'runId', run_id,
+          'caseId', case_result_id
+        ),
+        runtime_id,
+        environment_id,
+        CASE WHEN error IS NULL THEN 'completed' ELSE 'failed' END,
+        started_at,
+        coalesce(finished_at, started_at),
+        left(error, 4000)
+      FROM linked_evaluations
+      WHERE runtime_id IS NOT NULL
+      ON CONFLICT (id) DO NOTHING;
+
+      WITH linked_evaluations AS (
+        SELECT
+          case_results.id AS case_result_id,
+          sessions.environment_id,
+          sessions.raw_id AS runtime_session_id,
+          CASE
+            WHEN sessions.source IN ('codex-cli', 'codex-app', 'stepcode-codex', 'tcodex-cli') THEN 'codex'
+            WHEN sessions.source IN ('claude-cli', 'claude-app', 'stepcode-claude', 'tclaude-cli') THEN 'claude'
+            WHEN sessions.source = 'deepseek-cli' THEN 'dsh'
+            WHEN sessions.source = 'hermes' THEN 'hermes'
+            WHEN sessions.source = 'opencode-cli' THEN 'opencode'
+            WHEN sessions.source = 'openclaw' THEN 'openclaw'
+            ELSE NULL
+          END AS runtime_id,
+          coalesce(runs.finished_at, runs.started_at) AS bound_at
+        FROM agent_recall.evaluation_case_results case_results
+        JOIN agent_recall.evaluation_runs runs ON runs.id = case_results.run_id
+        JOIN agent_recall.evaluation_experiments experiments ON experiments.id = runs.experiment_id
+        JOIN agent_recall.sessions sessions ON sessions.session_key = case_results.session_key
+        WHERE case_results.session_key IS NOT NULL
+          AND coalesce(experiments.source, 'run_agent') = 'run_agent'
+      )
+      INSERT INTO agent_recall.runtime_session_bindings (
+        invocation_id, runtime_id, environment_id, runtime_session_id, relation, bound_at
+      )
+      SELECT
+        'legacy-evaluation:' || case_result_id,
+        runtime_id,
+        environment_id,
+        runtime_session_id,
+        'created',
+        bound_at
+      FROM linked_evaluations
+      WHERE runtime_id IS NOT NULL
+      ON CONFLICT DO NOTHING;
+    `,
+    `
+      WITH attempts AS (
+        SELECT
+          execution_attempts.*,
+          dispatches.room_id,
+          dispatches.source_message_id,
+          dispatches.target_agent_id,
+          dispatches.task_id,
+          room_agents.channel_id,
+          row_number() OVER (
+            PARTITION BY execution_attempts.runtime_id, coalesce(room_agents.channel_id, ''), execution_attempts.runtime_session_ref
+            ORDER BY execution_attempts.started_at, execution_attempts.id
+          ) AS session_sequence
+        FROM agent_recall.chat_dispatch_attempts execution_attempts
+        JOIN agent_recall.chat_dispatches dispatches ON dispatches.id = execution_attempts.dispatch_id
+        LEFT JOIN agent_recall.chat_room_agents room_agents
+          ON room_agents.room_id = dispatches.room_id
+         AND room_agents.agent_id = dispatches.target_agent_id
+        WHERE execution_attempts.runtime_session_ref IS NOT NULL
+      )
+      INSERT INTO agent_recall.runtime_invocations (
+        id, initiator, surface, role, owner_reference, runtime_id, channel_id,
+        environment_id, status, started_at, finished_at, error
+      )
+      SELECT
+        'legacy-team-chat:' || id,
+        'agentrecall',
+        'team_chat',
+        'member',
+        jsonb_strip_nulls(jsonb_build_object(
+          'roomId', room_id,
+          'messageId', source_message_id,
+          'agentId', target_agent_id,
+          'dispatchId', dispatch_id,
+          'taskId', task_id,
+          'attemptId', id
+        )),
+        runtime_id,
+        channel_id,
+        'local',
+        CASE status
+          WHEN 'completed' THEN 'completed'
+          WHEN 'interrupted' THEN 'cancelled'
+          ELSE 'failed'
+        END,
+        started_at,
+        coalesce(finished_at, started_at),
+        left(error, 4000)
+      FROM attempts
+      ON CONFLICT (id) DO NOTHING;
+
+      WITH attempts AS (
+        SELECT
+          execution_attempts.*,
+          room_agents.channel_id,
+          row_number() OVER (
+            PARTITION BY execution_attempts.runtime_id, coalesce(room_agents.channel_id, ''), execution_attempts.runtime_session_ref
+            ORDER BY execution_attempts.started_at, execution_attempts.id
+          ) AS session_sequence
+        FROM agent_recall.chat_dispatch_attempts execution_attempts
+        JOIN agent_recall.chat_dispatches dispatches ON dispatches.id = execution_attempts.dispatch_id
+        LEFT JOIN agent_recall.chat_room_agents room_agents
+          ON room_agents.room_id = dispatches.room_id
+         AND room_agents.agent_id = dispatches.target_agent_id
+        WHERE execution_attempts.runtime_session_ref IS NOT NULL
+      )
+      INSERT INTO agent_recall.runtime_session_bindings (
+        invocation_id, runtime_id, channel_id, environment_id,
+        runtime_session_id, runtime_turn_id, relation, bound_at
+      )
+      SELECT
+        'legacy-team-chat:' || id,
+        runtime_id,
+        coalesce(channel_id, ''),
+        'local',
+        runtime_session_ref,
+        native_turn_id,
+        CASE WHEN session_sequence = 1 THEN 'created' ELSE 'continued' END,
+        started_at
+      FROM attempts
+      ON CONFLICT DO NOTHING;
+    `,
+  ],
 }];

@@ -5,6 +5,7 @@ import type { RuntimeUsage } from "../../../shared/runtime/usage";
 import type { WorkflowNodeConversation } from "./workflow-v2/conversation";
 import type { ConfiguredAgent } from "./agent/types";
 import type { WorkflowDraftState, WorkflowStoreState } from "./workflow/draft";
+import type { AgentRecallInvocationSurface } from "../../../shared/runtime-invocation";
 export {
   isWorkflowRunTerminalStatus,
   type WorkflowArtifactReference,
@@ -18,6 +19,7 @@ export {
 export type { ResourceSourceType } from "./resource";
 export type { RuntimeConversation } from "./runtime/conversation";
 export type { RuntimeUsage } from "../../../shared/runtime/usage";
+export type { AgentRecallInvocationSurface } from "../../../shared/runtime-invocation";
 export type { AgentRevision, AgentType, ConfiguredAgent } from "./agent/types";
 export type {
   AgentMcpBinding,
@@ -301,7 +303,7 @@ export interface ProviderBalanceResult {
   queriedAt: number;
 }
 
-export type AgentTestEvent =
+export type AgentTestEvent = (
   | { agentId: string; type: "phase"; content: string; timestamp: number }
   | { agentId: string; type: "user"; content: string; timestamp: number }
   | { agentId: string; type: "assistant_delta"; content: string; timestamp: number }
@@ -309,7 +311,11 @@ export type AgentTestEvent =
   | { agentId: string; type: "tool"; content: string; timestamp: number }
   | { agentId: string; type: "warning"; content: string; timestamp: number }
   | { agentId: string; type: "stderr"; content: string; timestamp: number }
-  | { agentId: string; type: "error"; content: string; timestamp: number };
+  | { agentId: string; type: "error"; content: string; timestamp: number }
+) & {
+  /** Stable Runtime invocation shared by channel-test status and logs. */
+  invocationId?: string;
+};
 
 export interface GeneratedConfigFile {
   channelId: string;
@@ -346,6 +352,16 @@ export type ExecutionStyle = "oneshot" | "interactive";
 export type RuntimeExecutionMode = ExecutionStyle;
 export type RuntimeContinuationPolicy = "fresh" | "resume-preferred" | "resume-required";
 
+/** Stable business metadata attached to every Runtime dispatch. */
+export interface RuntimeInvocationRequest {
+  /** Runtime caller category used for Session grouping and history labels. */
+  surface: AgentRecallInvocationSurface;
+  /** Optional role within the selected surface, such as node or judge. */
+  role?: string;
+  /** Exact stable identifiers used to navigate back to the owning record. */
+  ownerReference?: Record<string, string>;
+}
+
 export interface RuntimeConfig {
   model: string;
   reasoningEffort?: string;
@@ -369,6 +385,18 @@ export interface RuntimeRequest {
   agentRecallMcp?: AgentRecallMcpContext;
   workflowNodeExecutionId?: string;
   allowedMcpTools?: string[];
+  /** Stable identifier shared by the Runtime request, status, and emitted logs. */
+  invocationId?: string;
+  /**
+   * Runtime execution environment used to scope native Session identifiers.
+   * Defaults to the reserved `local` environment: Runtime dispatch only spawns
+   * CLI subprocesses on the indexing machine. Dispatch outside that machine
+   * must pass the owning environment id explicitly or Session attribution is
+   * silently dropped.
+   */
+  environmentId?: string;
+  /** Identifies the AgentRecall caller and the exact owner record for this dispatch. */
+  invocation: RuntimeInvocationRequest;
 }
 
 export interface RuntimeResumeCapabilities {
@@ -397,7 +425,7 @@ export interface ChatRuntimeSessionState {
   capabilities: RuntimeResumeCapabilities & RuntimeInteractionCapabilities;
 }
 
-export type AgentEvent =
+export type AgentEvent = (
   | { type: "runtime_conversation"; runtimeConversation: RuntimeConversation }
   | { type: "usage"; usage: RuntimeUsage }
   | { type: "delta"; content: string }
@@ -411,7 +439,11 @@ export type AgentEvent =
   | { type: "user_input_request"; requestId: string; content: string; metadata?: Record<string, unknown> }
   | { type: "user_input_response"; requestId: string; content: string; metadata?: Record<string, unknown> }
   | { type: "completed"; content?: string }
-  | { type: "error"; error: string };
+  | { type: "error"; error: string }
+) & {
+  /** Stable identifier for the Runtime invocation that emitted this event. */
+  invocationId?: string;
+};
 
 export interface SendPromptRequest {
   prompt: string;
@@ -450,6 +482,8 @@ export interface ChatEvent {
   requestId?: string;
   requestState?: InteractionRequestState;
   decision?: ApprovalDecision;
+  /** Stable Runtime invocation identifier for this persisted event. */
+  invocationId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -524,17 +558,23 @@ export interface WorkflowAgentResponse {
 }
 
 export interface RuntimeExecutionReference {
+  /** AgentRecall ledger row that owns this native reference. */
+  invocationId?: string;
   sessionId?: string;
   turnId?: string;
 }
 
-export type WorkflowAgentEvent =
+export type WorkflowAgentEvent = (
   | { requestId: string; type: "delta"; content: string }
   | { requestId: string; type: "tool_call" | "tool_result"; content: string; name?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "approval_request"; approvalRequestId: string; content: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "approval_response"; approvalRequestId: string; decision: ApprovalDecision; content?: string; metadata?: Record<string, unknown> }
   | { requestId: string; type: "completed"; content: string; runtimeConversation?: RuntimeConversation }
-  | { requestId: string; type: "error"; error: string };
+  | { requestId: string; type: "error"; error: string }
+) & {
+  /** Stable identifier for the Runtime invocation that emitted this event. */
+  invocationId?: string;
+};
 
 export type AgentTeamMode = "pipeline" | "parallel" | "supervisor";
 export type AgentWorkflowTargetKind = "workspace" | "task" | "custom";

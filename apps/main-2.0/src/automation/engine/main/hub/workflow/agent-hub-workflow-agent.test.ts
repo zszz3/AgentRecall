@@ -16,6 +16,7 @@ describe("buildWorkflowAgentExecution", () => {
       workflowRunId: "run",
       workflowNodeId: "node",
       workflowNodeExecutionId: "execution",
+      invocation: { surface: "workflow", role: "node" },
     } satisfies WorkflowAgentRequest;
 
     const execution = buildWorkflowAgentExecution({

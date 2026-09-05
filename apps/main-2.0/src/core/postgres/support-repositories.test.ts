@@ -4,6 +4,7 @@ import type { IndexedSession } from "../types";
 import { PostgresDatabase } from "./database";
 import { PostgresEnvironmentRepository } from "./environment-repository";
 import { PostgresMetadataRepository } from "./metadata-repository";
+import { PostgresRuntimeInvocationRepository } from "./runtime-invocation-repository";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PostgresSessionRepository } from "./session-repository";
 import { PostgresSkillRepository } from "./skill-repository";
@@ -39,6 +40,45 @@ describe("PostgreSQL support repositories", () => {
 
   afterEach(async () => {
     await database.close();
+  });
+
+  it("fails Runtime invocations left pending by a previous process", async () => {
+    const repository = new PostgresRuntimeInvocationRepository(database);
+    await repository.begin({
+      id: "stale-invocation",
+      initiator: "agentrecall",
+      invocation: { surface: "agent", role: "task", ownerReference: { taskId: "task-1" } },
+      runtimeId: "opencode",
+      environmentId: "local",
+      startedAt: 1_000,
+    });
+    await repository.begin({
+      id: "finished-invocation",
+      initiator: "agentrecall",
+      invocation: { surface: "agent", role: "task", ownerReference: { taskId: "task-2" } },
+      runtimeId: "opencode",
+      environmentId: "local",
+      startedAt: 2_000,
+    });
+    await repository.finish("finished-invocation", "completed", 3_000);
+
+    await expect(repository.recoverPending(4_000)).resolves.toBe(1);
+    const result = await database.query<{
+      id: string;
+      status: string;
+      finished_at: Date | string | null;
+      error: string | null;
+    }>(
+      "select id, status, finished_at, error from agent_recall.runtime_invocations order by id",
+    );
+    expect(result.rows).toEqual([
+      expect.objectContaining({ id: "finished-invocation", status: "completed", error: null }),
+      expect.objectContaining({
+        id: "stale-invocation",
+        status: "failed",
+        error: "AgentRecall stopped before this Runtime invocation finished.",
+      }),
+    ]);
   });
 
   it("manages environments without allowing the local environment to be deleted", async () => {

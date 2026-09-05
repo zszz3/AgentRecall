@@ -7,7 +7,7 @@ import { DEFAULT_MODEL_ID } from "../../shared/models";
 import { projectNodeStates } from "../../shared/workflow-v2/runtime-utils";
 import { createWorkflowV2InlineScriptSpec } from "../../shared/workflow-v2/definition";
 import { createDirectWorkflowTransactionPolicy } from "../../shared/workflow-v2/transaction";
-import type { AgentChannel, AgentId, ChatRuntimeSessionState, ConfiguredAgent, RuntimeConversation } from "../../shared/types";
+import type { AgentChannel, AgentEvent, AgentId, ChatRuntimeSessionState, ConfiguredAgent, RuntimeConversation } from "../../shared/types";
 import { createRuntimeDriverRegistry, RuntimeDriverRegistry } from "./runtime/executor/agent-executor";
 import type {
   AgentExecutionContext,
@@ -528,6 +528,7 @@ test("workflow and generic Agent execution use the correct instruction scope", a
   })]);
 
   const response = await hub.askWorkflowAgent({
+    invocation: { surface: "workflow" },
     prompt: "Plan the repo",
     configuredAgentId: "hermes-agent",
     runtimeId: "hermes",
@@ -546,6 +547,7 @@ test("workflow and generic Agent execution use the correct instruction scope", a
   }));
 
   await hub.askConfiguredAgent({
+    invocation: { surface: "evaluation" },
     prompt: "Evaluate the answer",
     configuredAgentId: "hermes-agent",
     runtimeId: "hermes",
@@ -1234,6 +1236,109 @@ describe("AgentHub chat sessions", () => {
 
       expect(onTimeout).toHaveBeenCalledTimes(1);
       timeout.clear();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("waits for an idle workflow draft invocation to finish timing out before rejecting", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new AgentHub();
+      (hub as any).runtimes.set("codex", {
+        id: "codex",
+        label: "Codex",
+        command: "codex",
+        version: "test",
+        available: true,
+      });
+      const interactiveSessions = (hub as any).interactiveSessions;
+      let emitAfterTimeout: ((event: AgentEvent) => void) | undefined;
+      vi.spyOn(interactiveSessions, "dispatch").mockImplementation((...args: unknown[]) => {
+        const context = args[1] as { emit: (event: AgentEvent) => void };
+        emitAfterTimeout = context.emit;
+        return new Promise<void>(() => undefined);
+      });
+      let finishInterrupt: (() => void) | undefined;
+      const interrupt = vi.spyOn(interactiveSessions, "interrupt").mockImplementation(
+        () => new Promise<void>((resolve) => {
+          finishInterrupt = resolve;
+        }),
+      );
+
+      const response = (hub as any).askWorkflowDraftAgent({
+        workflowId: "workflow-timeout",
+        requestId: "request-timeout",
+        prompt: "Plan the workflow",
+        configuredAgentId: TEST_CODEX_AGENT_ID,
+        modelId: DEFAULT_MODEL_ID,
+        workDir: "/workspace",
+        starting: true,
+      });
+      let responseSettled = false;
+      void response.then(
+        () => { responseSettled = true; },
+        () => { responseSettled = true; },
+      );
+      const rejection = expect(response).rejects.toThrow(
+        "Workflow planning agent timed out after 10 minutes without activity",
+      );
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+      expect(interrupt).toHaveBeenCalledWith(
+        "workflow-draft:workflow-timeout",
+        {
+          status: "timed_out",
+          error: expect.objectContaining({
+            message: "Workflow planning agent timed out after 10 minutes without activity",
+          }),
+        },
+      );
+      expect(responseSettled).toBe(false);
+
+      emitAfterTimeout?.({ type: "completed", content: "Late completion" });
+      await Promise.resolve();
+      expect(responseSettled).toBe(false);
+
+      finishInterrupt?.();
+      await rejection;
+      expect(responseSettled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("rejects an idle workflow draft invocation when its timeout interruption fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new AgentHub();
+      (hub as any).runtimes.set("codex", {
+        id: "codex",
+        label: "Codex",
+        command: "codex",
+        version: "test",
+        available: true,
+      });
+      const interactiveSessions = (hub as any).interactiveSessions;
+      vi.spyOn(interactiveSessions, "dispatch").mockImplementation(
+        () => new Promise<void>(() => undefined),
+      );
+      const interruptError = new Error("Failed to persist the timed out invocation");
+      vi.spyOn(interactiveSessions, "interrupt").mockRejectedValue(interruptError);
+
+      const response = (hub as any).askWorkflowDraftAgent({
+        workflowId: "workflow-timeout",
+        requestId: "request-timeout",
+        prompt: "Plan the workflow",
+        configuredAgentId: TEST_CODEX_AGENT_ID,
+        modelId: DEFAULT_MODEL_ID,
+        workDir: "/workspace",
+        starting: true,
+      });
+      const rejection = expect(response).rejects.toThrow(interruptError.message);
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await rejection;
     } finally {
       vi.useRealTimers();
     }
@@ -3361,11 +3466,12 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       executionReference: { sessionId: "thread-1", turnId: "turn-1" },
     });
     expect(events).toEqual([
-      { requestId: "workflow-test", type: "delta", content: "artifact-1" },
+      { requestId: "workflow-test", type: "delta", content: "artifact-1", invocationId: expect.any(String) },
       {
         requestId: "workflow-test",
         type: "completed",
         content: "artifact-1",
+        invocationId: expect.any(String),
         runtimeConversation: runtimeConversation("codex", { native: { threadId: "thread-1" } }),
       },
     ]);
@@ -3428,6 +3534,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       : agent));
 
     await hub.askWorkflowAgent({
+      invocation: { surface: "workflow" },
       requestId: "bound-mcp-codex",
       prompt: "Use the bound server.",
       configuredAgentId: TEST_CODEX_AGENT_ID,
@@ -3486,11 +3593,12 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
       executionReference: { sessionId: "claude-session-7" },
     });
     expect(events).toEqual([
-      { requestId: "claude-workflow-test", type: "delta", content: "workflow-sdk" },
+      { requestId: "claude-workflow-test", type: "delta", content: "workflow-sdk", invocationId: expect.any(String) },
       {
         requestId: "claude-workflow-test",
         type: "completed",
         content: "workflow-sdk",
+        invocationId: expect.any(String),
         runtimeConversation: runtimeConversation("claude", { native: { sessionId: "claude-session-7" } }),
       },
     ]);
@@ -3558,6 +3666,7 @@ fs.writeFileSync(${JSON.stringify(argsPath)}, process.argv.slice(2).join("\\n") 
     (hub as any).runtimes.set("claude", { id: "claude", label: "Claude", command: "claude", version: "test", available: true });
 
     await hub.askWorkflowAgent({
+      invocation: { surface: "workflow" },
       requestId: "bound-mcp-claude",
       prompt: "Use the bound server.",
       configuredAgentId: "claude-agent",

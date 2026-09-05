@@ -134,7 +134,10 @@ export async function runCodexChannelTest(
     timeoutMs: RUNTIME_CHANNEL_TEST_TIMEOUT_MS,
     onStdoutLine: (line) => {
       const sessionId = extractCodexSessionId(line);
-      if (sessionId) sessionIds.add(sessionId);
+      if (sessionId && !sessionIds.has(sessionId)) {
+        sessionIds.add(sessionId);
+        input.reportExecutionReference?.({ sessionId });
+      }
       const eventOutput = handleCodexTestLine(line, input.emit);
       if (eventOutput) output += eventOutput;
     },

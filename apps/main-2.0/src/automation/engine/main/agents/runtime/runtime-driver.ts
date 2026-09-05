@@ -7,6 +7,7 @@ import type {
   RuntimeContinuationPolicy,
   RuntimeConversation,
   RuntimeExecutionMode,
+  RuntimeExecutionReference,
   RuntimeRequest,
   WorkflowAgentEvent,
   WorkflowAgentResponse,
@@ -26,6 +27,11 @@ export interface RuntimeSurfaceSupport {
 export interface InteractiveSessionSnapshot {
   runtimeState: ChatRuntimeSessionState;
   runtimeConversation?: RuntimeConversation;
+}
+
+export interface InteractiveSessionInterruption {
+  status: "cancelled" | "timed_out";
+  error?: unknown;
 }
 
 export interface InteractiveSessionContext extends RuntimeRequest {
@@ -52,6 +58,7 @@ export interface RuntimeWorkflowRequestContext extends RuntimeRequest {
   workDir: string;
   onEvent?: ((event: WorkflowAgentEvent) => void) | undefined;
   signal?: AbortSignal | undefined;
+  reportExecutionReference?: ((reference: RuntimeExecutionReference) => void) | undefined;
 }
 
 export interface RuntimeChannelTestContext {
@@ -59,6 +66,12 @@ export interface RuntimeChannelTestContext {
   channelId: string;
   modelId: string;
   workDir: string;
+  /** Stable identifier shared by the channel-test request and its logs. */
+  invocationId?: string;
+  /** Execution environment used to scope native Session identifiers. */
+  environmentId?: string;
+  /** Reports a native Session or Turn created while testing the channel. */
+  reportExecutionReference?: ((reference: RuntimeExecutionReference) => void) | undefined;
   emit: (event: Omit<AgentTestEvent, "agentId" | "timestamp">) => void;
 }
 
@@ -71,7 +84,7 @@ export interface InteractiveSession {
   reconfigure(context: InteractiveSessionContext): void;
   ensureAttached(): Promise<void>;
   sendPrompt(prompt: string): Promise<void>;
-  interrupt(): Promise<void>;
+  interrupt(interruption?: InteractiveSessionInterruption): Promise<void>;
   detach(reason: "idle_timeout" | "app_shutdown" | "error"): Promise<void>;
   detachIfStillExpired(input: {
     expectedGeneration: number;

@@ -46,6 +46,7 @@ describe("TeamChatPage rooms", () => {
   let root: Root;
   let fixture: ReturnType<typeof createTeamChatFixture>;
   let teamChat: ReturnType<typeof createTeamChatFixture>;
+  let resolveRuntimeInvocationSession = vi.fn();
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -54,9 +55,10 @@ describe("TeamChatPage rooms", () => {
     root = createRoot(container);
     fixture = createTeamChatFixture();
     teamChat = fixture;
+    resolveRuntimeInvocationSession = vi.fn(async () => ({ status: "not_recorded" as const }));
     Object.defineProperty(window, "sessionSearch", {
       configurable: true,
-      value: { teamChat },
+      value: { teamChat, resolveRuntimeInvocationSession },
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
@@ -137,6 +139,79 @@ describe("TeamChatPage rooms", () => {
       expect(container.textContent).toContain("Alpha stays visible");
       expect(composer(container).value).toBe("Keep this draft");
     });
+  });
+
+  it("opens the latest Session recorded for the active room", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
+    resolveRuntimeInvocationSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "session-1" },
+    });
+    const onOpenSession = vi.fn();
+
+    await act(async () => root.render(
+      <TeamChatPage language="en" onOpenSession={onOpenSession} />,
+    ));
+    await vi.waitFor(() => expect(
+      container.querySelector(".team-chat-room-title strong")?.textContent,
+    ).toBe("Alpha"));
+    const sessionButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open latest Session"]',
+    );
+    if (!sessionButton) throw new Error("Open latest Session button was not rendered");
+
+    await act(async () => {
+      sessionButton.click();
+      await Promise.resolve();
+    });
+
+    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
+      surface: "team_chat",
+      role: "member",
+      ownerReference: { roomId: "room-alpha" },
+    });
+    expect(onOpenSession).toHaveBeenCalledWith("session-1");
+  });
+
+  it("opens the Session recorded for an individual agent message", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
+    fixture.setRoomMessages("room-alpha", [{
+      ...messageFixture("agent-message", "room-alpha", 2, "Done"),
+      senderType: "agent",
+      senderAgentId: "member-1",
+      senderName: "Builder",
+      sourceMessageId: "human-message",
+    }]);
+    resolveRuntimeInvocationSession.mockResolvedValue({
+      status: "found",
+      session: { sessionKey: "session-message" },
+    });
+    const onOpenSession = vi.fn();
+
+    await act(async () => root.render(
+      <TeamChatPage language="en" onOpenSession={onOpenSession} />,
+    ));
+    await vi.waitFor(() => expect(container.textContent).toContain("Done"));
+    const sessionButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open Session for Builder"]',
+    );
+    if (!sessionButton) throw new Error("Message Session button was not rendered");
+
+    await act(async () => {
+      sessionButton.click();
+      await Promise.resolve();
+    });
+
+    expect(resolveRuntimeInvocationSession).toHaveBeenCalledWith({
+      surface: "team_chat",
+      role: "member",
+      ownerReference: {
+        roomId: "room-alpha",
+        messageId: "human-message",
+        agentId: "member-1",
+      },
+    });
+    expect(onOpenSession).toHaveBeenCalledWith("session-message");
   });
 
   it("clears deleted room details after switching rooms during a pending delete", async () => {
@@ -340,6 +415,91 @@ describe("TeamChatPage rooms", () => {
       expect(container.textContent).toContain("Alpha earlier");
       expect(container.textContent).toContain("Alpha recent");
       expect(earlierMessagesButton(container)).toBeUndefined();
+    });
+  });
+
+  it("loads older pages until the preferred source message can be focused", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha")]);
+    const onPreferredConsumed = vi.fn();
+    teamChat.listMessages.mockImplementation(async (request: ListTeamChatMessagesRequest) => {
+      if (request.before === "alpha-before") {
+        return {
+          messages: [messageFixture("target-message", "room-alpha", 1, "Original request")],
+        };
+      }
+      return {
+        messages: [messageFixture("recent-message", "room-alpha", 2, "Recent reply")],
+        nextBefore: "alpha-before",
+      };
+    });
+
+    await act(async () => root.render(
+      <TeamChatPage
+        language="en"
+        preferredRoomId="room-alpha"
+        preferredMessageId="target-message"
+        onPreferredConsumed={onPreferredConsumed}
+      />,
+    ));
+
+    await vi.waitFor(() => expect(teamChat.listMessages).toHaveBeenCalledWith({
+      roomId: "room-alpha",
+      before: "alpha-before",
+      limit: 100,
+    }));
+    await vi.waitFor(() => {
+      const target = container.querySelector<HTMLElement>('[data-message-id="target-message"]');
+      expect(target).not.toBeNull();
+      expect(document.activeElement).toBe(target);
+      expect(onPreferredConsumed).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("focuses the exact agent response when multiple members reply to one message", async () => {
+    fixture.setRooms([roomFixture("room-alpha", "Alpha", {
+      name: "Alpha",
+      workDir: "/workspace/project",
+      members: [
+        { configuredAgentId: "builder-profile", displayName: "Builder" },
+        { configuredAgentId: "reviewer-profile", displayName: "Reviewer" },
+      ],
+    })]);
+    fixture.setRoomMessages("room-alpha", [
+      messageFixture("human-message", "room-alpha", 1, "Please review this"),
+      {
+        ...messageFixture("builder-response", "room-alpha", 2, "Builder response"),
+        senderType: "agent",
+        senderAgentId: "member-1",
+        senderName: "Builder",
+        sourceMessageId: "human-message",
+      },
+      {
+        ...messageFixture("reviewer-response", "room-alpha", 3, "Reviewer response"),
+        senderType: "agent",
+        senderAgentId: "member-2",
+        senderName: "Reviewer",
+        sourceMessageId: "human-message",
+      },
+    ]);
+    const onPreferredConsumed = vi.fn();
+
+    await act(async () => root.render(
+      <TeamChatPage
+        language="en"
+        preferredRoomId="room-alpha"
+        preferredMessageId="human-message"
+        preferredAgentId="member-2"
+        onPreferredConsumed={onPreferredConsumed}
+      />,
+    ));
+
+    await vi.waitFor(() => {
+      const target = container.querySelector<HTMLElement>(
+        '[data-message-id="human-message"][data-agent-id="member-2"]',
+      );
+      expect(target).not.toBeNull();
+      expect(document.activeElement).toBe(target);
+      expect(onPreferredConsumed).toHaveBeenCalledOnce();
     });
   });
 

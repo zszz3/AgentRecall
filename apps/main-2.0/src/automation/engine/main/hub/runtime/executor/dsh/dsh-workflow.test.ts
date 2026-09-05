@@ -66,6 +66,7 @@ function workflowInput(
       instructionScope: "agent",
       onEvent: (event) => events.push(event),
       ...overrides,
+      invocation: overrides.invocation ?? { surface: "workflow" },
     },
     events,
   };
@@ -103,14 +104,30 @@ describe("DSH workflow execution", () => {
 
   test("runs with developer instructions, channel environment, and completed output", async () => {
     runnerMock.start.mockImplementation(async (options: Record<string, any>) => {
+      options.onEvent({
+        type: "runtime_conversation",
+        runtimeConversation: {
+          runtimeId: "dsh",
+          codecVersion: "v1",
+          payload: { native: { sessionId: "session-dsh-workflow" } },
+        },
+      });
       options.onEvent({ type: "completed", content: "  concise answer  " });
       options.onExit(0);
     });
-    const { input, events } = workflowInput();
+    const reportExecutionReference = vi.fn();
+    const { input, events } = workflowInput({ reportExecutionReference });
 
     await expect(runDshWorkflow(input, workflowOptions())).resolves.toEqual({
       content: "concise answer",
+      runtimeConversation: {
+        runtimeId: "dsh",
+        codecVersion: "v1",
+        payload: { native: { sessionId: "session-dsh-workflow" } },
+      },
+      executionReference: { sessionId: "session-dsh-workflow" },
     });
+    expect(reportExecutionReference).toHaveBeenCalledWith({ sessionId: "session-dsh-workflow" });
 
     expect(runnerMock.options).toHaveLength(1);
     expect(runnerMock.options[0]).toMatchObject({
@@ -211,21 +228,32 @@ describe("DSH workflow execution", () => {
 
   test("uses the standard channel-test prompt and returns the assistant response", async () => {
     runnerMock.start.mockImplementation(async (options: Record<string, any>) => {
+      options.onEvent({
+        type: "runtime_conversation",
+        runtimeConversation: {
+          runtimeId: "dsh",
+          codecVersion: "v1",
+          payload: { native: { sessionId: "session-dsh-test" } },
+        },
+      });
       options.onEvent({ type: "completed", content: "OK" });
       options.onExit(0);
     });
     const emitted: Array<Omit<AgentTestEvent, "agentId" | "timestamp">> = [];
+    const reportExecutionReference = vi.fn();
     const input: RuntimeChannelTestContext = {
       runtime,
       channelId: "dsh-default",
       modelId: "default",
       workDir: "/work/repository",
+      reportExecutionReference,
       emit: (event) => emitted.push(event),
     };
 
     await expect(runDshChannelTest(input, workflowOptions())).resolves.toBe("OK");
 
     expect(runnerMock.options[0]?.prompt).toBe(RUNTIME_CHANNEL_TEST_PROMPT);
+    expect(reportExecutionReference).toHaveBeenCalledWith({ sessionId: "session-dsh-test" });
     expect(emitted).toEqual([
       {
         type: "phase",

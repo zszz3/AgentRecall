@@ -27,6 +27,7 @@ export function createHermesDriver(options: RuntimeAgentExecutorFactoryOptions):
       ? new AcpWorkflowOneShotExecutor(context, {
           executable: context.runtime.command || options.executables.hermes,
           args: ["acp"],
+          runtimeStateCodec: hermesRuntimeStateCodec,
           modelId: context.runtimeConfig.model,
           mcpServers: [
             ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),

@@ -25,6 +25,7 @@ export function createOpenClawDriver(options: RuntimeAgentExecutorFactoryOptions
       ? new AcpWorkflowOneShotExecutor(context, {
           executable: context.runtime.command || options.executables.openclaw,
           args: ["acp"],
+          runtimeStateCodec: openClawRuntimeStateCodec,
           modelId: context.runtimeConfig.model,
           mcpServers: [
             ...acpMcpServers(context.configuredAgentId ? options.mcpServersForAgent?.(context.configuredAgentId, context.allowedMcpTools) ?? [] : []),
