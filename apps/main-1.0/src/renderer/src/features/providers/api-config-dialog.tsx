@@ -121,6 +121,9 @@ export function ApiConfigDialog({
   const codexConnectionTestIdRef = useRef(0);
   const claudeConnectionTestIdRef = useRef(0);
   const summaryConnectionTestIdRef = useRef(0);
+  const codexModelProbeIdRef = useRef(0);
+  const claudeModelProbeIdRef = useRef(0);
+  const summaryModelProbeIdRef = useRef(0);
   const updateDraftApiConfig = (next: Partial<ApiConfig>) => setDraftApiConfig((current) => ({ ...current, ...next }));
   const updateDraftClaudeApiConfig = (next: Partial<ClaudeApiConfig>) => setDraftClaudeApiConfig((current) => ({ ...current, ...next }));
   const codexConnectionSignature = JSON.stringify(draftApiConfig);
@@ -340,6 +343,8 @@ export function ApiConfigDialog({
   };
 
   const detectCodexModels = async () => {
+    const probeId = ++codexModelProbeIdRef.current;
+    const probedSignature = codexConnectionSignature;
     setCodexModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
     try {
       const configuredProviderId = selectedCodexConfigProviderId || codexConfig?.activeProviderId;
@@ -355,15 +360,19 @@ export function ApiConfigDialog({
         codexHome: draftApiConfig.customConfigDir || undefined,
         keyTarget: "codex",
       });
+      if (probeId !== codexModelProbeIdRef.current || probedSignature !== codexConnectionSignatureRef.current) return;
       setCodexModelOptions(result.models);
       setCodexModelMenuOpen(result.models.length > 0);
       setCodexModelProbeStatus({ kind: "success", message: l(`Found ${result.models.length} models from ${result.endpoint}.`, `已从 ${result.endpoint} 找到 ${result.models.length} 个模型。`) });
     } catch (error) {
+      if (probeId !== codexModelProbeIdRef.current || probedSignature !== codexConnectionSignatureRef.current) return;
       setCodexModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
   };
 
   const detectClaudeModels = async () => {
+    const probeId = ++claudeModelProbeIdRef.current;
+    const probedSignature = claudeConnectionSignature;
     setClaudeModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
     try {
       const result = await window.sessionSearch.probeClaudeModels({
@@ -374,6 +383,7 @@ export function ApiConfigDialog({
         apiFormat: draftClaudeApiConfig.customApiFormat,
         apiKeyField: draftClaudeApiConfig.customApiKeyField,
       });
+      if (probeId !== claudeModelProbeIdRef.current || probedSignature !== claudeConnectionSignatureRef.current) return;
       setClaudeModelOptions(result.models);
       setClaudeModelMenuOpen(result.models.length > 0);
       setClaudeModelProbeStatus({
@@ -384,6 +394,7 @@ export function ApiConfigDialog({
         ),
       });
     } catch (error) {
+      if (probeId !== claudeModelProbeIdRef.current || probedSignature !== claudeConnectionSignatureRef.current) return;
       setClaudeModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
   };
@@ -526,6 +537,8 @@ export function ApiConfigDialog({
   };
 
   const detectSummaryModels = async () => {
+    const probeId = ++summaryModelProbeIdRef.current;
+    const probedSignature = summaryConnectionSignature;
     setSummaryModelProbeStatus({ kind: "running", message: l("Detecting models...", "正在探测模型...") });
     try {
       const result = activeSummarySource === "claude"
@@ -553,6 +566,7 @@ export function ApiConfigDialog({
               codexHome: effectiveSummaryApiConfig.customConfigDir || undefined,
               keyTarget: summaryInheritsCodex ? "codex" : "summary",
             });
+      if (probeId !== summaryModelProbeIdRef.current || probedSignature !== summaryConnectionSignatureRef.current) return;
       setSummaryModelOptions(result.models);
       setSummaryModelMenuOpen(result.models.length > 0);
       setSummaryModelProbeStatus({
@@ -563,6 +577,7 @@ export function ApiConfigDialog({
         ),
       });
     } catch (error) {
+      if (probeId !== summaryModelProbeIdRef.current || probedSignature !== summaryConnectionSignatureRef.current) return;
       setSummaryModelProbeStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     }
   };
@@ -954,17 +969,23 @@ export function ApiConfigDialog({
 
   useEffect(() => {
     codexConnectionTestIdRef.current += 1;
+    codexModelProbeIdRef.current += 1;
     setCodexConnectionStatus(null);
+    setCodexModelProbeStatus(null);
   }, [codexConnectionSignature]);
 
   useEffect(() => {
     claudeConnectionTestIdRef.current += 1;
+    claudeModelProbeIdRef.current += 1;
     setClaudeConnectionStatus(null);
+    setClaudeModelProbeStatus(null);
   }, [claudeConnectionSignature]);
 
   useEffect(() => {
     summaryConnectionTestIdRef.current += 1;
+    summaryModelProbeIdRef.current += 1;
     setSummaryConnectionStatus(null);
+    setSummaryModelProbeStatus(null);
   }, [summaryConnectionSignature]);
 
   useEffect(() => {
