@@ -412,12 +412,14 @@ export class WorkflowEngine {
           }
           break;
         }
-        if (superseded()) return this.requiredRun(run.id);
+        if (superseded() || controller.signal.aborted) return this.requiredRun(run.id);
         await this.store.saveRun(run);
         if (revised) continue;
       }
 
-      if (superseded()) return this.requiredRun(run.id);
+      // An aborted loop must not derive a status from its stale clone: pause/cancel
+      // already persisted the run's real state, and saving here would resurrect it.
+      if (superseded() || controller.signal.aborted) return this.requiredRun(run.id);
       run.status = deriveWorkflowRunStatus(run.definition, run);
       if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
         run.finishedAt = this.now();
