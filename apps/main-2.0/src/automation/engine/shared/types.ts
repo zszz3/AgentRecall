@@ -387,7 +387,13 @@ export interface RuntimeRequest {
   allowedMcpTools?: string[];
   /** Stable identifier shared by the Runtime request, status, and emitted logs. */
   invocationId?: string;
-  /** Runtime execution environment used to scope native Session identifiers. */
+  /**
+   * Runtime execution environment used to scope native Session identifiers.
+   * Defaults to the reserved `local` environment: Runtime dispatch only spawns
+   * CLI subprocesses on the indexing machine. Dispatch outside that machine
+   * must pass the owning environment id explicitly or Session attribution is
+   * silently dropped.
+   */
   environmentId?: string;
   /** Identifies the AgentRecall caller and the exact owner record for this dispatch. */
   invocation: RuntimeInvocationRequest;

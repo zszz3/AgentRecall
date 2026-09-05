@@ -60,6 +60,9 @@ export class OpenClawRunner {
   constructor(private readonly options: OpenClawRunOptions) {}
 
   async start(): Promise<void> {
+    // Requires an OpenClaw CLI that keys agent runs by `--session-id`
+    // (earlier builds used `--session-key`); an unsupported flag exits
+    // non-zero and surfaces as a failed invocation.
     const args = [
       "agent",
       "--session-id",

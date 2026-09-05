@@ -24,6 +24,10 @@ export class HermesRunner {
   constructor(private readonly options: HermesRunOptions) {}
 
   async start(): Promise<void> {
+    // Requires a Hermes CLI whose `chat` subcommand supports `--quiet`,
+    // `--query`, and `--source tool` and emits `session_id: <id>` on stderr.
+    // Older builds only accept the bare `-z <prompt>` form; an unsupported
+    // flag exits non-zero and surfaces as a failed invocation.
     const args = ["chat", "--quiet", "--query", this.options.prompt];
     const modelArg = runtimeModelId(this.options.modelId ?? "");
     if (modelArg) {
@@ -90,6 +94,10 @@ export class HermesRunner {
       proc.once("exit", (code) => {
         finish(() => {
           const content = stdout.trim();
+          // Include the unterminated final line: the CLI may exit without a
+          // trailing newline. A process killed mid-write of the reference
+          // line could bind a truncated id, which can only produce an
+          // unmatchable binding, never a misattribution.
           reportSessionReference(true);
           if (!this.stopping && code === 0) {
             if (content) this.options.onEvent({ type: "completed", content });

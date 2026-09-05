@@ -513,9 +513,12 @@ export class RuntimeRouter {
 
   private statusForError(error: unknown, signal?: AbortSignal): Exclude<RuntimeInvocationStatus, "pending" | "completed"> {
     const name = error instanceof Error ? error.name : "";
+    const code = error instanceof Error ? String((error as NodeJS.ErrnoException).code ?? "") : "";
     const message = error instanceof Error ? error.message : String(error);
-    if (name === "TimeoutError" || /timed out|timeout/iu.test(message)) return "timed_out";
-    if (signal?.aborted || name === "AbortError" || /interrupt|cancel/iu.test(message)) return "cancelled";
+    if (name === "TimeoutError" || code === "ETIMEDOUT" || /\btimed out\b/iu.test(message)) return "timed_out";
+    if (signal?.aborted || name === "AbortError" || /\binterrupted\b|\bcancelled\b|\bcanceled\b/iu.test(message)) {
+      return "cancelled";
+    }
     return "failed";
   }
 }
@@ -523,6 +526,16 @@ export class RuntimeRouter {
 class RuntimeInvocationLifecycle {
   private writeQueue: Promise<void> = Promise.resolve();
   private finished = false;
+  /**
+   * Runtime dispatch only spawns CLI subprocesses on the indexing machine, so
+   * invocations and bindings default to the reserved `local` environment; the
+   * ssh/wsl environments in the sessions index are sync-only sources and never
+   * dispatch targets. A caller that starts dispatching on a synced environment
+   * must pass its environment id explicitly — the binding-match SQL keys on
+   * environment equality, so a wrong default silently drops attribution
+   * instead of misattributing the Session.
+   */
+  private readonly environmentId: string;
 
   constructor(private readonly options: {
     recorder: RuntimeInvocationRecorder;
@@ -534,7 +547,9 @@ class RuntimeInvocationLifecycle {
     continuedSessionId?: string;
     now: () => number;
     sessionIdFromConversation: (conversation: RuntimeConversation) => string | undefined;
-  }) {}
+  }) {
+    this.environmentId = options.environmentId ?? "local";
+  }
 
   get id(): string {
     return this.options.invocationId;
@@ -547,7 +562,7 @@ class RuntimeInvocationLifecycle {
       invocation: this.options.invocation,
       runtimeId: this.options.runtimeId,
       ...(this.options.channelId ? { channelId: this.options.channelId } : {}),
-      environmentId: this.options.environmentId ?? "local",
+      environmentId: this.environmentId,
       startedAt: this.options.now(),
     });
   }
@@ -587,7 +602,7 @@ class RuntimeInvocationLifecycle {
     const binding = {
       runtimeId: this.options.runtimeId,
       ...(this.options.channelId ? { channelId: this.options.channelId } : {}),
-      environmentId: this.options.environmentId ?? "local",
+      environmentId: this.environmentId,
       sessionId: reference.sessionId,
       ...(reference.turnId ? { turnId: reference.turnId } : {}),
       relation,

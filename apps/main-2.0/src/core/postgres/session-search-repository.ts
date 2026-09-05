@@ -38,7 +38,7 @@ const LIVE_SESSION_KEY_SQL = `
   end
 `;
 
-function agentRecallCreatedSurfaceSql(surface: string): string {
+function agentRecallCreatedSurfaceSql(surface: string, bind: (value: unknown) => string): string {
   return `
     exists (
       select 1
@@ -48,7 +48,7 @@ function agentRecallCreatedSurfaceSql(surface: string): string {
       where ${RUNTIME_SESSION_BINDING_MATCH_SQL}
         and bindings.relation = 'created'
         and invocations.initiator = 'agentrecall'
-        and invocations.surface = '${surface}'
+        and invocations.surface = ${bind(surface)}
     )
   `;
 }
@@ -167,7 +167,7 @@ export class PostgresSessionSearchRepository {
       if (!AGENT_RECALL_INVOCATION_SURFACES.includes(options.invocationSurface)) {
         throw new Error(`Unsupported Runtime invocation surface: ${options.invocationSurface}`);
       }
-      filters.push(agentRecallCreatedSurfaceSql(options.invocationSurface));
+      filters.push(agentRecallCreatedSurfaceSql(options.invocationSurface, bind));
     }
     if (options.origin === "ordinary") filters.push(`not (${AGENTRECALL_CREATED_SESSION_SQL})`);
     else if (options.origin === "agentrecall") filters.push(AGENTRECALL_CREATED_SESSION_SQL);
@@ -355,15 +355,20 @@ export class PostgresSessionSearchRepository {
       `,
       originCountValues,
     )).rows[0];
+    const invocationSurfaceCountParams = [...invocationSurfaceCountValues];
+    const invocationSurfaceCountBind = (value: unknown): string => {
+      invocationSurfaceCountParams.push(value);
+      return `$${invocationSurfaceCountParams.length}`;
+    };
     const invocationSurfaceCountRow = (await this.database.query<Record<string, number | string>>(
       `
         select
           ${AGENT_RECALL_INVOCATION_SURFACES.map((surface) =>
-            `count(*) filter (where ${agentRecallCreatedSurfaceSql(surface)}) as ${surface}_count`).join(",\n          ")},
+            `count(*) filter (where ${agentRecallCreatedSurfaceSql(surface, invocationSurfaceCountBind)}) as ${surface}_count`).join(",\n          ")},
           count(*) filter (where ${AGENTRECALL_CREATED_SESSION_SQL}) as all_count
         ${invocationSurfaceFilteredSessionsSql}
       `,
-      invocationSurfaceCountValues,
+      invocationSurfaceCountParams,
     )).rows[0];
     return {
       sessions,

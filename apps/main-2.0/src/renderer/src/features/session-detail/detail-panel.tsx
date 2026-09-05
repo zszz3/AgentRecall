@@ -128,6 +128,27 @@ function conversationRoleEmptyLabel(filter: Exclude<ConversationRoleFilter, "all
     : localize(language, "No Assistant messages in the loaded conversation.", "当前已加载内容中没有助手消息。");
 }
 
+/** Owner-navigation buttons shown before the "show all" toggle collapses the rest. */
+const INVOCATION_OWNER_ACTION_LIMIT = 3;
+
+/**
+ * Collapses the invocation history to one button per distinct navigation
+ * target. Invocations arrive newest-first, so the first occurrence of each
+ * surface + owner reference combination is its most recent invocation.
+ */
+function distinctInvocationOwnerActions(invocations: readonly RuntimeInvocationSummary[]): RuntimeInvocationSummary[] {
+  const actions: RuntimeInvocationSummary[] = [];
+  const seenOwnerReferences = new Set<string>();
+  for (const invocation of invocations) {
+    if (Object.keys(invocation.ownerReference).length === 0) continue;
+    const ownerKey = `${invocation.surface}:${JSON.stringify(invocation.ownerReference)}`;
+    if (seenOwnerReferences.has(ownerKey)) continue;
+    seenOwnerReferences.add(ownerKey);
+    actions.push(invocation);
+  }
+  return actions;
+}
+
 function invocationSurfaceLabel(surface: string, language: LanguageMode): string {
   const labels: Record<string, [string, string]> = {
     workflow: ["Workflow", "工作流"],
@@ -314,6 +335,8 @@ export function DetailPanel({
   const [roleFilter, setRoleFilter] = useState<ConversationRoleFilter>("all");
   const [showTools, setShowTools] = useState(readInitialToolEventsVisibility);
   const [exportMarkdownMenuOpen, setExportMarkdownMenuOpen] = useState(false);
+  const [showAllInvocationOwners, setShowAllInvocationOwners] = useState(false);
+  const invocationOwnerActions = distinctInvocationOwnerActions(session.runtimeInvocations ?? []);
   const timelineItems = useMemo(() => conversationTimeline(messages, traceEvents), [messages, traceEvents]);
   const visibleTimelineItems = useMemo(
     () => filterConversationTimeline(timelineItems, roleFilter, showTools),
@@ -339,6 +362,7 @@ export function DetailPanel({
   }, [exportMarkdownMenuOpen]);
 
   useEffect(() => setExportMarkdownMenuOpen(false), [session.sessionKey]);
+  useEffect(() => setShowAllInvocationOwners(false), [session.sessionKey]);
   const roleFilterEmpty = !loading
     && messages.length > 0
     && roleFilter !== "all"
@@ -710,15 +734,29 @@ export function DetailPanel({
               </button>
             </div>
           ) : null}
-          {onOpenInvocationOwner && session.runtimeInvocations?.some((invocation) => Object.keys(invocation.ownerReference).length > 0) ? (
+          {onOpenInvocationOwner && invocationOwnerActions.length > 0 ? (
             <div className="detail-action-group">
-              {session.runtimeInvocations
-                .filter((invocation) => Object.keys(invocation.ownerReference).length > 0)
+              {(showAllInvocationOwners
+                ? invocationOwnerActions
+                : invocationOwnerActions.slice(0, INVOCATION_OWNER_ACTION_LIMIT))
                 .map((invocation) => (
                   <button type="button" key={invocation.invocationId} onClick={() => onOpenInvocationOwner(invocation)}>
                     <CornerUpLeft size={15} /> {invocationOwnerActionLabel(invocation, language)}
                   </button>
                 ))}
+              {invocationOwnerActions.length > INVOCATION_OWNER_ACTION_LIMIT ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllInvocationOwners((open) => !open)}
+                >
+                  {showAllInvocationOwners
+                    ? l("Show fewer", "收起")
+                    : l(
+                      `Show all ${invocationOwnerActions.length}`,
+                      `查看全部 ${invocationOwnerActions.length} 处`,
+                    )}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div> : null}
