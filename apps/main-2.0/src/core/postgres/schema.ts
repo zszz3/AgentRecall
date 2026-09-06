@@ -2041,4 +2041,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS max_duration_ms bigint;
     `,
   ],
+}, {
+  version: 50,
+  name: "store how far apart an evaluation run's repetitions landed",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_runs
+        ADD COLUMN IF NOT EXISTS consistency jsonb;
+    `,
+  ],
 }];
