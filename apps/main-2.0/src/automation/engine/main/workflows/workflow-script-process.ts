@@ -76,11 +76,16 @@ export class WorkflowScriptProcessRunner implements WorkflowScriptRunner {
       input.signal.addEventListener("abort", abort, { once: true });
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
+      // After termination starts the captured output is never reported, but the pipes must keep
+      // draining: a script that ignores SIGTERM would otherwise block on a full pipe and stall
+      // the very grace period that is supposed to end it.
       child.stdout.on("data", (chunk: string) => {
+        if (stopMessage !== undefined) return;
         stdout += chunk;
         if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) stop("Script output exceeded 2 MB.");
       });
       child.stderr.on("data", (chunk: string) => {
+        if (stopMessage !== undefined) return;
         stderr += chunk;
         if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) stop("Script output exceeded 2 MB.");
       });
