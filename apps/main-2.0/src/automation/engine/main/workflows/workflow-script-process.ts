@@ -1,7 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { WorkflowScriptRunner } from "./workflow-executors";
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const TERMINATE_GRACE_MS = 2_000;
+const FORCE_KILL_EXIT_WAIT_MS = 5_000;
+const CANCEL_MESSAGE = "Script execution was cancelled.";
 
 function commandFor(runtime: Parameters<WorkflowScriptRunner["run"]>[0]["runtime"], source: string): {
   command: string;
@@ -18,7 +21,7 @@ function commandFor(runtime: Parameters<WorkflowScriptRunner["run"]>[0]["runtime
 }
 
 export class WorkflowScriptProcessRunner implements WorkflowScriptRunner {
-  private readonly children = new Map<string, ChildProcessWithoutNullStreams>();
+  private readonly stopRequests = new Map<string, () => void>();
 
   constructor(private readonly defaultWorkDir: () => string = () => process.cwd()) {}
 
@@ -32,25 +35,44 @@ export class WorkflowScriptProcessRunner implements WorkflowScriptRunner {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
-      this.children.set(key, child);
       let stdout = "";
       let stderr = "";
       let settled = false;
+      let stopMessage: string | undefined;
+      let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+      let giveUpTimer: ReturnType<typeof setTimeout> | undefined;
       const finish = (error?: Error): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        if (giveUpTimer) clearTimeout(giveUpTimer);
         input.signal.removeEventListener("abort", abort);
-        this.children.delete(key);
+        child.removeListener("exit", onExit);
+        this.stopRequests.delete(key);
         if (error) reject(error);
         else resolve({ stdout, stderr });
       };
+      // A script that ignores SIGTERM would otherwise outlive this promise with no handle left to
+      // stop it, so escalate to SIGKILL and settle only once the process is really gone.
       const stop = (message: string): void => {
-        child.kill();
-        finish(new Error(message));
+        if (stopMessage !== undefined) return;
+        // kill() reports false when the script already exited on its own; let close state that outcome.
+        if (!child.kill("SIGTERM")) return;
+        stopMessage = message;
+        forceKillTimer = setTimeout(() => {
+          child.kill("SIGKILL");
+          // A surviving grandchild can hold the stdio pipes open, so close may never arrive.
+          giveUpTimer = setTimeout(() => finish(new Error(message)), FORCE_KILL_EXIT_WAIT_MS);
+        }, TERMINATE_GRACE_MS);
       };
-      const abort = (): void => stop("Script execution was cancelled.");
+      const onExit = (): void => {
+        const message = stopMessage;
+        if (message !== undefined) finish(new Error(message));
+      };
+      const abort = (): void => stop(CANCEL_MESSAGE);
       const timer = setTimeout(() => stop(`Script execution timed out after ${input.timeoutSeconds} seconds.`), input.timeoutSeconds * 1000);
+      this.stopRequests.set(key, abort);
       input.signal.addEventListener("abort", abort, { once: true });
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
@@ -63,6 +85,7 @@ export class WorkflowScriptProcessRunner implements WorkflowScriptRunner {
         if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) stop("Script output exceeded 2 MB.");
       });
       child.once("error", (error) => finish(error));
+      child.once("exit", onExit);
       child.once("close", (code, signal) => {
         if (code === 0) finish();
         else finish(new Error(`Script exited with ${code === null ? `signal ${signal ?? "unknown"}` : `code ${code}`}${stderr.trim() ? `: ${stderr.trim()}` : "."}`));
@@ -74,6 +97,6 @@ export class WorkflowScriptProcessRunner implements WorkflowScriptRunner {
   }
 
   async cancel(runId: string, nodeId: string): Promise<void> {
-    this.children.get(`${runId}:${nodeId}`)?.kill();
+    this.stopRequests.get(`${runId}:${nodeId}`)?.();
   }
 }
