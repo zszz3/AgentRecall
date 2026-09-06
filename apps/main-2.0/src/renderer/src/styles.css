@@ -290,6 +290,30 @@
   letter-spacing: -0.01em;
 }
 
+[data-theme="warm"] .md-code-block {
+  border-color: #2e2a25;
+  background: #181715;
+}
+
+[data-theme="warm"] .md-code-toolbar {
+  border-bottom-color: #2e2a25;
+  background: #252320;
+}
+
+[data-theme="warm"] .md-code-language,
+[data-theme="warm"] .md-code-copy {
+  color: #a09d96;
+}
+
+[data-theme="warm"] .md-code-copy:hover {
+  background: #2e2a25;
+  color: #faf9f5;
+}
+
+[data-theme="warm"] .md-code {
+  color: #f0ece3;
+}
+
 * {
   box-sizing: border-box;
 }
