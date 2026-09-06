@@ -2029,4 +2029,16 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS rubric_hash text;
     `,
   ],
+}, {
+  version: 49,
+  name: "store an evaluator's trajectory budgets",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_evaluators
+        ADD COLUMN IF NOT EXISTS max_turns integer,
+        ADD COLUMN IF NOT EXISTS max_tool_calls integer,
+        ADD COLUMN IF NOT EXISTS max_total_tokens bigint,
+        ADD COLUMN IF NOT EXISTS max_duration_ms bigint;
+    `,
+  ],
 }];

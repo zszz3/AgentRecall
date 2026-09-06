@@ -32,6 +32,7 @@ export const KIND_LABELS: Record<EvaluatorKind, [string, string]> = {
   json_valid: ["JSON valid", "JSON 合法性"],
   llm_judge: ["LLM judge", "模型评判"],
   tool_failures: ["Tool failures", "工具失败"],
+  trajectory_budget: ["Trajectory budget", "轨迹预算"],
   script: ["Script", "脚本评判"],
 };
 
@@ -52,6 +53,10 @@ export const KIND_HINTS: Record<EvaluatorKind, [string, string]> = {
   tool_failures: [
     "Judges the trajectory, so it needs a source that has one; a folder artifact does not.",
     "判定轨迹，因此需要有轨迹的产物来源；产物文件夹没有轨迹。",
+  ],
+  trajectory_budget: [
+    "Judges what the work spent against the budgets you set, so it needs a trajectory too. A metric the runtime never reported is skipped, not charged as an overrun.",
+    "按你设定的预算判定这次工作的开销，同样需要轨迹。Runtime 没有报告的指标会被跳过，不会算成超支。",
   ],
   script: [
     "Your own code decides. A script that breaks is reported as unscored, never as a zero.",

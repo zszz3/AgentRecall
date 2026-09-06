@@ -110,12 +110,14 @@ export class EvaluationStore {
         id, name, kind, prompt, agent_id, runtime_id, threshold, enabled,
         dimension, priority, max_tool_failures,
         script_mode, script, command, command_args, subject, timeout_ms,
+        max_turns, max_tool_calls, max_total_tokens, max_duration_ms,
         created_at, updated_at
       ) values (
         $1, $2, $3, $4, null, $5, $6, $7,
         $8, $9, $10,
         $11, $12, $13, $14::jsonb, $15, $16,
-        $17, $18
+        $17, $18, $19, $20,
+        $21, $22
       )
       on conflict (id) do update set
         name = excluded.name,
@@ -134,6 +136,10 @@ export class EvaluationStore {
         command_args = excluded.command_args,
         subject = excluded.subject,
         timeout_ms = excluded.timeout_ms,
+        max_turns = excluded.max_turns,
+        max_tool_calls = excluded.max_tool_calls,
+        max_total_tokens = excluded.max_total_tokens,
+        max_duration_ms = excluded.max_duration_ms,
         updated_at = excluded.updated_at`,
       [
         value.id,
@@ -152,6 +158,10 @@ export class EvaluationStore {
         value.commandArgs ? JSON.stringify(value.commandArgs) : null,
         value.subject ?? null,
         value.timeoutMs ?? null,
+        value.maxTurns ?? null,
+        value.maxToolCalls ?? null,
+        value.maxTotalTokens ?? null,
+        value.maxDurationMs ?? null,
         new Date(value.createdAt),
         new Date(value.updatedAt),
       ],
@@ -774,6 +784,18 @@ function mapEvaluator(row: Row): EvaluationEvaluator {
     ...(row.subject ? { subject: row.subject as EvaluationEvaluator["subject"] } : {}),
     ...(row.timeout_ms !== null && row.timeout_ms !== undefined
       ? { timeoutMs: Number(row.timeout_ms) }
+      : {}),
+    ...(row.max_turns !== null && row.max_turns !== undefined
+      ? { maxTurns: Number(row.max_turns) }
+      : {}),
+    ...(row.max_tool_calls !== null && row.max_tool_calls !== undefined
+      ? { maxToolCalls: Number(row.max_tool_calls) }
+      : {}),
+    ...(row.max_total_tokens !== null && row.max_total_tokens !== undefined
+      ? { maxTotalTokens: Number(row.max_total_tokens) }
+      : {}),
+    ...(row.max_duration_ms !== null && row.max_duration_ms !== undefined
+      ? { maxDurationMs: Number(row.max_duration_ms) }
       : {}),
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
