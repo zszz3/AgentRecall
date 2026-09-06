@@ -1384,6 +1384,11 @@ function RunComparison({
     ...compare.results.map(pairKey).filter((key) => !baseByKey.has(key)),
   ];
   const sameVersion = Boolean(base.skillHash && base.skillHash === compare.skillHash);
+  // A score delta measures the subject only when the same rubric produced both
+  // scores. Runs from before rubric attribution cannot say either way, so an
+  // unrecorded standard gets a weaker note than a confirmed change.
+  const rubricRecorded = Boolean(base.rubricHash && compare.rubricHash);
+  const rubricChanged = rubricRecorded && base.rubricHash !== compare.rubricHash;
   const totalDelta = base.averageScore != null && compare.averageScore != null
     ? compare.averageScore - base.averageScore
     : null;
@@ -1399,8 +1404,15 @@ function RunComparison({
             {(base.skillHash ?? "?").slice(0, 8)} → {(compare.skillHash ?? "?").slice(0, 8)}
           </span>
         )}
+        {rubricChanged ? (
+          <span className="eval-badge eval-badge-warn">{l("Rubric changed", "评分标准已变更")}</span>
+        ) : rubricRecorded ? (
+          <span className="eval-badge eval-badge-dim">{l("Same rubric", "同一评分标准")}</span>
+        ) : (
+          <span className="eval-badge eval-badge-dim">{l("Rubric not recorded", "评分标准未记录")}</span>
+        )}
         {totalDelta != null ? (
-          <span className={`eval-badge ${totalDelta >= 0 ? "eval-badge-ok" : "eval-badge-warn"}`}>
+          <span className={`eval-badge ${rubricChanged ? "eval-badge-dim" : totalDelta >= 0 ? "eval-badge-ok" : "eval-badge-warn"}`}>
             {l("avg score", "平均分")} {totalDelta >= 0 ? "+" : ""}{totalDelta.toFixed(2)}
           </span>
         ) : null}
@@ -1408,6 +1420,14 @@ function RunComparison({
           <X size={12} />{l("Close", "关闭")}
         </button>
       </header>
+      {rubricChanged ? (
+        <p className="eval-muted">
+          {l(
+            "The two runs were scored by different rubrics, so the differences below are not attributable to the subject alone.",
+            "两次运行使用的评分标准不同，下面的分数差异不能只归因于被测对象。",
+          )}
+        </p>
+      ) : null}
       {keys.length === 0 ? (
         <p className="eval-muted">{l("Neither run recorded case results.", "两次运行都没有用例结果。")}</p>
       ) : keys.map((key) => {
@@ -1425,7 +1445,7 @@ function RunComparison({
                 {present.input.length > 60 ? `${present.input.slice(0, 60)}…` : present.input}
               </span>
               {delta != null ? (
-                <span className={`eval-badge ${delta > 0 ? "eval-badge-ok" : delta < 0 ? "eval-badge-warn" : "eval-badge-dim"}`}>
+                <span className={`eval-badge ${rubricChanged ? "eval-badge-dim" : delta > 0 ? "eval-badge-ok" : delta < 0 ? "eval-badge-warn" : "eval-badge-dim"}`}>
                   {delta > 0 ? "+" : ""}{delta.toFixed(2)}
                 </span>
               ) : !baseResult ? (
