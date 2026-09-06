@@ -239,6 +239,37 @@ export interface EvaluationCaseResult {
   gatePassed?: boolean;
 }
 
+/**
+ * How far apart one case's repetitions landed.
+ *
+ * An average over repetitions hides the thing a regression suite most needs to
+ * show: a case that scores 1.00 and then 0.40 on the same version is not a case
+ * worth 0.70, it is a case that does not reproduce.
+ */
+export interface EvaluationConsistencyEntry {
+  datasetItemId: string;
+  /** Repetitions that produced a score. */
+  scored: number;
+  /** Repetitions that passed, out of `scored`. */
+  passed: number;
+  averageScore: number | null;
+  /**
+   * Widest gap between two scored repetitions. Null unless at least two scored:
+   * a single repetition reports no spread rather than a spread of zero, because
+   * zero would claim a stability that was never measured.
+   */
+  spread: number | null;
+}
+
+export interface EvaluationRunConsistency {
+  /** Cases with at least one scored repetition. */
+  entries: EvaluationConsistencyEntry[];
+  /** Of those, how many ran often enough to have a spread at all. */
+  repeatedCaseCount: number;
+  /** Mean spread over those cases; null when none ran more than once. */
+  meanSpread: number | null;
+}
+
 export interface EvaluationRun {
   id: string;
   experimentId: string;
@@ -274,6 +305,12 @@ export interface EvaluationRun {
   coverage?: number;
   /** Dimension scores averaged across cases. */
   dimensions?: EvaluationRunScore["dimensions"];
+  /**
+   * How far apart each case's repetitions landed. Absent on runs recorded before
+   * it existed; a suite that runs every case once has a `repeatedCaseCount` of
+   * zero and no mean, which is not the same as being stable.
+   */
+  consistency?: EvaluationRunConsistency;
 }
 
 export type EvaluationRunSummary = Omit<EvaluationRun, "results"> & {

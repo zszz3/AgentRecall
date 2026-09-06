@@ -12,10 +12,12 @@ import type {
 import type { EvaluationCaseOutcome } from "../../../core/evaluation/run";
 import type {
   EvaluationCaseResult,
+  EvaluationConsistencyEntry,
   EvaluationDataset,
   EvaluationEvaluator,
   EvaluationExperiment,
   EvaluationRun,
+  EvaluationRunConsistency,
   EvaluationScore,
 } from "../shared/evaluation/types";
 
@@ -205,6 +207,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     scoredCaseCount: outcome.score.scoredCaseCount,
     unscoredCaseCount: outcome.score.unscoredCaseCount,
     dimensions: outcome.score.dimensions,
+    consistency: runConsistency(results),
   };
 
   const status: EvaluationRun["status"] = outcome.cancelled
@@ -224,6 +227,7 @@ interface EvaluationRunSnapshotScore {
   scoredCaseCount?: number;
   unscoredCaseCount?: number;
   dimensions?: EvaluationRun["dimensions"];
+  consistency?: EvaluationRunConsistency;
 }
 
 /**
@@ -247,6 +251,48 @@ function partialScore(results: readonly EvaluationCaseResult[]): EvaluationRunSn
       : {}),
     scoredCaseCount: scored.length,
     unscoredCaseCount: results.length - scored.length,
+    consistency: runConsistency(results),
+  };
+}
+
+/**
+ * How far apart each case's repetitions landed.
+ *
+ * Grouped by dataset item rather than by case id, which already carries the
+ * repetition — the whole point is to look across the repetitions of one case.
+ * Only scored repetitions count: an excused one says nothing about stability,
+ * and folding it in as a zero would manufacture a spread out of AgentRecall's
+ * own failure to judge.
+ */
+function runConsistency(results: readonly EvaluationCaseResult[]): EvaluationRunConsistency {
+  const byItem = new Map<string, EvaluationCaseResult[]>();
+  for (const result of results) {
+    byItem.set(result.datasetItemId, [...(byItem.get(result.datasetItemId) ?? []), result]);
+  }
+  const entries: EvaluationConsistencyEntry[] = [];
+  for (const [datasetItemId, group] of byItem) {
+    const scores = group
+      .filter((result) => result.unscoredReason === undefined)
+      .map((result) => result.score)
+      .filter((value): value is number => typeof value === "number");
+    if (scores.length === 0) continue;
+    entries.push({
+      datasetItemId,
+      scored: scores.length,
+      passed: group.filter((result) => result.passed === true).length,
+      averageScore: scores.reduce((left, right) => left + right, 0) / scores.length,
+      spread: scores.length > 1 ? Math.max(...scores) - Math.min(...scores) : null,
+    });
+  }
+  const spreads = entries
+    .map((entry) => entry.spread)
+    .filter((value): value is number => value !== null);
+  return {
+    entries,
+    repeatedCaseCount: spreads.length,
+    meanSpread: spreads.length > 0
+      ? spreads.reduce((left, right) => left + right, 0) / spreads.length
+      : null,
   };
 }
 
