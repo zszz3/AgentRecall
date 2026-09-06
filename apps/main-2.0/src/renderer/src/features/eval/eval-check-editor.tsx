@@ -79,6 +79,15 @@ return {
   reason: \`answer is \${answer.length} characters\`,
 };`;
 
+/**
+ * An empty or non-positive field means the metric is not budgeted, which is not
+ * a budget of zero: the judge skips what is unset, and zero would forbid work.
+ */
+function budgetValue(input: string): number | undefined {
+  const value = Math.floor(Number(input));
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 export function EvalCheckEditor({
   language,
   draft,
@@ -189,6 +198,62 @@ export function EvalCheckEditor({
             })}
           />
         </label>
+      ) : null}
+      {draft.kind === "trajectory_budget" ? (
+        <>
+          <div className="eval-editor-row">
+            <label className="eval-editor-field">
+              <span>{l("Max turns", "最多轮数")}</span>
+              <input
+                type="number"
+                min={1}
+                value={draft.maxTurns ?? ""}
+                placeholder={l("not budgeted", "不设预算")}
+                disabled={managed}
+                onChange={(event) => onChange({ ...draft, maxTurns: budgetValue(event.target.value) })}
+              />
+            </label>
+            <label className="eval-editor-field">
+              <span>{l("Max tool calls", "最多工具调用")}</span>
+              <input
+                type="number"
+                min={1}
+                value={draft.maxToolCalls ?? ""}
+                placeholder={l("not budgeted", "不设预算")}
+                disabled={managed}
+                onChange={(event) => onChange({ ...draft, maxToolCalls: budgetValue(event.target.value) })}
+              />
+            </label>
+            <label className="eval-editor-field">
+              <span>{l("Max tokens", "最多 token")}</span>
+              <input
+                type="number"
+                min={1}
+                value={draft.maxTotalTokens ?? ""}
+                placeholder={l("not budgeted", "不设预算")}
+                disabled={managed}
+                onChange={(event) => onChange({ ...draft, maxTotalTokens: budgetValue(event.target.value) })}
+              />
+            </label>
+            <label className="eval-editor-field">
+              <span>{l("Max wall clock (ms)", "最长耗时（毫秒）")}</span>
+              <input
+                type="number"
+                min={1}
+                value={draft.maxDurationMs ?? ""}
+                placeholder={l("not budgeted", "不设预算")}
+                disabled={managed}
+                onChange={(event) => onChange({ ...draft, maxDurationMs: budgetValue(event.target.value) })}
+              />
+            </label>
+          </div>
+          <p className="eval-muted">
+            {l(
+              "Left empty, a metric is not budgeted. The tightest budget set scores the verdict: staying inside scores full marks and going over decays rather than failing outright. A metric the runtime never reported is skipped, not charged.",
+              "留空表示该指标不设预算。按已设预算里最紧的那个计分：不超支得满分，超支按超出程度衰减而不是直接判不合格。Runtime 没有报告的指标会被跳过，不算超支。",
+            )}
+          </p>
+        </>
       ) : null}
       {draft.kind === "script" ? (
         <ScriptJudgeFields
