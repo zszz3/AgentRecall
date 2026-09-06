@@ -76,7 +76,7 @@ export function OpenVikingMemoryPage({
   const [action, setAction] = useState<PageAction>(null);
   const [error, setError] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
-  const browseRequestVersion = useRef(0);
+  const resultsRequestVersion = useRef(0);
   const memoryReadRequestVersion = useRef(0);
   const workspaceSelectionVersion = useRef(0);
   const lastReadWorkspaceSelectionVersion = useRef(0);
@@ -151,18 +151,18 @@ export function OpenVikingMemoryPage({
       setBrowseLoading(false);
       return;
     }
-    const requestVersion = ++browseRequestVersion.current;
+    const requestVersion = ++resultsRequestVersion.current;
     let current = true;
     setBrowseLoading(true);
     void window.sessionSearch.searchOpenVikingMemories(workspace.id, "", 200)
       .then((memories) => {
-        if (current && browseRequestVersion.current === requestVersion) setResults(memories);
+        if (current && resultsRequestVersion.current === requestVersion) setResults(memories);
       })
       .catch((cause) => {
-        if (current && browseRequestVersion.current === requestVersion) setError(errorMessage(cause));
+        if (current && resultsRequestVersion.current === requestVersion) setError(errorMessage(cause));
       })
       .finally(() => {
-        if (current && browseRequestVersion.current === requestVersion) setBrowseLoading(false);
+        if (current && resultsRequestVersion.current === requestVersion) setBrowseLoading(false);
       });
     return () => {
       current = false;
@@ -221,7 +221,9 @@ export function OpenVikingMemoryPage({
   const search = () => {
     if (!workspace || !runtimeRunning || !query.trim()) return;
     void run("search", async () => {
+      const requestVersion = ++resultsRequestVersion.current;
       const next = await window.sessionSearch.searchOpenVikingMemories(workspace.id, query.trim(), 30);
+      if (resultsRequestVersion.current !== requestVersion) return;
       setResults(next);
       setSelected(null);
     });
@@ -261,20 +263,24 @@ export function OpenVikingMemoryPage({
   const saveMemory = () => {
     if (!workspace || !runtimeRunning || !selected || !canEditSelected || !draftTitle.trim()) return;
     void run("save", async () => {
+      const requestVersion = ++resultsRequestVersion.current;
       const saved = await window.sessionSearch.saveOpenVikingMemory(workspace.id, {
         ...(editableMemoryUri ? { uri: editableMemoryUri } : {}),
         title: draftTitle.trim(),
         content: draftContent,
       });
-      setSelected(saved);
-      setDetails(await window.sessionSearch.getOpenVikingMemoryDetails(workspace.id, saved.id));
-      setDraftTitle(saved.title);
-      setDraftContent(saved.content);
-      setResults(await window.sessionSearch.searchOpenVikingMemories(
+      const savedDetails = await window.sessionSearch.getOpenVikingMemoryDetails(workspace.id, saved.id);
+      const nextResults = await window.sessionSearch.searchOpenVikingMemories(
         workspace.id,
         query.trim(),
         query.trim() ? 30 : 200,
-      ));
+      );
+      if (resultsRequestVersion.current !== requestVersion) return;
+      setSelected(saved);
+      setDetails(savedDetails);
+      setDraftTitle(saved.title);
+      setDraftContent(saved.content);
+      setResults(nextResults);
     });
   };
 
@@ -292,6 +298,7 @@ export function OpenVikingMemoryPage({
   const feedbackMemory = (feedback: OpenVikingMemoryFeedbackKind) => {
     if (!workspace || !selected?.id) return;
     void run("feedback", async () => {
+      const readVersion = memoryReadRequestVersion.current;
       const control = await window.sessionSearch.sendOpenVikingMemoryFeedback(
         workspace.id,
         selected.id,
@@ -305,8 +312,12 @@ export function OpenVikingMemoryPage({
         evidenceStatus: control.evidenceStatus,
         evidenceCount: control.evidenceCount,
       };
+      const nextDetails = await window.sessionSearch.getOpenVikingMemoryDetails(workspace.id, selected.id);
+      // The feedback is already durable; only the panel update is skipped when the reader moved to
+      // another memory or directory while it was in flight.
+      if (memoryReadRequestVersion.current !== readVersion) return;
       setSelected(next);
-      setDetails(await window.sessionSearch.getOpenVikingMemoryDetails(workspace.id, selected.id));
+      setDetails(nextDetails);
       setResults((current) => current.map((item) => item.id === selected.id ? next : item));
     });
   };
@@ -330,7 +341,7 @@ export function OpenVikingMemoryPage({
       "永久删除这个目录的 OpenViking 记忆？此操作无法撤销。",
     ))) return;
     void run("delete-workspace", async () => {
-      browseRequestVersion.current += 1;
+      resultsRequestVersion.current += 1;
       setBrowseLoading(false);
       try {
         await window.sessionSearch.deleteOpenVikingWorkspace(workspace.id);
@@ -468,6 +479,7 @@ export function OpenVikingMemoryPage({
                   onClick={() => {
                     if (item.id === workspaceId) return;
                     memoryReadRequestVersion.current += 1;
+                    resultsRequestVersion.current += 1;
                     workspaceSelectionVersion.current += 1;
                     setWorkspaceId(item.id);
                     setQuery("");
