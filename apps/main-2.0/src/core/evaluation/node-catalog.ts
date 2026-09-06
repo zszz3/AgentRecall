@@ -17,6 +17,7 @@ import {
   SCRIPT_JUDGE_NODE_TYPE,
   SCRIPT_TRAJECTORY_JUDGE_NODE_TYPE,
   TOOL_FAILURE_JUDGE_NODE_TYPE,
+  TRAJECTORY_BUDGET_JUDGE_NODE_TYPE,
 } from "./nodes/judge-nodes";
 
 /**
@@ -161,6 +162,13 @@ const PRESENTATION: Record<string, CatalogPresentation> = {
     labelZh: "工具失败",
     descriptionEn: "Decides on the trajectory: how many tool calls failed.",
     descriptionZh: "对轨迹判定：有多少工具调用失败。",
+    configFields: DIMENSION_FIELDS,
+  },
+  [TRAJECTORY_BUDGET_JUDGE_NODE_TYPE]: {
+    labelEn: "Trajectory budget",
+    labelZh: "轨迹预算",
+    descriptionEn: "Decides on the trajectory: what the work spent against the budgets you set.",
+    descriptionZh: "对轨迹判定：这次工作的开销是否超出你设定的预算。",
     configFields: DIMENSION_FIELDS,
   },
   [SCRIPT_JUDGE_NODE_TYPE]: {

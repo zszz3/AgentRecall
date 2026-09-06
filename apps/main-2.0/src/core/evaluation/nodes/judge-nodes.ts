@@ -35,6 +35,7 @@ import {
 export const DETERMINISTIC_JUDGE_NODE_TYPE = "deterministic_judge";
 export const LLM_JUDGE_NODE_TYPE = "llm_judge";
 export const TOOL_FAILURE_JUDGE_NODE_TYPE = "tool_failure_judge";
+export const TRAJECTORY_BUDGET_JUDGE_NODE_TYPE = "trajectory_budget_judge";
 export const SCRIPT_JUDGE_NODE_TYPE = "script_judge";
 export const SCRIPT_TRAJECTORY_JUDGE_NODE_TYPE = "script_trajectory_judge";
 
@@ -315,6 +316,89 @@ export const toolFailureJudgeNode = defineEvaluationNode<
           ? `tool failures within budget (${toolFailureCount} of ${allowed} allowed)`
           : `tool failures above budget (${toolFailureCount} of ${allowed} allowed)`,
         ...(failedToolNames.length > 0 ? { failedCriteria: failedToolNames } : {}),
+      })],
+    });
+  },
+});
+
+
+export interface TrajectoryBudgetJudgeConfig extends JudgeDimensionConfig {
+  /** Turns the agent may take. Unset means this metric is not budgeted. */
+  maxTurns?: number;
+  /** Tool calls it may make. */
+  maxToolCalls?: number;
+  /** Tokens it may spend, where the runtime reported any. */
+  maxTotalTokens?: number;
+  /** Wall clock it may take, in milliseconds. */
+  maxDurationMs?: number;
+}
+
+/**
+ * Decides whether the work stayed inside an efficiency budget.
+ *
+ * The tightest budget scores the verdict: a run that blew its token budget is
+ * over budget whatever its step count said. Attainment is `budget / actual`
+ * capped at 1, so staying inside scores 1 and overshooting decays rather than
+ * collapsing — ten times over stays distinguishable from a little over, which a
+ * pass/fail budget cannot do.
+ *
+ * A metric the runtime never reported is skipped, not read as zero. `totalTokens`
+ * is null when the session recorded no turns and `durationMs` is absent on a
+ * source that does not time itself; charging the agent for that is the mistake
+ * the excused/failed split exists to prevent. When nothing configured can be
+ * measured there is no decision to report, so the judge excuses itself.
+ */
+export const trajectoryBudgetJudgeNode = defineEvaluationNode<
+  { trajectory: typeof TRAJECTORY_PORT },
+  Record<string, never>,
+  TrajectoryBudgetJudgeConfig
+>({
+  type: TRAJECTORY_BUDGET_JUDGE_NODE_TYPE,
+  version: 1,
+  role: "judge",
+  verdicts: true,
+  inputs: { trajectory: TRAJECTORY_PORT },
+  outputs: {},
+  async run(context) {
+    const trajectory = context.in.trajectory;
+    const metrics = [
+      { key: "turnCount", label: "turns", budget: context.config.maxTurns, actual: trajectory.turnCount },
+      { key: "toolCallCount", label: "tool calls", budget: context.config.maxToolCalls, actual: trajectory.toolCallCount },
+      { key: "totalTokens", label: "tokens", budget: context.config.maxTotalTokens, actual: trajectory.totalTokens },
+      { key: "durationMs", label: "wall clock ms", budget: context.config.maxDurationMs, actual: trajectory.durationMs },
+    ];
+    const budgeted: Array<{ key: string; label: string; budget: number; actual: number }> = [];
+    for (const metric of metrics) {
+      const { budget, actual } = metric;
+      if (budget === undefined || !Number.isFinite(budget) || budget <= 0) continue;
+      if (actual === undefined || actual === null || !Number.isFinite(actual)) continue;
+      budgeted.push({ key: metric.key, label: metric.label, budget, actual });
+    }
+    if (budgeted.length === 0) {
+      return evaluationExcused.judge("no_trajectory_budget_measurable", {
+        facts: { evaluatorId: context.config.evaluatorId },
+      });
+    }
+
+    const scored = budgeted.map((item) => ({
+      ...item,
+      attainment: Math.min(1, item.budget / item.actual),
+    }));
+    const over = scored.filter((item) => item.actual > item.budget);
+    const described = scored.map((item) => `${item.label} ${item.actual} of ${item.budget}`);
+    return evaluationPass({
+      facts: Object.fromEntries(scored.map((item) => [item.key, item.actual])),
+      verdicts: [buildVerdict({
+        nodeId: context.nodeId,
+        config: context.config,
+        evaluator: "trajectory_budget",
+        raw: Math.min(...scored.map((item) => item.attainment)),
+        reason: over.length === 0
+          ? `within every budget (${described.join(", ")})`
+          : `over budget on ${over.map((item) => item.label).join(", ")} (${described.join(", ")})`,
+        ...(over.length > 0
+          ? { failedCriteria: over.map((item) => `${item.label} ${item.actual} of ${item.budget} allowed`) }
+          : {}),
       })],
     });
   },

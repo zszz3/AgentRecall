@@ -269,6 +269,10 @@ function planEvaluators(
       ...(evaluator.maxToolFailures !== undefined
         ? { maxToolFailures: evaluator.maxToolFailures }
         : {}),
+      ...(evaluator.maxTurns !== undefined ? { maxTurns: evaluator.maxTurns } : {}),
+      ...(evaluator.maxToolCalls !== undefined ? { maxToolCalls: evaluator.maxToolCalls } : {}),
+      ...(evaluator.maxTotalTokens !== undefined ? { maxTotalTokens: evaluator.maxTotalTokens } : {}),
+      ...(evaluator.maxDurationMs !== undefined ? { maxDurationMs: evaluator.maxDurationMs } : {}),
       ...(evaluator.scriptMode ? { scriptMode: evaluator.scriptMode } : {}),
       ...(evaluator.script ? { script: evaluator.script } : {}),
       ...(evaluator.command ? { command: evaluator.command } : {}),

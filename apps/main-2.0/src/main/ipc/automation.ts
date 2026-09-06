@@ -112,7 +112,7 @@ const evaluationDatasetSchema = z.object({
 const evaluationEvaluatorSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(200),
-  kind: z.enum(["contains", "exact_match", "json_valid", "llm_judge", "tool_failures", "script"]),
+  kind: z.enum(["contains", "exact_match", "json_valid", "llm_judge", "tool_failures", "trajectory_budget", "script"]),
   prompt: z.string().max(500_000).optional(),
   runtimeId: idSchema.optional(),
   threshold: z.number().finite().min(0).max(1),
@@ -122,6 +122,12 @@ const evaluationEvaluatorSchema = z.object({
   dimension: z.string().trim().max(120).optional(),
   priority: z.enum(["must", "should"]).optional(),
   maxToolFailures: z.number().int().nonnegative().max(10_000).optional(),
+  // Positive or absent, unlike the tolerance above: a budget of zero would forbid
+  // any work at all, so an unbudgeted metric is omitted rather than set to 0.
+  maxTurns: z.number().int().positive().max(10_000).optional(),
+  maxToolCalls: z.number().int().positive().max(100_000).optional(),
+  maxTotalTokens: z.number().int().positive().max(1_000_000_000).optional(),
+  maxDurationMs: z.number().int().positive().max(86_400_000).optional(),
   scriptMode: z.enum(["inline_js", "command"]).optional(),
   script: z.string().max(200_000).optional(),
   command: z.string().trim().max(4_000).optional(),

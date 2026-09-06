@@ -53,9 +53,9 @@ export interface EvaluationDataset {
 }
 
 /**
- * `tool_failures` decides on the trajectory rather than the answer, so it only
- * applies to a source that has one — a folder artifact has none. A `script`
- * evaluator picks its own subject.
+ * `tool_failures` and `trajectory_budget` decide on the trajectory rather than
+ * the answer, so they only apply to a source that has one — a folder artifact
+ * has none. A `script` evaluator picks its own subject.
  */
 export type EvaluatorKind =
   | "contains"
@@ -63,6 +63,7 @@ export type EvaluatorKind =
   | "json_valid"
   | "llm_judge"
   | "tool_failures"
+  | "trajectory_budget"
   | "script";
 
 export interface EvaluationEvaluator {
@@ -83,6 +84,15 @@ export interface EvaluationEvaluator {
   priority?: "must" | "should";
   /** Only for `tool_failures`: failures tolerated before the verdict goes unmet. */
   maxToolFailures?: number;
+  /**
+   * Only for `trajectory_budget`: what the work may spend. A metric left unset
+   * is not budgeted, which is not the same as a budget of zero, and one the
+   * runtime never reported is skipped rather than charged as an overrun.
+   */
+  maxTurns?: number;
+  maxToolCalls?: number;
+  maxTotalTokens?: number;
+  maxDurationMs?: number;
   /**
    * Only for `script`. Inline JS runs sandboxed with no filesystem, network or
    * module access; a command is spawned with the subject on stdin and must print

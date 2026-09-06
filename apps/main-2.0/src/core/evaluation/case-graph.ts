@@ -28,11 +28,13 @@ import {
   createScriptTrajectoryJudgeNode,
   deterministicJudgeNode,
   toolFailureJudgeNode,
+  trajectoryBudgetJudgeNode,
   DETERMINISTIC_JUDGE_NODE_TYPE,
   LLM_JUDGE_NODE_TYPE,
   SCRIPT_JUDGE_NODE_TYPE,
   SCRIPT_TRAJECTORY_JUDGE_NODE_TYPE,
   TOOL_FAILURE_JUDGE_NODE_TYPE,
+  TRAJECTORY_BUDGET_JUDGE_NODE_TYPE,
 } from "./nodes/judge-nodes";
 import type {
   EvaluationJudgeScript,
@@ -69,6 +71,7 @@ export type EvaluationPlanEvaluatorKind =
   | "json_valid"
   | "llm_judge"
   | "tool_failures"
+  | "trajectory_budget"
   | "script";
 
 /** What a judge decides on. Only a source with a session has a trajectory. */
@@ -84,6 +87,14 @@ export interface EvaluationPlanEvaluator {
   runtimeId?: string;
   prompt?: string;
   maxToolFailures?: number;
+  /**
+   * Only for `trajectory_budget`. An unset metric is not budgeted, which is not
+   * the same as a budget of zero.
+   */
+  maxTurns?: number;
+  maxToolCalls?: number;
+  maxTotalTokens?: number;
+  maxDurationMs?: number;
   /** Only for `script`. */
   scriptMode?: "inline_js" | "command";
   script?: string;
@@ -123,6 +134,7 @@ export function createEvaluationNodeDefinitions(
     deterministicJudgeNode,
     createLlmJudgeNode(dependencies),
     toolFailureJudgeNode,
+    trajectoryBudgetJudgeNode,
     createScriptJudgeNode(dependencies),
     createScriptTrajectoryJudgeNode(dependencies),
   ];
@@ -130,7 +142,7 @@ export function createEvaluationNodeDefinitions(
 
 /** True when this evaluator decides on the trajectory rather than the artifact. */
 export function judgesTrajectory(evaluator: EvaluationPlanEvaluator): boolean {
-  if (evaluator.kind === "tool_failures") return true;
+  if (evaluator.kind === "tool_failures" || evaluator.kind === "trajectory_budget") return true;
   return evaluator.kind === "script" && evaluator.subject === "trajectory";
 }
 
@@ -218,6 +230,7 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
 /** Node type and config for an evaluator, independent of how it is wired. */
 export function judgeNodeType(evaluator: EvaluationPlanEvaluator): string {
   if (evaluator.kind === "tool_failures") return TOOL_FAILURE_JUDGE_NODE_TYPE;
+  if (evaluator.kind === "trajectory_budget") return TRAJECTORY_BUDGET_JUDGE_NODE_TYPE;
   if (evaluator.kind === "llm_judge") return LLM_JUDGE_NODE_TYPE;
   if (evaluator.kind === "script") {
     return evaluator.subject === "trajectory"
@@ -261,6 +274,15 @@ export function judgeNodeConfig(evaluator: EvaluationPlanEvaluator): Record<stri
       ...(evaluator.maxToolFailures !== undefined
         ? { maxToolFailures: evaluator.maxToolFailures }
         : {}),
+    };
+  }
+  if (evaluator.kind === "trajectory_budget") {
+    return {
+      ...shared,
+      ...(evaluator.maxTurns !== undefined ? { maxTurns: evaluator.maxTurns } : {}),
+      ...(evaluator.maxToolCalls !== undefined ? { maxToolCalls: evaluator.maxToolCalls } : {}),
+      ...(evaluator.maxTotalTokens !== undefined ? { maxTotalTokens: evaluator.maxTotalTokens } : {}),
+      ...(evaluator.maxDurationMs !== undefined ? { maxDurationMs: evaluator.maxDurationMs } : {}),
     };
   }
   if (evaluator.kind === "llm_judge") {
@@ -333,6 +355,7 @@ export function hydrateEvaluationCaseSpec(
         node.type === DETERMINISTIC_JUDGE_NODE_TYPE
         || node.type === LLM_JUDGE_NODE_TYPE
         || node.type === TOOL_FAILURE_JUDGE_NODE_TYPE
+        || node.type === TRAJECTORY_BUDGET_JUDGE_NODE_TYPE
         || node.type === SCRIPT_JUDGE_NODE_TYPE
         || node.type === SCRIPT_TRAJECTORY_JUDGE_NODE_TYPE
       ) {
