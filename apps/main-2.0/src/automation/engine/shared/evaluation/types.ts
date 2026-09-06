@@ -237,6 +237,12 @@ export interface EvaluationRun {
   // SKILL.md fingerprint of the version that executed; null for generic
   // (non-skill) experiments and runs recorded before attribution existed.
   skillHash?: string | null;
+  /**
+   * Fingerprint of the judges and scoring policy this run was measured with.
+   * Runs recorded before rubric attribution existed carry none, so a comparison
+   * can only call a rubric change a fact when both runs have one.
+   */
+  rubricHash?: string | null;
   startedAt: number;
   finishedAt?: number;
   averageScore?: number;

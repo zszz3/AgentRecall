@@ -2020,4 +2020,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
       ON CONFLICT DO NOTHING;
     `,
   ],
+}, {
+  version: 48,
+  name: "fingerprint the rubric an evaluation run was scored with",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_runs
+        ADD COLUMN IF NOT EXISTS rubric_hash text;
+    `,
+  ],
 }];
