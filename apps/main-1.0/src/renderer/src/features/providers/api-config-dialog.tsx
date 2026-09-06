@@ -118,6 +118,12 @@ export function ApiConfigDialog({
   const summaryApiPresetSelectionRef = useRef(0);
   const codexConfigHydrationRef = useRef("");
   const claudeConfigHydrationRef = useRef("");
+  // Typing a config-directory path keeps several reads in flight. Only the newest one may touch
+  // the snapshot or the draft, or a slower earlier read drags the form back to the directory
+  // the user already left.
+  const codexConfigReadVersionRef = useRef(0);
+  const claudeConfigReadVersionRef = useRef(0);
+  const summaryConfigReadVersionRef = useRef(0);
   const codexConnectionTestIdRef = useRef(0);
   const claudeConnectionTestIdRef = useRef(0);
   const summaryConnectionTestIdRef = useRef(0);
@@ -258,8 +264,10 @@ export function ApiConfigDialog({
 
   const refreshCodexConfig = async () => {
     setCodexConfigError("");
+    const requestVersion = ++codexConfigReadVersionRef.current;
     try {
       const snapshot = await window.sessionSearch.getCodexConfig({ configDir: draftApiConfig.customConfigDir || undefined });
+      if (codexConfigReadVersionRef.current !== requestVersion) return;
       setCodexConfig(snapshot);
       const hydrationKey = codexConfigHydrationKey(snapshot);
       if (hydrationKey !== codexConfigHydrationRef.current) {
@@ -270,16 +278,19 @@ export function ApiConfigDialog({
         if (!hasSavedCustomRoute(settings?.apiConfig)) hydrateDraftFromCodexConfig(snapshot);
       }
     } catch (error) {
+      if (codexConfigReadVersionRef.current !== requestVersion) return;
       setCodexConfigError(error instanceof Error ? error.message : String(error));
     }
   };
 
   const refreshClaudeConfig = async () => {
     setClaudeConfigError("");
+    const requestVersion = ++claudeConfigReadVersionRef.current;
     try {
       const snapshot = await window.sessionSearch.getClaudeConfig({
         configDir: draftClaudeApiConfig.customConfigDir || undefined,
       });
+      if (claudeConfigReadVersionRef.current !== requestVersion) return;
       setClaudeConfig(snapshot);
       // Re-reading the same settings.json must not overwrite edits the user has not saved.
       const hydrationKey = claudeConfigHydrationKey(snapshot);
@@ -288,6 +299,7 @@ export function ApiConfigDialog({
         if (!hasSavedCustomRoute(settings?.claudeApiConfig)) hydrateDraftFromClaudeConfig(snapshot);
       }
     } catch (error) {
+      if (claudeConfigReadVersionRef.current !== requestVersion) return;
       setClaudeConfigError(error instanceof Error ? error.message : String(error));
     }
   };
@@ -298,13 +310,17 @@ export function ApiConfigDialog({
     if (!selected) return;
     if (target === "codex") {
       updateDraftApiConfig({ customConfigDir: selected });
+      const requestVersion = ++codexConfigReadVersionRef.current;
       const snapshot = await window.sessionSearch.getCodexConfig({ configDir: selected });
+      if (codexConfigReadVersionRef.current !== requestVersion) return;
       setCodexConfig(snapshot);
       codexConfigHydrationRef.current = codexConfigHydrationKey(snapshot);
       hydrateDraftFromCodexConfig(snapshot);
     } else {
       updateDraftClaudeApiConfig({ customConfigDir: selected });
+      const requestVersion = ++claudeConfigReadVersionRef.current;
       const snapshot = await window.sessionSearch.getClaudeConfig({ configDir: selected });
+      if (claudeConfigReadVersionRef.current !== requestVersion) return;
       setClaudeConfig(snapshot);
       claudeConfigHydrationRef.current = claudeConfigHydrationKey(snapshot);
       hydrateDraftFromClaudeConfig(snapshot, selected);
@@ -491,19 +507,25 @@ export function ApiConfigDialog({
 
   const refreshSummaryConfig = async () => {
     setSummaryConfigError("");
+    const requestVersion = ++summaryConfigReadVersionRef.current;
     try {
       if (activeSummarySource === "claude") {
-        setSummaryClaudeConfig(await window.sessionSearch.getClaudeConfig({
+        const snapshot = await window.sessionSearch.getClaudeConfig({
           configDir: draftSummaryClaudeConfigDir || undefined,
-        }));
+        });
+        if (summaryConfigReadVersionRef.current !== requestVersion) return;
+        setSummaryClaudeConfig(snapshot);
         return;
       }
-      setSummaryCodexConfig(await window.sessionSearch.getCodexConfig({
+      const snapshot = await window.sessionSearch.getCodexConfig({
         configDir: (activeSummarySource === "codex"
           ? draftSummaryCodexConfigDir
           : effectiveSummaryApiConfig.customConfigDir) || undefined,
-      }));
+      });
+      if (summaryConfigReadVersionRef.current !== requestVersion) return;
+      setSummaryCodexConfig(snapshot);
     } catch (error) {
+      if (summaryConfigReadVersionRef.current !== requestVersion) return;
       setSummaryConfigError(error instanceof Error ? error.message : String(error));
     }
   };
