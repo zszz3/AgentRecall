@@ -115,7 +115,7 @@ async function executeCommand(input: ExecuteWorkflowV2ScriptRequest): Promise<{ 
       const receipt = scriptReceipt(input, { code, signal, stdout: stdoutText, stderr: stderrText, timedOut: isTimeoutAbort(input.signal) });
       const expectedExitCode = input.node.expectedExitCode ?? 0;
       if (spawnError || code !== expectedExitCode) {
-        reject(new WorkflowV2ScriptExecutionError(spawnError?.message || stderrText.trim() || `Script exited with code ${code}.`, receipt));
+        reject(new WorkflowV2ScriptExecutionError(spawnError?.message || receipt.stderrSummary.trim() || `Script exited with code ${code}.`, receipt));
         return;
       }
       if (stderrText.trim() && (input.node.script.stderrPolicy ?? "warn") === "fail") {
