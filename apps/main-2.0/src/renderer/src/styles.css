@@ -278,6 +278,16 @@
   --branch-border: #a9c6d4;
   --branch-text: #0b5a76;
   --branch-icon: #0e7490;
+
+  --font-display: "Source Serif 4 Variable", Georgia, ui-serif, serif;
+}
+
+[data-theme="warm"] h1,
+[data-theme="warm"] h2,
+[data-theme="warm"] h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 * {

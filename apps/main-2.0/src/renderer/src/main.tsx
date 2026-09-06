@@ -4,6 +4,7 @@ import { App } from "./App";
 import { AutomationProvider } from "./features/automation/automation-provider";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
+import "@fontsource-variable/source-serif-4";
 import "@xyflow/react/dist/style.css";
 import "./styles.css";
 import "./styles/sessions.css";
