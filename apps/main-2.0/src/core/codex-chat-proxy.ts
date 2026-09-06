@@ -1,5 +1,8 @@
 import http from "node:http";
 
+const MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
+const REQUEST_BODY_TOO_LARGE_MESSAGE = `Codex proxy request body exceeded ${MAX_REQUEST_BODY_BYTES / (1024 * 1024)} MB.`;
+
 export interface CodexChatProxyOptions {
   upstreamBaseUrl: string;
   apiKey: string;
@@ -96,6 +99,14 @@ export class CodexChatProxy {
         return;
       }
 
+      // A declared length lets us reject before buffering any of the body; a chunked request
+      // declares none and is bounded while it streams, then answered from the error path.
+      const declaredBytes = Number(req.headers["content-length"]);
+      if (Number.isFinite(declaredBytes) && declaredBytes > MAX_REQUEST_BODY_BYTES) {
+        writeJson(res, 413, { error: { message: REQUEST_BODY_TOO_LARGE_MESSAGE } });
+        return;
+      }
+
       const body = JSON.parse(await readRequestBody(req)) as Record<string, unknown>;
       const controller = new AbortController();
       const abortUpstream = () => controller.abort();
@@ -158,7 +169,7 @@ export class CodexChatProxy {
       }
       if (res.destroyed || res.writableEnded) return;
       if (!res.headersSent) {
-        writeJson(res, 500, {
+        writeJson(res, error instanceof RequestBodyTooLargeError ? 413 : 500, {
           error: {
             message: redactSecret(
               error instanceof Error ? error.message : String(error),
@@ -553,10 +564,23 @@ function sse(event: string, data: Record<string, unknown>): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+class RequestBodyTooLargeError extends Error {
+  constructor() {
+    super(REQUEST_BODY_TOO_LARGE_MESSAGE);
+    this.name = "RequestBodyTooLargeError";
+  }
+}
+
 async function readRequestBody(req: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
+  let bytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.byteLength;
+    // Throwing ends the read, so the rest of a runaway upload is never buffered; the socket is
+    // still writable at that point and handleRequest answers 413.
+    if (bytes > MAX_REQUEST_BODY_BYTES) throw new RequestBodyTooLargeError();
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
 }
