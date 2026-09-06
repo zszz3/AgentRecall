@@ -372,8 +372,14 @@ export function WorkflowFeaturePage({
 
   useEffect(() => setGlobalWorkDir(automation.workDir), [automation.workDir]);
 
+  const loadRequestVersion = useRef(0);
   const load = useCallback(async (preferId?: string) => {
+    const requestVersion = ++loadRequestVersion.current;
     const snapshot = await api.getWorkflowCore(preferId);
+    // Selecting another workflow starts a second load, and the two responses can land in either
+    // order. Applying the older one would pull the list, the selection and the editor draft back
+    // to the workflow the user already left.
+    if (loadRequestVersion.current !== requestVersion) return snapshot;
     // Unsaved drafts only exist in local state; a plain snapshot overwrite
     // would silently drop them from the list.
     const preserved = definitions.filter(
