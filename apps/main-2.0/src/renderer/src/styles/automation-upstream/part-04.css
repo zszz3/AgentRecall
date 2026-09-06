@@ -738,6 +738,12 @@ body,
   --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
+[data-theme="warm"] {
+  --bg: #faf9f5;
+  --sidebar: #f5f0e8;
+  --shadow: 0 1px 3px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
 body {
   font-size: 13.5px;
 }
