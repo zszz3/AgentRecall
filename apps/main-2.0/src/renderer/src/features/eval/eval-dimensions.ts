@@ -82,6 +82,8 @@ export function methodOf(language: LanguageMode, check: EvaluationEvaluator): st
   if (type === "llm_judge") return l("LLM", "LLM 评判");
   if (type === "script_judge") return l("script", "脚本");
   if (type === "script_trajectory_judge") return l("script · trajectory", "脚本 · 轨迹");
-  if (type === "tool_failure_judge") return l("trajectory", "轨迹");
+  if (type === "tool_failure_judge" || type === "trajectory_budget_judge") {
+    return l("trajectory", "轨迹");
+  }
   return l("check", "确定性");
 }
