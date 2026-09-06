@@ -203,6 +203,32 @@
   --trend-new: #c4b5fd;
 }
 
+:root[data-theme="warm"] {
+  color-scheme: light;
+
+  --app-bg: #faf9f5;
+  --sidebar-bg: #f5f0e8;
+  --panel-bg: #faf9f5;
+  --panel-subtle: #f5f0e8;
+  --panel-hover: #efe9de;
+  --panel-active: #e8e0d2;
+  --row-bg: #faf9f5;
+  --row-hover-bg: #f5f0e8;
+  --row-selected-bg: rgba(204, 120, 92, 0.1);
+  --message-bg: #faf9f5;
+  --message-user-bg: rgba(204, 120, 92, 0.08);
+
+  --border: #e6dfd8;
+  --border-subtle: #ebe6df;
+  --border-strong: #d5cbbd;
+  --message-user-border: rgba(204, 120, 92, 0.28);
+
+  --text: #141413;
+  --text-dim: #3d3d3a;
+  --text-muted: #6c6a64;
+  --text-faint: #8e8b82;
+}
+
 * {
   box-sizing: border-box;
 }
