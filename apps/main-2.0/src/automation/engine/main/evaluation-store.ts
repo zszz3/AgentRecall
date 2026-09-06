@@ -319,9 +319,9 @@ export class EvaluationStore {
         `insert into agent_recall.evaluation_runs (
           id, experiment_id, status, agent_revision_id, skill_hash, started_at, finished_at,
           average_score, minimum_score, pass_rate, total_duration_ms, error,
-          engine, scored_case_count, unscored_case_count, coverage, dimensions
+          engine, scored_case_count, unscored_case_count, coverage, dimensions, rubric_hash
         ) values (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18
         )
         on conflict (id) do update set
           status = excluded.status,
@@ -336,7 +336,8 @@ export class EvaluationStore {
           unscored_case_count = excluded.unscored_case_count,
           coverage = excluded.coverage,
           dimensions = excluded.dimensions,
-          skill_hash = coalesce(agent_recall.evaluation_runs.skill_hash, excluded.skill_hash)`,
+          skill_hash = coalesce(agent_recall.evaluation_runs.skill_hash, excluded.skill_hash),
+          rubric_hash = coalesce(excluded.rubric_hash, agent_recall.evaluation_runs.rubric_hash)`,
         [
           value.id,
           value.experimentId,
@@ -355,6 +356,7 @@ export class EvaluationStore {
           value.unscoredCaseCount ?? null,
           value.coverage ?? null,
           value.dimensions ? JSON.stringify(value.dimensions) : null,
+          value.rubricHash ?? null,
         ],
       );
       await transaction.query(
@@ -785,6 +787,7 @@ function mapRunSummary(row: Row): EvaluationRunSummary {
     status: row.status as EvaluationRun["status"],
     ...(row.agent_revision_id ? { agentRevisionId: String(row.agent_revision_id) } : {}),
     ...(row.skill_hash ? { skillHash: String(row.skill_hash) } : {}),
+    ...(row.rubric_hash ? { rubricHash: String(row.rubric_hash) } : {}),
     startedAt: timestamp(row.started_at),
     ...(row.finished_at ? { finishedAt: timestamp(row.finished_at) } : {}),
     ...(row.average_score !== null && row.average_score !== undefined

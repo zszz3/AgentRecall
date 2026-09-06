@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { executeEvaluationRun } from "../../../core/evaluation/run";
 import type { EvaluationPlanEvaluator } from "../../../core/evaluation/case-graph";
@@ -144,6 +144,11 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     ...(input.wait ? { wait: input.wait } : {}),
   };
 
+  // Resolved once so the fingerprint cannot describe a rubric other than the
+  // one the graph actually runs.
+  const plannedEvaluators = planEvaluators(input.experiment, input.evaluators);
+  const rubricHash = rubricFingerprint(plannedEvaluators, input.experiment.scoring);
+
   let snapshotScore: EvaluationRunSnapshotScore = {};
   const snapshot = (status: EvaluationRun["status"]): EvaluationRun => ({
     id: runId,
@@ -152,6 +157,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     engine: "graph",
     ...(input.agentRevisionId ? { agentRevisionId: input.agentRevisionId } : {}),
     ...(input.skillHash ? { skillHash: input.skillHash } : {}),
+    rubricHash,
     startedAt,
     ...(status === "running" ? {} : { finishedAt: Date.now() }),
     ...snapshotScore,
@@ -169,7 +175,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
       source: input.experiment.source ?? "run_agent",
       agentId: input.experiment.agentId,
       skillName: input.experiment.skillName ?? null,
-      evaluators: planEvaluators(input.experiment, input.evaluators),
+      evaluators: plannedEvaluators,
       cases,
       // The trajectory half of a fresh run costs a lookup and a bounded wait, so
       // it only runs where the host wired both readers.
@@ -272,6 +278,26 @@ function planEvaluators(
       ...(evaluator.subject ? { subject: evaluator.subject } : {}),
       ...(evaluator.timeoutMs !== undefined ? { timeoutMs: evaluator.timeoutMs } : {}),
     }));
+}
+
+/**
+ * Fingerprint of the standard a run was measured with: two runs are comparable
+ * only when the same judges and the same scoring policy produced both scores,
+ * and the built-in judge rewrites itself whenever its rubric drifts.
+ *
+ * Taken over the resolved plan, which is what executed and carries no name or
+ * timestamp. Sorted by id because the rows arrive ordered by last update —
+ * touching one judge would otherwise reshuffle an unchanged rubric into a
+ * different fingerprint.
+ */
+function rubricFingerprint(
+  evaluators: readonly EvaluationPlanEvaluator[],
+  scoring: EvaluationExperiment["scoring"],
+): string {
+  const ordered = [...evaluators].sort((left, right) => left.id.localeCompare(right.id));
+  return createHash("sha256")
+    .update(JSON.stringify({ evaluators: ordered, scoring: scoring ?? null }))
+    .digest("hex");
 }
 
 /** Dataset items point at an existing artifact through their metadata. */
