@@ -377,6 +377,19 @@ function RunGraph({
             {l("coverage", "覆盖率")} {formatRatio(run.coverage)}
           </span>
         ) : null}
+        {run.consistency?.meanSpread != null ? (
+          <span title={l(
+            "Mean widest gap between two repetitions of the same case. A high number means one version does not reproduce its own score.",
+            "同一用例多次重复之间最大分差的均值。数值大说明同一个版本连自己的分数都复现不出来。",
+          )}>
+            {l("spread", "波动")} {run.consistency.meanSpread.toFixed(2)}
+            {" · "}
+            {l(
+              `${run.consistency.repeatedCaseCount} repeated case(s)`,
+              `${run.consistency.repeatedCaseCount} 个重复用例`,
+            )}
+          </span>
+        ) : null}
         {run.skillHash ? (
           <span className="eval-muted">Skill @{run.skillHash.slice(0, 8)}</span>
         ) : null}
