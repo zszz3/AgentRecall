@@ -7,8 +7,9 @@
     <script>
       (() => {
         try {
+          const stored = localStorage.getItem("agent-recall-theme");
           document.documentElement.dataset.theme =
-            localStorage.getItem("agent-recall-theme") === "dark" ? "dark" : "light";
+            stored === "dark" || stored === "warm" ? stored : "light";
         } catch {
           document.documentElement.dataset.theme = "light";
         }
