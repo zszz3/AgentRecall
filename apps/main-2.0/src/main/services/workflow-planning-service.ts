@@ -97,6 +97,11 @@ export class WorkflowPlanningService {
     const result = await this.dependencies.executor.runOneShot({
       configuredAgentId: request.agentId, prompt,
       workDir: request.definition.workDir ?? undefined,
+      invocation: {
+        surface: "workflow",
+        role: "planning",
+        ownerReference: { workflowId: definition.id },
+      },
       developerInstructions: "You are in Workflow design mode. Only interview and propose a workflow; do not perform the task or change files or external systems.",
     }, undefined, signal);
     signal.throwIfAborted();

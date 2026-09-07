@@ -26,6 +26,9 @@ describe("Workflow grill planning", () => {
     const first = await service.reply(input, new AbortController().signal);
     expect(first.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(first.proposal).toBeUndefined();
+    expect(executor.runOneShot).toHaveBeenCalledWith(expect.objectContaining({
+      invocation: { surface: "workflow", role: "planning", ownerReference: { workflowId: "workflow" } },
+    }), undefined, expect.any(AbortSignal));
     input.definition.planning = first;
     input.definition.nodes[0]!.goal = "Keep my manual change";
     executor.runOneShot.mockResolvedValueOnce({ output: JSON.stringify({ message: "Ready to review.", proposal }), durationMs: 1 });
