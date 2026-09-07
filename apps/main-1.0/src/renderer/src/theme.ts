@@ -1,9 +1,9 @@
-export type ThemeMode = "dark" | "light";
+export type ThemeMode = "dark" | "light" | "warm";
 
 export const THEME_STORAGE_KEY = "agent-recall-theme";
 
 export function readStoredTheme(value: string | null): ThemeMode {
-  return value === "dark" ? "dark" : "light";
+  return value === "dark" || value === "warm" ? value : "light";
 }
 
 export function readInitialTheme(): ThemeMode {
