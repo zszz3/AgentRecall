@@ -223,6 +223,30 @@
   --trend-up: #c64545;
   --trend-down: #2f7a48;
   --trend-new: #cc785c;
+
+  --claude: #c9742c;
+  --claude-badge-bg: #f9ecdc;
+  --claude-badge-text: #8a4b12;
+  --codex: #177a5c;
+  --codex-badge-bg: #e2f0e8;
+  --codex-badge-text: #096b4b;
+  --codebuddy: #6d5dfc;
+  --codebuddy-badge-bg: #eae8f5;
+  --codebuddy-badge-text: #4f46e5;
+  --codewiz: #e5304d;
+  --codewiz-badge-bg: #f7e4e4;
+  --codewiz-badge-text: #b42335;
+  --zcode: #2563eb;
+  --zcode-badge-bg: #e4ecf7;
+  --zcode-badge-text: #1d4ed8;
+
+  --tag-bg: #efe9de;
+  --tag-text: #3d3d3a;
+  --branch-bg: #e4edf2;
+  --branch-bg-hover: #d3e3ec;
+  --branch-border: #a9c6d4;
+  --branch-text: #0b5a76;
+  --branch-icon: #0e7490;
 }
 
 * {
