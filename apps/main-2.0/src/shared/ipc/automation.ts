@@ -52,6 +52,8 @@ export const AUTOMATION_CHANNELS = {
   evaluationRunGet: "automation:evaluation:runs:get",
   evaluationRunDelete: "automation:evaluation:runs:delete",
   evaluationArtifactOpen: "automation:evaluation:artifact:open",
+  workflowPlanningReply: "automation:workflow:planning-reply",
+  workflowPlanningCancel: "automation:workflow:planning-cancel",
   workflowCoreGet: "automation:workflow:get",
   workflowDefinitionSave: "automation:workflow:definition:save",
   workflowDefinitionDelete: "automation:workflow:definition:delete",

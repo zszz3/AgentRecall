@@ -64,6 +64,15 @@ describe("PostgresWorkflowCoreRepository", () => {
 
     await expect(repository.listDefinitions()).resolves.toEqual([definition()]);
     await expect(repository.getRun("run")).resolves.toEqual(run());
+    const withPlanning: WorkflowDefinition = { ...definition(), planning: {
+      agentId: "agent", messages: [{ role: "user", content: "请总结文档" }, { role: "assistant", content: "面向谁阅读？" }],
+      proposal: { name: "Proposal", description: "Pending user confirmation", inputs: [], nodes: definition().nodes },
+    } };
+    await repository.saveDefinition(withPlanning);
+    const reloaded = new PostgresWorkflowCoreRepository(database);
+    await expect(reloaded.getDefinition("workflow")).resolves.toEqual(withPlanning);
+    // The historical run remains the original definition with no authoring metadata.
+    await expect(reloaded.getRun("run")).resolves.toEqual(run());
     await database.close();
   });
 

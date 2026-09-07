@@ -49,6 +49,8 @@ import type {
   ConfirmWorkflowImportRequest,
   WorkflowExportResult,
   WorkflowCoreSnapshot,
+  WorkflowPlanningRequest,
+  WorkflowPlanningState,
   WorkflowDefinition,
   WorkflowRun,
   WorkflowRunStreamEvent,
@@ -120,6 +122,8 @@ export function createAutomationApi(ipc: AutomationIpcRenderer) {
       ipc.invoke(AUTOMATION_CHANNELS.evaluationArtifactOpen, { runId, resultId }),
     runEvaluationExperiment: (experimentId: string): Promise<EvaluationRun> => ipc.invoke(AUTOMATION_CHANNELS.evaluationExperimentRun, { experimentId }),
 
+    replyWorkflowPlanning: (request: WorkflowPlanningRequest): Promise<WorkflowPlanningState> => ipc.invoke(AUTOMATION_CHANNELS.workflowPlanningReply, request),
+    cancelWorkflowPlanning: (requestId: string): Promise<void> => ipc.invoke(AUTOMATION_CHANNELS.workflowPlanningCancel, requestId),
     getWorkflowCore: (workflowId?: string): Promise<WorkflowCoreSnapshot> => ipc.invoke(AUTOMATION_CHANNELS.workflowCoreGet, workflowId),
     saveWorkflowDefinition: (definition: WorkflowDefinition): Promise<WorkflowDefinition> => ipc.invoke(AUTOMATION_CHANNELS.workflowDefinitionSave, definition),
     deleteWorkflowDefinition: (workflowId: string): Promise<void> => ipc.invoke(AUTOMATION_CHANNELS.workflowDefinitionDelete, { workflowId }),

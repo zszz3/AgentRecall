@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
   pickDirectory: vi.fn(),
   chooseWorkDir: vi.fn(),
   saveWorkflowDefinition: vi.fn(),
+  replyWorkflowPlanning: vi.fn(),
+  cancelWorkflowPlanning: vi.fn(async () => undefined),
 }));
 
 const sessionSearch = vi.hoisted(() => ({
@@ -132,6 +134,100 @@ describe("WorkflowFeaturePage live output", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.clearAllMocks();
+  });
+
+  it("interviews, previews a proposal, applies it explicitly, and keeps manual edits", async () => {
+    const original = runningWorkflow().definition;
+    api.getWorkflowCore.mockResolvedValue({ definitions: [original], runs: [] });
+    api.saveWorkflowDefinition.mockImplementation(async (definition) => definition);
+    await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />));
+    const click = async (text: string): Promise<void> => {
+      const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text);
+      if (!button) throw new Error(`Missing button: ${text}`);
+      await act(async () => button.click());
+    };
+    await click("与 Agent 规划");
+    const answer = container.querySelector<HTMLTextAreaElement>("textarea[aria-label='目标或回答']")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(answer, "生成一份代码检查报告");
+      answer.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const messages = [{ role: "user", content: "生成一份代码检查报告" }, { role: "assistant", content: "报告给谁看？建议面向开发团队。" }];
+    api.replyWorkflowPlanning.mockResolvedValueOnce({ agentId: "agent-1", messages });
+    await click("发送");
+    expect(container.textContent).toContain("报告给谁看？");
+    expect(api.saveWorkflowDefinition.mock.lastCall?.[0].nodes).toEqual(original.nodes);
+    const proposal = { name: "检查报告", description: "为开发团队检查代码", inputs: [], nodes: [{ ...original.nodes[0]!, title: "新报告节点" }] };
+    api.replyWorkflowPlanning.mockResolvedValueOnce({ agentId: "agent-1", messages: [...messages, { role: "assistant", content: "方案已生成" }], proposal });
+    await click("生成 Workflow");
+    expect(container.textContent).toContain("新报告节点");
+    expect(api.saveWorkflowDefinition.mock.lastCall?.[0].nodes).toEqual(original.nodes);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await click("应用到画布");
+    await act(async () => container.querySelector<HTMLButtonElement>("[data-testid='workflow-graph']")!.click());
+    const nameInput = [...container.querySelectorAll<HTMLInputElement>(".workflow-core-inspector input")].find((item) => item.value === "新报告节点")!;
+    expect(nameInput).toBeDefined();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(nameInput, "我手动修改的节点");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    api.replyWorkflowPlanning.mockResolvedValueOnce({ agentId: "agent-1", messages: [{ role: "assistant", content: "保留手动修改" }] });
+    await click("生成 Workflow");
+    expect(api.replyWorkflowPlanning.mock.lastCall?.[0].definition.nodes[0].title).toBe("我手动修改的节点");
+    expect(api.saveWorkflowDefinition.mock.lastCall?.[0].nodes[0].title).toBe("我手动修改的节点");
+    confirm.mockRestore();
+  });
+
+  it("preserves edits made during planning and retries a failed save without rerunning the Agent", async () => {
+    const original = runningWorkflow().definition;
+    api.getWorkflowCore.mockResolvedValue({ definitions: [original], runs: [] });
+    await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled />));
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "与 Agent 规划")!.click());
+    const answer = container.querySelector<HTMLTextAreaElement>("textarea[aria-label='目标或回答']")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(answer, "调整检查步骤");
+      answer.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    let finish!: (value: unknown) => void;
+    api.replyWorkflowPlanning.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".workflow-core-planning button[type='submit']")!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>("[data-testid='workflow-graph']")!.click());
+    const nameInput = [...container.querySelectorAll<HTMLInputElement>(".workflow-core-inspector input")].find((item) => item.value === "检查代码")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(nameInput, "规划期间手动修改");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    api.saveWorkflowDefinition.mockRejectedValueOnce(new Error("Save failed"));
+    await act(async () => finish({ agentId: "agent-1", messages: [{ role: "assistant", content: "建议先检查输入" }] }));
+    expect(api.saveWorkflowDefinition.mock.lastCall?.[0].nodes[0].title).toBe("规划期间手动修改");
+    expect(answer.value).toBe("调整检查步骤");
+    expect(container.textContent).toContain("Save failed");
+    api.saveWorkflowDefinition.mockImplementationOnce(async (definition) => definition);
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === "重试保存本次回复")!.click());
+    expect(api.replyWorkflowPlanning).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("建议先检查输入");
+    expect(answer.value).toBe("");
+    expect(nameInput.value).toBe("规划期间手动修改");
+  });
+
+  it("opens planning for a new Workflow and cancels an unfinished turn when the panel closes", async () => {
+    api.getWorkflowCore.mockResolvedValue({ definitions: [], runs: [] });
+    await act(async () => root.render(<WorkflowFeaturePage language="zh" globalReviewEnabled runtimeReviewEnabled initialRequest={{ createNew: true }} />));
+    const answer = container.querySelector<HTMLTextAreaElement>("textarea[aria-label='目标或回答']")!;
+    expect(answer).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(answer, "检查代码");
+      answer.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    let finish!: (value: unknown) => void;
+    api.replyWorkflowPlanning.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".workflow-core-planning button[type='submit']")!.click());
+    const requestId = api.replyWorkflowPlanning.mock.lastCall?.[0].requestId;
+    await act(async () => container.querySelector<HTMLButtonElement>("[aria-label='收起规划']")!.click());
+    expect(api.cancelWorkflowPlanning).toHaveBeenCalledWith(requestId);
+    api.saveWorkflowDefinition.mockClear();
+    await act(async () => finish({ agentId: "agent-1", messages: [] }));
+    expect(api.saveWorkflowDefinition).not.toHaveBeenCalled();
   });
 
   it("shows a pre-delta waiting state above long resolved inputs for a running Agent node", async () => {
