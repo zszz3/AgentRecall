@@ -1,4 +1,0 @@
-interface:
-  display_name: "飞书技术图表"
-  short_description: "生成、重绘并校验可编辑的飞书技术图表与六十六类模板"
-  default_prompt: "Use $feishu-tech-diagram to turn this technical design into a clear editable diagram."

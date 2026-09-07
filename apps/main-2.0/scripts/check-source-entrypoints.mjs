@@ -49,7 +49,6 @@ function collectSourceFiles(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (entryPath === path.join(sourceRoot, "automation", "engine", "shared", "bundled-skills")) continue;
       files.push(...collectSourceFiles(entryPath));
       continue;
     }

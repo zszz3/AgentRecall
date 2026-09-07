@@ -71,13 +71,13 @@ interface ImportedSkillMetadata {
 }
 
 function bundledSkillSourceDir(template: SkillTemplate): string | undefined {
-  if (!template.sourcePath?.startsWith("src/shared/bundled-skills/")) return undefined;
+  if (!template.sourcePath?.startsWith("assets/bundled-skills/")) return undefined;
   const relativeDir = path.dirname(template.sourcePath);
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
     path.resolve(process.cwd(), relativeDir),
     path.resolve(moduleDir, "..", "..", relativeDir),
-    path.resolve(moduleDir, "..", "shared", "bundled-skills", template.id),
+    path.resolve(moduleDir, "..", "..", "..", "..", "..", relativeDir),
   ];
   return candidates.find((candidate) => pathExistsSync(candidate));
 }

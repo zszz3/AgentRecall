@@ -22,27 +22,29 @@ const BUNDLED_SKILL_ORDER = [
   "code-review-and-quality",
 ];
 
-const skillMarkdownFiles = import.meta.glob<string>("./bundled-skills/*/SKILL.md", {
+const BUNDLED_SKILL_ASSET_ROOT = "../../../../assets/bundled-skills";
+
+const skillMarkdownFiles = import.meta.glob<string>("../../../../assets/bundled-skills/*/SKILL.md", {
   eager: true,
   import: "default",
   query: "?raw",
 });
-const skillTranslationFiles = import.meta.glob<string>("./bundled-skills/*/SKILL.zh.md", {
+const skillTranslationFiles = import.meta.glob<string>("../../../../assets/bundled-skills/*/SKILL.zh.md", {
   eager: true,
   import: "default",
   query: "?raw",
 });
-const skillMetadataFiles = import.meta.glob<string>("./bundled-skills/*/metadata.json", {
+const skillMetadataFiles = import.meta.glob<string>("../../../../assets/bundled-skills/*/metadata.json", {
   eager: true,
   import: "default",
   query: "?raw",
 });
-const directSkillAssetFiles = import.meta.glob<string>("./bundled-skills/*/*", {
+const directSkillAssetFiles = import.meta.glob<string>("../../../../assets/bundled-skills/*/*", {
   eager: true,
   import: "default",
   query: "?raw",
 });
-const nestedSkillAssetFiles = import.meta.glob<string>("./bundled-skills/*/**/*", {
+const nestedSkillAssetFiles = import.meta.glob<string>("../../../../assets/bundled-skills/*/**/*", {
   eager: true,
   import: "default",
   query: "?raw",
@@ -54,17 +56,20 @@ export interface BundledSkillAsset {
 }
 
 function skillIdFromPath(filePath: string): string {
-  const match = filePath.match(/\.\/bundled-skills\/([^/]+)\/[^/]+$/);
+  const match = filePath.match(/\/bundled-skills\/([^/]+)\/[^/]+$/);
   if (!match?.[1]) throw new Error(`Invalid bundled skill path: ${filePath}`);
   return match[1];
 }
 
 function sourcePathFor(filePath: string): string {
-  return `src/shared/${filePath.replace(/^\.\//, "")}`;
+  const marker = "assets/bundled-skills/";
+  const markerIndex = filePath.indexOf(marker);
+  if (markerIndex === -1) throw new Error(`Invalid bundled skill asset path: ${filePath}`);
+  return filePath.slice(markerIndex);
 }
 
 export function bundledSkillAssetsFor(skillId: string): BundledSkillAsset[] {
-  const prefix = `./bundled-skills/${skillId}/`;
+  const prefix = `${BUNDLED_SKILL_ASSET_ROOT}/${skillId}/`;
   const assets = new Map<string, string>();
   for (const [filePath, contents] of Object.entries({ ...directSkillAssetFiles, ...nestedSkillAssetFiles })) {
     if (!filePath.startsWith(prefix)) continue;
@@ -103,7 +108,7 @@ function stripYamlScalar(value: string): string {
 }
 
 function metadataFor(skillId: string): BundledSkillMetadata {
-  const raw = skillMetadataFiles[`./bundled-skills/${skillId}/metadata.json`];
+  const raw = skillMetadataFiles[`${BUNDLED_SKILL_ASSET_ROOT}/${skillId}/metadata.json`];
   if (!raw) return {};
   const parsed = JSON.parse(raw) as Partial<BundledSkillMetadata>;
   const metadata: BundledSkillMetadata = {};
@@ -116,7 +121,13 @@ function metadataFor(skillId: string): BundledSkillMetadata {
 
 function orderedSkillEntries(): Array<[string, string]> {
   const order = new Map(BUNDLED_SKILL_ORDER.map((id, index) => [id, index]));
-  return Object.entries(skillMarkdownFiles).sort(([leftPath], [rightPath]) => {
+  const entries = Object.entries(skillMarkdownFiles).filter(([filePath]) =>
+    order.has(skillIdFromPath(filePath)),
+  );
+  const found = new Set(entries.map(([filePath]) => skillIdFromPath(filePath)));
+  const missing = BUNDLED_SKILL_ORDER.filter((id) => !found.has(id));
+  if (missing.length > 0) throw new Error(`Missing bundled Skill assets: ${missing.join(", ")}`);
+  return entries.sort(([leftPath], [rightPath]) => {
     const leftId = skillIdFromPath(leftPath);
     const rightId = skillIdFromPath(rightPath);
     const leftOrder = order.get(leftId) ?? Number.MAX_SAFE_INTEGER;
@@ -145,7 +156,7 @@ export function loadBundledSkillTemplates(): SkillTemplate[] {
     };
     const sourceUrl = metadata.sourceUrl;
     if (sourceUrl) template.sourceUrl = sourceUrl;
-    const translationZh = skillTranslationFiles[`./bundled-skills/${id}/SKILL.zh.md`];
+    const translationZh = skillTranslationFiles[`${BUNDLED_SKILL_ASSET_ROOT}/${id}/SKILL.zh.md`];
     if (translationZh) template.translationZh = normalizeNewlines(translationZh);
     return template;
   });
