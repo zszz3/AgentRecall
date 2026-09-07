@@ -20,6 +20,7 @@ import {
   Server,
   Sparkles,
   Sun,
+  Sunrise,
   Terminal as TerminalIcon,
   Trash2,
   Type,
@@ -1154,6 +1155,10 @@ export function SettingsDialog({
                     <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>
                       <Moon size={14} />
                       <span>{l("Dark", "深色")}</span>
+                    </button>
+                    <button className={theme === "warm" ? "active" : ""} onClick={() => onThemeChange("warm")}>
+                      <Sunrise size={14} />
+                      <span>{l("Warm", "暖阳")}</span>
                     </button>
                   </div>
                 </div>
