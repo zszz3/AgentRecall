@@ -191,4 +191,62 @@ describe("DetailPanel Turn controls", () => {
     });
     expect(document.activeElement).toBe(container.querySelector(".panel-search-input"));
   });
+
+  it("keeps an existing CodeWiz summary visible without offering summary actions", async () => {
+    await act(async () => {
+      root.render(
+        <DetailPanel
+          session={{
+            ...session,
+            sessionKey: "codewiz:test-session",
+            source: "codewiz-cli",
+            aiSummary: "Existing CodeWiz summary",
+          }}
+          turns={null}
+          turnsLoading={false}
+          matchedTurnId={null}
+          onLoadTurn={async () => null}
+          messages={[]}
+          matchedContextMessages={[]}
+          matchedMessageIndex={null}
+          traceEvents={[]}
+          loading={false}
+          actionStatus={null}
+          query=""
+          liveState="closed"
+          language="en"
+          revealLabel="Explorer"
+          showItermAction={false}
+          messagePageSize={100}
+          olderMessageCount={0}
+          onClose={vi.fn()}
+          onShowMore={vi.fn()}
+          onRename={vi.fn()}
+          onAddTag={vi.fn()}
+          onRemoveTag={vi.fn()}
+          onFavorite={vi.fn()}
+          onSummarize={vi.fn()}
+          summarizing={false}
+          canResume={false}
+          canMigrate={false}
+          migrationTitle=""
+          onResume={vi.fn()}
+          onResumeIterm={vi.fn()}
+          onMigrate={vi.fn()}
+          onCopyResume={vi.fn()}
+          onCopyMarkdown={vi.fn()}
+          onExportMarkdown={vi.fn()}
+          onExportJson={vi.fn()}
+          onCopyPlain={vi.fn()}
+          onDelete={vi.fn()}
+          onReveal={vi.fn()}
+          sessionFamily={{ parent: null, children: [], truncated: false }}
+        />,
+      );
+    });
+
+    expect(container.querySelector(".detail-summary")?.textContent).toContain("Existing CodeWiz summary");
+    const buttonLabels = [...container.querySelectorAll("button")].map((button) => button.textContent);
+    expect(buttonLabels.some((label) => label?.includes("Re-summarize"))).toBe(false);
+  });
 });

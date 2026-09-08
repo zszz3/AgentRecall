@@ -2034,6 +2034,7 @@ export class PostgresSessionRepository {
         from agent_recall.sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where sessions.file_mtime_ms >= $1
+          and sessions.source <> 'codewiz-cli'
           and (
             sessions.ai_summary is null
             or sessions.file_mtime_ms > coalesce(sessions.ai_summary_basis, 0)

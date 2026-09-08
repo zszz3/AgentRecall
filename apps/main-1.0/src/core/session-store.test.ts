@@ -140,6 +140,34 @@ const traceEvents: SessionTraceEvent[] = [
 ];
 
 describe("SessionStore", () => {
+  it("excludes CodeWiz sessions from summary backfill while keeping other sources eligible", () => {
+    const store = createInMemoryStore();
+    const now = 1_000;
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codex:summary-candidate",
+        rawId: "summary-candidate",
+        filePath: "/tmp/codex-summary.jsonl",
+        fileMtimeMs: 900,
+      }),
+      messages,
+    );
+    store.upsertIndexedSession(
+      sampleSession({
+        sessionKey: "codewiz:summary-candidate",
+        rawId: "summary-candidate",
+        source: "codewiz-cli",
+        filePath: "/tmp/codewiz-opencode.db#summary-candidate",
+        fileMtimeMs: 950,
+      }),
+      messages,
+    );
+
+    expect(store.listSessionsNeedingSummary(now, 500, 10).map(({ sessionKey }) => sessionKey)).toEqual([
+      "codex:summary-candidate",
+    ]);
+  });
+
   it("atomically migrates a legacy key with all dependent data and migration history", () => {
     const store = createInMemoryStore();
     const legacyKey = "ssh:ssh-devbox:codex:legacy-all-data";
