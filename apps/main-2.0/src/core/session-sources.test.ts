@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionSourceDescriptor } from "./session-sources";
+import { sessionSourceDescriptor, supportsAiSummarySource } from "./session-sources";
 
 describe("StepCode session source semantics", () => {
   it("keeps StepCode sources in their native Claude/Codex families", () => {
@@ -33,5 +33,10 @@ describe("StepCode session source semantics", () => {
       remoteFamily: null,
       capabilities: { live: false, resume: false, migrate: false, sessionSync: false, openApp: false },
     });
+  });
+
+  it("disables AI summaries only for CodeWiz sessions", () => {
+    expect(supportsAiSummarySource("codewiz-cli")).toBe(false);
+    expect(supportsAiSummarySource("codex-cli")).toBe(true);
   });
 });

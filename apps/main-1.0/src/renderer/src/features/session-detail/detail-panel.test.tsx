@@ -25,7 +25,10 @@ describe("DetailPanel Code Mode tool groups", () => {
     container.remove();
   });
 
-  async function renderTraceEvents(traceEvents: SessionTraceEvent[]): Promise<void> {
+  async function renderTraceEvents(
+    traceEvents: SessionTraceEvent[],
+    sessionOverrides: Partial<SessionSearchResult> = {},
+  ): Promise<void> {
     await act(async () => {
       root.render(createElement(DetailPanel, {
         session: {
@@ -63,6 +66,7 @@ describe("DetailPanel Code Mode tool groups", () => {
           messageCount: 0,
           aiSummary: null,
           aiSummaryStale: false,
+          ...sessionOverrides,
         } satisfies SessionSearchResult,
         messages: [],
         matchedMessageIndex: null,
@@ -103,6 +107,20 @@ describe("DetailPanel Code Mode tool groups", () => {
       }));
     });
   }
+
+  it("keeps an existing CodeWiz summary visible without offering a summary action", async () => {
+    await renderTraceEvents([], {
+      sessionKey: "codewiz:existing-summary",
+      rawId: "existing-summary",
+      source: "codewiz-cli",
+      aiSummary: "Previously generated summary",
+    });
+
+    expect(container.querySelector(".detail-summary")?.textContent).toContain("Previously generated summary");
+    expect(
+      [...container.querySelectorAll("button")].some((button) => button.textContent?.includes("重新摘要")),
+    ).toBe(false);
+  });
 
   it("shows each parsed tool after its runtime result inside exec", async () => {
     const commands = [

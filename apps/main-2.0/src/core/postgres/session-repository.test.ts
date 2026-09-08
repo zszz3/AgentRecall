@@ -127,6 +127,35 @@ describe("PostgresSessionRepository", () => {
     expect(Number(result.rows[0]?.ai_summary_basis)).toBe(fileMtimeMs);
   });
 
+  it("excludes CodeWiz sessions from batch and automatic summary candidates", async () => {
+    await repository.upsertIndexedSession(
+      session({
+        sessionKey: "codex:summary-candidate",
+        rawId: "summary-candidate",
+        source: "codex-cli",
+        fileMtimeMs: 900,
+      }),
+      messages,
+    );
+    await repository.upsertIndexedSession(
+      session({
+        sessionKey: "codewiz:summary-candidate",
+        rawId: "summary-candidate",
+        source: "codewiz-cli",
+        fileMtimeMs: 950,
+      }),
+      messages,
+    );
+
+    await expect(repository.listSessionsNeedingSummary(1_000, 1_000, 25))
+      .resolves.toEqual([
+        expect.objectContaining({
+          sessionKey: "codex:summary-candidate",
+          source: "codex-cli",
+        }),
+      ]);
+  });
+
   it("preserves paginated Codex history when migrating to a new Session key", async () => {
     const legacyKey = "ssh:dev:codex:legacy-paginated";
     const targetKey = "ssh:dev:codex-cli:legacy-paginated";

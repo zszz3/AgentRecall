@@ -25,7 +25,11 @@ import {
 import { readInitialToolEventsVisibility, storeToolEventsVisibility } from "../../tool-events-visibility";
 import type { SessionFamily } from "../../../../core/session-family";
 import { canDeleteSessionLocally } from "../../../../core/session-environment";
-import { isSessionSource, sessionSourceDescriptor } from "../../../../core/session-sources";
+import {
+  isSessionSource,
+  sessionSourceDescriptor,
+  supportsAiSummarySource,
+} from "../../../../core/session-sources";
 import { SubagentSessionTree } from "./subagent-session-tree";
 import { SessionContextComponentsPanel } from "./session-context-components-panel";
 import { collaborationMessageMetadata } from "./collaboration-message";
@@ -554,14 +558,16 @@ export function DetailPanel({
             <button onClick={onAddTag} disabled={actionRunning}>
               <Tag size={15} /> {l("Add Tag", "添加标签")}
             </button>
-            <button onClick={onSummarize} disabled={actionRunning || summarizing}>
-              <Sparkles size={15} />{" "}
-              {summarizing
-                ? l("Summarizing...", "摘要中...")
-                : session.aiSummary
-                  ? l("Re-summarize", "重新摘要")
-                  : l("AI Summary", "AI 摘要")}
-            </button>
+            {supportsAiSummarySource(session.source) ? (
+              <button onClick={onSummarize} disabled={actionRunning || summarizing}>
+                <Sparkles size={15} />{" "}
+                {summarizing
+                  ? l("Summarizing...", "摘要中...")
+                  : session.aiSummary
+                    ? l("Re-summarize", "重新摘要")
+                    : l("AI Summary", "AI 摘要")}
+              </button>
+            ) : null}
             <button onClick={onMigrate} disabled={actionRunning || !canMigrate} title={migrationTitle}>
               <ArrowRightLeft size={15} /> {l("Migrate to…", "迁移到…")}
             </button>

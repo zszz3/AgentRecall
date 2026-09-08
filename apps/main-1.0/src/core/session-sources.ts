@@ -229,6 +229,10 @@ export function sessionSourceLabel(source: SessionSource): string {
   return sessionSourceDescriptor(source).label;
 }
 
+export function supportsAiSummarySource(source: SessionSource): boolean {
+  return source !== "codewiz-cli";
+}
+
 export function remoteSessionAgentForSource(source: SessionSource): RemoteSessionAgent | null {
   if (source === "hermes") return "hermes";
   if (source === "pi-cli") return "pi";

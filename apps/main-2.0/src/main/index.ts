@@ -119,6 +119,7 @@ import { remoteSessionKey } from "../core/session-environment";
 import {
   OPTIONAL_SESSION_SOURCE_DESCRIPTORS,
   sessionSourcesForOptionalSetting,
+  supportsAiSummarySource,
 } from "../core/session-sources";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import { APP_UPDATE_EVENTS } from "../shared/ipc/app-update";
@@ -2114,6 +2115,10 @@ const SUMMARY_FULL_THRESHOLD = SUMMARY_HEAD_MESSAGES + SUMMARY_TAIL_MESSAGES;
 // Short sessions are summarized in full; long ones use a head + tail excerpt so the
 // original problem and the final resolution both survive, fetching only a bounded slice.
 async function summarizeOneSession(sessionKey: string, endpoint: SummaryEndpoint): Promise<void> {
+  const session = await store.getSession(sessionKey);
+  if (session && !supportsAiSummarySource(session.source)) {
+    throw new Error("AI summaries are disabled for CodeWiz sessions.");
+  }
   const count = await store.getMessageCount(sessionKey);
   let excerpt;
   if (count <= SUMMARY_FULL_THRESHOLD) {
@@ -2769,6 +2774,10 @@ function registerIpc(): void {
   });
   ipcMain.handle("session:summarize", async (_event, sessionKey: string) => {
     await remoteSessionAccess.ensureDetails(sessionKey);
+    const session = await store.getSession(sessionKey);
+    if (session && !supportsAiSummarySource(session.source)) {
+      throw new Error("AI summaries are disabled for CodeWiz sessions.");
+    }
     const endpoint = await resolveSummaryEndpointFromSettings();
     if (!endpoint) {
       throw new Error(SUMMARY_PROVIDER_ERROR);

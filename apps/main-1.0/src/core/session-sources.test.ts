@@ -6,6 +6,7 @@ import {
   SESSION_SOURCE_DESCRIPTORS,
   SESSION_SOURCE_REGISTRY,
   sessionSourceDescriptor,
+  supportsAiSummarySource,
 } from "./session-sources";
 import type { SessionSource } from "./types";
 
@@ -154,5 +155,11 @@ describe("session source capability registry", () => {
     expect(isSessionSource("qoder")).toBe(true);
     expect(isSessionSource("unknown-agent")).toBe(false);
     expect(isSessionSource(null)).toBe(false);
+  });
+
+  it("disables AI summaries only for CodeWiz sessions", () => {
+    for (const source of ALL_SOURCES) {
+      expect(supportsAiSummarySource(source)).toBe(source !== "codewiz-cli");
+    }
   });
 });

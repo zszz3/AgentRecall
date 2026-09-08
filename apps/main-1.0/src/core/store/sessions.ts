@@ -1338,6 +1338,7 @@ export class SessionsStore {
       .prepare(
         `SELECT * FROM sessions
          WHERE file_mtime_ms >= ?
+           AND source <> 'codewiz-cli'
            AND (ai_summary IS NULL OR file_mtime_ms > COALESCE(ai_summary_basis, 0))
          ORDER BY file_mtime_ms DESC
          LIMIT ?`,

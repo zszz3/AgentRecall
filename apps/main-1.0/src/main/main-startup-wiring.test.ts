@@ -65,4 +65,28 @@ describe("main process startup wiring", () => {
     expect(source).toContain("fetch: electronSummaryFetch");
     expect(source).toContain("net.fetch(input, init)");
   });
+
+  it("checks summary source support before reading messages or invoking the provider", () => {
+    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    const summarizeOneSession = source.match(
+      /async function summarizeOneSession[\s\S]*?\n}\n\nasync function pathExists/,
+    )?.[0];
+    const manualSummaryHandler = source.match(
+      /ipcMain\.handle\("session:summarize",[\s\S]*?\n\s*}\);/,
+    )?.[0];
+
+    expect(summarizeOneSession).toBeDefined();
+    expect(summarizeOneSession).toContain("supportsAiSummarySource");
+    expect(summarizeOneSession!.indexOf("supportsAiSummarySource")).toBeLessThan(
+      summarizeOneSession!.indexOf("store.getMessageCount"),
+    );
+    expect(summarizeOneSession!.indexOf("supportsAiSummarySource")).toBeLessThan(
+      summarizeOneSession!.indexOf("await summarizeSession"),
+    );
+    expect(manualSummaryHandler).toBeDefined();
+    expect(manualSummaryHandler).toContain("supportsAiSummarySource");
+    expect(manualSummaryHandler!.indexOf("supportsAiSummarySource")).toBeLessThan(
+      manualSummaryHandler!.indexOf("resolveSummaryEndpointFromSettings"),
+    );
+  });
 });
