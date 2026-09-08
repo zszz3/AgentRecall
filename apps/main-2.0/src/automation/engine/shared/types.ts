@@ -63,6 +63,8 @@ export type {
   WorkflowScriptPermission,
   WorkflowScriptRuntime,
   WorkflowValueType,
+  WorkflowPlanningRequest,
+  WorkflowPlanningState,
 } from "./workflow/model";
 export type { WorkflowValidationIssue } from "./workflow/validation";
 export type {

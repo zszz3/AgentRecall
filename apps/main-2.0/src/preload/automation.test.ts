@@ -63,6 +63,9 @@ describe("createAutomationApi", () => {
     const api = createAutomationApi(ipc as never);
     const definition = { id: "workflow" } as never;
 
+    const planning = { requestId: "planning", agentId: "agent", definition, message: "Goal", intent: "interview" as const };
+    await api.replyWorkflowPlanning(planning);
+    await api.cancelWorkflowPlanning("planning");
     await api.getWorkflowCore();
     await api.saveWorkflowDefinition(definition);
     await api.startWorkflowRun("workflow", { source: "resume" });
@@ -74,6 +77,8 @@ describe("createAutomationApi", () => {
     await api.deleteWorkflowDefinition("workflow");
 
     expect(ipc.invoke.mock.calls).toEqual([
+      [AUTOMATION_CHANNELS.workflowPlanningReply, planning],
+      [AUTOMATION_CHANNELS.workflowPlanningCancel, "planning"],
       [AUTOMATION_CHANNELS.workflowCoreGet, undefined],
       [AUTOMATION_CHANNELS.workflowDefinitionSave, definition],
       [AUTOMATION_CHANNELS.workflowRunStart, { workflowId: "workflow", inputs: { source: "resume" } }],

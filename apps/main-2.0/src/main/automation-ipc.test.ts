@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { AUTOMATION_CHANNELS } from "../shared/ipc/automation";
 import type { McpServerDefinition, McpToolDefinition } from "../automation/engine/shared/mcp/types";
@@ -103,6 +104,7 @@ function setup(
     updateConfiguredAgents: vi.fn((value, options) => hub.updateConfiguredAgents(value, options)),
     deleteConfiguredAgent: vi.fn(async (agentId: string) => ({ configuredAgents: hub.listConfiguredAgents().filter((agent) => agent.id !== agentId) })),
     workflows: hub,
+    workflowPlanning: { reply: vi.fn(async (_request: unknown, _signal: AbortSignal) => ({ agentId: "agent", messages: [] })) },
     workflowCore: {
       snapshot: vi.fn(async () => ({ definitions: [], runs: [] })),
       saveDefinition: vi.fn(async (value) => value),
@@ -180,6 +182,43 @@ describe("registerAutomationIpc", () => {
 
     dispose();
     expect(unsubscribeWorkflowRunStream).toHaveBeenCalledOnce();
+  });
+
+  it("owns planning cancellation by window and cleans up listeners after completion or reload", async () => {
+    const { handlers, service } = setup();
+    const owner = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false });
+    const request = { requestId: "planning-1", agentId: "agent", message: "Plan this task", intent: "interview",
+      definition: { id: "workflow", name: "Plan", description: "Goal", inputs: [], nodes: [], createdAt: 1, updatedAt: 1 } };
+    let finish!: () => void;
+    let signal!: AbortSignal;
+    vi.mocked(service.workflowPlanning.reply).mockImplementationOnce(async (_request, abortSignal) => {
+      signal = abortSignal;
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { agentId: "agent", messages: [] };
+    });
+    const turn = handlers.get(AUTOMATION_CHANNELS.workflowPlanningReply)!({ sender: owner }, request);
+    await Promise.resolve();
+    handlers.get(AUTOMATION_CHANNELS.workflowPlanningCancel)!({ sender: { id: 2 } }, request.requestId);
+    expect(signal.aborted).toBe(false);
+    handlers.get(AUTOMATION_CHANNELS.workflowPlanningCancel)!({ sender: owner }, request.requestId);
+    expect(signal.aborted).toBe(true);
+    finish();
+    await turn;
+    expect(owner.eventNames()).toEqual([]);
+
+    vi.mocked(service.workflowPlanning.reply).mockImplementationOnce(async (_request, abortSignal) => {
+      signal = abortSignal;
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { agentId: "agent", messages: [] };
+    });
+    const nextTurn = handlers.get(AUTOMATION_CHANNELS.workflowPlanningReply)!({ sender: owner }, request);
+    await Promise.resolve();
+    owner.emit("did-start-navigation");
+    expect(signal.aborted).toBe(true);
+    finish();
+    await nextTurn;
+    expect(owner.eventNames()).toEqual([]);
+    await expect(handlers.get(AUTOMATION_CHANNELS.workflowPlanningReply)!({ sender: owner }, { ...request, definition: { id: "broken" } })).rejects.toThrow();
   });
 
   it("routes the structured Workflow API through Workflow Core", async () => {

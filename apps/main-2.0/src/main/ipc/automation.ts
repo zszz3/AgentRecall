@@ -1,3 +1,5 @@
+import { workflowPlanningDefinitionSchema, workflowPlanningStateSchema } from "../services/workflow-planning-service";
+import type { WorkflowPlanningRequest } from "../../automation/contracts";
 import type { IpcMain } from "electron";
 import { z } from "zod";
 import type {
@@ -204,7 +206,16 @@ const boundedWorkflowObjectSchema = z.record(z.string().max(200), z.unknown()).r
   (value) => isBoundedJsonValue(value),
   "Workflow data must be bounded JSON data.",
 );
-const workflowDefinitionSchema = boundedWorkflowObjectSchema;
+const workflowDefinitionSchema = boundedWorkflowObjectSchema.superRefine((value, context) => {
+  if (value.planning !== undefined && !workflowPlanningStateSchema.safeParse(value.planning).success) {
+    context.addIssue({ code: "custom", message: "Invalid Workflow planning state.", path: ["planning"] });
+  }
+});
+const workflowPlanningRequestSchema = z.object({
+  requestId: idSchema, definition: workflowPlanningDefinitionSchema,
+  agentId: idSchema, message: z.string().trim().min(1).max(50_000),
+  intent: z.enum(["interview", "generate"]),
+}).strict();
 const workflowCoreRunSchema = z.object({
   workflowId: idSchema,
   inputs: boundedWorkflowObjectSchema,
@@ -324,6 +335,35 @@ export function registerAutomationIpc({
       return handler(...args);
     });
   };
+
+  // The invoking window owns each planning turn, including reload and shutdown.
+  const planningRequests = new Map<string, { ownerId: number; controller: AbortController }>();
+  ipc.handle(AUTOMATION_CHANNELS.workflowPlanningReply, async (event, value: unknown) => {
+    const request = workflowPlanningRequestSchema.parse(value) as unknown as WorkflowPlanningRequest;
+    if (planningRequests.has(request.requestId)) throw new Error("This planning request is already running.");
+    const controller = new AbortController();
+    const abort = (): void => controller.abort();
+    const owner = event.sender;
+    if (owner.isDestroyed()) throw new Error("The planning window has closed.");
+    planningRequests.set(request.requestId, { ownerId: owner.id, controller });
+    owner.once("destroyed", abort);
+    owner.on("render-process-gone", abort);
+    owner.on("did-start-navigation", abort);
+    try {
+      await service.requireReady();
+      controller.signal.throwIfAborted();
+      return await service.workflowPlanning.reply(request, controller.signal);
+    } finally {
+      planningRequests.delete(request.requestId);
+      owner.removeListener("destroyed", abort);
+      owner.removeListener("render-process-gone", abort);
+      owner.removeListener("did-start-navigation", abort);
+    }
+  });
+  ipc.handle(AUTOMATION_CHANNELS.workflowPlanningCancel, (event, value: unknown) => {
+    const request = planningRequests.get(idSchema.parse(value));
+    if (request?.ownerId === event.sender.id) request.controller.abort();
+  });
 
   ipc.handle(AUTOMATION_CHANNELS.health, () => service.health());
   ipc.handle(AUTOMATION_CHANNELS.workflowSidebar, () => service.workflowSidebar());
@@ -525,6 +565,7 @@ export function registerAutomationIpc({
   const unsubscribeWorkflowRunStream = service.subscribeWorkflowRunStream((event) =>
     send(AUTOMATION_CHANNELS.workflowRunStream, event));
   return () => {
+    for (const request of planningRequests.values()) request.controller.abort();
     unsubscribeSnapshot();
     unsubscribeChanges();
     unsubscribeWorkflowRunStream();

@@ -91,10 +91,28 @@ export interface WorkflowDefinition {
   /** Optional Workflow-specific directory; null explicitly falls back to the global default. */
   workDir?: string | null;
   isTemplate?: boolean;
+  /** Optional authoring conversation; older definitions have no planning state. */
+  planning?: WorkflowPlanningState;
   inputs: WorkflowInputDefinition[];
   nodes: WorkflowNode[];
   createdAt: number;
   updatedAt: number;
+}
+
+export type WorkflowProposal = Pick<WorkflowDefinition, "name" | "description" | "inputs" | "nodes">;
+
+export interface WorkflowPlanningState {
+  agentId: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  proposal?: WorkflowProposal;
+}
+
+export interface WorkflowPlanningRequest {
+  requestId: string;
+  definition: WorkflowDefinition;
+  agentId: string;
+  message: string;
+  intent: "interview" | "generate";
 }
 
 export type WorkflowRunStatus = "running" | "paused" | "waiting" | "completed" | "failed" | "cancelled";

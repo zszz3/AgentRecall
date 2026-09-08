@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { Activity, ArrowLeft, Bot, Braces, CirclePause, Code2, Copy, File, FolderOpen, GitBranch, Hash, History, LayoutTemplate, List, Pause, Pencil, Play, Plus, RotateCcw, Save, Settings2, ShieldCheck, Square, ToggleLeft, Trash2, Type as TypeIcon, UserRound, X } from "lucide-react";
 import type {
   WorkflowDefinition,
+  WorkflowPlanningState,
+  WorkflowProposal,
   WorkflowInputDefinition,
   WorkflowNode,
   WorkflowNodeInput,
@@ -19,6 +21,7 @@ import { localize } from "../../language";
 import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 import { useAutomationStoreSnapshot } from "./automation-provider";
 import { addWorkflowNode, createWorkflowCopy, createWorkflowDefinition, type WorkflowNodeKind } from "./workflow-editor-model";
+import { WorkflowPlanningPanel } from "./workflow-planning-panel";
 import { WorkflowGraphCanvas } from "./workflow-graph-canvas";
 import { reduceWorkflowRunStream, workflowRunStreamKey, type WorkflowRunStreamState } from "./workflow-run-stream";
 
@@ -359,11 +362,17 @@ export function WorkflowFeaturePage({
   const [selectedId, setSelectedId] = useState<string>();
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const [draft, setDraft] = useState<WorkflowDefinition>();
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const [planningOpen, setPlanningOpen] = useState(false);
+  const [planningReplies, setPlanningReplies] = useState<Record<string, string>>({});
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [definitionInspectorOpen, setDefinitionInspectorOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>("definition");
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
+  const [operationBusy, setBusy] = useState(false);
+  const [planningBusy, setPlanningBusy] = useState(false);
+  const busy = operationBusy || planningBusy;
   const [error, setError] = useState<string>();
   const [runStreams, setRunStreams] = useState<WorkflowRunStreamState>({});
   const [personalMenu, setPersonalMenu] = useState<{ definitionId: string; x: number; y: number; hasActiveRun?: boolean }>();
@@ -403,6 +412,7 @@ export function WorkflowFeaturePage({
 
   const createNewWorkflow = (): void => {
     const next = createWorkflowDefinition(agents[0]?.id ?? "");
+    setPlanningOpen(true);
     setNewDraftIds((current) => new Set(current).add(next.id));
     setDefinitions((current) => [next, ...current]);
     setDraft(next);
@@ -546,6 +556,21 @@ export function WorkflowFeaturePage({
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
+  const persistPlanning = async (planning: WorkflowPlanningState): Promise<void> => {
+    const current = draftRef.current;
+    if (!current || current.isTemplate) return;
+    // Merge into the current editor draft, including edits made during the turn.
+    const next = { ...current, planning, updatedAt: Date.now() };
+    const saved = await api.saveWorkflowDefinition(next);
+    setDefinitions((items) => items.map((item) => item.id === saved.id ? saved : item));
+    setDraft((latest) => latest?.id === saved.id ? { ...latest, planning } : latest);
+    setNewDraftIds((ids) => { const nextIds = new Set(ids); nextIds.delete(saved.id); return nextIds; });
+  };
+  const applyProposal = (proposal: WorkflowProposal): void => {
+    if (!window.confirm(localize(language, "Replace the current nodes with this proposal? You can edit them before saving and running.", "将当前节点替换为这个方案？应用后可继续手动调整，保存后再运行。"))) return;
+    setDraft((current) => current ? { ...current, ...proposal, planning: current.planning ? { ...current.planning, proposal: undefined } : undefined } : current);
+    setSelectedNodeId(undefined); setDefinitionInspectorOpen(false);
+  };
   const updateNode = (node: WorkflowNode): void => setDraft((current) => current ? { ...current, nodes: current.nodes.map((item) => item.id === node.id ? node : item) } : current);
   const pickWorkDir = async (): Promise<void> => {
     if (!draft || isTemplate) return;
@@ -615,7 +640,7 @@ export function WorkflowFeaturePage({
   };
 
   return <div className="automation-page automation-workflow-page workflow-core-page" data-page="workflows">
-    <header className="app-page-head automation-page-head"><div><h2>Workflow</h2><p>{localize(language, "Build dependable automations from explicit inputs, nodes, and described outputs.", "用明确的输入、节点和带描述的输出构建可靠自动化。")}</p></div></header>
+    <header className="app-page-head automation-page-head"><div><h2>Workflow</h2><p>{localize(language, "Describe a goal, answer focused questions, then generate and edit your Workflow.", "描述目标、逐步澄清需求，生成 Workflow 后继续手动调整。")}</p></div></header>
     <div className="workflow-core-shell">
       <aside className="workflow-core-list"><header><strong>Workflows</strong><button type="button" className="icon-btn" aria-label="New Workflow" onClick={createNewWorkflow}><Plus size={16} /></button></header>
         <div>{templates.length > 0 ? <section className="workflow-core-list-group is-template"><header><span><LayoutTemplate size={11} /> 模板</span><small>{templates.length}</small></header>{templates.map((definition) => <button type="button" key={definition.id} className={definition.id === selectedId ? "is-active" : ""} onClick={() => selectDefinition(definition)}><strong>{definition.name}</strong><span>预览</span><small>{definition.description}</small></button>)}</section> : null}<section className="workflow-core-list-group"><header><span><UserRound size={11} /> 我的 Workflow</span><small>{personalDefinitions.length}</small></header>{personalDefinitions.length > 0 ? personalDefinitions.map((definition) => <button type="button" key={definition.id} className={definition.id === selectedId ? "is-active" : ""} onClick={() => selectDefinition(definition)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); const position = { definitionId: definition.id, x: event.clientX, y: event.clientY }; setPersonalMenu(position); void api.getWorkflowCore(definition.id).then((snapshot) => { const hasActiveRun = snapshot.runs.some((run) => run.status === "running" || run.status === "paused" || run.status === "waiting"); setPersonalMenu((current) => current?.definitionId === definition.id ? { ...current, hasActiveRun } : current); }).catch(() => { setPersonalMenu((current) => current?.definitionId === definition.id ? { ...current, hasActiveRun: true } : current); }); }}><strong>{definition.name}</strong><span>{definition.nodes.length} nodes</span><small>{definition.description}</small></button>) : <p>还没有自己的 Workflow</p>}</section></div>
@@ -633,10 +658,14 @@ export function WorkflowFeaturePage({
         {issues.length > 0 && mode === "definition" && !isTemplate ? <div className="workflow-core-banner"><strong>{issues.length} definition issue{issues.length === 1 ? "" : "s"}</strong><span>{issues[0]!.path}: {issues[0]!.message}</span></div> : null}
         {mode === "run" ? <RunHistoryBar language={language} runs={workflowRuns} selectedRunId={selectedRun?.id} onSelect={(run) => { setSelectedRunId(run.id); setSelectedNodeId(undefined); setDefinitionInspectorOpen(false); }} /> : null}
         {mode === "run" && selectedRun ? <RunStatusBar run={selectedRun} /> : null}
+        {mode === "definition" && !isTemplate ? <button type="button" className="control-btn compact workflow-core-planning-toggle" aria-expanded={planningOpen} onClick={() => setPlanningOpen((open) => !open)}>{localize(language, "Plan with Agent", "与 Agent 规划")}</button> : null}
+        <div className="workflow-core-editor-body">
+        {planningOpen && mode === "definition" && !isTemplate ? <WorkflowPlanningPanel key={draft.id} definition={draft} agents={agents} language={language} reply={planningReplies[draft.id] ?? ""} onReplyChange={(reply) => setPlanningReplies((current) => ({ ...current, [draft.id]: reply }))} disabled={operationBusy} onBusyChange={setPlanningBusy} onPlanning={persistPlanning} onApply={applyProposal} onClose={() => setPlanningOpen(false)} /> : null}
         <div className="workflow-core-workbench">
           <WorkflowGraphCanvas definition={mode === "run" && selectedRun ? selectedRun.definition : draft} run={selectedRun} mode={isTemplate ? "definition" : mode} agents={agents} readOnly={isTemplate} selectedNodeId={selectedNodeId} onSelectNode={(nodeId) => { setSelectedNodeId(nodeId); setDefinitionInspectorOpen(false); }} onPositionsChange={(positions) => { if (isTemplate) return; setDraft((current) => current ? { ...current, nodes: current.nodes.map((node) => positions[node.id] ? { ...node, position: positions[node.id] } : node) } : current); }} />
           {mode === "definition" && !isTemplate ? <div className="workflow-core-add-dock">{nodeKinds.map(({ kind, label, icon: Icon }) => <button type="button" key={kind} onClick={() => { const next = addWorkflowNode(draft, kind, agents[0]?.id ?? ""); setDraft(next); setSelectedNodeId(next.nodes.at(-1)?.id); setDefinitionInspectorOpen(false); }}><Icon size={13} /> {label}</button>)}</div> : null}
           {!isTemplate && (mode === "run" ? Boolean(selectedNodeId) : Boolean(selectedNode || definitionInspectorOpen)) ? <aside key={`${mode}:${selectedRun?.id ?? "none"}:${selectedNodeId ?? "definition"}`} className={`workflow-core-inspector${mode === "run" ? " is-run" : ""}`}><button type="button" className="workflow-core-inspector-close icon-btn" aria-label="Close inspector" onClick={() => { setSelectedNodeId(undefined); setDefinitionInspectorOpen(false); }}><X size={15} /></button>{mode === "run" ? <RunInspector run={selectedRun} selectedNodeId={selectedNodeId} liveOutput={selectedRun && selectedNodeId ? runStreams[workflowRunStreamKey(selectedRun.id, selectedNodeId)] : undefined} onRetry={(nodeId) => { if (selectedRun) void changeRunState(() => api.retryWorkflowNode(selectedRun.id, nodeId)); }} onApprove={(nodeId, decision) => { if (selectedRun) void changeRunState(() => api.resolveWorkflowApproval(selectedRun.id, nodeId, { decision, comment: "" })); }} /> : selectedNode ? <NodeInspector definition={draft} node={selectedNode} agentIds={agents} language={language} onChange={updateNode} onDelete={() => { setDraft((current) => current ? { ...current, nodes: current.nodes.filter((item) => item.id !== selectedNode.id).map((item) => ({ ...item, inputs: item.inputs.filter((input) => input.source !== "node" || input.nodeId !== selectedNode.id) } as WorkflowNode)) } : current); setSelectedNodeId(undefined); }} /> : <DefinitionInspector definition={draft} runInputs={runInputs} defaultWorkDir={globalWorkDir} isNewDraft={newDraftIds.has(draft.id)} language={language} onChange={setDraft} onPickWorkDir={() => void pickWorkDir()} onClearWorkDir={clearWorkDir} onRunInputChange={(key, value) => setRunInputs((current) => ({ ...current, [key]: value }))} />}</aside> : null}
+        </div>
         </div>
       </main>}
     </div>

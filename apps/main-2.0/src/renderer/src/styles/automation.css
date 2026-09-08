@@ -2354,3 +2354,83 @@
 .result-graph li { display: grid; grid-template-columns: 16px minmax(120px, 1fr) auto; gap: 6px; align-items: baseline; counter-increment: result-graph-node; font-size: 9px; }
 .result-graph li::before { content: counter(result-graph-node); color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .result-graph li small { grid-column: 2 / -1; color: var(--muted); }
+
+.workflow-core-editor-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.workflow-core-editor-body > .workflow-core-workbench { flex: 1; min-width: 0; }
+.workflow-core-planning-toggle { align-self: flex-start; margin: 6px 12px; }
+/* Keep the planning conversation at workbench density, independent of session typography. */
+.workflow-core-planning {
+  width: clamp(310px, 28vw, 380px);
+  flex: 0 0 clamp(310px, 28vw, 380px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--panel-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+.workflow-core-planning > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; }
+.workflow-core-planning > header strong { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+.workflow-core-planning > header strong svg { color: var(--text-muted); }
+.workflow-core-planning > header .icon-btn { width: 24px; height: 24px; min-height: 24px; border: 0; color: var(--text-muted); }
+.workflow-core-planning .workflow-core-planning-agent { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; margin: 0 16px 12px; font-size: 11px; }
+.workflow-core-planning-agent select { min-width: 0; min-height: 28px; padding: 4px 8px; font-size: 11px; background: var(--panel-subtle); }
+.workflow-core-planning-messages { flex: 1; min-height: 0; padding: 4px 16px 16px; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere; scrollbar-gutter: stable; border-top: 1px solid var(--border-subtle); }
+.workflow-core-planning-intro { margin: 12px 0 20px; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
+.workflow-core-planning-messages article { margin: 0 0 22px; padding: 0; }
+.workflow-core-planning-messages article > strong { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; color: var(--text-muted); font-size: 10px; font-weight: 500; }
+.workflow-core-planning-messages article.is-user { padding: 10px 12px; border-radius: 8px; background: var(--panel-subtle); }
+.workflow-core-planning .md { font-size: 12px; line-height: 1.75; }
+.workflow-core-planning .md-p { margin: 0 0 9px; }
+.workflow-core-planning .md-h { margin: 14px 0 7px; font-size: 13px; line-height: 1.6; font-weight: 600; }
+.workflow-core-planning .md > :first-child { margin-top: 0; }
+.workflow-core-planning .md > :last-child { margin-bottom: 0; }
+.workflow-core-planning .md-ul, .workflow-core-planning .md-ol { margin: 8px 0; padding-left: 20px; }
+.workflow-core-planning .md li { margin: 4px 0; }
+.workflow-core-planning .md li > .md-p { margin-bottom: 4px; }
+.workflow-core-planning .md-blockquote { margin: 10px 0; padding: 2px 10px; color: var(--text-muted); }
+.workflow-core-planning .md-table { font-size: 11px; }
+.workflow-core-planning .md-table th, .workflow-core-planning .md-table td { padding: 6px 8px; }
+.workflow-core-planning .md-code { padding: 10px; font-size: 11px; line-height: 1.65; }
+.workflow-core-planning .md-code-toolbar { padding: 5px 9px; }
+.workflow-core-planning .md-hr { margin: 14px 0; }
+.workflow-core-planning-messages > [role="status"] { color: var(--text-muted); font-size: 11px; }
+.workflow-core-planning-proposal { margin-top: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--panel-subtle); }
+.workflow-core-planning-proposal-label { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; color: var(--text-muted); font-size: 10px; }
+.workflow-core-planning-proposal summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.workflow-core-planning-proposal summary::-webkit-details-marker { display: none; }
+.workflow-core-planning-proposal summary strong { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; }
+.workflow-core-planning-proposal summary > span { flex-shrink: 0; color: var(--text-muted); font-size: 10px; }
+.workflow-core-planning-proposal summary > svg { flex-shrink: 0; color: var(--text-muted); }
+.workflow-core-planning-proposal details[open] summary > svg { transform: rotate(180deg); }
+.workflow-core-planning-proposal details p { margin: 9px 0; color: var(--text-muted); font-size: 11px; }
+.workflow-core-planning-proposal ol { margin: 10px 0 12px; padding-left: 19px; }
+.workflow-core-planning-proposal li { padding: 3px 0; font-size: 11px; }
+.workflow-core-planning-proposal li small { margin-left: 8px; color: var(--text-muted); font-size: 10px; }
+.workflow-core-planning-proposal > button { margin-top: 12px; }
+.workflow-core-planning-proposal > small { display: block; margin-top: 7px; color: var(--text-muted); font-size: 10px; line-height: 1.6; }
+.workflow-core-planning > [role="alert"] { margin: 0; padding: 8px 16px; font-size: 11px; overflow-wrap: anywhere; }
+.workflow-core-planning > .control-btn { margin: 8px 16px; }
+.workflow-core-planning-composer { flex-shrink: 0; padding: 12px; border-top: 1px solid var(--border-subtle); background: var(--panel-bg); }
+.workflow-core-planning-composer textarea { display: block; box-sizing: border-box; width: 100%; min-height: 88px; max-height: 200px; padding: 10px 11px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-subtle); color: var(--text); font-family: inherit; font-size: 12px; line-height: 1.65; }
+.workflow-core-planning-composer textarea::placeholder { color: var(--text-muted); }
+.workflow-core-planning-composer textarea:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 12%, transparent); outline-offset: 1px; }
+.workflow-core-planning-composer > div { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+.workflow-core-planning .compact { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 11px; }
+.workflow-core-planning button:focus-visible, .workflow-core-planning summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1000px) { .workflow-core-planning { width: 290px; flex-basis: 290px; } }
+@media (max-width: 720px) {
+  .workflow-core-editor-body:has(.workflow-core-planning) { flex-direction: column; overflow-y: auto; }
+  .workflow-core-planning { width: 100%; flex: 0 0 440px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+  .workflow-core-editor-body:has(.workflow-core-planning) > .workflow-core-workbench { flex: 0 0 400px; }
+}
+
+.workflow-core-planning .control-btn, .workflow-core-planning .icon-btn { background: transparent; color: var(--text-dim); }
+.workflow-core-planning .control-btn { border-color: var(--border); }
+.workflow-core-planning .control-btn:hover, .workflow-core-planning .icon-btn:hover { background: var(--panel-hover); }
+.workflow-core-planning .send-btn { background: var(--accent); color: var(--accent-contrast); }
+.workflow-core-planning button:disabled { cursor: not-allowed; opacity: .5; }

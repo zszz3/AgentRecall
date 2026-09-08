@@ -62,6 +62,7 @@ import {
   type WorkflowPortableFileSelection,
 } from "./workflow-portable-service";
 import { parseWorkflowAgentOutputs, WorkflowCoreService } from "./workflow-core-service";
+import { WorkflowPlanningService } from "./workflow-planning-service";
 import { WorkflowCoreOutputBroker } from "./workflow-core-output-broker";
 import type {
   McpExternalClientConnections,
@@ -270,6 +271,7 @@ export class NativeAutomationService {
   readonly runtime: RuntimeAutomationModule;
   readonly workflows: WorkflowAutomationModule;
   readonly workflowCore: WorkflowCoreService;
+  readonly workflowPlanning: WorkflowPlanningService;
   readonly mcp: McpAutomationModule;
   readonly evaluations: EvaluationService;
   readonly teamChat: TeamChatService;
@@ -330,6 +332,10 @@ export class NativeAutomationService {
       channels: () => this.hubInstance.snapshot().channels,
       defaultWorkDir: () => this.hubInstance.getWorkDir(),
       execute: (request, onEvent, signal) => this.hubInstance.askConfiguredAgent(request, onEvent, signal),
+    });
+    this.workflowPlanning = new WorkflowPlanningService({
+      executor: this.configuredAgentExecutor,
+      agents: () => this.hubInstance.snapshot().configuredAgents.map(({ id, name }) => ({ id, name })),
     });
     const workflowRepository = new PostgresWorkflowCoreRepository(options.database);
     const approvedScriptNodes = new Map<string, Set<string>>();
