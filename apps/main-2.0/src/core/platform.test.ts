@@ -18,6 +18,21 @@ describe("app settings", () => {
     expect(command).toContain("codex --version");
   });
 
+  it("gates ZCode migration on the local database instead of a CLI version", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "agent-recall-zcode-inspect-"));
+    try {
+      await expect(inspectMigrationCli("zcode", defaultSettings, undefined, { homeDir: root }))
+        .rejects.toThrow(/ZCode database not found/);
+
+      const dbDir = path.join(root, ".zcode", "cli", "db");
+      mkdirSync(dbDir, { recursive: true });
+      writeFileSync(path.join(dbDir, "db.sqlite"), "");
+      await expect(inspectMigrationCli("zcode", defaultSettings, undefined, { homeDir: root })).resolves.toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === "win32")("probes bare migration CLI names through the user shell PATH", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "agent-recall-migration-cli-"));
     const appBin = path.join(root, "app-bin");

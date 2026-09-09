@@ -32,8 +32,12 @@ describe("migrationTargetsForSession", () => {
   });
 
   it("keeps local and WSL target behavior", () => {
-    expect(migrationTargetsForSession({ source: "claude-cli", environmentId: "local", environmentKind: "local" }, settings)).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor"]);
+    expect(migrationTargetsForSession({ source: "claude-cli", environmentId: "local", environmentKind: "local" }, settings)).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"]);
     expect(migrationTargetsForSession({ source: "codex-cli", environmentId: "wsl-1", environmentKind: "wsl" }, settings)).toEqual(["claude", "codex"]);
+  });
+
+  it("does not offer ZCode sessions as migratable into ZCode again", () => {
+    expect(migrationTargetsForSession({ source: "zcode-cli", environmentId: "local", environmentKind: "local" }, settings)).toEqual([]);
   });
 
   it("safely disables actions for a stale persisted source", () => {

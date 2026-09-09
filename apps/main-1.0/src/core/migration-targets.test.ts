@@ -23,6 +23,7 @@ describe("migration target registry", () => {
       "codebuddy",
       "codewiz",
       "cursor",
+      "zcode",
       "tclaude",
       "tcodex",
       "deepseek",
@@ -31,9 +32,9 @@ describe("migration target registry", () => {
     expect(MIGRATION_TARGETS.map(({ id }) => id)).toEqual(MIGRATION_TARGET_IDS);
   });
 
-  it("defines the four base migration targets", () => {
-    expect(BASE_MIGRATION_TARGETS).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor"]);
-    expect(MIGRATION_TARGETS.slice(0, 5)).toEqual([
+  it("defines the base migration targets", () => {
+    expect(BASE_MIGRATION_TARGETS).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"]);
+    expect(MIGRATION_TARGETS.slice(0, 6)).toEqual([
       {
         id: "claude",
         label: "Claude Code",
@@ -69,11 +70,18 @@ describe("migration target registry", () => {
         source: "cursor-agent",
         enabledSetting: null,
       },
+      {
+        id: "zcode",
+        label: "ZCode",
+        family: "zcode",
+        source: "zcode-cli",
+        enabledSetting: null,
+      },
     ]);
   });
 
   it("maps the optional migration targets", () => {
-    expect(MIGRATION_TARGETS.slice(5)).toEqual([
+    expect(MIGRATION_TARGETS.slice(6)).toEqual([
       {
         id: "tclaude",
         label: "TClaude",
@@ -114,7 +122,7 @@ describe("migration target registry", () => {
   });
 
   it("looks up registered targets and rejects unsupported ids", () => {
-    expect(migrationTargetDescriptor("tcodex")).toEqual(MIGRATION_TARGETS[6]);
+    expect(migrationTargetDescriptor("tcodex")).toEqual(MIGRATION_TARGETS[7]);
     expect(() => migrationTargetDescriptor("unsupported" as never)).toThrow("Unsupported migration target");
   });
 

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -25,6 +25,7 @@ import {
 } from "./terminal-title";
 import { sessionSourceDescriptor } from "./session-sources";
 import type { MigrationTarget, SessionSearchResult, SessionSource } from "./types";
+import { zcodeDatabasePathFromHome } from "./zcode-session-writer";
 import {
   DEFAULT_OPENVIKING_RECALL_TOKEN_BUDGET,
   OPENVIKING_EXTRACTION_REASONING_EFFORTS,
@@ -345,6 +346,7 @@ export function migrationBinary(target: MigrationTarget, settings: AppSettings):
   if (target === "codewiz") return settings.codeWizBinary;
   if (target === "cursor") return settings.cursorBinary;
   if (target === "deepseek") return settings.deepseekBinary;
+  if (target === "zcode") return "zcode";
   return settings.codexBinary;
 }
 
@@ -367,6 +369,12 @@ function migrationResumeArgs(target: MigrationTarget, sessionId: string): string
       : target === "deepseek"
         ? ["--profile", "tui", "--resume", sessionId]
     : ["--resume", sessionId];
+}
+
+// Migrated ZCode sessions land in the ZCode app's always-open default workspace,
+// so they appear in its task list; there is no CLI resume command to offer.
+function zcodeMigrationResumeHint(sessionId: string): string {
+  return `Open the ZCode app and continue session ${sessionId} from its task list.`;
 }
 
 interface ShellCommands {
@@ -412,6 +420,9 @@ const MIGRATION_CLI_VERSION_RULES: Record<MigrationTarget, VersionRule[]> = {
     { label: "@openai/codex", pattern: /^\s*@openai\/codex\s*:?[ \t]*v?(\d+\.\d+\.\d+)[ \t]*$/im, minimum: version(0, 142, 4) },
   ],
   deepseek: [{ label: "dsh", pattern: /^\s*v?(\d+\.\d+\.\d+)(?:-[\w.-]+)?\s*$/im, minimum: version(0, 0, 0) }],
+  // ZCode migrations write into the local ZCode database directly, so no CLI
+  // version gate applies; inspectMigrationCli checks the database instead.
+  zcode: [],
 };
 
 function migrationTargetForResumeSource(source: SessionSource): MigrationTarget | null {
@@ -870,6 +881,14 @@ export function getMigrationResumeProcessSpec(
   settings: AppSettings = defaultSettings,
   options: { homeDir?: string; platform?: NodeJS.Platform } = {},
 ): ResumeProcessSpec {
+  if (target === "zcode") {
+    return {
+      command: "zcode",
+      args: [],
+      cwd: projectPath || undefined,
+      displayCommand: zcodeMigrationResumeHint(sessionId),
+    };
+  }
   const platform = options.platform ?? process.platform;
   const shell = localShellKind(platform, settings);
   const spec = {
@@ -893,6 +912,7 @@ export function getSafeMigrationResumeCommand(
   settings: AppSettings = defaultSettings,
   options: { homeDir?: string; platform?: NodeJS.Platform } = {},
 ): string {
+  if (target === "zcode") return zcodeMigrationResumeHint(sessionId);
   const platform = options.platform ?? process.platform;
   const command = migrationBinary(target, settings);
   const args = migrationResumeArgs(target, sessionId);
@@ -1176,6 +1196,9 @@ export async function openMigrationResumeInTerminal(
     resolveMacApplicationName?: typeof resolveMacApplicationName;
   } = {},
 ): Promise<void> {
+  // ZCode sessions are resumed from the ZCode app's own session list; there is
+  // no terminal command to open, so a successful no-op is the correct launch.
+  if (target === "zcode") return;
   const platform = deps.platform ?? process.platform;
   const { displayCommand: _displayCommand, ...spec } = getMigrationResumeProcessSpec(
     target,
@@ -1599,8 +1622,24 @@ export async function inspectMigrationCli(
   target: MigrationTarget,
   settings: AppSettings,
   runner: CliVersionRunner = runCliVersion,
-  _options: { homeDir?: string; platform?: NodeJS.Platform } = {},
+  options: { homeDir?: string; platform?: NodeJS.Platform } = {},
 ): Promise<void> {
+  if (target === "zcode") {
+    const homeDir = options.homeDir || process.env.AGENT_RECALL_MIGRATION_HOME?.trim() || homedir();
+    const dbPath = zcodeDatabasePathFromHome(homeDir);
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(dbPath);
+    } catch (error) {
+      const failure = error as NodeJS.ErrnoException;
+      if (failure.code === "ENOENT") {
+        throw Object.assign(new Error(`ZCode database not found at ${dbPath}. Install ZCode and start one session so the database exists.`), { code: "ENOENT" });
+      }
+      throw error;
+    }
+    if (!stat.isFile()) throw new Error(`ZCode database path is not a regular file: ${dbPath}.`);
+    return;
+  }
   const binary = migrationBinary(target, settings);
   if (target === "cursor") {
     try {

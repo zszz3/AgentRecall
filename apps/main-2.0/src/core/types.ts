@@ -97,7 +97,9 @@ export interface SessionMessageEvent {
 }
 
 export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor" | "deepseek";
-export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex";
+// ZCode is a migration target only: its sessions are indexed read from the
+// shared ZCode database and cannot seed migrations into other agents yet.
+export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex" | "zcode";
 export type RemoteSessionAgent = MigrationAgent | "hermes" | "pi";
 export type SessionMigrationStrategy = "complete" | "ai-compressed" | "locally-truncated";
 export type SessionMigrationStage = "reading" | "compressing" | "writing" | "indexing" | "launching";

@@ -9,6 +9,7 @@ import {
   loadCursorTranscriptFile,
   loadDefaultSessions,
   loadDefaultSessionsAsyncIterator,
+  loadZcodeSessions,
   parseJsonlText,
   type SessionLoadOptions,
 } from "./session-loader";
@@ -473,6 +474,10 @@ function loadMigratedSessionFile(target: MigrationTarget, filePath: string, sess
   if (descriptor.family === "codewiz") {
     const sessions = loadCodeWizSessions(path.dirname(filePath));
     return sessions.find((item) => item.session.rawId === sessionId) ?? sessions[0] ?? null;
+  }
+  if (descriptor.family === "zcode") {
+    const sessions = loadZcodeSessions(path.dirname(path.dirname(path.dirname(filePath))));
+    return sessions.find((item) => item.session.rawId === sessionId) ?? null;
   }
 
   let rows: unknown[];
