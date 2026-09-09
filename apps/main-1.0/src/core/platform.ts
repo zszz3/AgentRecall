@@ -1547,6 +1547,17 @@ export async function inspectMigrationCli(
       throw error;
     }
     if (!stat.isFile()) throw new Error(`ZCode database path is not a regular file: ${dbPath}.`);
+    const taskIndexPath = path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite");
+    try {
+      stat = statSync(taskIndexPath);
+    } catch (error) {
+      const failure = error as NodeJS.ErrnoException;
+      if (failure.code === "ENOENT") {
+        throw Object.assign(new Error(`ZCode task index not found at ${taskIndexPath}. Start one ZCode session so its task list is initialized.`), { code: "ENOENT" });
+      }
+      throw error;
+    }
+    if (!stat.isFile()) throw new Error(`ZCode task index path is not a regular file: ${taskIndexPath}.`);
     return;
   }
   const binary = migrationBinary(target, settings);

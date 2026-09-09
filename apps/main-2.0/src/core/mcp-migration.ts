@@ -15,7 +15,7 @@ import {
   createMigrationCompressor,
   type MigrationCompressFn,
 } from "./session-migration-compression";
-import { portableSessionFrom } from "./session-migration";
+import { migrationRootSessionForWrite, portableSessionFrom } from "./session-migration";
 import { writeMigratedSession } from "./session-migration-writers";
 import { indexMigratedSessionFile } from "./indexer";
 import { resolveSummaryEndpointFromSettings } from "./summary-endpoint";
@@ -191,7 +191,7 @@ export async function migrateSessionForMcp(
 
   const written = await writeMigratedSession({
     target,
-    session: prepared.session,
+    session: migrationRootSessionForWrite(prepared.session),
     ...(deps.homeDir ? { homeDir: deps.homeDir } : {}),
   });
 

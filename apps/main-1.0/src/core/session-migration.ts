@@ -73,7 +73,7 @@ export function sshMigrationTarget(source: SessionSource): "claude" | "codex" | 
   return null;
 }
 
-export function supportedMigrationTargets(source: SessionSource): MigrationAgent[];
+export function supportedMigrationTargets(source: SessionSource): MigrationTarget[];
 export function supportedMigrationTargets<T extends MigrationTarget>(
   source: SessionSource,
   enabledTargets: readonly T[],
@@ -117,6 +117,15 @@ export function portableSessionFrom(
     messages: portableMessages,
     isSubagent: session.isSubagent === true,
     parentSessionId: session.parentSessionId ?? null,
+  };
+}
+
+export function migrationRootSessionForWrite(session: PortableSession): PortableSession {
+  return {
+    ...session,
+    isSubagent: false,
+    parentSessionId: null,
+    subagents: [],
   };
 }
 
@@ -250,7 +259,7 @@ export async function migrateSession({
   });
   const mainWriteSession = codexLinkage
     ? codexSessionForWrite(prepared.session, rootSourceId, null, codexLinkage)
-    : { ...prepared.session, subagents: [] };
+    : migrationRootSessionForWrite(prepared.session);
   const reservedMainTargetId = codexLinkage?.targetIdBySourceId.get(rootSourceId);
   const written = reservedMainTargetId
     ? await deps.write(target, mainWriteSession, reservedMainTargetId)

@@ -233,33 +233,50 @@ async function writeMigratedZcodeSession(
   if (writable.length === 0) throw new Error("ZCode migration produced no writable messages.");
 
   const db = new DatabaseSync(dbPath);
+  let taskIndexAttached = false;
   try {
     db.exec("PRAGMA busy_timeout = 5000");
     assertZcodeWriteSchema(db);
     backupZcodeDatabase(db, dbPath);
     // Root sessions must also be registered in the ZCode client's task index or its
     // session list will not show them; subagent sessions stay unlisted like native ones.
-    const taskIndexAttached = !stored.isSubagent && attachZcodeTaskIndex(db, dbPath);
+    taskIndexAttached = !stored.isSubagent && attachZcodeTaskIndex(db, dbPath);
+    if (!stored.isSubagent && !taskIndexAttached) {
+      throw new Error("ZCode task index is missing or incompatible. Start one ZCode session so its task list is initialized, then retry the migration.");
+    }
+    if (taskIndexAttached) assertZcodeTaskIndexWriteSchema(db);
     insertZcodeSession(db, stored, writable, zcodeSessionId, options.idFactory, options.now, taskIndexAttached);
+
+    const validationSession = { ...stored, messages: writable };
+    try {
+      if (options.beforeValidate) await options.beforeValidate(dbPath);
+      const loaded = loadWrittenSession("zcode", dbPath, zcodeSessionId, validationSession);
+      validateRoundTrip(loaded, "zcode", zcodeSessionId, validationSession);
+      if (options.validate) {
+        const additionallyLoaded = await options.validate(dbPath);
+        validateRoundTrip(additionallyLoaded, "zcode", zcodeSessionId, validationSession);
+      }
+    } catch (error) {
+      try {
+        removeInsertedZcodeSession(db, zcodeSessionId, taskIndexAttached);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `ZCode migration validation failed and cleanup could not remove session ${zcodeSessionId}.`,
+        );
+      }
+      throw error;
+    }
+    return { sessionId: zcodeSessionId, filePath: dbPath };
   } finally {
     db.close();
   }
-
-  const validationSession = { ...stored, messages: writable };
-  const loaded = loadWrittenSession("zcode", dbPath, zcodeSessionId, validationSession);
-  validateRoundTrip(loaded, "zcode", zcodeSessionId, validationSession);
-  if (options.validate) {
-    const additionallyLoaded = await options.validate(dbPath);
-    validateRoundTrip(additionallyLoaded, "zcode", zcodeSessionId, validationSession);
-  }
-  return { sessionId: zcodeSessionId, filePath: dbPath };
 }
 
 /** Drops messages the ZCode loader would filter out so the written rows round-trip exactly. */
 function zcodeWritableMessages(session: PortableSession): PortableSession["messages"] {
   return session.messages
-    .map((message) => ({ ...message, content: message.content.trim() }))
-    .filter((message) => message.content.length > 0 && (message.role === "assistant" || isMeaningfulUserMessage(message.content)));
+    .filter((message) => message.content.trim().length > 0 && (message.role === "assistant" || isMeaningfulUserMessage(message.content)));
 }
 
 function assertZcodeWriteSchema(db: import("node:sqlite").DatabaseSync): void {
@@ -278,6 +295,23 @@ function assertZcodeWriteSchema(db: import("node:sqlite").DatabaseSync): void {
     if (missing.length > 0) {
       throw new Error(`ZCode database schema is incompatible: ${table} is missing ${missing.join(", ")}.`);
     }
+  }
+}
+
+function assertZcodeTaskIndexWriteSchema(db: import("node:sqlite").DatabaseSync): void {
+  const required = [
+    "workspace_key", "workspace_path", "workspace_identity", "task_id", "title", "task_status",
+    "provider", "mode", "model", "migration_source", "forked_from_task_id", "created_at", "updated_at",
+    "unread_at", "last_unread_at", "pinned", "archived", "deleted", "title_overridden", "meta_json",
+    "searchable_text", "cron_automation_id", "off_peak_task_id",
+  ];
+  const present = new Set(
+    (db.prepare("PRAGMA zcode_tasks.table_info(tasks)").all() as Array<{ name?: unknown }>)
+      .map((column) => column.name),
+  );
+  const missing = required.filter((column) => !present.has(column));
+  if (missing.length > 0) {
+    throw new Error(`ZCode task index schema is incompatible: tasks is missing ${missing.join(", ")}.`);
   }
 }
 
@@ -453,6 +487,26 @@ function insertZcodeSession(
         updatedAt: lastMessageMs,
         searchableText: messages.map((message) => message.content).join("\n").slice(0, 20_000),
       });
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function removeInsertedZcodeSession(
+  db: import("node:sqlite").DatabaseSync,
+  zcodeSessionId: string,
+  taskIndexAttached: boolean,
+): void {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM part WHERE session_id = ?").run(zcodeSessionId);
+    db.prepare("DELETE FROM message WHERE session_id = ?").run(zcodeSessionId);
+    db.prepare("DELETE FROM session WHERE id = ?").run(zcodeSessionId);
+    if (taskIndexAttached) {
+      db.prepare("DELETE FROM zcode_tasks.tasks WHERE task_id = ?").run(zcodeSessionId);
     }
     db.exec("COMMIT");
   } catch (error) {

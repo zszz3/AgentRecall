@@ -27,6 +27,12 @@ describe("app settings", () => {
       const dbDir = path.join(root, ".zcode", "cli", "db");
       mkdirSync(dbDir, { recursive: true });
       writeFileSync(path.join(dbDir, "db.sqlite"), "");
+      await expect(inspectMigrationCli("zcode", defaultSettings, undefined, { homeDir: root }))
+        .rejects.toThrow(/ZCode task index not found/);
+
+      const taskIndexDir = path.join(root, ".zcode", "v2");
+      mkdirSync(taskIndexDir, { recursive: true });
+      writeFileSync(path.join(taskIndexDir, "tasks-index.sqlite"), "");
       await expect(inspectMigrationCli("zcode", defaultSettings, undefined, { homeDir: root })).resolves.toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
