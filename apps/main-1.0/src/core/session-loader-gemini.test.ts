@@ -134,6 +134,39 @@ describe("Gemini CLI sessions", () => {
     });
   });
 
+  it.each(["json", "jsonl"])("indexes legacy .json subagents under a %s parent", (parentFormat) => {
+    const root = fixture();
+    const chats = projectChats(root, "gemini-app", "/work/gemini-app");
+    const parentId = "72d14847-09f0-4562-aa8e-f7b42bf11749";
+    const subagentId = "legacy01-cccc-dddd-eeee-ffff00001111";
+    const parentMessage = { id: "p-user", timestamp: "2026-07-29T04:55:00.000Z", type: "user", content: "Delegate the audit" };
+    const parentPath = path.join(chats, `session-2026-07-29T04-54-72d14847.${parentFormat}`);
+    if (parentFormat === "json") {
+      fs.writeFileSync(parentPath, JSON.stringify({ ...header(parentId), messages: [parentMessage] }), "utf8");
+    } else {
+      writeChat(parentPath, [header(parentId), parentMessage]);
+    }
+    const subagentPath = path.join(chats, parentId, `${subagentId}.json`);
+    fs.mkdirSync(path.dirname(subagentPath), { recursive: true });
+    fs.writeFileSync(subagentPath, JSON.stringify({
+      ...header(subagentId, { kind: "subagent" }),
+      messages: [
+        { id: "s-user", timestamp: "2026-07-29T04:56:30.000Z", type: "user", content: "Audit the legacy middleware" },
+      ],
+    }), "utf8");
+
+    const loaded = loadDefaultSessions({ homeDir: root, includeGeminiCli: true });
+    const byId = new Map(loaded.map((item) => [item.session.rawId, item]));
+
+    expect(loaded).toHaveLength(2);
+    expect(byId.get(parentId)?.session).toMatchObject({ isSubagent: false, parentSessionId: null });
+    expect(byId.get(subagentId)?.session).toMatchObject({
+      isSubagent: true,
+      parentSessionId: parentId,
+    });
+    expect(byId.get(subagentId)?.messages.map((message) => message.content)).toEqual(["Audit the legacy middleware"]);
+  });
+
   it("uses summaries as titles and ignores temp or unreadable chat files", () => {
     const root = fixture();
     const chats = projectChats(root, "gemini-app", "/work/gemini-app");
