@@ -264,7 +264,7 @@ function zcodeWritableMessages(session: PortableSession): PortableSession["messa
 
 function assertZcodeWriteSchema(db: import("node:sqlite").DatabaseSync): void {
   const required: Array<[string, readonly string[]]> = [
-    ["session", ["id", "project_id", "parent_id", "slug", "directory", "path", "title", "version", "task_type", "title_source", "title_message_id", "time_created", "time_updated"]],
+    ["session", ["id", "project_id", "parent_id", "slug", "directory", "path", "title", "version", "permission", "trace_id", "task_type", "title_source", "title_message_id", "time_title_updated", "time_created", "time_updated"]],
     ["message", ["id", "session_id", "sequence", "time_created", "time_updated", "data"]],
     ["part", ["id", "message_id", "session_id", "sequence", "time_created", "time_updated", "data"]],
   ];
