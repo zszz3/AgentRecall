@@ -10,6 +10,7 @@ import {
   loadCodeBuddyCliSessionFile,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
+  loadZcodeSessions,
   parseCursorTranscriptPath,
   parseJsonlText,
 } from "./session-loader";
@@ -1121,6 +1122,351 @@ describe("writeMigratedSession", () => {
     });
   });
 });
+
+describe("writeMigratedSession → zcode", () => {
+  // Every migrated message consumes two ids (message row + text part row).
+  const zcodeIds = (seed: number): string[] =>
+    Array.from({ length: 14 }, (_, index) => `10000000-0000-4000-8000-${String(seed + index).padStart(12, "0")}`);
+
+  it("writes into a synthetic ZCode database and round-trips through the ZCode loader", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-"));
+    try {
+      createZcodeHomeFixture(homeDir);
+      const result = await writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(1)),
+      });
+      const dbPath = path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+
+      expect(result.sessionId).toBe(`sess_${SESSION_ID}`);
+      expect(result.filePath).toBe(dbPath);
+      expect(fs.existsSync(`${dbPath}.bak`)).toBe(true);
+
+      const loaded = loadZcodeSessions(path.join(homeDir, ".zcode")).find((item) => item.session.rawId === result.sessionId);
+      expect(loaded?.session).toMatchObject({
+        source: "zcode-cli",
+        projectPath: path.join(homeDir, ".zcode", "workspace", "default"),
+        originalTitle: portable().title,
+      });
+      expect(loaded?.messages.map(({ role, content, timestamp }) => ({ role, content }))).toEqual(
+        portable().messages.map(({ role, content }) => ({ role, content })),
+      );
+      expect(loaded?.messages.map(({ timestamp }) => new Date(timestamp).getTime())).toEqual(
+        portable().messages.map(({ timestamp }) => new Date(timestamp).getTime()),
+      );
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("links a migrated subagent to its parent through session.parent_id", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-subagent-"));
+    try {
+      createZcodeHomeFixture(homeDir);
+      const parent = await writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(1)),
+      });
+      const child = await writeMigratedSession({
+        target: "zcode",
+        session: {
+          ...portable(),
+          sourceSessionKey: "cursor:child",
+          title: "Research child",
+          isSubagent: true,
+          parentSessionId: parent.sessionId,
+        },
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(20)),
+      });
+
+      expect(child.sessionId).toMatch(/^sess_subagent_agent_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      const db = new DatabaseSync(child.filePath);
+      try {
+        const row = db.prepare("SELECT parent_id FROM session WHERE id = ?").get(child.sessionId) as { parent_id?: unknown };
+        expect(row.parent_id).toBe(parent.sessionId);
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("registers the migrated session in the ZCode task index so the client lists it", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-taskindex-"));
+    try {
+      createZcodeHomeFixture(homeDir);
+      const taskIndexPath = path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite");
+      // The client's list query hard-filters on its current provider, so the index
+      // already holds one native task whose provider/model the writer must reuse.
+      const seed = new DatabaseSync(taskIndexPath);
+      try {
+        seed.prepare(
+          `INSERT INTO tasks (workspace_key, workspace_path, task_id, title, task_status, provider, model, created_at, updated_at)
+           VALUES ('C:\\native', 'C:\\native', 'sess_native', 'Native task', 'completed', 'glm', 'builtin:glm-4.6', 1, 2)`,
+        ).run();
+      } finally {
+        seed.close();
+      }
+      const result = await writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(1)),
+      });
+
+      const indexDb = new DatabaseSync(taskIndexPath);
+      try {
+        const row = indexDb.prepare("SELECT * FROM tasks WHERE task_id = ?").get(result.sessionId) as Record<string, unknown>;
+        expect(row).toMatchObject({
+          workspace_key: path.join(homeDir, ".zcode", "workspace", "default"),
+          workspace_path: path.join(homeDir, ".zcode", "workspace", "default"),
+          task_id: result.sessionId,
+          title: portable().title,
+          task_status: "completed",
+          provider: "glm",
+          model: "builtin:glm-4.6",
+          migration_source: "claudeCode",
+          deleted: 0,
+        });
+        expect(JSON.parse(String(row.meta_json))).toMatchObject({ taskId: result.sessionId, traceId: `zcode-${result.sessionId}`, status: "completed", provider: "glm", mode: "build" });
+        expect(String(row.searchable_text)).toContain("你好，世界 🌏");
+      } finally {
+        indexDb.close();
+      }
+
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves message whitespace and sequence when timestamps are equal", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-order-"));
+    try {
+      createZcodeHomeFixture(homeDir);
+      const timestamp = "2026-06-20T01:02:04.005Z";
+      const migrated = {
+        ...portable(),
+        messages: [
+          { role: "user" as const, content: "  indented request  \n", timestamp, index: 0 },
+          { role: "assistant" as const, content: "answer\n", timestamp, index: 1 },
+        ],
+      };
+      const ids = [9, 8, 7, 1, 2, 3, 4]
+        .map((value) => `20000000-0000-4000-8000-${String(value).padStart(12, "0")}`);
+      const result = await writeMigratedSession({
+        target: "zcode",
+        session: migrated,
+        sessionId: SESSION_ID,
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(ids),
+      });
+
+      const loaded = loadZcodeSessions(path.join(homeDir, ".zcode"))
+        .find((item) => item.session.rawId === result.sessionId);
+      expect(loaded?.messages.map(({ role, content }) => ({ role, content }))).toEqual(
+        migrated.messages.map(({ role, content }) => ({ role, content })),
+      );
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes the inserted session and task-index row when validation fails", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-rollback-"));
+    try {
+      const dbPath = createZcodeHomeFixture(homeDir);
+      const taskIndexPath = path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite");
+      const existing = await writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(100)),
+      });
+      await expect(writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(1)),
+        validate: () => null,
+      })).rejects.toThrow(/validation/i);
+
+      const db = new DatabaseSync(dbPath);
+      const taskIndex = new DatabaseSync(taskIndexPath);
+      try {
+        expect(db.prepare("SELECT id FROM session").all()).toEqual([{ id: existing.sessionId }]);
+        expect(db.prepare("SELECT DISTINCT session_id FROM message").all())
+          .toEqual([{ session_id: existing.sessionId }]);
+        expect(db.prepare("SELECT DISTINCT session_id FROM part").all())
+          .toEqual([{ session_id: existing.sessionId }]);
+        expect(taskIndex.prepare("SELECT task_id FROM tasks").all())
+          .toEqual([{ task_id: existing.sessionId }]);
+      } finally {
+        db.close();
+        taskIndex.close();
+      }
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an incompatible ZCode task-index schema before writing", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-index-schema-"));
+    try {
+      const dbPath = createZcodeHomeFixture(homeDir, { taskIndex: false });
+      const taskIndexPath = path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite");
+      fs.mkdirSync(path.dirname(taskIndexPath), { recursive: true });
+      const taskIndex = new DatabaseSync(taskIndexPath);
+      try {
+        taskIndex.exec("CREATE TABLE tasks (task_id TEXT PRIMARY KEY)");
+      } finally {
+        taskIndex.close();
+      }
+
+      await expect(writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(1)),
+      })).rejects.toThrow(/task index schema is incompatible/i);
+
+      const db = new DatabaseSync(dbPath);
+      try {
+        expect(db.prepare("SELECT count(*) AS count FROM session").get()).toMatchObject({ count: 0 });
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a root migration when the ZCode task index is unavailable", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-no-index-"));
+    try {
+      const dbPath = createZcodeHomeFixture(homeDir, { taskIndex: false });
+      await expect(writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+        idFactory: idFactory(zcodeIds(1)),
+      })).rejects.toThrow(/task index is missing or incompatible/i);
+
+      const db = new DatabaseSync(dbPath);
+      try {
+        expect(db.prepare("SELECT count(*) AS count FROM session").get()).toMatchObject({ count: 0 });
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails loudly when the ZCode database does not exist", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-missing-"));
+    try {
+      await expect(writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+      })).rejects.toThrow(/ZCode database not found/);
+      expect(filesUnder(homeDir)).toEqual([]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails loudly when the ZCode database schema is incompatible", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-zcode-schema-"));
+    try {
+      const dbPath = path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+      const db = new DatabaseSync(dbPath);
+      try {
+        db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT)");
+      } finally {
+        db.close();
+      }
+
+      await expect(writeMigratedSession({
+        target: "zcode",
+        session: portable(),
+        homeDir,
+        now: NOW,
+      })).rejects.toThrow(/schema is incompatible/);
+      expect(fs.existsSync(`${dbPath}.bak`)).toBe(false);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+});
+
+function createZcodeHomeFixture(homeDir: string, options: { taskIndex?: boolean } = {}): string {
+  const dbPath = path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT, directory TEXT, path TEXT,
+        title TEXT, version TEXT, permission TEXT, trace_id TEXT, task_type TEXT DEFAULT 'interactive', title_source TEXT DEFAULT 'first_input',
+        title_message_id TEXT, time_title_updated INTEGER, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+        time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+        time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
+      );
+    `);
+  } finally {
+    db.close();
+  }
+  if (options.taskIndex !== false) createZcodeTaskIndexFixture(homeDir);
+  return dbPath;
+}
+
+function createZcodeTaskIndexFixture(homeDir: string): string {
+  const taskIndexPath = path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite");
+  fs.mkdirSync(path.dirname(taskIndexPath), { recursive: true });
+  const db = new DatabaseSync(taskIndexPath);
+  try {
+    db.exec(`
+      CREATE TABLE tasks (
+        workspace_key TEXT NOT NULL, workspace_path TEXT NOT NULL, workspace_identity TEXT,
+        task_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', task_status TEXT, provider TEXT,
+        mode TEXT NOT NULL DEFAULT 'build', model TEXT, migration_source TEXT, forked_from_task_id TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, unread_at INTEGER,
+        last_unread_at INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0,
+        archived INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0,
+        title_overridden INTEGER NOT NULL DEFAULT 0, meta_json TEXT NOT NULL DEFAULT '{}',
+        searchable_text TEXT NOT NULL DEFAULT '', cron_automation_id TEXT, off_peak_task_id TEXT,
+        PRIMARY KEY (workspace_key, task_id)
+      );
+    `);
+  } finally {
+    db.close();
+  }
+  return taskIndexPath;
+}
 
 async function expectTamperedSessionRejected(
   target: MigrationTarget,

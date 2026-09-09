@@ -1,19 +1,21 @@
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   createMcpTemporarySessionCleaner,
   loadMcpSourceSession,
   migrateSessionForMcp,
 } from "./mcp-migration";
-import { createInMemoryStore } from "./postgres/test-session-store";
+import { createInMemoryStore as createStore } from "./postgres/test-session-store";
 import {
   loadClaudeCliSessionRows,
   loadCodeBuddyCliSessionFile,
   loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
+  loadZcodeSessions,
   parseJsonlText,
 } from "./session-loader";
 import { parseDeepSeekSessionLog, projectDeepSeekSession } from "./deepseek-harness";
@@ -22,6 +24,15 @@ import { defaultSettings } from "./platform";
 import type { IndexedSession, MigrationTarget, SessionMessage, SessionSource } from "./types";
 
 const temporaryProjectDirectories = new Set<string>();
+
+// Each integration test initializes a fresh PostgreSQL schema through PGlite.
+vi.setConfig({ testTimeout: 15_000 });
+
+function createInMemoryStore(): ReturnType<typeof createStore> {
+  const store = createStore();
+  onTestFinished(async () => { await store.close(); });
+  return store;
+}
 
 function makeProjectDir(): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-project-"));
@@ -64,7 +75,7 @@ async function seedLocalSession(
 
 
 
-function loadMigratedSessionFileForTest(target: MigrationTarget, filePath: string) {
+function loadMigratedSessionFileForTest(target: MigrationTarget, filePath: string, sessionId?: string) {
   if (target === "cursor") return loadCursorTranscriptFile(filePath);
   if (target === "deepseek") {
     const log = parseDeepSeekSessionLog(fs.readFileSync(filePath));
@@ -74,12 +85,69 @@ function loadMigratedSessionFileForTest(target: MigrationTarget, filePath: strin
   const descriptor = migrationTargetDescriptor(target);
   if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
   if (descriptor.family === "codewiz") return loadCodeWizSessions(path.dirname(filePath)).find((item) => item.session.rawId === path.basename(filePath, ".jsonl")) ?? loadCodeWizSessions(path.dirname(filePath))[0] ?? null;
+  if (descriptor.family === "zcode") {
+    const sessions = loadZcodeSessions(path.dirname(path.dirname(path.dirname(filePath))));
+    return sessions.find((item) => item.session.rawId === sessionId) ?? sessions[0] ?? null;
+  }
 
   const rows = parseJsonlText(fs.readFileSync(filePath, "utf8"));
   if (descriptor.family === "codex") {
     return loadCodexSessionRows(filePath, rows, { sourceOverride: descriptor.source });
   }
   return loadClaudeCliSessionRows(filePath, rows, { source: descriptor.source });
+}
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync } = require("node:sqlite") as {
+  DatabaseSync: new (path: string) => import("node:sqlite").DatabaseSync;
+};
+
+/** Creates the minimal ZCode database layout the migration writer requires. */
+function createZcodeHomeFixture(homeDir: string): string {
+  const dbPath = path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT, directory TEXT, path TEXT,
+        title TEXT, version TEXT, permission TEXT, trace_id TEXT, task_type TEXT DEFAULT 'interactive', title_source TEXT DEFAULT 'first_input',
+        title_message_id TEXT, time_title_updated INTEGER, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+        time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+        time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL
+      );
+    `);
+  } finally {
+    db.close();
+  }
+  const taskIndexPath = path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite");
+  fs.mkdirSync(path.dirname(taskIndexPath), { recursive: true });
+  const taskIndex = new DatabaseSync(taskIndexPath);
+  try {
+    taskIndex.exec(`
+      CREATE TABLE tasks (
+        workspace_key TEXT NOT NULL, workspace_path TEXT NOT NULL, workspace_identity TEXT,
+        task_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', task_status TEXT, provider TEXT,
+        mode TEXT NOT NULL DEFAULT 'build', model TEXT, migration_source TEXT, forked_from_task_id TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, unread_at INTEGER,
+        last_unread_at INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0,
+        archived INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0,
+        title_overridden INTEGER NOT NULL DEFAULT 0, meta_json TEXT NOT NULL DEFAULT '{}',
+        searchable_text TEXT NOT NULL DEFAULT '', cron_automation_id TEXT, off_peak_task_id TEXT,
+        PRIMARY KEY (workspace_key, task_id)
+      );
+    `);
+  } finally {
+    taskIndex.close();
+  }
+
+  return dbPath;
 }
 
 const noOpInspect = async () => undefined;
@@ -100,6 +168,7 @@ const targetSources: Record<MigrationTarget, SessionSource> = {
   tclaude: "tclaude-cli",
   tcodex: "tcodex-cli",
   deepseek: "deepseek-cli",
+  zcode: "zcode-cli",
 };
 
 describe("migrateSessionForMcp — happy path", () => {
@@ -110,6 +179,7 @@ describe("migrateSessionForMcp — happy path", () => {
       const { sessionKey, projectPath } = await seedLocalSession(store);
       const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-home-"));
       try {
+        if (target === "zcode") createZcodeHomeFixture(homeDir);
         const result = await migrateSessionForMcp(
           { sessionKey, target },
           { store, settings: allMigrationTargetsEnabled, inspectCli: noOpInspect, homeDir },
@@ -118,10 +188,15 @@ describe("migrateSessionForMcp — happy path", () => {
         // launched must always be false: the MCP server never opens a terminal.
         expect(result.launched).toBe(false);
         expect(result.target).toBe(target);
-        expect(result.targetSessionId).toMatch(/^[0-9a-f-]{36}$/i);
+        expect(result.targetSessionId).toMatch(/^(sess_)?[0-9a-f-]{36}$/i);
         expect(result.strategy).toBe("complete");
         expect(result.resumeCommand).toContain(result.targetSessionId);
-        expect(result.resumeCommand).toContain(projectPath);
+        if (target === "zcode") {
+          // ZCode has no resume CLI; the hint points at the app's session list.
+          expect(result.resumeCommand).toContain("ZCode");
+        } else {
+          expect(result.resumeCommand).toContain(projectPath);
+        }
         if (target === "deepseek") {
           expect(result.resumeCommand).toContain("dsh");
           expect(result.resumeCommand).toContain("--profile");
@@ -131,7 +206,7 @@ describe("migrateSessionForMcp — happy path", () => {
         expect(fs.existsSync(result.targetFilePath)).toBe(true);
 
         // The target file must be readable by the existing loaders.
-        const loaded = loadMigratedSessionFileForTest(target, result.targetFilePath);
+        const loaded = loadMigratedSessionFileForTest(target, result.targetFilePath, result.targetSessionId);
         expect(loaded?.messages.length).toBeGreaterThan(0);
 
         // The migrated session is immediately searchable in the DB.
@@ -142,12 +217,43 @@ describe("migrateSessionForMcp — happy path", () => {
         expect(found).not.toBeNull();
         expect(found?.source).toBe(targetSources[target]);
       } finally {
-        await store.close();
         fs.rmSync(homeDir, { recursive: true, force: true });
         fs.rmSync(projectPath, { recursive: true, force: true });
       }
     },
+    15_000,
   );
+
+  it("promotes a directly selected subagent to a root ZCode task", async () => {
+    const store = createInMemoryStore();
+    const { sessionKey, projectPath } = await seedLocalSession(store, {
+      isSubagent: true,
+      parentSessionId: "source-parent",
+    });
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-mig-zcode-subagent-"));
+    try {
+      const dbPath = createZcodeHomeFixture(homeDir);
+      const result = await migrateSessionForMcp(
+        { sessionKey, target: "zcode" },
+        { store, settings: allMigrationTargetsEnabled, inspectCli: noOpInspect, homeDir },
+      );
+
+      const db = new DatabaseSync(dbPath);
+      const taskIndex = new DatabaseSync(path.join(homeDir, ".zcode", "v2", "tasks-index.sqlite"));
+      try {
+        expect(db.prepare("SELECT parent_id, task_type FROM session WHERE id = ?").get(result.targetSessionId))
+          .toMatchObject({ parent_id: null, task_type: "interactive" });
+        expect(taskIndex.prepare("SELECT task_id FROM tasks WHERE task_id = ?").get(result.targetSessionId))
+          .toMatchObject({ task_id: result.targetSessionId });
+      } finally {
+        db.close();
+        taskIndex.close();
+      }
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   it("migrates a Claude source to Codex and registers the native Codex index entry", async () => {
     const store = createInMemoryStore();
@@ -173,7 +279,6 @@ describe("migrateSessionForMcp — happy path", () => {
         targetAgent: "codex",
       });
     } finally {
-      store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });
       fs.rmSync(projectPath, { recursive: true, force: true });
     }
@@ -195,7 +300,6 @@ describe("migrateSessionForMcp — happy path", () => {
       expect(fs.existsSync(path.join(homeDir, ".tcodex"))).toBe(false);
       expect(await store.listSessionMigrations(sessionKey)).toEqual([]);
     } finally {
-      await store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });
       fs.rmSync(projectPath, { recursive: true, force: true });
     }

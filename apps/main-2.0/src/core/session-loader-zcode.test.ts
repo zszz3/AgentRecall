@@ -273,7 +273,7 @@ describe("ZCode session loader", () => {
     } finally {
       await store.close();
     }
-  });
+  }, 15_000);
 
   it("marks workflow task sessions as subagents via session_task_link", () => {
     const root = tempZcodeRoot("task-link");

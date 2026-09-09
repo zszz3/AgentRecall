@@ -51,6 +51,11 @@ function assertZcodeDatabasePath(dbPath: string): string {
   return normalized;
 }
 
+/** Resolves the ZCode database location for a home directory, mirroring the ZCode client layout. */
+export function zcodeDatabasePathFromHome(homeDir: string): string {
+  return assertZcodeDatabasePath(path.join(path.resolve(homeDir.trim()), ".zcode", "cli", "db", "db.sqlite"));
+}
+
 /**
  * Permanently removes one ZCode session and its sub-agent descendants while keeping the shared
  * database and all other sessions intact. A pre-deletion backup is written next to the database.
@@ -121,7 +126,12 @@ export function deleteZcodeSessions(dbPath: string, sessionIds: readonly string[
   }
 }
 
-function attachZcodeTaskIndex(db: DatabaseSyncType, dbPath: string): boolean {
+/**
+ * Attaches the ZCode client's task index as the `zcode_tasks` schema. The index drives the
+ * client's session list, so writers that add or remove sessions must keep it in step.
+ * Returns false when the index file or its tasks table does not exist yet.
+ */
+export function attachZcodeTaskIndex(db: DatabaseSyncType, dbPath: string): boolean {
   const zcodeRoot = path.dirname(path.dirname(path.dirname(dbPath)));
   const taskIndexPath = path.join(zcodeRoot, "v2", "tasks-index.sqlite");
   let stat: fs.Stats;

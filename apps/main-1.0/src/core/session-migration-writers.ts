@@ -16,6 +16,7 @@ import {
   loadCodeWizSessions,
   loadCodexSessionRows,
   loadCursorTranscriptFile,
+  loadZcodeSessions,
   parseCursorTranscriptPath,
   parseJsonlText,
 } from "./session-loader";
@@ -31,6 +32,7 @@ import {
 import { loadMigrationTargetRuntimeMetadata, type MigrationTargetRuntimeMetadata } from "./migration-target-runtime";
 import { migrationTargetDescriptor } from "./migration-targets";
 import type { LoadedSession, MigrationTarget, PortableSession } from "./types";
+import { attachZcodeTaskIndex, zcodeDatabasePathFromHome } from "./zcode-session-writer";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as {
@@ -69,6 +71,9 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
   }
   if (options.target === "codewiz") {
     return writeMigratedCodeWizSession({ ...options, homeDir, now, idFactory: createId }, sessionId);
+  }
+  if (options.target === "zcode") {
+    return writeMigratedZcodeSession({ ...options, homeDir, now, idFactory: createId }, sessionId);
   }
   if (options.target === "deepseek") {
     const deepSeekHome = options.homeDir === undefined
@@ -192,6 +197,392 @@ async function writeMigratedCodeWizSession(
   }
   await fs.promises.chmod(dbPath, 0o600);
   return { sessionId, filePath: dbPath };
+}
+
+/**
+ * Writes one migrated session into the shared local ZCode database. The write is a single
+ * transaction against the live database with a pre-write snapshot, and is verified by
+ * re-reading the session through the ZCode loader before it is reported as created.
+ */
+async function writeMigratedZcodeSession(
+  options: WriteMigratedSessionOptions & { homeDir: string; now: Date; idFactory: () => string },
+  sessionId: string,
+): Promise<WrittenMigratedSession> {
+  const dbPath = zcodeDatabasePathFromHome(options.homeDir);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(dbPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw Object.assign(
+        new Error(`ZCode database not found at ${dbPath}. Install ZCode and start one session so the database exists.`),
+        { code: "ENOENT" },
+      );
+    }
+    throw error;
+  }
+  if (!stat.isFile()) throw new Error("ZCode database path is not a regular file.");
+
+  // The ZCode sidebar only lists tasks for its open workspaces, and the built-in
+  // default workspace is always open, so migrated sessions land there and show up
+  // in the client's task list without the user opening the source project first.
+  const zcodeRoot = zcodeRootFromDatabasePath(dbPath);
+  const stored = { ...options.session, projectPath: zcodeDefaultWorkspacePath(zcodeRoot) };
+  const zcodeSessionId = options.session.isSubagent ? `sess_subagent_agent_${sessionId}` : `sess_${sessionId}`;
+  const writable = zcodeWritableMessages(stored);
+  if (writable.length === 0) throw new Error("ZCode migration produced no writable messages.");
+
+  const db = new DatabaseSync(dbPath);
+  let taskIndexAttached = false;
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    assertZcodeWriteSchema(db);
+    backupZcodeDatabase(db, dbPath);
+    // Root sessions must also be registered in the ZCode client's task index or its
+    // session list will not show them; subagent sessions stay unlisted like native ones.
+    taskIndexAttached = !stored.isSubagent && attachZcodeTaskIndex(db, dbPath);
+    if (!stored.isSubagent && !taskIndexAttached) {
+      throw new Error("ZCode task index is missing or incompatible. Start one ZCode session so its task list is initialized, then retry the migration.");
+    }
+    if (taskIndexAttached) assertZcodeTaskIndexWriteSchema(db);
+    insertZcodeSession(db, stored, writable, zcodeSessionId, options.idFactory, options.now, taskIndexAttached);
+
+    const validationSession = { ...stored, messages: writable };
+    try {
+      if (options.beforeValidate) await options.beforeValidate(dbPath);
+      const loaded = loadWrittenSession("zcode", dbPath, zcodeSessionId, validationSession);
+      validateRoundTrip(loaded, "zcode", zcodeSessionId, validationSession);
+      if (options.validate) {
+        const additionallyLoaded = await options.validate(dbPath);
+        validateRoundTrip(additionallyLoaded, "zcode", zcodeSessionId, validationSession);
+      }
+    } catch (error) {
+      try {
+        removeInsertedZcodeSession(db, zcodeSessionId, taskIndexAttached);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `ZCode migration validation failed and cleanup could not remove session ${zcodeSessionId}.`,
+        );
+      }
+      throw error;
+    }
+    return { sessionId: zcodeSessionId, filePath: dbPath };
+  } finally {
+    db.close();
+  }
+}
+
+/** Drops messages the ZCode loader would filter out so the written rows round-trip exactly. */
+function zcodeWritableMessages(session: PortableSession): PortableSession["messages"] {
+  return session.messages
+    .filter((message) => message.content.trim().length > 0 && (message.role === "assistant" || isMeaningfulUserMessage(message.content)));
+}
+
+function assertZcodeWriteSchema(db: import("node:sqlite").DatabaseSync): void {
+  const required: Array<[string, readonly string[]]> = [
+    ["session", ["id", "project_id", "parent_id", "slug", "directory", "path", "title", "version", "permission", "trace_id", "task_type", "title_source", "title_message_id", "time_title_updated", "time_created", "time_updated"]],
+    ["message", ["id", "session_id", "sequence", "time_created", "time_updated", "data"]],
+    ["part", ["id", "message_id", "session_id", "sequence", "time_created", "time_updated", "data"]],
+  ];
+  for (const [table, columns] of required) {
+    const present = new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: unknown }>)
+        .map((column) => column.name),
+    );
+    if (present.size === 0) throw new Error(`ZCode database schema is incompatible: missing the ${table} table.`);
+    const missing = columns.filter((column) => !present.has(column));
+    if (missing.length > 0) {
+      throw new Error(`ZCode database schema is incompatible: ${table} is missing ${missing.join(", ")}.`);
+    }
+  }
+}
+
+function assertZcodeTaskIndexWriteSchema(db: import("node:sqlite").DatabaseSync): void {
+  const required = [
+    "workspace_key", "workspace_path", "workspace_identity", "task_id", "title", "task_status",
+    "provider", "mode", "model", "migration_source", "forked_from_task_id", "created_at", "updated_at",
+    "unread_at", "last_unread_at", "pinned", "archived", "deleted", "title_overridden", "meta_json",
+    "searchable_text", "cron_automation_id", "off_peak_task_id",
+  ];
+  const present = new Set(
+    (db.prepare("PRAGMA zcode_tasks.table_info(tasks)").all() as Array<{ name?: unknown }>)
+      .map((column) => column.name),
+  );
+  const missing = required.filter((column) => !present.has(column));
+  if (missing.length > 0) {
+    throw new Error(`ZCode task index schema is incompatible: tasks is missing ${missing.join(", ")}.`);
+  }
+}
+
+/** Writes a consistent pre-write snapshot of the shared database to db.sqlite.bak. */
+function backupZcodeDatabase(db: import("node:sqlite").DatabaseSync, dbPath: string): void {
+  const backupPath = `${dbPath}.bak`;
+  const stagingPath = `${backupPath}.tmp`;
+  fs.rmSync(stagingPath, { force: true });
+  try {
+    db.prepare("VACUUM INTO ?").run(stagingPath);
+    fs.renameSync(stagingPath, backupPath);
+  } catch (error) {
+    fs.rmSync(stagingPath, { force: true });
+    throw new Error(`ZCode database backup failed before migration: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function insertZcodeSession(
+  db: import("node:sqlite").DatabaseSync,
+  session: PortableSession,
+  messages: PortableSession["messages"],
+  zcodeSessionId: string,
+  createId: () => string,
+  now: Date,
+  taskIndexAttached = false,
+): void {
+  const nowMs = now.getTime();
+  const startedMs = timestampMs(session.startedAt) || nowMs;
+  const lastMessageMs = messages.length > 0
+    ? messages.reduce((latest, message) => Math.max(latest, timestampMs(message.timestamp) || nowMs), startedMs)
+    : startedMs;
+  const version = db.prepare("SELECT version FROM session WHERE version IS NOT NULL AND version <> '' ORDER BY time_created DESC LIMIT 1")
+    .get() as { version?: unknown } | undefined;
+  const projectId = session.projectPath.trim() ? encodeZcodeProjectId(session.projectPath) : null;
+  const parentId = session.parentSessionId?.trim() || null;
+
+  const insertSession = db.prepare(`
+    INSERT INTO session (id, project_id, parent_id, slug, directory, path, title, version, permission, trace_id, task_type, title_source, title_message_id, time_title_updated, time_created, time_updated)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'first_input', ?, ?, ?, ?)
+  `);
+  const insertMessage = db.prepare(`
+    INSERT INTO message (id, session_id, sequence, time_created, time_updated, data)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertPart = db.prepare(`
+    INSERT INTO part (id, message_id, session_id, sequence, time_created, time_updated, data)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // The ZCode agent replays these rows verbatim when resuming, so every field it reads
+  // (tokens, semantics, anchor, parentID chain, step parts) must match native rows.
+  const usedIds = new Set<string>([zcodeSessionId]);
+  const provider = "glm";
+  const modelId = "glm";
+  const pathInfo = { cwd: session.projectPath, root: session.projectPath };
+  const emptyTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+  const agent = session.isSubagent ? "zcode-general-purpose" : "zcode-agent";
+  const toolFlags = {
+    AskUserQuestion: true, Bash: true, Edit: true, Read: true, Skill: true, TaskOutput: true,
+    TaskStop: true, TodoRead: true, TodoWrite: true, WebFetch: true, WebSearch: true, Write: true,
+  };
+  const rows: Array<{
+    messageId: string; messageTime: number; data: string; role: "user" | "assistant";
+    parts: Array<{ partId: string; data: string }>;
+  }> = [];
+  let lastUserMessageId: string | null = null;
+  let turnId: string | null = null;
+  for (const message of messages) {
+    const messageTime = timestampMs(message.timestamp) || nowMs;
+    const messageId = `msg_${nextUniqueUuid(createId, usedIds)}`;
+    if (message.role === "user") {
+      lastUserMessageId = messageId;
+      turnId = `turn_${nextUniqueUuid(createId, usedIds)}`;
+      rows.push({
+        messageId,
+        messageTime,
+        role: "user",
+        data: JSON.stringify({
+          role: "user",
+          time: { created: messageTime },
+          agent,
+          model: { providerID: provider, modelID: modelId },
+          contextSnapshot: {
+            envInfo: {
+              cwd: session.projectPath,
+              platform: process.platform,
+              isGitRepository: false,
+              gitStatus: "not_repo",
+            },
+          },
+          semantics: {
+            origin: "real_user",
+            kind: "user_prompt",
+            uiVisibility: "visible",
+            providerVisibility: "visible",
+            transcriptVisibility: "visible",
+          },
+          anchor: { turnId, origin: "realUser" },
+          tools: toolFlags,
+        }),
+        parts: [{ partId: `part_${nextUniqueUuid(createId, usedIds)}`, data: JSON.stringify({ type: "text", text: message.content }) }],
+      });
+      continue;
+    }
+    rows.push({
+      messageId,
+      messageTime,
+      role: "assistant",
+      data: JSON.stringify({
+        role: "assistant",
+        time: { created: messageTime, completed: messageTime },
+        ...(lastUserMessageId ? { parentID: lastUserMessageId } : {}),
+        modelID: modelId,
+        providerID: provider,
+        mode: "build",
+        agent,
+        path: pathInfo,
+        cost: 0,
+        tokens: emptyTokens,
+        finish: "completed",
+        semantics: {
+          origin: "agent_runtime",
+          kind: "assistant_response",
+          uiVisibility: "visible",
+          providerVisibility: "visible",
+          transcriptVisibility: "visible",
+        },
+        ...(turnId ? { anchor: { turnId } } : {}),
+      }),
+      parts: [
+        { partId: `part_${nextUniqueUuid(createId, usedIds)}`, data: JSON.stringify({ type: "step-start" }) },
+        { partId: `part_${nextUniqueUuid(createId, usedIds)}`, data: JSON.stringify({ type: "text", text: message.content }) },
+        {
+          partId: `part_${nextUniqueUuid(createId, usedIds)}`,
+          data: JSON.stringify({ type: "step-finish", reason: "stop", cost: 0, tokens: emptyTokens }),
+        },
+      ],
+    });
+  }
+  const firstUserMessageId = rows.find((row) => row.role === "user")?.messageId ?? null;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    insertSession.run(
+      zcodeSessionId,
+      projectId,
+      parentId,
+      zcodeSessionId,
+      session.projectPath,
+      session.projectPath,
+      session.title || zcodeSessionId,
+      typeof version?.version === "string" ? version.version : null,
+      '{"mode":"build"}',
+      zcodeSessionId.replace(/^sess_/, "trace_"),
+      session.isSubagent ? "subagent_child" : "interactive",
+      firstUserMessageId,
+      startedMs,
+      startedMs,
+      lastMessageMs,
+    );
+    rows.forEach((row, index) => {
+      insertMessage.run(row.messageId, zcodeSessionId, index, row.messageTime, row.messageTime, row.data);
+      row.parts.forEach((part, partIndex) => {
+        insertPart.run(part.partId, row.messageId, zcodeSessionId, partIndex, row.messageTime, row.messageTime, part.data);
+      });
+    });
+    if (taskIndexAttached) {
+      insertZcodeTaskIndexEntry(db, {
+        workspacePath: session.projectPath,
+        taskId: zcodeSessionId,
+        title: session.title || zcodeSessionId,
+        createdAt: startedMs,
+        updatedAt: lastMessageMs,
+        searchableText: messages.map((message) => message.content).join("\n").slice(0, 20_000),
+      });
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function removeInsertedZcodeSession(
+  db: import("node:sqlite").DatabaseSync,
+  zcodeSessionId: string,
+  taskIndexAttached: boolean,
+): void {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM part WHERE session_id = ?").run(zcodeSessionId);
+    db.prepare("DELETE FROM message WHERE session_id = ?").run(zcodeSessionId);
+    db.prepare("DELETE FROM session WHERE id = ?").run(zcodeSessionId);
+    if (taskIndexAttached) {
+      db.prepare("DELETE FROM zcode_tasks.tasks WHERE task_id = ?").run(zcodeSessionId);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * Mirrors the ZCode client's own task-index row so the migrated session is listed,
+ * searchable, and deletable inside the ZCode app. The client validates meta_json with a
+ * strict schema: traceId is required, mode/provider are closed enums, and migrationSource
+ * only accepts the client's own import marker "claudeCode".
+ */
+function insertZcodeTaskIndexEntry(
+  db: import("node:sqlite").DatabaseSync,
+  entry: {
+    workspacePath: string;
+    taskId: string;
+    title: string;
+    createdAt: number;
+    updatedAt: number;
+    searchableText: string;
+  },
+): void {
+  const latest = db.prepare(
+    "SELECT provider, model FROM zcode_tasks.tasks WHERE provider IN ('claude','opencode','gemini','codex','glm') AND provider <> '' ORDER BY updated_at DESC LIMIT 1",
+  ).get() as { provider?: unknown; model?: unknown } | undefined;
+  const provider = typeof latest?.provider === "string" ? latest.provider : "glm";
+  const model = typeof latest?.model === "string" ? latest.model : null;
+  db.prepare(`
+    INSERT OR IGNORE INTO zcode_tasks.tasks (
+      workspace_key, workspace_path, workspace_identity, task_id, title, task_status, provider, mode, model,
+      migration_source, forked_from_task_id, created_at, updated_at, unread_at, last_unread_at,
+      pinned, archived, deleted, title_overridden, meta_json, searchable_text, cron_automation_id, off_peak_task_id
+    ) VALUES (?, ?, NULL, ?, ?, 'completed', ?, 'build', ?, 'claudeCode', NULL, ?, ?, NULL, 0, 0, 0, 0, 0, ?, ?, NULL, NULL)
+  `).run(
+    entry.workspacePath,
+    entry.workspacePath,
+    entry.taskId,
+    entry.title,
+    provider,
+    model,
+    entry.createdAt,
+    entry.updatedAt,
+    JSON.stringify({
+      taskId: entry.taskId,
+      traceId: `zcode-${entry.taskId}`,
+      title: entry.title,
+      titleOverridden: false,
+      workspacePath: entry.workspacePath,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      mode: "build",
+      model: model ?? undefined,
+      provider,
+      status: "completed",
+      target: null,
+    }),
+    entry.searchableText,
+  );
+}
+
+function encodeZcodeProjectId(projectPath: string): string {
+  const slug = projectPath.trim().toLowerCase()
+    .replace(/[^a-z0-9一-龥]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `proj_${slug || "migration"}`;
+}
+
+function zcodeRootFromDatabasePath(dbPath: string): string {
+  return path.dirname(path.dirname(path.dirname(dbPath)));
+}
+
+function zcodeDefaultWorkspacePath(zcodeRoot: string): string {
+  return path.join(zcodeRoot, "workspace", "default");
 }
 
 function serializeSession(
@@ -658,6 +1049,7 @@ export function targetFilePath(
 ): string {
   const family = migrationTargetDescriptor(target).family;
   if (family === "codewiz") return path.join(homeDir, ".local", "share", "codewiz", "opencode.db");
+  if (target === "zcode") return path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
   const root = TARGET_ROOTS[target];
   if (family === "codex") {
     const year = String(now.getUTCFullYear()).padStart(4, "0");
@@ -712,6 +1104,7 @@ const TARGET_ROOTS: Record<MigrationTarget, string> = {
   codewiz: path.join(".local", "share", "codewiz"),
   cursor: ".cursor",
   deepseek: ".dsh",
+  zcode: ".zcode",
 };
 const NO_PROJECT_DIRECTORY = "empty-window";
 
@@ -1340,6 +1733,9 @@ function loadWrittenSession(
   if (descriptor.family === "codewiz") {
     return loadCodeWizSessions(path.dirname(filePath)).find((item) => item.session.rawId === sessionId) ?? null;
   }
+  if (descriptor.family === "zcode") {
+    return loadZcodeSessions(zcodeRootFromDatabasePath(filePath)).find((item) => item.session.rawId === sessionId) ?? null;
+  }
   const rows = parseJsonlText(fs.readFileSync(filePath, "utf8"));
   if (descriptor.family === "codex") {
     return loadCodexSessionRows(filePath, rows, { sourceOverride: descriptor.source });
@@ -1366,7 +1762,7 @@ function validateRoundTrip(
       const expectedContent = target === "cursor"
         ? normalizeCursorMigrationContent(expected.content, expected.role)
         : expected.content;
-      const timestampMatches = descriptor.family === "codebuddy" || descriptor.family === "codewiz"
+      const timestampMatches = descriptor.family === "codebuddy" || descriptor.family === "codewiz" || descriptor.family === "zcode"
         ? new Date(message.timestamp).getTime() === new Date(expected.timestamp).getTime()
         : target === "cursor"
           ? true

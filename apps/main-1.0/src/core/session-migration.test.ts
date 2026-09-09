@@ -12,7 +12,6 @@ import {
 } from "./session-migration";
 import type { WrittenMigratedSession } from "./session-migration-writers";
 import type {
-  MigrationAgent,
   MigrationTarget,
   PortableSession,
   SessionMessage,
@@ -246,9 +245,9 @@ describe("session migration model", () => {
   });
 
   it("returns the base migration targets when enabled targets are omitted", () => {
-    const targets: MigrationAgent[] = supportedMigrationTargets("claude-cli");
+    const targets: MigrationTarget[] = supportedMigrationTargets("claude-cli");
 
-    expect(targets).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor"]);
+    expect(targets).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"]);
   });
 
   it("preserves the narrow element type of explicitly enabled targets", () => {
@@ -348,6 +347,22 @@ describe("session migration model", () => {
 });
 
 describe("migrateSession", () => {
+  it("treats a directly selected ZCode subagent as a root task", async () => {
+    const { deps, write } = createDependencies();
+
+    await migrateSession({
+      source: session("cursor-agent", { isSubagent: true, parentSessionId: "source-parent" }),
+      messages,
+      target: "zcode",
+      deps,
+    });
+
+    expect(write).toHaveBeenCalledWith("zcode", expect.objectContaining({
+      isSubagent: false,
+      parentSessionId: null,
+    }));
+  });
+
   it("migrates a Codex subagent tree and replaces completion notifications with native links", async () => {
     const root = session("cursor-agent", { rawId: "root", sessionKey: "cursor:root" });
     const subagents: PortableSession[] = [{

@@ -91,7 +91,9 @@ SSH 和 WSL 会话的 Resume 会在对应远程环境中执行。连接不可用
 
 ### 迁移会话
 
-点击 **迁移到…**，选择 Claude Code、Codex、CodeBuddy、CodeWiz、Cursor Agent、TClaude 或 TCodex。迁移完成后会打开新的目标会话；如果自动打开失败，界面会给出可复制的恢复命令。
+点击 **迁移到…**，选择 Claude Code、Codex、CodeBuddy、CodeWiz、Cursor Agent、TClaude、TCodex 或 ZCode。除 ZCode 外，迁移完成后会自动打开新的目标会话；如果自动打开失败，界面会给出可复制的恢复命令。迁移到 ZCode 时，会话（含子代理会话）会写入本地 ZCode 数据库并出现在它的任务列表中，迁移前会自动备份数据库；迁移完成后重启 ZCode，即可在任务列表中打开继续。
+
+首次迁入 ZCode 前，先在 ZCode 中创建一次会话，初始化本地会话和任务列表。任务列表缺失或格式不兼容时，迁移会报错，不会留下无法找到的新会话。直接选中子代理迁移时，它会成为独立任务；随主会话迁移的子代理仍挂在新主会话下。若还要在 AgentRecall 中搜索迁入的会话，请开启 **设置 → 可选来源 → ZCode**。
 
 迁移到 CodeBuddy、CodeWiz、Cursor Agent、TClaude 或 TCodex 前，需要先在 **设置 → 可选来源** 中开启对应 Agent。某个来源或环境不支持迁移时，迁移入口会隐藏或不可用。
 

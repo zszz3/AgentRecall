@@ -100,7 +100,42 @@ describe("SSH session migration policy", () => {
   });
 });
 
-describe("Codex subagent migration", () => {
+describe("subagent migration", () => {
+  it("treats a directly selected ZCode subagent as a root task", async () => {
+    const source = {
+      ...session("cursor-agent"),
+      environmentId: "local",
+      environmentKind: "local",
+      isSubagent: true,
+      parentSessionId: "source-parent",
+    } as SessionSearchResult;
+    const write = vi.fn<SessionMigrationDependencies["write"]>(async () => ({
+      sessionId: "target-session",
+      filePath: "/tmp/target-session",
+    }));
+    const deps: SessionMigrationDependencies = {
+      inspectCli: vi.fn(),
+      prepare: vi.fn<SessionMigrationDependencies["prepare"]>(async (portable) => ({ session: portable, strategy: "complete" })),
+      write,
+      record: vi.fn(),
+      refreshIndex: vi.fn(),
+      launch: vi.fn(),
+      resumeCommand: vi.fn(() => "Open ZCode"),
+      fallbackResumeCommand: vi.fn(() => "Open ZCode"),
+      idFactory: vi.fn(() => "record-id"),
+      now: vi.fn(() => 1),
+      projectPathExists: vi.fn(() => true),
+      projectPathIsDirectory: vi.fn(() => true),
+    };
+
+    await migrateSession({ source, messages, target: "zcode", deps });
+
+    expect(write).toHaveBeenCalledWith("zcode", expect.objectContaining({
+      isSubagent: false,
+      parentSessionId: null,
+    }));
+  });
+
   it("writes nested child sessions and omits system completion messages from the parent", async () => {
     const root = {
       ...session("cursor-agent"),

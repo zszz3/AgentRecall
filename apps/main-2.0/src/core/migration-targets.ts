@@ -10,7 +10,7 @@ export type MigrationTargetSettings = Partial<Record<OptionalMigrationTargetSett
 export interface MigrationTargetDescriptor {
   id: MigrationTarget;
   label: string;
-  family: MigrationAgent;
+  family: MigrationAgent | "zcode";
   source: SessionSource;
   enabledSetting: OptionalMigrationTargetSetting | null;
 }
@@ -37,6 +37,13 @@ export const MIGRATION_TARGETS: readonly MigrationTargetDescriptor[] = [
     label: "Cursor Agent",
     family: "cursor",
     source: "cursor-agent",
+    enabledSetting: null,
+  },
+  {
+    id: "zcode",
+    label: "ZCode",
+    family: "zcode",
+    source: "zcode-cli",
     enabledSetting: null,
   },
   {
@@ -68,12 +75,13 @@ export const MIGRATION_TARGET_IDS = [
   "codebuddy",
   "codewiz",
   "cursor",
+  "zcode",
   "tclaude",
   "tcodex",
   "deepseek",
 ] as const satisfies readonly MigrationTarget[];
 
-export const BASE_MIGRATION_TARGETS = ["claude", "codex", "codebuddy", "codewiz", "cursor"] as const satisfies readonly MigrationTarget[];
+export const BASE_MIGRATION_TARGETS = ["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"] as const satisfies readonly MigrationTarget[];
 
 export function isMigrationTarget(value: unknown): value is MigrationTarget {
   return typeof value === "string" && (MIGRATION_TARGET_IDS as readonly string[]).includes(value);

@@ -1822,6 +1822,12 @@ function zcodeMessagesFromParts(
   db: import("node:sqlite").DatabaseSync,
   rawId: string,
 ): { messages: SessionMessage[]; traceEvents: SessionTraceEvent[]; assistantMessageIds: Set<string> } {
+  const messageOrder = sqliteHasColumns(db, "message", ["sequence"])
+    ? "message.sequence, message.time_created, message.id"
+    : "message.time_created, message.id";
+  const partOrder = sqliteHasColumns(db, "part", ["sequence"])
+    ? "part.sequence, part.time_created, part.id"
+    : "part.time_created, part.id";
   const rows = db
     .prepare(
       `
@@ -1830,7 +1836,7 @@ function zcodeMessagesFromParts(
         FROM message
         LEFT JOIN part ON part.message_id = message.id
         WHERE message.session_id = ?
-        ORDER BY message.time_created, message.id, part.time_created, part.id
+        ORDER BY ${messageOrder}, ${partOrder}
       `,
     )
     .all(rawId) as Array<Record<string, unknown>>;
@@ -1859,8 +1865,8 @@ function zcodeMessagesFromParts(
     if (!isRecord(partData)) continue;
     const partType = stringField(partData, "type");
     if (partType === "text") {
-      const text = stringField(partData, "text").trim();
-      if (text) draft.text.push(text);
+      const text = stringField(partData, "text");
+      if (text.trim()) draft.text.push(text);
       continue;
     }
     if (partType !== "tool") continue;
