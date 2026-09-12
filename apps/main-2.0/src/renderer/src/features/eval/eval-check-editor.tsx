@@ -7,6 +7,7 @@ import type {
   EvaluationEvaluator,
   EvaluatorKind,
 } from "../../../../automation/contracts";
+import { PROMPT_INPUT_KEYS } from "../../../../core/evaluation/nodes/judge-nodes";
 import { localize, type LanguageMode } from "../../language";
 
 /**
@@ -25,6 +26,13 @@ import { localize, type LanguageMode } from "../../language";
  * trajectory that never arrived all report as unscored rather than as a zero, and
  * the form says so where the choice is made.
  */
+
+/**
+ * The placeholders a scoring prompt may use, read off the list the prompt
+ * renderer owns. Restating them here would let the hint advertise a name the
+ * engine leaves as a literal `{{...}}` in the judge's prompt.
+ */
+const PLACEHOLDER_HINT = PROMPT_INPUT_KEYS.map((key) => `{{${key}}}`).join(" ");
 
 export const KIND_LABELS: Record<EvaluatorKind, [string, string]> = {
   exact_match: ["Exact match", "精确匹配"],
@@ -284,7 +292,7 @@ export function EvalCheckEditor({
             <span>
               {l("Scoring prompt", "评分 Prompt")}
               {" · "}
-              {l("placeholders: {{input}} {{output}} {{ground_truth}} {{context}}", "占位符：{{input}} {{output}} {{ground_truth}} {{context}}")}
+              {l("placeholders:", "占位符：")} {PLACEHOLDER_HINT}
             </span>
             <textarea
               value={draft.prompt ?? ""}
