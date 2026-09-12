@@ -1356,9 +1356,65 @@ function RunCaseDetail({
   );
 }
 
+/**
+ * Whether a score delta means anything.
+ *
+ * A case run twice can land far apart on its own, so a delta inside that gap says
+ * nothing about the change under comparison. The band comes from the runs' own
+ * repeated-case spread instead of a configured constant: a made-up default would
+ * be a criterion nobody chose, and "never scored twice" is the honest reading when
+ * a case's variation was not measured.
+ */
+type DeltaReading = "improved" | "regressed" | "within-noise" | "unmeasured";
+
+function deltaReading(delta: number, band: number | null): DeltaReading {
+  if (band === null) return "unmeasured";
+  if (delta > band) return "improved";
+  if (delta < -band) return "regressed";
+  return "within-noise";
+}
+
+function deltaBadgeClass(reading: DeltaReading): string {
+  if (reading === "improved") return "eval-badge-ok";
+  if (reading === "regressed") return "eval-badge-warn";
+  return "eval-badge-dim";
+}
+
+/**
+ * Wider of two bands. A comparison sets one draw from each run side by side, so
+ * instability on either side is enough to make a small delta unattributable.
+ */
+function widerBand(left: number | null, right: number | null): number | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Math.max(left, right);
+}
+
+function deltaTitle(
+  reading: DeltaReading,
+  band: number | null,
+  l: (en: string, zh: string) => string,
+): string {
+  if (reading === "unmeasured") {
+    return l(
+      "Fewer than two scored repetitions, so this delta cannot be told apart from ordinary variation.",
+      "评分过的重复次不足两次，这个涨跌分不清是改动带来的还是本身的波动。",
+    );
+  }
+  const width = `±${(band ?? 0).toFixed(2)}`;
+  if (reading === "within-noise") {
+    return l(`Inside the ${width} repeat spread.`, `在 ${width} 的重复波动带内。`);
+  }
+  return reading === "improved"
+    ? l(`Past the ${width} repeat spread, so it reads as a real improvement.`, `超出 ${width} 的重复波动带，可以当成真的改进。`)
+    : l(`Past the ${width} repeat spread, so it reads as a real regression.`, `超出 ${width} 的重复波动带，可以当成真的回归。`);
+}
+
 // Side-by-side comparison of two runs of the same suite. Case results pair by
 // dataset item + repetition; the view presents per-case facts (score deltas,
-// both outputs) and never turns them into advice.
+// both outputs) and never turns them into advice. A delta is read against the
+// spread the same case showed across its own repetitions, so ordinary variation
+// is not reported as a regression.
 function RunComparison({
   language,
   base,
@@ -1393,6 +1449,20 @@ function RunComparison({
   const totalDelta = base.averageScore != null && compare.averageScore != null
     ? compare.averageScore - base.averageScore
     : null;
+  const runBand = widerBand(
+    base.consistency?.meanSpread ?? null,
+    compare.consistency?.meanSpread ?? null,
+  );
+  // A case's own band, from whichever run repeated it enough to score. Null means
+  // fewer than two scored repetitions on both sides, so its delta cannot be read.
+  const bandOf = (datasetItemId: string): number | null => {
+    const spreadIn = (run: EvaluationRun): number | null =>
+      run.consistency?.entries.find((entry) => entry.datasetItemId === datasetItemId)?.spread ?? null;
+    return widerBand(spreadIn(base), spreadIn(compare));
+  };
+  const totalReading: DeltaReading = totalDelta !== null
+    ? deltaReading(totalDelta, runBand)
+    : "unmeasured";
 
   return (
     <div className="eval-run-comparison">
@@ -1413,7 +1483,10 @@ function RunComparison({
           <span className="eval-badge eval-badge-dim">{l("Rubric not recorded", "评分标准未记录")}</span>
         )}
         {totalDelta != null ? (
-          <span className={`eval-badge ${rubricChanged ? "eval-badge-dim" : totalDelta >= 0 ? "eval-badge-ok" : "eval-badge-warn"}`}>
+          <span
+            className={`eval-badge ${rubricChanged ? "eval-badge-dim" : deltaBadgeClass(totalReading)}`}
+            title={deltaTitle(totalReading, runBand, l)}
+          >
             {l("avg score", "平均分")} {totalDelta >= 0 ? "+" : ""}{totalDelta.toFixed(2)}
           </span>
         ) : null}
@@ -1429,6 +1502,17 @@ function RunComparison({
           )}
         </p>
       ) : null}
+      {keys.length > 0 ? (
+        <p className="eval-muted">
+          {runBand === null ? l(
+            "Neither run scored the same case more than once, so there is no repeat spread to judge against: the differences below cannot be told apart from ordinary variation.",
+            "两次运行都没有把同一个用例评分两次以上，没有可参照的重复波动，下面的涨跌分不清是本次改动带来的还是本来就有的抖动。",
+          ) : l(
+            `A delta counts as an improvement or a regression only past ±${runBand.toFixed(2)}, the mean of each case's own gap across its repetitions; anything inside that is treated as variation.`,
+            `涨跌只有超过 ±${runBand.toFixed(2)}（各用例自身重复次之间分差的均值）才算改进或回归，带内一律按波动处理。`,
+          )}
+        </p>
+      ) : null}
       {keys.length === 0 ? (
         <p className="eval-muted">{l("Neither run recorded case results.", "两次运行都没有用例结果。")}</p>
       ) : keys.map((key) => {
@@ -1439,6 +1523,8 @@ function RunComparison({
         const baseScore = caseScore(baseResult);
         const compareScore = caseScore(compareResult);
         const delta = baseScore != null && compareScore != null ? compareScore - baseScore : null;
+        const band = bandOf(present.datasetItemId);
+        const reading: DeltaReading = delta !== null ? deltaReading(delta, band) : "unmeasured";
         return (
           <div key={key} className="eval-run-case">
             <header className="eval-run-case-header">
@@ -1446,7 +1532,10 @@ function RunComparison({
                 {present.input.length > 60 ? `${present.input.slice(0, 60)}…` : present.input}
               </span>
               {delta != null ? (
-                <span className={`eval-badge ${rubricChanged ? "eval-badge-dim" : delta > 0 ? "eval-badge-ok" : delta < 0 ? "eval-badge-warn" : "eval-badge-dim"}`}>
+                <span
+                  className={`eval-badge ${rubricChanged ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
+                  title={deltaTitle(reading, band, l)}
+                >
                   {delta > 0 ? "+" : ""}{delta.toFixed(2)}
                 </span>
               ) : !baseResult ? (
