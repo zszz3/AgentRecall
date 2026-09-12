@@ -724,6 +724,51 @@
   }
 }
 
+/* Dimension breakdown of a comparison: both runs' dimensions, paired by name. */
+.eval-comparison-dimensions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.eval-comparison-section-title {
+  font-size: var(--text-xs);
+  font-weight: 650;
+  color: var(--text-dim);
+}
+
+.eval-comparison-dimension-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eval-comparison-dimension-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+
+.eval-comparison-dimension-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.eval-comparison-dimension-scores {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
 .eval-suite-list {
   display: flex;
   flex-direction: column;
