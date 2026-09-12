@@ -11,6 +11,7 @@ import type {
   SessionTurnSummary,
 } from "../../../../core/types";
 import { formatTokenCount } from "../../format-count";
+import { MessageActions } from "./message-tools";
 import {
   useClampedContextMenuStyle,
   type ContextMenuPoint,
@@ -410,6 +411,7 @@ function TurnMessageBlock({
         timestamp={message.timestamp}
         language={language}
       />
+      <MessageActions index={message.sourceMessageIndex} />
       {useMarkdown ? (
         <div className="msg-body">
           <Markdown text={content} language={language} />

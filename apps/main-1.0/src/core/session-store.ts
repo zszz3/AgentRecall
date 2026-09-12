@@ -15,6 +15,8 @@ import {
   type SessionSyncBinding,
 } from "./store/metadata";
 import { SavedSearchStore, type SavedSearch } from "./store/saved-searches";
+import { MessageBookmarkStore } from "./store/message-bookmarks";
+import type { MessageBookmark, MessageLocator } from "./message-tools";
 import { SearchHistoryStore, type SearchHistoryEntry } from "./store/search-history-store";
 import { migrateSessionStore } from "./store/schema";
 import {
@@ -83,6 +85,7 @@ export class SessionStore {
   private readonly sessions: SessionsStore;
   private readonly skills: SkillStore;
   private readonly savedSearches: SavedSearchStore;
+  private readonly messageBookmarks: MessageBookmarkStore;
   private readonly historyStore: SearchHistoryStore;
 
   constructor(
@@ -103,6 +106,7 @@ export class SessionStore {
     this.sessions = new SessionsStore(this.db, this.environments, attachmentCacheRoot);
     this.skills = new SkillStore(this.db);
     this.savedSearches = new SavedSearchStore(this.db);
+    this.messageBookmarks = new MessageBookmarkStore(this.db);
     this.historyStore = new SearchHistoryStore(this.db);
   }
 
@@ -411,6 +415,21 @@ export class SessionStore {
 
   deleteEnvironmentSessions(environmentId: string): void {
     this.environments.deleteEnvironmentSessions(environmentId);
+  }
+
+  listMessageBookmarks(sessionKey: string): MessageBookmark[] {
+
+    return this.messageBookmarks.list(sessionKey);
+  }
+
+  saveMessageBookmark(bookmark: MessageBookmark): void {
+
+    this.messageBookmarks.save(bookmark);
+  }
+
+  removeMessageBookmark(locator: MessageLocator): void {
+
+    this.messageBookmarks.remove(locator.sessionKey, locator.fingerprint, locator.messageIndex);
   }
 
   listSavedSearches(): SavedSearch[] {

@@ -1,0 +1,30 @@
+.message-actions, .message-tools-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 0; }
+.message-actions button, .message-tools-toolbar > button { display: inline-flex; align-items: center; gap: 6px; }
+.message-actions button[aria-pressed="true"] { color: var(--accent, #b66b36); }
+.message-bookmark-list { flex-basis: 100%; max-height: 220px; overflow: auto; }
+.message-bookmark-list > div { display: flex; gap: 8px; margin: 6px 0; }
+.message-bookmark-list > div > button:first-child { flex: 1; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-tools-feedback { position: fixed; bottom: 24px; right: 24px; z-index: 3000; background: var(--bg, #fff); color: var(--text, #222); padding: 14px; border: 1px solid currentColor; border-radius: 8px; max-width: 460px; }
+.message-tools-feedback button { margin-left: 12px; }
+.export-review-backdrop { position: fixed; inset: 0; z-index: 2500; background: #0008; display: grid; place-items: center; padding: 20px; }
+.export-review-dialog { display: flex; flex-direction: column; width: min(1100px, 100%); max-height: 92vh; overflow: auto; background: var(--panel-bg, #fff); color: var(--text, #222); padding: 24px; border-radius: 12px; box-shadow: 0 12px 48px #0005; }
+.export-review-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.export-review-dialog h2 { margin: 0; }
+.export-review-dialog p { line-height: 1.5; }
+.export-review-columns { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(300px, 2fr); gap: 16px; min-height: 0; flex: 1; overflow: hidden; }
+.export-review-findings { overflow: auto; }
+.export-review-output { display: flex; flex-direction: column; min-height: 0; }
+.export-review-finding { border: 1px solid #8886; border-radius: 6px; margin-bottom: 8px; padding: 10px; }
+.export-review-finding label { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
+.export-review-finding input:not([type="checkbox"]) { width: 100%; margin-top: 8px; }
+.export-review-custom { display: flex; gap: 8px; margin-top: 12px; }
+.export-review-custom input { flex: 1; min-width: 0; }
+.export-review-output pre { flex: 1; min-height: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; border: 1px solid #8886; padding: 12px; }
+.export-review-dialog mark { background: #f7d36d; color: #242019; }
+.export-review-dialog footer { display: flex; justify-content: flex-end; margin-top: 16px; flex-shrink: 0; }
+.export-review-dialog input:not([type="checkbox"]), .export-review-dialog select { padding: 7px 9px; border: 1px solid var(--border, #8886); border-radius: 5px; color: inherit; background: var(--panel-bg, #fff); }
+.export-review-dialog button { padding: 8px 12px; border: 1px solid var(--border, #8886); border-radius: 6px; }
+.export-review-dialog footer button { background: var(--accent, #2563eb); color: #fff; }
+.export-review-dialog button:disabled { opacity: .5; }
+.message-actions button:focus-visible, .message-tools-toolbar button:focus-visible, .export-review-dialog :focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
+@media (max-width: 720px) { .export-review-columns { grid-template-columns: 1fr; } .export-review-findings { max-height: 24vh; } }

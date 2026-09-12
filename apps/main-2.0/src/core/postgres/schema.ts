@@ -2050,4 +2050,17 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS consistency jsonb;
     `,
   ],
+}, {
+  version: 51,
+  name: "persist message bookmarks independently of indexed messages",
+  statements: [`
+    CREATE TABLE agent_recall.message_bookmarks (
+      session_key text NOT NULL,
+      message_index integer NOT NULL,
+      fingerprint text NOT NULL,
+      bookmark jsonb NOT NULL,
+      created_at bigint NOT NULL,
+      PRIMARY KEY (session_key, message_index, fingerprint)
+    );
+  `],
 }];

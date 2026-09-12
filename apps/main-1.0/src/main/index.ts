@@ -152,6 +152,7 @@ import { registerMemoriesIpc, type MemoriesIpcService } from "./ipc/memories";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
 import { registerRulesIpc, type RulesIpcService } from "./ipc/rules";
 import { registerSkillsIpc } from "./ipc/skills";
+import { MessageLinkRouter, registerMessageToolsIpc } from "./ipc/message-tools";
 import { bootstrapApplicationPaths } from "./app-path-bootstrap";
 import {
   AppUpdateService,
@@ -263,6 +264,10 @@ let deepSeekWebWindow: BrowserWindow | null = null;
 const interfaceZoomController = createInterfaceZoomController(() => [mainWindow, quickSearchWindow]);
 let tray: Tray | null = null;
 let store: SessionStore;
+const messageLinkRouter = new MessageLinkRouter(() => {
+  showWindow();
+  return mainWindow;
+});
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
 const indexRunCoordinator = createIndexRunCoordinator<IndexStatus>();
 const indexProgressPublisher = createIndexProgressPublisher(
@@ -1924,6 +1929,7 @@ function stopAutoIndexRefresh(): void {
 }
 
 function registerIpc(): void {
+  registerMessageToolsIpc(ipcMain, store, ensureRemoteSessionDetailsLoaded, messageLinkRouter);
   let openSessionKey: string | undefined;
   const loadConfiguredLiveSessions = (fresh = false) => loadCachedLiveSessionSnapshot({
     fresh,
@@ -2661,6 +2667,7 @@ const applicationReady = hasSingleInstanceLock
       quotaService.start();
       createApplicationMenu();
       createWindow();
+      messageLinkRouter.start();
       createTray();
       applyDockVisibility(getSettings().showInDock);
       if (process.platform === "darwin" && app.dock) {

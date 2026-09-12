@@ -139,6 +139,7 @@ import {
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
 import { registerSkillsIpc } from "./ipc/skills";
+import { MessageLinkRouter, registerMessageToolsIpc } from "./ipc/message-tools";
 import { registerSessionCatalogIpc } from "./ipc/session-catalog";
 import { registerSessionCommandIpc } from "./ipc/session-commands";
 import {
@@ -374,6 +375,10 @@ let deepSeekWebWindow: BrowserWindow | null = null;
 const interfaceZoomController = createInterfaceZoomController(() => [mainWindow, quickSearchWindow]);
 let tray: Tray | null = null;
 let store: SessionStore;
+const messageLinkRouter = new MessageLinkRouter(() => {
+  showWindow();
+  return mainWindow;
+});
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
 const indexRunCoordinator = createIndexRunCoordinator<IndexStatus>({
   afterRun: () => pruneDisabledOptionalSources(getSettings()),
@@ -2653,6 +2658,7 @@ function stopAutoIndexRefresh(): void {
 }
 
 function registerIpc(): void {
+  registerMessageToolsIpc(ipcMain, store, (key) => remoteSessionAccess.ensureDetails(key), messageLinkRouter);
   if (!automationService) throw new Error("Automation service must be created before IPC registration.");
   if (!openVikingControlService) {
     throw new Error("OpenViking memory must be initialized before IPC registration.");
@@ -3107,6 +3113,7 @@ app.whenReady().then(async () => {
   quotaService.start();
   createApplicationMenu();
   createWindow();
+  messageLinkRouter.start();
   createTray();
   applyDockVisibility(getSettings().showInDock);
   if (process.platform === "darwin" && app.dock) {

@@ -10,6 +10,14 @@ export function migrateSessionStore(db: SessionStoreDatabase): void {
     // Some environments (e.g. in-memory) reject WAL; fall back to the default journal.
   }
   db.exec(`
+    CREATE TABLE IF NOT EXISTS message_bookmarks (
+      session_key TEXT NOT NULL,
+      message_index INTEGER NOT NULL,
+      fingerprint TEXT NOT NULL,
+      bookmark TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (session_key, message_index, fingerprint)
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       session_key TEXT PRIMARY KEY,
       raw_id TEXT NOT NULL,

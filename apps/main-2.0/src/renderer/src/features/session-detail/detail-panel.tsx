@@ -42,6 +42,7 @@ import {
 } from "../../../../core/session-sources";
 import { SubagentSessionTree } from "./subagent-session-tree";
 import { SessionContextComponentsPanel } from "./session-context-components-panel";
+import { MessageActions, MessageToolsProvider, MessageToolsToolbar } from "./message-tools";
 import { collaborationMessageMetadata } from "./collaboration-message";
 
 export type ConversationTimelineItem =
@@ -571,6 +572,7 @@ export function DetailPanel({
   }, [panelSearchOpen, turns]);
 
   return (
+    <MessageToolsProvider key={session.sessionKey} sessionKey={session.sessionKey} revision={session.fileMtimeMs} language={language} enabled={!readOnly}>
     <div className={`detail-backdrop ${backdropClassName}`.trim()} onClick={onClose}>
       <aside className="detail" onClick={(event) => event.stopPropagation()}>
         <div className="detail-header">
@@ -776,6 +778,7 @@ export function DetailPanel({
           </div>
         ) : null}
         <SessionContextComponentsPanel session={session} language={language} />
+        <MessageToolsToolbar />
         <div className="detail-tags">
           {session.tags.map((tagName) => (
             <button key={tagName} className={`chip ${isBranchTag(tagName) ? "branch-tag" : ""}`} onClick={() => onRemoveTag(tagName)} disabled={readOnly}>
@@ -955,6 +958,7 @@ export function DetailPanel({
         </div>
       </aside>
     </div>
+    </MessageToolsProvider>
   );
 }
 
@@ -1000,6 +1004,7 @@ function MessageBlock({
         timestamp={message.timestamp}
         language={language}
       />
+      <MessageActions index={message.index} />
       {useMarkdown ? (
         <div className="msg-body">
           <Markdown text={content} language={language} />

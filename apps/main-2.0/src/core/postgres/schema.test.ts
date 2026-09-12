@@ -11,6 +11,20 @@ describe("AgentRecall PostgreSQL schema", () => {
     expect(versions).toEqual([...versions].sort((left, right) => left - right));
   });
 
+  it("adds bookmarks to an existing database without replacing saved searches", async () => {
+    const pool = new PGliteTestPool();
+    const legacy = new PostgresDatabase(pool, { migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 50) });
+    const upgraded = new PostgresDatabase(pool, { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+    try {
+      await legacy.initialize();
+      await legacy.query("insert into agent_recall.saved_searches (name, options, created_at, use_count) values ('Existing search', '{}', now(), 0)");
+      await upgraded.initialize();
+      expect((await upgraded.query("select name from agent_recall.saved_searches")).rows).toEqual([{ name: "Existing search" }]);
+      expect((await upgraded.query("select * from agent_recall.message_bookmarks")).rows).toEqual([]);
+    } finally { await upgraded.close(); }
+  });
+
   it("creates the complete internal domain schema", async () => {
     const database = new PostgresDatabase(new PGliteTestPool(), {
       migrationLock: false,
@@ -33,6 +47,7 @@ describe("AgentRecall PostgreSQL schema", () => {
       "session_message_events",
       "session_attachments",
       "saved_searches",
+      "message_bookmarks",
       "search_history",
       "runtime_invocations",
       "runtime_session_bindings",
@@ -71,7 +86,7 @@ describe("AgentRecall PostgreSQL schema", () => {
       "openviking_operation_events",
       "openviking_recall_traces",
     ]));
-    expect(names).toHaveLength(67);
+    expect(names).toHaveLength(68);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;

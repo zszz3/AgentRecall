@@ -32,6 +32,8 @@ import {
   type SessionSyncBinding,
 } from "./postgres/metadata-repository";
 import { SavedSearchStore, type SavedSearch } from "./store/saved-searches";
+import { MessageBookmarkStore } from "./store/message-bookmarks";
+import type { MessageBookmark, MessageLocator } from "./message-tools";
 import { SearchHistoryStore, type SearchHistoryEntry } from "./store/search-history-store";
 import { PostgresSessionRepository } from "./postgres/session-repository";
 import { PostgresSessionSearchRepository } from "./postgres/session-search-repository";
@@ -128,6 +130,7 @@ export class SessionStore {
   private readonly openVikingMemory: PostgresOpenVikingMemoryRepository;
   private readonly skills: PostgresSkillRepository;
   private readonly savedSearches: SavedSearchStore;
+  private readonly messageBookmarks: MessageBookmarkStore;
   private readonly historyStore: SearchHistoryStore;
   private openVikingControlChangedHandler: (() => void | Promise<void>) | null = null;
 
@@ -145,6 +148,7 @@ export class SessionStore {
     this.openVikingMemory = new PostgresOpenVikingMemoryRepository(database);
     this.skills = new PostgresSkillRepository(database);
     this.savedSearches = new SavedSearchStore(database);
+    this.messageBookmarks = new MessageBookmarkStore(database);
     this.historyStore = new SearchHistoryStore(database);
   }
 
@@ -642,6 +646,16 @@ export class SessionStore {
     return this.turns.getMessages(sessionKey, offset, limit);
   }
 
+  async getMessageTurnId(sessionKey: string, index: number): Promise<string | undefined> {
+    await this.ready;
+    const result = await this.database.query<{ id: string }>(
+      `select turns.id from agent_recall.session_turns turns
+       join agent_recall.turn_messages messages on messages.turn_id = turns.id
+       where turns.session_key = $1 and messages.source_message_index = $2
+       order by turns.turn_index limit 1`, [sessionKey, index]);
+    return result.rows[0]?.id;
+  }
+
   async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {
     await this.ready;
     return this.turns.getAllMessages(sessionKey);
@@ -851,6 +865,21 @@ export class SessionStore {
   async deleteSessionsBySource(sources: readonly SessionSource[]): Promise<void> {
     await this.ready;
     await this.sessions.deleteSessionsBySource(sources);
+  }
+
+  async listMessageBookmarks(sessionKey: string): Promise<MessageBookmark[]> {
+    await this.ready;
+    return this.messageBookmarks.list(sessionKey);
+  }
+
+  async saveMessageBookmark(bookmark: MessageBookmark): Promise<void> {
+    await this.ready;
+    await this.messageBookmarks.save(bookmark);
+  }
+
+  async removeMessageBookmark(locator: MessageLocator): Promise<void> {
+    await this.ready;
+    await this.messageBookmarks.remove(locator.sessionKey, locator.fingerprint, locator.messageIndex);
   }
 
   async listSavedSearches(): Promise<SavedSearch[]> {

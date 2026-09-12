@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactElement, RefObject } from "react";
+import { useMessageLinks } from "./use-message-links";
 import {
   AppWindow,
   Archive,
@@ -373,6 +374,11 @@ export function App(): ReactElement {
   } | null>(null);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
+  useMessageLinks(async (session, hit) => {
+
+    setSelectedKey(session.sessionKey);
+    await openDetail(session, hit);
+  }, (error) => setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) }));
   const [summarizing, setSummarizing] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { createMessageToolsApi } from "./message-tools";
 import type { AiChatMessage } from "../core/ai-assistant";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
@@ -55,6 +56,7 @@ export interface AiAssistantReply {
 }
 
 const api = {
+  messageTools: createMessageToolsApi(ipcRenderer),
   platform: process.platform as NodeJS.Platform,
   automation: createAutomationApi(ipcRenderer),
   quota: createQuotaApi(ipcRenderer),

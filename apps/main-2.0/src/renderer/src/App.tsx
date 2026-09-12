@@ -1,3 +1,4 @@
+import { useMessageLinks } from "./use-message-links";
 import {
   Suspense,
   lazy,
@@ -406,6 +407,11 @@ export function App(): ReactElement {
   } | null>(null);
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [actionStatus, setActionStatus] = useState<ActionStatus | null>(null);
+  useMessageLinks(async (session, hit) => {
+    if (!(await navigateToPage("sessions"))) return;
+    setSelectedKey(session.sessionKey);
+    await openDetail(session, hit);
+  }, (error) => setActionStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) }));
   const openWorkflows = useCallback(async (initialRequest?: WorkflowInitialRequest): Promise<void> => {
     const navigationVersion = pageNavigationVersionRef.current;
     setWorkflowInitialRequest(undefined);
