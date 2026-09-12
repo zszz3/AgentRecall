@@ -397,6 +397,15 @@ export const EVALUATOR_TEMPLATES: EvaluationEvaluatorTemplate[] = [
     prompt: JUDGE_PROMPTS["code-security"],
   },
   {
+    id: "claim-consistency",
+    name: "声称与实际改动一致",
+    description: "比对答案声称改过的文件与轨迹实际触及的文件；轨迹没有路径时不打分。",
+    category: "grounding",
+    kind: "llm_judge",
+    threshold: 0.75,
+    prompt: JUDGE_PROMPTS["claim-consistency"],
+  },
+  {
     id: "technical-writing-rubric",
     name: "技术教程十维评审",
     description: "一次 Judge 调用分别评估事实、机制、状态、代码、失败、图示、验证、结构、表达和注入抵抗。",
