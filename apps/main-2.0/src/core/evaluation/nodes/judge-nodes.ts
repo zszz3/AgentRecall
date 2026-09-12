@@ -13,6 +13,7 @@ import {
   ARTIFACT_PORT,
   TASK_PORT,
   TRAJECTORY_PORT,
+  type EvaluationArtifactFile,
   type EvaluationJudgeScript,
   type EvaluationJudgeScriptVerdict,
   type EvaluationNodeDependencies,
@@ -153,13 +154,73 @@ export interface LlmJudgeConfig extends JudgeDimensionConfig {
 const JUDGE_RETURN_CONTRACT =
   '\n\nReturn JSON only: {"score": number, "reason": string, "evidence": [string], "failedCriteria": [string]}';
 
+/**
+ * The placeholders a judge prompt may use.
+ *
+ * One list, because the render pattern, the "does this prompt use any" test and
+ * the absent-value copy below all have to agree: a prompt whose only placeholder
+ * is missing from the test reads as using none, and then gets the fallback block
+ * appended on top of its rendered result.
+ */
+export const PROMPT_INPUT_KEYS = ["input", "output", "ground_truth", "context", "files"] as const;
+
+export type PromptInputKey = (typeof PROMPT_INPUT_KEYS)[number];
+
+const PROMPT_INPUT_PATTERN = `\\{\\{(${PROMPT_INPUT_KEYS.join("|")})\\}\\}`;
+
+/**
+ * What each placeholder renders to when there is no value for it.
+ *
+ * `files` is the one that cannot borrow the others' copy. The artifact contract
+ * makes an absent list mean "not observed" — a runtime whose trace carries no
+ * tool arguments cannot report paths — and "(not provided)" reads as "nothing was
+ * touched", which would let a judge fail a run for AgentRecall's blind spot. So
+ * it says what is missing and points at the way to decline that already exists:
+ * `score: null` becomes `judge_score_missing` below.
+ */
+const MISSING_PROMPT_INPUT: Record<PromptInputKey, string> = {
+  input: "(not provided)",
+  output: "(not provided)",
+  ground_truth: "(not provided)",
+  context: "(not provided)",
+  files:
+    "（未观测到文件改动：本次运行的轨迹没有携带文件路径。缺少证据不等于证据表明没有改动，" +
+    "不要据此推断「什么都没改」。若没有文件清单就无法判定本维度，返回 score: null 并说明原因。）",
+};
+
+/**
+ * Paths a prompt lists, capped below the 500 the observation itself keeps: a
+ * judge reads the head of a long list, and the tail costs tokens to say nothing
+ * a summary line does not.
+ */
+const MAX_PROMPT_FILES = 200;
+
+function renderArtifactFiles(files: readonly EvaluationArtifactFile[] | undefined): string {
+  if (files === undefined) return MISSING_PROMPT_INPUT.files;
+  // Empty is not absent, and the folder and session sources do produce it: there
+  // it is an honest "touched nothing", which is evidence rather than a gap.
+  if (files.length === 0) return "（本次运行没有触及任何文件）";
+  const lines = files
+    .slice(0, MAX_PROMPT_FILES)
+    .map((file) => `${file.status.padEnd(8)}  ${file.path}`);
+  const omitted = files.length - lines.length;
+  if (omitted > 0) lines.push(`…（另有 ${omitted} 个路径未列出）`);
+  return lines.join("\n");
+}
+
 export function renderEvaluationPrompt(
   template: string,
-  values: { input: string; output: string; ground_truth?: string; context?: string },
+  values: {
+    input: string;
+    output: string;
+    ground_truth?: string;
+    context?: string;
+    files?: string;
+  },
 ): string {
   return template.replace(
-    /\{\{(input|output|ground_truth|context)\}\}/g,
-    (_match, key: keyof typeof values) => values[key] ?? "(not provided)",
+    new RegExp(PROMPT_INPUT_PATTERN, "g"),
+    (_match, key: PromptInputKey) => values[key] ?? MISSING_PROMPT_INPUT[key],
   );
 }
 
@@ -189,14 +250,18 @@ export function createLlmJudgeNode(
 
       const { task, artifact } = context.in;
       const template = context.config.prompt || "Score the answer from 0 to 1.";
-      const usesPlaceholders = /\{\{(?:input|output|ground_truth|context)\}\}/.test(template);
+      const usesPlaceholders = new RegExp(PROMPT_INPUT_PATTERN).test(template);
       let prompt = renderEvaluationPrompt(template, {
         input: task.input,
         output: artifact.output,
+        files: renderArtifactFiles(artifact.files),
         ...(task.expectedOutput !== undefined ? { ground_truth: task.expectedOutput } : {}),
         ...(task.context !== undefined ? { context: task.context } : {}),
       });
       if (!usesPlaceholders) {
+        // No file list here on purpose: it runs to 200 lines, and appending it to
+        // a prompt that asked for nothing would change both the judgment and the
+        // cost of every judge written before {{files}} existed. It is opt-in.
         prompt += `\n\nInput: ${task.input}\n\nAnswer: ${artifact.output}\n\nGround truth: ${task.expectedOutput ?? "(none)"}\n\nContext: ${task.context ?? "(none)"}`;
       }
       if (!prompt.includes('"failedCriteria"')) prompt += JUDGE_RETURN_CONTRACT;
