@@ -113,15 +113,19 @@ describe("remote sync", () => {
             JSON.stringify({ kind: "codex-session", source: "codex-cli", path: "/home/me/.codex/sessions/a.jsonl", mtimeMs: 1, size: 1, rawId: "same", projectPath: "/repo", timestamp: 1, originalTitle: "Codex", firstQuestion: "q", messageCount: 1 }),
             JSON.stringify({ kind: "claude-project", source: "claude-cli", path: "/home/me/.claude/projects/repo/same.jsonl", mtimeMs: 1, size: 1, rawId: "same-claude", projectPath: "/repo", timestamp: 1, originalTitle: "Claude", firstQuestion: "q", messageCount: 1 }),
             JSON.stringify({ kind: "codebuddy-project", source: "codebuddy-cli", path: "/home/me/.codebuddy/projects/repo/same.jsonl", mtimeMs: 1, size: 1, rawId: "same-codebuddy", projectPath: "/repo", timestamp: 1, originalTitle: "CodeBuddy", firstQuestion: "q", messageCount: 1 }),
+            JSON.stringify({ kind: "codewiz-session", source: "codewiz-cli", path: "/home/me/.local/share/codewiz/opencode.db#same-codewiz", mtimeMs: 1, size: 1, rawId: "same-codewiz", projectPath: "/repo", timestamp: 1, originalTitle: "CodeWiz", firstQuestion: "q", messageCount: 1 }),
+            JSON.stringify({ kind: "opencode-session", source: "opencode-cli", path: "/home/me/.local/share/opencode/opencode.db#same-opencode", mtimeMs: 1, size: 1, rawId: "same-opencode", projectPath: "/repo", timestamp: 1, originalTitle: "OpenCode", firstQuestion: "q", messageCount: 1 }),
           ].join("\n");
         },
       });
       const collectorScript = decodeCollectorScript(collectorCommand);
-      expect(collectorScript).not.toContain("codewiz_db = home");
-      expect(collectorScript).not.toContain("emit_codewiz_summaries(codewiz_db");
+      expect(collectorScript).toContain("codewiz_db = home");
+      expect(collectorScript).toContain("emit_codewiz_summaries(codewiz_db");
       expect(store.getSession("wsl:wsl-ubuntu:codex-cli:same")).toBeTruthy();
       expect(store.getSession("wsl:wsl-ubuntu:claude-cli:same-claude")).toBeTruthy();
       expect(store.getSession("wsl:wsl-ubuntu:codebuddy-cli:same-codebuddy")).toBeTruthy();
+      expect(store.getSession("wsl:wsl-ubuntu:codewiz-cli:same-codewiz")).toBeTruthy();
+      expect(store.getSession("wsl:wsl-ubuntu:opencode-cli:same-opencode")).toBeTruthy();
     } finally {
       store.close();
     }

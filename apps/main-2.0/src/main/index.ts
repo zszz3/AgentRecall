@@ -21,7 +21,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
@@ -2436,19 +2436,11 @@ async function writeMigratedSessionToSshEnvironment(
       contentBase64: content.toString("base64"),
     });
     if (target === "codex") {
-      try {
-        await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
-      } catch (error) {
-        try {
-          await removeRemoteMigratedFile(environment, remotePath, createHash("sha256").update(content).digest("hex"));
-        } catch (rollbackError) {
-          throw new Error(
-            `Remote Codex index update failed and rollback could not be verified: ${formatRemoteMigrationError(error)}; ${formatRemoteMigrationError(rollbackError)}`,
-            { cause: error },
-          );
-        }
-        throw error;
-      }
+      // Keep the rollout file when the index request fails. The request may
+      // have committed remotely before its response was lost; deleting the
+      // file here would leave an index entry that points at nothing. A later
+      // sync can safely rebuild the index from this durable file.
+      await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
       await updateRemoteCodexAppState(environment, remoteHome, remotePath, session, written.sessionId, now);
     }
     return { sessionId: written.sessionId, filePath: remotePath };
@@ -2533,17 +2525,6 @@ async function runRemotePathCheck(environment: SessionEnvironment, targetPath: s
   return output.trim();
 }
 
-async function removeRemoteMigratedFile(environment: SessionEnvironment, targetPath: string, sha256: string): Promise<void> {
-  const result = await runRemotePython(environment, REMOTE_REMOVE_FILE_SCRIPT, { path: targetPath, sha256 });
-  if (result.trim() !== "removed") {
-    throw new Error(`Remote migration rollback did not remove ${targetPath}.`);
-  }
-}
-
-function formatRemoteMigrationError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function runRemotePython(environment: SessionEnvironment, script: string, payload: unknown): Promise<string> {
   const remoteCommand = buildPythonBase64Command(script);
   return runRemoteWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
@@ -2575,25 +2556,17 @@ const REMOTE_WRITE_FILE_SCRIPT = [
   "from pathlib import Path",
   "payload = json.load(sys.stdin)",
   "target = Path(payload['path'])",
-  "if target.exists(): raise FileExistsError(f'Target session already exists: {target}')",
   "content = base64.b64decode(payload['contentBase64'])",
   "target.parent.mkdir(parents=True, exist_ok=True)",
   "tmp = target.with_name(target.name + '.tmp-' + uuid.uuid4().hex)",
-  "tmp.write_bytes(content)",
-  "os.chmod(tmp, 0o600)",
-  "os.replace(tmp, target)",
+  "try:",
+  "  tmp.write_bytes(content)",
+  "  os.chmod(tmp, 0o600)",
+  "  os.link(tmp, target)",
+  "  tmp.unlink()",
+  "finally:",
+  "  if tmp.exists(): tmp.unlink()",
   "print(str(target))",
-].join("\n");
-
-const REMOTE_REMOVE_FILE_SCRIPT = [
-  "import hashlib, json, sys",
-  "from pathlib import Path",
-  "payload = json.load(sys.stdin)",
-  "target = Path(payload['path'])",
-  "if target.is_symlink() or not target.is_file(): print('not-removed'); sys.exit(0)",
-  "if hashlib.sha256(target.read_bytes()).hexdigest() != payload['sha256']: print('not-removed'); sys.exit(0)",
-  "target.unlink()",
-  "print('removed')",
 ].join("\n");
 
 const REMOTE_UPDATE_CODEX_INDEX_SCRIPT = [

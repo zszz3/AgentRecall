@@ -64,6 +64,7 @@ export class RemoteWatchManager {
         environment,
         () => {
           if (this.isActive(environment.id, token) && !this.pollingEnvironmentIds.has(environment.id)) {
+            this.recoveryAttempts.delete(environment.id);
             this.scheduleSync(environment, token);
           }
         },
@@ -74,7 +75,6 @@ export class RemoteWatchManager {
       if (!this.isActive(environment.id, token) || this.pollingEnvironmentIds.has(environment.id)) handle.stop();
       else {
         this.handles.set(environment.id, handle);
-        this.recoveryAttempts.delete(environment.id);
         this.options.onModeChange(environment, "event");
       }
     } catch {

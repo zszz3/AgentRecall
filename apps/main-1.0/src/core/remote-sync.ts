@@ -486,8 +486,8 @@ async function syncWslEnvironment(
   try {
     const enabledOptionalSources = new Set(options.enabledOptionalSources ?? []);
     const output = await runWsl(environment, buildRemoteCollectorCommand([...enabledOptionalSources], {
-      includeCodeWiz: enabledOptionalSources.has("codewiz-cli"),
-      includeOpenCode: enabledOptionalSources.has("opencode-cli"),
+      includeCodeWiz: true,
+      includeOpenCode: true,
     }));
     const { payloads, summaries } = decodeRemoteSyncOutput(output);
     const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary), enabledOptionalSources));
@@ -589,7 +589,10 @@ function isSupportedWslSource(source: SessionSource, enabledOptionalSources: Rea
     || source === "claude-cli"
     || (source === "tclaude-cli" && enabledOptionalSources.has(source))
     || (source === "tcodex-cli" && enabledOptionalSources.has(source))
-    || (source === "codebuddy-cli" && enabledOptionalSources.has(source));
+    || (source === "codebuddy-cli" && enabledOptionalSources.has(source))
+    || source === "codewiz-cli"
+    || source === "opencode-cli"
+    || (source === "qoder" && enabledOptionalSources.has(source));
 }
 
 function isOptionalRemoteSource(source: SessionSource): boolean {
