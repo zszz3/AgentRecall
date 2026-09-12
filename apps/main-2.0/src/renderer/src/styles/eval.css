@@ -724,6 +724,14 @@
   }
 }
 
+/* How much evidence the comparison rests on: short facts, space separated. */
+.eval-comparison-sample {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+}
+
 /* Dimension breakdown of a comparison: both runs' dimensions, paired by name. */
 .eval-comparison-dimensions {
   display: flex;

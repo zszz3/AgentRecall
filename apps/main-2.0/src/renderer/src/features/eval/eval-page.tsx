@@ -1471,6 +1471,13 @@ function RunComparison({
       .map((entry) => entry.dimension)
       .filter((name) => !(base.dimensions ?? []).some((entry) => entry.dimension === name)),
   ];
+  const pairedCount = keys.filter((key) => baseByKey.has(key) && compareByKey.has(key)).length;
+  const baseOnlyCount = keys.filter((key) => baseByKey.has(key) && !compareByKey.has(key)).length;
+  const compareOnlyCount = keys.filter((key) => !baseByKey.has(key)).length;
+  const repeatedCount = Math.max(
+    base.consistency?.repeatedCaseCount ?? 0,
+    compare.consistency?.repeatedCaseCount ?? 0,
+  );
 
   return (
     <div className="eval-run-comparison">
@@ -1521,6 +1528,46 @@ function RunComparison({
           )}
         </p>
       ) : null}
+      {keys.length > 0 ? (
+        <p className="eval-muted eval-comparison-sample">
+          <span title={l(
+            "Case results present in both runs. Every per-case delta below rests on these alone.",
+            "两次运行都有的用例结果。下面每个用例的涨跌只建立在这些之上。",
+          )}>
+            {l(`${pairedCount} paired case(s)`, `${pairedCount} 个配对用例`)}
+          </span>
+          {repeatedCount > 0 ? (
+            <span title={l(
+              "Cases scored more than once in at least one of the two runs. That repetition is where the spread above comes from.",
+              "两次运行中至少有一次评分过不止一遍的用例。上面的波动带就来自这些重复。",
+            )}>
+              {l(`${repeatedCount} ran more than once`, `${repeatedCount} 个跑了不止一次`)}
+            </span>
+          ) : null}
+          {base.unscoredCaseCount ? (
+            <span title={l(
+              "Cases the base run decided nothing for. They are left out of its average rather than counted as zero.",
+              "基准运行没有得出结论的用例。它们被排除在平均分之外，而不是按 0 分计入。",
+            )}>
+              {l(`base left ${base.unscoredCaseCount} unscored`, `基准有 ${base.unscoredCaseCount} 个未评分`)}
+            </span>
+          ) : null}
+          {compare.unscoredCaseCount ? (
+            <span title={l(
+              "Cases the compare run decided nothing for. They are left out of its average rather than counted as zero.",
+              "对比运行没有得出结论的用例。它们被排除在平均分之外，而不是按 0 分计入。",
+            )}>
+              {l(`compare left ${compare.unscoredCaseCount} unscored`, `对比有 ${compare.unscoredCaseCount} 个未评分`)}
+            </span>
+          ) : null}
+          {baseOnlyCount > 0 ? (
+            <span>{l(`${baseOnlyCount} only in base`, `${baseOnlyCount} 个仅基准运行有`)}</span>
+          ) : null}
+          {compareOnlyCount > 0 ? (
+            <span>{l(`${compareOnlyCount} only in compare`, `${compareOnlyCount} 个仅对比运行有`)}</span>
+          ) : null}
+        </p>
+      ) : null}
       {dimensionNames.length > 0 ? (
         <div className="eval-comparison-dimensions">
           <span
@@ -1543,18 +1590,31 @@ function RunComparison({
                 ? deltaReading(delta, runBand)
                 : "unmeasured";
               const weight = fromCompare?.weight ?? fromBase?.weight ?? 1;
+              const weightChanged = fromBase !== undefined && fromCompare !== undefined
+                && fromBase.weight !== fromCompare.weight;
               return (
                 <li key={name} className="eval-comparison-dimension-row">
                   <span className="eval-comparison-dimension-name">
                     {name}
-                    {weight !== 1 ? (
+                    {weightChanged ? (
+                      <span className="eval-muted">
+                        {` · ${l("weight", "权重")} ${fromBase?.weight} → ${fromCompare?.weight}`}
+                      </span>
+                    ) : weight !== 1 ? (
                       <span className="eval-muted">{` · ${l("weight", "权重")} ${weight}`}</span>
                     ) : null}
                   </span>
-                  <span className="eval-comparison-dimension-scores">
+                  <span
+                    className="eval-comparison-dimension-scores"
+                    title={l(
+                      `Averaged over the cases that scored this dimension: ${fromBase?.scoredCaseCount ?? 0} in the base run, ${fromCompare?.scoredCaseCount ?? 0} in the compare run.`,
+                      `按为该维度打了分的用例求平均：基准运行 ${fromBase?.scoredCaseCount ?? 0} 个，对比运行 ${fromCompare?.scoredCaseCount ?? 0} 个。`,
+                    )}
+                  >
                     {fromBase?.score != null ? fromBase.score.toFixed(2) : "—"}
                     {" → "}
                     {fromCompare?.score != null ? fromCompare.score.toFixed(2) : "—"}
+                    {` · n=${fromCompare?.scoredCaseCount ?? 0}`}
                   </span>
                   {delta != null ? (
                     <span
@@ -1564,9 +1624,9 @@ function RunComparison({
                       {delta > 0 ? "+" : ""}{delta.toFixed(2)}
                     </span>
                   ) : !fromBase ? (
-                    <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行有")}</span>
+                    <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行存在")}</span>
                   ) : !fromCompare ? (
-                    <span className="eval-badge eval-badge-dim">{l("Only in base run", "仅基准运行有")}</span>
+                    <span className="eval-badge eval-badge-dim">{l("Only in base run", "仅基准运行存在")}</span>
                   ) : (
                     <span
                       className="eval-badge eval-badge-dim"
