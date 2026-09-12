@@ -1,4 +1,4 @@
-type PromptInput = "input" | "output" | "ground_truth" | "context";
+import type { PromptInputKey } from "../../../../core/evaluation/nodes/judge-nodes";
 
 interface PromptDefinition {
   objective: string;
@@ -6,14 +6,25 @@ interface PromptDefinition {
   steps: string[];
   anchors: [string, string, string, string, string];
   rules: string[];
-  inputs: PromptInput[];
+  inputs: PromptInputKey[];
+  /**
+   * Whether the judge may answer "I could not decide".
+   *
+   * The default format demands one of five values, which is right while every
+   * input is present. A dimension that reads an observation AgentRecall may not
+   * have — the file list, which a runtime without tool arguments cannot report —
+   * needs the third option, or the judge picks 0 under the pressure of a format
+   * that forbids declining and the run is failed for a missing observation.
+   */
+  mayDecline?: boolean;
 }
 
-const INPUT_TAGS: Record<PromptInput, [string, string]> = {
+const INPUT_TAGS: Record<PromptInputKey, [string, string]> = {
   input: ["Input", "{{input}}"],
   output: ["Answer", "{{output}}"],
   ground_truth: ["GroundTruth", "{{ground_truth}}"],
   context: ["Context", "{{context}}"],
+  files: ["Files", "{{files}}"],
 };
 
 // Structure adapted from OpenEvals (MIT), G-Eval/DeepEval (Apache-2.0),
@@ -21,6 +32,10 @@ const INPUT_TAGS: Record<PromptInput, [string, string]> = {
 function judgePrompt(definition: PromptDefinition): string {
   const scores = ["0.00", "0.25", "0.50", "0.75", "1.00"];
   const labels = ["不通过", "较差", "一般", "良好", "优秀"];
+  const scoreValues = definition.mayDecline ? "0|0.25|0.5|0.75|1|null" : "0|0.25|0.5|0.75|1";
+  const scoreRule = definition.mayDecline
+    ? "分数必须严格选择五档之一；证据不足以判定时返回 null，并在 reason 里说明缺什么，不要猜一档。"
+    : "分数必须严格选择五档之一。";
   return `你是一名严格、公正的模型输出评估员。只评价本 Prompt 指定的维度，不要把其他质量混入本次分数。
 
 <Rubric>
@@ -58,8 +73,8 @@ ${definition.inputs
 
 <OutputFormat>
 只返回 JSON，不要添加 Markdown 或其他文本：
-{"score": 0|0.25|0.5|0.75|1, "reason": "结合评分标准给出简洁理由", "evidence": ["支持判断的原文片段"], "failedCriteria": ["未满足的检查项编号"]}
-没有证据或失败项时返回空数组。分数必须严格选择五档之一。
+{"score": ${scoreValues}, "reason": "结合评分标准给出简洁理由", "evidence": ["支持判断的原文片段"], "failedCriteria": ["未满足的检查项编号"]}
+没有证据或失败项时返回空数组。${scoreRule}
 </OutputFormat>`;
 }
 
