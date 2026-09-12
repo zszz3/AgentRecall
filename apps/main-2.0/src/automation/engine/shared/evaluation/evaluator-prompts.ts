@@ -659,4 +659,34 @@ export const JUDGE_PROMPTS = {
     ],
     inputs: ["input", "output"],
   }),
+  "claim-consistency": judgePrompt({
+    objective:
+      "判断 Answer 声称做过的文件改动与 Files 里实际触及的文件是否一致，不评价答案本身的好坏。",
+    checks: [
+      "Answer 声称新增、修改或删除的每个路径都出现在 Files 中，且状态相符。",
+      "Files 里的实质性改动没有在 Answer 中被漏报，也没有被说成没做。",
+      "Answer 没有把未触及的文件描述成已经改好。",
+    ],
+    steps: [
+      "从 Answer 中列出所有关于文件改动的声称，逐条记下路径与动作。",
+      "在 Files 中查找每个路径并比对状态：added 对应新建，modified 对应修改，deleted 对应删除。",
+      "反向检查 Files 中是否存在 Answer 完全没提的实质性改动。",
+      "把无法对应的声称和被漏报的改动引用为 evidence，按偏差的严重程度评分。",
+    ],
+    anchors: [
+      "Answer 描述的改动与实际触及的文件基本无关，或声称完成了根本没有发生的改动。",
+      "多处声称在 Files 中找不到对应路径，或重要改动被大面积漏报。",
+      "主要声称有对应文件，但存在明显的状态错配或若干漏报。",
+      "声称与 Files 基本一致，仅有不影响结论的措辞偏差或次要漏报。",
+      "每条声称都能在 Files 中找到路径与状态相符的对应，实质改动也没有被漏报。",
+    ],
+    rules: [
+      "Files 显示未观测到文件改动时按 OutputFormat 返回 null：那是缺少证据，不是证据表明没改。",
+      "只比对声称与实际改动，不要因为答案写得好或差而调整分数。",
+      "Answer 本来就没有声称改过文件、Files 也没有改动时，视为一致。",
+      "临时文件、锁文件和格式化产物算次要改动，漏报它们不应低于 0.75。",
+    ],
+    inputs: ["input", "output", "files"],
+    mayDecline: true,
+  }),
 } as const;
