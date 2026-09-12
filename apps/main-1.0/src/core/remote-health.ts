@@ -79,6 +79,12 @@ async function diagnoseWslEnvironment(
       cliCheck("claude-cli", "Claude CLI", payload.claudeCli),
       directoryCheck("codex-sessions", "Codex sessions", payload.codexSessionsExists, payload.codexSessionsReadable),
       directoryCheck("claude-projects", "Claude projects", payload.claudeProjectsExists, payload.claudeProjectsReadable),
+      cliCheck("tclaude-cli", "TClaude CLI", payload.tclaudeCli),
+      cliCheck("tcodex-cli", "TCodex CLI", payload.tcodexCli),
+      cliCheck("codebuddy-cli", "CodeBuddy CLI", payload.codebuddyCli),
+      directoryCheck("tclaude-projects", "TClaude projects", payload.tclaudeProjectsExists, payload.tclaudeProjectsReadable),
+      directoryCheck("tcodex-sessions", "TCodex sessions", payload.tcodexSessionsExists, payload.tcodexSessionsReadable),
+      directoryCheck("codebuddy-projects", "CodeBuddy projects", payload.codebuddyProjectsExists, payload.codebuddyProjectsReadable),
     ]);
   } catch (error) {
     return buildReport([{
@@ -237,7 +243,8 @@ function buildPythonBase64Command(script: string): string {
   const compressed = zlib.deflateRawSync(Buffer.from(script, "utf-8"));
   const encoded = compressed.toString("base64");
   const pythonCommand = `python3 -c 'import base64,zlib; exec(zlib.decompress(base64.b64decode("${encoded}"), -15).decode("utf-8"))'`;
-  return `bash -lc ${posixShellQuote(pythonCommand)}`;
+  const shellCommand = `if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi; ${pythonCommand}`;
+  return `bash -lc ${posixShellQuote(shellCommand)}`;
 }
 
 function posixShellQuote(value: string): string {

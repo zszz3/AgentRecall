@@ -486,11 +486,17 @@ async function syncWslEnvironment(
   options: RemoteSyncOptions,
 ): Promise<RemoteSyncStatus> {
   const runWsl = options.runSsh ?? runSystemRemote;
+  const previousEnvironment = await store.getEnvironment(environment.id);
+  const previousState = previousEnvironment?.syncState;
   await store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
   try {
-    const output = await runWsl(environment, buildRemoteCollectorCommand([], { includeCodeWiz: false, includeOpenCode: false }));
+    const enabledOptionalSources = new Set(options.enabledOptionalSources ?? []);
+    const output = await runWsl(environment, buildRemoteCollectorCommand([...enabledOptionalSources], {
+      includeCodeWiz: enabledOptionalSources.has("codewiz-cli"),
+      includeOpenCode: enabledOptionalSources.has("opencode-cli"),
+    }));
     const { payloads, summaries } = decodeRemoteSyncOutput(output);
-    const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary)));
+    const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary), enabledOptionalSources));
     for (const summary of enabledSummaries) {
       await store.upsertIndexedSessionSummary(
         wslSummaryToIndexedSession(environment, summary),
@@ -501,7 +507,7 @@ async function syncWslEnvironment(
     }
     const loaded = loadWslSessionPayloads(
       environment,
-      payloads.filter((payload) => isSupportedWslSource(payloadSourceForPayload(payload))),
+      payloads.filter((payload) => isSupportedWslSource(payloadSourceForPayload(payload), enabledOptionalSources)),
     );
     for (const item of loaded) {
       await store.upsertIndexedSession(
@@ -512,7 +518,14 @@ async function syncWslEnvironment(
         item.codexIncrementalState,
       );
     }
-    await store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
+    // RemoteWatchManager owns the WSL mode. Preserve polling until an event
+    // watcher has actually been recreated and reported ready.
+    const state = previousState;
+    await store.updateEnvironmentSyncState(
+      environment.id,
+      state === "polling" || state === "watching" ? state : "syncing",
+      { lastSyncedAt: Date.now(), lastError: null },
+    );
     return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -583,8 +596,12 @@ function payloadSourceForPayload(payload: RemoteSessionFilePayload): SessionSour
   return "claude-cli";
 }
 
-function isSupportedWslSource(source: SessionSource): boolean {
-  return source === "codex-cli" || source === "claude-cli";
+function isSupportedWslSource(source: SessionSource, enabledOptionalSources: ReadonlySet<SessionSource> = new Set()): boolean {
+  return source === "codex-cli"
+    || source === "claude-cli"
+    || (source === "tclaude-cli" && enabledOptionalSources.has(source))
+    || (source === "tcodex-cli" && enabledOptionalSources.has(source))
+    || (source === "codebuddy-cli" && enabledOptionalSources.has(source));
 }
 
 function isOptionalRemoteSource(source: SessionSource): boolean {

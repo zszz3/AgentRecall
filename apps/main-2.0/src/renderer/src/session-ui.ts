@@ -192,7 +192,8 @@ export function migrationTargetsForSession(
     return target ? [target] : [];
   }
   if (session.environmentKind === "wsl") {
-    return migrationTargetsForSource(session.source, settings).filter((target) => target === "claude" || target === "codex");
+    return migrationTargetsForSource(session.source, settings).filter((target) =>
+      target === "claude" || target === "codex" || target === "codebuddy" || target === "cursor");
   }
   return isLocalSessionEnvironment(session) ? migrationTargetsForSource(session.source, settings) : [];
 }

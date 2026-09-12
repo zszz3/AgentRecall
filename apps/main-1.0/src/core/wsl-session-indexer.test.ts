@@ -169,4 +169,44 @@ describe("WslSessionIndexer", () => {
       store.close();
     }
   });
+
+  it("retries a transient WSL transport failure when the file version is unchanged", async () => {
+    const store = createInMemoryStore();
+    const environment = wslEnvironment(store);
+    const session = {
+      sessionKey: remoteSessionKey(environment, "codex-cli", "wsl-session"),
+      rawId: "wsl-session",
+      source: "codex-cli" as const,
+      projectPath: "/repo",
+      filePath: "/home/me/.codex/sessions/rollout.jsonl",
+      originalTitle: "WSL summary",
+      firstQuestion: "initial question",
+      timestamp: Date.parse("2026-07-26T10:00:00Z"),
+      fileMtimeMs: 10,
+      fileSize: 20,
+      prUrl: null,
+      prNumber: null,
+      environmentId: environment.id,
+      environmentKind: "wsl" as const,
+      environmentLabel: environment.label,
+    };
+    store.upsertIndexedSessionSummary(session, 1);
+    const fetchSessionFile = vi.fn<() => Promise<RemoteSessionFilePayload>>()
+      .mockRejectedValueOnce(new Error("WSL distribution is not running"))
+      .mockResolvedValueOnce(sessionPayload(10, 20));
+    const indexer = new WslSessionIndexer({
+      store,
+      fetchSessionFile,
+      loadSession: loadWslSessionDetailPayload,
+    });
+
+    try {
+      await indexer.request(environment);
+      await indexer.request(environment);
+      expect(fetchSessionFile).toHaveBeenCalledTimes(2);
+      expect(store.searchSessions({ query: "background WSL" })).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
 });

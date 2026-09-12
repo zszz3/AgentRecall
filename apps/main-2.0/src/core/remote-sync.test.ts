@@ -18,6 +18,24 @@ function decodeCollectorScript(command: string): string {
 }
 
 describe("remote sync", () => {
+  it("keeps polling visible after a successful WSL sync", async () => {
+    const store = createInMemoryStore();
+    const environment = await store.upsertEnvironment({
+      id: "wsl-ubuntu",
+      kind: "wsl",
+      label: "WSL · Ubuntu",
+      wslDistribution: "Ubuntu",
+      enabled: true,
+    });
+    await store.updateEnvironmentSyncState(environment.id, "polling", { lastError: "temporary watcher failure" });
+    try {
+      await syncRemoteEnvironment(store, environment, { runSsh: async () => "" });
+      await expect(store.getEnvironment(environment.id)).resolves.toMatchObject({ syncState: "polling", lastError: null });
+    } finally {
+      await store.close();
+    }
+  });
+
   it("separates interactive SSH PTY args from machine-readable sync args", () => {
     const environment = {
       id: "ssh:test",

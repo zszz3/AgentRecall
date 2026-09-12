@@ -128,8 +128,9 @@ const api = {
     sessionKey: string,
     target: MigrationTarget,
     targetProjectPath?: string,
+    targetEnvironmentId?: string,
   ): Promise<SessionMigrationResult> =>
-    ipcRenderer.invoke("session:migrate", sessionKey, target, targetProjectPath),
+    ipcRenderer.invoke("session:migrate", sessionKey, target, targetProjectPath, targetEnvironmentId),
   openNativeApp: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:open-app", sessionKey),
   revealSession: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:reveal", sessionKey),
   copyMarkdown: (sessionKey: string): Promise<void> => ipcRenderer.invoke("command:copy-markdown", sessionKey),

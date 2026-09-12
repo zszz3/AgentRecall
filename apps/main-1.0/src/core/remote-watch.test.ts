@@ -183,6 +183,33 @@ describe("RemoteWatchManager", () => {
     });
   });
 
+  it("retries event watching after a polling recovery window", async () => {
+    await withFakeTimers(async () => {
+      const sync = vi.fn(async (_environment: SessionEnvironment) => undefined);
+      const modes: string[] = [];
+      const startWatcher = vi
+        .fn()
+        .mockImplementationOnce(() => { throw new Error("watch unavailable"); })
+        .mockImplementation(() => ({ stop: vi.fn() }));
+      const manager = new RemoteWatchManager({
+        startWatcher,
+        syncEnvironment: sync,
+        pollIntervalMs: 100,
+        pollRecoveryMs: 250,
+        onModeChange: (_environment, mode) => modes.push(mode),
+      });
+
+      manager.start(environment);
+      expect(modes).toEqual(["polling"]);
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(sync).toHaveBeenCalledTimes(2);
+      expect(startWatcher).toHaveBeenCalledTimes(2);
+      expect(modes).toEqual(["polling", "event"]);
+      manager.stopAll();
+    });
+  });
+
   it("switches to polling when watcher reports unavailable", async () => {
     await withFakeTimers(async () => {
       const sync = vi.fn(async (_environment: SessionEnvironment) => undefined);

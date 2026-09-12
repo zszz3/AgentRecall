@@ -1401,13 +1401,22 @@ export function App(): ReactElement {
   async function runMigration(
     target: SessionMigrationProgress["target"],
     withoutProjectPath: boolean,
+    targetEnvironmentId: string,
+    selectedTargetProjectPath?: string,
   ): Promise<void> {
     if (!migrationDialog || migrationDialog.kind !== "select") return;
     const session = migrationDialog.session;
+    const targetEnvironment = environments.find((environment) => environment.id === targetEnvironmentId);
     let targetProjectPath: string | undefined;
     if (withoutProjectPath) {
       targetProjectPath = "";
-    } else if (isLocalSessionEnvironment(session) && !session.projectPath.trim()) {
+    } else if (targetEnvironment?.kind === "wsl") {
+      targetProjectPath = selectedTargetProjectPath?.trim() || undefined;
+      if (!targetProjectPath) {
+        setActionStatus({ kind: "error", message: t("Enter an absolute Linux project path or choose without a project path.", "请输入 Linux 绝对项目路径，或选择无项目路径。") });
+        return;
+      }
+    } else if (targetEnvironment?.kind === "local" && (!isLocalSessionEnvironment(session) || !session.projectPath.trim())) {
       try {
         targetProjectPath = (await window.sessionSearch.chooseLocalProjectDirectory()) ?? undefined;
       } catch (error) {
@@ -1428,6 +1437,7 @@ export function App(): ReactElement {
         ...(migrationDialog.throughTurnId
           ? { throughTurnId: migrationDialog.throughTurnId }
           : {}),
+        ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
       });
       await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
       await refreshLiveSessions();
@@ -2355,11 +2365,12 @@ export function App(): ReactElement {
         <SessionMigrationDialog
           session={migrationDialog.session}
           targets={migrationTargetsForSession(migrationDialog.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
+          environments={environments}
           language={language}
           busy={migrationBusy}
           progress={migrationProgress}
           throughTurnIndex={migrationDialog.throughTurnIndex}
-          onSelect={(target, withoutProjectPath) => void runMigration(target, withoutProjectPath)}
+          onSelect={(target, withoutProjectPath, targetEnvironmentId, targetProjectPath) => void runMigration(target, withoutProjectPath, targetEnvironmentId, targetProjectPath)}
           onClose={closeMigrationDialog}
         />
       ) : null}

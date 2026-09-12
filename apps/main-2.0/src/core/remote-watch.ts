@@ -11,8 +11,10 @@ export interface RemoteWatchManagerOptions {
   startWatcher?: (environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void) => WatchHandle;
   syncEnvironment: (environment: SessionEnvironment) => Promise<void>;
   onSyncError?: (environment: SessionEnvironment, error: unknown) => void;
+  onModeChange?: (environment: SessionEnvironment, mode: "event" | "polling") => void;
   debounceMs?: number;
   pollIntervalMs?: number;
+  pollRecoveryMs?: number;
 }
 
 export class RemoteWatchManager {
@@ -22,6 +24,7 @@ export class RemoteWatchManager {
   private readonly inFlightEnvironmentTokens = new Map<string, number>();
   private readonly pendingSyncEnvironmentTokens = new Map<string, number>();
   private readonly pollingEnvironmentIds = new Set<string>();
+  private readonly pollRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly options: Required<RemoteWatchManagerOptions>;
 
@@ -30,8 +33,10 @@ export class RemoteWatchManager {
       startWatcher: options.startWatcher ?? startSystemWatcher,
       syncEnvironment: options.syncEnvironment,
       onSyncError: options.onSyncError ?? (() => undefined),
+      onModeChange: options.onModeChange ?? (() => undefined),
       debounceMs: options.debounceMs ?? 600,
       pollIntervalMs: options.pollIntervalMs ?? 60_000,
+      pollRecoveryMs: options.pollRecoveryMs ?? 300_000,
     };
   }
 
@@ -54,7 +59,10 @@ export class RemoteWatchManager {
         },
       );
       if (!this.isActive(environment.id, token) || this.pollingEnvironmentIds.has(environment.id)) handle.stop();
-      else this.handles.set(environment.id, handle);
+      else {
+        this.handles.set(environment.id, handle);
+        this.options.onModeChange(environment, "event");
+      }
     } catch {
       if (this.isActive(environment.id, token)) this.startPolling(environment, token);
     }
@@ -66,6 +74,9 @@ export class RemoteWatchManager {
     this.handles.delete(environmentId);
     this.inFlightEnvironmentTokens.delete(environmentId);
     this.pollingEnvironmentIds.delete(environmentId);
+    const recovery = this.pollRecoveryTimers.get(environmentId);
+    if (recovery) clearTimeout(recovery);
+    this.pollRecoveryTimers.delete(environmentId);
     this.pendingSyncEnvironmentTokens.delete(environmentId);
     this.activeTokens.delete(environmentId);
   }
@@ -99,6 +110,16 @@ export class RemoteWatchManager {
     }, this.options.pollIntervalMs);
     this.handles.set(environment.id, { stop: () => clearInterval(timer) });
     this.pollingEnvironmentIds.add(environment.id);
+    this.options.onModeChange(environment, "polling");
+    const recovery = setTimeout(() => {
+      this.pollRecoveryTimers.delete(environment.id);
+      if (!this.isActive(environment.id, token) || !this.pollingEnvironmentIds.has(environment.id)) return;
+      this.handles.get(environment.id)?.stop();
+      this.handles.delete(environment.id);
+      this.pollingEnvironmentIds.delete(environment.id);
+      this.start(environment);
+    }, this.options.pollRecoveryMs);
+    this.pollRecoveryTimers.set(environment.id, recovery);
   }
 
   private runSync(environment: SessionEnvironment, token: number): void {
@@ -191,5 +212,5 @@ function startWslWatcher(environment: SessionEnvironment, onEvent: () => void, o
 }
 
 function buildWslWatchCommand(): string {
-  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
+  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
 }

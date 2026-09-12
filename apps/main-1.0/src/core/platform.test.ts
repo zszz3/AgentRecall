@@ -962,9 +962,19 @@ describe("resume process specs", () => {
 
     expect(getResumeProcessSpec(session, defaultSettings, { platform: "win32", wslDistribution: "Ubuntu" })).toMatchObject({
       command: "wsl.exe",
-      args: ["--distribution", "Ubuntu", "--exec", "bash", "-lc", "cd /home/me/project && claude --resume claude-1"],
+      args: ["--distribution", "Ubuntu", "--exec", "bash", "-lc", "if [ -s \"$HOME/.nvm/nvm.sh\" ]; then . \"$HOME/.nvm/nvm.sh\"; fi; cd /home/me/project && claude --resume claude-1"],
       cwd: undefined,
     });
+  });
+
+  it("resolves the resume executable inside WSL instead of passing a Windows path", () => {
+    const session = { source: "claude-cli", rawId: "wsl-cli", projectPath: "/home/me/project" } as SessionSearchResult;
+    const spec = getResumeProcessSpec(session, { ...defaultSettings, claudeBinary: "C:\\Program Files\\Claude\\claude.exe" }, {
+      platform: "win32",
+      wslDistribution: "Ubuntu",
+    });
+    expect(spec.args.at(-1)).toContain("claude --resume wsl-cli");
+    expect(spec.args.at(-1)).not.toContain("Program Files");
   });
 
   it("keeps both Windows terminal launch variants inside WSL", () => {

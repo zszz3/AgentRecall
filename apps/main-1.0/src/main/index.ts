@@ -1240,6 +1240,11 @@ function ensureRemoteWatchManager(): RemoteWatchManager {
         store.updateEnvironmentSyncState(environment.id, "error", { lastError: remoteSyncErrorMessage(error) });
         emitEnvironmentsUpdated();
       },
+      onModeChange: (environment, mode) => {
+        if (environment.kind !== "wsl") return;
+        store.updateEnvironmentSyncState(environment.id, mode === "polling" ? "polling" : "watching", { lastError: null });
+        emitEnvironmentsUpdated();
+      },
     });
   }
   return remoteWatchManager;
@@ -2478,6 +2483,7 @@ function registerIpc(): void {
     sessionKey: string,
     target: unknown,
     targetProjectPath?: string,
+    targetEnvironmentId?: string,
   ) => {
     const session = store.getSession(sessionKey);
     if (!session) throw new Error("Session not found.");
@@ -2496,8 +2502,52 @@ function registerIpc(): void {
       store.getAllMessages(child.sessionKey),
       { allowSsh: child.environmentKind === "ssh" },
     ));
+    const targetEnvironment = targetEnvironmentId
+      ? store.getEnvironment(targetEnvironmentId)
+      : null;
+    if (targetEnvironmentId && !targetEnvironment) {
+      throw new Error("Migration target environment is not configured.");
+    }
+    if (targetEnvironment && targetEnvironment.kind !== "local" && !targetEnvironment.enabled) {
+      throw new Error(`Migration target environment ${targetEnvironment.label} is disabled.`);
+    }
+    const crossEnvironment = targetEnvironment !== null && targetEnvironment.id !== session.environmentId;
+    if (crossEnvironment) {
+      if (!isMigrationTarget(target)) throw new Error(`Migration target ${String(target)} is not supported.`);
+      const settings = await providerService.hydrateSettings();
+      assertMigrationTargetEnabled(target, settings);
+      if (session.environmentKind === "ssh" && target !== sshMigrationTarget(session.source)) {
+        throw new Error("SSH sessions can only migrate between Claude Code and Codex on the same host.");
+      }
+      if (session.environmentKind === "wsl"
+        && !["claude", "codex", "codebuddy", "cursor"].includes(target)) {
+        throw new Error(`Migration target ${String(target)} is not supported in WSL.`);
+      }
+      const portable = portableSessionFrom(
+        session,
+        store.getAllMessages(sessionKey),
+        { allowSsh: session.environmentKind === "ssh" },
+      );
+      if (subagents.length > 0) portable.subagents = subagents;
+      const progress = (item: SessionMigrationProgress): void => event.sender.send("session:migration-progress", item);
+      const deps = targetEnvironment!.kind === "local"
+        ? await createLocalRemoteRestoreDependencies(progress)
+        : await createSourceRemoteRestoreDependencies(targetEnvironment!, progress);
+      return restoreRemotePortableSession({
+        remoteId: sessionKey,
+        portable,
+        target: target as MigrationAgent,
+        // Project paths are environment-specific. An explicit destination path
+        // may be supplied by the renderer; otherwise leave it empty.
+        localProjectPath: targetProjectPath ?? "",
+        deps,
+      });
+    }
     if (session.environmentKind === "wsl" || session.environmentKind === "ssh") {
       if (!isMigrationTarget(target)) throw new Error(`Migration target ${String(target)} is not supported.`);
+      if (target === "codewiz") {
+        throw new Error("CodeWiz migration is disabled for WSL and SSH until its shared database can be updated transactionally.");
+      }
       const settings = await providerService.hydrateSettings();
       assertMigrationTargetEnabled(target, settings);
       if (session.environmentKind === "ssh" && target !== sshMigrationTarget(session.source)) {

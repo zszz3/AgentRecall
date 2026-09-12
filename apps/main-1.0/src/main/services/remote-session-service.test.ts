@@ -947,7 +947,7 @@ describe("RemoteSessionService cloud orchestration", () => {
   it("rejects source-environment restore for non-SSH sessions or unavailable SSH environments", async () => {
     const localRemote = createHarness({ settings: configuredSettings() });
     await expect(localRemote.service.restoreToSource("remote-1", "codex", vi.fn())).rejects.toThrow(
-      "was not saved from an SSH environment",
+      "was not saved from an SSH or WSL environment",
     );
     expect(localRemote.client.getPortableSession).not.toHaveBeenCalled();
 
@@ -956,7 +956,7 @@ describe("RemoteSessionService cloud orchestration", () => {
       remote: remoteSession({ sourceEnvironmentKind: "ssh", sourceEnvironmentId: "ssh-1" }),
     });
     await expect(sshRemote.service.restoreToSource("remote-1", "codex", vi.fn())).rejects.toThrow(
-      "SSH environment for this remote session is not configured",
+      "source environment for this remote session is not configured",
     );
     expect(sshRemote.createSourceRestoreDependencies).not.toHaveBeenCalled();
   });

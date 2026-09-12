@@ -80,7 +80,7 @@ describe("remote sync", () => {
     expect(remoteFamilyForSource(source)).toBe(family);
   });
 
-  it("limits WSL indexing to Codex and Claude and uses a WSL-scoped session key", async () => {
+  it("indexes enabled WSL sources and uses a WSL-scoped session key", async () => {
     const store = createInMemoryStore();
     const environment = upsertWslEnvironment(store);
     let collectorCommand = "";
@@ -101,7 +101,19 @@ describe("remote sync", () => {
       expect(collectorScript).not.toContain("emit_codewiz_summaries(codewiz_db");
       expect(store.getSession("wsl:wsl-ubuntu:codex-cli:same")).toBeTruthy();
       expect(store.getSession("wsl:wsl-ubuntu:claude-cli:same-claude")).toBeTruthy();
-      expect(store.searchSessions({ environmentId: environment.id }).map((session) => session.source)).not.toContain("codebuddy-cli");
+      expect(store.getSession("wsl:wsl-ubuntu:codebuddy-cli:same-codebuddy")).toBeTruthy();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps polling visible after a successful WSL sync", async () => {
+    const store = createInMemoryStore();
+    const environment = upsertWslEnvironment(store);
+    store.updateEnvironmentSyncState(environment.id, "polling", { lastError: "temporary watcher failure" });
+    try {
+      await syncRemoteEnvironment(store, environment, { runSsh: async () => "" });
+      expect(store.getEnvironment(environment.id)).toMatchObject({ syncState: "polling", lastError: null });
     } finally {
       store.close();
     }

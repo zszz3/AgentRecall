@@ -193,18 +193,20 @@ export function loadWslSessionPayloads(environment: SessionEnvironment, payloads
   const loaded: LoadedSession[] = [];
 
   for (const payload of payloads) {
-    if (payload.kind === "codex-session" && payloadSource(payload) === "codex-cli") {
+    if (payload.kind === "codex-session" && (payloadSource(payload) === "codex-cli" || payloadSource(payload) === "tcodex-cli")) {
+      const source = payloadSource(payload);
       const rows = parseJsonlText(payload.content);
       const meta = rows.length > 0 ? parseCodexSessionMetaLine(rows[0] as CodexConversationLine) : null;
       const indexedTitle = meta ? codexTitleMap.get(meta.id) : undefined;
       const candidate = loadCodexSessionRows(payload.path, rows, {
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
-        sourceOverride: "codex-cli",
+        sourceOverride: source,
         title: indexedTitle?.title,
         updatedAt: indexedTitle?.updatedAt,
       });
-      if (candidate) loaded.push(scopeWslSession(candidate, environment, "codex-cli"));
-    } else if (payload.kind === "claude-project" && payloadSource(payload) === "claude-cli") {
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, source));
+    } else if (payload.kind === "claude-project" && (payloadSource(payload) === "claude-cli" || payloadSource(payload) === "tclaude-cli")) {
+      const source = payloadSource(payload);
       const rows = parseJsonlText(payload.content);
       const relation = claudeRemoteRelation(payload.path, rows);
       const rawId = relation.agentId || path.basename(payload.path, ".jsonl");
@@ -216,9 +218,15 @@ export function loadWslSessionPayloads(environment: SessionEnvironment, payloads
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
         isSubagent: relation.isSubagent,
         parentSessionId: relation.parentSessionId,
-        source: "claude-cli",
+        source,
       });
-      if (candidate) loaded.push(scopeWslSession(candidate, environment, "claude-cli"));
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, source));
+    } else if (payload.kind === "codebuddy-project" && payloadSource(payload) === "codebuddy-cli") {
+      const candidate = loadCodeBuddyCliSessionRows(payload.path, parseJsonlText(payload.content), {
+        mtimeMs: payload.mtimeMs,
+        size: payload.size,
+      });
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, "codebuddy-cli"));
     }
   }
 
@@ -231,16 +239,18 @@ export function loadWslSessionDetailPayload(
   summary: SessionSearchResult,
   options: { includeTraceEvents?: boolean } = {},
 ): LoadedSession | null {
-  if (payload.kind === "codex-session" && payloadSource(payload) === "codex-cli") {
+  if (payload.kind === "codex-session" && (payloadSource(payload) === "codex-cli" || payloadSource(payload) === "tcodex-cli")) {
+    const source = payloadSource(payload);
     const candidate = loadCodexSessionRows(payload.path, parseJsonlText(payload.content), {
       stat: { mtimeMs: payload.mtimeMs, size: payload.size },
-      sourceOverride: "codex-cli",
+      sourceOverride: source,
       title: summary.originalTitle,
       includeTraceEvents: options.includeTraceEvents,
     });
-    return candidate ? scopeWslSession(candidate, environment, "codex-cli") : null;
+    return candidate ? scopeWslSession(candidate, environment, source) : null;
   }
-  if (payload.kind === "claude-project" && payloadSource(payload) === "claude-cli") {
+  if (payload.kind === "claude-project" && (payloadSource(payload) === "claude-cli" || payloadSource(payload) === "tclaude-cli")) {
+    const source = payloadSource(payload);
     const rawId = path.basename(payload.path, ".jsonl");
     const candidate = loadClaudeCliSessionRows(payload.path, parseJsonlText(payload.content), {
       rawId,
@@ -249,10 +259,17 @@ export function loadWslSessionDetailPayload(
       stat: { mtimeMs: payload.mtimeMs, size: payload.size },
       isSubagent: summary.isSubagent,
       parentSessionId: summary.parentSessionId,
-      source: "claude-cli",
+      source,
       includeTraceEvents: options.includeTraceEvents,
     });
-    return candidate ? scopeWslSession(candidate, environment, "claude-cli") : null;
+    return candidate ? scopeWslSession(candidate, environment, source) : null;
+  }
+  if (payload.kind === "codebuddy-project" && payloadSource(payload) === "codebuddy-cli") {
+    const candidate = loadCodeBuddyCliSessionRows(payload.path, parseJsonlText(payload.content), {
+      mtimeMs: payload.mtimeMs,
+      size: payload.size,
+    });
+    return candidate ? scopeWslSession(candidate, environment, "codebuddy-cli") : null;
   }
   return null;
 }
