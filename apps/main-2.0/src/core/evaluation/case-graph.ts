@@ -4,9 +4,11 @@ import {
   type BuiltEvaluationGraph,
   type EvaluationGraphNodeSpec,
   type EvaluationGraphSpec,
+  type EvaluationInputBinding,
 } from "./graph/builder";
 import type { AnyEvaluationNodeDefinition } from "./graph/node";
 import {
+  createArtifactCompleteNode,
   createFolderArtifactNode,
   createRunAgentNode,
   createSessionArtifactNode,
@@ -14,6 +16,7 @@ import {
   createSkillProvisionNode,
   skillUseObserveNode,
   taskSourceNode,
+  ARTIFACT_COMPLETE_NODE_TYPE,
   FOLDER_ARTIFACT_NODE_TYPE,
   RUN_AGENT_NODE_TYPE,
   SESSION_ARTIFACT_NODE_TYPE,
@@ -61,6 +64,7 @@ export const AGENT_NODE_ID = "agent";
 export const SESSION_NODE_ID = "session";
 export const SOURCE_NODE_ID = "source";
 export const SKILL_USE_NODE_ID = "skill-use";
+export const ARTIFACT_COMPLETE_NODE_ID = "artifact-complete";
 
 /** Where the artifact under evaluation comes from. */
 export type EvaluationArtifactSourceKind = "run_agent" | "session" | "folder";
@@ -128,6 +132,7 @@ export function createEvaluationNodeDefinitions(
     createSkillProvisionNode(dependencies),
     createRunAgentNode(dependencies),
     createSessionLinkNode(dependencies),
+    createArtifactCompleteNode(dependencies),
     createSessionArtifactNode(dependencies),
     createFolderArtifactNode(dependencies),
     skillUseObserveNode,
@@ -189,8 +194,20 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
             trajectory: `${SESSION_NODE_ID}.trajectory`,
           },
         },
+        {
+          id: ARTIFACT_COMPLETE_NODE_ID,
+          type: ARTIFACT_COMPLETE_NODE_TYPE,
+          in: {
+            artifact: `${AGENT_NODE_ID}.artifact`,
+            execution_ref: `${AGENT_NODE_ID}.execution_ref`,
+          },
+          // Ordered, not wired: the session link excuses itself when indexing never
+          // catches up, and the answer must still reach its judges when it does.
+          after: [SESSION_NODE_ID],
+        },
       );
       trajectoryNodeId = SESSION_NODE_ID;
+      artifactNodeId = ARTIFACT_COMPLETE_NODE_ID;
     }
   } else if (plan.source === "session") {
     nodes.push({
@@ -410,9 +427,42 @@ function judgingOnlyOrHydrated(
     evaluators: plan.evaluators,
   });
   return {
-    spec: { ...head.spec, nodes: [...head.spec.nodes, ...judges.nodes] },
+    spec: {
+      ...head.spec,
+      nodes: [...head.spec.nodes, ...followDerivedArtifact(judges.nodes, head.spec.nodes)],
+    },
     skippedEvaluatorIds: head.skippedEvaluatorIds,
   };
+}
+
+/**
+ * Repoints saved judges at the artifact the derived head now produces.
+ *
+ * A judging-only graph stores bindings against a head it does not own, and that head
+ * is derived again on every run. When it gains the step that completes the artifact,
+ * a binding saved as "the agent's artifact" has to follow — otherwise every judge
+ * reads the uncompleted value that step exists to replace, and the fix only reaches
+ * graphs nobody saves.
+ */
+function followDerivedArtifact(
+  judges: EvaluationGraphNodeSpec[],
+  headNodes: readonly EvaluationGraphNodeSpec[],
+): EvaluationGraphNodeSpec[] {
+  if (!headNodes.some((node) => node.id === ARTIFACT_COMPLETE_NODE_ID)) return judges;
+  const stale = `${AGENT_NODE_ID}.artifact`;
+  const current = `${ARTIFACT_COMPLETE_NODE_ID}.artifact`;
+  const repoint = (binding: EvaluationInputBinding): EvaluationInputBinding => {
+    if (typeof binding === "string") return binding === stale ? current : binding;
+    return binding.from === stale ? { ...binding, from: current } : binding;
+  };
+  return judges.map((node) => node.in
+    ? {
+        ...node,
+        in: Object.fromEntries(
+          Object.entries(node.in).map(([input, binding]) => [input, repoint(binding)]),
+        ),
+      }
+    : node);
 }
 
 export function buildEvaluationCaseGraph(
