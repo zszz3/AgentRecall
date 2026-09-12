@@ -42,7 +42,7 @@ agent-recall install-app
 
 如果要使用 SSH 远程会话，请确保本机可以用系统 `ssh` 非交互连接远端机器，远端安装了 `python3`。实时监听需要远端有 `inotifywait` 或 `fswatch`；没有时应用会退化为轮询同步。
 
-Windows 用户还可以在设置中添加已安装的 WSL 发行版。WSL 会话搜索和 Resume 需要发行版可运行 `bash`、`python3`，并在 WSL 内安装对应的 Codex 或 Claude Code CLI。WSL 发行版中安装 `inotifywait` 或 `fswatch` 后可以实时监听会话变化；如果两者都没有，应用会自动退化为定时轮询同步。WSL 会话目前支持搜索、查看和 Resume，暂不支持会话迁移。
+Windows 用户还可以在设置中添加已安装的 WSL 发行版。WSL 会话搜索、详情和 Resume 需要发行版可运行 `bash`、`python3`，并在 WSL 内安装对应的 CLI。Claude Code、Codex、TClaude、TCodex 和 CodeBuddy 可在设置中启用并分别索引；在 WSL 发行版中安装 `inotifywait` 或 `fswatch` 后可以实时监听会话变化，如果两者都没有，应用会自动退化为定时轮询同步。WSL 会话可以手动保存到你自己的 Supabase 项目，也可以恢复到本地或指定 WSL 发行版；迁移窗口会要求填写目标 Linux 项目目录。CodeWiz 的共享数据库暂不作为 WSL/SSH 迁移目标。
 
 ### 后续启动还要 `nvm use 22` 吗？
 

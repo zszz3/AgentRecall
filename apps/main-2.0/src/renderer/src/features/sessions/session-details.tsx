@@ -178,7 +178,7 @@ export function SessionDetails({
         onResumeIterm={() => actions.resumeInIterm(detail)}
         onMigrate={() => actions.migrate(detail)}
         onUploadRemote={() => actions.uploadRemote(detail)}
-        remoteUploadDisabled={detail.source === "zcode-cli" || detail.environmentKind === "wsl"}
+        remoteUploadDisabled={detail.source === "zcode-cli"}
         onCopyResume={() => actions.copyResume(detail)}
         onCopyMarkdown={() => actions.copyMarkdown(detail)}
         onExportMarkdown={(includeToolTrace) => actions.exportMarkdown(detail, includeToolTrace)}

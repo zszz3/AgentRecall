@@ -193,18 +193,20 @@ export function loadWslSessionPayloads(environment: SessionEnvironment, payloads
   const loaded: LoadedSession[] = [];
 
   for (const payload of payloads) {
-    if (payload.kind === "codex-session" && payloadSource(payload) === "codex-cli") {
+    if (payload.kind === "codex-session" && (payloadSource(payload) === "codex-cli" || payloadSource(payload) === "tcodex-cli")) {
+      const source = payloadSource(payload);
       const rows = parseJsonlText(payload.content);
       const meta = rows.length > 0 ? parseCodexSessionMetaLine(rows[0] as CodexConversationLine) : null;
       const indexedTitle = meta ? codexTitleMap.get(meta.id) : undefined;
       const candidate = loadCodexSessionRows(payload.path, rows, {
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
-        sourceOverride: "codex-cli",
+        sourceOverride: source,
         title: indexedTitle?.title,
         updatedAt: indexedTitle?.updatedAt,
       });
-      if (candidate) loaded.push(scopeWslSession(candidate, environment, "codex-cli"));
-    } else if (payload.kind === "claude-project" && payloadSource(payload) === "claude-cli") {
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, source));
+    } else if (payload.kind === "claude-project" && (payloadSource(payload) === "claude-cli" || payloadSource(payload) === "tclaude-cli")) {
+      const source = payloadSource(payload);
       const rows = parseJsonlText(payload.content);
       const relation = claudeRemoteRelation(payload.path, rows);
       const rawId = relation.agentId || path.basename(payload.path, ".jsonl");
@@ -216,9 +218,23 @@ export function loadWslSessionPayloads(environment: SessionEnvironment, payloads
         stat: { mtimeMs: payload.mtimeMs, size: payload.size },
         isSubagent: relation.isSubagent,
         parentSessionId: relation.parentSessionId,
-        source: "claude-cli",
+        source,
       });
-      if (candidate) loaded.push(scopeWslSession(candidate, environment, "claude-cli"));
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, source));
+    } else if (payload.kind === "codebuddy-project" && payloadSource(payload) === "codebuddy-cli") {
+      const candidate = loadCodeBuddyCliSessionRows(payload.path, parseJsonlText(payload.content), {
+        mtimeMs: payload.mtimeMs,
+        size: payload.size,
+      });
+      if (candidate) loaded.push(scopeWslSession(candidate, environment, "codebuddy-cli"));
+    } else if (payload.kind === "codewiz-session" || payload.kind === "opencode-session" || payload.kind === "qoder-project") {
+      // These sources use a SQLite or JSONL format already parsed by the
+      // remote loader. Reuse that parser for WSL while replacing its SSH
+      // namespace with the WSL environment namespace.
+      const source = wslPayloadSource(payload);
+      for (const candidate of loadRemoteSessionPayloads(environment, [payload])) {
+        loaded.push(scopeWslSession({ ...candidate, session: { ...candidate.session, source } }, environment, source));
+      }
     }
   }
 
@@ -231,16 +247,18 @@ export function loadWslSessionDetailPayload(
   summary: SessionSearchResult,
   options: { includeTraceEvents?: boolean } = {},
 ): LoadedSession | null {
-  if (payload.kind === "codex-session" && payloadSource(payload) === "codex-cli") {
+  if (payload.kind === "codex-session" && (payloadSource(payload) === "codex-cli" || payloadSource(payload) === "tcodex-cli")) {
+    const source = payloadSource(payload);
     const candidate = loadCodexSessionRows(payload.path, parseJsonlText(payload.content), {
       stat: { mtimeMs: payload.mtimeMs, size: payload.size },
-      sourceOverride: "codex-cli",
+      sourceOverride: source,
       title: summary.originalTitle,
       includeTraceEvents: options.includeTraceEvents,
     });
-    return candidate ? scopeWslSession(candidate, environment, "codex-cli") : null;
+    return candidate ? scopeWslSession(candidate, environment, source) : null;
   }
-  if (payload.kind === "claude-project" && payloadSource(payload) === "claude-cli") {
+  if (payload.kind === "claude-project" && (payloadSource(payload) === "claude-cli" || payloadSource(payload) === "tclaude-cli")) {
+    const source = payloadSource(payload);
     const rawId = path.basename(payload.path, ".jsonl");
     const candidate = loadClaudeCliSessionRows(payload.path, parseJsonlText(payload.content), {
       rawId,
@@ -249,10 +267,22 @@ export function loadWslSessionDetailPayload(
       stat: { mtimeMs: payload.mtimeMs, size: payload.size },
       isSubagent: summary.isSubagent,
       parentSessionId: summary.parentSessionId,
-      source: "claude-cli",
+      source,
       includeTraceEvents: options.includeTraceEvents,
     });
-    return candidate ? scopeWslSession(candidate, environment, "claude-cli") : null;
+    return candidate ? scopeWslSession(candidate, environment, source) : null;
+  }
+  if (payload.kind === "codebuddy-project" && payloadSource(payload) === "codebuddy-cli") {
+    const candidate = loadCodeBuddyCliSessionRows(payload.path, parseJsonlText(payload.content), {
+      mtimeMs: payload.mtimeMs,
+      size: payload.size,
+    });
+    return candidate ? scopeWslSession(candidate, environment, "codebuddy-cli") : null;
+  }
+  if (payload.kind === "codewiz-session" || payload.kind === "opencode-session" || payload.kind === "qoder-project") {
+    const candidate = loadRemoteSessionDetailPayload(environment, payload, summary);
+    const source = wslPayloadSource(payload);
+    return candidate ? scopeWslSession({ ...candidate, session: { ...candidate.session, source } }, environment, source) : null;
   }
   return null;
 }
@@ -268,6 +298,13 @@ function scopeWslSession(loaded: LoadedSession, environment: SessionEnvironment,
       environmentLabel: environment.label,
     },
   };
+}
+
+function wslPayloadSource(payload: RemoteSessionFilePayload): SessionSource {
+  if (payload.kind === "codewiz-session") return "codewiz-cli";
+  if (payload.kind === "opencode-session") return "opencode-cli";
+  if (payload.kind === "qoder-project") return "qoder";
+  return payloadSource(payload);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

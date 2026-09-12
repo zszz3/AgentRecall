@@ -402,6 +402,49 @@ describe("RemoteSessionService cloud orchestration", () => {
     });
   });
 
+  it("uploads a WSL session with its environment-scoped key", async () => {
+    const environment: SessionEnvironment = {
+      ...({} as SessionEnvironment),
+      id: "wsl-ubuntu",
+      kind: "wsl",
+      label: "WSL · Ubuntu",
+      wslDistribution: "Ubuntu",
+      enabled: true,
+      syncState: "idle",
+      lastSyncedAt: null,
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+      hostAlias: null,
+      host: null,
+      user: null,
+      port: null,
+      authMode: "none",
+      identityFile: null,
+    };
+    const sessionKey = "wsl-ubuntu:claude-cli:session-1";
+    const harness = createHarness({
+      settings: configuredSettings(),
+      environment,
+      sessions: [localSession({
+        sessionKey,
+        source: "claude-cli",
+        rawId: "session-1",
+        environmentId: environment.id,
+        environmentKind: environment.kind,
+        environmentLabel: environment.label,
+        filePath: "/home/me/.claude/projects/work/session-1.jsonl",
+      })],
+    });
+
+    await expect(harness.service.upload(sessionKey)).resolves.toMatchObject({ status: "uploaded" });
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(sessionKey);
+    expect(harness.client.uploadSession).toHaveBeenCalledOnce();
+    expect(harness.store.upsertSessionSyncBinding).toHaveBeenCalledWith(expect.objectContaining({
+      localSessionKey: sessionKey,
+    }));
+  });
+
   it("uploads raw source artifacts together with optional attachments", async () => {
     const harness = createHarness({ settings: configuredSettings() });
     const sourceObject = {
@@ -1023,7 +1066,7 @@ describe("RemoteSessionService cloud orchestration", () => {
   it("rejects source-environment restore for non-SSH sessions or unavailable SSH environments", async () => {
     const localRemote = createHarness({ settings: configuredSettings() });
     await expect(localRemote.service.restoreToSource("remote-1", "codex", vi.fn())).rejects.toThrow(
-      "was not saved from an SSH environment",
+      "was not saved from an SSH or WSL environment",
     );
     expect(localRemote.client.getPortableSession).not.toHaveBeenCalled();
 
@@ -1032,7 +1075,7 @@ describe("RemoteSessionService cloud orchestration", () => {
       remote: remoteSession({ sourceEnvironmentKind: "ssh", sourceEnvironmentId: "ssh-1" }),
     });
     await expect(sshRemote.service.restoreToSource("remote-1", "codex", vi.fn())).rejects.toThrow(
-      "SSH environment for this remote session is not configured",
+      "source environment for this remote session is not configured",
     );
     expect(sshRemote.createSourceRestoreDependencies).not.toHaveBeenCalled();
   });

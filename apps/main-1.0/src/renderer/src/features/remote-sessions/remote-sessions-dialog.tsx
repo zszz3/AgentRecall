@@ -486,7 +486,7 @@ export function RemoteSessionsDialog({
                      <MoreHorizontal size={15} />
                    </button>
                    {openActionsId === item.id ? <div className="remote-session-more-menu" onMouseDown={(event) => event.stopPropagation()}>
-                     {remote.sourceEnvironmentKind === "ssh" ? <button type="button" onClick={() => setRestoreRequest({ remote, destination: "source" })}><Server size={14} />{l("Restore to source", "恢复到来源")}</button> : null}
+                     {remote.sourceEnvironmentKind === "ssh" || remote.sourceEnvironmentKind === "wsl" ? <button type="button" onClick={() => setRestoreRequest({ remote, destination: "source" })}><Server size={14} />{l("Restore to source", "恢复到来源")}</button> : null}
                      <button type="button" className="danger" disabled={uploadBusy || deleteBusy} onClick={() => setDeleteCandidates([item])}><Trash2 size={14} />{l("Delete cloud copy", "删除云端副本")}</button>
                    </div> : null}
                  </div> : null}

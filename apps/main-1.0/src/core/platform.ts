@@ -124,6 +124,8 @@ export interface AppSettings {
   skillSyncSupabaseAnonKey: string;
   remoteSyncEnabled: boolean;
   syncSessionAttachments: boolean;
+  /** Polling fallback interval for WSL/SSH watchers, in milliseconds. */
+  wslPollingIntervalMs: number;
   remoteSyncSupabaseUrl: string;
   remoteSyncSupabaseAnonKey: string;
   apiConfig: ApiConfig;
@@ -196,6 +198,7 @@ export const defaultSettings: AppSettings = {
   skillSyncSupabaseAnonKey: "",
   remoteSyncEnabled: false,
   syncSessionAttachments: true,
+  wslPollingIntervalMs: 60_000,
   remoteSyncSupabaseUrl: "",
   remoteSyncSupabaseAnonKey: "",
   apiConfig: defaultApiConfig,
@@ -228,6 +231,7 @@ export function mergeAppSettings(previous: AppSettings, updates: AppSettingsUpda
     skillSyncSupabaseAnonKey: String(merged.skillSyncSupabaseAnonKey ?? "").trim(),
     remoteSyncEnabled: Boolean(merged.remoteSyncEnabled),
     syncSessionAttachments: merged.syncSessionAttachments !== false,
+    wslPollingIntervalMs: normalizeWslPollingIntervalMs(merged.wslPollingIntervalMs),
     remoteSyncSupabaseUrl: normalizeSupabaseSettingUrl(merged.remoteSyncSupabaseUrl),
     remoteSyncSupabaseAnonKey: String(merged.remoteSyncSupabaseAnonKey ?? "").trim(),
     apiConfig: normalizeApiConfig({ ...previous.apiConfig, ...(updates.apiConfig ?? {}) }),
@@ -250,6 +254,11 @@ function normalizeCompressionConcurrency(value: number): number {
   return Math.min(32, Math.round(value));
 }
 
+export function normalizeWslPollingIntervalMs(value: number): number {
+  if (!Number.isFinite(value)) return defaultSettings.wslPollingIntervalMs;
+  return Math.min(3_600_000, Math.max(5_000, Math.round(value)));
+}
+
 const ITERM_APPLICATION_NAMES = ["iTerm", "iTerm2"];
 
 function sourceDisplayName(source: SessionSource): string {
@@ -266,6 +275,25 @@ export function migrationBinary(target: MigrationTarget, settings: AppSettings):
   if (target === "deepseek") return settings.deepseekBinary;
   if (target === "zcode") return "zcode";
   return settings.codexBinary;
+}
+
+/**
+ * Normalize persisted CLI settings for a remote POSIX environment.
+ * Local settings may contain a Windows absolute path; WSL and SSH must resolve
+ * the executable through the target user's PATH instead.
+ */
+export function remoteMigrationSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    claudeBinary: "claude",
+    codexBinary: "codex",
+    codeBuddyBinary: "codebuddy",
+    codeWizBinary: "codewiz",
+    cursorBinary: "cursor-agent",
+    tclaudeBinary: "tclaude",
+    tcodexBinary: "tcodex",
+    deepseekBinary: "dsh",
+  };
 }
 
 function migrationTargetDisplayName(target: MigrationTarget): string {
@@ -401,7 +429,7 @@ function buildResumeRuntimeProcessSpec(
   // Local absolute CLI settings do not describe the SSH host. Interactive SSH
   // resolves these stable command names through the remote user's own shell.
   return {
-    command: useRemoteBinary && (target === "claude" || target === "codex")
+    command: useRemoteBinary && ["claude", "codex", "tclaude", "tcodex", "codebuddy"].includes(target)
       ? target
       : migrationBinary(target, settings),
     args,
@@ -526,8 +554,8 @@ export function getResumeCommand(
   const wslDistribution = resolveWslDistribution(opts);
   const shell = localShellKind(platform, settings);
   if (wslDistribution) {
-    const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions);
-    const innerCommand = buildMigrationResumeShellCommand(spec, session.projectPath ?? "", "posix", withCwd);
+    const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, true);
+    const innerCommand = withWslShellProfile(buildMigrationResumeShellCommand(spec, session.projectPath ?? "", "posix", withCwd));
     return shell === "powershell"
       ? formatPowershellWslDisplay(wslDistribution, innerCommand)
       : formatWslDisplayCommand(wslDistribution, innerCommand, platform);
@@ -744,8 +772,8 @@ export function getResumeProcessSpec(
   const sshArgs = resolveSshArgs(opts);
   const wslDistribution = resolveWslDistribution(opts);
   if (wslDistribution) {
-    const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions);
-    const innerCommand = buildMigrationResumeShellCommand(spec, session.projectPath ?? "", "posix", true);
+    const spec = buildResumeRuntimeProcessSpec(session, settings, skipPermissions, true);
+    const innerCommand = withWslShellProfile(buildMigrationResumeShellCommand(spec, session.projectPath ?? "", "posix", true));
     return {
       command: "wsl.exe",
       args: ["--distribution", wslDistribution, "--exec", "bash", "-lc", innerCommand],
@@ -1295,18 +1323,23 @@ function getResumePowerShellCommand(
   return formatPowershellSshDisplay(opts.sshArgs, remoteInteractiveCommand(opts.sshArgs, innerCommand));
 }
 
+function withWslShellProfile(command: string): string {
+  return `if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi; ${command}`;
+}
+
 function getResumeWslPowerShellCommand(
   session: SessionSearchResult,
   settings: AppSettings,
   opts: ResumeOpenOptions & { wslDistribution: string },
 ): string {
-  const innerCommand = buildResumeShellCommand(session, settings, {
+  const innerCommand = withWslShellProfile(buildResumeShellCommand(session, settings, {
     withCwd: true,
     skipPermissions: opts.skipPermissions ?? false,
     shell: "posix",
     platform: "linux",
     homeDir: opts.homeDir,
-  });
+    useRemoteBinary: true,
+  }));
   return formatPowershellWslDisplay(opts.wslDistribution, innerCommand);
 }
 

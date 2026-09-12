@@ -1141,6 +1141,8 @@ test("strict recall hides uncontrolled and in-flight model memories while keepin
   assert.match(blocked.hookSpecificOutput.additionalContext, /written-at="2026-08-05T01:00:00.000Z"/);
   assert.doesNotMatch(blocked.hookSpecificOutput.additionalContext, /high-confidence|low-confidence|partially visible/);
 
+  const traceDirectory = path.join(stateDir, "recall-traces");
+  const blockedTraceFiles = new Set(fs.readdirSync(traceDirectory));
   fs.writeFileSync(statePath, JSON.stringify({
     workspaceId: "workspace-1",
     sessionId: "session-1",
@@ -1151,8 +1153,9 @@ test("strict recall hides uncontrolled and in-flight model memories while keepin
   assert.match(completed.hookSpecificOutput.additionalContext, /human-approved editor policy/);
   assert.match(completed.hookSpecificOutput.additionalContext, /completed high-confidence event/);
   assert.doesNotMatch(completed.hookSpecificOutput.additionalContext, /low-confidence|partially visible/);
-  const traceFiles = fs.readdirSync(path.join(stateDir, "recall-traces")).sort();
-  const trace = JSON.parse(fs.readFileSync(path.join(stateDir, "recall-traces", traceFiles.at(-1)), "utf8"));
+  const traceFiles = fs.readdirSync(traceDirectory).filter((name) => !blockedTraceFiles.has(name));
+  assert.equal(traceFiles.length, 1);
+  const trace = JSON.parse(fs.readFileSync(path.join(traceDirectory, traceFiles[0]), "utf8"));
   assert.equal(trace.candidates.find((candidate) => candidate.uri.endsWith("low.md")).reason, "score-threshold");
   assert.equal(trace.candidates.find((candidate) => candidate.uri.endsWith("uncontrolled.md")).reason, "uncontrolled-memory");
 });

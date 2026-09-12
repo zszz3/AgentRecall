@@ -5,6 +5,16 @@ export interface WslProcessSpec {
   args: string[];
 }
 
+export type WslDistributionState = "running" | "stopped" | "unknown";
+
+/** A parsed row from `wsl.exe --list --verbose` (or the quiet list). */
+export interface WslDistributionInfo {
+  name: string;
+  isDefault: boolean;
+  state: WslDistributionState;
+  version: number | null;
+}
+
 export interface WslListRunner {
   (file: string, args: readonly string[], options: ExecFileOptions): Promise<{ stdout: Buffer; stderr: Buffer }>;
 }
@@ -16,14 +26,33 @@ export const WSL_LIST_EXEC_OPTIONS = {
 } satisfies ExecFileOptions;
 
 export function parseWslDistributionOutput(output: Buffer | string): string[] {
-  const distributions: string[] = [];
+  return parseWslDistributionDetails(output).map((distribution) => distribution.name);
+}
+
+/**
+ * Parse both the compact output (`--list --quiet`) and the table emitted by
+ * `--list --verbose`. WSL has emitted UTF-16LE, UTF-8, and output with a BOM
+ * across Windows versions, so decoding happens before any table parsing.
+ */
+export function parseWslDistributionDetails(output: Buffer | string): WslDistributionInfo[] {
+  const distributions: WslDistributionInfo[] = [];
   const seen = new Set<string>();
-  for (const line of decodeWslOutput(output).split(/\r?\n/)) {
-    const distribution = line.replace(/\0/g, "").replace(/^\uFEFF/, "").trim();
-    if (distribution && !seen.has(distribution)) {
-      seen.add(distribution);
-      distributions.push(distribution);
-    }
+  for (const rawLine of decodeWslOutput(output).split(/\r?\n/)) {
+    const line = rawLine.replace(/\0/g, "").replace(/^\uFEFF/, "").trim();
+    if (!line || /^name\s+state\s+version$/iu.test(line) || /^[-\s]+$/u.test(line) || /windows subsystem for linux|linux distribution/iu.test(line)) continue;
+    const defaultMarked = line.startsWith("*");
+    const withoutMarker = (defaultMarked ? line.slice(1) : line).trim();
+    const verbose = withoutMarker.match(/^(.*?)\s+(Running|Stopped|Installing|Uninstalling)\s+(\d+)\s*$/iu);
+    const name = (verbose?.[1] ?? withoutMarker).trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const stateText = verbose?.[2]?.toLowerCase();
+    distributions.push({
+      name,
+      isDefault: defaultMarked,
+      state: stateText === "running" ? "running" : stateText ? "stopped" : "unknown",
+      version: verbose?.[3] ? Number(verbose[3]) : null,
+    });
   }
   return distributions;
 }
@@ -51,6 +80,25 @@ export async function listWslDistributions(
   if (platform !== "win32") return [];
   const result = await runner("wsl.exe", ["--list", "--quiet"], WSL_LIST_EXEC_OPTIONS);
   return parseWslDistributionOutput(result.stdout);
+}
+
+/** Return status/default information for the environment picker and diagnostics. */
+export async function listWslDistributionDetails(
+  runner: WslListRunner = runWslList,
+  platform: NodeJS.Platform = process.platform,
+): Promise<WslDistributionInfo[]> {
+  if (platform !== "win32") return [];
+  try {
+    const result = await runner("wsl.exe", ["--list", "--verbose"], WSL_LIST_EXEC_OPTIONS);
+    return parseWslDistributionDetails(result.stdout);
+  } catch (verboseError) {
+    try {
+      const result = await runner("wsl.exe", ["--list", "--quiet"], WSL_LIST_EXEC_OPTIONS);
+      return parseWslDistributionDetails(result.stdout);
+    } catch {
+      throw verboseError;
+    }
+  }
 }
 
 async function runWslList(

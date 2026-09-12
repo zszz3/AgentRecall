@@ -20,7 +20,7 @@ export async function deleteWslSessionFiles(
 ): Promise<void> {
   if (environment.kind !== "wsl") throw new Error("WSL session deletion requires a WSL environment.");
   const normalizedPaths = [...new Set(filePaths.map((filePath) => filePath.trim()))];
-  if (normalizedPaths.some((filePath) => !filePath.startsWith("/"))) throw new Error("WSL session path must be absolute.");
+  normalizedPaths.forEach(validateWslDeletionPath);
   if (normalizedPaths.length === 0) return;
   await runCommand(environment, `rm -f -- ${normalizedPaths.map(posixShellQuote).join(" ")}`);
 }
@@ -38,7 +38,7 @@ export async function deleteWslSessionSources(
     ...deletionPaths.emptyDirectories,
     ...deletionPaths.requiredAbsentFiles,
   ];
-  if (allPaths.some((filePath) => !filePath.startsWith("/"))) throw new Error("WSL session path must be absolute.");
+  allPaths.forEach(validateWslDeletionPath);
   if (deletionPaths.files.length === 0) return;
 
   const commands = [
@@ -67,4 +67,18 @@ export async function deleteWslSessionSources(
 
 function posixShellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function validateWslDeletionPath(filePath: string): void {
+  if (!filePath.startsWith("/")) throw new Error("WSL session path must be absolute.");
+  const segments = filePath.split("/").filter(Boolean);
+  if (segments.includes("..") || segments.includes(".")) throw new Error("WSL session path contains traversal segments.");
+  if (segments.length < 3) throw new Error("Refusing to delete a WSL filesystem root.");
+  const protectedSuffixes = [
+    "/.codex/sessions", "/.codex/session_index.jsonl", "/.claude/projects", "/.claude/sessions",
+    "/.tclaude/projects", "/.tcodex/sessions", "/.tcodex/session_index.jsonl", "/.codebuddy/projects",
+  ];
+  if (protectedSuffixes.some((suffix) => filePath.endsWith(suffix))) {
+    throw new Error("Refusing to delete a WSL session source root.");
+  }
 }

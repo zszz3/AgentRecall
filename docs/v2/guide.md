@@ -199,7 +199,7 @@ SSH 环境中的 Claude Code 和 Codex 会话可以在同一台远程主机上�
 
 ### SSH、WSL 和跨设备同步
 
-在 **设置 → 连接** 中添加 SSH 主机；Windows 用户还可以添加 WSL 发行版。连接成功后，对应环境和项目会显示在 Session 左侧。SSH 中的 Claude Code 和 Codex 会话支持在原主机上互相迁移。
+在 **设置 → 连接** 中添加 SSH 主机；Windows 用户还可以添加 WSL 发行版。连接成功后，对应环境和项目会显示在 Session 左侧。SSH 中的 Claude Code 和 Codex 会话支持在原主机上互相迁移；WSL 中的 Claude Code、Codex、TClaude、TCodex 和 CodeBuddy 支持搜索、详情、Resume、手动云备份，以及选择本地或 WSL 目标创建会话副本。迁移到 WSL 时必须输入 Linux 项目目录或明确选择无项目路径，CodeWiz 共享数据库暂不作为 WSL/SSH 目标。
 
 点击 Session 右上角的云朵按钮打开远程会话：
 

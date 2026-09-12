@@ -33,7 +33,7 @@ export type SessionSource =
 export type SessionFormat = "claude" | "codex" | "codebuddy" | "workbuddy" | "codewiz" | "openclaw" | "hermes" | "opencode" | "zcode" | "cursor" | "trae" | "qoder" | "pi" | "deepseek" | "kimi" | "qwen" | "gemini";
 export type SessionSortBy = "smart" | "activity" | "created";
 export type EnvironmentKind = "local" | "wsl" | "ssh";
-export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "disconnected" | "error";
+export type EnvironmentSyncState = "idle" | "syncing" | "watching" | "polling" | "disconnected" | "error";
 export type SshAuthMode = "none" | "identityFile" | "password";
 
 export interface SessionEnvironment {
@@ -154,6 +154,7 @@ export interface SessionMigrationProgress {
 }
 
 export interface SessionMigrationResult {
+  operationId?: string;
   target: MigrationTarget;
   targetSessionId: string;
   targetFilePath: string;
@@ -163,6 +164,8 @@ export interface SessionMigrationResult {
   launched: boolean;
   restoredSubagentCount?: number;
   warning?: string;
+  completedStages?: SessionMigrationStage[];
+  partial?: boolean;
 }
 
 export interface SessionMigrationRequest {
@@ -170,6 +173,7 @@ export interface SessionMigrationRequest {
   target: MigrationTarget;
   targetProjectPath?: string;
   throughTurnId?: string;
+  targetEnvironmentId?: string;
 }
 
 export interface SessionMigrationRecord {

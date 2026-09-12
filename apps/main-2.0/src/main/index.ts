@@ -44,6 +44,7 @@ import {
   getSafeMigrationResumeCommand,
   getRemoteMigrationCliVersionCommand,
   inspectMigrationCli,
+  remoteMigrationSettings,
   mergeAppSettings,
   normalizeTerminal,
   getResumeCommand,
@@ -106,7 +107,7 @@ import { WslSessionIndexer } from "../core/wsl-session-indexer";
 import { SessionStore } from "../core/session-store";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { readUserSshConfig } from "../core/ssh-config";
-import { listWslDistributions } from "../core/wsl";
+import { listWslDistributionDetails, listWslDistributions } from "../core/wsl";
 import {
   AUTO_INDEX_REFRESH_INTERVAL_MS,
   INITIAL_INDEX_DELAY_MS,
@@ -496,6 +497,7 @@ async function applySettingsUpdate(settings: AppSettingsUpdate): Promise<AppSett
   }
   await providerService.persistKeysFromUpdate(settings, next);
   settingsStore.set(providerService.removeStoredKeys(next));
+  if ("wslPollingIntervalMs" in settings) remoteWatchManager?.updatePollingInterval(next.wslPollingIntervalMs);
   if (openVikingSettingsChanged) {
     reconcileOpenVikingMemoryHooks(next);
     if (!next.openVikingMemoryEnabled) await openVikingControlService?.stopRuntime().catch((error) => {
@@ -1925,6 +1927,14 @@ function ensureRemoteWatchManager(): RemoteWatchManager {
           .then(emitEnvironmentsUpdated)
           .catch(() => undefined);
       },
+      onModeChange: (environment, mode) => {
+        if (environment.kind !== "wsl") return;
+        void store.updateEnvironmentSyncState(environment.id, mode === "polling" ? "polling" : "watching", { lastError: null })
+          .then(() => store.listEnvironments())
+          .then(emitEnvironmentsUpdated)
+          .catch(() => undefined);
+      },
+      pollIntervalMs: getSettings().wslPollingIntervalMs,
     });
   }
   return remoteWatchManager;
@@ -2268,7 +2278,7 @@ async function inspectWslMigrationCli(environment: SessionEnvironment, target: M
   const settings = getSettings();
   await inspectMigrationCli(
     target,
-    { ...settings, claudeBinary: "claude", codexBinary: "codex" },
+    remoteMigrationSettings(settings),
     async (command, args) => runRemoteCommand(environment, [command, ...args].join(" ")),
     { platform: "linux" },
   );
@@ -2278,7 +2288,7 @@ async function inspectSshMigrationCli(environment: SessionEnvironment, target: M
   const settings = getSettings();
   await inspectMigrationCli(
     target,
-    { ...settings, claudeBinary: "claude", codexBinary: "codex" },
+    remoteMigrationSettings(settings),
     (command, args) => runSshSessionCommand(
       environment,
       getRemoteMigrationCliVersionCommand(command, args),
@@ -2426,6 +2436,10 @@ async function writeMigratedSessionToSshEnvironment(
       contentBase64: content.toString("base64"),
     });
     if (target === "codex") {
+      // Keep the rollout file when the index request fails. The request may
+      // have committed remotely before its response was lost; deleting the
+      // file here would leave an index entry that points at nothing. A later
+      // sync can safely rebuild the index from this durable file.
       await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
       await updateRemoteCodexAppState(environment, remoteHome, remotePath, session, written.sessionId, now);
     }
@@ -2545,9 +2559,13 @@ const REMOTE_WRITE_FILE_SCRIPT = [
   "content = base64.b64decode(payload['contentBase64'])",
   "target.parent.mkdir(parents=True, exist_ok=True)",
   "tmp = target.with_name(target.name + '.tmp-' + uuid.uuid4().hex)",
-  "tmp.write_bytes(content)",
-  "os.chmod(tmp, 0o600)",
-  "os.replace(tmp, target)",
+  "try:",
+  "  tmp.write_bytes(content)",
+  "  os.chmod(tmp, 0o600)",
+  "  os.link(tmp, target)",
+  "  tmp.unlink()",
+  "finally:",
+  "  if tmp.exists(): tmp.unlink()",
   "print(str(target))",
 ].join("\n");
 
@@ -2924,6 +2942,7 @@ function registerIpc(): void {
   });
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
   ipcMain.handle("wsl:list-distributions", () => listWslDistributions());
+  ipcMain.handle("wsl:list-distribution-details", () => listWslDistributionDetails());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>
     ensureRemoteEnvironmentLifecycle().saveEnvironment(input),
   );
@@ -3008,14 +3027,64 @@ function registerIpc(): void {
     }
     const migrationSource = await loadLocalSessionMigrationSource(store, request);
     const settings = Object.freeze(await providerService.hydrateSettings());
-    if (migrationSource.source.environmentKind === "wsl" || migrationSource.source.environmentKind === "ssh") {
+    const targetEnvironment = request.targetEnvironmentId
+      ? await store.getEnvironment(request.targetEnvironmentId)
+      : null;
+    if (request.targetEnvironmentId && !targetEnvironment) {
+      throw new Error("Migration target environment is not configured.");
+    }
+    if (targetEnvironment && targetEnvironment.kind !== "local" && !targetEnvironment.enabled) {
+      throw new Error(`Migration target environment ${targetEnvironment.label} is disabled.`);
+    }
+    const sourceEnvironmentId = migrationSource.source.environmentId;
+    const crossEnvironment = targetEnvironment !== null && targetEnvironment.id !== sourceEnvironmentId;
+    if (crossEnvironment) {
       assertMigrationTargetEnabled(request.target, settings);
+      if (request.target === "codewiz" && targetEnvironment?.kind !== "local") {
+        throw new Error("CodeWiz migration into WSL or SSH is disabled until its shared database can be updated transactionally.");
+      }
       if (migrationSource.source.environmentKind === "ssh"
         && request.target !== sshMigrationTarget(migrationSource.source.source)) {
         throw new Error("SSH sessions can only migrate between Claude Code and Codex on the same host.");
       }
       if (migrationSource.source.environmentKind === "wsl"
-        && !["claude", "codex", "codebuddy", "codewiz", "cursor"].includes(request.target)) {
+        && !["claude", "codex", "codebuddy", "cursor"].includes(request.target)) {
+        throw new Error(`Migration target ${request.target} is not supported in WSL.`);
+      }
+      const portable = portableSessionFrom(
+        migrationSource.source,
+        migrationSource.messages,
+        {
+          turnSourceMessageIndexes: migrationSource.turnSourceMessageIndexes,
+          allowSsh: migrationSource.source.environmentKind === "ssh",
+        },
+      );
+      if (migrationSource.subagents.length > 0) portable.subagents = migrationSource.subagents;
+      const progress = (item: SessionMigrationProgress): void => event.sender.send("session:migration-progress", item);
+      const deps = targetEnvironment!.kind === "local"
+        ? await createLocalRemoteRestoreDependencies(progress)
+        : await createSourceRemoteRestoreDependencies(targetEnvironment!, progress);
+      return restoreRemotePortableSession({
+        remoteId: request.sessionKey,
+        portable,
+        target: request.target as MigrationAgent,
+        // A project path from another environment is not portable. Callers can
+        // provide an explicit destination path; otherwise start without one.
+        localProjectPath: request.targetProjectPath ?? "",
+        deps,
+      });
+    }
+    if (migrationSource.source.environmentKind === "wsl" || migrationSource.source.environmentKind === "ssh") {
+      assertMigrationTargetEnabled(request.target, settings);
+      if (request.target === "codewiz") {
+        throw new Error("CodeWiz migration is disabled for WSL and SSH until its shared database can be updated transactionally.");
+      }
+      if (migrationSource.source.environmentKind === "ssh"
+        && request.target !== sshMigrationTarget(migrationSource.source.source)) {
+        throw new Error("SSH sessions can only migrate between Claude Code and Codex on the same host.");
+      }
+      if (migrationSource.source.environmentKind === "wsl"
+        && !["claude", "codex", "codebuddy", "cursor"].includes(request.target)) {
         throw new Error(`Migration target ${request.target} is not supported in WSL.`);
       }
       const environment = migrationSource.source.environmentKind === "wsl"
@@ -3037,7 +3106,7 @@ function registerIpc(): void {
         remoteId: request.sessionKey,
         portable,
         target: request.target as MigrationAgent,
-        localProjectPath: portable.projectPath,
+        localProjectPath: request.targetProjectPath ?? portable.projectPath,
         deps,
       });
     }

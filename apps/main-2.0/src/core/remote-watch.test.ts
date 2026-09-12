@@ -88,7 +88,7 @@ describe("RemoteWatchManager", () => {
     expect(command).toContain("exit 86");
   });
 
-  it.skipIf(process.platform === "win32")("passes only existing candidate paths to inotifywait", () => {
+  it.skipIf(process.platform === "win32")( "passes only existing candidate paths to inotifywait", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "remote-watch-home-"));
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "remote-watch-bin-"));
     const argsFile = path.join(bin, "watch-args");

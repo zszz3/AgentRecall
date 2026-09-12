@@ -7,7 +7,8 @@ import {
 import type { SessionStore } from "./session-store";
 import { remoteSessionKey } from "./session-environment";
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { runRemoteCommand } from "./remote-process";
+import { inflateRawSync } from "node:zlib";
+import { runRemoteCommand, runRemoteCommandWithInput } from "./remote-process";
 import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "./session-sources";
 import { buildSshArgs } from "./ssh-config";
 import type {
@@ -480,11 +481,16 @@ async function syncWslEnvironment(
   options: RemoteSyncOptions,
 ): Promise<RemoteSyncStatus> {
   const runWsl = options.runSsh ?? runSystemRemote;
+  const previousState = store.getEnvironment(environment.id)?.syncState;
   store.updateEnvironmentSyncState(environment.id, "syncing", { lastError: null });
   try {
-    const output = await runWsl(environment, buildRemoteCollectorCommand([], { includeCodeWiz: false, includeOpenCode: false }));
+    const enabledOptionalSources = new Set(options.enabledOptionalSources ?? []);
+    const output = await runWsl(environment, buildRemoteCollectorCommand([...enabledOptionalSources], {
+      includeCodeWiz: true,
+      includeOpenCode: true,
+    }));
     const { payloads, summaries } = decodeRemoteSyncOutput(output);
-    const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary)));
+    const enabledSummaries = summaries.filter((summary) => isSupportedWslSource(summarySource(summary), enabledOptionalSources));
     for (const summary of enabledSummaries) {
       store.upsertIndexedSessionSummary(
         wslSummaryToIndexedSession(environment, summary),
@@ -495,12 +501,19 @@ async function syncWslEnvironment(
     }
     const loaded = loadWslSessionPayloads(
       environment,
-      payloads.filter((payload) => isSupportedWslSource(payloadSourceForPayload(payload))),
+      payloads.filter((payload) => isSupportedWslSource(payloadSourceForPayload(payload), enabledOptionalSources)),
     );
     for (const item of loaded) {
       store.upsertIndexedSession(item.session, item.messages, item.tokenEvents, item.traceEvents, item.codexIncrementalState);
     }
-    store.updateEnvironmentSyncState(environment.id, "watching", { lastSyncedAt: Date.now(), lastError: null });
+    // RemoteWatchManager owns the WSL mode. Preserve polling until an event
+    // watcher has actually been recreated and reported ready.
+    const currentState = previousState;
+    store.updateEnvironmentSyncState(
+      environment.id,
+      currentState === "polling" || currentState === "watching" ? currentState : "syncing",
+      { lastSyncedAt: Date.now(), lastError: null },
+    );
     return { environmentId: environment.id, indexed: enabledSummaries.length + loaded.length, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -571,8 +584,15 @@ function payloadSourceForPayload(payload: RemoteSessionFilePayload): SessionSour
   return "claude-cli";
 }
 
-function isSupportedWslSource(source: SessionSource): boolean {
-  return source === "codex-cli" || source === "claude-cli";
+function isSupportedWslSource(source: SessionSource, enabledOptionalSources: ReadonlySet<SessionSource> = new Set()): boolean {
+  return source === "codex-cli"
+    || source === "claude-cli"
+    || (source === "tclaude-cli" && enabledOptionalSources.has(source))
+    || (source === "tcodex-cli" && enabledOptionalSources.has(source))
+    || (source === "codebuddy-cli" && enabledOptionalSources.has(source))
+    || source === "codewiz-cli"
+    || source === "opencode-cli"
+    || (source === "qoder" && enabledOptionalSources.has(source));
 }
 
 function isOptionalRemoteSource(source: SessionSource): boolean {
@@ -645,18 +665,40 @@ export function buildRemoteInteractiveSshArgs(
 }
 
 async function runSystemRemote(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
-  if (environment.kind === "wsl") return runRemoteCommand(environment, remoteCommand, REMOTE_SYNC_EXEC_OPTIONS);
+  const script = decodeInlinePythonCommand(remoteCommand);
+  if (environment.kind === "wsl") {
+    if (script !== null) return runRemoteCommandWithInput(environment, "python3 -", script, REMOTE_SYNC_EXEC_OPTIONS);
+    return runRemoteCommand(environment, remoteCommand, REMOTE_SYNC_EXEC_OPTIONS);
+  }
   return runSystemSsh(environment, remoteCommand);
 }
 
 async function runSystemSsh(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
-  const args = buildRemoteSyncSshArgs(environment, remoteCommand);
+  const script = decodeInlinePythonCommand(remoteCommand);
+  const args = buildRemoteSyncSshArgs(environment, script === null ? remoteCommand : "python3 -");
   return new Promise((resolve, reject) => {
-    execFile("ssh", args, REMOTE_SYNC_EXEC_OPTIONS, (error, stdout, stderr) => {
+    const child = execFile("ssh", args, REMOTE_SYNC_EXEC_OPTIONS, (error, stdout, stderr) => {
       if (error) reject(new Error(formatRemoteSyncProcessError(error, stdout, stderr)));
       else resolve(stdout);
     });
+    if (script !== null) child.stdin?.end(script);
   });
+}
+
+/**
+ * Large remote collectors used to be embedded in `python3 -c ...`. Windows
+ * rejects those commands once they exceed CreateProcess' argument limit. Keep
+ * the public command builders stable for SSH diagnostics and tests, but move
+ * the decoded Python program through stdin for real WSL/SSH execution.
+ */
+function decodeInlinePythonCommand(command: string): string | null {
+  const match = command.match(/^python3 -c 'import base64,zlib; exec\(zlib\.decompress\(base64\.b64decode\("([A-Za-z0-9+/=]+)"\), -15\)\.decode\("utf-8"\)\)'$/u);
+  if (!match?.[1]) return null;
+  try {
+    return inflateRawSync(Buffer.from(match[1], "base64")).toString("utf8");
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchRemoteSessionFilePayload(

@@ -9,9 +9,17 @@ import {
   getResumeCommand,
   inspectMigrationCli,
   mergeAppSettings,
+  normalizeWslPollingIntervalMs,
+  remoteMigrationSettings,
 } from "./platform";
 
 describe("app settings", () => {
+  it("keeps the WSL polling fallback within safe bounds", () => {
+    expect(normalizeWslPollingIntervalMs(1)).toBe(5_000);
+    expect(normalizeWslPollingIntervalMs(60_001.4)).toBe(60_001);
+    expect(normalizeWslPollingIntervalMs(9_000_000)).toBe(3_600_000);
+    expect(mergeAppSettings(defaultSettings, { wslPollingIntervalMs: 1 }).wslPollingIntervalMs).toBe(5_000);
+  });
   it("keeps NVM as the fallback for migration CLI probes over SSH", () => {
     const command = getRemoteMigrationCliVersionCommand("codex", ["--version"]);
     expect(command).toContain('if [ -s "$HOME/.nvm/nvm.sh" ]');
@@ -220,5 +228,26 @@ describe("app settings", () => {
     });
     expect(merged.summaryCodexConfigDir).toBe("");
     expect(merged.summaryClaudeModel).toBe("claude-opus-4-8");
+  });
+});
+
+describe("remote migration CLI settings", () => {
+  it("uses target PATH names instead of persisted local paths", () => {
+    const settings = remoteMigrationSettings({
+      ...defaultSettings,
+      claudeBinary: "C:\\Program Files\\Claude\\claude.exe",
+      codexBinary: "C:\\Program Files\\Codex\\codex.exe",
+      codeBuddyBinary: "C:\\CodeBuddy\\codebuddy.exe",
+      codeWizBinary: "C:\\CodeWiz\\codewiz.exe",
+      cursorBinary: "C:\\Cursor\\cursor-agent.exe",
+      tclaudeBinary: "C:\\Tencent\\tclaude.exe",
+      tcodexBinary: "C:\\Tencent\\tcodex.exe",
+      deepseekBinary: "C:\\DeepSeek\\dsh.exe",
+    });
+    expect(settings).toMatchObject({
+      claudeBinary: "claude", codexBinary: "codex", codeBuddyBinary: "codebuddy",
+      codeWizBinary: "codewiz", cursorBinary: "cursor-agent", tclaudeBinary: "tclaude",
+      tcodexBinary: "tcodex", deepseekBinary: "dsh",
+    });
   });
 });

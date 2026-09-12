@@ -12,6 +12,7 @@ export function environmentStatusLabel(environment: SessionEnvironment, language
   if (status === "local") return localize(language, "local", "本地");
   if (status === "syncing") return localize(language, "syncing", "同步中");
   if (status === "watching") return localize(language, "watching", "监听中");
+  if (status === "polling") return localize(language, "polling", "轮询中");
   if (status === "error") return localize(language, "error", "错误");
   if (status === "disconnected") return localize(language, "disconnected", "未连接");
   return localize(language, "idle", "空闲");
@@ -19,7 +20,10 @@ export function environmentStatusLabel(environment: SessionEnvironment, language
 
 export function environmentTarget(environment: SessionEnvironment, language: LanguageMode): string {
   if (environment.kind === "local") return localize(language, "This computer", "这台电脑");
-  if (environment.kind === "wsl") return `${localize(language, "Windows Subsystem for Linux", "Windows Subsystem for Linux")} · ${localize(language, "Local Linux", "本地 Linux")}`;
+  if (environment.kind === "wsl") {
+    const distribution = environment.wslDistribution?.trim();
+    return `${localize(language, "Windows Subsystem for Linux", "Windows Subsystem for Linux")} · ${distribution || localize(language, "Local Linux", "本地 Linux")}`;
+  }
   const destination = environment.hostAlias || environment.host || environment.label;
   const userPrefix = environment.user && !environment.hostAlias ? `${environment.user}@` : "";
   const portSuffix = environment.port ? `:${environment.port}` : "";

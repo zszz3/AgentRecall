@@ -51,6 +51,7 @@ import {
   getResumeCommand,
   getRemoteMigrationCliVersionCommand,
   inspectMigrationCli,
+  remoteMigrationSettings,
   mergeAppSettings,
   normalizeTerminal,
   openDeepSeekWebInTerminal,
@@ -105,7 +106,7 @@ import { WslSessionIndexer } from "../core/wsl-session-indexer";
 import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { readUserSshConfig } from "../core/ssh-config";
-import { listWslDistributions } from "../core/wsl";
+import { listWslDistributionDetails, listWslDistributions } from "../core/wsl";
 import { SessionBulkDeleteService } from "./services/session-bulk-delete-service";
 import { LocalSessionIndexService } from "./services/local-session-index-service";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
@@ -1240,6 +1241,12 @@ function ensureRemoteWatchManager(): RemoteWatchManager {
         store.updateEnvironmentSyncState(environment.id, "error", { lastError: remoteSyncErrorMessage(error) });
         emitEnvironmentsUpdated();
       },
+      onModeChange: (environment, mode) => {
+        if (environment.kind !== "wsl") return;
+        store.updateEnvironmentSyncState(environment.id, mode === "polling" ? "polling" : "watching", { lastError: null });
+        emitEnvironmentsUpdated();
+      },
+      pollIntervalMs: getSettings().wslPollingIntervalMs,
     });
   }
   return remoteWatchManager;
@@ -1560,7 +1567,7 @@ async function inspectWslMigrationCli(environment: SessionEnvironment, target: M
   const settings = getSettings();
   await inspectMigrationCli(
     target,
-    { ...settings, claudeBinary: "claude", codexBinary: "codex" },
+    remoteMigrationSettings(settings),
     async (command, args) => runRemoteCommand(environment, [command, ...args].join(" ")),
     { platform: "linux" },
   );
@@ -1570,7 +1577,7 @@ async function inspectSshMigrationCli(environment: SessionEnvironment, target: M
   const settings = getSettings();
   await inspectMigrationCli(
     target,
-    { ...settings, claudeBinary: "claude", codexBinary: "codex" },
+    remoteMigrationSettings(settings),
     (command, args) => runSshSessionCommand(
       environment,
       getRemoteMigrationCliVersionCommand(command, args),
@@ -1697,6 +1704,10 @@ async function writeMigratedSessionToSshEnvironment(
       contentBase64: content.toString("base64"),
     });
     if (target === "codex") {
+      // Keep the rollout file when the index request fails. The request may
+      // have committed remotely before its response was lost; deleting the
+      // file here would leave an index entry that points at nothing. A later
+      // sync can safely rebuild the index from this durable file.
       await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
       await updateRemoteCodexAppState(environment, remoteHome, remotePath, session, written.sessionId, now);
     }
@@ -1816,9 +1827,13 @@ const REMOTE_WRITE_FILE_SCRIPT = [
   "content = base64.b64decode(payload['contentBase64'])",
   "target.parent.mkdir(parents=True, exist_ok=True)",
   "tmp = target.with_name(target.name + '.tmp-' + uuid.uuid4().hex)",
-  "tmp.write_bytes(content)",
-  "os.chmod(tmp, 0o600)",
-  "os.replace(tmp, target)",
+  "try:",
+  "  tmp.write_bytes(content)",
+  "  os.chmod(tmp, 0o600)",
+  "  os.link(tmp, target)",
+  "  tmp.unlink()",
+  "finally:",
+  "  if tmp.exists(): tmp.unlink()",
   "print(str(target))",
 ].join("\n");
 
@@ -2224,6 +2239,7 @@ function registerIpc(): void {
   ipcMain.handle("environments:list", () => store.listEnvironments());
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
   ipcMain.handle("wsl:list-distributions", () => listWslDistributions());
+  ipcMain.handle("wsl:list-distribution-details", () => listWslDistributionDetails());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>
     retrySqliteWrite(() => ensureRemoteEnvironmentLifecycle().saveEnvironment(input)),
   );
@@ -2384,6 +2400,7 @@ function registerIpc(): void {
     }
     providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
+    if ("wslPollingIntervalMs" in settings) remoteWatchManager?.updatePollingInterval(next.wslPollingIntervalMs);
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
     if ("showInDock" in settings) applyDockVisibility(next.showInDock);
     if (OPTIONAL_SOURCE_SETTINGS.some((item) => previous[item.key] && !next[item.key])) {
@@ -2478,6 +2495,7 @@ function registerIpc(): void {
     sessionKey: string,
     target: unknown,
     targetProjectPath?: string,
+    targetEnvironmentId?: string,
   ) => {
     const session = store.getSession(sessionKey);
     if (!session) throw new Error("Session not found.");
@@ -2496,8 +2514,52 @@ function registerIpc(): void {
       store.getAllMessages(child.sessionKey),
       { allowSsh: child.environmentKind === "ssh" },
     ));
+    const targetEnvironment = targetEnvironmentId
+      ? store.getEnvironment(targetEnvironmentId)
+      : null;
+    if (targetEnvironmentId && !targetEnvironment) {
+      throw new Error("Migration target environment is not configured.");
+    }
+    if (targetEnvironment && targetEnvironment.kind !== "local" && !targetEnvironment.enabled) {
+      throw new Error(`Migration target environment ${targetEnvironment.label} is disabled.`);
+    }
+    const crossEnvironment = targetEnvironment !== null && targetEnvironment.id !== session.environmentId;
+    if (crossEnvironment) {
+      if (!isMigrationTarget(target)) throw new Error(`Migration target ${String(target)} is not supported.`);
+      const settings = await providerService.hydrateSettings();
+      assertMigrationTargetEnabled(target, settings);
+      if (session.environmentKind === "ssh" && target !== sshMigrationTarget(session.source)) {
+        throw new Error("SSH sessions can only migrate between Claude Code and Codex on the same host.");
+      }
+      if (session.environmentKind === "wsl"
+        && !["claude", "codex", "codebuddy", "cursor"].includes(target)) {
+        throw new Error(`Migration target ${String(target)} is not supported in WSL.`);
+      }
+      const portable = portableSessionFrom(
+        session,
+        store.getAllMessages(sessionKey),
+        { allowSsh: session.environmentKind === "ssh" },
+      );
+      if (subagents.length > 0) portable.subagents = subagents;
+      const progress = (item: SessionMigrationProgress): void => event.sender.send("session:migration-progress", item);
+      const deps = targetEnvironment!.kind === "local"
+        ? await createLocalRemoteRestoreDependencies(progress)
+        : await createSourceRemoteRestoreDependencies(targetEnvironment!, progress);
+      return restoreRemotePortableSession({
+        remoteId: sessionKey,
+        portable,
+        target: target as MigrationAgent,
+        // Project paths are environment-specific. An explicit destination path
+        // may be supplied by the renderer; otherwise leave it empty.
+        localProjectPath: targetProjectPath ?? "",
+        deps,
+      });
+    }
     if (session.environmentKind === "wsl" || session.environmentKind === "ssh") {
       if (!isMigrationTarget(target)) throw new Error(`Migration target ${String(target)} is not supported.`);
+      if (target === "codewiz") {
+        throw new Error("CodeWiz migration is disabled for WSL and SSH until its shared database can be updated transactionally.");
+      }
       const settings = await providerService.hydrateSettings();
       assertMigrationTargetEnabled(target, settings);
       if (session.environmentKind === "ssh" && target !== sshMigrationTarget(session.source)) {
@@ -2519,7 +2581,7 @@ function registerIpc(): void {
         remoteId: sessionKey,
         portable,
         target: target as MigrationAgent,
-        localProjectPath: portable.projectPath,
+        localProjectPath: targetProjectPath ?? portable.projectPath,
         deps,
       });
     }

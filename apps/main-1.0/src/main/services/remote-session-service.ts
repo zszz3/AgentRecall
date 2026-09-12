@@ -20,6 +20,7 @@ import {
   type SessionSyncItem,
 } from "../../core/remote-session-sync";
 import { remoteSessionAgentForSource, sessionSourceDescriptor } from "../../core/session-sources";
+import { migrationTargetDescriptor } from "../../core/migration-targets";
 import type { SessionStore } from "../../core/session-store";
 import {
   clearSessionSyncQueue,
@@ -259,7 +260,6 @@ export class RemoteSessionService {
     if (!sourceDescriptor.capabilities.sessionSync) {
       throw new Error(`${sourceDescriptor.label} sessions cannot be saved remotely yet.`);
     }
-    if (initialSession.environmentKind === "wsl") throw new Error("WSL sessions cannot be saved to cloud yet.");
     const client = this.createClient();
     const session = await this.prepareSessionForUpload(store, initialSession);
     const descendants = descendantSessions(session, store.searchSessions({ limit: 100_000, excludeSubagents: false }));
@@ -361,8 +361,7 @@ export class RemoteSessionService {
     const bindings = store.listSessionSyncBindings();
     const indexedSessions = store.searchSessions({ limit: 100_000, excludeSubagents: false })
       .filter((session) =>
-        session.environmentKind !== "wsl"
-        && remoteSessionAgentForSource(session.source) !== null);
+        remoteSessionAgentForSource(session.source) !== null);
     const indexedBySessionKey = new Map(indexedSessions.map((session) => [session.sessionKey, session]));
     const remotes = remoteCandidates
       .filter((remote) => indexedBySessionKey.get(remote.sourceSessionKey)?.isSubagent !== true);
@@ -426,7 +425,7 @@ export class RemoteSessionService {
     const portable = await client.getPortableSession(remoteId);
     const deps = await this.dependencies.createLocalRestoreDependencies(onProgress);
     const result = await this.operations.restorePortable({ remoteId, portable, target, localProjectPath, deps });
-    if (bind) await this.bindRestoredSession(client, remoteId, result.targetSessionId);
+    if (bind) await this.bindRestoredSession(client, remoteId, result.targetSessionId, target, "local");
     return result;
   }
 
@@ -438,12 +437,12 @@ export class RemoteSessionService {
   ): Promise<SessionMigrationResult> {
     const client = this.createClient();
     const remote = await client.getRemoteSession(remoteId);
-    if (remote.sourceEnvironmentKind !== "ssh") {
-      throw new Error("This remote session was not saved from an SSH environment.");
+    if (remote.sourceEnvironmentKind !== "ssh" && remote.sourceEnvironmentKind !== "wsl") {
+      throw new Error("This remote session was not saved from an SSH or WSL environment.");
     }
     const environment = this.dependencies.getStore().getEnvironment(remote.sourceEnvironmentId);
-    if (!environment || environment.kind !== "ssh") {
-      throw new Error("The SSH environment for this remote session is not configured on this machine.");
+    if (!environment || environment.kind !== remote.sourceEnvironmentKind) {
+      throw new Error("The source environment for this remote session is not configured on this machine.");
     }
     const portable = await client.getPortableSession(remoteId);
     const deps = await this.dependencies.createSourceRestoreDependencies(environment, onProgress);
@@ -454,7 +453,7 @@ export class RemoteSessionService {
       localProjectPath: portable.projectPath,
       deps,
     });
-    if (bind) await this.bindRestoredSession(client, remoteId, result.targetSessionId);
+    if (bind) await this.bindRestoredSession(client, remoteId, result.targetSessionId, target, environment.id);
     return result;
   }
 
@@ -542,10 +541,23 @@ export class RemoteSessionService {
     });
   }
 
-  private async bindRestoredSession(client: RemoteSessionClientPort, remoteId: string, targetSessionId: string): Promise<void> {
+  private async bindRestoredSession(
+    client: RemoteSessionClientPort,
+    remoteId: string,
+    targetSessionId: string,
+    target: MigrationAgent,
+    environmentId: string,
+  ): Promise<void> {
     try {
       const store = this.dependencies.getStore();
-      const local = store.searchSessions({ limit: 100_000 }).find((session) => session.rawId === targetSessionId);
+      const source = migrationTargetDescriptor(target).source;
+      const candidates = store.searchSessions({ limit: 100_000, excludeSubagents: false }).filter((session) =>
+        session.rawId === targetSessionId && session.source === source && session.environmentId === environmentId);
+      const local = candidates[0] ?? (() => {
+        const fallback = store.searchSessions({ limit: 100_000, excludeSubagents: false }).filter((session) =>
+          session.rawId === targetSessionId && session.environmentId === environmentId);
+        return fallback.length === 1 ? fallback[0] : undefined;
+      })();
       if (!local) return;
       const built = await this.operations.buildRevision(store, local.sessionKey, remoteId);
       const remote = await client.getRemoteSession(remoteId);

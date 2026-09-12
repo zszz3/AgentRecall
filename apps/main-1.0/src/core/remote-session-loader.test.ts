@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadRemoteSessionDetailPayload, loadRemoteSessionPayloads, type RemoteSessionFilePayload } from "./remote-session-loader";
+import { loadRemoteSessionDetailPayload, loadRemoteSessionPayloads, loadWslSessionPayloads, type RemoteSessionFilePayload } from "./remote-session-loader";
 import type { SessionEnvironment, SessionSearchResult } from "./types";
 
 const env: SessionEnvironment = {
@@ -96,6 +96,25 @@ describe("remote session loader", () => {
     expect(loaded.session.projectPath).toBe("demo-app");
     expect(loaded.messages[0].content).toBe("remote qoder question");
     expect(loaded.messages[1].content).toBe("remote qoder answer");
+  });
+
+  it("loads the already-supported Qoder JSONL format in WSL without an SSH key", () => {
+    const wsl = { ...env, id: "wsl-ubuntu", kind: "wsl" as const, label: "Ubuntu", wslDistribution: "Ubuntu", hostAlias: null, host: null };
+    const rows = [
+      { role: "user", message: { content: [{ type: "text", text: "wsl qoder question" }] } },
+      { role: "assistant", message: { content: [{ type: "text", text: "wsl qoder answer" }] } },
+    ];
+    const [loaded] = loadWslSessionPayloads(wsl, [{
+      source: "qoder",
+      kind: "qoder-project",
+      path: "/home/me/.qoder/cache/projects/demo-1a2b3c4d/conversation-history/task/task.jsonl",
+      mtimeMs: 100,
+      size: 200,
+      content: rows.map((row) => JSON.stringify(row)).join("\n"),
+    }]);
+    expect(loaded.session.source).toBe("qoder");
+    expect(loaded.session.environmentKind).toBe("wsl");
+    expect(loaded.session.sessionKey).toContain("wsl-ubuntu:qoder:");
   });
 
   it("detects remote Claude subagent payloads from structured metadata and path", () => {

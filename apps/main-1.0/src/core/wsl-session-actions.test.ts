@@ -16,6 +16,13 @@ describe("deleteWslSessionFiles", () => {
     expect(run.mock.calls[0][1]).toContain("'/home/me/one.jsonl' '/home/me/two'\"'\"'s.jsonl'");
   });
 
+  it("rejects traversal and source-root deletion before invoking WSL", async () => {
+    const run = vi.fn(async (_environment: SessionEnvironment, _command: string) => "");
+    await expect(deleteWslSessionFiles(environment, ["/home/me/.codex/sessions/../other.jsonl"], run)).rejects.toThrow(/traversal/);
+    await expect(deleteWslSessionFiles(environment, ["/home/me/.codex/sessions"], run)).rejects.toThrow(/source root/);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("deletes Claude companion artifacts with explicit safe paths", async () => {
     const run = vi.fn(async (_environment: SessionEnvironment, _command: string) => "");
     await deleteWslSessionSources(environment, [{
