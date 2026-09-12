@@ -97,6 +97,7 @@ describe("buildEvaluationCaseGraph", () => {
       "agent",
       "session",
       "skill-use",
+      "artifact-complete",
       "judge-exact",
       "judge-tools",
     ]);

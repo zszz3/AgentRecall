@@ -9,6 +9,7 @@ import {
   INSTRUCTIONS_PORT,
   TASK_PORT,
   TRAJECTORY_PORT,
+  type EvaluationArtifactValue,
   type EvaluationNodeDependencies,
   type EvaluationTaskValue,
   type EvaluationTrajectoryValue,
@@ -32,6 +33,7 @@ export const TASK_SOURCE_NODE_TYPE = "task_source";
 export const SKILL_PROVISION_NODE_TYPE = "skill_provision";
 export const RUN_AGENT_NODE_TYPE = "run_agent";
 export const SESSION_LINK_NODE_TYPE = "session_link";
+export const ARTIFACT_COMPLETE_NODE_TYPE = "artifact_complete";
 export const SESSION_ARTIFACT_NODE_TYPE = "session_artifact";
 export const FOLDER_ARTIFACT_NODE_TYPE = "folder_artifact";
 export const SKILL_USE_OBSERVE_NODE_TYPE = "skill_use_observe";
@@ -235,6 +237,108 @@ export function createSessionLinkNode(
         if (attempt < attempts && dependencies.wait) await dependencies.wait(delayMs);
       }
       return evaluationExcused.infra("session_not_indexed", { facts: { rawId, attempts } });
+    },
+  });
+}
+
+/**
+ * What a completed fresh-run artifact is: the files its session shows, plus where
+ * it lives.
+ *
+ * One rule, two callers — the graph step below and the report path that reads a
+ * case afterwards — so a judge and a reader cannot disagree about what the run
+ * produced. A reader that fails is ignored on purpose: files are an observation,
+ * and losing one must not cost the case its answer.
+ */
+export async function attachArtifactFiles(
+  artifact: EvaluationArtifactValue,
+  sessionKey: string,
+  readArtifactFiles: EvaluationNodeDependencies["readArtifactFiles"],
+): Promise<EvaluationArtifactValue> {
+  let files = artifact.files;
+  if (!files && readArtifactFiles) {
+    try {
+      files = (await readArtifactFiles(sessionKey)) ?? undefined;
+    } catch {
+      // An unreadable trace is a missing observation, not a defect in the run.
+      files = undefined;
+    }
+  }
+  return {
+    ...artifact,
+    ...(files && files.length > 0 ? { files } : {}),
+    // A fresh run's artifact does live somewhere once it has been linked, and a
+    // reader that cannot say where would send anyone verifying a score back to
+    // the run log.
+    origin: { ...artifact.origin, reference: sessionKey },
+  };
+}
+
+/**
+ * Completes a fresh run's artifact inside the graph, so a judge reads the same
+ * artifact the report does.
+ *
+ * Ordered *after* the session-link step rather than wired to it. That step excuses
+ * itself when indexing never catches up, and an excused producer stores no value,
+ * so an input bound to it would leave this step pending — and a pending artifact
+ * source costs the case every judge that reads the answer, which is far worse than
+ * missing files. So this step resolves the session once more on its own and passes
+ * the artifact through untouched when there is none to read.
+ *
+ * It never excuses and never fails for the same reason: it is a completion step,
+ * not a gate.
+ */
+export function createArtifactCompleteNode(
+  dependencies: Pick<EvaluationNodeDependencies, "resolveSession" | "readArtifactFiles">,
+) {
+  return defineEvaluationNode<
+    { artifact: typeof ARTIFACT_PORT; execution_ref: typeof EXECUTION_REF_PORT },
+    { artifact: typeof ARTIFACT_PORT },
+    Record<string, never>
+  >({
+    type: ARTIFACT_COMPLETE_NODE_TYPE,
+    version: 1,
+    role: "prepare",
+    inputs: { artifact: ARTIFACT_PORT, execution_ref: EXECUTION_REF_PORT },
+    outputs: { artifact: ARTIFACT_PORT },
+    async run(context) {
+      const artifact = context.in.artifact;
+      if (artifact.origin.kind !== "agent_run" || artifact.files) {
+        return evaluationPass({ outputs: { artifact } });
+      }
+      if (!dependencies.resolveSession) {
+        return evaluationPass({
+          outputs: { artifact },
+          facts: { filesObserved: false, reason: "session_lookup_unavailable" },
+        });
+      }
+      let sessionKey: string | null = null;
+      try {
+        sessionKey = (await dependencies.resolveSession(context.in.execution_ref))?.sessionKey ?? null;
+      } catch {
+        // Same rule as the reader: this step reports what it could not observe
+        // rather than taking the artifact down with it.
+        sessionKey = null;
+      }
+      if (!sessionKey) {
+        return evaluationPass({
+          outputs: { artifact },
+          facts: { filesObserved: false, reason: "session_not_indexed" },
+        });
+      }
+      const completed = await attachArtifactFiles(
+        artifact,
+        sessionKey,
+        dependencies.readArtifactFiles,
+      );
+      return evaluationPass({
+        outputs: { artifact: completed },
+        facts: {
+          sessionKey,
+          filesObserved: completed.files !== undefined,
+          ...(completed.files ? { fileCount: completed.files.length } : {}),
+        },
+      });
     },
   });
 }

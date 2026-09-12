@@ -3,6 +3,7 @@ import { createEvaluationNodeDefinitions } from "./case-graph";
 import type { EvaluationNodeRole } from "./graph/node";
 import type { EvaluationPortMap } from "./graph/ports";
 import {
+  ARTIFACT_COMPLETE_NODE_TYPE,
   FOLDER_ARTIFACT_NODE_TYPE,
   RUN_AGENT_NODE_TYPE,
   SESSION_ARTIFACT_NODE_TYPE,
@@ -119,6 +120,13 @@ const PRESENTATION: Record<string, CatalogPresentation> = {
       { key: "attempts", kind: "number", required: false, labelEn: "Attempts", labelZh: "重试次数" },
       { key: "delayMs", kind: "number", required: false, labelEn: "Delay (ms)", labelZh: "间隔（毫秒）" },
     ],
+  },
+  [ARTIFACT_COMPLETE_NODE_TYPE]: {
+    labelEn: "Artifact files",
+    labelZh: "产物文件",
+    descriptionEn: "Adds the files a fresh run's session shows to its artifact, so judges read what the report reads.",
+    descriptionZh: "把本次运行的会话所见到的文件补进产物，让评分器读到的和报告读到的是同一份。",
+    configFields: [],
   },
   [SESSION_ARTIFACT_NODE_TYPE]: {
     labelEn: "Session artifact",

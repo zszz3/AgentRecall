@@ -202,7 +202,11 @@ describe("evaluation run", () => {
       }),
     );
 
-    expect(attempts).toBe(3);
+    // Three attempts from the session link, whose retries the waits below pin
+    // exactly, plus one from the step that completes the artifact: it is ordered
+    // after the link rather than wired to it, so an excused link cannot block the
+    // answer from reaching its judges.
+    expect(attempts).toBe(4);
     expect(waits).toEqual([250, 250]);
     expect(outcome.cases[0]!.sessionKey).toBe("claude:thread-9");
     expect(statuses(outcome.cases[0]!.aggregate.nodes)).toMatchObject({
@@ -213,8 +217,8 @@ describe("evaluation run", () => {
 
   it("completes a fresh run's artifact with the files its session shows", async () => {
     // The answer is produced before the session that recorded it has been found,
-    // so the files can only be attached afterwards — and a judge asking "did it
-    // write the file" has nothing to read until they are.
+    // so a step inside the graph attaches the files once the link has a session —
+    // which is what lets a judge asking "did it write the file" read them.
     const outcome = await executeEvaluationRun(
       plan({ linkTrajectory: true }),
       dependencies({
