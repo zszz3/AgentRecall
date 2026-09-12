@@ -1463,6 +1463,14 @@ function RunComparison({
   const totalReading: DeltaReading = totalDelta !== null
     ? deltaReading(totalDelta, runBand)
     : "unmeasured";
+  // Union of both runs' dimensions in the base run's order. A dimension only one
+  // side scored still has to appear: dropping it would read as "no change".
+  const dimensionNames = [
+    ...(base.dimensions ?? []).map((entry) => entry.dimension),
+    ...(compare.dimensions ?? [])
+      .map((entry) => entry.dimension)
+      .filter((name) => !(base.dimensions ?? []).some((entry) => entry.dimension === name)),
+  ];
 
   return (
     <div className="eval-run-comparison">
@@ -1512,6 +1520,69 @@ function RunComparison({
             `涨跌只有超过 ±${runBand.toFixed(2)}（各用例自身重复次之间分差的均值）才算改进或回归，带内一律按波动处理。`,
           )}
         </p>
+      ) : null}
+      {dimensionNames.length > 0 ? (
+        <div className="eval-comparison-dimensions">
+          <span
+            className="eval-comparison-section-title"
+            title={l(
+              "Each dimension's average over the cases that scored it, read against the same repeat spread as the total: there is no per-dimension spread.",
+              "每个维度在已评分用例上的平均分，判读用的是与总分相同的重复波动带——维度本身没有单独的波动数据。",
+            )}
+          >
+            {l("By dimension", "按维度")}
+          </span>
+          <ul className="eval-comparison-dimension-list">
+            {dimensionNames.map((name) => {
+              const fromBase = (base.dimensions ?? []).find((entry) => entry.dimension === name);
+              const fromCompare = (compare.dimensions ?? []).find((entry) => entry.dimension === name);
+              const delta = fromBase?.score != null && fromCompare?.score != null
+                ? fromCompare.score - fromBase.score
+                : null;
+              const reading: DeltaReading = delta !== null
+                ? deltaReading(delta, runBand)
+                : "unmeasured";
+              const weight = fromCompare?.weight ?? fromBase?.weight ?? 1;
+              return (
+                <li key={name} className="eval-comparison-dimension-row">
+                  <span className="eval-comparison-dimension-name">
+                    {name}
+                    {weight !== 1 ? (
+                      <span className="eval-muted">{` · ${l("weight", "权重")} ${weight}`}</span>
+                    ) : null}
+                  </span>
+                  <span className="eval-comparison-dimension-scores">
+                    {fromBase?.score != null ? fromBase.score.toFixed(2) : "—"}
+                    {" → "}
+                    {fromCompare?.score != null ? fromCompare.score.toFixed(2) : "—"}
+                  </span>
+                  {delta != null ? (
+                    <span
+                      className={`eval-badge ${rubricChanged ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
+                      title={deltaTitle(reading, runBand, l)}
+                    >
+                      {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                    </span>
+                  ) : !fromBase ? (
+                    <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行有")}</span>
+                  ) : !fromCompare ? (
+                    <span className="eval-badge eval-badge-dim">{l("Only in base run", "仅基准运行有")}</span>
+                  ) : (
+                    <span
+                      className="eval-badge eval-badge-dim"
+                      title={l(
+                        "One side decided nothing for this dimension, so there is no delta to read.",
+                        "其中一次运行没有为这个维度得出结论，所以没有涨跌可判读。",
+                      )}
+                    >
+                      {l("Not decided", "未判定")}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : null}
       {keys.length === 0 ? (
         <p className="eval-muted">{l("Neither run recorded case results.", "两次运行都没有用例结果。")}</p>
