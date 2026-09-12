@@ -98,8 +98,10 @@ export const TECHNICAL_DESIGN_DIMENSIONS: readonly StarterPlanDimension[] = [
   },
 ] as const;
 
+// There is no {{metadata}} placeholder, so the stage has to be read off the task
+// the judge is given rather than off dataset metadata or the Answer itself.
 export const TECHNICAL_DESIGN_JUDGE_PROMPT = buildJudgePrompt(
-  "你是技术方案评审员。依据 Dataset metadata.stage 识别当前阶段，评估 Answer 的九个质量维度。阶段正确性由另一个确定性检查负责，但这里仍要判断内容是否服务于当前阶段。",
+  "你是技术方案评审员。当前阶段以 Input 与 Context 的表述为准，不要从 Answer 反推阶段，否则一份越界交付的答案会自己把评审标准放宽到越界的那一档。据此评估 Answer 的九个质量维度，包括内容是否服务于当前阶段。",
   TECHNICAL_DESIGN_DIMENSIONS,
   `- discovery：高质量答案应提出一个最高价值的澄清问题并说明其决策影响；克制地不展开完整设计是优点，不因缺少架构、发布或回滚细节扣分。
 - approaches：重点评估 2 至 3 个可行方案的实质差异、权衡、推荐理由和进入详细设计前的批准点；尚未展开完整生命周期不是缺陷。
