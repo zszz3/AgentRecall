@@ -14,6 +14,7 @@ import type { EvaluationNodeRecord } from "./graph/node";
 import type { EvaluationGraphSpec } from "./graph/builder";
 import {
   AGENT_NODE_ID,
+  ARTIFACT_COMPLETE_NODE_ID,
   buildEvaluationCaseGraph,
   SESSION_NODE_ID,
   SKILL_NODE_ID,
@@ -22,6 +23,7 @@ import {
   type EvaluationCasePlan,
   type EvaluationPlanEvaluator,
 } from "./case-graph";
+import { attachArtifactFiles } from "./nodes/prepare-nodes";
 import type {
   EvaluationArtifactValue,
   EvaluationInstructionsValue,
@@ -202,15 +204,10 @@ async function runCase(
 /**
  * Fills in the half of a fresh run's artifact that only its session can tell us.
  *
- * A run produces its answer before the session that recorded it has been found,
- * so at the moment `run_agent` returns there is no way to know which files were
- * written. Once the session-link step has a session key, both are available, and
- * this is where they are put back together — the artifact a judge and a report
- * read is then the same shape whether it came from a fresh run, a stored session
- * or a folder.
- *
- * A reader that fails is ignored on purpose. Files are an observation, and losing
- * one must not cost the case its answer.
+ * The derived graph completes the artifact itself now, so a judge reads the files
+ * too. This is the same rule applied once more afterwards, for a graph saved before
+ * that step existed, which still wires its judges straight to the run. Idempotent:
+ * an artifact already carrying its files and its reference comes back unchanged.
  */
 async function completeArtifact(
   artifact: EvaluationArtifactValue | undefined,
@@ -220,41 +217,27 @@ async function completeArtifact(
   if (!artifact || artifact.origin.kind !== "agent_run") return artifact;
   const sessionKey = trajectory?.sessionKey?.trim();
   if (!sessionKey) return artifact;
-  const files = artifact.files ?? await readFilesQuietly(dependencies, sessionKey);
-  return {
-    ...artifact,
-    ...(files && files.length > 0 ? { files } : {}),
-    // A fresh run's artifact does live somewhere once it has been linked, and a
-    // reader that cannot say where would send anyone verifying a score back to
-    // the run log.
-    origin: { ...artifact.origin, reference: sessionKey },
-  };
-}
-
-async function readFilesQuietly(
-  dependencies: EvaluationNodeDependencies,
-  sessionKey: string,
-): Promise<EvaluationArtifactValue["files"]> {
-  if (!dependencies.readArtifactFiles) return undefined;
-  try {
-    return await dependencies.readArtifactFiles(sessionKey) ?? undefined;
-  } catch {
-    return undefined;
-  }
+  return attachArtifactFiles(artifact, sessionKey, dependencies.readArtifactFiles);
 }
 
 /**
  * Reads a port from whichever node produced it.
  *
- * The producing node differs by source — a fresh run yields the artifact from
- * `agent`, a session or folder from `source` — and the caller only wants the
- * value.
+ * The producing node differs by source — a fresh run yields the artifact from the
+ * step that completed it, or from `agent` when no step did, a session or folder
+ * from `source` — and the caller only wants the value. The completion step is
+ * asked first so the artifact read here is the same one the judges read.
  */
 function firstValue<T>(
   values: Map<string, Map<string, unknown>>,
   port: string,
 ): T | undefined {
-  for (const nodeId of [AGENT_NODE_ID, SOURCE_NODE_ID, SESSION_NODE_ID]) {
+  for (const nodeId of [
+    ARTIFACT_COMPLETE_NODE_ID,
+    AGENT_NODE_ID,
+    SOURCE_NODE_ID,
+    SESSION_NODE_ID,
+  ]) {
     const value = values.get(nodeId)?.get(port);
     if (value !== undefined) return value as T;
   }
