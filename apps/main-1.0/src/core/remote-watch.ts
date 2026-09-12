@@ -15,6 +15,13 @@ export interface RemoteWatchManagerOptions {
   debounceMs?: number;
   pollIntervalMs?: number;
   pollRecoveryMs?: number;
+  /** Maximum number of polling-to-event recovery attempts per watcher lifetime. */
+  maxRecoveryAttempts?: number;
+  /** Exponential factor applied after each failed recovery attempt. */
+  recoveryBackoffFactor?: number;
+  /** Optional bounded jitter to avoid all WSL distributions reconnecting together. */
+  recoveryJitterMs?: number;
+  random?: () => number;
 }
 
 export class RemoteWatchManager {
@@ -25,6 +32,8 @@ export class RemoteWatchManager {
   private readonly pendingSyncEnvironmentTokens = new Map<string, number>();
   private readonly pollingEnvironmentIds = new Set<string>();
   private readonly pollRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly recoveryAttempts = new Map<string, number>();
+  private readonly pollingEnvironments = new Map<string, { environment: SessionEnvironment; token: number }>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly options: Required<RemoteWatchManagerOptions>;
 
@@ -37,6 +46,10 @@ export class RemoteWatchManager {
       debounceMs: options.debounceMs ?? 600,
       pollIntervalMs: options.pollIntervalMs ?? 60_000,
       pollRecoveryMs: options.pollRecoveryMs ?? 300_000,
+      maxRecoveryAttempts: Math.max(1, Math.floor(options.maxRecoveryAttempts ?? 6)),
+      recoveryBackoffFactor: Math.max(1, options.recoveryBackoffFactor ?? 2),
+      recoveryJitterMs: Math.max(0, options.recoveryJitterMs ?? 0),
+      random: options.random ?? Math.random,
     };
   }
 
@@ -61,6 +74,7 @@ export class RemoteWatchManager {
       if (!this.isActive(environment.id, token) || this.pollingEnvironmentIds.has(environment.id)) handle.stop();
       else {
         this.handles.set(environment.id, handle);
+        this.recoveryAttempts.delete(environment.id);
         this.options.onModeChange(environment, "event");
       }
     } catch {
@@ -74,15 +88,28 @@ export class RemoteWatchManager {
     this.handles.delete(environmentId);
     this.inFlightEnvironmentTokens.delete(environmentId);
     this.pollingEnvironmentIds.delete(environmentId);
+    this.pollingEnvironments.delete(environmentId);
     const recovery = this.pollRecoveryTimers.get(environmentId);
     if (recovery) clearTimeout(recovery);
     this.pollRecoveryTimers.delete(environmentId);
+    this.recoveryAttempts.delete(environmentId);
     this.pendingSyncEnvironmentTokens.delete(environmentId);
     this.activeTokens.delete(environmentId);
   }
 
   stopAll(): void {
     for (const id of [...this.handles.keys()]) this.stop(id);
+  }
+
+  /** Apply a settings change to already-running polling watchers. */
+  updatePollingInterval(pollIntervalMs: number): void {
+    this.options.pollIntervalMs = Math.max(1_000, Math.round(pollIntervalMs));
+    for (const [environmentId, state] of this.pollingEnvironments) {
+      if (!this.isActive(environmentId, state.token) || !this.pollingEnvironmentIds.has(environmentId)) continue;
+      this.handles.get(environmentId)?.stop();
+      const timer = setInterval(() => this.runSync(state.environment, state.token), this.options.pollIntervalMs);
+      this.handles.set(environmentId, { stop: () => clearInterval(timer) });
+    }
   }
 
   private scheduleSync(environment: SessionEnvironment, token: number): void {
@@ -110,7 +137,15 @@ export class RemoteWatchManager {
     }, this.options.pollIntervalMs);
     this.handles.set(environment.id, { stop: () => clearInterval(timer) });
     this.pollingEnvironmentIds.add(environment.id);
+    this.pollingEnvironments.set(environment.id, { environment, token });
     this.options.onModeChange(environment, "polling");
+    const attempt = this.recoveryAttempts.get(environment.id) ?? 0;
+    if (attempt >= this.options.maxRecoveryAttempts) return;
+    this.recoveryAttempts.set(environment.id, attempt + 1);
+    const backoff = this.options.pollRecoveryMs * this.options.recoveryBackoffFactor ** attempt;
+    const jitter = this.options.recoveryJitterMs > 0
+      ? Math.floor(this.options.random() * (this.options.recoveryJitterMs + 1))
+      : 0;
     const recovery = setTimeout(() => {
       this.pollRecoveryTimers.delete(environment.id);
       if (!this.isActive(environment.id, token) || !this.pollingEnvironmentIds.has(environment.id)) return;
@@ -118,7 +153,7 @@ export class RemoteWatchManager {
       this.handles.delete(environment.id);
       this.pollingEnvironmentIds.delete(environment.id);
       this.start(environment);
-    }, this.options.pollRecoveryMs);
+    }, backoff + jitter);
     this.pollRecoveryTimers.set(environment.id, recovery);
   }
 
@@ -171,7 +206,7 @@ export function buildRemoteWatchSshArgs(environment: SessionEnvironment, remoteC
 }
 
 export function buildRemoteWatchCommand(): string {
-  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
+  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects" "$HOME/.qoder/cache/projects" "$HOME/.local/share/codewiz/opencode.db" "$HOME/.local/share/opencode/opencode.db"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
 }
 
 export function startSystemWatcher(environment: SessionEnvironment, onEvent: () => void, onUnavailable?: () => void): WatchHandle {
@@ -212,5 +247,5 @@ function startWslWatcher(environment: SessionEnvironment, onEvent: () => void, o
 }
 
 function buildWslWatchCommand(): string {
-  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
+  return String.raw`sh -lc 'set --; for path in "$HOME/.codex/sessions" "$HOME/.codex/session_index.jsonl" "$HOME/.claude/projects" "$HOME/.claude/sessions" "$HOME/.tclaude/projects" "$HOME/.tcodex/sessions" "$HOME/.tcodex/session_index.jsonl" "$HOME/.codebuddy/projects" "$HOME/.qoder/cache/projects" "$HOME/.local/share/codewiz/opencode.db" "$HOME/.local/share/opencode/opencode.db"; do if [ -e "$path" ]; then set -- "$@" "$path"; fi; done; [ "$#" -gt 0 ] || exit 86; if command -v inotifywait >/dev/null 2>&1; then inotifywait -m -r -e create,modify,move,delete "$@" 2>/dev/null; elif command -v fswatch >/dev/null 2>&1; then fswatch -0 "$@"; else exit 86; fi'`;
 }

@@ -402,6 +402,49 @@ describe("RemoteSessionService cloud orchestration", () => {
     });
   });
 
+  it("uploads a WSL session with its environment-scoped key", async () => {
+    const environment: SessionEnvironment = {
+      ...({} as SessionEnvironment),
+      id: "wsl-ubuntu",
+      kind: "wsl",
+      label: "WSL · Ubuntu",
+      wslDistribution: "Ubuntu",
+      enabled: true,
+      syncState: "idle",
+      lastSyncedAt: null,
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+      hostAlias: null,
+      host: null,
+      user: null,
+      port: null,
+      authMode: "none",
+      identityFile: null,
+    };
+    const sessionKey = "wsl-ubuntu:claude-cli:session-1";
+    const harness = createHarness({
+      settings: configuredSettings(),
+      environment,
+      sessions: [localSession({
+        sessionKey,
+        source: "claude-cli",
+        rawId: "session-1",
+        environmentId: environment.id,
+        environmentKind: environment.kind,
+        environmentLabel: environment.label,
+        filePath: "/home/me/.claude/projects/work/session-1.jsonl",
+      })],
+    });
+
+    await expect(harness.service.upload(sessionKey)).resolves.toMatchObject({ status: "uploaded" });
+    expect(harness.ensureSessionDetails).toHaveBeenCalledWith(sessionKey);
+    expect(harness.client.uploadSession).toHaveBeenCalledOnce();
+    expect(harness.store.upsertSessionSyncBinding).toHaveBeenCalledWith(expect.objectContaining({
+      localSessionKey: sessionKey,
+    }));
+  });
+
   it("uploads raw source artifacts together with optional attachments", async () => {
     const harness = createHarness({ settings: configuredSettings() });
     const sourceObject = {

@@ -21,7 +21,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import {
   reconstructCodexResponsesRequest,
@@ -51,6 +51,7 @@ import {
   getResumeCommand,
   getRemoteMigrationCliVersionCommand,
   inspectMigrationCli,
+  remoteMigrationSettings,
   mergeAppSettings,
   normalizeTerminal,
   openDeepSeekWebInTerminal,
@@ -105,7 +106,7 @@ import { WslSessionIndexer } from "../core/wsl-session-indexer";
 import { SessionStore, type TraceEventQueryOptions } from "../core/session-store";
 import { buildCombinedSupabaseSetupSql, supabaseSqlEditorUrl } from "../core/supabase-setup";
 import { readUserSshConfig } from "../core/ssh-config";
-import { listWslDistributions } from "../core/wsl";
+import { listWslDistributionDetails, listWslDistributions } from "../core/wsl";
 import { SessionBulkDeleteService } from "./services/session-bulk-delete-service";
 import { LocalSessionIndexService } from "./services/local-session-index-service";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
@@ -1245,6 +1246,7 @@ function ensureRemoteWatchManager(): RemoteWatchManager {
         store.updateEnvironmentSyncState(environment.id, mode === "polling" ? "polling" : "watching", { lastError: null });
         emitEnvironmentsUpdated();
       },
+      pollIntervalMs: getSettings().wslPollingIntervalMs,
     });
   }
   return remoteWatchManager;
@@ -1565,7 +1567,7 @@ async function inspectWslMigrationCli(environment: SessionEnvironment, target: M
   const settings = getSettings();
   await inspectMigrationCli(
     target,
-    { ...settings, claudeBinary: "claude", codexBinary: "codex" },
+    remoteMigrationSettings(settings),
     async (command, args) => runRemoteCommand(environment, [command, ...args].join(" ")),
     { platform: "linux" },
   );
@@ -1575,7 +1577,7 @@ async function inspectSshMigrationCli(environment: SessionEnvironment, target: M
   const settings = getSettings();
   await inspectMigrationCli(
     target,
-    { ...settings, claudeBinary: "claude", codexBinary: "codex" },
+    remoteMigrationSettings(settings),
     (command, args) => runSshSessionCommand(
       environment,
       getRemoteMigrationCliVersionCommand(command, args),
@@ -1702,7 +1704,19 @@ async function writeMigratedSessionToSshEnvironment(
       contentBase64: content.toString("base64"),
     });
     if (target === "codex") {
-      await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
+      try {
+        await updateRemoteCodexSessionIndex(environment, remoteHome, session, written.sessionId, now);
+      } catch (error) {
+        try {
+          await removeRemoteMigratedFile(environment, remotePath, createHash("sha256").update(content).digest("hex"));
+        } catch (rollbackError) {
+          throw new Error(
+            `Remote Codex index update failed and rollback could not be verified: ${formatRemoteMigrationError(error)}; ${formatRemoteMigrationError(rollbackError)}`,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
       await updateRemoteCodexAppState(environment, remoteHome, remotePath, session, written.sessionId, now);
     }
     return { sessionId: written.sessionId, filePath: remotePath };
@@ -1787,6 +1801,17 @@ async function runRemotePathCheck(environment: SessionEnvironment, targetPath: s
   return output.trim();
 }
 
+async function removeRemoteMigratedFile(environment: SessionEnvironment, targetPath: string, sha256: string): Promise<void> {
+  const result = await runRemotePython(environment, REMOTE_REMOVE_FILE_SCRIPT, { path: targetPath, sha256 });
+  if (result.trim() !== "removed") {
+    throw new Error(`Remote migration rollback did not remove ${targetPath}.`);
+  }
+}
+
+function formatRemoteMigrationError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function runRemotePython(environment: SessionEnvironment, script: string, payload: unknown): Promise<string> {
   const remoteCommand = buildPythonBase64Command(script);
   return runRemoteWithInput(environment, remoteCommand, `${JSON.stringify(payload)}\n`);
@@ -1818,6 +1843,7 @@ const REMOTE_WRITE_FILE_SCRIPT = [
   "from pathlib import Path",
   "payload = json.load(sys.stdin)",
   "target = Path(payload['path'])",
+  "if target.exists(): raise FileExistsError(f'Target session already exists: {target}')",
   "content = base64.b64decode(payload['contentBase64'])",
   "target.parent.mkdir(parents=True, exist_ok=True)",
   "tmp = target.with_name(target.name + '.tmp-' + uuid.uuid4().hex)",
@@ -1825,6 +1851,17 @@ const REMOTE_WRITE_FILE_SCRIPT = [
   "os.chmod(tmp, 0o600)",
   "os.replace(tmp, target)",
   "print(str(target))",
+].join("\n");
+
+const REMOTE_REMOVE_FILE_SCRIPT = [
+  "import hashlib, json, sys",
+  "from pathlib import Path",
+  "payload = json.load(sys.stdin)",
+  "target = Path(payload['path'])",
+  "if target.is_symlink() or not target.is_file(): print('not-removed'); sys.exit(0)",
+  "if hashlib.sha256(target.read_bytes()).hexdigest() != payload['sha256']: print('not-removed'); sys.exit(0)",
+  "target.unlink()",
+  "print('removed')",
 ].join("\n");
 
 const REMOTE_UPDATE_CODEX_INDEX_SCRIPT = [
@@ -2229,6 +2266,7 @@ function registerIpc(): void {
   ipcMain.handle("environments:list", () => store.listEnvironments());
   ipcMain.handle("ssh-config:list-hosts", () => readUserSshConfig());
   ipcMain.handle("wsl:list-distributions", () => listWslDistributions());
+  ipcMain.handle("wsl:list-distribution-details", () => listWslDistributionDetails());
   ipcMain.handle("environment:save", (_event, input: EnvironmentUpsertInput) =>
     retrySqliteWrite(() => ensureRemoteEnvironmentLifecycle().saveEnvironment(input)),
   );
@@ -2389,6 +2427,7 @@ function registerIpc(): void {
     }
     providerService.persistKeysFromUpdate(settings, next);
     settingsStore.set(providerService.removeStoredKeys(next));
+    if ("wslPollingIntervalMs" in settings) remoteWatchManager?.updatePollingInterval(next.wslPollingIntervalMs);
     if ("autoCheckUpdates" in settings) await appUpdateService.setAutoCheckEnabled(next.autoCheckUpdates);
     if ("showInDock" in settings) applyDockVisibility(next.showInDock);
     if (OPTIONAL_SOURCE_SETTINGS.some((item) => previous[item.key] && !next[item.key])) {

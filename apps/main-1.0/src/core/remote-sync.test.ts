@@ -24,8 +24,28 @@ function decodeCollectorScript(command: string): string {
   return inflateRawSync(Buffer.from(command.match(/b64decode\("([^"]+)"\)/)?.[1] ?? "", "base64")).toString("utf-8");
 }
 
+function executePythonScript(
+  script: string,
+  options: { env?: NodeJS.ProcessEnv; maxBuffer?: number; args?: string[] } = {},
+): string {
+  const { args = [], maxBuffer = 128 * 1024 * 1024, env, ...execOptions } = options;
+  const mergedEnv: NodeJS.ProcessEnv = { ...process.env, ...env, PYTHONIOENCODING: "utf-8" };
+  if (process.platform === "win32" && env?.HOME) {
+    mergedEnv.USERPROFILE = env.HOME;
+    mergedEnv.HOMEDRIVE = "";
+    mergedEnv.HOMEPATH = env.HOME;
+  }
+  return execFileSync(process.platform === "win32" ? "python" : "python3", ["-", ...args], {
+    ...execOptions,
+    maxBuffer,
+    env: mergedEnv,
+    input: script,
+    encoding: "utf8",
+  });
+}
+
 async function executeDecodedPython(_environment: unknown, remoteCommand: string): Promise<string> {
-  return execFileSync("python3", ["-c", decodeCollectorScript(remoteCommand)], { encoding: "utf8" });
+  return executePythonScript(decodeCollectorScript(remoteCommand));
 }
 
 function upsertSshEnvironment(store: ReturnType<typeof createInMemoryStore>) {
@@ -183,10 +203,9 @@ describe("remote sync", () => {
       ]);
 
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_environment, remoteCommand) => execFileSync(
-          "python3",
-          ["-c", decodeCollectorScript(remoteCommand)],
-          { encoding: "utf8", env: { ...process.env, HOME: tempHome } },
+        runSsh: async (_environment, remoteCommand) => executePythonScript(
+          decodeCollectorScript(remoteCommand),
+          { env: { ...process.env, HOME: tempHome } },
         ),
       });
 
@@ -271,10 +290,9 @@ describe("remote sync", () => {
       ]);
 
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_environment, remoteCommand) => execFileSync(
-          "python3",
-          ["-c", decodeCollectorScript(remoteCommand)],
-          { encoding: "utf8", env: { ...process.env, HOME: tempHome } },
+        runSsh: async (_environment, remoteCommand) => executePythonScript(
+          decodeCollectorScript(remoteCommand),
+          { env: { ...process.env, HOME: tempHome } },
         ),
       });
 
@@ -339,10 +357,9 @@ describe("remote sync", () => {
       ]);
 
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_remoteEnvironment, remoteCommand) => execFileSync(
-          "python3",
-          ["-c", decodeCollectorScript(remoteCommand)],
-          { encoding: "utf8", env: { ...process.env, HOME: tempHome } },
+        runSsh: async (_remoteEnvironment, remoteCommand) => executePythonScript(
+          decodeCollectorScript(remoteCommand),
+          { env: { ...process.env, HOME: tempHome } },
         ),
       });
 
@@ -454,8 +471,7 @@ describe("remote sync", () => {
         enabledOptionalSources: ["tclaude-cli", "tcodex-cli", "codebuddy-cli"],
         runSsh: async (_environment, remoteCommand) => {
           collectorCommand = remoteCommand;
-          return execFileSync("python3", ["-c", decodeCollectorScript(remoteCommand)], {
-            encoding: "utf8",
+          return executePythonScript(decodeCollectorScript(remoteCommand), {
             env: { ...process.env, HOME: tempHome },
           });
         },
@@ -463,8 +479,7 @@ describe("remote sync", () => {
 
       const collectorScript = decodeCollectorScript(collectorCommand);
       expect(collectorScript).not.toContain("fromisoformat");
-      const summaries = execFileSync("python3", ["-c", collectorScript], {
-        encoding: "utf8",
+      const summaries = executePythonScript(collectorScript, {
         env: { ...process.env, HOME: tempHome },
       }).trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
         source?: string;
@@ -728,7 +743,7 @@ describe("remote sync", () => {
           return "";
         },
       });
-      const output = execFileSync("python3", ["-c", script], { encoding: "utf8", env: { ...process.env, HOME: tempHome } });
+      const output = executePythonScript(script, { env: { ...process.env, HOME: tempHome } });
       expect(output.trim().split(/\r?\n/).map((line) => JSON.parse(line) as { rawId: string })).toEqual(
         expect.arrayContaining([expect.objectContaining({ rawId: "valid-base" })]),
       );
@@ -764,8 +779,7 @@ describe("remote sync", () => {
           return "";
         },
       });
-      const output = execFileSync("python3", ["-c", collectorScript], {
-        encoding: "utf8",
+      const output = executePythonScript(collectorScript, {
         env: { ...process.env, HOME: tempHome },
         maxBuffer: 16 * 1024 * 1024,
       });
@@ -1183,11 +1197,7 @@ describe("remote sync", () => {
       const codewizDir = path.join(tempHome, ".local", "share", "codewiz");
       fs.mkdirSync(codewizDir, { recursive: true });
       const codewizDbPath = path.join(codewizDir, "opencode.db");
-      execFileSync(
-        "python3",
-        [
-          "-c",
-          String.raw`
+      executePythonScript(String.raw`
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 db.executescript('''
@@ -1203,11 +1213,7 @@ db.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("cw-assistant", "remot
 db.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?)", ("cw-assistant-part", "cw-assistant", "remote-codewiz-token-events", 1780560120000, json.dumps({"type": "text", "text": "codewiz remote answer", "tokens": {"input": 200, "output": 50, "reasoning": 7, "cache": {"read": 1000, "write": 9}}})))
 db.commit()
 db.close()
-`,
-          codewizDbPath,
-        ],
-        { encoding: "utf8" },
-      );
+`, { args: [codewizDbPath] });
 
       let collectorCommand = "";
       await syncRemoteEnvironment(store, environment, {
@@ -1217,8 +1223,7 @@ db.close()
         },
       });
       const collectorScript = decodeCollectorScript(collectorCommand);
-      const output = execFileSync("python3", ["-c", collectorScript], {
-        encoding: "utf8",
+      const output = executePythonScript(collectorScript, {
         env: { ...process.env, HOME: tempHome },
       });
       const summary = output
@@ -1338,11 +1343,7 @@ db.close()
     const opencodeDir = path.join(tempHome, ".local", "share", "opencode");
     fs.mkdirSync(opencodeDir, { recursive: true });
     const opencodeDbPath = path.join(opencodeDir, "opencode.db");
-    execFileSync(
-      "python3",
-      [
-        "-c",
-        String.raw`
+    executePythonScript(String.raw`
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 db.executescript('''
@@ -1358,16 +1359,11 @@ db.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)", ("oc-child-user", "open
 db.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?)", ("oc-child-part", "oc-child-user", "opencode-child", 1780560060000, json.dumps({"type": "text", "text": "opencode child question"})))
 db.commit()
 db.close()
-`,
-        opencodeDbPath,
-      ],
-      { encoding: "utf8" },
-    );
+`, { args: [opencodeDbPath] });
 
     try {
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_environment, remoteCommand) => execFileSync("python3", ["-c", decodeCollectorScript(remoteCommand)], {
-          encoding: "utf8",
+        runSsh: async (_environment, remoteCommand) => executePythonScript(decodeCollectorScript(remoteCommand), {
           env: { ...process.env, HOME: tempHome },
         }),
       });
@@ -1679,10 +1675,9 @@ db.close()
     try {
       await syncRemoteEnvironment(store, environment, {
         enabledOptionalSources: ["codebuddy-cli"],
-        runSsh: async (_remoteEnvironment, remoteCommand) => execFileSync(
-          "python3",
-          ["-c", decodeCollectorScript(remoteCommand)],
-          { encoding: "utf8", env: { ...process.env, HOME: tempHome } },
+        runSsh: async (_remoteEnvironment, remoteCommand) => executePythonScript(
+          decodeCollectorScript(remoteCommand),
+          { env: { ...process.env, HOME: tempHome } },
         ),
       });
       const summary = store.getSession("ssh:ssh-devbox:codebuddy-cli:codebuddy-parser");

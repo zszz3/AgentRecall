@@ -47,4 +47,28 @@ describe("WslSessionIndexer", () => {
       await store.close();
     }
   });
-});
+
+  it("cancels a queued pass without fetching files and can be reused", async () => {
+    const store = createInMemoryStore();
+    const current = await environment(store);
+    const session = {
+      sessionKey: remoteSessionKey(current, "codex-cli", "cancelled"), rawId: "cancelled", source: "codex-cli" as const,
+      projectPath: "/repo", filePath: "/home/me/.codex/sessions/cancelled.jsonl", originalTitle: "cancelled", firstQuestion: "question",
+      timestamp: Date.now(), fileMtimeMs: 10, fileSize: 20, prUrl: null, prNumber: null, environmentId: current.id,
+      environmentKind: "wsl" as const, environmentLabel: current.label,
+    };
+    await store.upsertIndexedSessionSummary(session, 1);
+    const fetchSessionFile = vi.fn(async () => payload());
+    const onComplete = vi.fn();
+    const indexer = new WslSessionIndexer({ store, fetchSessionFile, loadSession: loadWslSessionDetailPayload, onComplete });
+    try {
+      indexer.cancel(current.id);
+      await indexer.request(current);
+      expect(fetchSessionFile).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenLastCalledWith(current, expect.objectContaining({ cancelled: true }));
+      await indexer.request(current);
+      expect(fetchSessionFile).toHaveBeenCalledTimes(1);
+    } finally {
+      await store.close();
+    }
+  });});

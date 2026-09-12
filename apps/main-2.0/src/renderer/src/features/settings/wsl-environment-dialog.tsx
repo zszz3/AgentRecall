@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import type { EnvironmentUpsertInput, SessionEnvironment } from "../../../../core/types";
+import type { WslDistributionInfo } from "../../../../core/wsl";
 import type { SettingsFeedback } from "../../app-types";
 import { localize, type LanguageMode } from "../../language";
 
@@ -19,7 +20,7 @@ export function WslEnvironmentDialog({
   onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const [distributions, setDistributions] = useState<string[]>([]);
+  const [distributions, setDistributions] = useState<WslDistributionInfo[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -29,15 +30,15 @@ export function WslEnvironmentDialog({
     () => new Set(environments.filter((environment) => environment.kind === "wsl").map((environment) => environment.wslDistribution).filter(Boolean)),
     [environments],
   );
-  const available = distributions.filter((distribution) => !existing.has(distribution));
+  const available = distributions.filter((distribution) => !existing.has(distribution.name));
 
   async function loadDistributions(manual = false): Promise<void> {
     if (manual) setRefreshing(true);
     else setLoading(true);
     try {
-      const next = await window.sessionSearch.listWslDistributions();
+      const next = await window.sessionSearch.listWslDistributionDetails();
       setDistributions(next);
-      setSelected((current) => (current && next.includes(current) ? current : next.find((item) => !existing.has(item)) ?? next[0] ?? ""));
+      setSelected((current) => (current && next.some((item) => item.name === current) ? current : next.find((item) => !existing.has(item.name))?.name ?? next[0]?.name ?? ""));
       setLocalError(null);
     } catch (error) {
       setDistributions([]);
@@ -88,18 +89,18 @@ export function WslEnvironmentDialog({
               {loading ? <div className="ssh-empty">{l("Loading WSL distributions...", "正在加载 WSL 发行版...")}</div> : null}
               {!loading && distributions.length === 0 ? <div className="ssh-empty">{l("No WSL distributions found.", "未找到 WSL 发行版。")}</div> : null}
               {available.map((distribution) => (
-                <label key={distribution} className={`ssh-config-row ${selected === distribution ? "active" : ""}`}>
+                <label key={distribution.name} className={`ssh-config-row ${selected === distribution.name ? "active" : ""}`}>
                   <span className="ssh-host-main">
-                    <strong>{distribution}</strong>
-                    <em>{l("Local Linux", "本地 Linux")}</em>
+                    <strong>{distribution.name}{distribution.isDefault ? ` · ${l("default", "默认")}` : ""}</strong>
+                    <em>{distribution.state === "running" ? l("Running", "运行中") : distribution.state === "stopped" ? l("Stopped", "已停止") : l("Local Linux", "本地 Linux")}</em>
                   </span>
                   <input
                     type="radio"
                     name="wsl-distribution"
                     className="ssh-check"
-                    checked={selected === distribution}
-                    onChange={() => setSelected(distribution)}
-                    aria-label={l(`Select ${distribution}`, `选择 ${distribution}`)}
+                    checked={selected === distribution.name}
+                    onChange={() => setSelected(distribution.name)}
+                    aria-label={l(`Select ${distribution.name}`, `选择 ${distribution.name}`)}
                   />
                 </label>
               ))}

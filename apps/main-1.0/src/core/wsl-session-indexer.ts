@@ -18,6 +18,8 @@ export interface WslSessionIndexResult {
   indexed: number;
   skipped: number;
   failed: number;
+  cancelled?: boolean;
+  durationMs?: number;
 }
 
 interface ActiveIndexRun {
@@ -48,6 +50,7 @@ export class WslSessionIndexer {
   private readonly wait: (delayMs: number) => Promise<void>;
   private readonly activeRuns = new Map<string, ActiveIndexRun>();
   private readonly pendingRuns = new Set<string>();
+  private readonly cancelledEnvironments = new Set<string>();
   private readonly failedVersions = new Map<string, FailedSessionVersion>();
 
   constructor(options: WslSessionIndexerOptions) {
@@ -76,17 +79,29 @@ export class WslSessionIndexer {
     return promise;
   }
 
+  /** Stop fetching new files for an environment; an in-flight read is allowed to settle safely. */
+  cancel(environmentId: string): void {
+    this.cancelledEnvironments.add(environmentId);
+    this.pendingRuns.delete(environmentId);
+  }
+
   private async runUntilIdle(initialEnvironment: SessionEnvironment): Promise<void> {
     let environment = initialEnvironment;
-    do {
-      this.pendingRuns.delete(environment.id);
-      await this.runPass(environment);
-      const latest = this.store.getEnvironment(environment.id);
-      if (latest?.kind === "wsl") environment = latest;
-    } while (this.pendingRuns.has(environment.id));
+    try {
+      do {
+        this.pendingRuns.delete(environment.id);
+        await this.runPass(environment);
+        if (this.cancelledEnvironments.has(environment.id)) break;
+        const latest = this.store.getEnvironment(environment.id);
+        if (latest?.kind === "wsl") environment = latest;
+      } while (this.pendingRuns.has(environment.id));
+    } finally {
+      this.cancelledEnvironments.delete(initialEnvironment.id);
+    }
   }
 
   private async runPass(environment: SessionEnvironment): Promise<void> {
+    const startedAt = Date.now();
     const sessions = this.listSessions(environment.id);
     const candidates = sessions.filter(
       (session) =>
@@ -99,6 +114,7 @@ export class WslSessionIndexer {
 
     const worker = async (): Promise<void> => {
       while (next < candidates.length) {
+        if (this.cancelledEnvironments.has(environment.id)) return;
         const session = candidates[next++];
         let stage: "fetch" | "parse" | "store" = "fetch";
         let attempt = 0;
@@ -120,6 +136,7 @@ export class WslSessionIndexer {
             indexed += 1;
             break;
           } catch (error) {
+            if (this.cancelledEnvironments.has(environment.id)) return;
             const retryable = isRetryableWslIndexError(error) && stage !== "parse";
             const delay = this.retryDelaysMs[attempt];
             if (retryable && delay !== undefined) {
@@ -147,6 +164,8 @@ export class WslSessionIndexer {
       indexed,
       skipped: sessions.length - candidates.length,
       failed,
+      ...(this.cancelledEnvironments.has(environment.id) ? { cancelled: true } : {}),
+      durationMs: Math.max(0, Date.now() - startedAt),
     });
   }
 

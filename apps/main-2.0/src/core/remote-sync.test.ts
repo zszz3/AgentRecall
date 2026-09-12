@@ -17,6 +17,26 @@ function decodeCollectorScript(command: string): string {
   return inflateRawSync(Buffer.from(encoded, "base64")).toString("utf8");
 }
 
+function executePythonScript(
+  script: string,
+  options: { env?: NodeJS.ProcessEnv; maxBuffer?: number; args?: string[] } = {},
+): string {
+  const { args = [], maxBuffer = 128 * 1024 * 1024, env, ...execOptions } = options;
+  const mergedEnv: NodeJS.ProcessEnv = { ...process.env, ...env, PYTHONIOENCODING: "utf-8" };
+  if (process.platform === "win32" && env?.HOME) {
+    mergedEnv.USERPROFILE = env.HOME;
+    mergedEnv.HOMEDRIVE = "";
+    mergedEnv.HOMEPATH = env.HOME;
+  }
+  return execFileSync(process.platform === "win32" ? "python" : "python3", ["-", ...args], {
+    ...execOptions,
+    maxBuffer,
+    env: mergedEnv,
+    input: script,
+    encoding: "utf8",
+  });
+}
+
 describe("remote sync", () => {
   it("keeps polling visible after a successful WSL sync", async () => {
     const store = createInMemoryStore();
@@ -180,13 +200,9 @@ describe("remote sync", () => {
         enabled: true,
       });
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_environment, command) => execFileSync(
-          process.platform === "win32" ? "python" : "python3",
-          ["-c", decodeCollectorScript(command)],
-          {
-            encoding: "utf8",
-            env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
-          },
+        runSsh: async (_environment, command) => executePythonScript(
+          decodeCollectorScript(command),
+          { env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome } },
         ),
       });
 
@@ -229,11 +245,7 @@ describe("remote sync", () => {
     const codewizDir = path.join(tempHome, ".local", "share", "codewiz");
     fs.mkdirSync(codewizDir, { recursive: true });
     const codewizDbPath = path.join(codewizDir, "opencode.db");
-    execFileSync(
-      process.platform === "win32" ? "python" : "python3",
-      [
-        "-c",
-        String.raw`
+    executePythonScript(String.raw`
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 db.executescript('''
@@ -249,11 +261,7 @@ db.execute("INSERT INTO message (id, session_id, type, time_created, data) VALUE
 db.execute("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)", ("cw-child-user-part", "cw-child-user", "codewiz-child", 1780560060000, json.dumps({"type": "text", "text": "codewiz child question"})))
 db.commit()
 db.close()
-`,
-        codewizDbPath,
-      ],
-      { encoding: "utf8" },
-    );
+`, { args: [codewizDbPath] });
 
     try {
       const environment = await store.upsertEnvironment({
@@ -266,13 +274,9 @@ db.close()
         enabled: true,
       });
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_environment, command) => execFileSync(
-          process.platform === "win32" ? "python" : "python3",
-          ["-c", decodeCollectorScript(command)],
-          {
-            encoding: "utf8",
-            env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
-          },
+        runSsh: async (_environment, command) => executePythonScript(
+          decodeCollectorScript(command),
+          { env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome } },
         ),
       });
 
@@ -304,11 +308,7 @@ db.close()
     const opencodeDir = path.join(tempHome, ".local", "share", "opencode");
     fs.mkdirSync(opencodeDir, { recursive: true });
     const opencodeDbPath = path.join(opencodeDir, "opencode.db");
-    execFileSync(
-      process.platform === "win32" ? "python" : "python3",
-      [
-        "-c",
-        String.raw`
+    executePythonScript(String.raw`
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
 db.executescript('''
@@ -324,11 +324,7 @@ db.execute("INSERT INTO message (id, session_id, type, time_created, data) VALUE
 db.execute("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)", ("oc-child-user-part", "oc-child-user", "opencode-child", 1780560060000, json.dumps({"type": "text", "text": "opencode child question"})))
 db.commit()
 db.close()
-`,
-        opencodeDbPath,
-      ],
-      { encoding: "utf8" },
-    );
+`, { args: [opencodeDbPath] });
 
     try {
       const environment = await store.upsertEnvironment({
@@ -341,13 +337,9 @@ db.close()
         enabled: true,
       });
       await syncRemoteEnvironment(store, environment, {
-        runSsh: async (_environment, command) => execFileSync(
-          process.platform === "win32" ? "python" : "python3",
-          ["-c", decodeCollectorScript(command)],
-          {
-            encoding: "utf8",
-            env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
-          },
+        runSsh: async (_environment, command) => executePythonScript(
+          decodeCollectorScript(command),
+          { env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome } },
         ),
       });
 

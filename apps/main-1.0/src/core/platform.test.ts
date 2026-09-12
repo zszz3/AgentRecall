@@ -25,7 +25,9 @@ import {
   normalizeApiConfig,
   normalizeClaudeApiConfig,
   normalizeTerminal,
+  normalizeWslPollingIntervalMs,
   migrationBinary,
+  remoteMigrationSettings,
   openNativeApp,
   openMigrationResumeInTerminal,
   resolveMacApplicationName,
@@ -51,6 +53,36 @@ function withPlatform<T>(platform: NodeJS.Platform, fn: () => T | Promise<T>): T
     throw error;
   }
 }
+
+describe("WSL polling settings", () => {
+  it("keeps the fallback interval within safe bounds", () => {
+    expect(normalizeWslPollingIntervalMs(1)).toBe(5_000);
+    expect(normalizeWslPollingIntervalMs(60_001.4)).toBe(60_001);
+    expect(normalizeWslPollingIntervalMs(9_000_000)).toBe(3_600_000);
+    expect(mergeAppSettings(defaultSettings, { wslPollingIntervalMs: 1 }).wslPollingIntervalMs).toBe(5_000);
+  });
+});
+
+describe("remote migration CLI settings", () => {
+  it("uses target PATH names instead of persisted local paths", () => {
+    const settings = remoteMigrationSettings({
+      ...defaultSettings,
+      claudeBinary: "C:\\Program Files\\Claude\\claude.exe",
+      codexBinary: "C:\\Program Files\\Codex\\codex.exe",
+      codeBuddyBinary: "C:\\CodeBuddy\\codebuddy.exe",
+      codeWizBinary: "C:\\CodeWiz\\codewiz.exe",
+      cursorBinary: "C:\\Cursor\\cursor-agent.exe",
+      tclaudeBinary: "C:\\Tencent\\tclaude.exe",
+      tcodexBinary: "C:\\Tencent\\tcodex.exe",
+      deepseekBinary: "C:\\DeepSeek\\dsh.exe",
+    });
+    expect(settings).toMatchObject({
+      claudeBinary: "claude", codexBinary: "codex", codeBuddyBinary: "codebuddy",
+      codeWizBinary: "codewiz", cursorBinary: "cursor-agent", tclaudeBinary: "tclaude",
+      tcodexBinary: "tcodex", deepseekBinary: "dsh",
+    });
+  });
+});
 
 function withShell<T>(shell: string, fn: () => T | Promise<T>): T | Promise<T> {
   const originalShell = process.env.SHELL;

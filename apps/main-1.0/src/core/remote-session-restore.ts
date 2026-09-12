@@ -47,6 +47,19 @@ export interface RestoreRemoteSessionOptions {
   deps: RemoteSessionRestoreDependencies;
 }
 
+export class RemoteSessionRestoreError extends Error {
+  constructor(
+    message: string,
+    readonly operationId: string,
+    readonly stage: SessionMigrationProgress["stage"],
+    readonly target: MigrationAgent,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "RemoteSessionRestoreError";
+  }
+}
+
 const RESTORE_TARGETS: MigrationAgent[] = ["claude", "codex", "codebuddy", "codewiz", "cursor"];
 
 export async function restoreRemotePortableSession({
@@ -57,6 +70,8 @@ export async function restoreRemotePortableSession({
   deps,
 }: RestoreRemoteSessionOptions): Promise<SessionMigrationResult> {
   const restoredProjectPath = localProjectPath.trim();
+  const operationId = deps.idFactory();
+  const completedStages: SessionMigrationProgress["stage"][] = [];
   await validateRestoreRequest(portable, target, restoredProjectPath, deps);
 
   notifyProgress(deps.onProgress, {
@@ -65,7 +80,8 @@ export async function restoreRemotePortableSession({
     stage: "reading",
   });
 
-  await deps.inspectCli(target);
+  await runRestoreStage(operationId, target, "reading", () => deps.inspectCli(target));
+  completedStages.push("reading");
 
   const localPortable: PortableSession = {
     ...portable,
@@ -113,7 +129,9 @@ export async function restoreRemotePortableSession({
       }
     : undefined;
 
-  const prepared = await deps.prepare(migrationPortable, compressionListener);
+  const compressed = estimatePortableSessionTokens(migrationPortable) > MIGRATION_TOKEN_LIMIT;
+  const prepared = await runRestoreStage(operationId, target, "compressing", () => deps.prepare(migrationPortable, compressionListener));
+  if (compressed) completedStages.push("compressing");
 
   notifyProgress(deps.onProgress, {
     sessionKey: remoteId,
@@ -124,9 +142,10 @@ export async function restoreRemotePortableSession({
     ? codexSessionForWrite(prepared.session, rootSourceId, null, codexLinkage)
     : { ...prepared.session, subagents: [] };
   const reservedMainTargetId = codexLinkage?.targetIdBySourceId.get(rootSourceId);
-  const written = reservedMainTargetId
-    ? await deps.write(target, mainWriteSession, reservedMainTargetId)
-    : await deps.write(target, mainWriteSession);
+  const written = await runRestoreStage(operationId, target, "writing", () => reservedMainTargetId
+    ? deps.write(target, mainWriteSession, reservedMainTargetId)
+    : deps.write(target, mainWriteSession));
+  completedStages.push("writing");
   if (reservedMainTargetId && written.sessionId !== reservedMainTargetId) {
     throw new Error("Codex migration writer did not preserve the reserved parent session id.");
   }
@@ -216,6 +235,7 @@ export async function restoreRemotePortableSession({
   });
   try {
     await deps.refreshIndex(target, written.filePath, written.sessionId);
+    completedStages.push("indexing");
   } catch (error) {
     indexed = false;
     warnings.push(formatWarning("Failed to refresh session index", error));
@@ -229,12 +249,14 @@ export async function restoreRemotePortableSession({
   let launched = true;
   try {
     await deps.launch(target, written.sessionId, prepared.session.projectPath);
+    completedStages.push("launching");
   } catch (error) {
     launched = false;
     warnings.push(formatWarning("Failed to launch target session", error));
   }
 
   return {
+    operationId,
     target,
     targetSessionId: written.sessionId,
     targetFilePath: written.filePath,
@@ -244,7 +266,29 @@ export async function restoreRemotePortableSession({
     launched,
     ...(restoredSubagentCount > 0 ? { restoredSubagentCount } : {}),
     ...(warnings.length > 0 ? { warning: warnings.join("\n") } : {}),
+    completedStages,
+    partial: !indexed || !launched || warnings.length > 0,
   };
+}
+
+async function runRestoreStage<T>(
+  operationId: string,
+  target: MigrationAgent,
+  stage: SessionMigrationProgress["stage"],
+  action: () => Promise<T> | T,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof RemoteSessionRestoreError) throw error;
+    throw new RemoteSessionRestoreError(
+      `Remote session restore ${stage} stage failed (operation ${operationId}): ${error instanceof Error ? error.message : String(error)}`,
+      operationId,
+      stage,
+      target,
+      { cause: error },
+    );
+  }
 }
 
 async function validateRestoreRequest(

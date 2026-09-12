@@ -3,6 +3,7 @@ import type { AiChatMessage } from "../core/ai-assistant";
 import type { AppSettings, AppSettingsUpdate } from "../core/platform";
 import type { IndexStatus } from "../core/indexer";
 import type { RemoteHealthReport } from "../core/remote-health";
+import type { WslDistributionInfo } from "../core/wsl";
 import type { ResumeRouteResult } from "../core/resume-router";
 import type { TraceEventQueryOptions } from "../core/session-store";
 import type {
@@ -104,6 +105,7 @@ const api = {
   listEnvironments: (): Promise<SessionEnvironment[]> => ipcRenderer.invoke("environments:list"),
   listSshConfigHosts: (): Promise<SshConfigHost[]> => ipcRenderer.invoke("ssh-config:list-hosts"),
   listWslDistributions: (): Promise<string[]> => ipcRenderer.invoke("wsl:list-distributions"),
+  listWslDistributionDetails: (): Promise<WslDistributionInfo[]> => ipcRenderer.invoke("wsl:list-distribution-details"),
   saveEnvironment: (environment: EnvironmentUpsertInput): Promise<SessionEnvironment> =>
     ipcRenderer.invoke("environment:save", environment),
   deleteEnvironment: (environmentId: string): Promise<void> => ipcRenderer.invoke("environment:delete", environmentId),

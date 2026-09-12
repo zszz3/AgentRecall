@@ -7,7 +7,8 @@ import {
 import type { SessionStore } from "./session-store";
 import { remoteSessionKey } from "./session-environment";
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { runRemoteCommand } from "./remote-process";
+import { inflateRawSync } from "node:zlib";
+import { runRemoteCommand, runRemoteCommandWithInput } from "./remote-process";
 import { SESSION_SOURCE_DESCRIPTORS, sessionSourceDescriptor } from "./session-sources";
 import { buildSshArgs } from "./ssh-config";
 import type {
@@ -661,18 +662,40 @@ export function buildRemoteInteractiveSshArgs(
 }
 
 async function runSystemRemote(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
-  if (environment.kind === "wsl") return runRemoteCommand(environment, remoteCommand, REMOTE_SYNC_EXEC_OPTIONS);
+  const script = decodeInlinePythonCommand(remoteCommand);
+  if (environment.kind === "wsl") {
+    if (script !== null) return runRemoteCommandWithInput(environment, "python3 -", script, REMOTE_SYNC_EXEC_OPTIONS);
+    return runRemoteCommand(environment, remoteCommand, REMOTE_SYNC_EXEC_OPTIONS);
+  }
   return runSystemSsh(environment, remoteCommand);
 }
 
 async function runSystemSsh(environment: SessionEnvironment, remoteCommand: string): Promise<string> {
-  const args = buildRemoteSyncSshArgs(environment, remoteCommand);
+  const script = decodeInlinePythonCommand(remoteCommand);
+  const args = buildRemoteSyncSshArgs(environment, script === null ? remoteCommand : "python3 -");
   return new Promise((resolve, reject) => {
-    execFile("ssh", args, REMOTE_SYNC_EXEC_OPTIONS, (error, stdout, stderr) => {
+    const child = execFile("ssh", args, REMOTE_SYNC_EXEC_OPTIONS, (error, stdout, stderr) => {
       if (error) reject(new Error(formatRemoteSyncProcessError(error, stdout, stderr)));
       else resolve(stdout);
     });
+    if (script !== null) child.stdin?.end(script);
   });
+}
+
+/**
+ * Large remote collectors used to be embedded in `python3 -c ...`. Windows
+ * rejects those commands once they exceed CreateProcess' argument limit. Keep
+ * the public command builders stable for SSH diagnostics and tests, but move
+ * the decoded Python program through stdin for real WSL/SSH execution.
+ */
+function decodeInlinePythonCommand(command: string): string | null {
+  const match = command.match(/^python3 -c 'import base64,zlib; exec\(zlib\.decompress\(base64\.b64decode\("([A-Za-z0-9+/=]+)"\), -15\)\.decode\("utf-8"\)\)'$/u);
+  if (!match?.[1]) return null;
+  try {
+    return inflateRawSync(Buffer.from(match[1], "base64")).toString("utf8");
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchRemoteSessionFilePayload(

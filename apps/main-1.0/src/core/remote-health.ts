@@ -5,6 +5,7 @@ import type { SessionEnvironment, SessionSearchResult, SessionSource } from "./t
 import { sessionSourceDescriptor } from "./session-sources";
 
 export type RemoteHealthStatus = "ok" | "warning" | "error";
+export type RemoteHealthCategory = "connection" | "runtime" | "cli" | "directory" | "permission" | "session";
 
 export interface RemoteHealthCheck {
   id: string;
@@ -12,6 +13,11 @@ export interface RemoteHealthCheck {
   status: RemoteHealthStatus;
   message: string;
   detail?: string;
+  category?: RemoteHealthCategory;
+  /** A safe, user-facing next step. It is deliberately not an auto-fix. */
+  suggestion?: string;
+  /** Only populated when the remote package manager was detected safely. */
+  repairCommand?: string;
 }
 
 export interface RemoteHealthReport {
@@ -39,19 +45,7 @@ export async function diagnoseRemoteEnvironment(
   try {
     const output = await runSsh(environment, buildRemoteHealthCommand());
     const payload = parseHealthPayload(output);
-    const checks: RemoteHealthCheck[] = [
-      { id: "connectivity", label: "SSH connection", status: "ok", message: `Connected as ${payload.user || "remote user"}.` },
-      cliCheck("codex-cli", "Codex CLI", payload.codexCli),
-      cliCheck("claude-cli", "Claude CLI", payload.claudeCli),
-      directoryCheck("codex-sessions", "Codex sessions", payload.codexSessionsExists, payload.codexSessionsReadable),
-      directoryCheck("claude-projects", "Claude projects", payload.claudeProjectsExists, payload.claudeProjectsReadable),
-      cliCheck("tclaude-cli", "TClaude CLI", payload.tclaudeCli),
-      cliCheck("tcodex-cli", "TCodex CLI", payload.tcodexCli),
-      cliCheck("codebuddy-cli", "CodeBuddy CLI", payload.codebuddyCli),
-      directoryCheck("tclaude-projects", "TClaude projects", payload.tclaudeProjectsExists, payload.tclaudeProjectsReadable),
-      directoryCheck("tcodex-sessions", "TCodex sessions", payload.tcodexSessionsExists, payload.tcodexSessionsReadable),
-      directoryCheck("codebuddy-projects", "CodeBuddy projects", payload.codebuddyProjectsExists, payload.codebuddyProjectsReadable),
-    ];
+    const checks = buildHealthChecks(payload, "SSH");
     return buildReport(checks);
   } catch (error) {
     return buildReport([
@@ -73,19 +67,7 @@ async function diagnoseWslEnvironment(
   try {
     const output = await runWsl(environment, buildRemoteHealthCommand());
     const payload = parseHealthPayload(output);
-    return buildReport([
-      { id: "connectivity", label: "WSL connection", status: "ok", message: `Connected as ${payload.user || "remote user"}.` },
-      cliCheck("codex-cli", "Codex CLI", payload.codexCli),
-      cliCheck("claude-cli", "Claude CLI", payload.claudeCli),
-      directoryCheck("codex-sessions", "Codex sessions", payload.codexSessionsExists, payload.codexSessionsReadable),
-      directoryCheck("claude-projects", "Claude projects", payload.claudeProjectsExists, payload.claudeProjectsReadable),
-      cliCheck("tclaude-cli", "TClaude CLI", payload.tclaudeCli),
-      cliCheck("tcodex-cli", "TCodex CLI", payload.tcodexCli),
-      cliCheck("codebuddy-cli", "CodeBuddy CLI", payload.codebuddyCli),
-      directoryCheck("tclaude-projects", "TClaude projects", payload.tclaudeProjectsExists, payload.tclaudeProjectsReadable),
-      directoryCheck("tcodex-sessions", "TCodex sessions", payload.tcodexSessionsExists, payload.tcodexSessionsReadable),
-      directoryCheck("codebuddy-projects", "CodeBuddy projects", payload.codebuddyProjectsExists, payload.codebuddyProjectsReadable),
-    ]);
+    return buildReport(buildHealthChecks(payload, "WSL"));
   } catch (error) {
     return buildReport([{
       id: "connectivity",
@@ -129,23 +111,112 @@ export async function preflightRemoteSessionResume(
   }
 }
 
-function cliCheck(id: string, label: string, path: unknown): RemoteHealthCheck {
-  if (typeof path === "string" && path) {
-    return { id, label, status: "ok", message: `${label} found.`, detail: path };
+function buildHealthChecks(payload: Record<string, unknown>, connectionLabel: "SSH" | "WSL"): RemoteHealthCheck[] {
+  if (payload.pythonUnavailable === true) {
+    return [
+      { id: "connectivity", label: `${connectionLabel} connection`, status: "ok", message: `Connected as ${payload.user || "remote user"}.`, category: "connection" },
+      runtimePathCheck("bash", "bash", payload.bashAvailable === true ? "available" : null, true),
+      runtimePathCheck("python3", "python3", null, true),
+      {
+        id: "dependent-checks",
+        label: "Session prerequisites",
+        status: "warning",
+        message: "Session, CLI, and permission checks were skipped because python3 is unavailable.",
+        category: "runtime",
+        suggestion: "Install python3 in this environment, then run diagnosis again.",
+      },
+    ];
   }
-  return { id, label, status: "warning", message: `${label} was not found on PATH.` };
+  const checks: RemoteHealthCheck[] = [
+    { id: "connectivity", label: `${connectionLabel} connection`, status: "ok", message: `Connected as ${payload.user || "remote user"}.`, category: "connection" },
+    cliCheck("codex-cli", "Codex CLI", payload.codexCli, payload.packageManager, "codex"),
+    cliCheck("claude-cli", "Claude CLI", payload.claudeCli, payload.packageManager, "claude"),
+    directoryCheck("codex-sessions", "Codex sessions", payload.codexSessionsExists, payload.codexSessionsReadable, payload.codexSessionsWritable),
+    directoryCheck("claude-projects", "Claude projects", payload.claudeProjectsExists, payload.claudeProjectsReadable, payload.claudeProjectsWritable),
+    cliCheck("tclaude-cli", "TClaude CLI", payload.tclaudeCli, payload.packageManager, "tclaude"),
+    cliCheck("tcodex-cli", "TCodex CLI", payload.tcodexCli, payload.packageManager, "tcodex"),
+    cliCheck("codebuddy-cli", "CodeBuddy CLI", payload.codebuddyCli, payload.packageManager, "codebuddy"),
+    directoryCheck("tclaude-projects", "TClaude projects", payload.tclaudeProjectsExists, payload.tclaudeProjectsReadable, payload.tclaudeProjectsWritable),
+    directoryCheck("tcodex-sessions", "TCodex sessions", payload.tcodexSessionsExists, payload.tcodexSessionsReadable, payload.tcodexSessionsWritable),
+    directoryCheck("codebuddy-projects", "CodeBuddy projects", payload.codebuddyProjectsExists, payload.codebuddyProjectsReadable, payload.codebuddyProjectsWritable),
+  ];
+  // Keep compatibility with old mocked health payloads while making the real
+  // command report all runtime prerequisites and permissions.
+  if (Object.hasOwn(payload, "bashPath")) {
+    checks.splice(1, 0,
+      runtimePathCheck("bash", "bash", payload.bashPath, true),
+      runtimePathCheck("python3", "python3", payload.pythonPath, true),
+    );
+  }
+  if (Object.hasOwn(payload, "inotifyPath")) {
+    checks.push(runtimePathCheck("inotifywait", "inotifywait", payload.inotifyPath, false, payload.packageManager, "inotify-tools"));
+    checks.push(runtimePathCheck("fswatch", "fswatch", payload.fswatchPath, false, payload.packageManager, "fswatch"));
+    checks.push(permissionCheck("home", "HOME", payload.homeWritable));
+    checks.push({
+      id: "default-user",
+      label: "Default user",
+      status: typeof payload.user === "string" && payload.user ? "ok" : "warning",
+      message: typeof payload.user === "string" && payload.user ? `Running as ${payload.user}.` : "The remote user could not be identified.",
+      category: "runtime",
+      suggestion: "Check the distribution's default user and HOME environment before resuming sessions.",
+    });
+  }
+  if (Object.hasOwn(payload, "codewizDbExists")) {
+    checks.push(cliCheck("opencode-cli", "OpenCode CLI", payload.opencodeCli, payload.packageManager, "opencode"));
+    checks.push(cliCheck("qoder-cli", "Qoder CLI", payload.qoderCli, payload.packageManager, "qoder"));
+    checks.push(directoryCheck("codewiz-database", "CodeWiz database", payload.codewizDbExists, payload.codewizDbReadable, payload.codewizDbWritable));
+    checks.push(directoryCheck("opencode-database", "OpenCode database", payload.opencodeDbExists, payload.opencodeDbReadable, payload.opencodeDbWritable));
+    checks.push(directoryCheck("qoder-projects", "Qoder projects", payload.qoderProjectsExists, payload.qoderProjectsReadable, payload.qoderProjectsWritable));
+  }
+  return checks;
 }
 
-function directoryCheck(id: string, label: string, exists: unknown, readable: unknown): RemoteHealthCheck {
-  if (exists && readable) return { id, label, status: "ok", message: `${label} directory is readable.` };
-  if (exists) return { id, label, status: "error", message: `${label} directory exists but is not readable.` };
-  return { id, label, status: "warning", message: `${label} directory was not found.` };
+function cliCheck(id: string, label: string, path: unknown, packageManager?: unknown, packageName?: string): RemoteHealthCheck {
+  if (typeof path === "string" && path) {
+    return { id, label, status: "ok", message: `${label} found.`, detail: path, category: "cli" };
+  }
+  return {
+    id, label, status: "warning", message: `${label} was not found on PATH.`, category: "cli",
+    suggestion: `Install ${label} inside this environment, then run diagnosis again.`,
+    ...(packageName ? packageRepair(packageManager, packageName) : {}),
+  };
+}
+
+function directoryCheck(id: string, label: string, exists: unknown, readable: unknown, writable?: unknown): RemoteHealthCheck {
+  if (exists && readable && (writable === undefined || writable)) {
+    return { id, label, status: "ok", message: `${label} directory is readable${writable === undefined ? "" : " and writable"}.`, category: "directory" };
+  }
+  if (exists && !readable) return { id, label, status: "error", message: `${label} directory exists but is not readable.`, category: "permission", suggestion: `Check read permissions for the ${label.toLowerCase()} directory.` };
+  if (exists) return { id, label, status: "error", message: `${label} directory is not writable.`, category: "permission", suggestion: `Check ownership and write permissions for the ${label.toLowerCase()} directory.` };
+  return { id, label, status: "warning", message: `${label} directory was not found.`, category: "directory", suggestion: `Start the matching CLI once in this environment so its session directory is created.` };
+}
+
+function runtimePathCheck(id: string, label: string, value: unknown, required: boolean, packageManager?: unknown, packageName?: string): RemoteHealthCheck {
+  if (typeof value === "string" && value) return { id, label, status: "ok", message: `${label} is available.`, detail: value, category: "runtime" };
+  return {
+    id, label, status: required ? "error" : "warning", message: `${label} is not available in the remote environment.`, category: "runtime",
+    suggestion: required ? `Install or enable ${label} before retrying WSL session operations.` : `Install ${label} to use event-based WSL watching; polling will remain available.`,
+    ...(packageName ? packageRepair(packageManager, packageName) : {}),
+  };
+}
+
+function permissionCheck(id: string, label: string, writable: unknown): RemoteHealthCheck {
+  if (writable === true) return { id, label, status: "ok", message: `${label} is writable.`, category: "permission" };
+  return { id, label, status: "error", message: `${label} is not writable.`, category: "permission", suggestion: `Check the owner and write permissions for ${label}.` };
+}
+
+function packageRepair(packageManager: unknown, packageName: string): Pick<RemoteHealthCheck, "repairCommand"> {
+  if (packageManager === "apt-get") return { repairCommand: `sudo apt-get install ${packageName}` };
+  if (packageManager === "dnf") return { repairCommand: `sudo dnf install ${packageName}` };
+  if (packageManager === "apk") return { repairCommand: `sudo apk add ${packageName}` };
+  if (packageManager === "pacman") return { repairCommand: `sudo pacman -S ${packageName}` };
+  return {};
 }
 
 function sessionFileCheck(exists: unknown, readable: unknown): RemoteHealthCheck {
-  if (exists && readable) return { id: "session-file", label: "Session file", status: "ok", message: "Remote session file is readable." };
-  if (exists) return { id: "session-file", label: "Session file", status: "error", message: "Remote session file exists but is not readable." };
-  return { id: "session-file", label: "Session file", status: "error", message: "Remote session file was not found." };
+  if (exists && readable) return { id: "session-file", label: "Session file", status: "ok", message: "Remote session file is readable.", category: "session" };
+  if (exists) return { id: "session-file", label: "Session file", status: "error", message: "Remote session file exists but is not readable.", category: "permission", suggestion: "Check read permissions for the session file." };
+  return { id: "session-file", label: "Session file", status: "error", message: "Remote session file was not found.", category: "session", suggestion: "Refresh the environment and verify that the source CLI still owns this session." };
 }
 
 function buildReport(checks: RemoteHealthCheck[]): RemoteHealthReport {
@@ -183,32 +254,70 @@ def readable(path):
   except Exception:
     return False
 
+def writable(path):
+  try:
+    return path.exists() and os.access(path, os.W_OK)
+  except Exception:
+    return False
+
+def find_package_manager():
+  for candidate in ("apt-get", "dnf", "apk", "pacman"):
+    found = shutil.which(candidate)
+    if found:
+      return candidate
+  return None
+
 codex_sessions = home / ".codex" / "sessions"
 claude_projects = home / ".claude" / "projects"
 tclaude_projects = home / ".tclaude" / "projects"
 tcodex_sessions = home / ".tcodex" / "sessions"
 codebuddy_projects = home / ".codebuddy" / "projects"
+codewiz_db = home / ".local" / "share" / "codewiz" / "opencode.db"
+opencode_db = home / ".local" / "share" / "opencode" / "opencode.db"
+qoder_projects = home / ".qoder" / "cache" / "projects"
 print(json.dumps({
   "ok": True,
   "home": str(home),
   "user": os.environ.get("USER") or os.environ.get("USERNAME") or "",
+  "bashPath": shutil.which("bash") or shutil.which("sh"),
+  "pythonPath": shutil.which("python3") or shutil.which("python"),
+  "inotifyPath": shutil.which("inotifywait"),
+  "fswatchPath": shutil.which("fswatch"),
+  "packageManager": find_package_manager(),
+  "homeWritable": writable(home),
   "codexCli": shutil.which("codex"),
   "claudeCli": shutil.which("claude"),
   "tclaudeCli": shutil.which("tclaude"),
   "tcodexCli": shutil.which("tcodex"),
   "codebuddyCli": shutil.which("codebuddy"),
+  "opencodeCli": shutil.which("opencode"),
+  "qoderCli": shutil.which("qoder"),
   "codexSessionsExists": codex_sessions.exists(),
   "codexSessionsReadable": readable(codex_sessions),
+  "codexSessionsWritable": writable(codex_sessions),
   "claudeProjectsExists": claude_projects.exists(),
   "claudeProjectsReadable": readable(claude_projects),
+  "claudeProjectsWritable": writable(claude_projects),
   "tclaudeProjectsExists": tclaude_projects.exists(),
   "tclaudeProjectsReadable": readable(tclaude_projects),
+  "tclaudeProjectsWritable": writable(tclaude_projects),
   "tcodexSessionsExists": tcodex_sessions.exists(),
   "tcodexSessionsReadable": readable(tcodex_sessions),
+  "tcodexSessionsWritable": writable(tcodex_sessions),
   "codebuddyProjectsExists": codebuddy_projects.exists(),
   "codebuddyProjectsReadable": readable(codebuddy_projects),
+  "codebuddyProjectsWritable": writable(codebuddy_projects),
+  "codewizDbExists": codewiz_db.exists(),
+  "codewizDbReadable": readable(codewiz_db),
+  "codewizDbWritable": writable(codewiz_db.parent),
+  "opencodeDbExists": opencode_db.exists(),
+  "opencodeDbReadable": readable(opencode_db),
+  "opencodeDbWritable": writable(opencode_db.parent),
+  "qoderProjectsExists": qoder_projects.exists(),
+  "qoderProjectsReadable": readable(qoder_projects),
+  "qoderProjectsWritable": writable(qoder_projects),
 }, ensure_ascii=False))`;
-  return buildPythonBase64Command(script);
+  return buildPythonBase64Command(script, `printf '%s\\n' '{"ok":false,"pythonUnavailable":true,"bashAvailable":true}'`);
 }
 
 function buildRemoteResumePreflightCommand(session: SessionSearchResult): string {
@@ -238,12 +347,14 @@ print(json.dumps({
   return buildPythonBase64Command(script);
 }
 
-function buildPythonBase64Command(script: string): string {
+function buildPythonBase64Command(script: string, fallbackCommand?: string): string {
   const zlib = require("node:zlib") as typeof import("node:zlib");
   const compressed = zlib.deflateRawSync(Buffer.from(script, "utf-8"));
   const encoded = compressed.toString("base64");
   const pythonCommand = `python3 -c 'import base64,zlib; exec(zlib.decompress(base64.b64decode("${encoded}"), -15).decode("utf-8"))'`;
-  const shellCommand = `if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi; ${pythonCommand}`;
+  const pythonFallback = pythonCommand.replace(/^python3\b/u, "python");
+  const fallback = fallbackCommand ?? "exit 127";
+  const shellCommand = `if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi; if command -v python3 >/dev/null 2>&1; then ${pythonCommand}; elif command -v python >/dev/null 2>&1; then ${pythonFallback}; else ${fallback}; fi`;
   return `bash -lc ${posixShellQuote(shellCommand)}`;
 }
 

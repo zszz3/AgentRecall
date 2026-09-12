@@ -227,6 +227,11 @@ export function loadWslSessionPayloads(environment: SessionEnvironment, payloads
         size: payload.size,
       });
       if (candidate) loaded.push(scopeWslSession(candidate, environment, "codebuddy-cli"));
+    } else if (payload.kind === "codewiz-session" || payload.kind === "opencode-session" || payload.kind === "qoder-project") {
+      const source = wslPayloadSource(payload);
+      for (const candidate of loadRemoteSessionPayloads(environment, [payload])) {
+        loaded.push(scopeWslSession({ ...candidate, session: { ...candidate.session, source } }, environment, source));
+      }
     }
   }
 
@@ -271,6 +276,11 @@ export function loadWslSessionDetailPayload(
     });
     return candidate ? scopeWslSession(candidate, environment, "codebuddy-cli") : null;
   }
+  if (payload.kind === "codewiz-session" || payload.kind === "opencode-session" || payload.kind === "qoder-project") {
+    const candidate = loadRemoteSessionDetailPayload(environment, payload, summary);
+    const source = wslPayloadSource(payload);
+    return candidate ? scopeWslSession({ ...candidate, session: { ...candidate.session, source } }, environment, source) : null;
+  }
   return null;
 }
 
@@ -285,6 +295,13 @@ function scopeWslSession(loaded: LoadedSession, environment: SessionEnvironment,
       environmentLabel: environment.label,
     },
   };
+}
+
+function wslPayloadSource(payload: RemoteSessionFilePayload): SessionSource {
+  if (payload.kind === "codewiz-session") return "codewiz-cli";
+  if (payload.kind === "opencode-session") return "opencode-cli";
+  if (payload.kind === "qoder-project") return "qoder";
+  return payloadSource(payload);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

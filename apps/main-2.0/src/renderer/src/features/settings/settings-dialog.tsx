@@ -537,6 +537,8 @@ export function SettingsDialog({
                                   <span className="connection-diagnostic-label">{check.label}</span>
                                   <span className="connection-diagnostic-message" title={check.detail ?? check.message}>
                                     {check.message}
+                                    {check.suggestion ? <small style={{ display: "block" }}>{check.suggestion}</small> : null}
+                                    {check.repairCommand ? <code style={{ display: "block", userSelect: "text" }}>{check.repairCommand}</code> : null}
                                   </span>
                                 </div>
                               ))}
@@ -952,6 +954,22 @@ export function SettingsDialog({
                     </button>
                   ) : null}
                 </header>
+                <label className="settings-field">
+                  <div className="settings-field-text">
+                    <span className="settings-field-title">{l("WSL polling fallback (seconds)", "WSL 轮询回退间隔（秒）")}</span>
+                    <span className="settings-field-sub">{l("Used when inotifywait/fswatch is unavailable or a distribution is restarting. 5–3600 seconds.", "监听工具不可用或发行版重启时使用。范围 5–3600 秒。")}</span>
+                  </div>
+                  <input
+                    type="number"
+                    min={5}
+                    max={3600}
+                    step={1}
+                    className="settings-number"
+                    value={Math.round((settings?.wslPollingIntervalMs ?? 60_000) / 1000)}
+                    disabled={!settings}
+                    onChange={(event) => onSettingsChange({ wslPollingIntervalMs: Number(event.currentTarget.value) * 1000 })}
+                  />
+                </label>
                 <label className="settings-field settings-toggle remote-sync-master-toggle">
                   <div className="settings-field-text">
                     <span className="settings-field-title">{l("Enable remote session sync", "启用远程会话同步")}</span>

@@ -145,6 +145,7 @@ export interface SessionMigrationProgress {
 }
 
 export interface SessionMigrationResult {
+  operationId?: string;
   target: MigrationTarget;
   targetSessionId: string;
   targetFilePath: string;
@@ -154,6 +155,8 @@ export interface SessionMigrationResult {
   launched: boolean;
   restoredSubagentCount?: number;
   warning?: string;
+  completedStages?: SessionMigrationStage[];
+  partial?: boolean;
 }
 
 export interface SessionMigrationRecord {
