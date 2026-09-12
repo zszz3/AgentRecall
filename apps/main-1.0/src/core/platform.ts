@@ -401,7 +401,7 @@ function buildResumeRuntimeProcessSpec(
   // Local absolute CLI settings do not describe the SSH host. Interactive SSH
   // resolves these stable command names through the remote user's own shell.
   return {
-    command: useRemoteBinary && (target === "claude" || target === "codex")
+    command: useRemoteBinary && ["claude", "codex", "tclaude", "tcodex", "codebuddy"].includes(target)
       ? target
       : migrationBinary(target, settings),
     args,
@@ -1290,6 +1290,7 @@ function getResumePowerShellCommand(
     shell: "posix",
     platform: "linux",
     homeDir: opts.homeDir,
+    useRemoteBinary: true,
   });
   return formatPowershellSshDisplay(opts.sshArgs, remoteInteractiveCommand(opts.sshArgs, innerCommand));
 }

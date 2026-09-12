@@ -3094,7 +3094,7 @@ function registerIpc(): void {
         remoteId: request.sessionKey,
         portable,
         target: request.target as MigrationAgent,
-        localProjectPath: portable.projectPath,
+        localProjectPath: request.targetProjectPath ?? portable.projectPath,
         deps,
       });
     }
