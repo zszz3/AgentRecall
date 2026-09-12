@@ -5,7 +5,7 @@ import { AlertTriangle, Beaker, CheckCircle2, ChevronDown, ChevronRight, Databas
 import type { SkillTriggerLink } from "../../../../core/session-store";
 import type { SkillFinding } from "../../../../core/skill-eval-findings";
 import type { SkillEvalDetail, SkillEvalOverview, SkillEvalSuite } from "../../../../main/services/skill-service";
-import type { EvaluationEvaluator, EvaluationNodeRecord, EvaluationRun, EvaluationRunSummary, ConfiguredAgent } from "../../../../automation/contracts";
+import type { EvaluationCaseResult, EvaluationEvaluator, EvaluationNodeRecord, EvaluationRun, EvaluationRunSummary, ConfiguredAgent } from "../../../../automation/contracts";
 import {
   isTechnicalWritingSkill,
   TECHNICAL_WRITING_DIMENSIONS,
@@ -1371,10 +1371,11 @@ function RunComparison({
   onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const caseScore = (result: { scores: Array<{ score: number }> } | undefined): number | null => {
-    if (!result || result.scores.length === 0) return null;
-    return result.scores.reduce((sum, score) => sum + score.score, 0) / result.scores.length;
-  };
+  // The case's own weighted score, not a flat mean of its evaluator rows: the
+  // header delta compares averageScore, which is weighted, so a flat mean here
+  // would put the two deltas in different units and disagree with the run page.
+  const caseScore = (result: EvaluationCaseResult | undefined): number | null =>
+    result?.score ?? null;
   const pairKey = (result: { datasetItemId: string; repetition: number }) =>
     `${result.datasetItemId}:${result.repetition}`;
   const baseByKey = new Map(base.results.map((result) => [pairKey(result), result]));
@@ -1450,8 +1451,18 @@ function RunComparison({
                 </span>
               ) : !baseResult ? (
                 <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行存在")}</span>
-              ) : (
+              ) : !compareResult ? (
                 <span className="eval-badge eval-badge-dim">{l("Not re-run", "未在对比运行中重跑")}</span>
+              ) : (
+                <span
+                  className="eval-badge eval-badge-dim"
+                  title={compareResult.unscoredReason ?? baseResult.unscoredReason ?? l(
+                    "One side recorded no score for this case.",
+                    "其中一次运行没有为这个用例记下分数。",
+                  )}
+                >
+                  {l("Not scored", "未评分")}
+                </span>
               )}
             </header>
             <div className="eval-run-compare-columns">
