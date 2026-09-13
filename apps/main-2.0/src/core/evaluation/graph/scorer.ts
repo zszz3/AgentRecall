@@ -115,6 +115,21 @@ export interface EvaluationRunScore {
 const DEFAULT_THRESHOLD = 0.6;
 
 /**
+ * Which rules totalled a run's numbers.
+ *
+ * Bumped when the arithmetic changes underneath scores that are already stored,
+ * so a comparison can say the two runs were measured differently instead of
+ * reporting the difference as the agent's. 1 is the rule set every older run was
+ * scored under; it was never written down, because nothing recorded a version
+ * until stage normalization made the number mean something.
+ *
+ * Deliberately not part of the rubric fingerprint. That describes what was asked
+ * for, this describes how it was added up, and telling somebody their standard
+ * changed when only the scoring did sends them looking in the wrong place.
+ */
+export const EVALUATION_SCORING_VERSION = 2;
+
+/**
  * Failure types whose defect says nothing about the agent: AgentRecall broke, a
  * judge broke, or the case was out of scope. A gate closed only by these has no
  * measurement to report, so the result is unscorable rather than zero.

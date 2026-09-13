@@ -308,6 +308,12 @@ export interface EvaluationRun {
    * can only call a rubric change a fact when both runs have one.
    */
   rubricHash?: string | null;
+  /**
+   * Scoring rules that totalled this run's numbers. Absent on runs stored before
+   * the version was recorded; their scores follow the older rules, which is not
+   * the same as following these and must not be compared as if it were.
+   */
+  scoringVersion?: number | null;
   startedAt: number;
   finishedAt?: number;
   averageScore?: number;

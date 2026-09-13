@@ -2071,4 +2071,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS stage_by_evaluator_id jsonb;
     `,
   ],
+}, {
+  version: 53,
+  name: "store which scoring rules totalled an evaluation run",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_runs
+        ADD COLUMN IF NOT EXISTS scoring_version integer;
+    `,
+  ],
 }];

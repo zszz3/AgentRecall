@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { executeEvaluationRun } from "../../../core/evaluation/run";
+import { EVALUATION_SCORING_VERSION } from "../../../core/evaluation/graph/scorer";
 import {
   judgesTrajectory,
   type EvaluationPlanEvaluator,
@@ -173,6 +174,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     ...(input.agentRevisionId ? { agentRevisionId: input.agentRevisionId } : {}),
     ...(input.skillHash ? { skillHash: input.skillHash } : {}),
     rubricHash,
+    scoringVersion: EVALUATION_SCORING_VERSION,
     startedAt,
     ...(status === "running" ? {} : { finishedAt: Date.now() }),
     ...snapshotScore,
