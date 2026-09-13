@@ -158,7 +158,11 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
   // Resolved once so the fingerprint cannot describe a rubric other than the
   // one the graph actually runs.
   const plannedEvaluators = planEvaluators(input.experiment, input.evaluators);
-  const rubricHash = rubricFingerprint(plannedEvaluators, input.experiment.scoring);
+  const rubricHash = rubricFingerprint(
+    plannedEvaluators,
+    input.experiment.scoring,
+    input.experiment.stages,
+  );
 
   let snapshotScore: EvaluationRunSnapshotScore = {};
   const snapshot = (status: EvaluationRun["status"]): EvaluationRun => ({
@@ -357,8 +361,9 @@ function planEvaluators(
 
 /**
  * Fingerprint of the standard a run was measured with: two runs are comparable
- * only when the same judges and the same scoring policy produced both scores,
- * and the built-in judge rewrites itself whenever its rubric drifts.
+ * only when the same judges, the same scoring policy and the same segmentation
+ * produced both scores, and the built-in judge rewrites itself whenever its
+ * rubric drifts.
  *
  * Taken over the resolved plan, which is what executed and carries no name or
  * timestamp. Sorted by id because the rows arrive ordered by last update —
@@ -368,10 +373,24 @@ function planEvaluators(
 function rubricFingerprint(
   evaluators: readonly EvaluationPlanEvaluator[],
   scoring: EvaluationExperiment["scoring"],
+  stages: EvaluationExperiment["stages"],
 ): string {
   const ordered = [...evaluators].sort((left, right) => left.id.localeCompare(right.id));
   return createHash("sha256")
-    .update(JSON.stringify({ evaluators: ordered, scoring: scoring ?? null }))
+    .update(
+      JSON.stringify({
+        evaluators: ordered,
+        scoring: scoring ?? null,
+        ...(stages && stages.length > 0
+          ? {
+              // Name left out on purpose: renaming a stage measures exactly the
+              // same run, and reporting that as a changed standard is the false
+              // alarm the fingerprint exists to avoid.
+              stages: stages.map(({ id, boundaryKind, pattern }) => ({ id, boundaryKind, pattern })),
+            }
+          : {}),
+      }),
+    )
     .digest("hex");
 }
 
