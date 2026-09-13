@@ -14,7 +14,9 @@ import {
   createSessionArtifactNode,
   createSessionLinkNode,
   createSkillProvisionNode,
+  createStageTraceNode,
   skillUseObserveNode,
+  stageSegmentNode,
   taskSourceNode,
   ARTIFACT_COMPLETE_NODE_TYPE,
   FOLDER_ARTIFACT_NODE_TYPE,
@@ -23,6 +25,8 @@ import {
   SESSION_LINK_NODE_TYPE,
   SKILL_PROVISION_NODE_TYPE,
   SKILL_USE_OBSERVE_NODE_TYPE,
+  STAGE_SEGMENT_NODE_TYPE,
+  STAGE_TRACE_NODE_TYPE,
   TASK_SOURCE_NODE_TYPE,
 } from "./nodes/prepare-nodes";
 import {
@@ -65,6 +69,7 @@ export const SESSION_NODE_ID = "session";
 export const SOURCE_NODE_ID = "source";
 export const SKILL_USE_NODE_ID = "skill-use";
 export const ARTIFACT_COMPLETE_NODE_ID = "artifact-complete";
+export const STAGE_TRACE_NODE_ID = "stage-trace";
 
 /** Where the artifact under evaluation comes from. */
 export type EvaluationArtifactSourceKind = "run_agent" | "session" | "folder";
@@ -108,6 +113,24 @@ export interface EvaluationPlanEvaluator {
   timeoutMs?: number;
 }
 
+/**
+ * One stage a run is declared to have.
+ *
+ * The order is the segmentation: a stage's boundary is only searched for after
+ * the one before it, so reordering the list changes what the stages mean.
+ */
+export interface EvaluationStageDefinition {
+  /**
+   * Stable identity. Node ids are derived from it and are what lets two runs be
+   * compared step by step, so it must not change when the name is edited.
+   */
+  id: string;
+  name: string;
+  /** Only `file_written` for now: the first write of a path matching `pattern`. */
+  boundaryKind: "file_written";
+  pattern: string;
+}
+
 export interface EvaluationCasePlan {
   task: EvaluationTaskValue;
   source: EvaluationArtifactSourceKind;
@@ -120,6 +143,8 @@ export interface EvaluationCasePlan {
    */
   linkTrajectory: boolean;
   sessionLink?: { attempts?: number; delayMs?: number };
+  /** Declared stages of the run, in order. Empty or absent means no segmentation. */
+  stages?: readonly EvaluationStageDefinition[];
   /** Graph authored in the editor; replaces the derived shape when present. */
   savedSpec?: EvaluationGraphSpec;
 }
@@ -136,6 +161,8 @@ export function createEvaluationNodeDefinitions(
     createSessionArtifactNode(dependencies),
     createFolderArtifactNode(dependencies),
     skillUseObserveNode,
+    createStageTraceNode(dependencies),
+    stageSegmentNode,
     deterministicJudgeNode,
     createLlmJudgeNode(dependencies),
     toolFailureJudgeNode,
@@ -158,6 +185,12 @@ export interface EvaluationCaseSpecResult {
    * so an omission is visible rather than looking like a passing run.
    */
   skippedEvaluatorIds: string[];
+  /**
+   * Stages left out for the same reason. A folder has no session behind it, so
+   * there is no trace to segment, and a run that silently showed one stage step
+   * fewer than the plan declared would read as a segmentation that matched.
+   */
+  skippedStageIds: string[];
 }
 
 export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCaseSpecResult {
@@ -228,6 +261,45 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
 
   const usedIds = new Set(nodes.map((node) => node.id));
   const skippedEvaluatorIds: string[] = [];
+  const skippedStageIds: string[] = [];
+
+  const stages = plan.stages ?? [];
+  if (stages.length > 0) {
+    if (!trajectoryNodeId) {
+      skippedStageIds.push(...stages.map((stage) => stage.id));
+    } else {
+      nodes.push({
+        id: STAGE_TRACE_NODE_ID,
+        type: STAGE_TRACE_NODE_TYPE,
+        in: { trajectory: `${trajectoryNodeId}.trajectory` },
+      });
+      usedIds.add(STAGE_TRACE_NODE_ID);
+      // Each step reads the segmentation its predecessor produced, which is what
+      // makes the search sequential: stage N is only looked for after stage N-1
+      // opened. The trace step seeds it empty, so the first stage has a producer.
+      let previous = STAGE_TRACE_NODE_ID;
+      for (const stage of stages) {
+        const id = stageNodeId(stage.id, usedIds);
+        usedIds.add(id);
+        nodes.push({
+          id,
+          type: STAGE_SEGMENT_NODE_TYPE,
+          config: {
+            stageId: stage.id,
+            name: stage.name,
+            boundaryKind: stage.boundaryKind,
+            pattern: stage.pattern,
+          },
+          in: {
+            touches: `${STAGE_TRACE_NODE_ID}.touches`,
+            stages: `${previous}.stages`,
+          },
+        });
+        previous = id;
+      }
+    }
+  }
+
   for (const evaluator of plan.evaluators) {
     if (judgesTrajectory(evaluator) && !trajectoryNodeId) {
       skippedEvaluatorIds.push(evaluator.id);
@@ -241,6 +313,7 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
   return {
     spec: { name: `evaluation-case:${plan.task.caseId}`, version: 1, nodes },
     skippedEvaluatorIds,
+    skippedStageIds,
   };
 }
 
@@ -417,6 +490,7 @@ function judgingOnlyOrHydrated(
         evaluators: plan.evaluators,
       }),
       skippedEvaluatorIds: [],
+      skippedStageIds: [],
     };
   }
   const head = buildEvaluationCaseSpec({ ...plan, evaluators: [] });
@@ -432,6 +506,7 @@ function judgingOnlyOrHydrated(
       nodes: [...head.spec.nodes, ...followDerivedArtifact(judges.nodes, head.spec.nodes)],
     },
     skippedEvaluatorIds: head.skippedEvaluatorIds,
+    skippedStageIds: head.skippedStageIds,
   };
 }
 
@@ -468,7 +543,11 @@ function followDerivedArtifact(
 export function buildEvaluationCaseGraph(
   plan: EvaluationCasePlan,
   dependencies: EvaluationNodeDependencies,
-): { graph: BuiltEvaluationGraph; skippedEvaluatorIds: string[] } {
+): {
+  graph: BuiltEvaluationGraph;
+  skippedEvaluatorIds: string[];
+  skippedStageIds: string[];
+} {
   const built = plan.savedSpec
     ? judgingOnlyOrHydrated(plan, plan.savedSpec)
     : buildEvaluationCaseSpec(plan);
@@ -478,22 +557,36 @@ export function buildEvaluationCaseGraph(
       createEvaluationNodeRegistry(createEvaluationNodeDefinitions(dependencies)),
     ),
     skippedEvaluatorIds: built.skippedEvaluatorIds,
+    skippedStageIds: built.skippedStageIds,
   };
 }
 
 /**
- * Derives a node id from an evaluator id.
+ * Derives a node id from a piece of user data.
  *
- * Evaluator ids are user data and may contain characters a node id cannot — a
- * dot in particular would be read as the producer/port separator in an input
- * binding, silently pointing a judge at a node that does not exist.
+ * User data may contain characters a node id cannot — a dot in particular would
+ * be read as the producer/port separator in an input binding, silently pointing a
+ * step at a node that does not exist.
  */
-export function evaluatorNodeId(evaluatorId: string, taken: ReadonlySet<string>): string {
-  const slug = evaluatorId.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+/, "") || "evaluator";
-  const base = `judge-${slug}`;
+function derivedNodeId(
+  prefix: string,
+  key: string,
+  fallback: string,
+  taken: ReadonlySet<string>,
+): string {
+  const slug = key.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+/, "") || fallback;
+  const base = `${prefix}-${slug}`;
   if (!taken.has(base)) return base;
   for (let suffix = 2; ; suffix += 1) {
     const candidate = `${base}-${suffix}`;
     if (!taken.has(candidate)) return candidate;
   }
+}
+
+export function evaluatorNodeId(evaluatorId: string, taken: ReadonlySet<string>): string {
+  return derivedNodeId("judge", evaluatorId, "evaluator", taken);
+}
+
+export function stageNodeId(stageId: string, taken: ReadonlySet<string>): string {
+  return derivedNodeId("stage", stageId, "unnamed", taken);
 }
