@@ -111,6 +111,12 @@ export interface EvaluationPlanEvaluator {
   commandArgs?: string[];
   subject?: EvaluationJudgeSubject;
   timeoutMs?: number;
+  /**
+   * Id of the declared stage this check judges, from the plan's own assignment.
+   * Absent means the whole run. Only a check that judges the artifact can carry
+   * one, since a trajectory is a single aggregate over the run.
+   */
+  stageId?: string;
 }
 
 /**
@@ -173,7 +179,9 @@ export function createEvaluationNodeDefinitions(
 }
 
 /** True when this evaluator decides on the trajectory rather than the artifact. */
-export function judgesTrajectory(evaluator: EvaluationPlanEvaluator): boolean {
+export function judgesTrajectory(
+  evaluator: Pick<EvaluationPlanEvaluator, "kind" | "subject">,
+): boolean {
   if (evaluator.kind === "tool_failures" || evaluator.kind === "trajectory_budget") return true;
   return evaluator.kind === "script" && evaluator.subject === "trajectory";
 }
@@ -357,6 +365,7 @@ export function judgeNodeConfig(evaluator: EvaluationPlanEvaluator): Record<stri
     threshold: evaluator.threshold,
     ...(evaluator.dimension ? { dimension: evaluator.dimension } : {}),
     ...(evaluator.priority ? { priority: evaluator.priority } : {}),
+    ...(evaluator.stageId ? { stageId: evaluator.stageId } : {}),
   };
   if (evaluator.kind === "tool_failures") {
     return {

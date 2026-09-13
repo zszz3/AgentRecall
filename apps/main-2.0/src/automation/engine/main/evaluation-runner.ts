@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { executeEvaluationRun } from "../../../core/evaluation/run";
-import type { EvaluationPlanEvaluator } from "../../../core/evaluation/case-graph";
+import {
+  judgesTrajectory,
+  type EvaluationPlanEvaluator,
+} from "../../../core/evaluation/case-graph";
 import type {
   EvaluationArtifactFile,
   EvaluationExecutionReference,
@@ -311,30 +314,45 @@ function planEvaluators(
     .filter(
       (evaluator) => experiment.evaluatorIds.includes(evaluator.id) && evaluator.enabled,
     )
-    .map((evaluator) => ({
-      id: evaluator.id,
-      kind: evaluator.kind,
-      threshold: evaluator.threshold,
-      ...(evaluator.dimension ? { dimension: evaluator.dimension } : {}),
-      ...(evaluator.priority ? { priority: evaluator.priority } : {}),
-      ...(evaluator.runtimeId ? { runtimeId: evaluator.runtimeId } : {}),
-      ...(evaluator.prompt ? { prompt: evaluator.prompt } : {}),
-      ...(evaluator.maxToolFailures !== undefined
-        ? { maxToolFailures: evaluator.maxToolFailures }
-        : {}),
-      ...(evaluator.maxTurns !== undefined ? { maxTurns: evaluator.maxTurns } : {}),
-      ...(evaluator.maxToolCalls !== undefined ? { maxToolCalls: evaluator.maxToolCalls } : {}),
-      ...(evaluator.maxTotalTokens !== undefined ? { maxTotalTokens: evaluator.maxTotalTokens } : {}),
-      ...(evaluator.maxDurationMs !== undefined ? { maxDurationMs: evaluator.maxDurationMs } : {}),
-      ...(evaluator.scriptMode ? { scriptMode: evaluator.scriptMode } : {}),
-      ...(evaluator.script ? { script: evaluator.script } : {}),
-      ...(evaluator.command ? { command: evaluator.command } : {}),
-      ...(evaluator.commandArgs && evaluator.commandArgs.length > 0
-        ? { commandArgs: evaluator.commandArgs }
-        : {}),
-      ...(evaluator.subject ? { subject: evaluator.subject } : {}),
-      ...(evaluator.timeoutMs !== undefined ? { timeoutMs: evaluator.timeoutMs } : {}),
-    }));
+    .map((evaluator) => {
+      // Dropped for a check that judges the trajectory: a trajectory is one
+      // aggregate over the whole run, so there is no per-stage trajectory to
+      // judge yet. Resolving it here rather than letting the graph ignore it
+      // keeps the plan — which the rubric fingerprint is taken over — describing
+      // what will actually run.
+      const stageId = judgesTrajectory(evaluator)
+        ? undefined
+        : experiment.stageByEvaluatorId?.[evaluator.id];
+      return {
+        id: evaluator.id,
+        kind: evaluator.kind,
+        threshold: evaluator.threshold,
+        ...(evaluator.dimension ? { dimension: evaluator.dimension } : {}),
+        ...(evaluator.priority ? { priority: evaluator.priority } : {}),
+        ...(evaluator.runtimeId ? { runtimeId: evaluator.runtimeId } : {}),
+        ...(evaluator.prompt ? { prompt: evaluator.prompt } : {}),
+        ...(evaluator.maxToolFailures !== undefined
+          ? { maxToolFailures: evaluator.maxToolFailures }
+          : {}),
+        ...(evaluator.maxTurns !== undefined ? { maxTurns: evaluator.maxTurns } : {}),
+        ...(evaluator.maxToolCalls !== undefined ? { maxToolCalls: evaluator.maxToolCalls } : {}),
+        ...(evaluator.maxTotalTokens !== undefined
+          ? { maxTotalTokens: evaluator.maxTotalTokens }
+          : {}),
+        ...(evaluator.maxDurationMs !== undefined
+          ? { maxDurationMs: evaluator.maxDurationMs }
+          : {}),
+        ...(evaluator.scriptMode ? { scriptMode: evaluator.scriptMode } : {}),
+        ...(evaluator.script ? { script: evaluator.script } : {}),
+        ...(evaluator.command ? { command: evaluator.command } : {}),
+        ...(evaluator.commandArgs && evaluator.commandArgs.length > 0
+          ? { commandArgs: evaluator.commandArgs }
+          : {}),
+        ...(evaluator.subject ? { subject: evaluator.subject } : {}),
+        ...(evaluator.timeoutMs !== undefined ? { timeoutMs: evaluator.timeoutMs } : {}),
+        ...(stageId ? { stageId } : {}),
+      };
+    });
 }
 
 /**

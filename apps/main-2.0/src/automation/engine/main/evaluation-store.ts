@@ -211,6 +211,9 @@ export class EvaluationStore {
         stages: row.stages != null
           ? jsonValue(row.stages) as EvaluationStageDefinition[]
           : null,
+        stageByEvaluatorId: row.stage_by_evaluator_id != null
+          ? jsonValue(row.stage_by_evaluator_id) as Record<string, string>
+          : null,
         createdAt: timestamp(row.created_at),
         updatedAt: timestamp(row.updated_at),
       };
@@ -222,8 +225,11 @@ export class EvaluationStore {
       await transaction.query(
         `insert into agent_recall.evaluation_experiments (
           id, name, dataset_id, agent_id, repetitions, skill_name, skill_hash,
-          graph, source, scoring, stages, created_at, updated_at
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11::jsonb, $12, $13)
+          graph, source, scoring, stages, stage_by_evaluator_id, created_at, updated_at
+        ) values (
+          $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11::jsonb,
+          $12::jsonb, $13, $14
+        )
         on conflict (id) do update set
           name = excluded.name,
           dataset_id = excluded.dataset_id,
@@ -235,6 +241,7 @@ export class EvaluationStore {
           source = excluded.source,
           scoring = excluded.scoring,
           stages = excluded.stages,
+          stage_by_evaluator_id = excluded.stage_by_evaluator_id,
           updated_at = excluded.updated_at`,
         [
           value.id,
@@ -248,6 +255,7 @@ export class EvaluationStore {
           value.source ?? null,
           value.scoring ? JSON.stringify(value.scoring) : null,
           value.stages ? JSON.stringify(value.stages) : null,
+          value.stageByEvaluatorId ? JSON.stringify(value.stageByEvaluatorId) : null,
           new Date(value.createdAt),
           new Date(value.updatedAt),
         ],

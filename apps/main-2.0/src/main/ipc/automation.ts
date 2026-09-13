@@ -200,9 +200,13 @@ const evaluationExperimentSchema = z.object({
   // Where each case's artifact comes from, and how its verdicts are combined.
   source: z.enum(["run_agent", "session", "folder"]).optional(),
   scoring: evaluationScoringSchema.nullish(),
-  // Low cap: every stage becomes a step in every case's graph, and a judge call
-  // per stage once stages are scored.
+  // Low cap: every stage becomes a step in every case's graph, and every check
+  // bound to one becomes a judge call of its own.
   stages: z.array(evaluationStageSchema).max(10).nullish(),
+  // Which stage each check is bound to. On the plan rather than on the check:
+  // one check library is shared, and the same check can sit at a different stage
+  // of a different skill.
+  stageByEvaluatorId: z.record(z.string().max(80), z.string().max(80)).nullish(),
   // Skill binding and the authored graph travel with the experiment, so an
   // experiment loaded from the store can be saved back without losing either.
   skillName: z.string().trim().max(200).nullish(),
@@ -210,7 +214,19 @@ const evaluationExperimentSchema = z.object({
   graph: evaluationExperimentGraphSchema.nullish(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
-}).strict();
+}).strict().superRefine((value, context) => {
+  const assignments = value.stageByEvaluatorId;
+  if (!assignments) return;
+  const declared = new Set((value.stages ?? []).map((stage) => stage.id));
+  for (const [evaluatorId, stageId] of Object.entries(assignments)) {
+    if (declared.has(stageId)) continue;
+    context.addIssue({
+      code: "custom",
+      path: ["stageByEvaluatorId", evaluatorId],
+      message: "A check can only be bound to a stage this plan declares.",
+    });
+  }
+});
 const evaluationRunListSchema = z.object({
   experimentId: idSchema.optional(),
   offset: z.number().int().nonnegative().max(1_000_000).optional(),

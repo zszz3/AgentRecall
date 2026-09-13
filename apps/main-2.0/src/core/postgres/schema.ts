@@ -2062,4 +2062,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS skipped_stage_ids jsonb;
     `,
   ],
+}, {
+  version: 52,
+  name: "store which stage each check of an evaluation experiment judges",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_experiments
+        ADD COLUMN IF NOT EXISTS stage_by_evaluator_id jsonb;
+    `,
+  ],
 }];

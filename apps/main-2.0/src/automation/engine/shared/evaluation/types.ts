@@ -152,6 +152,13 @@ export interface EvaluationExperiment {
    */
   stages?: EvaluationStageDefinition[] | null;
   /**
+   * Which declared stage each check judges, by evaluator id. On the plan rather
+   * than on the check: one check library is shared, and the same check can sit at
+   * a different stage of a different skill. A check that is absent here judges
+   * the whole run, which is what every check did before stages could be scored.
+   */
+  stageByEvaluatorId?: Record<string, string> | null;
+  /**
    * Custom graph for this experiment. Null or absent means the runner derives
    * the standard shape, which is what every experiment created before the editor
    * existed does.
