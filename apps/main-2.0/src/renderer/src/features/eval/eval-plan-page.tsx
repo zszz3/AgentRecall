@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   FolderInput,
   Pencil,
   Play,
@@ -20,6 +21,7 @@ import type {
   EvaluationExperiment,
   EvaluationRunSummary,
   EvaluationScoringConfig,
+  EvaluationStageDefinition,
 } from "../../../../automation/contracts";
 import { localize, type LanguageMode } from "../../language";
 import { EvalCheckDialog } from "./eval-check-editor";
@@ -35,6 +37,8 @@ import { dimensionsOf, methodText, type EvalDimension } from "./eval-dimensions"
  * feeds which follows from the dimensions' own kinds, and the engine derives it.
  */
 const DEFAULT_THRESHOLD = 0.6;
+/** The bound the save path enforces, so the form refuses what a save would reject. */
+const MAX_STAGES = 10;
 
 export function EvalPlanPage({
   language,
@@ -371,6 +375,45 @@ export function EvalPlanPage({
       return { ...current, scoring: { ...(current.scoring ?? {}), weightByLabels: byLabels } };
     });
   }, []);
+
+  const stages = draft?.stages ?? [];
+
+  const setStages = useCallback(
+    (update: (current: EvaluationStageDefinition[]) => EvaluationStageDefinition[]) => {
+      setDraft((current) => current && { ...current, stages: update(current.stages ?? []) });
+    },
+    [],
+  );
+
+  const addStage = useCallback(() => {
+    setStages((current) => [
+      ...current,
+      {
+        id: `stage-${Date.now()}-${current.length}`,
+        name: "",
+        boundaryKind: "file_written",
+        pattern: "",
+      },
+    ]);
+  }, [setStages]);
+
+  const updateStage = useCallback((id: string, patch: Partial<EvaluationStageDefinition>) => {
+    setStages((current) => current.map(
+      (stage) => (stage.id === id ? { ...stage, ...patch } : stage),
+    ));
+  }, [setStages]);
+
+  /** The list order is the segmentation, so moving a stage changes what it means. */
+  const moveStage = useCallback((index: number, delta: number) => {
+    setStages((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      const [moved] = next.splice(index, 1);
+      next.splice(target, 0, moved!);
+      return next;
+    });
+  }, [setStages]);
 
   const dataset = datasets.find((item) => item.id === draft?.datasetId) ?? null;
   const editing = evaluators.find((item) => item.id === editingCheckId) ?? null;
@@ -835,6 +878,92 @@ export function EvalPlanPage({
                     <option value="zero">{l("count as zero", "计 0 分")}</option>
                   </select>
                 </div>
+              </section>
+
+              <section className="eval-plan-section">
+                <h5>{l("Stages", "阶段")}</h5>
+                <p className="eval-muted">
+                  {l(
+                    "A run is cut into these stages in order. Each one opens at the first file written that matches its pattern, and is only looked for after the stage before it opened — so the order here is the segmentation. A stage whose pattern never matches is reported as not found, not scored.",
+                    "一次运行按这里的顺序被切成若干阶段。每个阶段从「首次写入命中其匹配模式的文件」那一刻开始，且只在它前一个阶段开始之后才搜索——所以这里的顺序就是切分方式。匹配不到的阶段会报「阶段未识别」，不计入评分。",
+                  )}
+                </p>
+                {draft?.source === "folder" ? (
+                  <p className="eval-muted">
+                    {l(
+                      "This plan evaluates a folder, which has no session behind it, so there is no run to cut: its stages come back reported as skipped.",
+                      "这个方案评测的是产物文件夹，背后没有会话，也就没有可切的运行：它声明的阶段会被报成「已跳过」。",
+                    )}
+                  </p>
+                ) : null}
+                <ol className="eval-stage-list">
+                  {stages.map((stage, index) => (
+                    <li key={stage.id}>
+                      <header>
+                        <span className="eval-graph-case-title">
+                          {l(`Stage ${index + 1}`, `阶段 ${index + 1}`)}
+                        </span>
+                        <span className="eval-stage-move">
+                          <button
+                            type="button"
+                            className="eval-icon-button"
+                            disabled={index === 0}
+                            onClick={() => moveStage(index, -1)}
+                            aria-label={l("Move earlier", "前移")}
+                          >
+                            <ChevronUp size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            className="eval-icon-button"
+                            disabled={index === stages.length - 1}
+                            onClick={() => moveStage(index, 1)}
+                            aria-label={l("Move later", "后移")}
+                          >
+                            <ChevronDown size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            className="eval-icon-button"
+                            onClick={() => setStages(
+                              (current) => current.filter((entry) => entry.id !== stage.id),
+                            )}
+                            aria-label={l("Remove stage", "删除阶段")}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </span>
+                      </header>
+                      <label className="eval-editor-field">
+                        <span>{l("Name", "名字")}</span>
+                        <input
+                          value={stage.name}
+                          placeholder={l("data collection", "数据采集")}
+                          onChange={(event) => updateStage(stage.id, { name: event.target.value })}
+                        />
+                      </label>
+                      <label className="eval-editor-field">
+                        <span>
+                          {l("Opens when this file is first written", "首次写入这个文件时开始")}
+                        </span>
+                        <input
+                          value={stage.pattern}
+                          placeholder="report.md"
+                          spellCheck={false}
+                          onChange={(event) => updateStage(stage.id, { pattern: event.target.value })}
+                        />
+                      </label>
+                    </li>
+                  ))}
+                </ol>
+                <button
+                  type="button"
+                  className="eval-icon-button"
+                  disabled={stages.length >= MAX_STAGES}
+                  onClick={addStage}
+                >
+                  <Plus size={12} />{l("Add stage", "添加阶段")}
+                </button>
               </section>
             </>
           )}

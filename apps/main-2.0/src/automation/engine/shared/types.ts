@@ -39,7 +39,7 @@ export type {
 } from "./mcp/types";
 export type { EvaluationCaseResult, EvaluationDataset, EvaluationDatasetItem, EvaluationEvaluator, EvaluationExperiment, EvaluationRun, EvaluationRunPage, EvaluationRunSummary, EvaluationScore, EvaluatorKind, ListEvaluationRunsRequest } from "./evaluation/types";
 export type { EvaluationDimensionScore, EvaluationScoringConfig } from "./evaluation/types";
-export type { EvaluationExperimentGraph, EvaluationFailureAttribution, EvaluationFailureType, EvaluationGraphNodeSpec, EvaluationGraphSpec, EvaluationInputBinding, EvaluationNodeRecord, EvaluationPendingReason, EvaluationRecordStatus, EvaluationVerdict, EvaluationVerdictStatus } from "./evaluation/types";
+export type { EvaluationExperimentGraph, EvaluationFailureAttribution, EvaluationFailureType, EvaluationGraphNodeSpec, EvaluationGraphSpec, EvaluationInputBinding, EvaluationNodeRecord, EvaluationPendingReason, EvaluationRecordStatus, EvaluationStageDefinition, EvaluationVerdict, EvaluationVerdictStatus } from "./evaluation/types";
 export type { WorkflowDraftState, WorkflowGrillMessage, WorkflowSidebarItem, WorkflowStoreState } from "./workflow/draft";
 export type {
   WorkflowAgentNode,

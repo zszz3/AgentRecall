@@ -1362,7 +1362,8 @@
   font-size: var(--text-xs);
 }
 
-.eval-dataset-cases {
+.eval-dataset-cases,
+.eval-stage-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1371,7 +1372,8 @@
   list-style: none;
 }
 
-.eval-dataset-cases li {
+.eval-dataset-cases li,
+.eval-stage-list li {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -1380,11 +1382,23 @@
   border-radius: var(--radius-sm);
 }
 
-.eval-dataset-cases li > header {
+.eval-dataset-cases li > header,
+.eval-stage-list li > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* A stage's order is what it means, so moving one is an action, not a nicety. */
+.eval-stage-move {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.eval-stage-move .eval-icon-button {
+  min-height: 22px;
+  padding: 0 5px;
 }
 
 /* Evaluator kinds: each option states what it needs to be able to decide. */
