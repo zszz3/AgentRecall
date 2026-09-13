@@ -270,6 +270,7 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
   const usedIds = new Set(nodes.map((node) => node.id));
   const skippedEvaluatorIds: string[] = [];
   const skippedStageIds: string[] = [];
+  const stageNodeIds = new Map<string, string>();
 
   const stages = plan.stages ?? [];
   if (stages.length > 0) {
@@ -295,6 +296,7 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
       for (const stage of stages) {
         const id = stageNodeId(stage.id, usedIds);
         usedIds.add(id);
+        stageNodeIds.set(stage.id, id);
         nodes.push({
           id,
           type: STAGE_SEGMENT_NODE_TYPE,
@@ -313,9 +315,18 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
       skippedEvaluatorIds.push(evaluator.id);
       continue;
     }
+    const stageStepId = evaluator.stageId ? stageNodeIds.get(evaluator.stageId) : undefined;
+    if (evaluator.stageId && !stageStepId) {
+      // The plan binds this check to a stage this source cannot present: a folder
+      // has no trace to cut, and a stage that is no longer declared has no step.
+      // Reported rather than quietly judged against the whole run, which would
+      // score the wrong thing under the check's own name.
+      skippedEvaluatorIds.push(evaluator.id);
+      continue;
+    }
     const id = evaluatorNodeId(evaluator.id, usedIds);
     usedIds.add(id);
-    nodes.push(judgeNodeSpec(id, evaluator, artifactNodeId, trajectoryNodeId));
+    nodes.push(judgeNodeSpec(id, evaluator, stageStepId ?? artifactNodeId, trajectoryNodeId));
   }
 
   return {
@@ -522,31 +533,50 @@ function judgingOnlyOrHydrated(
 /**
  * Repoints saved judges at the artifact the derived head now produces.
  *
- * A judging-only graph stores bindings against a head it does not own, and that head
- * is derived again on every run. When it gains the step that completes the artifact,
- * a binding saved as "the agent's artifact" has to follow — otherwise every judge
- * reads the uncompleted value that step exists to replace, and the fix only reaches
- * graphs nobody saves.
+ * A judging-only graph stores bindings against a head it does not own, and that
+ * head is derived again on every run. Two things can move under it: the step that
+ * completes a fresh run's artifact, and the stage a check is bound to, which the
+ * plan can change after the graph was saved. A binding that does not follow would
+ * leave every judge reading the value the new step exists to replace, or a
+ * stage-bound check quietly judging the whole run under its own name.
  */
 function followDerivedArtifact(
   judges: EvaluationGraphNodeSpec[],
   headNodes: readonly EvaluationGraphNodeSpec[],
 ): EvaluationGraphNodeSpec[] {
-  if (!headNodes.some((node) => node.id === ARTIFACT_COMPLETE_NODE_ID)) return judges;
+  const stageSteps = new Map<string, string>();
+  for (const node of headNodes) {
+    if (node.type !== STAGE_SEGMENT_NODE_TYPE) continue;
+    const stageId = (node.config as Record<string, unknown> | undefined)?.stageId;
+    if (typeof stageId === "string") stageSteps.set(stageId, node.id);
+  }
+  const completed = headNodes.some((node) => node.id === ARTIFACT_COMPLETE_NODE_ID)
+    ? `${ARTIFACT_COMPLETE_NODE_ID}.artifact`
+    : null;
   const stale = `${AGENT_NODE_ID}.artifact`;
-  const current = `${ARTIFACT_COMPLETE_NODE_ID}.artifact`;
   const repoint = (binding: EvaluationInputBinding): EvaluationInputBinding => {
-    if (typeof binding === "string") return binding === stale ? current : binding;
-    return binding.from === stale ? { ...binding, from: current } : binding;
+    if (!completed) return binding;
+    if (typeof binding === "string") return binding === stale ? completed : binding;
+    return binding.from === stale ? { ...binding, from: completed } : binding;
   };
-  return judges.map((node) => node.in
-    ? {
-        ...node,
-        in: Object.fromEntries(
-          Object.entries(node.in).map(([input, binding]) => [input, repoint(binding)]),
-        ),
-      }
-    : node);
+  return judges.map((node) => {
+    const config = (node.config ?? {}) as Record<string, unknown>;
+    if (typeof config.stageId === "string") {
+      const stageStep = stageSteps.get(config.stageId);
+      // The same treatment as a deleted evaluator: a reported skipped step rather
+      // than a binding that resolves to nothing and fails the whole case to build.
+      if (!stageStep) return { ...node, enabled: false };
+      return { ...node, in: { ...node.in, artifact: `${stageStep}.artifact` } };
+    }
+    return node.in
+      ? {
+          ...node,
+          in: Object.fromEntries(
+            Object.entries(node.in).map(([input, binding]) => [input, repoint(binding)]),
+          ),
+        }
+      : node;
+  });
 }
 
 export function buildEvaluationCaseGraph(
