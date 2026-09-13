@@ -53,6 +53,18 @@ export interface TraceEventQueryOptions {
   limit?: number;
 }
 
+/**
+ * One assistant message, placed at the trace position it follows.
+ *
+ * A range of trace positions can then claim the text that belongs to it without
+ * guessing an alignment from timestamps.
+ */
+export interface AssistantTextPosition {
+  /** Trace index of the last event before the message; null when there was none. */
+  traceIndex: number | null;
+  text: string;
+}
+
 export class PostgresSessionTurnRepository {
   constructor(private readonly database: PostgresDatabase) {}
 
@@ -315,5 +327,47 @@ export class PostgresSessionTurnRepository {
         ...(attributes && Object.keys(attributes).length > 0 ? { attributes } : {}),
       };
     });
+  }
+
+  /**
+   * The assistant text of a session, each message placed at the trace position it
+   * follows.
+   *
+   * Messages and trace events are stored in one merged sequence whose order was
+   * decided when the session was indexed, so this reads that order instead of
+   * re-deriving it. Re-deriving it would mean agreeing with `buildRawEvents` about
+   * timestamps that are optional and frequently equal, in a second place.
+   */
+  async getAssistantTextPositions(sessionKey: string): Promise<AssistantTextPosition[]> {
+    const result = await this.database.query<{
+      kind: string;
+      trace_index: string | number | null;
+      role: string | null;
+      content: string | null;
+    }>(
+      `
+        select
+          kind,
+          payload->>'traceIndex' as trace_index,
+          payload->>'role' as role,
+          payload->>'content' as content
+        from agent_recall.session_raw_events
+        where session_key = $1 and kind in ('message', 'trace')
+        order by event_index
+      `,
+      [sessionKey],
+    );
+    const positions: AssistantTextPosition[] = [];
+    let traceIndex: number | null = null;
+    for (const row of result.rows) {
+      if (row.kind === "trace") {
+        if (row.trace_index !== null) traceIndex = numberValue(row.trace_index);
+        continue;
+      }
+      const text = row.content ?? "";
+      if (row.role !== "assistant" || text.trim() === "") continue;
+      positions.push({ traceIndex, text });
+    }
+    return positions;
   }
 }

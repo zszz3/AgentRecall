@@ -209,6 +209,7 @@ import { writeWorkflowExportFileAtomically } from "./services/workflow-portable-
 import type {
   EvaluationArtifactFile,
   EvaluationFileTouch,
+  EvaluationStageText,
   EvaluationTrajectoryValue,
 } from "../core/evaluation/nodes/contracts";
 import { createJudgeScriptRunner } from "../core/evaluation/judge-script-runner";
@@ -637,6 +638,28 @@ async function readEvaluationStageTouches(
   return touches;
 }
 
+/**
+ * The assistant text of a session, each message placed at the trace position it
+ * follows.
+ *
+ * A stage's window is a range of trace positions, so this is what lets a stage
+ * claim the text it produced instead of being handed the run's final answer. The
+ * order is read from the merged sequence indexing already produced rather than
+ * re-derived from timestamps, which are optional and often equal, so the two
+ * cannot disagree about what came first.
+ *
+ * An empty list is an answer here rather than a gap: the caller only asks once
+ * `readEvaluationStageTouches` has established there is a trace to read, so
+ * nothing coming back means the assistant's text was not part of it.
+ */
+async function readEvaluationStageTexts(sessionKey: string): Promise<EvaluationStageText[]> {
+  const positions = await store.getAssistantTextPositions(sessionKey);
+  return positions.map((position) => ({
+    index: position.traceIndex ?? -1,
+    text: position.text,
+  }));
+}
+
 const ARTIFACT_OUTPUT_FILES = ["output.md", "answer.md", "OUTPUT.md", "ANSWER.md"];
 const ARTIFACT_MAX_FILES = 500;
 
@@ -778,6 +801,7 @@ function createAutomationService(): NativeAutomationService {
     readEvaluationSessionArtifact: (sessionKey) => readEvaluationSessionArtifact(sessionKey),
     readEvaluationArtifactFiles: (sessionKey) => readEvaluationArtifactFiles(sessionKey),
     readEvaluationStageTouches: (sessionKey) => readEvaluationStageTouches(sessionKey),
+    readEvaluationStageTexts: (sessionKey) => readEvaluationStageTexts(sessionKey),
     readEvaluationFolderArtifact: (directory) => readEvaluationFolderArtifact(directory),
     // Inline JS judges always run, sandboxed. A command judge is a real process,
     // so it is read from the setting on every call rather than captured here.

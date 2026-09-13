@@ -15,6 +15,7 @@ import {
   type EvaluationFileTouch,
   type EvaluationNodeDependencies,
   type EvaluationStageArtifact,
+  type EvaluationStageText,
   type EvaluationTaskValue,
   type EvaluationTrajectoryValue,
 } from "./contracts";
@@ -513,6 +514,49 @@ const STAGE_OUTPUT_NOT_OBSERVED =
   "不要据此判 0 分。若没有文本就无法判定本维度，返回 score: null 并说明原因。）";
 
 /**
+ * How much of one stage's text reaches a judge.
+ *
+ * A stage of a long run can be most of a long session, and every check bound to
+ * it pays for the whole thing. The budget covers the emitted value including the
+ * separators and the truncation note.
+ */
+const MAX_STAGE_TEXT = 12_000;
+
+/**
+ * The assistant text inside one stage's window.
+ *
+ * Stops at the first message that would not fit rather than skipping it and
+ * taking a later one: a stage's text reads as a sequence, and a judge handed
+ * scattered fragments of it would be judging something the agent never said.
+ * What was left out is stated, because a judge that silently got half a stage
+ * would read the missing half as the stage having stopped.
+ */
+function stageWindowText(
+  texts: readonly EvaluationStageText[],
+  fromIndex: number,
+  toIndex: number | undefined,
+): string {
+  const inside = texts.filter(
+    (entry) => entry.index >= fromIndex && (toIndex === undefined || entry.index < toIndex),
+  );
+  const kept: string[] = [];
+  let length = 0;
+  let position = 0;
+  while (position < inside.length) {
+    // The blank line between two messages is emitted too, so it is budgeted too.
+    const cost = inside[position]!.text.length + (kept.length > 0 ? 2 : 0);
+    if (length + cost > MAX_STAGE_TEXT) break;
+    kept.push(inside[position]!.text);
+    length += cost;
+    position += 1;
+  }
+  const dropped = inside.length - position;
+  if (dropped === 0) return kept.join("\n\n");
+  const note = `\n\n…（该阶段另有 ${dropped} 段文本因长度未列入）`;
+  return kept.join("\n\n").slice(0, Math.max(0, MAX_STAGE_TEXT - note.length)) + note;
+}
+
+/**
  * Cuts one run into the stages it was declared to have.
  *
  * The search is sequential — a stage is only looked for after the one before it
@@ -526,6 +570,7 @@ const STAGE_OUTPUT_NOT_OBSERVED =
  */
 export function segmentRunIntoStages(
   touches: readonly EvaluationFileTouch[],
+  texts: readonly EvaluationStageText[] | null,
   declared: readonly StageSegmentTarget[],
 ): EvaluationStageArtifact[] {
   const opened: Array<{ index: number; path: string } | null> = [];
@@ -562,6 +607,7 @@ export function segmentRunIntoStages(
       files: artifactFilesEndState(
         touches.filter((touch) => !next || touch.index < next.index),
       ),
+      ...(texts ? { output: stageWindowText(texts, boundary.index, next?.index) } : {}),
     };
   });
 }
@@ -580,7 +626,7 @@ export function segmentRunIntoStages(
  * say what it produced until all of them have been looked for.
  */
 export function createStageTraceNode(
-  dependencies: Pick<EvaluationNodeDependencies, "readStageTouches">,
+  dependencies: Pick<EvaluationNodeDependencies, "readStageTouches" | "readStageTexts">,
 ) {
   return defineEvaluationNode<
     { trajectory: typeof TRAJECTORY_PORT },
@@ -612,7 +658,18 @@ export function createStageTraceNode(
       if (!touches) {
         return evaluationExcused.infra("stage_trace_unavailable", { facts: { sessionKey } });
       }
-      const stages = segmentRunIntoStages(touches, context.config.stages);
+      let texts: EvaluationStageText[] | null = null;
+      if (dependencies.readStageTexts) {
+        try {
+          texts = await dependencies.readStageTexts(sessionKey);
+        } catch {
+          // An unreadable transcript loses the text half of every stage. That is
+          // reported rather than excused: the file half is still observable, and
+          // a stage's boundary is made of file writes, not of text.
+          texts = null;
+        }
+      }
+      const stages = segmentRunIntoStages(touches, texts, context.config.stages);
       return evaluationPass({
         outputs: { stages },
         facts: {
@@ -620,6 +677,7 @@ export function createStageTraceNode(
           touchCount: touches.length,
           stageCount: stages.length,
           foundCount: stages.filter((stage) => stage.fromIndex !== null).length,
+          textsObserved: texts !== null,
         },
       });
     },

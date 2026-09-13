@@ -133,6 +133,19 @@ export interface EvaluationFileTouch {
 }
 
 /**
+ * One assistant message, placed at the trace position it follows.
+ *
+ * A stage's window is a range of trace positions, so this is what lets the text a
+ * stage produced be told apart from the text the run produced. `-1` means the
+ * message came before every trace event, which no stage's window reaches back to.
+ */
+export interface EvaluationStageText {
+  /** Trace index of the last event before the message; -1 when there was none. */
+  index: number;
+  text: string;
+}
+
+/**
  * One declared stage of a run, and what its window produced.
  *
  * The window is `[fromIndex, toIndex)`: a stage owns the boundary event that
@@ -276,6 +289,16 @@ export interface EvaluationNodeDependencies {
    * boundary is exactly a position.
    */
   readStageTouches?: (sessionKey: string) => Promise<EvaluationFileTouch[] | null>;
+  /**
+   * The assistant text of a session, in trace order.
+   *
+   * A different question from `readStageTouches` and a different table, so it is
+   * its own reader. Null means there was nothing to read at all; an empty list is
+   * the honest answer for a session whose assistant said nothing, and a stage
+   * whose window held no text is normal rather than broken — the boundary that
+   * opened it was a file write.
+   */
+  readStageTexts?: (sessionKey: string) => Promise<EvaluationStageText[] | null>;
   /**
    * Runs a judge the user wrote. Any failure of the script itself — a throw, a
    * timeout, output that is not a verdict — must reject, so the judge is excused

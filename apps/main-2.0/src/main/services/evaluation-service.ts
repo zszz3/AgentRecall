@@ -108,6 +108,12 @@ export interface EvaluationServiceDependencies {
    */
   readStageTouches?: RunEvaluationInput["readStageTouches"];
   /**
+   * The assistant text of a session in trace order, so each stage can be handed
+   * the text of its own window. Without it a stage still reports its files, and
+   * says that its text was not read rather than that it produced none.
+   */
+  readStageTexts?: RunEvaluationInput["readStageTexts"];
+  /**
    * Runs a judge the user wrote as code. Without it a script evaluator excuses
    * itself, which keeps it visible in the report instead of scoring zero.
    */
@@ -378,6 +384,7 @@ export class EvaluationService {
     readFolderArtifact?: EvaluationServiceDependencies["readFolderArtifact"];
     readArtifactFiles?: EvaluationServiceDependencies["readArtifactFiles"];
     readStageTouches?: EvaluationServiceDependencies["readStageTouches"];
+    readStageTexts?: EvaluationServiceDependencies["readStageTexts"];
     runJudgeScript?: EvaluationServiceDependencies["runJudgeScript"];
     execute: EvaluationAgentExecution;
     executeJudge: NonNullable<RunEvaluationInput["executeJudge"]>;
@@ -447,6 +454,9 @@ export class EvaluationService {
         : {}),
       ...(this.dependencies.readStageTouches
         ? { readStageTouches: this.dependencies.readStageTouches }
+        : {}),
+      ...(this.dependencies.readStageTexts
+        ? { readStageTexts: this.dependencies.readStageTexts }
         : {}),
       ...(this.dependencies.runJudgeScript
         ? { runJudgeScript: this.dependencies.runJudgeScript }

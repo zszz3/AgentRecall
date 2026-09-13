@@ -38,6 +38,7 @@ import { PostgresSessionSearchRepository } from "./postgres/session-search-repos
 import { PostgresSessionStatsRepository } from "./postgres/session-stats-repository";
 import {
   PostgresSessionTurnRepository,
+  type AssistantTextPosition,
   type TraceEventQueryOptions,
 } from "./postgres/session-turn-repository";
 import {
@@ -105,6 +106,7 @@ export type {
   SubagentSessionSummary,
 } from "./session-family";
 export type {
+  AssistantTextPosition,
   TraceEventQueryOptions,
 } from "./postgres/session-turn-repository";
 export type {
@@ -673,6 +675,11 @@ export class SessionStore {
   ): Promise<SessionTraceEvent[]> {
     await this.ready;
     return this.turns.getTraceEvents(sessionKey, options);
+  }
+
+  async getAssistantTextPositions(sessionKey: string): Promise<AssistantTextPosition[]> {
+    await this.ready;
+    return this.turns.getAssistantTextPositions(sessionKey);
   }
 
   async getTokenEvents(sessionKey: string): Promise<TokenUsageEvent[]> {
