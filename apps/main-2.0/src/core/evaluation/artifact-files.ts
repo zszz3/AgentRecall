@@ -58,45 +58,75 @@ const PATH_KEYS = ["file_path", "filePath", "path", "notebook_path", "notebookPa
 
 const MAX_FILES = 500;
 
-export function artifactFilesFromTrace(
-  events: readonly ArtifactFileTraceEvent[],
+/**
+ * What one trace event did to files.
+ *
+ * Empty when the event is not a tool call this recognises, which is the honest
+ * answer rather than a guess. One event can touch several paths — an
+ * `apply_patch` body names every file in the patch — and when it does the patch
+ * wins, because its header lines say what happened to each path, which is more
+ * than a path argument would have told us.
+ *
+ * This is the half a stage boundary needs: "which event first wrote a path
+ * matching this glob" is a question about one event, and the folding below
+ * cannot answer it.
+ */
+export function filesTouchedByEvent(
+  event: ArtifactFileTraceEvent,
+): EvaluationArtifactFile[] {
+  if (event.kind !== "tool_call") return [];
+  const input = inputOf(event);
+  const patched = applyPatchTargets(event, input);
+  if (patched.length > 0) return patched;
+  const tool = toolNameOf(event.title);
+  const status = WRITE_TOOLS.has(tool)
+    ? "added" as const
+    : EDIT_TOOLS.has(tool)
+      ? "modified" as const
+      : DELETE_TOOLS.has(tool)
+        ? "deleted" as const
+        : null;
+  if (!status) return [];
+  const path = pathOf(input) ?? summaryOf(event.title);
+  return path ? [{ path, status }] : [];
+}
+
+/**
+ * Each path's end state, in path order.
+ *
+ * Folding is what makes the list an artifact rather than a log: a file the run
+ * created and then edited is still a file the run produced, and a path deleted
+ * at the end is reported as deleted however it got there. Feeding it a prefix of
+ * a run's touches therefore yields the state as of that point, which is what a
+ * stage's cumulative artifact is.
+ */
+export function artifactFilesEndState(
+  touches: readonly EvaluationArtifactFile[],
 ): EvaluationArtifactFile[] {
   const byPath = new Map<string, EvaluationArtifactFile["status"]>();
-  const record = (path: string, status: EvaluationArtifactFile["status"]): void => {
-    const trimmed = path.trim();
-    if (!trimmed || byPath.size >= MAX_FILES) return;
+  for (const touch of touches) {
+    const trimmed = touch.path.trim();
+    // The cap stops admitting new paths, and it drops updates to paths already
+    // listed too — so a run over the cap can report a file it deleted last as
+    // `added`. Left exactly as it was: the list is an observation with a budget,
+    // and quietly changing what stored artifacts say is worse than the wart.
+    if (!trimmed || byPath.size >= MAX_FILES) continue;
     const seen = byPath.get(trimmed);
     // An edit after a create still reads as "added": the run produced the file.
-    // Anything else takes the later action, so a path deleted at the end is
-    // reported as deleted however it got there.
-    if (seen === "added" && status === "modified") return;
-    byPath.set(trimmed, status);
-  };
-
-  for (const event of events) {
-    if (event.kind !== "tool_call") continue;
-    const tool = toolNameOf(event.title);
-    const input = inputOf(event);
-    const patched = applyPatchTargets(event, input);
-    if (patched.length > 0) {
-      for (const file of patched) record(file.path, file.status);
-      continue;
-    }
-    const status = WRITE_TOOLS.has(tool)
-      ? "added" as const
-      : EDIT_TOOLS.has(tool)
-        ? "modified" as const
-        : DELETE_TOOLS.has(tool)
-          ? "deleted" as const
-          : null;
-    if (!status) continue;
-    const path = pathOf(input) ?? summaryOf(event.title);
-    if (path) record(path, status);
+    // Anything else takes the later action.
+    if (seen === "added" && touch.status === "modified") continue;
+    byPath.set(trimmed, touch.status);
   }
 
   return [...byPath.entries()]
     .map(([path, status]) => ({ path, status }))
     .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export function artifactFilesFromTrace(
+  events: readonly ArtifactFileTraceEvent[],
+): EvaluationArtifactFile[] {
+  return artifactFilesEndState(events.flatMap(filesTouchedByEvent));
 }
 
 /** `"Write · /tmp/a.ts"` → `"write"`. */
