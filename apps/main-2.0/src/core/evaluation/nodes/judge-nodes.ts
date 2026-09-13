@@ -49,6 +49,12 @@ export interface JudgeDimensionConfig {
   /** Dimension this judge's verdict belongs to. Defaults to the evaluator id. */
   dimension?: string;
   priority?: "must" | "should";
+  /**
+   * Stage this judge is bound to, as the id the plan declared. The id and not
+   * the name because a rename must not read as a different measurement, and
+   * because `weightByLabels` keys a stage the same way the plan does.
+   */
+  stageId?: string;
 }
 
 export interface DeterministicJudgeConfig extends JudgeDimensionConfig {
@@ -77,6 +83,7 @@ function buildVerdict(input: {
       dimension,
       evaluator: input.evaluator,
       ...(input.config.priority ? { priority: input.config.priority } : {}),
+      ...(input.config.stageId ? { stage: input.config.stageId } : {}),
     },
     status: verdictStatus(input.raw, input.config.threshold),
     raw: input.raw,
