@@ -1973,6 +1973,27 @@ button.eval-dimension-card:hover { border-color: var(--accent); }
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
+/* Which stage a check judges. The row already ellipsises the name, so this stays put. */
+.eval-plan-check-stage {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.eval-plan-check-stage select {
+  max-width: 132px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
 .eval-plan-check-row:hover .eval-plan-check-pencil,
 .eval-plan-check-row:focus-visible .eval-plan-check-pencil {
   opacity: 1;

@@ -24,6 +24,7 @@ import type {
   EvaluationStageDefinition,
 } from "../../../../automation/contracts";
 import { localize, type LanguageMode } from "../../language";
+import { judgesTrajectory } from "../../../../core/evaluation/case-graph";
 import { EvalCheckDialog } from "./eval-check-editor";
 import { EvalDimensionCard, type DimensionCardData } from "./eval-dimension-card";
 import { dimensionsOf, methodText, type EvalDimension } from "./eval-dimensions";
@@ -415,6 +416,32 @@ export function EvalPlanPage({
     });
   }, [setStages]);
 
+  const removeStage = useCallback((id: string) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const bound: Record<string, string> = {};
+      for (const [evaluatorId, stageId] of Object.entries(current.stageByEvaluatorId ?? {})) {
+        if (stageId !== id) bound[evaluatorId] = stageId;
+      }
+      return {
+        ...current,
+        stages: (current.stages ?? []).filter((stage) => stage.id !== id),
+        stageByEvaluatorId: bound,
+      };
+    });
+  }, []);
+
+  /** Which stage a check judges; empty means the whole run. */
+  const setStageOf = useCallback((evaluatorId: string, stageId: string) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const bound = { ...(current.stageByEvaluatorId ?? {}) };
+      if (stageId === "") delete bound[evaluatorId];
+      else bound[evaluatorId] = stageId;
+      return { ...current, stageByEvaluatorId: bound };
+    });
+  }, []);
+
   const dataset = datasets.find((item) => item.id === draft?.datasetId) ?? null;
   const editing = evaluators.find((item) => item.id === editingCheckId) ?? null;
   // A plan with nothing to judge by would run the agent and conclude nothing, so
@@ -435,6 +462,7 @@ export function EvalPlanPage({
     if (!draft) return null;
     const on = dimension.checks.some((check) => draft.evaluatorIds.includes(check.id));
     const open = expanded === dimension.name;
+    const boundTo = draft.stageByEvaluatorId ?? {};
     return (
       <li key={dimension.name} className={on ? "is-on" : ""}>
         <div className="eval-plan-dimension-row">
@@ -505,6 +533,33 @@ export function EvalPlanPage({
                   ) : null}
                   <Pencil size={11} className="eval-plan-check-pencil" />
                 </button>
+                {/*
+                  Beside the row rather than inside it: the row is a button that
+                  opens the editor, and a select cannot be nested in one. Not
+                  offered for a check that judges the trajectory — that reads one
+                  aggregate over the whole run, so there is no stage to bind it to
+                  yet, and offering one would be a choice that silently does
+                  nothing.
+                */}
+                {stages.length > 0
+                && draft.evaluatorIds.includes(check.id)
+                && !judgesTrajectory(check) ? (
+                  <label className="eval-plan-check-stage">
+                    <span>{l("Stage", "阶段")}</span>
+                    <select
+                      value={boundTo[check.id] ?? ""}
+                      onChange={(event) => setStageOf(check.id, event.target.value)}
+                    >
+                      <option value="">{l("the whole run", "整次运行")}</option>
+                      {stages.map((stage, position) => (
+                        <option key={stage.id} value={stage.id}>
+                          {stage.name.trim()
+                            || l(`Stage ${position + 1}`, `阶段 ${position + 1}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
               </li>
             ))}
             <li>
@@ -888,6 +943,12 @@ export function EvalPlanPage({
                     "一次运行按这里的顺序被切成若干阶段。每个阶段从「首次写入命中其匹配模式的文件」那一刻开始，且只在它前一个阶段开始之后才搜索——所以这里的顺序就是切分方式。匹配不到的阶段会报「阶段未识别」，不计入评分。",
                   )}
                 </p>
+                <p className="eval-muted">
+                  {l(
+                    "A stage owns everything from where it opens to where the next one opens, and the last one runs to the end of the run. A check bound to a stage under Dimensions judges only that stretch: the files the stage handed on, and what the model said along the way. A stage whose pattern never matches costs only the checks bound to it, which are reported as undecided rather than scored.",
+                    "一个阶段管的是从它开始到下一个阶段开始之间的全部内容，最后一个阶段一直到运行结束。在「维度」里挂到某个阶段上的检查，评的就只有这一段：这个阶段交出去的文件，以及期间模型说的话。匹配不到的阶段只影响挂在它上面的检查，那些检查会报成没判出来，不计入评分。",
+                  )}
+                </p>
                 {draft?.source === "folder" ? (
                   <p className="eval-muted">
                     {l(
@@ -925,9 +986,7 @@ export function EvalPlanPage({
                           <button
                             type="button"
                             className="eval-icon-button"
-                            onClick={() => setStages(
-                              (current) => current.filter((entry) => entry.id !== stage.id),
-                            )}
+                            onClick={() => removeStage(stage.id)}
                             aria-label={l("Remove stage", "删除阶段")}
                           >
                             <Trash2 size={11} />
