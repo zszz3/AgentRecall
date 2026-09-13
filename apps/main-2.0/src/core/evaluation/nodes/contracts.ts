@@ -117,6 +117,40 @@ export interface EvaluationTrajectoryValue {
   skillUsageObservable: boolean;
 }
 
+/**
+ * One file a run touched, and where in its trace that happened.
+ *
+ * Recognition stays outside the graph, in the dependency that reads the trace,
+ * because it needs the events' arguments — thousands of them on a long session.
+ * Only the result crosses in, so a stage node can ask which event first wrote a
+ * path without the raw trace ever becoming a port value.
+ */
+export interface EvaluationFileTouch {
+  /** Index of the trace event that made this touch. */
+  index: number;
+  path: string;
+  status: EvaluationArtifactFile["status"];
+}
+
+/**
+ * Where a declared stage turned out to begin, and what the run had produced by
+ * then.
+ *
+ * No closing index: the next stage's `fromIndex` bounds this one, and the last
+ * stage runs to the end of the trace. Deriving segments from consecutive
+ * boundaries keeps a stage that was never found from having to invent an end.
+ */
+export interface EvaluationStageValue {
+  stageId: string;
+  name: string;
+  /** Index of the trace event that opened this stage. */
+  fromIndex: number;
+  /** The path that matched the stage's pattern, which is why it opened here. */
+  matchedPath: string;
+  /** Every path touched up to and including `fromIndex`, folded to its state there. */
+  files: EvaluationArtifactFile[];
+}
+
 export const TASK_PORT = defineEvaluationPort<EvaluationTaskValue>("eval.task");
 export const INSTRUCTIONS_PORT =
   defineEvaluationPort<EvaluationInstructionsValue>("eval.instructions");
@@ -125,6 +159,19 @@ export const EXECUTION_REF_PORT =
   defineEvaluationPort<EvaluationExecutionReference>("eval.execution_ref");
 export const TRAJECTORY_PORT =
   defineEvaluationPort<EvaluationTrajectoryValue>("eval.trajectory");
+export const FILE_TOUCHES_PORT =
+  defineEvaluationPort<readonly EvaluationFileTouch[]>("eval.file_touches");
+/**
+ * The stages found so far, in declared order.
+ *
+ * A list rather than one stage because the builder resolves every declared input
+ * and rejects one with no producer, so the first stage step cannot take an
+ * optional "previous stage". The trace step seeds it empty and each stage step
+ * extends it, which is also what makes the search sequential: a step reads the
+ * last boundary and starts after it.
+ */
+export const STAGES_PORT =
+  defineEvaluationPort<readonly EvaluationStageValue[]>("eval.stages");
 
 /** A judge implemented as code the user wrote. */
 export type EvaluationJudgeScript =
@@ -212,6 +259,12 @@ export interface EvaluationNodeDependencies {
    * step has run.
    */
   readArtifactFiles?: (sessionKey: string) => Promise<EvaluationArtifactFile[] | null>;
+  /**
+   * The same observation as `readArtifactFiles`, but keeping where in the trace
+   * each touch happened — the fold into an end state discards that, and a stage
+   * boundary is exactly a position.
+   */
+  readStageTouches?: (sessionKey: string) => Promise<EvaluationFileTouch[] | null>;
   /**
    * Runs a judge the user wrote. Any failure of the script itself — a throw, a
    * timeout, output that is not a verdict — must reject, so the judge is excused

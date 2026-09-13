@@ -3,14 +3,19 @@ import {
   evaluationExcused,
   evaluationPass,
 } from "../graph/node";
+import { artifactFilesEndState } from "../artifact-files";
 import {
   ARTIFACT_PORT,
   EXECUTION_REF_PORT,
+  FILE_TOUCHES_PORT,
   INSTRUCTIONS_PORT,
+  STAGES_PORT,
   TASK_PORT,
   TRAJECTORY_PORT,
   type EvaluationArtifactValue,
+  type EvaluationFileTouch,
   type EvaluationNodeDependencies,
+  type EvaluationStageValue,
   type EvaluationTaskValue,
   type EvaluationTrajectoryValue,
 } from "./contracts";
@@ -37,6 +42,8 @@ export const ARTIFACT_COMPLETE_NODE_TYPE = "artifact_complete";
 export const SESSION_ARTIFACT_NODE_TYPE = "session_artifact";
 export const FOLDER_ARTIFACT_NODE_TYPE = "folder_artifact";
 export const SKILL_USE_OBSERVE_NODE_TYPE = "skill_use_observe";
+export const STAGE_TRACE_NODE_TYPE = "stage_trace";
+export const STAGE_SEGMENT_NODE_TYPE = "stage_segment";
 
 /** Emits the case under evaluation. Its config is the case itself. */
 export const taskSourceNode = defineEvaluationNode<
@@ -473,6 +480,153 @@ export const skillUseObserveNode = defineEvaluationNode<
     });
   },
 });
+
+export interface StageSegmentConfig {
+  stageId: string;
+  name: string;
+  boundaryKind: "file_written";
+  /** Path pattern. `**` crosses separators, `*` does not, `?` is one character. */
+  pattern: string;
+}
+
+/**
+ * Reads a run's file touches once, for every stage step to share.
+ *
+ * Bound to the trajectory rather than resolving the session again: a source with
+ * no trajectory cannot be segmented at all, and this step pending is the honest
+ * report of that. Pending is safe here in a way it would not be for an artifact
+ * step — nothing but the stage steps reads these ports, so a missing trace costs
+ * the segmentation and never the answer's judges.
+ *
+ * It also seeds the segmentation as empty. That is what lets the first stage step
+ * declare a previous-segmentation input at all, since the builder rejects a
+ * declared input with no producer and there is no such thing as an optional one.
+ */
+export function createStageTraceNode(
+  dependencies: Pick<EvaluationNodeDependencies, "readStageTouches">,
+) {
+  return defineEvaluationNode<
+    { trajectory: typeof TRAJECTORY_PORT },
+    { touches: typeof FILE_TOUCHES_PORT; stages: typeof STAGES_PORT },
+    Record<string, never>
+  >({
+    type: STAGE_TRACE_NODE_TYPE,
+    version: 1,
+    role: "prepare",
+    inputs: { trajectory: TRAJECTORY_PORT },
+    outputs: { touches: FILE_TOUCHES_PORT, stages: STAGES_PORT },
+    async run(context) {
+      const sessionKey = context.in.trajectory.sessionKey?.trim();
+      if (!sessionKey) return evaluationExcused.infra("stage_trace_names_no_session");
+      if (!dependencies.readStageTouches) {
+        return evaluationExcused.infra("stage_touches_reader_unavailable", {
+          facts: { sessionKey },
+        });
+      }
+      let touches: EvaluationFileTouch[] | null;
+      try {
+        touches = await dependencies.readStageTouches(sessionKey);
+      } catch (cause) {
+        return evaluationExcused.infra(
+          cause instanceof Error ? cause.message : String(cause),
+          { facts: { sessionKey } },
+        );
+      }
+      if (!touches) {
+        return evaluationExcused.infra("stage_trace_unavailable", { facts: { sessionKey } });
+      }
+      return evaluationPass({
+        outputs: { touches, stages: [] },
+        facts: { sessionKey, touchCount: touches.length },
+      });
+    },
+  });
+}
+
+/**
+ * Finds where one declared stage of a run began.
+ *
+ * The search starts after the stage before it, so N stages are N segments of one
+ * run in the order they were declared rather than N independent matches that can
+ * come out reversed. The cost is that a first stage matched too early moves every
+ * stage after it — which is what actually happened, so it is reported rather than
+ * smoothed over.
+ */
+export const stageSegmentNode = defineEvaluationNode<
+  { touches: typeof FILE_TOUCHES_PORT; stages: typeof STAGES_PORT },
+  { stages: typeof STAGES_PORT },
+  StageSegmentConfig
+>({
+  type: STAGE_SEGMENT_NODE_TYPE,
+  version: 1,
+  role: "prepare",
+  inputs: { touches: FILE_TOUCHES_PORT, stages: STAGES_PORT },
+  outputs: { stages: STAGES_PORT },
+  async run(context) {
+    const { stageId, name, pattern } = context.config;
+    const touches = context.in.touches;
+    const found = context.in.stages;
+    const after = found.at(-1)?.fromIndex ?? -1;
+    const boundary = touches.find(
+      (touch) => touch.index > after && matchesStagePattern(touch.path, pattern),
+    );
+    const facts: Record<string, unknown> = { stageId, stageName: name, pattern, searchedAfter: after };
+    if (!boundary) {
+      return evaluationExcused.infra("stage_boundary_not_found", { facts });
+    }
+    const stage: EvaluationStageValue = {
+      stageId,
+      name,
+      fromIndex: boundary.index,
+      matchedPath: boundary.path,
+      files: artifactFilesEndState(touches.filter((touch) => touch.index <= boundary.index)),
+    };
+    return evaluationPass({
+      outputs: { stages: [...found, stage] },
+      facts: { ...facts, matchedPath: stage.matchedPath, fileCount: stage.files.length },
+    });
+  },
+});
+
+/**
+ * Whether a touched path matches a stage's pattern.
+ *
+ * A pattern with no separator is also tried against the path's last segment,
+ * because a user who writes `report.md` means the report, wherever the run put
+ * it. Separators are normalised first: a touch carries the path a runtime
+ * reported, and a Windows runtime reports backslashes.
+ */
+function matchesStagePattern(path: string, pattern: string): boolean {
+  const wanted = pattern.replace(/\\/g, "/");
+  const matcher = new RegExp(`^(?:${stagePatternSource(wanted)})$`);
+  const touched = path.replace(/\\/g, "/");
+  if (matcher.test(touched)) return true;
+  if (wanted.includes("/")) return false;
+  const separator = touched.lastIndexOf("/");
+  return separator >= 0 && matcher.test(touched.slice(separator + 1));
+}
+
+function stagePatternSource(pattern: string): string {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char !== "*") {
+      source += char === "?" ? "[^/]" : char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      continue;
+    }
+    if (pattern[index + 1] !== "*") {
+      source += "[^/]*";
+      continue;
+    }
+    // `**/x` has to find a root-level x too, so the separator becomes optional.
+    source += pattern[index + 2] === "/" ? "(?:.*/)?" : ".*";
+    index += pattern[index + 2] === "/" ? 2 : 1;
+  }
+  // A run of separator-crossing wildcards matches exactly what one `.*` does, and
+  // left as written it backtracks exponentially on a long path that does not
+  // match — a user's own pattern would then hang their run with no timeout.
+  return source.replace(/(?:\(\?:\.\*\/\)\?|\.\*)+/g, ".*");
+}
 
 function trajectoryFacts(trajectory: EvaluationTrajectoryValue): Record<string, unknown> {
   return {
