@@ -85,6 +85,8 @@ export interface RunEvaluationInput {
   ) => Promise<{ output: string; files?: EvaluationArtifactFile[] } | null>;
   /** Which files a session's tool calls touched, for a fresh run's artifact. */
   readArtifactFiles?: (sessionKey: string) => Promise<EvaluationArtifactFile[] | null>;
+  /** The same touches with their positions, for cutting a run into its stages. */
+  readStageTouches?: EvaluationNodeDependencies["readStageTouches"];
   /** Runs a judge the user wrote. Absent means script judges excuse themselves. */
   runJudgeScript?: EvaluationNodeDependencies["runJudgeScript"];
   wait?: (milliseconds: number) => Promise<void>;
@@ -142,6 +144,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     ...(input.readSessionArtifact ? { readSessionArtifact: input.readSessionArtifact } : {}),
     ...(input.readFolderArtifact ? { readFolderArtifact: input.readFolderArtifact } : {}),
     ...(input.readArtifactFiles ? { readArtifactFiles: input.readArtifactFiles } : {}),
+    ...(input.readStageTouches ? { readStageTouches: input.readStageTouches } : {}),
     ...(input.runJudgeScript ? { runJudgeScript: input.runJudgeScript } : {}),
     ...(input.wait ? { wait: input.wait } : {}),
   };
@@ -184,6 +187,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
       linkTrajectory: Boolean(input.resolveSession && input.readTrajectory),
       sessionLink: { attempts: 6, delayMs: 500 },
       ...(input.experiment.scoring ? { scoring: input.experiment.scoring } : {}),
+      ...(input.experiment.stages ? { stages: input.experiment.stages } : {}),
       // An experiment with an authored graph runs that graph instead of the
       // derived shape; the runner only rewrites its per-case and evaluator config.
       ...(input.experiment.graph?.spec ? { savedSpec: input.experiment.graph.spec } : {}),
@@ -410,6 +414,9 @@ function caseResult(runId: string, outcome: EvaluationCaseOutcome): EvaluationCa
     byLabel: outcome.score.byLabel,
     ...(outcome.skippedEvaluatorIds.length > 0
       ? { skippedEvaluatorIds: outcome.skippedEvaluatorIds }
+      : {}),
+    ...(outcome.skippedStageIds.length > 0
+      ? { skippedStageIds: outcome.skippedStageIds }
       : {}),
     ...(outcome.sessionKey ? { sessionKey: outcome.sessionKey } : {}),
     ...(outcome.skill ? { skillInjection: outcome.skill } : {}),

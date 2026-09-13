@@ -102,6 +102,12 @@ export interface EvaluationServiceDependencies {
    */
   readArtifactFiles?: (sessionKey: string) => Promise<EvaluationArtifactFile[] | null>;
   /**
+   * The same observation with each touch's position kept, so a run can be cut
+   * into its declared stages. Without it every stage reports that it could not
+   * be traced rather than scoring a guess.
+   */
+  readStageTouches?: RunEvaluationInput["readStageTouches"];
+  /**
    * Runs a judge the user wrote as code. Without it a script evaluator excuses
    * itself, which keeps it visible in the report instead of scoring zero.
    */
@@ -371,6 +377,7 @@ export class EvaluationService {
     readSessionArtifact?: EvaluationServiceDependencies["readSessionArtifact"];
     readFolderArtifact?: EvaluationServiceDependencies["readFolderArtifact"];
     readArtifactFiles?: EvaluationServiceDependencies["readArtifactFiles"];
+    readStageTouches?: EvaluationServiceDependencies["readStageTouches"];
     runJudgeScript?: EvaluationServiceDependencies["runJudgeScript"];
     execute: EvaluationAgentExecution;
     executeJudge: NonNullable<RunEvaluationInput["executeJudge"]>;
@@ -437,6 +444,9 @@ export class EvaluationService {
         : {}),
       ...(this.dependencies.readArtifactFiles
         ? { readArtifactFiles: this.dependencies.readArtifactFiles }
+        : {}),
+      ...(this.dependencies.readStageTouches
+        ? { readStageTouches: this.dependencies.readStageTouches }
         : {}),
       ...(this.dependencies.runJudgeScript
         ? { runJudgeScript: this.dependencies.runJudgeScript }

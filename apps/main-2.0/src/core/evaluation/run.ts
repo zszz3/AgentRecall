@@ -22,6 +22,7 @@ import {
   type EvaluationArtifactSourceKind,
   type EvaluationCasePlan,
   type EvaluationPlanEvaluator,
+  type EvaluationStageDefinition,
 } from "./case-graph";
 import { attachArtifactFiles } from "./nodes/prepare-nodes";
 import type {
@@ -51,6 +52,8 @@ export interface EvaluationRunPlan {
   /** Attach the session-link step to a fresh run so it gains a trajectory. */
   linkTrajectory: boolean;
   sessionLink?: { attempts?: number; delayMs?: number };
+  /** Declared stages of one run, in order. Absent means no segmentation. */
+  stages?: readonly EvaluationStageDefinition[];
   scoring?: EvaluationScoringConfig;
   /**
    * Cases executed at once. Defaults to 1 when the source runs an agent, since a
@@ -82,6 +85,8 @@ export interface EvaluationCaseOutcome {
   skill?: EvaluationSkillInjection;
   /** Evaluators this source could not judge, so their absence stays visible. */
   skippedEvaluatorIds: string[];
+  /** Stages this source could not segment, for the same reason. */
+  skippedStageIds: string[];
   /** Why this case produced no score, when it produced none. */
   unscoredReason?: string;
   cancelled: boolean;
@@ -158,9 +163,13 @@ async function runCase(
     evaluators: plan.evaluators,
     linkTrajectory: plan.linkTrajectory,
     ...(plan.sessionLink ? { sessionLink: plan.sessionLink } : {}),
+    ...(plan.stages ? { stages: plan.stages } : {}),
     ...(plan.savedSpec ? { savedSpec: plan.savedSpec } : {}),
   };
-  const { graph, skippedEvaluatorIds } = buildEvaluationCaseGraph(casePlan, dependencies);
+  const { graph, skippedEvaluatorIds, skippedStageIds } = buildEvaluationCaseGraph(
+    casePlan,
+    dependencies,
+  );
   const execution = await executeEvaluationGraph({
     graph,
     caseId: task.caseId,
@@ -194,6 +203,7 @@ async function runCase(
     ...(trajectory?.sessionKey ? { sessionKey: trajectory.sessionKey } : {}),
     ...(instructions?.skill ? { skill: instructions.skill } : {}),
     skippedEvaluatorIds,
+    skippedStageIds,
     ...(score.score === null
       ? { unscoredReason: unscoredReason(execution.records, execution.cancelled) }
       : {}),

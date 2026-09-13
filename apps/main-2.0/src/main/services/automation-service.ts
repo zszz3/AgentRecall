@@ -112,6 +112,7 @@ export interface AutomationServiceOptions {
   readEvaluationSessionArtifact?: EvaluationServiceDependencies["readSessionArtifact"];
   readEvaluationFolderArtifact?: EvaluationServiceDependencies["readFolderArtifact"];
   readEvaluationArtifactFiles?: EvaluationServiceDependencies["readArtifactFiles"];
+  readEvaluationStageTouches?: EvaluationServiceDependencies["readStageTouches"];
   runEvaluationJudgeScript?: EvaluationServiceDependencies["runJudgeScript"];
   chooseEvaluationDatasetDirectory?: EvaluationServiceDependencies["chooseDatasetDirectory"];
 }
@@ -434,6 +435,9 @@ export class NativeAutomationService {
         : {}),
       ...(options.readEvaluationArtifactFiles
         ? { readArtifactFiles: options.readEvaluationArtifactFiles }
+        : {}),
+      ...(options.readEvaluationStageTouches
+        ? { readStageTouches: options.readEvaluationStageTouches }
         : {}),
       ...(options.runEvaluationJudgeScript
         ? { runJudgeScript: options.runEvaluationJudgeScript }

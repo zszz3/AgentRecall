@@ -208,10 +208,11 @@ import { WORKFLOW_PORTABLE_MAX_BYTES } from "../automation/engine/main/hub/workf
 import { writeWorkflowExportFileAtomically } from "./services/workflow-portable-filesystem";
 import type {
   EvaluationArtifactFile,
+  EvaluationFileTouch,
   EvaluationTrajectoryValue,
 } from "../core/evaluation/nodes/contracts";
 import { createJudgeScriptRunner } from "../core/evaluation/judge-script-runner";
-import { artifactFilesFromTrace } from "../core/evaluation/artifact-files";
+import { artifactFilesFromTrace, filesTouchedByEvent } from "../core/evaluation/artifact-files";
 import type {
   EnvironmentUpsertInput,
   MigrationAgent,
@@ -611,6 +612,31 @@ async function readEvaluationArtifactFiles(
   return files.length > 0 ? files : null;
 }
 
+/**
+ * The same observation, keeping where in the run each touch happened.
+ *
+ * A stage boundary is a position, and folding the touches into an end state is
+ * exactly what throws that away. Recognition is shared with the list above rather
+ * than written twice, so the two cannot disagree about what a run touched.
+ *
+ * An empty list here is an answer, not a gap: the trace had events and none of
+ * them wrote a file, so no `file_written` boundary exists. Null is reserved for
+ * there being no trace to read at all.
+ */
+async function readEvaluationStageTouches(
+  sessionKey: string,
+): Promise<EvaluationFileTouch[] | null> {
+  const events = await store.getTraceEvents(sessionKey);
+  if (events.length === 0) return null;
+  const touches: EvaluationFileTouch[] = [];
+  for (const event of events) {
+    for (const file of filesTouchedByEvent(event)) {
+      touches.push({ index: event.index, path: file.path, status: file.status });
+    }
+  }
+  return touches;
+}
+
 const ARTIFACT_OUTPUT_FILES = ["output.md", "answer.md", "OUTPUT.md", "ANSWER.md"];
 const ARTIFACT_MAX_FILES = 500;
 
@@ -751,6 +777,7 @@ function createAutomationService(): NativeAutomationService {
     readEvaluationTrajectory: (sessionKey) => readEvaluationTrajectory(sessionKey),
     readEvaluationSessionArtifact: (sessionKey) => readEvaluationSessionArtifact(sessionKey),
     readEvaluationArtifactFiles: (sessionKey) => readEvaluationArtifactFiles(sessionKey),
+    readEvaluationStageTouches: (sessionKey) => readEvaluationStageTouches(sessionKey),
     readEvaluationFolderArtifact: (directory) => readEvaluationFolderArtifact(directory),
     // Inline JS judges always run, sandboxed. A command judge is a real process,
     // so it is read from the setting on every call rather than captured here.

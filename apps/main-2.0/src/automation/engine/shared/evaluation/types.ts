@@ -1,4 +1,7 @@
-import type { EvaluationJudgeSubject } from "../../../../core/evaluation/case-graph";
+import type {
+  EvaluationJudgeSubject,
+  EvaluationStageDefinition,
+} from "../../../../core/evaluation/case-graph";
 import type {
   EvaluationArtifactFile,
   EvaluationArtifactValue,
@@ -16,7 +19,10 @@ export type {
   EvaluationDimensionScore,
   EvaluationScoringConfig,
 } from "../../../../core/evaluation/graph/scorer";
-export type { EvaluationJudgeSubject } from "../../../../core/evaluation/case-graph";
+export type {
+  EvaluationJudgeSubject,
+  EvaluationStageDefinition,
+} from "../../../../core/evaluation/case-graph";
 export type {
   EvaluationArtifactFile,
   EvaluationArtifactValue,
@@ -140,6 +146,12 @@ export interface EvaluationExperiment {
   /** Dimension weights, pass threshold and minimum coverage for this experiment. */
   scoring?: EvaluationScoringConfig | null;
   /**
+   * Declared stages of one run, in order — the order is the segmentation, since a
+   * stage's boundary is only looked for after the one before it. Absent means no
+   * segmentation, which is what every experiment created before stages existed has.
+   */
+  stages?: EvaluationStageDefinition[] | null;
+  /**
    * Custom graph for this experiment. Null or absent means the runner derives
    * the standard shape, which is what every experiment created before the editor
    * existed does.
@@ -229,6 +241,11 @@ export interface EvaluationCaseResult {
    * artifact, for instance. Reported so the omission is visible.
    */
   skippedEvaluatorIds?: string[];
+  /**
+   * Stages this source could not segment — a folder artifact has no session
+   * behind it, so there is no trace to cut. Reported for the same reason.
+   */
+  skippedStageIds?: string[];
   /**
    * Why this case has no score. Set when nothing was decided — a missing judge
    * runtime, an agent that never answered, a cancelled run — so the absence is

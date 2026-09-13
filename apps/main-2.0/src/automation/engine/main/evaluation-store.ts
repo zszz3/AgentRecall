@@ -15,6 +15,7 @@ import type {
   EvaluationRunSummary,
   EvaluationScore,
   EvaluationScoringConfig,
+  EvaluationStageDefinition,
   EvaluationVerdict,
   ListEvaluationRunsRequest,
 } from "../shared/evaluation/types";
@@ -207,6 +208,9 @@ export class EvaluationStore {
         scoring: row.scoring != null
           ? jsonValue(row.scoring) as EvaluationScoringConfig
           : null,
+        stages: row.stages != null
+          ? jsonValue(row.stages) as EvaluationStageDefinition[]
+          : null,
         createdAt: timestamp(row.created_at),
         updatedAt: timestamp(row.updated_at),
       };
@@ -218,8 +222,8 @@ export class EvaluationStore {
       await transaction.query(
         `insert into agent_recall.evaluation_experiments (
           id, name, dataset_id, agent_id, repetitions, skill_name, skill_hash,
-          graph, source, scoring, created_at, updated_at
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12)
+          graph, source, scoring, stages, created_at, updated_at
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11::jsonb, $12, $13)
         on conflict (id) do update set
           name = excluded.name,
           dataset_id = excluded.dataset_id,
@@ -230,6 +234,7 @@ export class EvaluationStore {
           graph = excluded.graph,
           source = excluded.source,
           scoring = excluded.scoring,
+          stages = excluded.stages,
           updated_at = excluded.updated_at`,
         [
           value.id,
@@ -242,6 +247,7 @@ export class EvaluationStore {
           value.graph ? JSON.stringify(value.graph) : null,
           value.source ?? null,
           value.scoring ? JSON.stringify(value.scoring) : null,
+          value.stages ? JSON.stringify(value.stages) : null,
           new Date(value.createdAt),
           new Date(value.updatedAt),
         ],
@@ -617,6 +623,9 @@ export class EvaluationStore {
         ...(result.skipped_evaluator_ids
           ? { skippedEvaluatorIds: jsonArray(result.skipped_evaluator_ids) as string[] }
           : {}),
+        ...(result.skipped_stage_ids
+          ? { skippedStageIds: jsonArray(result.skipped_stage_ids) as string[] }
+          : {}),
       };
     });
     const {
@@ -638,10 +647,12 @@ export class EvaluationStore {
         output, error, duration_ms, session_key, skill_name, skill_hash,
         skill_content_length, unscored_reason, gate_passed,
         score, passed, coverage, dimensions, by_label, skipped_evaluator_ids,
-        artifact_origin_kind, artifact_origin_reference, artifact_files
+        artifact_origin_kind, artifact_origin_reference, artifact_files,
+        skipped_stage_ids
       ) values (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-        $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb, $22, $23, $24::jsonb
+        $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb, $22, $23, $24::jsonb,
+        $25::jsonb
       )`,
       [
         result.id,
@@ -674,6 +685,9 @@ export class EvaluationStore {
         // artifact file list means.
         result.artifact?.files && result.artifact.files.length > 0
           ? JSON.stringify(result.artifact.files)
+          : null,
+        result.skippedStageIds && result.skippedStageIds.length > 0
+          ? JSON.stringify(result.skippedStageIds)
           : null,
       ],
     );

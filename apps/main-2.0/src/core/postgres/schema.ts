@@ -2050,4 +2050,16 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS consistency jsonb;
     `,
   ],
+}, {
+  version: 51,
+  name: "store the stages an evaluation experiment declares",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_experiments
+        ADD COLUMN IF NOT EXISTS stages jsonb;
+
+      ALTER TABLE agent_recall.evaluation_case_results
+        ADD COLUMN IF NOT EXISTS skipped_stage_ids jsonb;
+    `,
+  ],
 }];

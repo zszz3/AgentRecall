@@ -174,6 +174,22 @@ const evaluationExperimentGraphSchema = z.object({
     z.object({ x: z.number(), y: z.number() }).strict(),
   ),
 }).strict();
+const evaluationStageSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(120),
+  boundaryKind: z.literal("file_written"),
+  // Compiled to a regular expression that runs with no timeout and cannot be
+  // interrupted mid-match, so the wildcards are capped: a stage boundary is a
+  // filename shape, not a regex a user is invited to make pathological.
+  pattern: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .refine((value) => (value.match(/\*/g)?.length ?? 0) <= 16, {
+      message: "a stage pattern may use at most 16 wildcards",
+    }),
+}).strict();
 const evaluationExperimentSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(200),
@@ -184,6 +200,9 @@ const evaluationExperimentSchema = z.object({
   // Where each case's artifact comes from, and how its verdicts are combined.
   source: z.enum(["run_agent", "session", "folder"]).optional(),
   scoring: evaluationScoringSchema.nullish(),
+  // Low cap: every stage becomes a step in every case's graph, and a judge call
+  // per stage once stages are scored.
+  stages: z.array(evaluationStageSchema).max(10).nullish(),
   // Skill binding and the authored graph travel with the experiment, so an
   // experiment loaded from the store can be saved back without losing either.
   skillName: z.string().trim().max(200).nullish(),
