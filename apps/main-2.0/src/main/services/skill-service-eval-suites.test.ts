@@ -268,7 +268,6 @@ describe("SkillService skill regression suites (phase four)", () => {
     expect(experimentArg.scoring).toEqual({
       weightByLabels: { priority: { must: 2, should: 1 } },
       resolvedThreshold: 0.75,
-      minCoverage: 1,
       uncertain: "exclude",
       requiredLabels: { priority: ["must"] },
     });

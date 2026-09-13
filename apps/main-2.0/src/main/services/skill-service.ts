@@ -152,7 +152,10 @@ function technicalWritingScoring(): EvaluationScoringConfig {
   return {
     weightByLabels: { priority: { must: 2, should: 1 } },
     resolvedThreshold: 0.75,
-    minCoverage: 1,
+    // No coverage floor on purpose: with `uncertain: "exclude"` a judge that
+    // honestly declines lowers coverage, so requiring full coverage would fail a
+    // plan for saying "I cannot tell". Whether the must-have checks were all
+    // decided is what requiredLabels below enforces.
     uncertain: "exclude",
     requiredLabels: { priority: ["must"] },
   };
