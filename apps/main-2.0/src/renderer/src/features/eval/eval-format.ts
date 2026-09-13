@@ -1,6 +1,10 @@
 import { localize, type LanguageMode } from "../../language";
 import type { EvaluationNodeRecord } from "../../../../automation/contracts";
 import { evaluationNodeCatalog } from "../../../../core/evaluation/node-catalog";
+import {
+  STAGE_SEGMENT_NODE_TYPE,
+  STAGE_TRACE_NODE_TYPE,
+} from "../../../../core/evaluation/nodes/prepare-nodes";
 
 /**
  * Formatting shared by the Eval pages.
@@ -119,6 +123,10 @@ export function nodeReasonText(language: LanguageMode, reason: string): string {
     trace_not_available: ["the session trace is unavailable", "读不到会话轨迹"],
     trace_reader_unavailable: ["trace reading is unavailable", "轨迹读取不可用"],
     cancelled_before_session_link: ["cancelled before linking the session", "关联会话前已取消"],
+    stage_boundary_not_found: ["no file matched this stage's pattern", "没有文件命中这个阶段的匹配模式"],
+    stage_trace_unavailable: ["the run's file changes could not be read", "读不到本次运行的文件改动"],
+    stage_trace_names_no_session: ["the run has no session to read", "本次运行没有可读的会话"],
+    stage_touches_reader_unavailable: ["stage tracing is unavailable", "阶段轨迹读取不可用"],
     upstream_not_pass: ["an earlier step did not pass", "上游步骤未通过"],
     upstream_skipped: ["an earlier step was skipped", "上游步骤被跳过"],
     not_decided: ["the run ended first", "运行提前结束"],
@@ -137,6 +145,52 @@ export function skillUseText(
   if (facts.used === true) return l("skill was used", "使用了该 Skill");
   if (facts.used === false) return l("skill went unused", "未使用该 Skill");
   return l("skill use is not observable", "无法观测是否使用");
+}
+
+/**
+ * Observation text for the two stage steps, neither of which produces a verdict.
+ *
+ * The stage's own name leads because every stage step carries the same catalog
+ * label: without it, several rows would all read "Stage" and a reader could not
+ * tell which one was not found.
+ */
+export function stageText(
+  language: LanguageMode,
+  nodeType: string,
+  facts: Record<string, unknown> | undefined,
+): string | null {
+  if (!facts) return null;
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (nodeType === STAGE_TRACE_NODE_TYPE) {
+    return typeof facts.touchCount === "number"
+      ? l(`${facts.touchCount} file changes read`, `读到 ${facts.touchCount} 处文件改动`)
+      : null;
+  }
+  if (nodeType !== STAGE_SEGMENT_NODE_TYPE) return null;
+
+  const text = (key: string): string | null => {
+    const value = facts[key];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  };
+  const parts: string[] = [];
+  const name = text("stageName");
+  if (name) parts.push(name);
+  const matched = text("matchedPath");
+  if (matched) {
+    parts.push(l(`opened at ${matched}`, `从 ${matched} 开始`));
+    if (typeof facts.fileCount === "number") {
+      parts.push(l(
+        `${facts.fileCount} files by then`,
+        `截至此处累计 ${facts.fileCount} 个文件`,
+      ));
+    }
+  } else {
+    // Not found. What it was looking for is the half that says the pattern
+    // missed, rather than leaving the reader to guess which stage this was.
+    const pattern = text("pattern");
+    if (pattern) parts.push(l(`looking for ${pattern}`, `在找 ${pattern}`));
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /**

@@ -33,6 +33,7 @@ import {
   runStatusClass,
   runStatusText,
   skillUseText,
+  stageText,
 } from "./eval-format";
 
 /**
@@ -531,6 +532,14 @@ function RunGraph({
                     {result.skippedEvaluatorIds.join(", ")}
                   </p>
                 ) : null}
+                {result.skippedStageIds?.length ? (
+                  <p className="eval-muted">
+                    {l(
+                      `${result.skippedStageIds.length} declared stage(s) not applicable to this source, so the run was never cut`,
+                      `该产物来源不适用，声明的 ${result.skippedStageIds.length} 个阶段没有切分`,
+                    )}
+                  </p>
+                ) : null}
                 {unscored ? (
                   <p className="eval-muted">
                     {l("Nothing was decided", "没有得出任何结论")}
@@ -738,6 +747,7 @@ function GraphNodeRow({
 }): ReactElement {
   const reason = node.attribution?.reason ?? node.pendingReason;
   const skillUse = node.nodeType === "skill_use_observe" ? skillUseText(language, node.facts) : null;
+  const stage = stageText(language, node.nodeType, node.facts);
   const evaluatorId = node.role === "judge" && typeof node.facts?.evaluatorId === "string"
     ? node.facts.evaluatorId
     : undefined;
@@ -751,7 +761,7 @@ function GraphNodeRow({
         {node.durationMs !== undefined ? formatDuration(node.durationMs) : ""}
       </span>
       <span className="eval-muted eval-graph-node-note">
-        {[reason ? nodeReasonText(language, reason) : null, skillUse]
+        {[reason ? nodeReasonText(language, reason) : null, skillUse, stage]
           .filter(Boolean)
           .join(" · ")}
       </span>
