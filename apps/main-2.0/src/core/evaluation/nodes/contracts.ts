@@ -133,22 +133,35 @@ export interface EvaluationFileTouch {
 }
 
 /**
- * Where a declared stage turned out to begin, and what the run had produced by
- * then.
+ * One declared stage of a run, and what its window produced.
  *
- * No closing index: the next stage's `fromIndex` bounds this one, and the last
- * stage runs to the end of the trace. Deriving segments from consecutive
- * boundaries keeps a stage that was never found from having to invent an end.
+ * The window is `[fromIndex, toIndex)`: a stage owns the boundary event that
+ * opened it and everything up to the one that opened the next stage *that was
+ * found*. `files` is the cumulative state at the end of that window rather than
+ * only the paths the window wrote, because the next stage reads the world and
+ * not a diff — this is what the stage handed on.
+ *
+ * A stage nobody's run matched is kept in the list with `fromIndex: null`
+ * instead of being dropped, so the stages after it are still bounded by a real
+ * window and the one that is missing says so for itself.
  */
-export interface EvaluationStageValue {
+export interface EvaluationStageArtifact {
   stageId: string;
   name: string;
-  /** Index of the trace event that opened this stage. */
-  fromIndex: number;
+  /** The declared pattern, kept because it is all a stage that was not found can show. */
+  pattern: string;
+  /** Index of the trace event that opened this stage; null when nothing matched. */
+  fromIndex: number | null;
   /** The path that matched the stage's pattern, which is why it opened here. */
-  matchedPath: string;
-  /** Every path touched up to and including `fromIndex`, folded to its state there. */
+  matchedPath: string | null;
+  /** Exclusive. Absent for the last stage found, whose window runs to the end. */
+  toIndex?: number;
   files: EvaluationArtifactFile[];
+  /**
+   * The assistant text inside the window. Absent means it was not observed,
+   * which is not the same as the stage having produced no text.
+   */
+  output?: string;
 }
 
 export const TASK_PORT = defineEvaluationPort<EvaluationTaskValue>("eval.task");
@@ -159,19 +172,17 @@ export const EXECUTION_REF_PORT =
   defineEvaluationPort<EvaluationExecutionReference>("eval.execution_ref");
 export const TRAJECTORY_PORT =
   defineEvaluationPort<EvaluationTrajectoryValue>("eval.trajectory");
-export const FILE_TOUCHES_PORT =
-  defineEvaluationPort<readonly EvaluationFileTouch[]>("eval.file_touches");
 /**
- * The stages found so far, in declared order.
+ * Every declared stage of the run, found or not, in declared order.
  *
- * A list rather than one stage because the builder resolves every declared input
- * and rejects one with no producer, so the first stage step cannot take an
- * optional "previous stage". The trace step seeds it empty and each stage step
- * extends it, which is also what makes the search sequential: a step reads the
- * last boundary and starts after it.
+ * One value for the whole segmentation rather than one per stage: a stage's
+ * window ends where the next one opens, so no stage can say what it produced
+ * until all of them have been looked for. Each stage step reads this list and
+ * takes its own entry, which is also what keeps a stage that was not found from
+ * costing the stages around it their judgment.
  */
 export const STAGES_PORT =
-  defineEvaluationPort<readonly EvaluationStageValue[]>("eval.stages");
+  defineEvaluationPort<readonly EvaluationStageArtifact[]>("eval.stages");
 
 /** A judge implemented as code the user wrote. */
 export type EvaluationJudgeScript =

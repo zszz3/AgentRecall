@@ -162,9 +162,17 @@ export function stageText(
   if (!facts) return null;
   const l = (en: string, zh: string) => localize(language, en, zh);
   if (nodeType === STAGE_TRACE_NODE_TYPE) {
-    return typeof facts.touchCount === "number"
-      ? l(`${facts.touchCount} file changes read`, `读到 ${facts.touchCount} 处文件改动`)
-      : null;
+    if (typeof facts.touchCount !== "number") return null;
+    const read = l(
+      `${facts.touchCount} file changes read`,
+      `读到 ${facts.touchCount} 处文件改动`,
+    );
+    return typeof facts.foundCount === "number" && typeof facts.stageCount === "number"
+      ? l(
+          `${read}; ${facts.foundCount} of ${facts.stageCount} stages found`,
+          `${read}，${facts.stageCount} 个阶段里识别到 ${facts.foundCount} 个`,
+        )
+      : read;
   }
   if (nodeType !== STAGE_SEGMENT_NODE_TYPE) return null;
 
@@ -179,10 +187,15 @@ export function stageText(
   if (matched) {
     parts.push(l(`opened at ${matched}`, `从 ${matched} 开始`));
     if (typeof facts.fileCount === "number") {
+      // Cumulative on purpose: this is what the stage handed on to the next one,
+      // not a list of what it alone wrote.
       parts.push(l(
-        `${facts.fileCount} files by then`,
-        `截至此处累计 ${facts.fileCount} 个文件`,
+        `${facts.fileCount} files by the end of it`,
+        `本阶段结束时累计 ${facts.fileCount} 个文件`,
       ));
+    }
+    if (facts.outputObserved === false) {
+      parts.push(l("no text read for this stage", "未读到该阶段的文本"));
     }
   } else {
     // Not found. What it was looking for is the half that says the pattern
@@ -206,6 +219,7 @@ const PORT_LABELS: Record<string, [string, string]> = {
   "eval.trajectory": ["Trajectory", "轨迹"],
   "eval.instructions": ["Skill text", "Skill 说明"],
   "eval.execution_ref": ["Run id", "运行标识"],
+  "eval.stages": ["Stages", "阶段"],
 };
 
 const PORT_HINTS: Record<string, [string, string]> = {
@@ -214,8 +228,8 @@ const PORT_HINTS: Record<string, [string, string]> = {
     "当前被评测的用例：输入、期望输出，以及上下文。",
   ],
   "eval.artifact": [
-    "What the model produced: the answer, and any files that came with it.",
-    "模型产出的东西：答案，以及随带的文件。",
+    "What is being judged: the answer, and any files that came with it. A check bound to a stage gets that stage's window instead of the whole run.",
+    "被评判的东西：答案，以及随带的文件。挂在某个阶段上的检查拿到的是那个阶段的窗口，而不是整次运行。",
   ],
   "eval.trajectory": [
     "How the work was done: turns, tool calls, failures, tokens.",
@@ -228,6 +242,10 @@ const PORT_HINTS: Record<string, [string, string]> = {
   "eval.execution_ref": [
     "The runtime's own id for the run, used to find its session.",
     "运行时给这次运行的标识，用来找到对应会话。",
+  ],
+  "eval.stages": [
+    "Where each declared stage of this run opened, and what its own window produced. A stage that never opened is listed as not found.",
+    "本次运行各个声明阶段从哪里开始，以及每段窗口各自产出了什么。没有开过的阶段会列成「未识别」。",
   ],
 };
 

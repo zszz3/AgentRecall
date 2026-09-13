@@ -156,16 +156,18 @@ const PRESENTATION: Record<string, CatalogPresentation> = {
   [STAGE_TRACE_NODE_TYPE]: {
     labelEn: "Stage trace",
     labelZh: "阶段轨迹",
-    descriptionEn: "Reads the files a run touched, in order, once for every stage step to share.",
-    descriptionZh: "按顺序读取本次运行触及的文件，供各个阶段步骤共用。",
+    descriptionEn:
+      "Reads the files a run touched and cuts the run into its declared stages, in order.",
+    descriptionZh: "读取本次运行触及的文件，按声明顺序把这次运行切成各个阶段。",
     configFields: [],
   },
   [STAGE_SEGMENT_NODE_TYPE]: {
     labelEn: "Stage",
     labelZh: "阶段",
     descriptionEn:
-      "Finds where one declared stage began. A pattern that never matches is reported as a stage not found, not scored.",
-    descriptionZh: "找出一个声明阶段从哪里开始。匹配不到时如实报「阶段未识别」，不计入评分。",
+      "Hands one declared stage to its checks: the text and files of that stage's own window. A pattern that never matches is reported as a stage not found, not scored.",
+    descriptionZh:
+      "把一个声明阶段交给挂在它上面的检查：只取这个阶段自己那段窗口的文本和文件。匹配不到时如实报「阶段未识别」，不计入评分。",
     configFields: [],
   },
   [DETERMINISTIC_JUDGE_NODE_TYPE]: {

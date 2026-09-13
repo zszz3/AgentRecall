@@ -271,31 +271,31 @@ export function buildEvaluationCaseSpec(plan: EvaluationCasePlan): EvaluationCas
       nodes.push({
         id: STAGE_TRACE_NODE_ID,
         type: STAGE_TRACE_NODE_TYPE,
+        config: {
+          stages: stages.map((stage) => ({
+            stageId: stage.id,
+            name: stage.name,
+            boundaryKind: stage.boundaryKind,
+            pattern: stage.pattern,
+          })),
+        },
         in: { trajectory: `${trajectoryNodeId}.trajectory` },
       });
       usedIds.add(STAGE_TRACE_NODE_ID);
-      // Each step reads the segmentation its predecessor produced, which is what
-      // makes the search sequential: stage N is only looked for after stage N-1
-      // opened. The trace step seeds it empty, so the first stage has a producer.
-      let previous = STAGE_TRACE_NODE_ID;
+      // Every stage step reads the same segmentation rather than its
+      // predecessor's, so a stage the run never reached excuses only itself.
       for (const stage of stages) {
         const id = stageNodeId(stage.id, usedIds);
         usedIds.add(id);
         nodes.push({
           id,
           type: STAGE_SEGMENT_NODE_TYPE,
-          config: {
-            stageId: stage.id,
-            name: stage.name,
-            boundaryKind: stage.boundaryKind,
-            pattern: stage.pattern,
-          },
+          config: { stageId: stage.id },
           in: {
-            touches: `${STAGE_TRACE_NODE_ID}.touches`,
-            stages: `${previous}.stages`,
+            stages: `${STAGE_TRACE_NODE_ID}.stages`,
+            trajectory: `${trajectoryNodeId}.trajectory`,
           },
         });
-        previous = id;
       }
     }
   }

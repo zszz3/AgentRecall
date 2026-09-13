@@ -7,7 +7,6 @@ import { artifactFilesEndState } from "../artifact-files";
 import {
   ARTIFACT_PORT,
   EXECUTION_REF_PORT,
-  FILE_TOUCHES_PORT,
   INSTRUCTIONS_PORT,
   STAGES_PORT,
   TASK_PORT,
@@ -15,7 +14,7 @@ import {
   type EvaluationArtifactValue,
   type EvaluationFileTouch,
   type EvaluationNodeDependencies,
-  type EvaluationStageValue,
+  type EvaluationStageArtifact,
   type EvaluationTaskValue,
   type EvaluationTrajectoryValue,
 } from "./contracts";
@@ -481,40 +480,118 @@ export const skillUseObserveNode = defineEvaluationNode<
   },
 });
 
-export interface StageSegmentConfig {
+/** One declared stage, in the shape the segmentation reads. */
+export interface StageSegmentTarget {
   stageId: string;
   name: string;
+  /**
+   * Carried even though only `file_written` exists: the segmentation below
+   * matches paths, so a second kind has to change it rather than be ignored.
+   */
   boundaryKind: "file_written";
   /** Path pattern. `**` crosses separators, `*` does not, `?` is one character. */
   pattern: string;
 }
 
+export interface StageTraceConfig {
+  stages: StageSegmentTarget[];
+}
+
+export interface StageSegmentConfig {
+  stageId: string;
+}
+
 /**
- * Reads a run's file touches once, for every stage step to share.
+ * What a stage's answer is replaced with when its window was never read.
+ *
+ * The distinction `{{files}}` already keeps: no text observed is not evidence
+ * the stage produced none, and a judge that scored an empty answer would be
+ * scoring AgentRecall's blind spot instead of the agent.
+ */
+const STAGE_OUTPUT_NOT_OBSERVED =
+  "（未观测到该阶段的文本产出：这段窗口内没有读到模型说的话。缺少证据不等于没有产出，" +
+  "不要据此判 0 分。若没有文本就无法判定本维度，返回 score: null 并说明原因。）";
+
+/**
+ * Cuts one run into the stages it was declared to have.
+ *
+ * The search is sequential — a stage is only looked for after the one before it
+ * opened — but a stage that is not found does not stop the search: the ones after
+ * it are looked for after the last stage that *was* found. Not finding a stage is
+ * a fact about this run, and letting it erase every later stage would report one
+ * unmatched pattern as a much larger failure than it is.
+ *
+ * A stage that was not found stays in the list rather than being dropped, so the
+ * step that presents it can say so for itself.
+ */
+export function segmentRunIntoStages(
+  touches: readonly EvaluationFileTouch[],
+  declared: readonly StageSegmentTarget[],
+): EvaluationStageArtifact[] {
+  const opened: Array<{ index: number; path: string } | null> = [];
+  let after = -1;
+  for (const stage of declared) {
+    const boundary = touches.find(
+      (touch) => touch.index > after && matchesStagePattern(touch.path, stage.pattern),
+    );
+    opened.push(boundary ?? null);
+    if (boundary) after = boundary.index;
+  }
+  return declared.map((stage, position) => {
+    const boundary = opened[position]!;
+    if (!boundary) {
+      return {
+        stageId: stage.stageId,
+        name: stage.name,
+        pattern: stage.pattern,
+        fromIndex: null,
+        matchedPath: null,
+        files: [],
+      };
+    }
+    const next = opened
+      .slice(position + 1)
+      .find((entry): entry is { index: number; path: string } => entry !== null);
+    return {
+      stageId: stage.stageId,
+      name: stage.name,
+      pattern: stage.pattern,
+      fromIndex: boundary.index,
+      matchedPath: boundary.path,
+      ...(next ? { toIndex: next.index } : {}),
+      files: artifactFilesEndState(
+        touches.filter((touch) => !next || touch.index < next.index),
+      ),
+    };
+  });
+}
+
+/**
+ * Reads a run's trace once and cuts it into the declared stages.
  *
  * Bound to the trajectory rather than resolving the session again: a source with
  * no trajectory cannot be segmented at all, and this step pending is the honest
  * report of that. Pending is safe here in a way it would not be for an artifact
- * step — nothing but the stage steps reads these ports, so a missing trace costs
- * the segmentation and never the answer's judges.
+ * step — only the stage steps read this port, so a missing trace costs the
+ * segmentation and never the answer's judges.
  *
- * It also seeds the segmentation as empty. That is what lets the first stage step
- * declare a previous-segmentation input at all, since the builder rejects a
- * declared input with no producer and there is no such thing as an optional one.
+ * The whole segmentation is computed here rather than stage by stage down a
+ * chain, because a stage's window ends where the next one opens, so no stage can
+ * say what it produced until all of them have been looked for.
  */
 export function createStageTraceNode(
   dependencies: Pick<EvaluationNodeDependencies, "readStageTouches">,
 ) {
   return defineEvaluationNode<
     { trajectory: typeof TRAJECTORY_PORT },
-    { touches: typeof FILE_TOUCHES_PORT; stages: typeof STAGES_PORT },
-    Record<string, never>
+    { stages: typeof STAGES_PORT },
+    StageTraceConfig
   >({
     type: STAGE_TRACE_NODE_TYPE,
     version: 1,
     role: "prepare",
     inputs: { trajectory: TRAJECTORY_PORT },
-    outputs: { touches: FILE_TOUCHES_PORT, stages: STAGES_PORT },
+    outputs: { stages: STAGES_PORT },
     async run(context) {
       const sessionKey = context.in.trajectory.sessionKey?.trim();
       if (!sessionKey) return evaluationExcused.infra("stage_trace_names_no_session");
@@ -535,55 +612,72 @@ export function createStageTraceNode(
       if (!touches) {
         return evaluationExcused.infra("stage_trace_unavailable", { facts: { sessionKey } });
       }
+      const stages = segmentRunIntoStages(touches, context.config.stages);
       return evaluationPass({
-        outputs: { touches, stages: [] },
-        facts: { sessionKey, touchCount: touches.length },
+        outputs: { stages },
+        facts: {
+          sessionKey,
+          touchCount: touches.length,
+          stageCount: stages.length,
+          foundCount: stages.filter((stage) => stage.fromIndex !== null).length,
+        },
       });
     },
   });
 }
 
 /**
- * Finds where one declared stage of a run began.
+ * Presents one declared stage as the thing to judge.
  *
- * The search starts after the stage before it, so N stages are N segments of one
- * run in the order they were declared rather than N independent matches that can
- * come out reversed. The cost is that a first stage matched too early moves every
- * stage after it — which is what actually happened, so it is reported rather than
- * smoothed over.
+ * One step per stage so each gets its own row, status and evidence, and so a
+ * stage the run never reached excuses itself without touching the others. What
+ * it emits is that stage's window and nothing else: in a check bound to a stage,
+ * the answer is what the stage said and the files are what existed when it
+ * handed over — which is the whole reason to bind a check to a stage rather than
+ * to the run.
  */
 export const stageSegmentNode = defineEvaluationNode<
-  { touches: typeof FILE_TOUCHES_PORT; stages: typeof STAGES_PORT },
-  { stages: typeof STAGES_PORT },
+  { stages: typeof STAGES_PORT; trajectory: typeof TRAJECTORY_PORT },
+  { artifact: typeof ARTIFACT_PORT },
   StageSegmentConfig
 >({
   type: STAGE_SEGMENT_NODE_TYPE,
   version: 1,
   role: "prepare",
-  inputs: { touches: FILE_TOUCHES_PORT, stages: STAGES_PORT },
-  outputs: { stages: STAGES_PORT },
+  inputs: { stages: STAGES_PORT, trajectory: TRAJECTORY_PORT },
+  outputs: { artifact: ARTIFACT_PORT },
   async run(context) {
-    const { stageId, name, pattern } = context.config;
-    const touches = context.in.touches;
-    const found = context.in.stages;
-    const after = found.at(-1)?.fromIndex ?? -1;
-    const boundary = touches.find(
-      (touch) => touch.index > after && matchesStagePattern(touch.path, pattern),
-    );
-    const facts: Record<string, unknown> = { stageId, stageName: name, pattern, searchedAfter: after };
-    if (!boundary) {
-      return evaluationExcused.infra("stage_boundary_not_found", { facts });
+    const { stageId } = context.config;
+    const stage = context.in.stages.find((item) => item.stageId === stageId);
+    if (!stage || stage.fromIndex === null) {
+      return evaluationExcused.infra("stage_boundary_not_found", {
+        facts: {
+          stageId,
+          ...(stage ? { stageName: stage.name, pattern: stage.pattern } : {}),
+        },
+      });
     }
-    const stage: EvaluationStageValue = {
-      stageId,
-      name,
-      fromIndex: boundary.index,
-      matchedPath: boundary.path,
-      files: artifactFilesEndState(touches.filter((touch) => touch.index <= boundary.index)),
-    };
+    const sessionKey = context.in.trajectory.sessionKey?.trim();
     return evaluationPass({
-      outputs: { stages: [...found, stage] },
-      facts: { ...facts, matchedPath: stage.matchedPath, fileCount: stage.files.length },
+      outputs: {
+        artifact: {
+          output: stage.output ?? STAGE_OUTPUT_NOT_OBSERVED,
+          // Empty is an observation here rather than a gap: the trace was
+          // readable, so nothing written by then is what the stage handed over.
+          files: stage.files,
+          origin: { kind: "session", ...(sessionKey ? { reference: sessionKey } : {}) },
+        },
+      },
+      facts: {
+        stageId: stage.stageId,
+        stageName: stage.name,
+        pattern: stage.pattern,
+        fromIndex: stage.fromIndex,
+        matchedPath: stage.matchedPath,
+        fileCount: stage.files.length,
+        outputObserved: stage.output !== undefined,
+        ...(stage.toIndex !== undefined ? { toIndex: stage.toIndex } : {}),
+      },
     });
   },
 });
