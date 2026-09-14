@@ -148,6 +148,14 @@ export interface SkillEvalSuite {
   lastRun: SkillEvalSuiteLastRun | null;
 }
 
+/**
+ * What a technical-writing suite starts with — a default, not a rule.
+ *
+ * Applied when the suite is created and never re-asserted afterwards: from then
+ * on the scoring belongs to whoever edits it on the plan page. Refreshing it from
+ * code on every run would quietly discard those edits and, because the scoring is
+ * part of the rubric fingerprint, report a change of standard that nobody made.
+ */
 function technicalWritingScoring(): EvaluationScoringConfig {
   return {
     weightByLabels: { priority: { must: 2, should: 1 } },
@@ -1117,9 +1125,6 @@ export class SkillService {
       agentId: input.agentId.trim(),
       evaluatorIds,
       repetitions: Math.max(1, Math.min(5, Math.floor(input.repetitions))),
-      ...(isTechnicalWritingSkill(experiment.skillName ?? "")
-        ? { scoring: technicalWritingScoring() }
-        : {}),
       updatedAt: now,
     });
     const skill = (experiment.skillName ?? "").trim();
@@ -1191,21 +1196,19 @@ export class SkillService {
       });
     }
     // Sync the built-in judge to its managed definition right before use, so
-    // suites created under an older rubric pick up the current one.
+    // suites created under an older rubric pick up the current one. The scoring
+    // beside it is not synced: it belongs to the plan, and re-asserting a preset
+    // here would undo whatever was set on the plan page since the last run.
     if (experiment.evaluatorIds.some((id) => id.startsWith("builtin-judge-"))) {
       const builtin = await evaluations.ensureBuiltinJudge(experiment.agentId, skill);
       const evaluatorIds = [
         builtin.id,
         ...experiment.evaluatorIds.filter((evaluatorId) => !evaluatorId.startsWith("builtin-judge-")),
       ];
-      if (
-        evaluatorIds.join("\n") !== experiment.evaluatorIds.join("\n")
-        || isTechnicalWritingSkill(skill)
-      ) {
+      if (evaluatorIds.join("\n") !== experiment.evaluatorIds.join("\n")) {
         await evaluations.saveExperiment({
           ...experiment,
           evaluatorIds,
-          ...(isTechnicalWritingSkill(skill) ? { scoring: technicalWritingScoring() } : {}),
           skillHash: currentHash,
           updatedAt: this.dependencies.now(),
         });

@@ -2080,4 +2080,19 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS scoring_version integer;
     `,
   ],
+}, {
+  version: 54,
+  // That floor came from a preset, not from a choice: it was re-applied on every
+  // run of a technical-writing suite. The preset is a creation default now, so
+  // what is already stored would otherwise stay, and with it a suite that cannot
+  // pass any run in which one check could not be decided.
+  name: "drop the coverage floor the technical-writing preset forced on its suites",
+  statements: [
+    `
+      UPDATE agent_recall.evaluation_experiments
+         SET scoring = scoring - 'minCoverage'
+       WHERE lower(btrim(skill_name)) = 'rewrite-technical-tutorial'
+         AND scoring ->> 'minCoverage' = '1';
+    `,
+  ],
 }];
