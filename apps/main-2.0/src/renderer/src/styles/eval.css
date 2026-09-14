@@ -1605,6 +1605,28 @@
  * important part — a dimension whose judge could not decide has no score, and red
  * would blame the model for the evaluation's own gap.
  */
+/* A stage's dimensions are read together, because together is what they weigh. */
+.eval-dimension-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.eval-dimension-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.eval-dimension-group-name {
+  margin: 0;
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: var(--text-xs);
+}
+
 .eval-dimension-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));

@@ -22,7 +22,7 @@ import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
 import { runtimeSessionUnavailableMessage } from "../sessions/runtime-session-resolution";
 import { EvalCaseArtifact } from "./eval-case-artifact";
-import { EvalDimensionCard } from "./eval-dimension-card";
+import { EvalDimensionCards } from "./eval-dimension-card";
 import {
   formatDuration,
   formatRatio,
@@ -398,28 +398,28 @@ function RunGraph({
       </div>
       {/* The same cards the plan page shows, so a run reads in the same units. */}
       {run.dimensions?.length ? (
-        <div className="eval-dimension-cards">
-          {run.dimensions.map((dimension) => (
-            <EvalDimensionCard
-              key={dimension.dimension}
-              language={language}
-              selected={selectedDimension === dimension.dimension}
-              onClick={() => setSelectedDimension((current) => (
-                current === dimension.dimension ? null : dimension.dimension
-              ))}
-              data={{
-                dimension: dimension.dimension,
-                score: dimension.score,
-                weight: dimension.weight,
-                threshold,
-                method: l(
-                  `${dimension.scoredCaseCount} case(s) · click for reasons`,
-                  `${dimension.scoredCaseCount} 个用例 · 点击查看原因`,
-                ),
-              }}
-            />
+        <EvalDimensionCards
+          language={language}
+          stages={experiment?.stages ?? []}
+          selected={selectedDimension}
+          onSelect={(dimension) => setSelectedDimension((current) => (
+            current === dimension ? null : dimension
           ))}
-        </div>
+          cards={run.dimensions.map((dimension) => ({
+            dimension: dimension.dimension,
+            score: dimension.score,
+            weight: dimension.weight,
+            ...(dimension.effectiveWeight !== undefined
+              ? { effectiveWeight: dimension.effectiveWeight }
+              : {}),
+            ...(dimension.stage ? { stage: dimension.stage } : {}),
+            threshold,
+            method: l(
+              `${dimension.scoredCaseCount} case(s) · click for reasons`,
+              `${dimension.scoredCaseCount} 个用例 · 点击查看原因`,
+            ),
+          }))}
+        />
       ) : null}
       {selectedDimension ? (
         <DimensionDiagnostics

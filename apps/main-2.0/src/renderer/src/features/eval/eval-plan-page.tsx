@@ -26,7 +26,7 @@ import type {
 import { localize, type LanguageMode } from "../../language";
 import { judgesTrajectory } from "../../../../core/evaluation/case-graph";
 import { EvalCheckDialog } from "./eval-check-editor";
-import { EvalDimensionCard, type DimensionCardData } from "./eval-dimension-card";
+import { EvalDimensionCards, type DimensionCardData } from "./eval-dimension-card";
 import { dimensionsOf, methodText, type EvalDimension } from "./eval-dimensions";
 
 /**
@@ -163,18 +163,23 @@ export function EvalPlanPage({
 
   const cards = useMemo<DimensionCardData[]>(() => {
     if (!draft) return [];
-    return chosen.map((dimension) => ({
-      dimension: dimension.name,
-      score: scoreOf(runs.at(-1), dimension.name),
-      weight: weightOf(scoring, dimension.name),
-      ...(dimension.priority ? { priority: dimension.priority } : {}),
-      threshold: scoring?.resolvedThreshold ?? DEFAULT_THRESHOLD,
-      method: methodText(language, dimension),
-      trend: runs.map((run) => ({
-        score: scoreOf(run, dimension.name),
-        startedAt: run.startedAt,
-      })),
-    }));
+    const bound = draft.stageByEvaluatorId ?? {};
+    return chosen.map((dimension) => {
+      const stage = stageOfDimension(dimension, draft.evaluatorIds, bound);
+      return {
+        dimension: dimension.name,
+        score: scoreOf(runs.at(-1), dimension.name),
+        weight: labelWeight(scoring, "dimension", dimension.name),
+        ...(stage ? { stage } : {}),
+        ...(dimension.priority ? { priority: dimension.priority } : {}),
+        threshold: scoring?.resolvedThreshold ?? DEFAULT_THRESHOLD,
+        method: methodText(language, dimension),
+        trend: runs.map((run) => ({
+          score: scoreOf(run, dimension.name),
+          startedAt: run.startedAt,
+        })),
+      };
+    });
   }, [chosen, draft, language, runs, scoring]);
 
   const leave = useCallback(() => {
@@ -368,14 +373,22 @@ export function EvalPlanPage({
     });
   }, []);
 
-  const setWeight = useCallback((dimension: string, weight: number) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const byLabels = { ...(current.scoring?.weightByLabels ?? {}) };
-      byLabels.dimension = { ...(byLabels.dimension ?? {}), [dimension]: weight };
-      return { ...current, scoring: { ...(current.scoring ?? {}), weightByLabels: byLabels } };
-    });
-  }, []);
+  /**
+   * Declares how much one value of one label weighs. A stage's weight is the same
+   * edit as a dimension's, because both are labels the scorer multiplies; only
+   * the key differs.
+   */
+  const setLabelWeight = useCallback(
+    (label: "dimension" | "stage", value: string, weight: number) => {
+      setDraft((current) => {
+        if (!current) return current;
+        const byLabels = { ...(current.scoring?.weightByLabels ?? {}) };
+        byLabels[label] = { ...(byLabels[label] ?? {}), [value]: weight };
+        return { ...current, scoring: { ...(current.scoring ?? {}), weightByLabels: byLabels } };
+      });
+    },
+    [],
+  );
 
   const stages = draft?.stages ?? [];
 
@@ -423,10 +436,18 @@ export function EvalPlanPage({
       for (const [evaluatorId, stageId] of Object.entries(current.stageByEvaluatorId ?? {})) {
         if (stageId !== id) bound[evaluatorId] = stageId;
       }
+      const weights = { ...(current.scoring?.weightByLabels?.stage ?? {}) };
+      delete weights[id];
+      const byLabels = { ...(current.scoring?.weightByLabels ?? {}) };
+      if (Object.keys(weights).length > 0) byLabels.stage = weights;
+      else delete byLabels.stage;
       return {
         ...current,
         stages: (current.stages ?? []).filter((stage) => stage.id !== id),
         stageByEvaluatorId: bound,
+        ...(current.scoring
+          ? { scoring: { ...current.scoring, weightByLabels: byLabels } }
+          : {}),
       };
     });
   }, []);
@@ -486,8 +507,9 @@ export function EvalPlanPage({
               type="number"
               min={0}
               step={1}
-              value={weightOf(scoring, dimension.name)}
-              onChange={(event) => setWeight(
+              value={labelWeight(scoring, "dimension", dimension.name)}
+              onChange={(event) => setLabelWeight(
+                "dimension",
                 dimension.name,
                 Math.max(0, Number(event.target.value) || 0),
               )}
@@ -707,11 +729,7 @@ export function EvalPlanPage({
               </div>
 
               {cards.length > 0 ? (
-                <div className="eval-dimension-cards">
-                  {cards.map((card) => (
-                    <EvalDimensionCard key={card.dimension} language={language} data={card} />
-                  ))}
-                </div>
+                <EvalDimensionCards language={language} cards={cards} stages={stages} />
               ) : (
                 <p className="eval-muted">
                   {l(
@@ -949,6 +967,12 @@ export function EvalPlanPage({
                     "一个阶段管的是从它开始到下一个阶段开始之间的全部内容，最后一个阶段一直到运行结束。在「维度」里挂到某个阶段上的检查，评的就只有这一段：这个阶段交出去的文件，以及期间模型说的话。匹配不到的阶段只影响挂在它上面的检查，那些检查会报成没判出来，不计入评分。",
                   )}
                 </p>
+                <p className="eval-muted">
+                  {l(
+                    "A stage's weight is shared by the dimensions judging it, so hanging more checks on a stage does not give that stage more say in the total score. Each of those dimensions also keeps its own weight under Dimensions, which decides its share of the stage rather than adding to it.",
+                    "一个阶段的权重由评它的那些维度平分，所以在某个阶段上多挂检查，不会让这个阶段在总分里更有话语权。这些维度在「维度」里各自的权重仍然有效，决定的是它在这个阶段内部占多少，而不是往总分上再加一份。",
+                  )}
+                </p>
                 {draft?.source === "folder" ? (
                   <p className="eval-muted">
                     {l(
@@ -1012,6 +1036,20 @@ export function EvalPlanPage({
                           onChange={(event) => updateStage(stage.id, { pattern: event.target.value })}
                         />
                       </label>
+                      <label className="eval-plan-weight">
+                        <span>{l("weight", "权重")}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={labelWeight(scoring, "stage", stage.id)}
+                          onChange={(event) => setLabelWeight(
+                            "stage",
+                            stage.id,
+                            Math.max(0, Number(event.target.value) || 0),
+                          )}
+                        />
+                      </label>
                     </li>
                   ))}
                 </ol>
@@ -1061,14 +1099,47 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
 }
 
-function weightOf(scoring: EvaluationScoringConfig | null, dimension: string): number {
-  const weight = scoring?.weightByLabels?.dimension?.[dimension];
+/**
+ * Weight declared for one value of one label.
+ *
+ * The two keys differ on purpose: a dimension is keyed by name because it has no
+ * id of its own, a stage by the id the plan declared, so renaming a stage keeps
+ * the weight that was set for it.
+ */
+function labelWeight(
+  scoring: EvaluationScoringConfig | null,
+  label: "dimension" | "stage",
+  value: string,
+): number {
+  const weight = scoring?.weightByLabels?.[label]?.[value];
   return typeof weight === "number" ? weight : 1;
 }
 
 /** This dimension's score in one run, or null when it decided nothing there. */
 function scoreOf(run: EvaluationRunSummary | undefined, dimension: string): number | null {
   return run?.dimensions?.find((item) => item.dimension === dimension)?.score ?? null;
+}
+
+/**
+ * The stage every chosen check of this dimension judges.
+ *
+ * A dimension whose checks are split — across two stages, or between one stage
+ * and the whole run — belongs to none, which is what the scorer does with it too.
+ * Naming a stage here that the score does not use would file the card under a
+ * heading that means nothing.
+ */
+function stageOfDimension(
+  dimension: EvalDimension,
+  chosen: readonly string[],
+  bound: Record<string, string>,
+): string | undefined {
+  const stages = new Set(
+    dimension.checks
+      .filter((check) => chosen.includes(check.id))
+      .map((check) => bound[check.id]),
+  );
+  const [stage] = stages;
+  return stages.size === 1 && stage !== undefined ? stage : undefined;
 }
 
 function dimensionCount(

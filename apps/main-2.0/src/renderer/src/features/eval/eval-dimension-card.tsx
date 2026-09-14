@@ -24,6 +24,13 @@ export interface DimensionCardData {
   /** Weighted mean of this dimension's checks; null when nothing was decided. */
   score: number | null;
   weight: number;
+  /**
+   * Share this dimension actually held, when a stage split its weight over the
+   * dimensions judging it. Absent when it counted as declared.
+   */
+  effectiveWeight?: number;
+  /** Id of the stage this dimension judges; absent means the whole run. */
+  stage?: string;
   priority?: "must" | "should";
   /** Score a check in this dimension has to reach. */
   threshold?: number;
@@ -46,6 +53,7 @@ export function EvalDimensionCard({
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const state = dimensionState(data);
+  const applied = data.effectiveWeight ?? data.weight;
   const body = (
     <>
       <header>
@@ -55,15 +63,20 @@ export function EvalDimensionCard({
             {data.priority === "must" ? l("must", "必须") : l("should", "应该")}
           </span>
         ) : null}
-        {data.weight !== 1 ? (
+        {applied !== 1 || data.weight !== 1 ? (
           <span
             className="eval-dimension-card-weight"
-            title={l(
-              `Counts ${data.weight} times when dimensions are combined into the total score.`,
-              `汇总总分时按普通维度的 ${data.weight} 倍计入。`,
-            )}
+            title={applied === data.weight
+              ? l(
+                `Counts ${formatWeight(applied)} times when dimensions are combined into the total score.`,
+                `汇总总分时按普通维度的 ${formatWeight(applied)} 倍计入。`,
+              )
+              : l(
+                `Declared ${formatWeight(data.weight)}, but the dimensions judging this stage share it, so this one counts ${formatWeight(applied)} times.`,
+                `声明的是 ${formatWeight(data.weight)}，但同一阶段的维度平分这份权重，所以这个维度按 ${formatWeight(applied)} 倍计入。`,
+              )}
           >
-            {l(`weight ${data.weight}`, `权重 ${data.weight}`)}
+            {l(`weight ${formatWeight(applied)}`, `权重 ${formatWeight(applied)}`)}
           </span>
         ) : null}
       </header>
@@ -101,6 +114,84 @@ export function EvalDimensionCard({
 export function dimensionState(data: DimensionCardData): "met" | "unmet" | "undecided" {
   if (data.score === null) return "undecided";
   return data.score >= (data.threshold ?? 0.6) ? "met" : "unmet";
+}
+
+/**
+ * The same cards, split by the stage they judge.
+ *
+ * A run cut into stages reads as those stages rather than as one wall of
+ * dimensions, and that a stage's dimensions share its weight is only visible
+ * when they are seen side by side. The dimensions judging the whole run come
+ * first under no heading: they are not a stage, and heading them as one would
+ * invent a group the plan never declared.
+ */
+export function EvalDimensionCards({
+  language,
+  cards,
+  stages = [],
+  selected,
+  onSelect,
+}: {
+  language: LanguageMode;
+  cards: readonly DimensionCardData[];
+  /** The plan's declared stages, whose order is the order of the groups. */
+  stages?: ReadonlyArray<{ id: string; name: string }>;
+  selected?: string | null;
+  onSelect?: (dimension: string) => void;
+}): ReactElement {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const declared = stages.map((stage, position) => ({
+    id: stage.id,
+    label: stage.name.trim() || l(`Stage ${position + 1}`, `阶段 ${position + 1}`),
+  }));
+  const groups: Array<{ key: string; label?: string; cards: DimensionCardData[] }> = [];
+  const whole = cards.filter((card) => card.stage === undefined);
+  if (whole.length > 0) groups.push({ key: "run", cards: whole });
+  for (const stage of declared) {
+    const inStage = cards.filter((card) => card.stage === stage.id);
+    if (inStage.length > 0) groups.push({ key: stage.id, label: stage.label, cards: inStage });
+  }
+  // An older run still has scores for a stage the plan has since dropped. Kept
+  // and named rather than folded into the whole run, which would claim those
+  // dimensions judged something they did not; never shown by id, since an id is
+  // a key rather than something anybody chose to read.
+  const gone = cards.filter(
+    (card) => card.stage !== undefined && !declared.some((stage) => stage.id === card.stage),
+  );
+  if (gone.length > 0) {
+    groups.push({
+      key: "gone",
+      label: l("A stage this plan no longer declares", "方案已不再声明的阶段"),
+      cards: gone,
+    });
+  }
+  return (
+    <div className="eval-dimension-groups">
+      {groups.map((group) => (
+        <section key={group.key} className="eval-dimension-group">
+          {group.label
+            ? <h6 className="eval-dimension-group-name">{group.label}</h6>
+            : null}
+          <div className="eval-dimension-cards">
+            {group.cards.map((card) => (
+              <EvalDimensionCard
+                key={card.dimension}
+                language={language}
+                data={card}
+                selected={selected === card.dimension}
+                onClick={onSelect ? () => onSelect(card.dimension) : undefined}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/** A declared weight is usually whole; a stage's split of one usually is not. */
+function formatWeight(weight: number): string {
+  return Number.isInteger(weight) ? String(weight) : weight.toFixed(2);
 }
 
 function ScoreRing({
