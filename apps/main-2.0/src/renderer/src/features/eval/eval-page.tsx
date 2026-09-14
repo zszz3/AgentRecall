@@ -1446,6 +1446,13 @@ function RunComparison({
   // unrecorded standard gets a weaker note than a confirmed change.
   const rubricRecorded = Boolean(base.rubricHash && compare.rubricHash);
   const rubricChanged = rubricRecorded && base.rubricHash !== compare.rubricHash;
+  // The rubric says what was asked for; this says how the answers were totalled.
+  // Two runs of an unchanged plan can still be incomparable, because the scoring
+  // underneath the stored numbers changed — and unlike a rubric edit, nothing the
+  // user did shows up in the plan to explain it.
+  const scoringRecorded = base.scoringVersion != null && compare.scoringVersion != null;
+  const scoringChanged = scoringRecorded && base.scoringVersion !== compare.scoringVersion;
+  const unattributable = rubricChanged || scoringChanged;
   const totalDelta = base.averageScore != null && compare.averageScore != null
     ? compare.averageScore - base.averageScore
     : null;
@@ -1497,9 +1504,17 @@ function RunComparison({
         ) : (
           <span className="eval-badge eval-badge-dim">{l("Rubric not recorded", "评分标准未记录")}</span>
         )}
+        {scoringChanged ? (
+          <span className="eval-badge eval-badge-warn">{l("Scoring changed", "计分口径已变更")}</span>
+        ) : null}
+        {!scoringRecorded ? (
+          <span className="eval-badge eval-badge-dim">
+            {l("Scoring not recorded", "计分口径未记录")}
+          </span>
+        ) : null}
         {totalDelta != null ? (
           <span
-            className={`eval-badge ${rubricChanged ? "eval-badge-dim" : deltaBadgeClass(totalReading)}`}
+            className={`eval-badge ${unattributable ? "eval-badge-dim" : deltaBadgeClass(totalReading)}`}
             title={deltaTitle(totalReading, runBand, l)}
           >
             {l("avg score", "平均分")} {totalDelta >= 0 ? "+" : ""}{totalDelta.toFixed(2)}
@@ -1514,6 +1529,14 @@ function RunComparison({
           {l(
             "The two runs were scored by different rubrics, so the differences below are not attributable to the subject alone.",
             "两次运行使用的评分标准不同，下面的分数差异不能只归因于被测对象。",
+          )}
+        </p>
+      ) : null}
+      {scoringChanged ? (
+        <p className="eval-muted">
+          {l(
+            "The two runs were totalled by different scoring rules, so a difference below can come from the arithmetic itself. The plan was not edited: the way its weights are combined changed between the two runs.",
+            "两次运行是用不同的计分口径汇总出来的，下面的涨跌可能来自算法本身。方案没有被改过：是两次运行之间，权重的合并方式变了。",
           )}
         </p>
       ) : null}
@@ -1618,7 +1641,7 @@ function RunComparison({
                   </span>
                   {delta != null ? (
                     <span
-                      className={`eval-badge ${rubricChanged ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
+                      className={`eval-badge ${unattributable ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
                       title={deltaTitle(reading, runBand, l)}
                     >
                       {delta > 0 ? "+" : ""}{delta.toFixed(2)}
@@ -1664,7 +1687,7 @@ function RunComparison({
               </span>
               {delta != null ? (
                 <span
-                  className={`eval-badge ${rubricChanged ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
+                  className={`eval-badge ${unattributable ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
                   title={deltaTitle(reading, band, l)}
                 >
                   {delta > 0 ? "+" : ""}{delta.toFixed(2)}
