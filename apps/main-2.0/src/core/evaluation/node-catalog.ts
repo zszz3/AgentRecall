@@ -157,8 +157,8 @@ const PRESENTATION: Record<string, CatalogPresentation> = {
     labelEn: "Stage trace",
     labelZh: "阶段轨迹",
     descriptionEn:
-      "Reads the files a run touched and cuts the run into its declared stages, in order.",
-    descriptionZh: "读取本次运行触及的文件，按声明顺序把这次运行切成各个阶段。",
+      "Reads the files a run touched and the tools it called, then cuts the run into its declared stages, in order.",
+    descriptionZh: "读取本次运行触及的文件和调用的工具，按声明顺序把这次运行切成各个阶段。",
     configFields: [],
   },
   [STAGE_SEGMENT_NODE_TYPE]: {

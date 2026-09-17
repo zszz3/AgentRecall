@@ -123,10 +123,10 @@ export function nodeReasonText(language: LanguageMode, reason: string): string {
     trace_not_available: ["the session trace is unavailable", "读不到会话轨迹"],
     trace_reader_unavailable: ["trace reading is unavailable", "轨迹读取不可用"],
     cancelled_before_session_link: ["cancelled before linking the session", "关联会话前已取消"],
-    stage_boundary_not_found: ["no file matched this stage's pattern", "没有文件命中这个阶段的匹配模式"],
-    stage_trace_unavailable: ["the run's file changes could not be read", "读不到本次运行的文件改动"],
+    stage_boundary_not_found: ["nothing matched this stage's pattern", "没有内容命中这个阶段的匹配模式"],
+    stage_trace_unavailable: ["the run's trace could not be read", "读不到本次运行的轨迹"],
     stage_trace_names_no_session: ["the run has no session to read", "本次运行没有可读的会话"],
-    stage_touches_reader_unavailable: ["stage tracing is unavailable", "阶段轨迹读取不可用"],
+    stage_trace_reader_unavailable: ["stage tracing is unavailable", "阶段轨迹读取不可用"],
     upstream_not_pass: ["an earlier step did not pass", "上游步骤未通过"],
     upstream_skipped: ["an earlier step was skipped", "上游步骤被跳过"],
     not_decided: ["the run ended first", "运行提前结束"],
@@ -148,6 +148,43 @@ export function skillUseText(
 }
 
 /**
+ * How to say what opened a stage.
+ *
+ * The boundary kind decides the wording because the matched value means
+ * something different in each: a path, a tool name, or the message that was
+ * said. Reading all three as "opened at X" would have a reader look for a file
+ * named after a sentence.
+ */
+function openedAt(language: LanguageMode, boundaryKind: string | null, matched: string): string {
+  if (boundaryKind === "tool_called") {
+    return localize(language, `opened at the ${matched} call`, `从调用 ${matched} 开始`);
+  }
+  if (boundaryKind === "message_contains") {
+    return localize(
+      language,
+      `opened where the model said "${matched}"`,
+      `从模型说到「${matched}」开始`,
+    );
+  }
+  return localize(language, `opened at ${matched}`, `从 ${matched} 开始`);
+}
+
+/** The same, for a stage the run never reached. */
+function lookingFor(language: LanguageMode, boundaryKind: string | null, pattern: string): string {
+  if (boundaryKind === "tool_called") {
+    return localize(language, `looking for a ${pattern} call`, `在找对 ${pattern} 的调用`);
+  }
+  if (boundaryKind === "message_contains") {
+    return localize(
+      language,
+      `looking for the model to say "${pattern}"`,
+      `在找说到「${pattern}」的消息`,
+    );
+  }
+  return localize(language, `looking for ${pattern}`, `在找 ${pattern}`);
+}
+
+/**
  * Observation text for the two stage steps, neither of which produces a verdict.
  *
  * The stage's own name leads because every stage step carries the same catalog
@@ -163,10 +200,12 @@ export function stageText(
   const l = (en: string, zh: string) => localize(language, en, zh);
   if (nodeType === STAGE_TRACE_NODE_TYPE) {
     if (typeof facts.touchCount !== "number") return null;
-    const read = l(
-      `${facts.touchCount} file changes read`,
-      `读到 ${facts.touchCount} 处文件改动`,
-    );
+    const read = typeof facts.toolCallCount === "number"
+      ? l(
+          `${facts.touchCount} file changes and ${facts.toolCallCount} tool calls read`,
+          `读到 ${facts.touchCount} 处文件改动、${facts.toolCallCount} 次工具调用`,
+        )
+      : l(`${facts.touchCount} file changes read`, `读到 ${facts.touchCount} 处文件改动`);
     return typeof facts.foundCount === "number" && typeof facts.stageCount === "number"
       ? l(
           `${read}; ${facts.foundCount} of ${facts.stageCount} stages found`,
@@ -183,9 +222,10 @@ export function stageText(
   const parts: string[] = [];
   const name = text("stageName");
   if (name) parts.push(name);
-  const matched = text("matchedPath");
+  const boundaryKind = text("boundaryKind");
+  const matched = text("matched");
   if (matched) {
-    parts.push(l(`opened at ${matched}`, `从 ${matched} 开始`));
+    parts.push(openedAt(language, boundaryKind, matched));
     if (typeof facts.fileCount === "number") {
       // Cumulative on purpose: this is what the stage handed on to the next one,
       // not a list of what it alone wrote.
@@ -201,7 +241,7 @@ export function stageText(
     // Not found. What it was looking for is the half that says the pattern
     // missed, rather than leaving the reader to guess which stage this was.
     const pattern = text("pattern");
-    if (pattern) parts.push(l(`looking for ${pattern}`, `在找 ${pattern}`));
+    if (pattern) parts.push(lookingFor(language, boundaryKind, pattern));
   }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
