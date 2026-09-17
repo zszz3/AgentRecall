@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { AgentHub as AgentHubImplementation, createWorkflowAgentTimeout } from "./agent-hub";
 import { DEFAULT_MODEL_ID } from "../../shared/models";
+import { RUNTIME_DEFINITIONS } from "../../shared/runtime-catalog";
 import { projectNodeStates } from "../../shared/workflow-v2/runtime-utils";
 import { createWorkflowV2InlineScriptSpec } from "../../shared/workflow-v2/definition";
 import { createDirectWorkflowTransactionPolicy } from "../../shared/workflow-v2/transaction";
@@ -25,9 +26,31 @@ import type { AgentHubPersistedStore } from "./persisted/persisted-store";
 
 const TEST_CODEX_AGENT_ID = "runtime-agent:codex-openai";
 
+/**
+ * No runtime binary exists inside this file.
+ *
+ * `loadModelChannels` falls back to spawning `codex debug models` when the
+ * channel config file is not there yet, and that spawn is given the same five
+ * seconds a test gets. On a machine with Codex installed the two race and which
+ * one wins depends on the load, so a handful of channel tests timed out here
+ * while CI — which has no Codex, and therefore fails the spawn at once — always
+ * passed. Derived from the catalog so a runtime added later is covered too;
+ * anything a test passes explicitly still wins.
+ */
+const MISSING_EXECUTABLES = Object.fromEntries(
+  RUNTIME_DEFINITIONS.map((definition) => [definition.id, `missing-${definition.id}-for-test`]),
+) as Partial<Record<AgentId, string>>;
+
+type AgentHubConstructorArgs = ConstructorParameters<typeof AgentHubImplementation>;
+
+function withoutRealRuntimes(args: AgentHubConstructorArgs): AgentHubConstructorArgs {
+  const [executables, ...rest] = args;
+  return [{ ...MISSING_EXECUTABLES, ...executables }, ...rest];
+}
+
 class AgentHub extends AgentHubImplementation {
-  constructor(...args: ConstructorParameters<typeof AgentHubImplementation>) {
-    super(...args);
+  constructor(...args: AgentHubConstructorArgs) {
+    super(...withoutRealRuntimes(args));
     const activeChatId = this.snapshot().activeChatId;
     if (activeChatId) this.setChatAgent(activeChatId, TEST_CODEX_AGENT_ID);
   }
