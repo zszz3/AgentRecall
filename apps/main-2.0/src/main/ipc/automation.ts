@@ -177,19 +177,22 @@ const evaluationExperimentGraphSchema = z.object({
 const evaluationStageSchema = z.object({
   id: z.string().trim().min(1).max(80),
   name: z.string().trim().min(1).max(120),
-  boundaryKind: z.literal("file_written"),
-  // Compiled to a regular expression that runs with no timeout and cannot be
-  // interrupted mid-match, so the wildcards are capped: a stage boundary is a
-  // filename shape, not a regex a user is invited to make pathological.
-  pattern: z
-    .string()
-    .trim()
-    .min(1)
-    .max(200)
-    .refine((value) => (value.match(/\*/g)?.length ?? 0) <= 16, {
+  boundaryKind: z.enum(["file_written", "tool_called", "message_contains"]),
+  // Only `file_written` is compiled to a regular expression, which runs with no
+  // timeout and cannot be interrupted mid-match, so only that kind needs its
+  // wildcards capped: a boundary there is a filename shape, not a regex a user is
+  // invited to make pathological. The other two compare a literal.
+  pattern: z.string().trim().min(1).max(200),
+}).strict().superRefine((stage, context) => {
+  if (stage.boundaryKind !== "file_written") return;
+  if ((stage.pattern.match(/\*/g)?.length ?? 0) > 16) {
+    context.addIssue({
+      code: "custom",
+      path: ["pattern"],
       message: "a stage pattern may use at most 16 wildcards",
-    }),
-}).strict();
+    });
+  }
+});
 const evaluationExperimentSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(200),
