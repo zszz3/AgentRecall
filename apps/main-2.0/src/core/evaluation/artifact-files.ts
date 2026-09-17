@@ -1,7 +1,8 @@
 import type { EvaluationArtifactFile } from "./nodes/contracts";
 
 /**
- * Which files a run touched, read from its trace.
+ * What a run did, read from its trace: which files it touched and which tools it
+ * called.
  *
  * A fresh run's artifact is not only its answer: an agent asked to fix a bug
  * produces a diff, and a judge that can only see the final message cannot tell a
@@ -89,6 +90,19 @@ export function filesTouchedByEvent(
   if (!status) return [];
   const path = pathOf(input) ?? summaryOf(event.title);
   return path ? [{ path, status }] : [];
+}
+
+/**
+ * The tool one trace event called, in the lowercase name runtimes report.
+ *
+ * Null when the event is not a tool call. Read here rather than in the stage
+ * segmentation so that "which event first called `apply_patch`" and "which event
+ * wrote this path" cannot disagree about what an event was: both go through the
+ * same title parsing and the same `tool_call` test.
+ */
+export function toolCalledByEvent(event: ArtifactFileTraceEvent): string | null {
+  if (event.kind !== "tool_call") return null;
+  return toolNameOf(event.title) || null;
 }
 
 /**
