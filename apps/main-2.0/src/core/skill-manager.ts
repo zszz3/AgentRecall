@@ -481,6 +481,10 @@ function parseFrontmatter(markdown: string): { name: string; description: string
   let name = "";
   let description = "";
   for (const line of match[1].split(/\r?\n/)) {
+    // Top-level keys only. A nested mapping under any other frontmatter key can
+    // carry its own `name`, and that one belongs to the nested value rather than
+    // to the skill — reading it here renamed the skill after its own metadata.
+    if (/^\s/.test(line)) continue;
     const separator = line.indexOf(":");
     if (separator === -1) continue;
     const key = line.slice(0, separator).trim();
