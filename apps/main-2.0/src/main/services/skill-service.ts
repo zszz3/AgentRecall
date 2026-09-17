@@ -80,6 +80,7 @@ import type {
 } from "../../automation/contracts";
 import { isTechnicalWritingSkill } from "../../automation/engine/shared/evaluation/technical-writing-eval";
 import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
+import { parseDeclaredSkillStages } from "../../core/evaluation/skill-stages";
 import type { EvaluationService } from "./evaluation-service";
 
 export interface SkillUsageHookSetup {
@@ -1013,6 +1014,12 @@ export class SkillService {
     if (!input.agentId.trim()) throw new Error("An execution Agent is required.");
     if (input.cases.length === 0) throw new Error("At least one case is required.");
     const evaluations = this.requireEvaluationService();
+    // Read the skill before anything is written. A declaration this cannot parse
+    // throws, and throwing after the dataset exists would leave one behind with
+    // no suite pointing at it.
+    const instructions = await this.readSkillInstructions(name);
+    const declaredStages = instructions ? parseDeclaredSkillStages(instructions.content) : [];
+    const currentHash = instructions?.hash ?? null;
     const evaluatorIds = await this.resolveSuiteEvaluators(
       evaluations,
       input.agentId.trim(),
@@ -1035,7 +1042,6 @@ export class SkillService {
       createdAt: now,
       updatedAt: now,
     });
-    const currentHash = await this.currentSkillHash(name);
     const experiment = await evaluations.saveExperiment({
       id: `experiment-${now}`,
       name: input.name.trim(),
@@ -1044,6 +1050,7 @@ export class SkillService {
       evaluatorIds,
       repetitions: Math.max(1, Math.min(5, Math.floor(input.repetitions))),
       ...(isTechnicalWritingSkill(name) ? { scoring: technicalWritingScoring() } : {}),
+      ...(declaredStages.length > 0 ? { stages: declaredStages } : {}),
       skillName: name,
       skillHash: currentHash,
       createdAt: now,
