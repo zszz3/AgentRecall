@@ -26,6 +26,7 @@ export type {
 export type {
   EvaluationArtifactFile,
   EvaluationArtifactValue,
+  EvaluationStageBoundaryKind,
 } from "../../../../core/evaluation/nodes/contracts";
 export type {
   EvaluationGraphNodeSpec,

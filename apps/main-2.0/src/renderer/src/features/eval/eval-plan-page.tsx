@@ -21,6 +21,7 @@ import type {
   EvaluationExperiment,
   EvaluationRunSummary,
   EvaluationScoringConfig,
+  EvaluationStageBoundaryKind,
   EvaluationStageDefinition,
 } from "../../../../automation/contracts";
 import { localize, type LanguageMode } from "../../language";
@@ -957,8 +958,8 @@ export function EvalPlanPage({
                 <h5>{l("Stages", "阶段")}</h5>
                 <p className="eval-muted">
                   {l(
-                    "A run is cut into these stages in order. Each one opens at the first file written that matches its pattern, and is only looked for after the stage before it opened — so the order here is the segmentation. A stage whose pattern never matches is reported as not found, not scored.",
-                    "一次运行按这里的顺序被切成若干阶段。每个阶段从「首次写入命中其匹配模式的文件」那一刻开始，且只在它前一个阶段开始之后才搜索——所以这里的顺序就是切分方式。匹配不到的阶段会报「阶段未识别」，不计入评分。",
+                    "A run is cut into these stages in order. Each one opens at the first thing that matches its pattern — a file written, a tool called, or something the model said — and is only looked for after the stage before it opened, so the order here is the segmentation. A stage whose pattern never matches is reported as not found, not scored.",
+                    "一次运行按这里的顺序被切成若干阶段。每个阶段从首个命中其匹配模式的地方开始——写入某个文件、调用某个工具，或者模型说了某句话——且只在它前一个阶段开始之后才搜索，所以这里的顺序就是切分方式。匹配不到的阶段会报「阶段未识别」，不计入评分。",
                   )}
                 </p>
                 <p className="eval-muted">
@@ -1026,12 +1027,28 @@ export function EvalPlanPage({
                         />
                       </label>
                       <label className="eval-editor-field">
-                        <span>
-                          {l("Opens when this file is first written", "首次写入这个文件时开始")}
-                        </span>
+                        <span>{l("Opens on", "从什么开始")}</span>
+                        <select
+                          value={stage.boundaryKind}
+                          onChange={(event) => {
+                            const kind = STAGE_BOUNDARY_KINDS.find(
+                              (item) => item === event.target.value,
+                            );
+                            if (kind) updateStage(stage.id, { boundaryKind: kind });
+                          }}
+                        >
+                          {STAGE_BOUNDARY_KINDS.map((kind) => (
+                            <option key={kind} value={kind}>
+                              {stageBoundaryKindLabel(language, kind)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="eval-editor-field">
+                        <span>{stagePatternField(language, stage.boundaryKind).label}</span>
                         <input
                           value={stage.pattern}
-                          placeholder="report.md"
+                          placeholder={stagePatternField(language, stage.boundaryKind).placeholder}
                           spellCheck={false}
                           onChange={(event) => updateStage(stage.id, { pattern: event.target.value })}
                         />
@@ -1169,4 +1186,52 @@ function planSummary(
       ? l(`${plan.repetitions} repetitions`, `重复 ${plan.repetitions} 次`)
       : null,
   ].filter(Boolean).join(" · ");
+}
+
+/** Offered in the order a run usually meets them: a file, a tool, a sentence. */
+const STAGE_BOUNDARY_KINDS: readonly EvaluationStageBoundaryKind[] = [
+  "file_written",
+  "tool_called",
+  "message_contains",
+];
+
+function stageBoundaryKindLabel(
+  language: LanguageMode,
+  kind: EvaluationStageBoundaryKind,
+): string {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (kind === "tool_called") return l("a tool is called", "调用了某个工具");
+  if (kind === "message_contains") return l("the model says something", "模型说了某句话");
+  return l("a file is written", "写入了某个文件");
+}
+
+/**
+ * What the pattern field asks for.
+ *
+ * One label for all three kinds would not say which: the same box takes a
+ * filename shape with wildcards, an exact tool name, or a sentence the model is
+ * expected to have said, and only the first of those is a pattern in the usual
+ * sense.
+ */
+function stagePatternField(
+  language: LanguageMode,
+  kind: EvaluationStageBoundaryKind,
+): { label: string; placeholder: string } {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  if (kind === "tool_called") {
+    return {
+      label: l("Opens when this tool is first called", "首次调用这个工具时开始"),
+      placeholder: "bash",
+    };
+  }
+  if (kind === "message_contains") {
+    return {
+      label: l("Opens when the model first says this", "模型首次说到这段文字时开始"),
+      placeholder: l("now collecting data", "开始采集数据"),
+    };
+  }
+  return {
+    label: l("Opens when this file is first written", "首次写入这个文件时开始"),
+    placeholder: "report.md",
+  };
 }
