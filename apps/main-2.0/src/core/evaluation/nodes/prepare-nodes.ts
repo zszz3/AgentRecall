@@ -12,10 +12,11 @@ import {
   TASK_PORT,
   TRAJECTORY_PORT,
   type EvaluationArtifactValue,
-  type EvaluationFileTouch,
   type EvaluationNodeDependencies,
   type EvaluationStageArtifact,
+  type EvaluationStageBoundaryKind,
   type EvaluationStageText,
+  type EvaluationStageTrace,
   type EvaluationTaskValue,
   type EvaluationTrajectoryValue,
 } from "./contracts";
@@ -485,12 +486,13 @@ export const skillUseObserveNode = defineEvaluationNode<
 export interface StageSegmentTarget {
   stageId: string;
   name: string;
+  /** How this stage says where it begins, which is also how `pattern` is read. */
+  boundaryKind: EvaluationStageBoundaryKind;
   /**
-   * Carried even though only `file_written` exists: the segmentation below
-   * matches paths, so a second kind has to change it rather than be ignored.
+   * Read in the terms of `boundaryKind`: a path pattern, where `**` crosses
+   * separators and `*` does not; one exact tool name; or a literal run of text
+   * the model is expected to have said.
    */
-  boundaryKind: "file_written";
-  /** Path pattern. `**` crosses separators, `*` does not, `?` is one character. */
   pattern: string;
 }
 
@@ -557,6 +559,57 @@ function stageWindowText(
 }
 
 /**
+ * How much of a matched message a stage row shows as the reason it opened.
+ *
+ * The whole message is the evidence but not a label: a path or a tool name reads
+ * at a glance, and a message can be a page long.
+ */
+const MAX_MATCHED_TEXT = 120;
+
+function matchedText(message: string): string {
+  const flat = message.trim().replace(/\s+/g, " ");
+  return flat.length > MAX_MATCHED_TEXT ? `${flat.slice(0, MAX_MATCHED_TEXT - 1)}…` : flat;
+}
+
+/**
+ * Where one declared stage opens, read in the terms of its own kind.
+ *
+ * `after` is where the search resumes, which is what makes the stages sequential.
+ * A kind whose evidence was never read — a stage that opens on something the model
+ * said, in a run whose transcript could not be read — finds nothing, and that is
+ * reported as this stage missing rather than as the whole segmentation failing.
+ */
+function boundaryOf(
+  stage: StageSegmentTarget,
+  trace: EvaluationStageTrace,
+  texts: readonly EvaluationStageText[] | null,
+  after: number,
+): { index: number; matched: string } | null {
+  const wanted = stage.pattern.trim().toLowerCase();
+  if (stage.boundaryKind === "tool_called") {
+    // One exact name rather than a glob: tool names are a closed set, and a
+    // wildcard here would only make an already-often-missing boundary harder to
+    // tell apart from a pattern nobody's runtime ever reports.
+    const call = trace.tools.find((item) => item.index > after && item.tool === wanted);
+    return call ? { index: call.index, matched: call.tool } : null;
+  }
+  if (stage.boundaryKind === "message_contains") {
+    if (!texts) return null;
+    // A literal substring, not a regular expression: a pattern is compiled and run
+    // with no timeout and cannot be interrupted mid-match, and what a user writes
+    // here is prose they expect the model to have said.
+    const message = texts.find(
+      (entry) => entry.index > after && entry.text.toLowerCase().includes(wanted),
+    );
+    return message ? { index: message.index, matched: matchedText(message.text) } : null;
+  }
+  const touch = trace.touches.find(
+    (item) => item.index > after && matchesStagePattern(item.path, stage.pattern),
+  );
+  return touch ? { index: touch.index, matched: touch.path } : null;
+}
+
+/**
  * Cuts one run into the stages it was declared to have.
  *
  * The search is sequential — a stage is only looked for after the one before it
@@ -569,17 +622,17 @@ function stageWindowText(
  * step that presents it can say so for itself.
  */
 export function segmentRunIntoStages(
-  touches: readonly EvaluationFileTouch[],
+  trace: EvaluationStageTrace,
   texts: readonly EvaluationStageText[] | null,
   declared: readonly StageSegmentTarget[],
 ): EvaluationStageArtifact[] {
-  const opened: Array<{ index: number; path: string } | null> = [];
-  let after = -1;
+  const opened: Array<{ index: number; matched: string } | null> = [];
+  // Below the -1 a message before every trace event carries, so a skill that
+  // announces its first stage before doing anything in it can still open it.
+  let after = -2;
   for (const stage of declared) {
-    const boundary = touches.find(
-      (touch) => touch.index > after && matchesStagePattern(touch.path, stage.pattern),
-    );
-    opened.push(boundary ?? null);
+    const boundary = boundaryOf(stage, trace, texts, after);
+    opened.push(boundary);
     if (boundary) after = boundary.index;
   }
   return declared.map((stage, position) => {
@@ -590,22 +643,24 @@ export function segmentRunIntoStages(
         name: stage.name,
         pattern: stage.pattern,
         fromIndex: null,
-        matchedPath: null,
+        matched: null,
+        boundaryKind: stage.boundaryKind,
         files: [],
       };
     }
     const next = opened
       .slice(position + 1)
-      .find((entry): entry is { index: number; path: string } => entry !== null);
+      .find((entry): entry is { index: number; matched: string } => entry !== null);
     return {
       stageId: stage.stageId,
       name: stage.name,
       pattern: stage.pattern,
       fromIndex: boundary.index,
-      matchedPath: boundary.path,
+      matched: boundary.matched,
+      boundaryKind: stage.boundaryKind,
       ...(next ? { toIndex: next.index } : {}),
       files: artifactFilesEndState(
-        touches.filter((touch) => !next || touch.index < next.index),
+        trace.touches.filter((touch) => !next || touch.index < next.index),
       ),
       ...(texts ? { output: stageWindowText(texts, boundary.index, next?.index) } : {}),
     };
@@ -626,7 +681,7 @@ export function segmentRunIntoStages(
  * say what it produced until all of them have been looked for.
  */
 export function createStageTraceNode(
-  dependencies: Pick<EvaluationNodeDependencies, "readStageTouches" | "readStageTexts">,
+  dependencies: Pick<EvaluationNodeDependencies, "readStageTrace" | "readStageTexts">,
 ) {
   return defineEvaluationNode<
     { trajectory: typeof TRAJECTORY_PORT },
@@ -641,21 +696,21 @@ export function createStageTraceNode(
     async run(context) {
       const sessionKey = context.in.trajectory.sessionKey?.trim();
       if (!sessionKey) return evaluationExcused.infra("stage_trace_names_no_session");
-      if (!dependencies.readStageTouches) {
-        return evaluationExcused.infra("stage_touches_reader_unavailable", {
+      if (!dependencies.readStageTrace) {
+        return evaluationExcused.infra("stage_trace_reader_unavailable", {
           facts: { sessionKey },
         });
       }
-      let touches: EvaluationFileTouch[] | null;
+      let trace: EvaluationStageTrace | null;
       try {
-        touches = await dependencies.readStageTouches(sessionKey);
+        trace = await dependencies.readStageTrace(sessionKey);
       } catch (cause) {
         return evaluationExcused.infra(
           cause instanceof Error ? cause.message : String(cause),
           { facts: { sessionKey } },
         );
       }
-      if (!touches) {
+      if (!trace) {
         return evaluationExcused.infra("stage_trace_unavailable", { facts: { sessionKey } });
       }
       let texts: EvaluationStageText[] | null = null;
@@ -663,18 +718,20 @@ export function createStageTraceNode(
         try {
           texts = await dependencies.readStageTexts(sessionKey);
         } catch {
-          // An unreadable transcript loses the text half of every stage. That is
-          // reported rather than excused: the file half is still observable, and
-          // a stage's boundary is made of file writes, not of text.
+          // Reported rather than excused: the trace half is still observable, so
+          // a stage that opens on a write or a tool call is still findable. The
+          // ones that open on something the model said are then not found, which
+          // is what `textsObserved: false` below says the reason was.
           texts = null;
         }
       }
-      const stages = segmentRunIntoStages(touches, texts, context.config.stages);
+      const stages = segmentRunIntoStages(trace, texts, context.config.stages);
       return evaluationPass({
         outputs: { stages },
         facts: {
           sessionKey,
-          touchCount: touches.length,
+          touchCount: trace.touches.length,
+          toolCallCount: trace.tools.length,
           stageCount: stages.length,
           foundCount: stages.filter((stage) => stage.fromIndex !== null).length,
           textsObserved: texts !== null,
@@ -711,7 +768,9 @@ export const stageSegmentNode = defineEvaluationNode<
       return evaluationExcused.infra("stage_boundary_not_found", {
         facts: {
           stageId,
-          ...(stage ? { stageName: stage.name, pattern: stage.pattern } : {}),
+          ...(stage
+            ? { stageName: stage.name, pattern: stage.pattern, boundaryKind: stage.boundaryKind }
+            : {}),
         },
       });
     }
@@ -730,8 +789,9 @@ export const stageSegmentNode = defineEvaluationNode<
         stageId: stage.stageId,
         stageName: stage.name,
         pattern: stage.pattern,
+        boundaryKind: stage.boundaryKind,
         fromIndex: stage.fromIndex,
-        matchedPath: stage.matchedPath,
+        matched: stage.matched,
         fileCount: stage.files.length,
         outputObserved: stage.output !== undefined,
         ...(stage.toIndex !== undefined ? { toIndex: stage.toIndex } : {}),

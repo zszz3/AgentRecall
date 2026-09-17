@@ -46,6 +46,7 @@ import {
 import type {
   EvaluationJudgeScript,
   EvaluationNodeDependencies,
+  EvaluationStageBoundaryKind,
   EvaluationTaskValue,
 } from "./nodes/contracts";
 
@@ -132,8 +133,8 @@ export interface EvaluationStageDefinition {
    */
   id: string;
   name: string;
-  /** Only `file_written` for now: the first write of a path matching `pattern`. */
-  boundaryKind: "file_written";
+  /** How this stage says where it begins; `pattern` is read in those terms. */
+  boundaryKind: EvaluationStageBoundaryKind;
   pattern: string;
 }
 

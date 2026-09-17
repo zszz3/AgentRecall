@@ -133,11 +133,49 @@ export interface EvaluationFileTouch {
 }
 
 /**
+ * How a stage says where it begins.
+ *
+ * `file_written` is what a run hands on, `tool_called` what it did, and
+ * `message_contains` what it announced — a skill that narrates its own stages
+ * marks them in prose and may write nothing until the last one.
+ */
+export type EvaluationStageBoundaryKind =
+  | "file_written"
+  | "tool_called"
+  | "message_contains";
+
+/** One tool call, and where in the trace it happened. */
+export interface EvaluationToolCall {
+  /** Index of the trace event that made this call. */
+  index: number;
+  /** Lowercase name, as `toolCalledByEvent` reads it. */
+  tool: string;
+}
+
+/**
+ * What a stage boundary can read off a run's trace.
+ *
+ * One pass, two projections: the files a run wrote and the tools it called are
+ * the same events seen two ways, so reading them through separate readers would
+ * query one session's whole trace once per kind of boundary a plan declares. The
+ * assistant text is not here — it lives in another table and its position is a
+ * message's place relative to the events, not an event of its own.
+ */
+export interface EvaluationStageTrace {
+  /** File touches, in trace order. Empty is an answer: nothing was written. */
+  touches: EvaluationFileTouch[];
+  /** Tool calls, in trace order. */
+  tools: EvaluationToolCall[];
+}
+
+/**
  * One assistant message, placed at the trace position it follows.
  *
  * A stage's window is a range of trace positions, so this is what lets the text a
  * stage produced be told apart from the text the run produced. `-1` means the
- * message came before every trace event, which no stage's window reaches back to.
+ * message came before every trace event, which is where a skill that announces a
+ * stage before doing anything in it puts that announcement — so it can open the
+ * first stage, and only the first.
  */
 export interface EvaluationStageText {
   /** Trace index of the last event before the message; -1 when there was none. */
@@ -165,8 +203,14 @@ export interface EvaluationStageArtifact {
   pattern: string;
   /** Index of the trace event that opened this stage; null when nothing matched. */
   fromIndex: number | null;
-  /** The path that matched the stage's pattern, which is why it opened here. */
-  matchedPath: string | null;
+  /**
+   * What the boundary matched, in the terms of its own kind: a path, a tool name,
+   * or the message that contained the pattern. It is why the stage opened here,
+   * and with `boundaryKind` it is what a report shows for a stage that was found.
+   */
+  matched: string | null;
+  /** How this stage said where it begins. */
+  boundaryKind: EvaluationStageBoundaryKind;
   /** Exclusive. Absent for the last stage found, whose window runs to the end. */
   toIndex?: number;
   files: EvaluationArtifactFile[];
@@ -284,19 +328,21 @@ export interface EvaluationNodeDependencies {
    */
   readArtifactFiles?: (sessionKey: string) => Promise<EvaluationArtifactFile[] | null>;
   /**
-   * The same observation as `readArtifactFiles`, but keeping where in the trace
-   * each touch happened — the fold into an end state discards that, and a stage
-   * boundary is exactly a position.
+   * What a run's trace shows about the files it wrote and the tools it called,
+   * read in one pass and keeping where in the trace each one happened — the fold
+   * into an end state discards that, and a stage boundary is exactly a position.
    */
-  readStageTouches?: (sessionKey: string) => Promise<EvaluationFileTouch[] | null>;
+  readStageTrace?: (sessionKey: string) => Promise<EvaluationStageTrace | null>;
   /**
    * The assistant text of a session, in trace order.
    *
-   * A different question from `readStageTouches` and a different table, so it is
-   * its own reader. Null means there was nothing to read at all; an empty list is
-   * the honest answer for a session whose assistant said nothing, and a stage
-   * whose window held no text is normal rather than broken — the boundary that
-   * opened it was a file write.
+   * A different question from `readStageTrace` and a different table, so it is its
+   * own reader: this is where a stage's window content comes from, and where a
+   * stage that opens on something the model said finds its boundary. Null means
+   * there was nothing to read at all; an empty list is the honest answer for a
+   * session whose assistant said nothing, and a stage whose window held no text is
+   * normal rather than broken. With no transcript at all, a stage that opens on a
+   * message is simply not found, which is reported rather than guessed at.
    */
   readStageTexts?: (sessionKey: string) => Promise<EvaluationStageText[] | null>;
   /**

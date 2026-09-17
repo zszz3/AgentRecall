@@ -89,8 +89,8 @@ export interface RunEvaluationInput {
   ) => Promise<{ output: string; files?: EvaluationArtifactFile[] } | null>;
   /** Which files a session's tool calls touched, for a fresh run's artifact. */
   readArtifactFiles?: (sessionKey: string) => Promise<EvaluationArtifactFile[] | null>;
-  /** The same touches with their positions, for cutting a run into its stages. */
-  readStageTouches?: EvaluationNodeDependencies["readStageTouches"];
+  /** The same touches and calls with their positions, for cutting a run into stages. */
+  readStageTrace?: EvaluationNodeDependencies["readStageTrace"];
   /** The assistant text of a session in trace order, for each stage's window. */
   readStageTexts?: EvaluationNodeDependencies["readStageTexts"];
   /** Runs a judge the user wrote. Absent means script judges excuse themselves. */
@@ -150,7 +150,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     ...(input.readSessionArtifact ? { readSessionArtifact: input.readSessionArtifact } : {}),
     ...(input.readFolderArtifact ? { readFolderArtifact: input.readFolderArtifact } : {}),
     ...(input.readArtifactFiles ? { readArtifactFiles: input.readArtifactFiles } : {}),
-    ...(input.readStageTouches ? { readStageTouches: input.readStageTouches } : {}),
+    ...(input.readStageTrace ? { readStageTrace: input.readStageTrace } : {}),
     ...(input.readStageTexts ? { readStageTexts: input.readStageTexts } : {}),
     ...(input.runJudgeScript ? { runJudgeScript: input.runJudgeScript } : {}),
     ...(input.wait ? { wait: input.wait } : {}),

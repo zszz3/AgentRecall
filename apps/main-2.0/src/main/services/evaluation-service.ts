@@ -102,11 +102,11 @@ export interface EvaluationServiceDependencies {
    */
   readArtifactFiles?: (sessionKey: string) => Promise<EvaluationArtifactFile[] | null>;
   /**
-   * The same observation with each touch's position kept, so a run can be cut
-   * into its declared stages. Without it every stage reports that it could not
-   * be traced rather than scoring a guess.
+   * The same observation with each touch's and each call's position kept, so a
+   * run can be cut into its declared stages. Without it every stage reports that
+   * it could not be traced rather than scoring a guess.
    */
-  readStageTouches?: RunEvaluationInput["readStageTouches"];
+  readStageTrace?: RunEvaluationInput["readStageTrace"];
   /**
    * The assistant text of a session in trace order, so each stage can be handed
    * the text of its own window. Without it a stage still reports its files, and
@@ -383,7 +383,7 @@ export class EvaluationService {
     readSessionArtifact?: EvaluationServiceDependencies["readSessionArtifact"];
     readFolderArtifact?: EvaluationServiceDependencies["readFolderArtifact"];
     readArtifactFiles?: EvaluationServiceDependencies["readArtifactFiles"];
-    readStageTouches?: EvaluationServiceDependencies["readStageTouches"];
+    readStageTrace?: EvaluationServiceDependencies["readStageTrace"];
     readStageTexts?: EvaluationServiceDependencies["readStageTexts"];
     runJudgeScript?: EvaluationServiceDependencies["runJudgeScript"];
     execute: EvaluationAgentExecution;
@@ -452,8 +452,8 @@ export class EvaluationService {
       ...(this.dependencies.readArtifactFiles
         ? { readArtifactFiles: this.dependencies.readArtifactFiles }
         : {}),
-      ...(this.dependencies.readStageTouches
-        ? { readStageTouches: this.dependencies.readStageTouches }
+      ...(this.dependencies.readStageTrace
+        ? { readStageTrace: this.dependencies.readStageTrace }
         : {}),
       ...(this.dependencies.readStageTexts
         ? { readStageTexts: this.dependencies.readStageTexts }

@@ -208,12 +208,16 @@ import { WORKFLOW_PORTABLE_MAX_BYTES } from "../automation/engine/main/hub/workf
 import { writeWorkflowExportFileAtomically } from "./services/workflow-portable-filesystem";
 import type {
   EvaluationArtifactFile,
-  EvaluationFileTouch,
   EvaluationStageText,
+  EvaluationStageTrace,
   EvaluationTrajectoryValue,
 } from "../core/evaluation/nodes/contracts";
 import { createJudgeScriptRunner } from "../core/evaluation/judge-script-runner";
-import { artifactFilesFromTrace, filesTouchedByEvent } from "../core/evaluation/artifact-files";
+import {
+  artifactFilesFromTrace,
+  filesTouchedByEvent,
+  toolCalledByEvent,
+} from "../core/evaluation/artifact-files";
 import type {
   EnvironmentUpsertInput,
   MigrationAgent,
@@ -614,28 +618,32 @@ async function readEvaluationArtifactFiles(
 }
 
 /**
- * The same observation, keeping where in the run each touch happened.
+ * The same recognition, keeping where in the run each touch and each call happened.
  *
  * A stage boundary is a position, and folding the touches into an end state is
  * exactly what throws that away. Recognition is shared with the list above rather
  * than written twice, so the two cannot disagree about what a run touched.
  *
- * An empty list here is an answer, not a gap: the trace had events and none of
- * them wrote a file, so no `file_written` boundary exists. Null is reserved for
- * there being no trace to read at all.
+ * One pass yields both projections because they are read from the same events:
+ * which files were written, and which tools were called. Empty lists here are an
+ * answer rather than a gap — the trace had events and none of them wrote a file,
+ * so no `file_written` boundary exists. Null is reserved for there being no trace
+ * to read at all.
  */
-async function readEvaluationStageTouches(
+async function readEvaluationStageTrace(
   sessionKey: string,
-): Promise<EvaluationFileTouch[] | null> {
+): Promise<EvaluationStageTrace | null> {
   const events = await store.getTraceEvents(sessionKey);
   if (events.length === 0) return null;
-  const touches: EvaluationFileTouch[] = [];
+  const trace: EvaluationStageTrace = { touches: [], tools: [] };
   for (const event of events) {
     for (const file of filesTouchedByEvent(event)) {
-      touches.push({ index: event.index, path: file.path, status: file.status });
+      trace.touches.push({ index: event.index, path: file.path, status: file.status });
     }
+    const tool = toolCalledByEvent(event);
+    if (tool) trace.tools.push({ index: event.index, tool });
   }
-  return touches;
+  return trace;
 }
 
 /**
@@ -649,7 +657,7 @@ async function readEvaluationStageTouches(
  * cannot disagree about what came first.
  *
  * An empty list is an answer here rather than a gap: the caller only asks once
- * `readEvaluationStageTouches` has established there is a trace to read, so
+ * `readEvaluationStageTrace` has established there is a trace to read, so
  * nothing coming back means the assistant's text was not part of it.
  */
 async function readEvaluationStageTexts(sessionKey: string): Promise<EvaluationStageText[]> {
@@ -800,7 +808,7 @@ function createAutomationService(): NativeAutomationService {
     readEvaluationTrajectory: (sessionKey) => readEvaluationTrajectory(sessionKey),
     readEvaluationSessionArtifact: (sessionKey) => readEvaluationSessionArtifact(sessionKey),
     readEvaluationArtifactFiles: (sessionKey) => readEvaluationArtifactFiles(sessionKey),
-    readEvaluationStageTouches: (sessionKey) => readEvaluationStageTouches(sessionKey),
+    readEvaluationStageTrace: (sessionKey) => readEvaluationStageTrace(sessionKey),
     readEvaluationStageTexts: (sessionKey) => readEvaluationStageTexts(sessionKey),
     readEvaluationFolderArtifact: (directory) => readEvaluationFolderArtifact(directory),
     // Inline JS judges always run, sandboxed. A command judge is a real process,
