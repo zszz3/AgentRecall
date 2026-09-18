@@ -116,14 +116,70 @@ export function dimensionState(data: DimensionCardData): "met" | "unmet" | "unde
   return data.score >= (data.threshold ?? 0.6) ? "met" : "unmet";
 }
 
+/** One group of stage-tagged items, in the order the groups are read. */
+export interface DimensionGroup<T> {
+  key: string;
+  /** Absent for a group that is not one declared stage, which gets no heading. */
+  label?: string;
+  /**
+   * The stage this group is, when it is exactly one. Absent for the whole-run
+   * group and for the bucket of stages the plan has dropped, neither of which has
+   * a single total to show.
+   */
+  stage?: string;
+  items: T[];
+}
+
+/**
+ * Groups stage-tagged items for display.
+ *
+ * Order: the items that judge the whole run first and with no heading — they are
+ * not a stage, and heading them would invent a group the plan never declared.
+ * Then the plan's stages in the order it declares them. Then everything tagged
+ * with a stage the plan no longer declares, under one heading and never by id: an
+ * older run still has scores for a stage that was since dropped, and folding them
+ * into the whole run would claim those dimensions judged something they did not.
+ */
+export function dimensionGroups<T>(
+  language: LanguageMode,
+  items: readonly T[],
+  stageOf: (item: T) => string | undefined,
+  declared: ReadonlyArray<{ id: string; name: string }>,
+): Array<DimensionGroup<T>> {
+  const l = (en: string, zh: string) => localize(language, en, zh);
+  const named = declared.map((stage, position) => ({
+    id: stage.id,
+    label: stage.name.trim() || l(`Stage ${position + 1}`, `阶段 ${position + 1}`),
+  }));
+  const groups: Array<DimensionGroup<T>> = [];
+  const whole = items.filter((item) => stageOf(item) === undefined);
+  if (whole.length > 0) groups.push({ key: "run", items: whole });
+  for (const stage of named) {
+    const inStage = items.filter((item) => stageOf(item) === stage.id);
+    if (inStage.length > 0) {
+      groups.push({ key: stage.id, label: stage.label, stage: stage.id, items: inStage });
+    }
+  }
+  const gone = items.filter((item) => {
+    const stage = stageOf(item);
+    return stage !== undefined && !named.some((entry) => entry.id === stage);
+  });
+  if (gone.length > 0) {
+    groups.push({
+      key: "gone",
+      label: l("A stage this plan no longer declares", "方案已不再声明的阶段"),
+      items: gone,
+    });
+  }
+  return groups;
+}
+
 /**
  * The same cards, split by the stage they judge.
  *
  * A run cut into stages reads as those stages rather than as one wall of
  * dimensions, and that a stage's dimensions share its weight is only visible
- * when they are seen side by side. The dimensions judging the whole run come
- * first under no heading: they are not a stage, and heading them as one would
- * invent a group the plan never declared.
+ * when they are seen side by side.
  */
 export function EvalDimensionCards({
   language,
@@ -139,32 +195,7 @@ export function EvalDimensionCards({
   selected?: string | null;
   onSelect?: (dimension: string) => void;
 }): ReactElement {
-  const l = (en: string, zh: string) => localize(language, en, zh);
-  const declared = stages.map((stage, position) => ({
-    id: stage.id,
-    label: stage.name.trim() || l(`Stage ${position + 1}`, `阶段 ${position + 1}`),
-  }));
-  const groups: Array<{ key: string; label?: string; cards: DimensionCardData[] }> = [];
-  const whole = cards.filter((card) => card.stage === undefined);
-  if (whole.length > 0) groups.push({ key: "run", cards: whole });
-  for (const stage of declared) {
-    const inStage = cards.filter((card) => card.stage === stage.id);
-    if (inStage.length > 0) groups.push({ key: stage.id, label: stage.label, cards: inStage });
-  }
-  // An older run still has scores for a stage the plan has since dropped. Kept
-  // and named rather than folded into the whole run, which would claim those
-  // dimensions judged something they did not; never shown by id, since an id is
-  // a key rather than something anybody chose to read.
-  const gone = cards.filter(
-    (card) => card.stage !== undefined && !declared.some((stage) => stage.id === card.stage),
-  );
-  if (gone.length > 0) {
-    groups.push({
-      key: "gone",
-      label: l("A stage this plan no longer declares", "方案已不再声明的阶段"),
-      cards: gone,
-    });
-  }
+  const groups = dimensionGroups(language, cards, (card) => card.stage, stages);
   return (
     <div className="eval-dimension-groups">
       {groups.map((group) => (
@@ -173,7 +204,7 @@ export function EvalDimensionCards({
             ? <h6 className="eval-dimension-group-name">{group.label}</h6>
             : null}
           <div className="eval-dimension-cards">
-            {group.cards.map((card) => (
+            {group.items.map((card) => (
               <EvalDimensionCard
                 key={card.dimension}
                 language={language}
