@@ -692,6 +692,8 @@ export function serializeDeepSeekSessionLog(options: {
   cwd: string;
   messages: readonly { role: "user" | "assistant"; content: string; time: number }[];
   title?: string;
+  parentSession?: string;
+  delegationDepth?: number;
 }): Buffer {
   const lines: string[] = [];
   lines.push(JSON.stringify({
@@ -700,7 +702,8 @@ export function serializeDeepSeekSessionLog(options: {
     id: options.sessionId,
     createdAt: options.createdAt,
     cwd: options.cwd,
-    delegationDepth: 0,
+    ...(options.parentSession ? { parentSession: options.parentSession } : {}),
+    delegationDepth: options.parentSession ? options.delegationDepth ?? 1 : 0,
   }));
 
   let seq = 0;

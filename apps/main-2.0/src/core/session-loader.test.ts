@@ -4149,3 +4149,21 @@ describe("StepCode optional source", () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 });
+
+describe("native child transcript paths", () => {
+  it.each(["/", "\\"])("recognizes Claude and CodeBuddy children with %s separators", (separator) => {
+    const childPath = ["home", "agent", "projects", "workspace", "parent", "subagents", "agent-child.jsonl"].join(separator);
+    const rootPath = ["home", "agent", "projects", "subagents", "agent-root.jsonl"].join(separator);
+    const claudeRows = [{ type: "user", sessionId: "parent", agentId: "child", isSidechain: true, message: { role: "user", content: "child context" } }];
+    const buddyRows = [{ type: "message", sessionId: "child", role: "user", content: [{ type: "input_text", text: "child context" }] }];
+    const stat = { mtimeMs: 1, size: 100 };
+    expect(loadClaudeCliSessionRows(childPath, claudeRows)?.session)
+      .toMatchObject({ rawId: "child", isSubagent: true, parentSessionId: "parent" });
+    expect(loadCodeBuddyCliSessionRows(childPath, buddyRows, stat)?.session)
+      .toMatchObject({ rawId: "child", isSubagent: true, parentSessionId: "parent" });
+    expect(loadClaudeCliSessionRows(rootPath, [{ type: "user", message: { role: "user", content: "root context" } }])?.session)
+      .toMatchObject({ isSubagent: false, parentSessionId: null });
+    expect(loadCodeBuddyCliSessionRows(rootPath, buddyRows, stat)?.session)
+      .toMatchObject({ isSubagent: false, parentSessionId: null });
+  });
+});

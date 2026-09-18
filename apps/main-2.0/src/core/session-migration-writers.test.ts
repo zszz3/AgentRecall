@@ -133,6 +133,38 @@ function loadWrittenSession(
 }
 
 describe("writeMigratedSession", () => {
+  it("rejects unsafe child locations before writing a transcript", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-child-path-"));
+    try {
+      await expect(writeMigratedSession({
+        target: "claude",
+        session: { ...portable(), isSubagent: true, parentSessionId: "../escape" },
+        homeDir,
+      })).rejects.toThrow("Invalid migrated parent session id");
+      expect(filesUnder(homeDir)).toEqual([]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects child metadata loss and removes the unpublished transcript", async () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-child-validation-"));
+    try {
+      await expect(writeMigratedSession({
+        target: "claude",
+        session: { ...portable(), isSubagent: true, parentSessionId: SESSION_ID },
+        homeDir,
+        validate: (filePath) => {
+          const loaded = loadClaudeCliSessionRows(filePath, readRows(filePath))!;
+          return { ...loaded, session: { ...loaded.session, isSubagent: false, parentSessionId: null } };
+        },
+      })).rejects.toThrow("round-trip data does not match");
+      expect(filesUnder(homeDir)).toEqual([]);
+    } finally {
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("emits native Codex subagent activity without model-visible synthetic tool history", async () => {
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "migration-writer-subagent-activity-"));
     try {
@@ -715,6 +747,9 @@ describe("writeMigratedSession", () => {
       "/home/alice",
       NOW,
     )).toBe(`/home/alice/.claude/projects/-home-alice-project/${SESSION_ID}.jsonl`);
+    const childPath = targetFilePathForRemoteEnvironment("claude", "/repo", CHILD_SESSION_ID, "/home/test", NOW, SESSION_ID);
+    expect(childPath).toContain(`/${SESSION_ID}/subagents/agent-${CHILD_SESSION_ID}.jsonl`);
+
   });
 
   it.each([

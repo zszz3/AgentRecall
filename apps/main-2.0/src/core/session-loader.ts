@@ -1,3 +1,4 @@
+import { parseProjectSubagentPath } from "./session-loaders/project-subagent-path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -1807,6 +1808,7 @@ export function loadCodeBuddyCliSessionRows(
 
   const fallbackRawId = path.basename(filePath, ".jsonl");
   const meta = firstCodeBuddySessionMeta(rows, fallbackRawId);
+  const subagent = parseProjectSubagentPath(filePath);
   const messages = extractMessages(rows, "codebuddy");
   const tokenEvents = extractCodeBuddyTokenEvents(rows);
   const traceEvents = extractTraceEvents(rows, "codebuddy");
@@ -1826,6 +1828,8 @@ export function loadCodeBuddyCliSessionRows(
       gitBranch,
       tokenUsage: tokenUsageFromEvents(tokenEvents),
       stat,
+      isSubagent: subagent !== null,
+      parentSessionId: subagent?.parentSessionId ?? null,
     }),
     messages,
     tokenEvents,

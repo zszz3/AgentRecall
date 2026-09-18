@@ -1697,7 +1697,7 @@ async function writeMigratedSessionToSshEnvironment(
       now,
       codexRuntimeCwd: session.projectPath || remoteHome,
     });
-    const remotePath = targetFilePathForRemoteEnvironment(target, session.projectPath, written.sessionId, remoteHome, now);
+    const remotePath = targetFilePathForRemoteEnvironment(target, session.projectPath, written.sessionId, remoteHome, now, session.isSubagent ? session.parentSessionId : null);
     const content = await fs.readFile(written.filePath);
     await runRemotePython(environment, REMOTE_WRITE_FILE_SCRIPT, {
       path: remotePath,

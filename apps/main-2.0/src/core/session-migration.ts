@@ -1,5 +1,5 @@
 import type { MigrationCompressionListener, PreparedMigrationSession } from "./session-migration-compression";
-import { BASE_MIGRATION_TARGETS, isMigrationTarget } from "./migration-targets";
+import { BASE_MIGRATION_TARGETS, isMigrationTarget, migrationTargetDescriptor } from "./migration-targets";
 import type { WrittenMigratedSession } from "./session-migration-writers";
 import { isLocalSessionEnvironment } from "./session-environment";
 import { sessionSourceDescriptor } from "./session-sources";
@@ -221,6 +221,7 @@ export async function migrateSession({
     ? source
     : { ...source, projectPath: targetProjectPath.trim() };
   await validateMigrationRequest(migrationSource, target, deps);
+  const codexTarget = migrationTargetDescriptor(target).family === "codex";
 
   notifyProgress(deps.onProgress, {
     sessionKey: source.sessionKey,
@@ -234,11 +235,11 @@ export async function migrateSession({
   if (subagents.length > 0) portable.subagents = subagents;
   const rootSourceId = portableSourceId(portable);
   const flattenedSubagents = flattenPortableSubagents(subagents);
-  const codexSubagentNormalization = target === "codex"
+  const codexSubagentNormalization = codexTarget
     ? normalizeCursorCodexSubagents(flattenedSubagents, rootSourceId)
     : { subagents: flattenedSubagents, sourceAliases: new Map<string, string>() };
   const portableSubagents = codexSubagentNormalization.subagents;
-  const codexLinkage = target === "codex" && portableSubagents.length > 0 && deps.targetSessionIdFactory
+  const codexLinkage = codexTarget && portableSubagents.length > 0 && deps.targetSessionIdFactory
     ? buildCodexMigrationLinkage(
         portable,
         portableSubagents,
@@ -246,7 +247,7 @@ export async function migrateSession({
         deps.targetSessionIdFactory,
       )
     : null;
-  const migrationPortable = target === "codex"
+  const migrationPortable = codexTarget
     ? withoutSubagentSystemNotifications(portable, portableSubagents.length > 0)
     : portable;
   if (estimatePortableSessionTokens(migrationPortable) > completeTokenLimit) {
@@ -307,6 +308,7 @@ export async function migrateSession({
   let indexed = true;
   let restoredSubagentCount = 0;
   const writtenTargetIdsBySourceId = new Map<string, string>([[rootSourceId, written.sessionId]]);
+  const writtenDepthsBySourceId = new Map<string, number>([[rootSourceId, 0]]);
   for (const subagent of portableSubagents) {
     const subagentSourceId = portableSourceId(subagent);
     const sourceParentId = subagent.parentSessionId?.trim() || rootSourceId;
@@ -316,18 +318,20 @@ export async function migrateSession({
       continue;
     }
     try {
-      const hasDirectChildren = target === "codex" && (
+      const subagentDepth = (writtenDepthsBySourceId.get(sourceParentId) ?? 0) + 1;
+      const hasDirectChildren = codexTarget && (
         (codexLinkage?.childrenByParentSourceId.get(subagentSourceId)?.length ?? 0) > 0
         || (!codexLinkage && portableSubagents.some((candidate) =>
           (candidate.parentSessionId?.trim() || rootSourceId) === subagentSourceId))
       );
       const preparedSubagent = await deps.prepare({
-        ...(target === "codex"
+        ...(codexTarget
           ? withoutSubagentSystemNotifications(subagent, hasDirectChildren)
           : subagent),
         projectPath: prepared.session.projectPath,
         isSubagent: true,
         parentSessionId: targetParentId,
+        subagentDepth,
       });
       const subagentWriteSession = codexLinkage
         ? codexSessionForWrite(preparedSubagent.session, subagentSourceId, targetParentId, codexLinkage)
@@ -340,6 +344,7 @@ export async function migrateSession({
         throw new Error("Codex migration writer did not preserve a reserved subagent session id.");
       }
       writtenTargetIdsBySourceId.set(subagentSourceId, writtenSubagent.sessionId);
+      writtenDepthsBySourceId.set(subagentSourceId, subagentDepth);
       restoredSubagentCount += 1;
       await collectWarning(warnings, async () => {
         await deps.record({

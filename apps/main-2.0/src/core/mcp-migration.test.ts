@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as os from "node:os";
@@ -11,6 +12,8 @@ import {
 import { createInMemoryStore as createStore } from "./postgres/test-session-store";
 import {
   loadClaudeCliSessionRows,
+  loadDefaultSessions,
+  loadDeepSeekCliSessionFile,
   loadCodeBuddyCliSessionFile,
   loadCodeWizSessions,
   loadCodexSessionRows,
@@ -18,7 +21,10 @@ import {
   loadZcodeSessions,
   parseJsonlText,
 } from "./session-loader";
-import { parseDeepSeekSessionLog, projectDeepSeekSession } from "./deepseek-harness";
+import { collectMigrationDescendants, migrateSession, portableSessionFrom } from "./session-migration";
+import { writeMigratedSession } from "./session-migration-writers";
+import { indexMigratedSessionFile } from "./indexer";
+import { parseDeepSeekSessionLog } from "./deepseek-harness";
 import { migrationTargetDescriptor } from "./migration-targets";
 import { defaultSettings } from "./platform";
 import type { IndexedSession, MigrationTarget, SessionMessage, SessionSource } from "./types";
@@ -78,13 +84,12 @@ async function seedLocalSession(
 function loadMigratedSessionFileForTest(target: MigrationTarget, filePath: string, sessionId?: string) {
   if (target === "cursor") return loadCursorTranscriptFile(filePath);
   if (target === "deepseek") {
-    const log = parseDeepSeekSessionLog(fs.readFileSync(filePath));
-    return log ? projectDeepSeekSession(log) : null;
+    return loadDeepSeekCliSessionFile(filePath, fs.statSync(filePath));
   }
 
   const descriptor = migrationTargetDescriptor(target);
   if (descriptor.family === "codebuddy") return loadCodeBuddyCliSessionFile(filePath);
-  if (descriptor.family === "codewiz") return loadCodeWizSessions(path.dirname(filePath)).find((item) => item.session.rawId === path.basename(filePath, ".jsonl")) ?? loadCodeWizSessions(path.dirname(filePath))[0] ?? null;
+  if (descriptor.family === "codewiz") return loadCodeWizSessions(path.dirname(filePath)).find((item) => item.session.rawId === (sessionId ?? path.basename(filePath, ".jsonl"))) ?? loadCodeWizSessions(path.dirname(filePath))[0] ?? null;
   if (descriptor.family === "zcode") {
     const sessions = loadZcodeSessions(path.dirname(path.dirname(path.dirname(filePath))));
     return sessions.find((item) => item.session.rawId === sessionId) ?? sessions[0] ?? null;
@@ -170,6 +175,100 @@ const targetSources: Record<MigrationTarget, SessionSource> = {
   deepseek: "deepseek-cli",
   zcode: "zcode-cli",
 };
+
+describe("ZCode desktop migration", () => {
+  it.each(Object.keys(targetSources) as MigrationTarget[])(
+    "preserves nested children in %s on disk and when indexed",
+    async (target) => {
+      const store = createInMemoryStore();
+      const sourceHome = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-tree-source-"));
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "zcode-tree-target-"));
+      const projectPath = makeProjectDir();
+      try {
+        const dbPath = createZcodeHomeFixture(sourceHome);
+        const db = new DatabaseSync(dbPath);
+        try {
+          const start = Date.parse("2026-06-01T10:00:00Z");
+          for (const [depth, id] of ["root", "child", "grandchild"].entries()) {
+            db.prepare("INSERT INTO session (id, parent_id, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?)")
+              .run(id, depth === 0 ? null : depth === 1 ? "root" : "child", id, projectPath, start + depth * 1000, start + depth * 1000);
+            for (const [index, role] of ["user", "assistant"].entries()) {
+              const messageId = `${id}-${index}`;
+              const time = start + depth * 1000 + index;
+              db.prepare("INSERT INTO message (id, session_id, sequence, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)")
+                .run(messageId, id, index, time, time, JSON.stringify({ role }));
+              db.prepare("INSERT INTO part (id, message_id, session_id, sequence, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                .run(messageId, messageId, id, 0, time, time, JSON.stringify({ type: "text", text: `${id} ${role} 内容 🐛` }));
+            }
+          }
+        } finally {
+          db.close();
+        }
+        const originalDatabase = fs.readFileSync(dbPath);
+        const loadedSources = loadZcodeSessions(path.join(sourceHome, ".zcode"));
+        for (const loaded of loadedSources) {
+          await store.upsertIndexedSession(loaded.session, loaded.messages, loaded.tokenEvents, loaded.traceEvents);
+        }
+        const source = (await store.getSession("zcode:root"))!;
+        const descendants = collectMigrationDescendants(source, await store.searchSessions({ excludeSubagents: false }));
+        const subagents = await Promise.all(descendants.map(async (child) =>
+          portableSessionFrom(child, await store.getAllMessages(child.sessionKey))));
+        if (target === "zcode") createZcodeHomeFixture(homeDir);
+        const launch = vi.fn(async () => {});
+        const result = await migrateSession({
+          source,
+          messages: await store.getAllMessages(source.sessionKey),
+          subagents,
+          target,
+          deps: {
+            inspectCli: noOpInspect,
+            prepare: async (session) => ({ session, strategy: "complete" }),
+            write: (target, session, sessionId) => writeMigratedSession({ target, session, sessionId, homeDir }),
+            record: (record) => store.recordSessionMigration(record),
+            refreshIndex: async (target, filePath, sessionId) => { await indexMigratedSessionFile(store, target, filePath, sessionId); },
+            launch,
+            resumeCommand: () => "resume",
+            fallbackResumeCommand: () => "resume",
+            idFactory: randomUUID,
+            targetSessionIdFactory: randomUUID,
+            now: Date.now,
+            projectPathExists: fs.existsSync,
+            projectPathIsDirectory: (directory) => fs.statSync(directory).isDirectory(),
+          },
+        });
+        expect(result.warning).toBeUndefined();
+        expect(result.restoredSubagentCount).toBe(2);
+        expect(result.indexed).toBe(true);
+        expect(launch).toHaveBeenCalledTimes(1);
+        const rediscovered = loadDefaultSessions({
+          homeDir, includeTclaude: true, includeTcodex: true, includeCodeBuddyCli: true,
+          includeCodeWizCli: true, includeCursorAgent: true, includeZcode: true, includeDeepSeekCli: true,
+        });
+        let parentSessionId: string | null = null;
+        for (const [depth, id] of ["root", "child", "grandchild"].entries()) {
+          const [record] = await store.listSessionMigrations(`zcode:${id}`);
+          const loaded = loadMigratedSessionFileForTest(target, record.targetFilePath, record.targetSessionId)!;
+          const indexed = await store.getSession(loaded.session.sessionKey);
+          const rescanned = rediscovered.find((item) => item.session.sessionKey === loaded.session.sessionKey);
+          for (const session of [loaded.session, indexed, rescanned?.session]) {
+            expect(session).toMatchObject({ isSubagent: id !== "root", parentSessionId });
+          }
+          expect(loaded.messages.map(({ role, content }) => ({ role, content })))
+            .toEqual(["user", "assistant"].map((role) => ({ role, content: `${id} ${role} 内容 🐛` })));
+          if (target === "deepseek") {
+            expect(parseDeepSeekSessionLog(fs.readFileSync(record.targetFilePath))?.header.delegationDepth).toBe(depth);
+          }
+          parentSessionId = record.targetSessionId;
+        }
+        expect(fs.readFileSync(dbPath)).toEqual(originalDatabase);
+      } finally {
+        fs.rmSync(sourceHome, { recursive: true, force: true });
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+});
 
 describe("migrateSessionForMcp — happy path", () => {
   it.each(Object.keys(targetSources) as MigrationTarget[])(
