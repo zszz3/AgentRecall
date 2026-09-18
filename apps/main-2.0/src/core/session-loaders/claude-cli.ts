@@ -1,3 +1,4 @@
+import { parseProjectSubagentPath } from "./project-subagent-path";
 import * as path from "node:path";
 
 import { cleanTitle } from "../format-adapters";
@@ -178,7 +179,9 @@ export function loadClaudeCliSessionRows(
     includeTraceEvents?: boolean;
   } = {},
 ): LoadedSession | null {
-  const rawId = options.rawId || path.basename(filePath, ".jsonl");
+  const subagent = parseProjectSubagentPath(filePath);
+  const relationRow = subagent ? rows.find((row) => isRecord(row) && typeof row.agentId === "string") : undefined;
+  const rawId = options.rawId || (subagent ? stringField(relationRow, "agentId") || subagent.agentId : path.basename(filePath, ".jsonl"));
   const visibleRows = claudeVisibleConversationRows(rows);
   const messages = extractMessages(visibleRows, "claude");
   const tokenEvents = extractClaudeTokenEvents(rows);
@@ -215,8 +218,8 @@ export function loadClaudeCliSessionRows(
       gitBranch,
       tokenUsage,
       stat: options.stat,
-      isSubagent: options.isSubagent,
-      parentSessionId: options.parentSessionId,
+      isSubagent: options.isSubagent ?? subagent !== null,
+      parentSessionId: options.parentSessionId ?? (subagent ? stringField(relationRow, "sessionId") || subagent.parentSessionId : null),
     }),
     messages,
     tokenEvents,

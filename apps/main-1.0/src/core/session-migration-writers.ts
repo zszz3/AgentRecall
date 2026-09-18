@@ -87,7 +87,7 @@ export async function writeMigratedSession(options: WriteMigratedSessionOptions)
   const codexRuntimeCwd = migrationTargetDescriptor(options.target).family === "codex"
     ? session.projectPath || options.codexRuntimeCwd || homeDir
     : session.projectPath;
-  const filePath = targetFilePath(options.target, session.projectPath, sessionId, homeDir, now);
+  const filePath = targetFilePath(options.target, session.projectPath, sessionId, homeDir, now, session.isSubagent ? session.parentSessionId : null);
   const targetHome = path.join(homeDir, TARGET_ROOTS[options.target]);
   const runtimeMetadata = await loadMigrationTargetRuntimeMetadata(options.target, targetHome);
   const rows = serializeSession(options.target, session, sessionId, createId, runtimeMetadata, codexRuntimeCwd);
@@ -142,6 +142,9 @@ async function writeMigratedDeepSeekSession(
     createdAt,
     cwd,
     title: cleanTitle(options.session.title),
+    ...(options.session.isSubagent && options.session.parentSessionId
+      ? { parentSession: options.session.parentSessionId, delegationDepth: options.session.subagentDepth ?? 1 }
+      : {}),
     messages: options.session.messages.map((message) => ({
       role: message.role,
       content: message.content,
@@ -161,8 +164,10 @@ async function writeMigratedDeepSeekSession(
     const view = projectDeepSeekSession(parsed);
     const loadedMessages = view.messages.map((message) => ({ role: message.role, content: message.content }));
     const expected = options.session.messages.map((message) => ({ role: message.role, content: message.content }));
-    if (JSON.stringify(loadedMessages) !== JSON.stringify(expected)) {
-      throw new Error("DeepSeek migration round trip did not preserve the transcript.");
+    if (JSON.stringify(loadedMessages) !== JSON.stringify(expected)
+      || (parsed.header.parentSession ?? null) !== (options.session.isSubagent ? options.session.parentSessionId ?? null : null)
+      || (parsed.header.delegationDepth > 0) !== (options.session.isSubagent === true)) {
+      throw new Error("DeepSeek migration round trip did not preserve the transcript or parent relationship.");
     }
     await fs.promises.chmod(tempPath, 0o600);
     await fs.promises.rename(tempPath, filePath);
@@ -637,16 +642,15 @@ function serializeCodex(
       title: session.title,
       originator: "agent-recall",
       cli_version: "migration",
-      ...(includeVsCodeEvents
+      ...(parentSessionId
         ? {
-            source: parentSessionId
-              ? codexSubagentSource(parentSessionId, subagentPath!, subagentNickname!, session.subagentDepth ?? 1)
-              : "vscode",
-            thread_source: parentSessionId ? "subagent" : "user",
-            history_mode: "legacy",
-            ...(parentSessionId ? { agent_nickname: subagentNickname, agent_path: subagentPath } : {}),
+            source: codexSubagentSource(parentSessionId, subagentPath!, subagentNickname!, session.subagentDepth ?? 1),
+            thread_source: "subagent",
+            agent_nickname: subagentNickname,
+            agent_path: subagentPath,
           }
-        : {}),
+        : includeVsCodeEvents ? { source: "vscode", thread_source: "user" } : {}),
+      ...(includeVsCodeEvents ? { history_mode: "legacy" } : {}),
       model_provider: modelProvider,
     },
   }];
@@ -803,12 +807,14 @@ function serializeClaude(
   createId: () => string,
   model: string,
 ): unknown[] {
+  const parentSessionId = session.isSubagent ? session.parentSessionId : null;
   const usedIds = new Set<string>([sessionId]);
   let parentUuid: string | null = null;
   const rows: unknown[] = [{
     type: "ai-title",
     aiTitle: session.title,
-    sessionId,
+    sessionId: parentSessionId ?? sessionId,
+    ...(parentSessionId ? { agentId: sessionId } : {}),
   }];
 
   for (const portableMessage of session.messages) {
@@ -828,7 +834,7 @@ function serializeClaude(
 
     rows.push({
       parentUuid,
-      isSidechain: false,
+      isSidechain: Boolean(parentSessionId),
       type: portableMessage.role,
       message,
       uuid,
@@ -836,7 +842,8 @@ function serializeClaude(
       userType: "external",
       entrypoint: "cli",
       cwd: session.projectPath,
-      sessionId,
+      sessionId: parentSessionId ?? sessionId,
+      ...(parentSessionId ? { agentId: sessionId } : {}),
       version: "migration",
     });
     parentUuid = uuid;
@@ -948,7 +955,7 @@ function insertCodeWizSession(
   `);
   const insertSession = db.prepare(`
     INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, share_url, summary_additions, summary_deletions, summary_files, summary_diffs, revert, permission, time_created, time_updated, time_compacting, time_archived, workspace_id)
-    VALUES (?, ?, NULL, ?, ?, ?, 'migration', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL, NULL, NULL)
+    VALUES (?, ?, ?, ?, ?, ?, 'migration', NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL, NULL, NULL)
   `);
   const insertMessage = db.prepare(`
     INSERT INTO message (id, session_id, time_created, time_updated, data)
@@ -965,6 +972,7 @@ function insertCodeWizSession(
     insertSession.run(
       sessionId,
       projectId,
+      session.isSubagent ? session.parentSessionId ?? null : null,
       slugFromTitle(session.title || sessionId),
       session.projectPath,
       session.title || sessionId,
@@ -1046,7 +1054,11 @@ export function targetFilePath(
   sessionId: string,
   homeDir: string,
   now: Date,
+  parentSessionId?: string | null,
 ): string {
+  if (parentSessionId && !UUID_PATTERN.test(parentSessionId)) {
+    throw new Error(`Invalid migrated parent session id: ${parentSessionId}`);
+  }
   const family = migrationTargetDescriptor(target).family;
   if (family === "codewiz") return path.join(homeDir, ".local", "share", "codewiz", "opencode.db");
   if (target === "zcode") return path.join(homeDir, ".zcode", "cli", "db", "db.sqlite");
@@ -1060,7 +1072,10 @@ export function targetFilePath(
   }
 
   if (family === "claude") {
-    return path.join(homeDir, root, "projects", encodeClaudeProjectDir(projectPath), `${sessionId}.jsonl`);
+    const projectDir = path.join(homeDir, root, "projects", encodeClaudeProjectDir(projectPath));
+    return parentSessionId
+      ? path.join(projectDir, parentSessionId, "subagents", `agent-${sessionId}.jsonl`)
+      : path.join(projectDir, `${sessionId}.jsonl`);
   }
 
   if (target === "cursor") {
@@ -1071,7 +1086,7 @@ export function targetFilePath(
       "projects",
       workspaceSlug,
       "agent-transcripts",
-      sessionId,
+      ...(parentSessionId ? [parentSessionId, "subagents"] : [sessionId]),
       `${sessionId}.jsonl`,
     );
   }
@@ -1082,7 +1097,10 @@ export function targetFilePath(
     return path.join(dshHome, "sessions", key, encodeDeepSeekPathSegment(sessionId), DEEPSEEK_HARNESS_LOG_NAME);
   }
 
-  return path.join(homeDir, root, "projects", encodeCodeBuddyProjectDir(projectPath), `${sessionId}.jsonl`);
+  const projectDir = path.join(homeDir, root, "projects", encodeCodeBuddyProjectDir(projectPath));
+  return parentSessionId
+    ? path.join(projectDir, parentSessionId, "subagents", `agent-${sessionId}.jsonl`)
+    : path.join(projectDir, `${sessionId}.jsonl`);
 }
 
 export function targetFilePathForRemoteEnvironment(
@@ -1091,8 +1109,9 @@ export function targetFilePathForRemoteEnvironment(
   sessionId: string,
   homeDir: string,
   now: Date,
+  parentSessionId?: string | null,
 ): string {
-  return targetFilePath(target, projectPath, sessionId, homeDir, now).replaceAll("\\", "/");
+  return targetFilePath(target, projectPath, sessionId, homeDir, now, parentSessionId).replaceAll("\\", "/");
 }
 
 const TARGET_ROOTS: Record<MigrationTarget, string> = {
@@ -1600,8 +1619,10 @@ function validateCodexStructure(
 
 function validateClaudeStructure(rows: unknown[], sessionId: string, session: PortableSession, model: string): void {
   if (rows.length !== session.messages.length + 1) failValidation("claude", "has an unexpected row count");
+  const parentSessionId = session.isSubagent ? session.parentSessionId : null;
+  const nativeSessionId = parentSessionId ?? sessionId;
   const title = record(rows[0]);
-  if (title?.type !== "ai-title" || title.aiTitle !== session.title || title.sessionId !== sessionId) {
+  if (title?.type !== "ai-title" || title.aiTitle !== session.title || title.sessionId !== nativeSessionId || title.agentId !== (parentSessionId ? sessionId : undefined)) {
     failValidation("claude", "has invalid title metadata");
   }
 
@@ -1622,7 +1643,9 @@ function validateClaudeStructure(rows: unknown[], sessionId: string, session: Po
       || row.type !== portableMessage.role
       || row.timestamp !== portableMessage.timestamp
       || row.cwd !== session.projectPath
-      || row.sessionId !== sessionId
+      || row.sessionId !== nativeSessionId
+      || row.isSidechain !== Boolean(parentSessionId)
+      || row.agentId !== (parentSessionId ? sessionId : undefined)
       || message?.role !== portableMessage.role
       || (portableMessage.role === "assistant" && message.model !== model)
       || !contentMatches
@@ -1781,6 +1804,8 @@ function validateRoundTrip(
     || loaded.session.source !== descriptor.source
     || loaded.session.rawId !== sessionId
     || loaded.session.projectPath !== portable.projectPath
+    || Boolean(loaded.session.isSubagent) !== (portable.isSubagent === true)
+    || (loaded.session.parentSessionId ?? null) !== (portable.isSubagent ? portable.parentSessionId ?? null : null)
     || !titleOk
     || !messagesMatch
   ) {

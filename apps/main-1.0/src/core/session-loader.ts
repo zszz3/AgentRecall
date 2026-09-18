@@ -1,3 +1,4 @@
+import { parseProjectSubagentPath } from "./session-loaders/project-subagent-path";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -3149,7 +3150,9 @@ export function loadClaudeCliSessionRows(
     includeTraceEvents?: boolean;
   } = {},
 ): LoadedSession | null {
-  const rawId = options.rawId || path.basename(filePath, ".jsonl");
+  const subagent = parseProjectSubagentPath(filePath);
+  const relationRow = subagent ? rows.find((row) => isRecord(row) && typeof row.agentId === "string") : undefined;
+  const rawId = options.rawId || (subagent ? stringField(relationRow, "agentId") || subagent.agentId : path.basename(filePath, ".jsonl"));
   const visibleRows = claudeVisibleConversationRows(rows);
   const messages = extractMessages(visibleRows, "claude");
   const tokenEvents = extractClaudeTokenEvents(rows);
@@ -3179,8 +3182,8 @@ export function loadClaudeCliSessionRows(
       gitBranch,
       tokenUsage,
       stat: options.stat,
-      isSubagent: options.isSubagent,
-      parentSessionId: options.parentSessionId,
+      isSubagent: options.isSubagent ?? subagent !== null,
+      parentSessionId: options.parentSessionId ?? (subagent ? stringField(relationRow, "sessionId") || subagent.parentSessionId : null),
     }),
     messages,
     tokenEvents,
@@ -3354,6 +3357,7 @@ export function loadCodeBuddyCliSessionRows(
 
   const fallbackRawId = path.basename(filePath, ".jsonl");
   const meta = firstCodeBuddySessionMeta(rows, fallbackRawId);
+  const subagent = parseProjectSubagentPath(filePath);
   const messages = extractMessages(rows, "codebuddy");
   const tokenEvents = extractCodeBuddyTokenEvents(rows);
   const traceEvents = extractTraceEvents(rows, "codebuddy");
@@ -3373,6 +3377,8 @@ export function loadCodeBuddyCliSessionRows(
       gitBranch,
       tokenUsage: tokenUsageFromEvents(tokenEvents),
       stat,
+      isSubagent: subagent !== null,
+      parentSessionId: subagent?.parentSessionId ?? null,
     }),
     messages,
     tokenEvents,
