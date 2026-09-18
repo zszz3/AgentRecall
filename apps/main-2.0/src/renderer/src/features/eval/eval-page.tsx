@@ -13,6 +13,7 @@ import {
 } from "../../../../automation/engine/shared/evaluation/technical-writing-eval";
 import { formatRelativeTime } from "../../../../core/format-session";
 import { localize, type LanguageMode } from "../../language";
+import { dimensionGroups } from "./eval-dimension-card";
 import { EvalDatasetsPage } from "./eval-datasets-page";
 import { EvalEvaluatorsPage } from "./eval-evaluators-page";
 import { EvalPlanPage } from "./eval-plan-page";
@@ -1151,6 +1152,7 @@ function SuiteRunsSection({
                 language={language}
                 base={comparison.base}
                 compare={comparison.compare}
+                stages={suite.stages}
                 onClose={() => setComparison(null)}
               />
             ) : null}
@@ -1419,11 +1421,14 @@ function RunComparison({
   language,
   base,
   compare,
+  stages,
   onClose,
 }: {
   language: LanguageMode;
   base: EvaluationRun;
   compare: EvaluationRun;
+  /** The plan's declared stages, whose order is the order of the groups. */
+  stages: ReadonlyArray<{ id: string; name: string }>;
   onClose: () => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
@@ -1485,6 +1490,91 @@ function RunComparison({
     base.consistency?.repeatedCaseCount ?? 0,
     compare.consistency?.repeatedCaseCount ?? 0,
   );
+  // Which stage a dimension judged, read from whichever run tagged it: a dimension
+  // only one side scored still belongs to the stage that side put it in.
+  const stageOf = (name: string): string | undefined =>
+    (base.dimensions ?? []).find((entry) => entry.dimension === name)?.stage
+    ?? (compare.dimensions ?? []).find((entry) => entry.dimension === name)?.stage;
+  const stageGroups = dimensionGroups(language, dimensionNames, stageOf, stages).map((group) => {
+    const totalIn = (run: EvaluationRun) => group.stage === undefined
+      ? undefined
+      : (run.stageScores ?? []).find((entry) => entry.stage === group.stage);
+    const fromBase = totalIn(base);
+    const fromCompare = totalIn(compare);
+    return {
+      group,
+      fromBase,
+      fromCompare,
+      delta: fromBase?.score != null && fromCompare?.score != null
+        ? fromCompare.score - fromBase.score
+        : null,
+    };
+  });
+  const stageTotalUnrecorded = stageGroups.some(
+    ({ group, fromBase, fromCompare }) =>
+      group.stage !== undefined && (fromBase === undefined || fromCompare === undefined),
+  );
+  const dimensionRow = (name: string): ReactElement => {
+    const fromBase = (base.dimensions ?? []).find((entry) => entry.dimension === name);
+    const fromCompare = (compare.dimensions ?? []).find((entry) => entry.dimension === name);
+    const delta = fromBase?.score != null && fromCompare?.score != null
+      ? fromCompare.score - fromBase.score
+      : null;
+    const reading: DeltaReading = delta !== null
+      ? deltaReading(delta, runBand)
+      : "unmeasured";
+    const weight = fromCompare?.weight ?? fromBase?.weight ?? 1;
+    const weightChanged = fromBase !== undefined && fromCompare !== undefined
+      && fromBase.weight !== fromCompare.weight;
+    return (
+      <li key={name} className="eval-comparison-dimension-row">
+        <span className="eval-comparison-dimension-name">
+          {name}
+          {weightChanged ? (
+            <span className="eval-muted">
+              {` · ${l("weight", "权重")} ${fromBase?.weight} → ${fromCompare?.weight}`}
+            </span>
+          ) : weight !== 1 ? (
+            <span className="eval-muted">{` · ${l("weight", "权重")} ${weight}`}</span>
+          ) : null}
+        </span>
+        <span
+          className="eval-comparison-dimension-scores"
+          title={l(
+            `Averaged over the cases that scored this dimension: ${fromBase?.scoredCaseCount ?? 0} in the base run, ${fromCompare?.scoredCaseCount ?? 0} in the compare run.`,
+            `按为该维度打了分的用例求平均：基准运行 ${fromBase?.scoredCaseCount ?? 0} 个，对比运行 ${fromCompare?.scoredCaseCount ?? 0} 个。`,
+          )}
+        >
+          {fromBase?.score != null ? fromBase.score.toFixed(2) : "—"}
+          {" → "}
+          {fromCompare?.score != null ? fromCompare.score.toFixed(2) : "—"}
+          {` · n=${fromCompare?.scoredCaseCount ?? 0}`}
+        </span>
+        {delta != null ? (
+          <span
+            className={`eval-badge ${unattributable ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
+            title={deltaTitle(reading, runBand, l)}
+          >
+            {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+          </span>
+        ) : !fromBase ? (
+          <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行存在")}</span>
+        ) : !fromCompare ? (
+          <span className="eval-badge eval-badge-dim">{l("Only in base run", "仅基准运行存在")}</span>
+        ) : (
+          <span
+            className="eval-badge eval-badge-dim"
+            title={l(
+              "One side decided nothing for this dimension, so there is no delta to read.",
+              "其中一次运行没有为这个维度得出结论，所以没有涨跌可判读。",
+            )}
+          >
+            {l("Not decided", "未判定")}
+          </span>
+        )}
+      </li>
+    );
+  };
 
   return (
     <div className="eval-run-comparison">
@@ -1510,6 +1600,17 @@ function RunComparison({
         {!scoringRecorded ? (
           <span className="eval-badge eval-badge-dim">
             {l("Scoring not recorded", "计分口径未记录")}
+          </span>
+        ) : null}
+        {stageTotalUnrecorded ? (
+          <span
+            className="eval-badge eval-badge-dim"
+            title={l(
+              "One of the two runs was scored before a stage total was recorded, so that stage shows no difference rather than no change.",
+              "两次运行中有一次是在记录阶段总分之前评的，所以那个阶段显示的是没有差值，而不是没有变化。",
+            )}
+          >
+            {l("Stage totals not recorded", "阶段总分未记录")}
           </span>
         ) : null}
         {totalDelta != null ? (
@@ -1596,75 +1697,50 @@ function RunComparison({
           <span
             className="eval-comparison-section-title"
             title={l(
-              "Each dimension's average over the cases that scored it, read against the same repeat spread as the total: there is no per-dimension spread.",
-              "每个维度在已评分用例上的平均分，判读用的是与总分相同的重复波动带——维度本身没有单独的波动数据。",
+              "Each dimension's average over the cases that scored it, read against the same repeat spread as the total: there is no per-dimension spread, and no per-stage one either.",
+              "每个维度在已评分用例上的平均分，判读用的是与总分相同的重复波动带——维度本身没有单独的波动数据，阶段也没有。",
             )}
           >
             {l("By dimension", "按维度")}
           </span>
-          <ul className="eval-comparison-dimension-list">
-            {dimensionNames.map((name) => {
-              const fromBase = (base.dimensions ?? []).find((entry) => entry.dimension === name);
-              const fromCompare = (compare.dimensions ?? []).find((entry) => entry.dimension === name);
-              const delta = fromBase?.score != null && fromCompare?.score != null
-                ? fromCompare.score - fromBase.score
-                : null;
-              const reading: DeltaReading = delta !== null
-                ? deltaReading(delta, runBand)
-                : "unmeasured";
-              const weight = fromCompare?.weight ?? fromBase?.weight ?? 1;
-              const weightChanged = fromBase !== undefined && fromCompare !== undefined
-                && fromBase.weight !== fromCompare.weight;
-              return (
-                <li key={name} className="eval-comparison-dimension-row">
-                  <span className="eval-comparison-dimension-name">
-                    {name}
-                    {weightChanged ? (
-                      <span className="eval-muted">
-                        {` · ${l("weight", "权重")} ${fromBase?.weight} → ${fromCompare?.weight}`}
+          {stageGroups.map(({ group, fromBase, fromCompare, delta }) => {
+            const reading: DeltaReading = delta !== null
+              ? deltaReading(delta, runBand)
+              : "unmeasured";
+            return (
+              <section key={group.key} className="eval-comparison-stage-group">
+                {group.label ? (
+                  <h6 className="eval-comparison-stage-name">
+                    <span>{group.label}</span>
+                    {group.stage ? (
+                      <span
+                        className="eval-comparison-stage-total"
+                        title={l(
+                          `Weighted over the dimensions that scored this stage: ${fromBase?.scoredDimensionCount ?? 0} of ${fromBase?.dimensionCount ?? 0} in the base run, ${fromCompare?.scoredDimensionCount ?? 0} of ${fromCompare?.dimensionCount ?? 0} in the compare run.`,
+                          `按该阶段里打出分的维度加权：基准运行 ${fromBase?.scoredDimensionCount ?? 0}/${fromBase?.dimensionCount ?? 0} 条，对比运行 ${fromCompare?.scoredDimensionCount ?? 0}/${fromCompare?.dimensionCount ?? 0} 条。`,
+                        )}
+                      >
+                        {fromBase?.score != null ? fromBase.score.toFixed(2) : "—"}
+                        {" → "}
+                        {fromCompare?.score != null ? fromCompare.score.toFixed(2) : "—"}
                       </span>
-                    ) : weight !== 1 ? (
-                      <span className="eval-muted">{` · ${l("weight", "权重")} ${weight}`}</span>
                     ) : null}
-                  </span>
-                  <span
-                    className="eval-comparison-dimension-scores"
-                    title={l(
-                      `Averaged over the cases that scored this dimension: ${fromBase?.scoredCaseCount ?? 0} in the base run, ${fromCompare?.scoredCaseCount ?? 0} in the compare run.`,
-                      `按为该维度打了分的用例求平均：基准运行 ${fromBase?.scoredCaseCount ?? 0} 个，对比运行 ${fromCompare?.scoredCaseCount ?? 0} 个。`,
-                    )}
-                  >
-                    {fromBase?.score != null ? fromBase.score.toFixed(2) : "—"}
-                    {" → "}
-                    {fromCompare?.score != null ? fromCompare.score.toFixed(2) : "—"}
-                    {` · n=${fromCompare?.scoredCaseCount ?? 0}`}
-                  </span>
-                  {delta != null ? (
-                    <span
-                      className={`eval-badge ${unattributable ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
-                      title={deltaTitle(reading, runBand, l)}
-                    >
-                      {delta > 0 ? "+" : ""}{delta.toFixed(2)}
-                    </span>
-                  ) : !fromBase ? (
-                    <span className="eval-badge eval-badge-dim">{l("Only in compare run", "仅对比运行存在")}</span>
-                  ) : !fromCompare ? (
-                    <span className="eval-badge eval-badge-dim">{l("Only in base run", "仅基准运行存在")}</span>
-                  ) : (
-                    <span
-                      className="eval-badge eval-badge-dim"
-                      title={l(
-                        "One side decided nothing for this dimension, so there is no delta to read.",
-                        "其中一次运行没有为这个维度得出结论，所以没有涨跌可判读。",
-                      )}
-                    >
-                      {l("Not decided", "未判定")}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                    {delta != null ? (
+                      <span
+                        className={`eval-badge ${unattributable ? "eval-badge-dim" : deltaBadgeClass(reading)}`}
+                        title={deltaTitle(reading, runBand, l)}
+                      >
+                        {delta > 0 ? "+" : ""}{delta.toFixed(2)}
+                      </span>
+                    ) : null}
+                  </h6>
+                ) : null}
+                <ul className="eval-comparison-dimension-list">
+                  {group.items.map(dimensionRow)}
+                </ul>
+              </section>
+            );
+          })}
         </div>
       ) : null}
       {keys.length === 0 ? (

@@ -748,6 +748,27 @@
   color: var(--text-dim);
 }
 
+.eval-comparison-stage-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eval-comparison-stage-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.eval-comparison-stage-total {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
 .eval-comparison-dimension-list {
   display: flex;
   flex-direction: column;
