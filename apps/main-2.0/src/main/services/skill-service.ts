@@ -77,6 +77,7 @@ import type {
   EvaluationRun,
   EvaluationRunSummary,
   EvaluationScoringConfig,
+  EvaluationStageDefinition,
 } from "../../automation/contracts";
 import { isTechnicalWritingSkill } from "../../automation/engine/shared/evaluation/technical-writing-eval";
 import { evaluateSkillFindings, type SkillFinding } from "../../core/skill-eval-findings";
@@ -144,9 +145,22 @@ export interface SkillEvalSuite {
   evaluatorIds: string[];
   repetitions: number;
   caseCount: number;
+  /**
+   * The plan's declared stages, as labels. A run's scores carry only the stage
+   * id, and an id is a key rather than something anybody chose to read, so a
+   * report that groups by stage needs the names from the plan that declared them.
+   */
+  stages: Array<{ id: string; name: string }>;
   createdAt: number;
   updatedAt: number;
   lastRun: SkillEvalSuiteLastRun | null;
+}
+
+/** The plan's stages reduced to what a report shows: an id to group by and a name. */
+function stageLabels(
+  stages: EvaluationStageDefinition[] | null | undefined,
+): Array<{ id: string; name: string }> {
+  return (stages ?? []).map(({ id, name }) => ({ id, name }));
 }
 
 /**
@@ -990,6 +1004,7 @@ export class SkillService {
         evaluatorIds: experiment.evaluatorIds,
         repetitions: experiment.repetitions,
         caseCount: datasetById.get(experiment.datasetId)?.items.length ?? 0,
+        stages: stageLabels(experiment.stages),
         createdAt: experiment.createdAt,
         updatedAt: experiment.updatedAt,
         lastRun: last
@@ -1067,6 +1082,7 @@ export class SkillService {
       evaluatorIds: experiment.evaluatorIds,
       repetitions: experiment.repetitions,
       caseCount: dataset.items.length,
+      stages: stageLabels(experiment.stages),
       createdAt: experiment.createdAt,
       updatedAt: experiment.updatedAt,
       lastRun: null,
