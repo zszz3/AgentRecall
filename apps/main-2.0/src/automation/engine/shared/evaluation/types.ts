@@ -337,6 +337,12 @@ export interface EvaluationRun {
   /** Dimension scores averaged across cases. */
   dimensions?: EvaluationRunScore["dimensions"];
   /**
+   * Each declared stage's own total, measured. Named apart from a plan's
+   * `stages`, which are the definitions this was measured against. Absent on runs
+   * recorded before it existed and on plans that declare no stages.
+   */
+  stageScores?: EvaluationRunScore["stages"];
+  /**
    * How far apart each case's repetitions landed. Absent on runs recorded before
    * it existed; a suite that runs every case once has a `repeatedCaseCount` of
    * zero and no mean, which is not the same as being stable.

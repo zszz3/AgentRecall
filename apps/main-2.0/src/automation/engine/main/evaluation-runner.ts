@@ -223,6 +223,7 @@ export async function runEvaluation(input: RunEvaluationInput): Promise<Evaluati
     scoredCaseCount: outcome.score.scoredCaseCount,
     unscoredCaseCount: outcome.score.unscoredCaseCount,
     dimensions: outcome.score.dimensions,
+    ...(outcome.score.stages.length > 0 ? { stageScores: outcome.score.stages } : {}),
     consistency: runConsistency(results),
   };
 
@@ -243,6 +244,7 @@ interface EvaluationRunSnapshotScore {
   scoredCaseCount?: number;
   unscoredCaseCount?: number;
   dimensions?: EvaluationRun["dimensions"];
+  stageScores?: EvaluationRun["stageScores"];
   consistency?: EvaluationRunConsistency;
 }
 

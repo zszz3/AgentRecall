@@ -2095,4 +2095,16 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
          AND scoring ->> 'minCoverage' = '1';
     `,
   ],
+}, {
+  version: 55,
+  // A stage's total is a weighted average over its dimensions, which is scorer
+  // arithmetic. Storing it keeps the report from becoming a second definition of
+  // that arithmetic, free to drift from the one that produced every other number.
+  name: "store each evaluation run's per-stage totals",
+  statements: [
+    `
+      ALTER TABLE agent_recall.evaluation_runs
+        ADD COLUMN IF NOT EXISTS stage_scores jsonb;
+    `,
+  ],
 }];

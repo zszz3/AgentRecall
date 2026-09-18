@@ -345,10 +345,10 @@ export class EvaluationStore {
           id, experiment_id, status, agent_revision_id, skill_hash, started_at, finished_at,
           average_score, minimum_score, pass_rate, total_duration_ms, error,
           engine, scored_case_count, unscored_case_count, coverage, dimensions, rubric_hash,
-          consistency, scoring_version
+          consistency, scoring_version, stage_scores
         ) values (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18,
-          $19::jsonb, $20
+          $19::jsonb, $20, $21::jsonb
         )
         on conflict (id) do update set
           status = excluded.status,
@@ -369,7 +369,11 @@ export class EvaluationStore {
             excluded.scoring_version,
             agent_recall.evaluation_runs.scoring_version
           ),
-          engine = coalesce(excluded.engine, agent_recall.evaluation_runs.engine)`,
+          engine = coalesce(excluded.engine, agent_recall.evaluation_runs.engine),
+          stage_scores = coalesce(
+            excluded.stage_scores,
+            agent_recall.evaluation_runs.stage_scores
+          )`,
         [
           value.id,
           value.experimentId,
@@ -391,6 +395,9 @@ export class EvaluationStore {
           value.rubricHash ?? null,
           value.consistency ? JSON.stringify(value.consistency) : null,
           value.scoringVersion ?? null,
+          value.stageScores && value.stageScores.length > 0
+            ? JSON.stringify(value.stageScores)
+            : null,
         ],
       );
       await transaction.query(
@@ -875,6 +882,13 @@ function mapRunSummary(row: Row): EvaluationRunSummary {
           dimensions: jsonObjectArray<
             NonNullable<EvaluationRun["dimensions"]>[number]
           >(row.dimensions),
+        }
+      : {}),
+    ...(row.stage_scores
+      ? {
+          stageScores: jsonObjectArray<
+            NonNullable<EvaluationRun["stageScores"]>[number]
+          >(row.stage_scores),
         }
       : {}),
     ...(row.consistency
