@@ -1,4 +1,4 @@
-import type { LiveSessionFamily, MigrationAgent, MigrationTarget, RemoteSessionAgent, SessionFormat, SessionSource } from "./types";
+import type { LiveSessionFamily, MigrationSourceAgent, MigrationTarget, RemoteSessionAgent, SessionFormat, SessionSource } from "./types";
 
 export type OptionalSessionSourceSetting =
   | "includeTclaude"
@@ -63,7 +63,7 @@ export interface SessionSourceDescriptor {
   pendingKey: SessionSourceFamily | null;
   remoteCollectorOptional: boolean;
   liveFamily: LiveSessionFamily | null;
-  migrationAgent: MigrationAgent | null;
+  migrationAgent: MigrationSourceAgent | null;
   resumeTarget: MigrationTarget | null;
   remoteFamily: "claude" | "codex" | "codebuddy" | "codewiz" | "opencode" | "qoder" | null;
   nativeAppFamily: "claude" | "codex" | "codebuddy" | null;
@@ -148,9 +148,9 @@ export const SESSION_SOURCE_REGISTRY = {
   },
   "zcode-cli": {
     id: "zcode-cli", label: "ZCode", format: "zcode", family: "zcode", uiFamily: "zcode", statsGroup: null,
-    optionalSetting: "includeZcode", pendingKey: "zcode", remoteCollectorOptional: false, liveFamily: "zcode", migrationAgent: null,
+    optionalSetting: "includeZcode", pendingKey: "zcode", remoteCollectorOptional: false, liveFamily: "zcode", migrationAgent: "zcode",
     resumeTarget: null, remoteFamily: null, nativeAppFamily: null,
-    capabilities: { live: true, resume: false, migrate: false, sessionSync: false, openApp: false },
+    capabilities: { live: true, resume: false, migrate: true, sessionSync: false, openApp: false },
   },
   "cursor-agent": {
     id: "cursor-agent", label: "Cursor Agent", format: "cursor", family: "cursor", uiFamily: "other", statsGroup: null,
@@ -236,5 +236,6 @@ export function supportsAiSummarySource(source: SessionSource): boolean {
 export function remoteSessionAgentForSource(source: SessionSource): RemoteSessionAgent | null {
   if (source === "hermes") return "hermes";
   if (source === "pi-cli") return "pi";
-  return sessionSourceDescriptor(source).migrationAgent;
+  const agent = sessionSourceDescriptor(source).migrationAgent;
+  return agent === "zcode" ? null : agent;
 }

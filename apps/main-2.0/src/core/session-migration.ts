@@ -4,7 +4,7 @@ import type { WrittenMigratedSession } from "./session-migration-writers";
 import { isLocalSessionEnvironment } from "./session-environment";
 import { sessionSourceDescriptor } from "./session-sources";
 import type {
-  MigrationAgent,
+  MigrationSourceAgent,
   MigrationCompressionEvent,
   MigrationTarget,
   PortableSession,
@@ -65,7 +65,7 @@ export interface MigrateSessionOptions {
   deps: SessionMigrationDependencies;
 }
 
-export function migrationAgentForSource(source: SessionSource): MigrationAgent | null {
+export function migrationAgentForSource(source: SessionSource): MigrationSourceAgent | null {
   return sessionSourceDescriptor(source).migrationAgent;
 }
 

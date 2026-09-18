@@ -173,6 +173,60 @@ const targetSources: Record<MigrationTarget, SessionSource> = {
 
 describe("migrateSessionForMcp — happy path", () => {
   it.each(Object.keys(targetSources) as MigrationTarget[])(
+    "migrates an indexed ZCode transcript to %s without changing the source database",
+    async (target) => {
+      const store = createInMemoryStore();
+      const sourceHome = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-zcode-source-"));
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-zcode-target-"));
+      const projectPath = makeProjectDir();
+      const transcript = [
+        { role: "user", content: "修复登录失败 🐛\n保留这个上下文" },
+        { role: "assistant", content: "检查结果：\n```ts\nconst ready = true;\n```" },
+        { role: "user", content: "继续添加测试" },
+        { role: "assistant", content: "测试通过 ✅" },
+      ];
+      try {
+        const dbPath = createZcodeHomeFixture(sourceHome);
+        const db = new DatabaseSync(dbPath);
+        try {
+          const start = Date.parse("2026-06-01T10:00:00Z");
+          db.prepare("INSERT INTO session (id, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?)")
+            .run("source-zcode", "ZCode 登录修复", projectPath, start, start + 3000);
+          for (const [index, entry] of transcript.entries()) {
+            const time = start + index * 1000;
+            db.prepare("INSERT INTO message (id, session_id, sequence, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)")
+              .run(`message-${index}`, "source-zcode", index, time, time, JSON.stringify({ role: entry.role }));
+            db.prepare("INSERT INTO part (id, message_id, session_id, sequence, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)")
+              .run(`part-${index}`, `message-${index}`, "source-zcode", 0, time, time, JSON.stringify({ type: "text", text: entry.content }));
+          }
+        } finally {
+          db.close();
+        }
+        const originalDatabase = fs.readFileSync(dbPath);
+        const [loadedSource] = loadZcodeSessions(path.join(sourceHome, ".zcode"));
+        expect(loadedSource.messages.map(({ role, content }) => ({ role, content }))).toEqual(transcript);
+        await store.upsertIndexedSession(loadedSource.session, loadedSource.messages, loadedSource.tokenEvents, loadedSource.traceEvents);
+        if (target === "zcode") createZcodeHomeFixture(homeDir);
+
+        const result = await migrateSessionForMcp(
+          { sessionKey: loadedSource.session.sessionKey, target },
+          { store, settings: allMigrationTargetsEnabled, inspectCli: noOpInspect, homeDir },
+        );
+        const loadedTarget = loadMigratedSessionFileForTest(target, result.targetFilePath, result.targetSessionId);
+        expect(result).toMatchObject({ indexed: true, launched: false, strategy: "complete" });
+        expect(loadedTarget?.messages.map(({ role, content }) => ({ role, content }))).toEqual(transcript);
+        expect((await store.listSessionMigrations(loadedSource.session.sessionKey))[0])
+          .toMatchObject({ sourceAgent: "zcode", targetAgent: target });
+        expect(fs.readFileSync(dbPath)).toEqual(originalDatabase);
+      } finally {
+        fs.rmSync(sourceHome, { recursive: true, force: true });
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
+  it.each(Object.keys(targetSources) as MigrationTarget[])(
     "migrates a local session to %s, writes a loadable file, indexes it, and returns launched=false",
     async (target) => {
       const store = createInMemoryStore();

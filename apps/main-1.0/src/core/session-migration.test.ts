@@ -213,7 +213,7 @@ describe("session migration model", () => {
     ["openclaw", null],
     ["hermes", null],
     ["opencode-cli", null],
-    ["zcode-cli", null],
+    ["zcode-cli", "zcode"],
     ["cursor-agent", "cursor"],
     ["trae", null],
     ["qoder", null],
@@ -363,12 +363,13 @@ describe("migrateSession", () => {
     }));
   });
 
-  it("migrates a Codex subagent tree and replaces completion notifications with native links", async () => {
-    const root = session("cursor-agent", { rawId: "root", sessionKey: "cursor:root" });
+  it.each(["cursor-agent", "zcode-cli"] as const)("migrates a %s subagent tree to Codex with native links", async (source) => {
+    const agent = source === "zcode-cli" ? "zcode" : "cursor";
+    const root = session(source, { rawId: "root", sessionKey: `${agent}:root` });
     const subagents: PortableSession[] = [{
-      sourceSessionKey: "cursor:child",
+      sourceSessionKey: `${agent}:child`,
       sourceSessionId: "child",
-      sourceAgent: "cursor",
+      sourceAgent: agent,
       title: "Research child",
       projectPath: "/repo",
       startedAt: "2026-06-23T00:00:02Z",
@@ -376,9 +377,9 @@ describe("migrateSession", () => {
       isSubagent: true,
       parentSessionId: "root",
     }, {
-      sourceSessionKey: "cursor:grandchild",
+      sourceSessionKey: `${agent}:grandchild`,
       sourceSessionId: "grandchild",
-      sourceAgent: "cursor",
+      sourceAgent: agent,
       title: "Nested child",
       projectPath: "/repo",
       startedAt: "2026-06-23T00:00:04Z",

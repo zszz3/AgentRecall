@@ -1,5 +1,5 @@
 import type {
-  MigrationAgent,
+  MigrationSourceAgent,
   MigrationTarget,
   ProjectSummary,
   SearchOptions,
@@ -175,7 +175,7 @@ export function migrationAgentLabel(target: MigrationTarget): string {
   return migrationTargetDescriptor(target).label;
 }
 
-export function sourceMigrationAgent(source: SessionSource): MigrationAgent | null {
+export function sourceMigrationAgent(source: SessionSource): MigrationSourceAgent | null {
   if (!isSessionSource(source)) return null;
   return sessionSourceDescriptor(source).migrationAgent;
 }

@@ -36,8 +36,13 @@ describe("migrationTargetsForSession", () => {
     expect(migrationTargetsForSession({ source: "codex-cli", environmentId: "wsl-1", environmentKind: "wsl" }, settings)).toEqual(["claude", "codex", "codebuddy", "cursor"]);
   });
 
-  it("does not offer ZCode sessions as migratable into ZCode again", () => {
-    expect(migrationTargetsForSession({ source: "zcode-cli", environmentId: "local", environmentKind: "local" }, settings)).toEqual([]);
+  it("offers enabled targets for local ZCode sessions without enabling SSH migration", () => {
+    const session = { source: "zcode-cli", environmentId: "local", environmentKind: "local" } as const;
+    expect(canMigrateSession(session, settings)).toBe(true);
+    expect(migrationTargetsForSession(session, settings)).toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode"]);
+    expect(migrationTargetsForSession(session, { includeTclaude: true, includeTcodex: true, includeDeepSeekCli: true }))
+      .toEqual(["claude", "codex", "codebuddy", "codewiz", "cursor", "zcode", "tclaude", "tcodex", "deepseek"]);
+    expect(migrationTargetsForSession({ ...session, environmentId: "ssh-1", environmentKind: "ssh" }, settings)).toEqual([]);
   });
 
   it("safely disables actions for a stale persisted source", () => {
