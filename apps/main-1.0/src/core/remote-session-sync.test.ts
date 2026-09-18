@@ -77,6 +77,15 @@ const PORTABLE: PortableSession = {
 };
 
 describe("remote session sync model", () => {
+  it("rejects a local-only ZCode migration transcript before building an upload", () => {
+    const detail = buildRemoteSessionSnapshot(SESSION, MESSAGES, [], 10_000);
+    expect(() => buildRemoteSessionPayload({
+      session: { ...SESSION, source: "zcode-cli" },
+      detail,
+      portable: { ...PORTABLE, sourceAgent: "zcode" },
+    })).toThrow("Unsupported remote session agent: zcode");
+  });
+
   it("builds setup SQL for the table and storage bucket", () => {
     const sql = buildRemoteSessionSetupSql();
     expect(sql).toContain("agent_session_remote_sessions");

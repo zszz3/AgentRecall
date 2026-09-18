@@ -195,7 +195,7 @@ Session 详情会显示关联调用的用途、状态、时间和可用的业务
 
 SSH 环境中的 Claude Code 和 Codex 会话可以在同一台远程主机上互相迁移。迁移完成后，AgentRecall 会打开一个新终端，重新连接原 SSH 主机并自动 Resume 新会话。
 
-本地会话也可迁入 ZCode，具体初始化要求、子代理行为和查看方式见 [ZCode 迁移说明](../v1/guide.md#迁移会话)。迁移完成后重启 ZCode，在任务列表中继续。
+本地 ZCode 会话支持迁移到 Claude Code、Codex 等 Agent，也可将其他 Agent 的会话迁入 ZCode。操作入口、初始化要求、子代理行为和迁移范围见 [ZCode 迁移说明](../v1/guide.md#迁移会话)。迁入 ZCode 后重启 ZCode，在任务列表中继续。
 
 ### SSH、WSL 和跨设备同步
 

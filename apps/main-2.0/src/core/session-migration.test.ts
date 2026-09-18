@@ -136,19 +136,20 @@ describe("subagent migration", () => {
     }));
   });
 
-  it("writes nested child sessions and omits system completion messages from the parent", async () => {
+  it.each(["cursor-agent", "zcode-cli"] as const)("migrates a %s subagent tree to Codex with native links", async (source) => {
+    const agent = source === "zcode-cli" ? "zcode" : "cursor";
     const root = {
-      ...session("cursor-agent"),
-      sessionKey: "cursor:root",
+      ...session(source),
+      sessionKey: `${agent}:root`,
       rawId: "root",
       environmentId: "local",
       environmentKind: "local",
       projectPath: "/repo",
     } as SessionSearchResult;
     const subagents: PortableSession[] = [{
-      sourceSessionKey: "cursor:child",
+      sourceSessionKey: `${agent}:child`,
       sourceSessionId: "child",
-      sourceAgent: "cursor",
+      sourceAgent: agent,
       title: "Child",
       projectPath: "/repo",
       startedAt: "2026-08-08T00:00:02Z",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionSourceDescriptor, supportsAiSummarySource } from "./session-sources";
+import { remoteSessionAgentForSource, sessionSourceDescriptor, supportsAiSummarySource } from "./session-sources";
 
 describe("StepCode session source semantics", () => {
   it("keeps StepCode sources in their native Claude/Codex families", () => {
@@ -38,5 +38,15 @@ describe("StepCode session source semantics", () => {
   it("disables AI summaries only for CodeWiz sessions", () => {
     expect(supportsAiSummarySource("codewiz-cli")).toBe(false);
     expect(supportsAiSummarySource("codex-cli")).toBe(true);
+  });
+});
+
+describe("ZCode session source semantics", () => {
+  it("allows local migration while retaining the resume and remote-sync boundaries", () => {
+    expect(sessionSourceDescriptor("zcode-cli")).toMatchObject({
+      migrationAgent: "zcode",
+      capabilities: { live: true, resume: false, migrate: true, sessionSync: false, openApp: false },
+    });
+    expect(remoteSessionAgentForSource("zcode-cli")).toBeNull();
   });
 });

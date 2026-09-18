@@ -104,8 +104,8 @@ export interface SessionMessageEvent {
 }
 
 export type MigrationAgent = "claude" | "codex" | "codebuddy" | "codewiz" | "cursor" | "deepseek";
-// ZCode is a migration target only: its sessions are indexed read from the
-// shared ZCode database and cannot seed migrations into other agents yet.
+// Local migration sources are independent of remote session sync support.
+export type MigrationSourceAgent = MigrationAgent | "zcode";
 export type MigrationTarget = MigrationAgent | "tclaude" | "tcodex" | "zcode";
 export type RemoteSessionAgent = MigrationAgent | "hermes" | "pi";
 export type SessionMigrationStrategy = "complete" | "ai-compressed" | "locally-truncated";
@@ -129,7 +129,7 @@ export interface MigrationCompressionEvent {
 export interface PortableSession {
   sourceSessionKey: string;
   sourceSessionId?: string;
-  sourceAgent: RemoteSessionAgent;
+  sourceAgent: RemoteSessionAgent | MigrationSourceAgent;
   title: string;
   projectPath: string;
   startedAt: string;
@@ -179,7 +179,7 @@ export interface SessionMigrationRequest {
 export interface SessionMigrationRecord {
   id: string;
   sourceSessionKey: string;
-  sourceAgent: RemoteSessionAgent;
+  sourceAgent: RemoteSessionAgent | MigrationSourceAgent;
   targetAgent: MigrationTarget;
   targetSessionId: string;
   targetFilePath: string;

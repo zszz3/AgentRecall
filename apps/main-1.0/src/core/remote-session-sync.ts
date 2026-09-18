@@ -397,7 +397,7 @@ export function buildRemoteSessionPayload(options: {
     payload: {
       id,
       source_session_key: options.session.sessionKey,
-      source_agent: options.portable.sourceAgent,
+      source_agent: parseRemoteSessionAgent(options.portable.sourceAgent),
       source_source: options.session.source,
       source_environment_id: options.session.environmentId,
       source_environment_kind: options.session.environmentKind,

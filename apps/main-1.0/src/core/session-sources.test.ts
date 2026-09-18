@@ -99,7 +99,8 @@ describe("session source capability registry", () => {
       uiFamily: "zcode",
       optionalSetting: "includeZcode",
       liveFamily: "zcode",
-      capabilities: { live: true, resume: false, migrate: false, sessionSync: false, openApp: false },
+      migrationAgent: "zcode",
+      capabilities: { live: true, resume: false, migrate: true, sessionSync: false, openApp: false },
     });
     expect(sessionSourceDescriptor("workbuddy-cli")).toMatchObject({
       label: "WorkBuddy",
