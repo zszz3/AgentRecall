@@ -110,6 +110,21 @@ export interface EvaluationRunScore {
     stage?: string;
     scoredCaseCount: number;
   }>;
+  /**
+   * One total per stage, in the order the stages first appear. Empty for a plan
+   * that declares none.
+   *
+   * Computed here rather than in the report: it is a weighted average over the
+   * stage's dimensions, and a renderer that re-derived it would be a second
+   * definition of the same arithmetic, free to drift from this one.
+   */
+  stages: Array<{
+    stage: string;
+    score: number | null;
+    /** Dimensions of this stage that scored, out of the ones this run has. */
+    scoredDimensionCount: number;
+    dimensionCount: number;
+  }>;
 }
 
 const DEFAULT_THRESHOLD = 0.6;
@@ -170,7 +185,6 @@ export function scoreEvaluationCase(
   );
   const dimensions = stageShares(dimensionScores(verdicts, config));
   const scored = dimensions.filter((item) => item.score !== null && item.weight > 0);
-  const shareOf = (item: EvaluationDimensionScore) => item.effectiveWeight ?? item.weight;
   const totalWeight = scored.reduce((sum, item) => sum + shareOf(item), 0);
   const score = totalWeight > 0
     ? scored.reduce((sum, item) => sum + shareOf(item) * item.score!, 0) / totalWeight
@@ -211,6 +225,25 @@ export function scoreEvaluationRun(
   const scored = cases.filter((item) => item.score !== null);
   const values = scored.map((item) => item.score!);
   const dimensionNames = [...new Set(cases.flatMap((item) => item.dimensions.map((entry) => entry.dimension)))];
+  const dimensions = dimensionNames.map((dimension) => {
+    const reported = cases.flatMap(
+      (item) => item.dimensions.filter((entry) => entry.dimension === dimension),
+    );
+    const entries = reported.filter((entry) => entry.score !== null);
+    const weight = entries[0]?.weight ?? 1;
+    const applied = entries[0]?.effectiveWeight;
+    const stage = agreedStage(new Set(reported.map((entry) => entry.stage)));
+    return {
+      dimension,
+      score: entries.length > 0
+        ? entries.reduce((sum, entry) => sum + entry.score!, 0) / entries.length
+        : null,
+      weight,
+      ...(applied !== undefined && applied !== weight ? { effectiveWeight: applied } : {}),
+      ...(stage ? { stage } : {}),
+      scoredCaseCount: entries.length,
+    };
+  });
   return {
     averageScore: values.length > 0
       ? values.reduce((left, right) => left + right, 0) / values.length
@@ -225,26 +258,42 @@ export function scoreEvaluationRun(
     scoredCaseCount: scored.length,
     unscoredCaseCount: cases.length - scored.length,
     passedCaseCount: cases.filter((item) => item.passed).length,
-    dimensions: dimensionNames.map((dimension) => {
-      const reported = cases.flatMap(
-        (item) => item.dimensions.filter((entry) => entry.dimension === dimension),
-      );
-      const entries = reported.filter((entry) => entry.score !== null);
-      const weight = entries[0]?.weight ?? 1;
-      const applied = entries[0]?.effectiveWeight;
-      const stage = agreedStage(new Set(reported.map((entry) => entry.stage)));
-      return {
-        dimension,
-        score: entries.length > 0
-          ? entries.reduce((sum, entry) => sum + entry.score!, 0) / entries.length
-          : null,
-        weight,
-        ...(applied !== undefined && applied !== weight ? { effectiveWeight: applied } : {}),
-        ...(stage ? { stage } : {}),
-        scoredCaseCount: entries.length,
-      };
-    }),
+    dimensions,
+    stages: stageTotals(dimensions),
   };
+}
+
+/**
+ * Each stage's own total, weighted the same way a case's total is.
+ *
+ * The denominator counts only the dimensions that scored, so a stage whose other
+ * checks were undecided is not quietly shrunk by them — the gap is reported next
+ * to the number as `scoredDimensionCount` over `dimensionCount`, which is the same
+ * division of labour `coverage` already has at the case level.
+ */
+function stageTotals(
+  dimensions: EvaluationRunScore["dimensions"],
+): EvaluationRunScore["stages"] {
+  const names = [
+    ...new Set(
+      dimensions
+        .map((entry) => entry.stage)
+        .filter((stage): stage is string => stage !== undefined),
+    ),
+  ];
+  return names.map((stage) => {
+    const entries = dimensions.filter((entry) => entry.stage === stage);
+    const decided = entries.filter((entry) => entry.score !== null && shareOf(entry) > 0);
+    const totalWeight = decided.reduce((sum, entry) => sum + shareOf(entry), 0);
+    return {
+      stage,
+      score: totalWeight > 0
+        ? decided.reduce((sum, entry) => sum + shareOf(entry) * entry.score!, 0) / totalWeight
+        : null,
+      scoredDimensionCount: decided.length,
+      dimensionCount: entries.length,
+    };
+  });
 }
 
 function dimensionScores(
@@ -307,6 +356,17 @@ function stageShares(
 function agreedStage(stages: ReadonlySet<string | undefined>): string | undefined {
   const [stage] = stages;
   return stages.size === 1 && stage !== undefined ? stage : undefined;
+}
+
+/**
+ * The share a dimension actually carries in a weighted average.
+ *
+ * One rule rather than one per call site: a case's total and a run's per-stage
+ * total have to weight by the same value, or the stage totals would not add up
+ * to anything the run total is made of.
+ */
+function shareOf(item: { weight: number; effectiveWeight?: number }): number {
+  return item.effectiveWeight ?? item.weight;
 }
 
 /**
