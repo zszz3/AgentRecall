@@ -2,13 +2,51 @@ import { describe, expect, it } from "vitest";
 import { PostgresDatabase } from "./database";
 import { POSTGRES_MIGRATIONS } from "./schema";
 import { PGliteTestPool } from "./test-pglite";
-import { PostgresSessionRepository } from "./session-repository";
 
 describe("AgentRecall PostgreSQL schema", () => {
   it("uses one stable record per migration version", () => {
     const versions = POSTGRES_MIGRATIONS.map((migration) => migration.version);
     expect(new Set(versions).size).toBe(versions.length);
     expect(versions).toEqual([...versions].sort((left, right) => left - right));
+  });
+
+  it("adds nullable indexing fingerprints without rewriting legacy records", async () => {
+    const pool = new PGliteTestPool();
+    const legacy = new PostgresDatabase(pool, {
+      migrationLock: false, migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version < 56),
+    });
+    const upgraded = new PostgresDatabase(pool, { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+    try {
+      await legacy.initialize();
+      await legacy.query(`
+        insert into agent_recall.sessions (
+          session_key, raw_id, source, environment_id, project_path, file_path,
+          original_title, first_question, started_at, file_mtime_ms, file_size, indexed_at
+        ) values ('legacy', 'legacy', 'codex-cli', 'local', '/fixture', '/fixture/legacy.jsonl',
+          'Legacy', 'Question', now(), 123, 456, now());
+        insert into agent_recall.session_turns (id, session_key, turn_index, user_text, derivation_version)
+          values ('legacy-turn', 'legacy', 0, 'Question', 7);
+        insert into agent_recall.session_raw_events (session_key, event_index, kind, payload)
+          values ('legacy', 0, 'message', '{"content":"Question"}');
+      `);
+      // No backfill or invalidation is necessary: old rows acquire fingerprints
+      // lazily in the same transaction as their next content update.
+      await upgraded.initialize();
+      const columns = await upgraded.query<{ table_name: string; is_nullable: string }>(`
+        select table_name, is_nullable from information_schema.columns
+        where table_schema = 'agent_recall' and column_name = 'index_fingerprint' order by table_name
+      `);
+      expect(columns.rows).toEqual([
+        { table_name: "session_raw_events", is_nullable: "YES" },
+        { table_name: "session_turns", is_nullable: "YES" },
+      ]);
+      expect((await upgraded.query("select id, user_text, index_fingerprint from agent_recall.session_turns")).rows)
+        .toEqual([{ id: "legacy-turn", user_text: "Question", index_fingerprint: null }]);
+      expect((await upgraded.query("select payload, index_fingerprint from agent_recall.session_raw_events")).rows)
+        .toEqual([{ payload: { content: "Question" }, index_fingerprint: null }]);
+    } finally {
+      await upgraded.close();
+    }
   });
 
   it("creates the complete internal domain schema", async () => {
@@ -1032,21 +1070,14 @@ describe("AgentRecall PostgreSQL schema", () => {
       migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 46),
     });
     await legacyDatabase.initialize();
-    const sessions = new PostgresSessionRepository(legacyDatabase);
-    await sessions.upsertIndexedSession({
-      sessionKey: "codex:historical-runtime",
-      rawId: "historical-runtime",
-      source: "codex-cli",
-      projectPath: "/workspace",
-      filePath: "/fixtures/historical-runtime.jsonl",
-      originalTitle: "Historical evaluation",
-      firstQuestion: "Evaluate this",
-      timestamp: Date.parse("2026-08-01T00:00:00.000Z"),
-      fileMtimeMs: Date.parse("2026-08-01T00:00:00.000Z"),
-      fileSize: 1,
-      prUrl: null,
-      prNumber: null,
-    }, []);
+    await legacyDatabase.query(`
+      insert into agent_recall.sessions (
+        session_key, raw_id, source, environment_id, project_path, file_path,
+        original_title, first_question, started_at, file_mtime_ms, file_size, indexed_at
+      ) values ('codex:historical-runtime', 'historical-runtime', 'codex-cli', 'local', '/workspace',
+        '/fixtures/historical-runtime.jsonl', 'Historical evaluation', 'Evaluate this',
+        '2026-08-01T00:00:00Z', 1785542400000, 1, now());
+    `);
     await legacyDatabase.query(`
       insert into agent_recall.evaluation_datasets (
         id, name, description, created_at, updated_at

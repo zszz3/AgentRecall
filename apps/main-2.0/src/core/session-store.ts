@@ -70,6 +70,7 @@ import type {
   SessionSearchPage,
   SessionSearchResult,
   SessionSource,
+  SessionSourceMetadata,
   SessionStats,
   SessionStatsOptions,
   SessionStatsTrend,
@@ -197,6 +198,11 @@ export class SessionStore {
   ): Promise<boolean> {
     await this.ready;
     return this.sessions.isSessionContentFresh(sessionKey, fileMtimeMs, fileSize);
+  }
+
+  async refreshSessionSourceMetadata(metadata: readonly SessionSourceMetadata[]): Promise<void> {
+    await this.ready;
+    await this.sessions.refreshSessionSourceMetadata(metadata);
   }
 
   async touchIndexedAtIfMissing(sessionKey: string): Promise<void> {

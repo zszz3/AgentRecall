@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import type { CodexIncrementalState, IndexedSession } from "../types";
+import type { CodexIncrementalState, IndexedSession, SessionMessage } from "../types";
 import { EnvironmentStore } from "./environments";
 import { migrateSessionStore } from "./schema";
 import { SessionsStore } from "./sessions";
@@ -29,6 +29,49 @@ function indexedSession(overrides: Partial<IndexedSession> = {}): IndexedSession
 }
 
 describe("SessionsStore", () => {
+  it("updates only changed message records and search chunks, including corrections and rollback", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      migrateSessionStore(db);
+      const store = new SessionsStore(db, new EnvironmentStore(db));
+      const session = indexedSession();
+      const messages: SessionMessage[] = [
+        { role: "user", content: "First question", timestamp: "2026-07-20T08:00:00Z", index: 0 },
+        { role: "assistant", content: "Original answer", timestamp: "2026-07-20T08:00:01Z", index: 1 },
+      ];
+      store.upsertIndexedSession(session, messages);
+      db.exec(`
+        CREATE TEMP TABLE message_writes (operation TEXT, message_index INTEGER);
+        CREATE TEMP TRIGGER capture_message_insert AFTER INSERT ON messages BEGIN
+          INSERT INTO message_writes VALUES ('insert', NEW.message_index); END;
+        CREATE TEMP TRIGGER capture_message_update AFTER UPDATE ON messages BEGIN
+          INSERT INTO message_writes VALUES ('update', NEW.message_index); END;
+        CREATE TEMP TRIGGER capture_message_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO message_writes VALUES ('delete', OLD.message_index); END;
+      `);
+      const appended: SessionMessage[] = [...messages,
+        { role: "user", content: "Second question", timestamp: "2026-07-20T08:01:00Z", index: 2 },
+      ];
+      store.upsertIndexedSession(session, appended);
+      expect(db.prepare("SELECT * FROM message_writes").all()).toEqual([{ operation: "insert", message_index: 2 }]);
+      const ftsBefore = db.prepare("SELECT rowid, * FROM session_fts").all();
+      db.exec("DELETE FROM message_writes");
+      store.upsertIndexedSession(session, appended);
+      expect(db.prepare("SELECT * FROM message_writes").all()).toEqual([]);
+      expect(db.prepare("SELECT rowid, * FROM session_fts").all()).toEqual(ftsBefore);
+      appended[1] = { ...appended[1], content: "Corrected answer" };
+      store.upsertIndexedSession(session, appended);
+      expect(db.prepare("SELECT * FROM message_writes").all()).toEqual([{ operation: "update", message_index: 1 }]);
+      expect(db.prepare("SELECT count(*) AS n FROM session_fts WHERE session_fts MATCH 'Corrected'").get()).toEqual({ n: 1 });
+      db.exec("DELETE FROM message_writes");
+      store.upsertIndexedSession(session, appended.slice(0, 2));
+      expect(db.prepare("SELECT * FROM message_writes").all()).toEqual([{ operation: "delete", message_index: 2 }]);
+      expect(db.prepare("SELECT count(*) AS n FROM session_fts WHERE session_fts MATCH 'Second'").get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("stores AI summary freshness for millisecond file timestamps", () => {
     const db = new DatabaseSync(":memory:");
     try {

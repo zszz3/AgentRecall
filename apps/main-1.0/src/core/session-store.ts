@@ -50,6 +50,7 @@ import type {
   SessionSearchPage,
   SessionSearchResult,
   SessionSource,
+  SessionSourceMetadata,
   SessionStats,
   SessionStatsOptions,
   SessionStatsTrend,
@@ -126,6 +127,10 @@ export class SessionStore {
 
   isSessionContentFresh(sessionKey: string, fileMtimeMs: number, fileSize: number): boolean {
     return this.sessions.isSessionContentFresh(sessionKey, fileMtimeMs, fileSize);
+  }
+
+  refreshSessionSourceMetadata(metadata: readonly SessionSourceMetadata[]): void {
+    this.sessions.refreshSessionSourceMetadata(metadata);
   }
 
   touchIndexedAtIfMissing(sessionKey: string): void {

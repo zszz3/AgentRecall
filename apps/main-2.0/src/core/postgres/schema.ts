@@ -2107,4 +2107,13 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS stage_scores jsonb;
     `,
   ],
+}, {
+  version: 56,
+  name: "retain unchanged session events and turns during indexing",
+  statements: [
+    // Existing Turns remain readable. A missing fingerprint is rebuilt lazily
+    // when that session next changes; no global content invalidation is needed.
+    `ALTER TABLE agent_recall.session_turns ADD COLUMN index_fingerprint text;`,
+    `ALTER TABLE agent_recall.session_raw_events ADD COLUMN index_fingerprint text;`,
+  ],
 }];
