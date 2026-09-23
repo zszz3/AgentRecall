@@ -9,6 +9,7 @@ import type {
   SessionFormat,
   SessionMessage,
   SessionSource,
+  SessionSourceMetadata,
   SessionTraceEvent,
   TokenUsage,
   TokenUsageEvent,
@@ -47,6 +48,7 @@ export interface SessionLoadOptions {
     source?: SessionSource,
   ) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
+  refreshCodexSessionMetadata?: (metadata: SessionSourceMetadata) => void | Promise<void>;
   incrementalCodexSessions?: ReadonlyMap<string, { offset: number; loaded: LoadedSession }>;
   loadIncrementalCodexSession?: (
     filePath: string,

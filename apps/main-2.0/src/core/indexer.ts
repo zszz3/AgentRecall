@@ -17,7 +17,7 @@ import { loadDeepSeekCliSessionFile } from "./session-loaders/alternative-source
 import { safeStat } from "./session-loaders/common";
 import { migrationTargetDescriptor } from "./migration-targets";
 import type { SessionStore } from "./session-store";
-import type { IndexedSessionFileState, LoadedSession, MigrationTarget, SessionEnvironment } from "./types";
+import type { IndexedSessionFileState, LoadedSession, MigrationTarget, SessionEnvironment, SessionSourceMetadata } from "./types";
 
 export interface IndexStatus {
   running: boolean;
@@ -329,8 +329,10 @@ export async function syncDefaultSessionsInBatches(
   const onSkippedFile = loadOptions.onSkippedFile;
   const scannedFilePaths = new Set<string>();
   const scannedSessionKeys = new Set<string>();
+  const metadataUpdates: SessionSourceMetadata[] = [];
   const rawLoaded = loadDefaultSessionsAsyncIterator({
     ...loadOptions,
+    refreshCodexSessionMetadata: (metadata) => { metadataUpdates.push(metadata); },
     loadIncrementalCodexSession: async (filePath) => {
       const previous = incrementalCodexFiles.get(filePath);
       if (!previous) return undefined;
@@ -380,6 +382,7 @@ export async function syncDefaultSessionsInBatches(
       dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   });
+  await store.refreshSessionSourceMetadata(metadataUpdates);
   // Prune sessions whose source files no longer exist in local storage. Cursor
   // is the exception: its shared database can forget one conversation while our
   // parsed message cache remains the only readable copy.

@@ -1007,54 +1007,37 @@ describe("indexer", () => {
     }
   });
 
-  it("re-reads Codex sessions when the session index changes", async () => {
+  it("refreshes one Codex title without loading or rewriting any conversation", async () => {
     const store = createInMemoryStore();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-index-"));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-title-"));
     try {
-      writeCodexSession(homeDir, "codex-title-refresh", "title refresh question", "Old Title");
-      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
-      expect(store.searchSessions({ query: "Old Title", limit: 10 })).toHaveLength(1);
-
+      writeCodexSession(homeDir, "first", "first question", "Old Title");
+      writeCodexSession(homeDir, "second", "second question", "Stable Title");
       const indexPath = path.join(homeDir, ".codex", "session_index.jsonl");
-      fs.writeFileSync(
-        indexPath,
-        `${JSON.stringify({ id: "codex-title-refresh", thread_name: "New Title", updated_at: "2026-06-01T10:05:00Z" })}\n`,
-      );
-      const futureIndexTime = new Date(Date.now() + 2000);
-      fs.utimesSync(indexPath, futureIndexTime, futureIndexTime);
-
-      const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
-
-      expect(warm).toMatchObject({ indexed: 1, skipped: 0, total: 1 });
+      const entries = [
+        { id: "first", thread_name: "Old Title", updated_at: "2026-06-01T10:00:00Z" },
+        { id: "second", thread_name: "Stable Title", updated_at: "2026-06-01T10:00:00Z" },
+      ];
+      fs.writeFileSync(indexPath, entries.map((entry) => JSON.stringify(entry)).join("\n"));
+      await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+      const upsert = vi.spyOn(store, "upsertIndexedSession");
+      const readMessages = vi.spyOn(store, "getAllMessages");
+      entries[0].thread_name = "New Title";
+      fs.writeFileSync(indexPath, entries.map((entry) => JSON.stringify(entry)).join("\n"));
+      const warm = await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+      expect(warm).toMatchObject({ indexed: 0, skipped: 2, total: 2 });
+      expect(upsert).not.toHaveBeenCalled();
+      expect(readMessages).not.toHaveBeenCalled();
       expect(store.searchSessions({ query: "New Title", limit: 10 })).toHaveLength(1);
       expect(store.searchSessions({ query: "Old Title", limit: 10 })).toHaveLength(0);
-    } finally {
-      fs.rmSync(homeDir, { recursive: true, force: true });
-    }
-  });
-
-  it("rebuilds unchanged session content when a metadata dependency changes", async () => {
-    const store = createInMemoryStore();
-    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-codex-content-refresh-"));
-    try {
-      const filePath = writeCodexSession(homeDir, "codex-content-refresh", "alphaoldx", "Stable Title");
-      await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
-      expect(store.searchSessions({ query: "alphaoldx", limit: 10 })).toHaveLength(1);
-
-      const previousStat = fs.statSync(filePath);
-      const content = fs.readFileSync(filePath, "utf8").replace("alphaoldx", "betanewxx");
-      fs.writeFileSync(filePath, content);
-      fs.utimesSync(filePath, previousStat.atime, previousStat.mtime);
-
-      const indexPath = path.join(homeDir, ".codex", "session_index.jsonl");
-      const futureIndexTime = new Date(Date.now() + 2000);
-      fs.utimesSync(indexPath, futureIndexTime, futureIndexTime);
-
-      const warm = await syncDefaultSessionsInBatches(store, { batchSize: 1, loadOptions: { homeDir } });
-
-      expect(warm).toMatchObject({ indexed: 1, skipped: 0, total: 1 });
-      expect(store.searchSessions({ query: "betanewxx", limit: 10 })).toHaveLength(1);
-      expect(store.searchSessions({ query: "alphaoldx", limit: 10 })).toHaveLength(0);
+      expect(store.searchSessions({ query: "Stable Title", limit: 10 })).toHaveLength(1);
+      store.setCustomTitle("codex:first", "My custom title");
+      // Removing a catalog entry restores the embedded title without rewriting content.
+      fs.writeFileSync(indexPath, JSON.stringify(entries[1]));
+      await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+      expect(store.getSession("codex:first")?.originalTitle).toBe("Embedded Title");
+      expect(store.getSession("codex:first")?.displayTitle).toBe("My custom title");
+      expect(upsert).not.toHaveBeenCalled();
     } finally {
       store.close();
       fs.rmSync(homeDir, { recursive: true, force: true });

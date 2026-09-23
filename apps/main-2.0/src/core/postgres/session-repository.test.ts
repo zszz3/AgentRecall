@@ -417,6 +417,69 @@ describe("PostgresSessionRepository", () => {
     });
   });
 
+  it("retains unchanged raw events and completed Turns when a conversation grows", async () => {
+    await repository.upsertIndexedSession(session(), messages);
+    const firstTurn = (await database.query<{ id: string }>(
+      "select id from agent_recall.session_turns order by turn_index limit 1",
+    )).rows[0].id;
+    await database.query(`
+      create temp table index_writes (table_name text, operation text, data jsonb);
+      create function pg_temp.capture_index_write() returns trigger language plpgsql as $$
+      begin
+        insert into index_writes values (TG_TABLE_NAME, TG_OP, coalesce(to_jsonb(NEW), to_jsonb(OLD)));
+        return null;
+      end $$;
+      create trigger capture_raw_write after insert or update or delete on agent_recall.session_raw_events
+        for each row execute function pg_temp.capture_index_write();
+      create trigger capture_turn_write after insert or update or delete on agent_recall.session_turns
+        for each row execute function pg_temp.capture_index_write();
+    `);
+    const appended = [...messages, {
+      role: "assistant" as const, content: "Only the latest Turn changes.",
+      timestamp: "2026-07-20T08:01:02.000Z", index: 3,
+    }];
+    await repository.upsertIndexedSession(session({ fileSize: 200 }), appended);
+    expect((await database.query(
+      "select operation from index_writes where table_name = 'session_raw_events'",
+    )).rows).toEqual([{ operation: "INSERT" }]);
+    expect((await database.query(
+      "select operation from index_writes where table_name = 'session_turns' and data->>'id' = $1", [firstTurn],
+    )).rows).toEqual([]);
+    await database.query("truncate index_writes");
+    await repository.upsertIndexedSession(session({ fileSize: 200 }), appended);
+    expect((await database.query("select * from index_writes")).rows).toEqual([]);
+
+    // A late tool result must revise its owning Turn, even though the earlier
+    // messages did not change. A later rollback must remove those derived rows.
+    const lateTraces = traces.map((event, index) => ({
+      ...event, timestamp: `2026-07-20T08:01:0${3 + index}.000Z`,
+    }));
+    await repository.upsertIndexedSession(session({ fileSize: 300 }), appended, [], lateTraces);
+    expect((await database.query("select output from agent_recall.trace_spans where call_id = 'call-1'")).rows)
+      .toHaveLength(1);
+    expect((await database.query(
+      "select operation from index_writes where table_name = 'session_turns' and data->>'id' = $1", [firstTurn],
+    )).rows).toEqual([]);
+    await repository.upsertIndexedSession(session({ fileSize: 100 }), messages.slice(0, 2));
+    expect((await database.query("select * from agent_recall.trace_spans")).rows).toEqual([]);
+    expect((await database.query("select event_index from agent_recall.session_raw_events order by event_index")).rows)
+      .toEqual([{ event_index: 0 }, { event_index: 1 }]);
+  });
+
+  it("refreshes legacy records without fingerprints on their next content update", async () => {
+    await repository.upsertIndexedSession(session(), messages, tokens, traces);
+    await database.query("update agent_recall.session_turns set index_fingerprint = null");
+    await database.query("update agent_recall.session_raw_events set index_fingerprint = null");
+    await repository.upsertIndexedSession(session(), messages, tokens, traces);
+    expect((await database.query(`
+      select count(*)::int as missing from (
+        select index_fingerprint from agent_recall.session_turns
+        union all select index_fingerprint from agent_recall.session_raw_events
+      ) records where index_fingerprint is null
+    `)).rows).toEqual([{ missing: 0 }]);
+    expect(await turnsRepository.getAllMessages("codex:session-a")).toMatchObject(messages);
+  });
+
   it("atomically replaces derived content while preserving user-owned state", async () => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
     await repository.setCustomTitle("codex:session-a", "My login investigation");

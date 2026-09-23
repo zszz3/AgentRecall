@@ -364,6 +364,11 @@ export interface IndexedSessionFileState {
   indexedAt: number;
 }
 
+/** Source metadata can change without changing the conversation file. */
+export type SessionSourceMetadata = Pick<IndexedSession, "filePath" | "rawId" | "source" | "timestamp"> & {
+  originalTitle: string | null;
+};
+
 export interface LoadedSession {
   session: IndexedSession;
   messages: SessionMessage[];

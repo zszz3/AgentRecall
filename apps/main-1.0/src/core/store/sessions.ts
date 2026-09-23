@@ -23,6 +23,7 @@ import type {
   SessionSearchResult,
   SessionSortBy,
   SessionSource,
+  SessionSourceMetadata,
   SessionSourceStats,
   SessionStats,
   SessionStatsOptions,
@@ -345,16 +346,34 @@ export class SessionsStore {
             : null,
         );
 
-      this.db.prepare("DELETE FROM messages WHERE session_key = ?").run(session.sessionKey);
-      this.db.prepare("DELETE FROM message_attachments WHERE session_key = ?").run(session.sessionKey);
-      this.db.prepare("DELETE FROM message_events WHERE session_key = ?").run(session.sessionKey);
-      this.db.prepare("DELETE FROM token_events WHERE session_key = ?").run(session.sessionKey);
-      this.db.prepare("DELETE FROM trace_events WHERE session_key = ?").run(session.sessionKey);
+      this.db.prepare("DELETE FROM messages WHERE session_key = ? AND message_index NOT IN (SELECT value FROM json_each(?))")
+        .run(session.sessionKey, JSON.stringify(messages.map((message) => message.index)));
+      this.db.prepare("DELETE FROM message_attachments WHERE session_key = ? AND attachment_id NOT IN (SELECT value FROM json_each(?))")
+        .run(session.sessionKey, JSON.stringify(messages.flatMap((message) => (message.attachments ?? []).map((attachment, index) => `${message.index}-${index}-${attachment.id}`))));
+      this.db.prepare("DELETE FROM message_events WHERE session_key = ? AND message_index NOT IN (SELECT value FROM json_each(?))")
+        .run(session.sessionKey, JSON.stringify(messages.map((message) => message.index)));
+      this.db.prepare("DELETE FROM token_events WHERE session_key = ? AND dedupe_key NOT IN (SELECT value FROM json_each(?))")
+        .run(session.sessionKey, JSON.stringify(normalizedTokenEvents.map((event) => event.dedupeKey)));
+      this.db.prepare("DELETE FROM trace_events WHERE session_key = ? AND trace_index NOT IN (SELECT value FROM json_each(?))")
+        .run(session.sessionKey, JSON.stringify(traceEvents.map((event) => event.index)));
 
       const insertMessage = this.db.prepare(
         `INSERT INTO messages (
           session_key, message_index, role, content, timestamp, source_turn_id, phase, source_record_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_key, message_index) DO UPDATE SET
+          role = excluded.role,
+          content = excluded.content,
+          timestamp = excluded.timestamp,
+          source_turn_id = excluded.source_turn_id,
+          phase = excluded.phase,
+          source_record_id = excluded.source_record_id
+        WHERE messages.role IS NOT excluded.role
+          OR messages.content IS NOT excluded.content
+          OR messages.timestamp IS NOT excluded.timestamp
+          OR messages.source_turn_id IS NOT excluded.source_turn_id
+          OR messages.phase IS NOT excluded.phase
+          OR messages.source_record_id IS NOT excluded.source_record_id`,
       );
       for (const message of messages) {
         const sourceRecordId = sourceRecordIdByMessageIndex.get(message.index) ?? null;
@@ -374,7 +393,22 @@ export class SessionsStore {
         `INSERT INTO message_attachments (
           session_key, message_index, attachment_id, attachment_index, file_name,
           mime_type, size_bytes, preview_kind, status, cache_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_key, message_index, attachment_id) DO UPDATE SET
+          attachment_index = excluded.attachment_index,
+          file_name = excluded.file_name,
+          mime_type = excluded.mime_type,
+          size_bytes = excluded.size_bytes,
+          preview_kind = excluded.preview_kind,
+          status = excluded.status,
+          cache_path = excluded.cache_path
+        WHERE message_attachments.attachment_index IS NOT excluded.attachment_index
+          OR message_attachments.file_name IS NOT excluded.file_name
+          OR message_attachments.mime_type IS NOT excluded.mime_type
+          OR message_attachments.size_bytes IS NOT excluded.size_bytes
+          OR message_attachments.preview_kind IS NOT excluded.preview_kind
+          OR message_attachments.status IS NOT excluded.status
+          OR message_attachments.cache_path IS NOT excluded.cache_path`,
       );
       let sessionAttachmentBytes = 0;
       for (const message of messages) {
@@ -405,7 +439,10 @@ export class SessionsStore {
       }
 
       const insertMessageEvent = this.db.prepare(
-        "INSERT INTO message_events (session_key, message_index, timestamp) VALUES (?, ?, ?)",
+        `INSERT INTO message_events (session_key, message_index, timestamp) VALUES (?, ?, ?)
+        ON CONFLICT (session_key, message_index) DO UPDATE SET
+          timestamp = excluded.timestamp
+        WHERE message_events.timestamp IS NOT excluded.timestamp`,
       );
       for (const message of messages) {
         const timestamp = Date.parse(message.timestamp);
@@ -423,6 +460,23 @@ export class SessionsStore {
           cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens, total_tokens, source_turn_id
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_key, dedupe_key) DO UPDATE SET
+          timestamp = excluded.timestamp,
+          input_tokens = excluded.input_tokens,
+          output_tokens = excluded.output_tokens,
+          cached_input_tokens = excluded.cached_input_tokens,
+          cache_creation_input_tokens = excluded.cache_creation_input_tokens,
+          reasoning_output_tokens = excluded.reasoning_output_tokens,
+          total_tokens = excluded.total_tokens,
+          source_turn_id = excluded.source_turn_id
+        WHERE token_events.timestamp IS NOT excluded.timestamp
+          OR token_events.input_tokens IS NOT excluded.input_tokens
+          OR token_events.output_tokens IS NOT excluded.output_tokens
+          OR token_events.cached_input_tokens IS NOT excluded.cached_input_tokens
+          OR token_events.cache_creation_input_tokens IS NOT excluded.cache_creation_input_tokens
+          OR token_events.reasoning_output_tokens IS NOT excluded.reasoning_output_tokens
+          OR token_events.total_tokens IS NOT excluded.total_tokens
+          OR token_events.source_turn_id IS NOT excluded.source_turn_id
       `,
       );
       for (const event of normalizedTokenEvents) {
@@ -447,6 +501,27 @@ export class SessionsStore {
           timestamp, call_id, event_type, status, source_turn_id, attributes_json
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (session_key, trace_index) DO UPDATE SET
+          kind = excluded.kind,
+          source = excluded.source,
+          title = excluded.title,
+          detail = excluded.detail,
+          timestamp = excluded.timestamp,
+          call_id = excluded.call_id,
+          event_type = excluded.event_type,
+          status = excluded.status,
+          source_turn_id = excluded.source_turn_id,
+          attributes_json = excluded.attributes_json
+        WHERE trace_events.kind IS NOT excluded.kind
+          OR trace_events.source IS NOT excluded.source
+          OR trace_events.title IS NOT excluded.title
+          OR trace_events.detail IS NOT excluded.detail
+          OR trace_events.timestamp IS NOT excluded.timestamp
+          OR trace_events.call_id IS NOT excluded.call_id
+          OR trace_events.event_type IS NOT excluded.event_type
+          OR trace_events.status IS NOT excluded.status
+          OR trace_events.source_turn_id IS NOT excluded.source_turn_id
+          OR trace_events.attributes_json IS NOT excluded.attributes_json
       `,
       );
       for (const event of traceEvents) {
@@ -469,13 +544,13 @@ export class SessionsStore {
       }
 
       this.replaceBranchTag(session.sessionKey, session.gitBranch);
+      this.refreshFtsForSession(session.sessionKey, messages);
+      this.db.prepare(`
+        UPDATE sessions
+        SET content_indexed_mtime_ms = ?, content_indexed_size = ?
+        WHERE session_key = ?
+      `).run(session.fileMtimeMs, session.fileSize, session.sessionKey);
     });
-    this.refreshFtsForSession(session.sessionKey, messages);
-    this.db.prepare(`
-      UPDATE sessions
-      SET content_indexed_mtime_ms = ?, content_indexed_size = ?
-      WHERE session_key = ?
-    `).run(session.fileMtimeMs, session.fileSize, session.sessionKey);
   }
 
   isIndexedSessionFresh(session: IndexedSession): boolean {
@@ -540,6 +615,23 @@ export class SessionsStore {
       .prepare("SELECT content_indexed_mtime_ms, content_indexed_size FROM sessions WHERE session_key = ?")
       .get(sessionKey) as { content_indexed_mtime_ms: number; content_indexed_size: number } | undefined;
     return row !== undefined && row.content_indexed_mtime_ms === fileMtimeMs && row.content_indexed_size === fileSize;
+  }
+
+  refreshSessionSourceMetadata(updates: readonly SessionSourceMetadata[]): void {
+    if (updates.length === 0) return;
+    this.transaction(() => {
+      for (const metadata of updates) {
+        const changed = this.db.prepare(`
+          UPDATE sessions
+          SET original_title = coalesce(?, nullif(first_question, ''), 'Untitled Session'), timestamp = ?
+          WHERE file_path = ? AND raw_id = ? AND source = ? AND storage_environment_id = 'local'
+            AND (original_title IS NOT coalesce(?, nullif(first_question, ''), 'Untitled Session') OR timestamp IS NOT ?)
+          RETURNING session_key
+        `).all(metadata.originalTitle, metadata.timestamp, metadata.filePath, metadata.rawId,
+          metadata.source, metadata.originalTitle, metadata.timestamp) as Array<{ session_key: string }>;
+        for (const row of changed) this.refreshFtsForSession(row.session_key);
+      }
+    });
   }
 
   touchIndexedAtIfMissing(sessionKey: string): void {
@@ -1739,19 +1831,32 @@ export class SessionsStore {
     const messages = indexedMessages ?? (this.db
       .prepare("SELECT content FROM messages WHERE session_key = ? ORDER BY message_index")
       .all(sessionKey) as Array<{ content: string }>);
-    this.db.prepare("DELETE FROM session_fts WHERE session_key = ?").run(sessionKey);
+    const existing = this.db.prepare(`
+      SELECT rowid, title, first_question, content_text, project_path
+      FROM session_fts WHERE session_key = ? ORDER BY rowid
+    `).all(sessionKey) as Array<{
+      rowid: number; title: string; first_question: string; content_text: string; project_path: string;
+    }>;
+    const chunks = sessionFtsContentChunks(messages);
     const insert = this.db.prepare(
       "INSERT INTO session_fts (session_key, title, first_question, content_text, project_path) VALUES (?, ?, ?, ?, ?)",
     );
-    for (const [index, content] of sessionFtsContentChunks(messages).entries()) {
-      insert.run(
-        sessionKey,
-        index === 0 ? searchableTitle : "",
-        index === 0 ? row.first_question : "",
-        content,
-        index === 0 ? row.project_path : "",
-      );
+    const update = this.db.prepare(
+      "UPDATE session_fts SET title = ?, first_question = ?, content_text = ?, project_path = ? WHERE rowid = ?",
+    );
+    for (const [index, content] of chunks.entries()) {
+      const title = index === 0 ? searchableTitle : "";
+      const question = index === 0 ? row.first_question : "";
+      const project = index === 0 ? row.project_path : "";
+      const previous = existing[index];
+      if (!previous) insert.run(sessionKey, title, question, content, project);
+      else if (previous.title !== title || previous.first_question !== question
+        || previous.content_text !== content || previous.project_path !== project) {
+        update.run(title, question, content, project, previous.rowid);
+      }
     }
+    const remove = this.db.prepare("DELETE FROM session_fts WHERE rowid = ?");
+    for (const previous of existing.slice(chunks.length)) remove.run(previous.rowid);
   }
 
   private deleteUnusedTag(tagName: string): void {

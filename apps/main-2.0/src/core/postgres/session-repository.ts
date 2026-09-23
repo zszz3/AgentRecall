@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   CodexIncrementalState,
   IndexedSession,
@@ -12,6 +13,7 @@ import type {
   SessionMessageEvent,
   SessionSearchResult,
   SessionSource,
+  SessionSourceMetadata,
   SessionTraceEvent,
   TagListOptions,
   TokenUsageEvent,
@@ -456,24 +458,36 @@ const INDEX_INSERT_BATCH_SIZE = 1_000;
 async function insertRawEvents(
   client: PostgresQueryable,
   sessionKey: string,
-  events: readonly DerivedRawEvent[],
+  events: readonly (DerivedRawEvent & { indexFingerprint: string })[],
 ): Promise<void> {
   for (let offset = 0; offset < events.length; offset += INDEX_INSERT_BATCH_SIZE) {
     const batch = events.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
     await client.query(
       `
         insert into agent_recall.session_raw_events (
-          session_key, event_index, event_id, kind, role, occurred_at, payload
+          session_key, event_index, event_id, kind, role, occurred_at, payload, index_fingerprint
         )
-        select $1, event_index, event_id, kind, role, occurred_at, payload
+        select $1, event_index, event_id, kind, role, occurred_at, payload, index_fingerprint
         from jsonb_to_recordset($2::jsonb) as records(
           event_index integer,
           event_id text,
           kind text,
           role text,
           occurred_at timestamptz,
-          payload jsonb
+          payload jsonb,
+          index_fingerprint text
         )
+        on conflict (session_key, event_index) do update set
+          event_id = excluded.event_id,
+          kind = excluded.kind,
+          role = excluded.role,
+          occurred_at = excluded.occurred_at,
+          payload = excluded.payload,
+          index_fingerprint = excluded.index_fingerprint
+        where (session_raw_events.event_id, session_raw_events.kind, session_raw_events.role,
+          session_raw_events.occurred_at, session_raw_events.payload, session_raw_events.index_fingerprint)
+          is distinct from (excluded.event_id, excluded.kind, excluded.role,
+            excluded.occurred_at, excluded.payload, excluded.index_fingerprint)
       `,
       [sessionKey, JSON.stringify(batch.map((event) => postgresJsonValue({
         event_index: event.eventIndex,
@@ -482,6 +496,7 @@ async function insertRawEvents(
         role: event.role,
         occurred_at: event.occurredAt,
         payload: event.payload,
+        index_fingerprint: event.indexFingerprint,
       })))],
     );
   }
@@ -490,7 +505,7 @@ async function insertRawEvents(
 async function insertTurns(
   client: PostgresQueryable,
   sessionKey: string,
-  turns: readonly DerivedSessionTurn[],
+  turns: readonly (DerivedSessionTurn & { indexFingerprint: string })[],
 ): Promise<void> {
   for (let offset = 0; offset < turns.length; offset += INDEX_INSERT_BATCH_SIZE) {
     const batch = turns.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
@@ -501,14 +516,14 @@ async function insertTurns(
           started_at, ended_at, duration_ms, time_to_first_token_ms, abort_reason,
           user_text, assistant_text, tool_text, search_text,
           input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
-          total_tokens, error_count, tool_names, derivation_version
+          total_tokens, error_count, tool_names, derivation_version, index_fingerprint
         )
         select
           id, $1, turn_index, source_message_index, source_turn_id, synthetic, status,
           started_at, ended_at, duration_ms, time_to_first_token_ms, abort_reason,
           user_text, assistant_text, tool_text, search_text,
           input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, reasoning_output_tokens,
-          total_tokens, error_count, tool_names, derivation_version
+          total_tokens, error_count, tool_names, derivation_version, index_fingerprint
         from jsonb_to_recordset($2::jsonb) as records(
           id text,
           turn_index integer,
@@ -533,7 +548,8 @@ async function insertTurns(
           total_tokens integer,
           error_count integer,
           tool_names text[],
-          derivation_version integer
+          derivation_version integer,
+          index_fingerprint text
         )
       `,
       [sessionKey, JSON.stringify(batch.map((turn) => ({
@@ -561,6 +577,7 @@ async function insertTurns(
         error_count: turn.errorCount,
         tool_names: turn.toolNames,
         derivation_version: turn.derivationVersion,
+        index_fingerprint: turn.indexFingerprint,
       })))],
     );
   }
@@ -822,13 +839,46 @@ export class PostgresSessionRepository {
         ],
       );
 
-      await client.query("delete from agent_recall.session_raw_events where session_key = $1", [session.sessionKey]);
-      await client.query("delete from agent_recall.session_message_events where session_key = $1", [session.sessionKey]);
-      await client.query("delete from agent_recall.session_attachments where session_key = $1", [session.sessionKey]);
-      await client.query("delete from agent_recall.session_turns where session_key = $1", [session.sessionKey]);
-      await client.query("delete from agent_recall.token_events where session_key = $1", [session.sessionKey]);
+      // The session upsert holds the row lock until all derived records commit.
+      // A null fingerprint is an older record: refresh that Turn on its next
+      // content update, without forcing every stored session to reindex.
+      const previousTurns = await client.query<{ id: string; index_fingerprint: string | null }>(
+        "select id, index_fingerprint from agent_recall.session_turns where session_key = $1",
+        [session.sessionKey],
+      );
+      const previousFingerprints = new Map(previousTurns.rows.map((turn) => [turn.id, turn.index_fingerprint]));
+      const nextTurns = timeline.turns.map((turn) => ({
+        ...turn,
+        indexFingerprint: createHash("sha256").update(JSON.stringify(turn)).digest("hex"),
+      }));
+      const changedTurns = nextTurns.filter((turn) => previousFingerprints.get(turn.id) !== turn.indexFingerprint);
+      const retainedTurnIds = new Set(nextTurns
+        .filter((turn) => previousFingerprints.get(turn.id) === turn.indexFingerprint)
+        .map((turn) => turn.id));
+      const replacedTurnIds = previousTurns.rows.filter((turn) => !retainedTurnIds.has(turn.id)).map((turn) => turn.id);
+      if (replacedTurnIds.length > 0) {
+        await client.query("delete from agent_recall.session_turns where session_key = $1 and id = any($2::text[])",
+          [session.sessionKey, replacedTurnIds]);
+      }
+      await client.query("delete from agent_recall.session_raw_events where session_key = $1 and not (event_index = any($2::integer[]))",
+        [session.sessionKey, timeline.rawEvents.map((event) => event.eventIndex)]);
+      await client.query("delete from agent_recall.session_message_events where session_key = $1 and not (message_index = any($2::integer[]))",
+        [session.sessionKey, persistedMessages.map((message) => message.index)]);
+      await client.query("delete from agent_recall.session_attachments where session_key = $1 and not (attachment_id = any($2::text[]))",
+        [session.sessionKey, attachmentRows.map((attachment) => attachment.id)]);
+      await client.query("delete from agent_recall.token_events where session_key = $1 and not (dedupe_key = any($2::text[]))",
+        [session.sessionKey, persistedTokenEvents.map((event) => event.dedupeKey)]);
 
-      await insertRawEvents(client, session.sessionKey, timeline.rawEvents);
+      const previousEvents = await client.query<{ event_index: number; index_fingerprint: string | null }>(
+        "select event_index, index_fingerprint from agent_recall.session_raw_events where session_key = $1",
+        [session.sessionKey],
+      );
+      const eventFingerprints = new Map(previousEvents.rows.map((event) => [Number(event.event_index), event.index_fingerprint]));
+      const changedEvents = timeline.rawEvents.map((event) => ({
+        ...event,
+        indexFingerprint: createHash("sha256").update(JSON.stringify(event)).digest("hex"),
+      })).filter((event) => eventFingerprints.get(event.eventIndex) !== event.indexFingerprint);
+      await insertRawEvents(client, session.sessionKey, changedEvents);
       const messageEvents = persistedMessages.map((message) => {
         const occurredAt = Date.parse(message.timestamp);
         return {
@@ -847,6 +897,9 @@ export class PostgresSessionRepository {
               message_index integer,
               occurred_at timestamptz
             )
+            on conflict (session_key, message_index) do update set
+              occurred_at = excluded.occurred_at
+            where session_message_events.occurred_at is distinct from excluded.occurred_at
           `,
           [
             session.sessionKey,
@@ -854,7 +907,7 @@ export class PostgresSessionRepository {
           ],
         );
       }
-      await insertTurns(client, session.sessionKey, timeline.turns);
+      await insertTurns(client, session.sessionKey, changedTurns);
       for (let offset = 0; offset < attachmentRows.length; offset += INDEX_INSERT_BATCH_SIZE) {
         const batch = attachmentRows.slice(offset, offset + INDEX_INSERT_BATCH_SIZE);
         await client.query(
@@ -876,6 +929,18 @@ export class PostgresSessionRepository {
               size_bytes bigint,
               cache_path text
             )
+            on conflict (session_key, attachment_id) do update set
+              message_index = excluded.message_index,
+              file_name = excluded.file_name,
+              mime_type = excluded.mime_type,
+              preview_kind = excluded.preview_kind,
+              status = excluded.status,
+              size_bytes = excluded.size_bytes,
+              cache_path = excluded.cache_path
+            where (session_attachments.message_index, session_attachments.file_name, session_attachments.mime_type,
+              session_attachments.preview_kind, session_attachments.status, session_attachments.size_bytes, session_attachments.cache_path)
+              is distinct from (excluded.message_index, excluded.file_name, excluded.mime_type,
+                excluded.preview_kind, excluded.status, excluded.size_bytes, excluded.cache_path)
           `,
           [
             session.sessionKey,
@@ -914,6 +979,21 @@ export class PostgresSessionRepository {
               total_tokens bigint,
               source_turn_id text
             )
+            on conflict (session_key, dedupe_key) do update set
+              occurred_at = excluded.occurred_at,
+              input_tokens = excluded.input_tokens,
+              output_tokens = excluded.output_tokens,
+              cached_input_tokens = excluded.cached_input_tokens,
+              cache_creation_input_tokens = excluded.cache_creation_input_tokens,
+              reasoning_output_tokens = excluded.reasoning_output_tokens,
+              total_tokens = excluded.total_tokens,
+              source_turn_id = excluded.source_turn_id
+            where (token_events.occurred_at, token_events.input_tokens, token_events.output_tokens,
+              token_events.cached_input_tokens, token_events.cache_creation_input_tokens,
+              token_events.reasoning_output_tokens, token_events.total_tokens, token_events.source_turn_id)
+              is distinct from (excluded.occurred_at, excluded.input_tokens, excluded.output_tokens,
+                excluded.cached_input_tokens, excluded.cache_creation_input_tokens,
+                excluded.reasoning_output_tokens, excluded.total_tokens, excluded.source_turn_id)
           `,
           [
             session.sessionKey,
@@ -1208,6 +1288,30 @@ export class PostgresSessionRepository {
       && Math.abs(numberValue(row.content_indexed_mtime_ms) - fileMtimeMs) < 0.001
       && numberValue(row.content_indexed_size) === fileSize,
     );
+  }
+
+  async refreshSessionSourceMetadata(updates: readonly SessionSourceMetadata[]): Promise<void> {
+    for (let offset = 0; offset < updates.length; offset += INDEX_INSERT_BATCH_SIZE) {
+      const batch = updates.slice(offset, offset + INDEX_INSERT_BATCH_SIZE).map((metadata) => ({
+        file_path: metadata.filePath,
+        raw_id: metadata.rawId,
+        source: metadata.source,
+        original_title: metadata.originalTitle === null ? null : postgresText(metadata.originalTitle),
+        started_at: new Date(Math.max(0, numberValue(metadata.timestamp))).toISOString(),
+      }));
+      await this.database.query(`
+        update agent_recall.sessions sessions
+        set original_title = coalesce(records.original_title, nullif(sessions.first_question, ''), 'Untitled Session'),
+            started_at = records.started_at
+        from jsonb_to_recordset($1::jsonb) as records(
+          file_path text, raw_id text, source text, original_title text, started_at timestamptz
+        )
+        where sessions.file_path = records.file_path and sessions.raw_id = records.raw_id
+          and sessions.source = records.source and sessions.storage_environment_id = 'local'
+          and (sessions.original_title, sessions.started_at) is distinct from
+            (coalesce(records.original_title, nullif(sessions.first_question, ''), 'Untitled Session'), records.started_at)
+      `, [JSON.stringify(batch)]);
+    }
   }
 
   async touchIndexedAtIfMissing(sessionKey: string): Promise<void> {
