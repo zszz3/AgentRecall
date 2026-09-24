@@ -114,10 +114,10 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install CLI development dependencies
         run: npm run setup:cli
-      - name: Test CLI and isolated package lifecycle
-        run: |
-          npm run test:cli
-          npm run package:smoke:cli
+      - name: Test CLI
+        run: npm run test:cli
+      - name: Test isolated package lifecycle
+        run: npm run package:smoke:cli
 
   quality-gate:
     name: Quality gate

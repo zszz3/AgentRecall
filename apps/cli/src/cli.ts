@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
-import { parseArgs } from "node:util";
-import { WorkspaceError, WorkspaceService, type WorkspaceStatus } from "@agentrecall/workspace-core";
+import { parseArgs, stripVTControlCharacters } from "node:util";
+import { WorkspaceError, WorkspaceService, TeamAssetService, type WorkspaceStatus } from "@agentrecall/workspace-core";
 import packageInfo from "../package.json" with { type: "json" };
 
 const help = `AgentRecall CLI — 本地项目与可选团队配置
@@ -15,14 +15,20 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
   agentrecall team use --personal          清除默认团队
   agentrecall team enable|disable          开启或关闭团队功能
   agentrecall team current [--project <id>] 读取当前可用的团队配置
+  agentrecall team sync [--transport https|ssh] 拉取当前项目的团队资产
+  agentrecall skill list                   列出当前团队缓存的 Skill
+  agentrecall skill preview <id> [--target codex|claude] [--file <path>]
+  agentrecall skill install <id> --target codex|claude --revision <预览中的版本>
+  agentrecall skill uninstall <id> --target codex|claude
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
   agentrecall project remove <id>          移除本地绑定（保留代码仓库）
   agentrecall project bind <id> --team <id>|--personal|--inherit
 
-所有命令支持 --json；add 支持 --name。--cwd <dir> 指定操作目录。
+所有命令支持 --json；add 支持 --name；sync 和 skill 命令支持 --project。
+--cwd <dir> 指定操作目录；Skill 只安装到该项目，不改变个人 Skill。
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
-本版本只管理本地配置，不验证 GitHub 权限、不下载资产、不上传 Session。
+只有 team sync 主动连接远端。安装必须显式选择版本和客户端；不上传 Session。
 `;
 
 const options = {
@@ -30,6 +36,7 @@ const options = {
   cwd: { type: "string" }, project: { type: "string" }, repo: { type: "string" }, name: { type: "string" },
   path: { type: "string" }, remote: { type: "string" }, team: { type: "string" },
   personal: { type: "boolean" }, inherit: { type: "boolean" },
+  target: { type: "string" }, revision: { type: "string" }, transport: { type: "string" }, file: { type: "string" },
 } as const;
 
 function invalidArguments(message: string): never {
@@ -39,7 +46,7 @@ function invalidArguments(message: string): never {
 function describeStatus(status: WorkspaceStatus): string {
   const reasons: Record<WorkspaceStatus["reason"], string> = {
     not_initialized: "尚未初始化，请运行 agentrecall init。", team_disabled: "团队功能已关闭，使用个人模式。",
-    no_project: "当前目录未绑定项目。", no_team: "当前项目未选择团队。", ready: "团队配置可用（尚未连接远端）。",
+    no_project: "当前目录未绑定项目。", no_team: "当前项目未选择团队。", ready: "团队功能已开启，资产状态可用 skill list 查看。",
   };
   return [reasons[status.reason], `配置：${status.configPath}`, `项目：${status.project?.name ?? "未选择"}`,
     `配置的团队：${status.team?.name ?? "无"}`].join("\n");
@@ -51,17 +58,22 @@ async function main(): Promise<void> {
     catch { return invalidArguments("参数无效。"); }
   })();
   const { values, positionals } = parsed;
-  const output = (data: unknown, message: string) => process.stdout.write(`${values.json ? JSON.stringify({ ok: true, data }) : message}\n`);
+  const output = (data: unknown, message: string) => process.stdout.write(`${values.json ? JSON.stringify({ ok: true, data }) : stripVTControlCharacters(message)}\n`);
   if (values.help || positionals.length === 0 && Object.keys(values).every((flag) => flag === "json")) { output({ help }, help.trimEnd()); return; }
   if (values.version) { output({ version: packageInfo.version }, packageInfo.version); return; }
   const [command, action, id] = positionals;
-  const key = command === "team" || command === "project" ? `${command} ${action ?? ""}` : command!;
+  const key = command === "team" || command === "project" || command === "skill" ? `${command} ${action ?? ""}` : command!;
   const commands: Record<string, { count: number; flags: string[] }> = {
     init: { count: 1, flags: [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
     "team add": { count: 3, flags: ["repo", "name"] }, "team list": { count: 2, flags: [] },
     "team use": { count: values.personal ? 2 : 3, flags: ["personal"] },
     "team enable": { count: 2, flags: [] }, "team disable": { count: 2, flags: [] },
     "team current": { count: 2, flags: ["project"] },
+    "team sync": { count: 2, flags: ["project", "transport"] },
+    "skill list": { count: 2, flags: ["project"] },
+    "skill preview": { count: 3, flags: ["project", "target", "file"] },
+    "skill install": { count: 3, flags: ["project", "target", "revision"] },
+    "skill uninstall": { count: 3, flags: ["project", "target"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
     "project bind": { count: 3, flags: ["team", "personal", "inherit"] },
@@ -73,9 +85,14 @@ async function main(): Promise<void> {
   const teamFlags = Number(values.team !== undefined) + Number(Boolean(values.personal)) + Number(Boolean(values.inherit));
   if (teamFlags > 1 || key === "project bind" && teamFlags !== 1) invalidArguments("请只选择 --team、--personal 或 --inherit 中的一项。");
   if (key === "team add" && !values.repo) invalidArguments("缺少 --repo。");
+  if ((key === "skill install" || key === "skill uninstall") && !values.target) invalidArguments("缺少 --target。");
+  if (values.target !== undefined && values.target !== "codex" && values.target !== "claude") invalidArguments("--target 只能为 codex 或 claude。");
+  if (key === "skill install" && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览 Skill，再通过 --revision 提供完整版本。");
+  if (values.transport !== undefined && values.transport !== "https" && values.transport !== "ssh") invalidArguments("--transport 只能为 https 或 ssh。");
   if (process.env.AGENTRECALL_HOME !== undefined && !process.env.AGENTRECALL_HOME.trim()) invalidArguments("AGENTRECALL_HOME 不能为空。");
   const directory = path.resolve(values.cwd ?? process.cwd());
   const service = new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(os.homedir(), ".agentrecall-cli"));
+  const assets = new TeamAssetService(service);
   switch (key) {
     case "init": {
       const config = await service.store.initialize();
@@ -97,11 +114,38 @@ async function main(): Promise<void> {
     }
     case "team enable": case "team disable": {
       const config = await service.setTeamEnabled(key === "team enable");
-      output({ teamEnabled: config.teamEnabled }, config.teamEnabled ? "团队功能已开启。Session 分享仍需主动发起。" : "团队功能已关闭，已有配置保留。"); break;
+      output({ teamEnabled: config.teamEnabled }, config.teamEnabled ? "团队功能已开启，用 team sync 主动拉取资产。" : "团队功能已关闭。已安装的本地 Skill 仍保留，需要移除时使用 skill uninstall。"); break;
     }
     case "team current": {
       const context = await service.currentTeam(directory, values.project);
       output(context, `项目：${context.project.name}\n团队：${context.team.name}\n资产仓库：${context.team.repository}`); break;
+    }
+    case "team sync": {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      process.once("SIGINT", cancel);
+      process.once("SIGTERM", cancel);
+      try {
+        const result = await assets.sync(directory, values.project, values.transport as "https" | "ssh" | undefined, controller.signal);
+        output(result, `已缓存 ${result.skills} 个 Skill。版本：${result.commit}。请用 skill preview 查看后选择安装。`);
+      } finally { process.removeListener("SIGINT", cancel); process.removeListener("SIGTERM", cancel); }
+      break;
+    }
+    case "skill list": {
+      const result = await assets.list(directory, values.project);
+      output(result, `团队：${result.teamId}\n版本：${result.commit}\n${result.skills.map((skill) => `${skill.id}\t${skill.description}`).join("\n") || "暂无 Skill。"}`); break;
+    }
+    case "skill preview": {
+      const result = await assets.preview(directory, id!, values.project, values.target as "codex" | "claude" | undefined, values.file);
+      output(result, `版本：${result.commit}\n${result.destination ? `安装位置：${result.destination}\n` : ""}文件：${result.files.map((file) => file.path).join(", ")}\n\n${result.file} (${result.encoding}):\n${result.content}`); break;
+    }
+    case "skill install": {
+      const result = await assets.install(directory, id!, values.target as "codex" | "claude", values.revision!, values.project);
+      output(result, `${result.status === "existing" ? "相同内容已经安装" : "已安装"}：${result.path}\n版本：${result.commit}`); break;
+    }
+    case "skill uninstall": {
+      const result = await assets.uninstall(directory, id!, values.target as "codex" | "claude", values.project);
+      output(result, `已卸载，保留的备份：${result.backupPath}`); break;
     }
     case "project add": {
       const project = await service.addProject({

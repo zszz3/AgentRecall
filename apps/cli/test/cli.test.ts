@@ -36,6 +36,8 @@ test("rejects unknown commands, conflicting flags and missing arguments before c
     ["status", "--typo"], ["team", "add", "a"], ["project", "bind", "a"],
     ["project", "bind", "a", "--team", "b", "--personal"], ["team", "enable", "--repo", "https://github.com/a/b"],
     ["session", "upload"], ["init", "extra"], ["team", "use", "a", "--personal"],
+    ["skill", "install", "review", "--target", "codex"],
+    ["skill", "uninstall", "review", "--target", "unknown"], ["team", "sync", "--transport", "file"],
   ]) {
     const result = await cli(home, root, args);
     assert.equal(result.code, 2, result.stdout);

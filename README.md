@@ -106,7 +106,7 @@ v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认�
 
 ## 独立 CLI（源码预览）
 
-`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理本地项目、多仓库绑定与可选团队配置，无需启动桌面。团队默认关闭，当前不连接远端、下载资产或上传 Session，尚未接入桌面端。构建安装见 [CLI 包说明](./apps/cli/README.md)，命令及配置见 [CLI 使用指南](./docs/v2/cli.md)。
+`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。团队默认关闭，无需启动桌面；当前尚未接入桌面端或 Session 分享。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
 
 ## 隐私与安全
 
