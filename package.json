@@ -28,6 +28,15 @@
     "package:smoke:all": "node scripts/run-package-smokes.mjs",
     "release:preflight": "npm run release-note:check && npm run package:smoke:all && npm run release:preflight:openviking",
     "release:preflight:openviking": "npm --prefix apps/main-2.0 run release:preflight:openviking",
-    "release-note:check": "node scripts/release-notes.mjs check-range"
-  }
+    "release-note:check": "node scripts/release-notes.mjs check-range",
+    "setup:cli": "npm ci --include=dev",
+    "build:cli": "npm run build --workspace agentrecall-cli",
+    "typecheck:cli": "npm run typecheck --workspace agentrecall-cli",
+    "test:cli": "npm run test --workspace agentrecall-cli",
+    "package:smoke:cli": "npm run package:smoke --workspace agentrecall-cli"
+  },
+  "workspaces": [
+    "packages/workspace-core",
+    "apps/cli"
+  ]
 }

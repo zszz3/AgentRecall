@@ -104,6 +104,10 @@ v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认�
 
 > 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。
 
+## 独立 CLI（源码预览）
+
+`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理本地项目、多仓库绑定与可选团队配置，无需启动桌面。团队默认关闭，当前不连接远端、下载资产或上传 Session，尚未接入桌面端。构建安装见 [CLI 包说明](./apps/cli/README.md)，命令及配置见 [CLI 使用指南](./docs/v2/cli.md)。
+
 ## 隐私与安全
 
 - 会话索引与元数据保存在本机，不经过 AgentRecall 提供的第三方服务。
