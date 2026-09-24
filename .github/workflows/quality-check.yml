@@ -96,9 +96,32 @@ jobs:
           npm --prefix "${{ matrix.directory }}" run typecheck
           node "${{ matrix.directory }}/scripts/package-smoke.mjs"
 
+  cli:
+    name: Verify CLI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install CLI development dependencies
+        run: npm run setup:cli
+      - name: Test CLI and isolated package lifecycle
+        run: |
+          npm run test:cli
+          npm run package:smoke:cli
+
   quality-gate:
     name: Quality gate
-    needs: [preflight, verify]
+    needs: [preflight, verify, cli]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -107,7 +130,9 @@ jobs:
           SHOULD_VERIFY: ${{ needs.preflight.outputs.verify }}
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          CLI_RESULT: ${{ needs.cli.result }}
         run: |
+          test "$CLI_RESULT" = "success"
           case "$PREFLIGHT_RESULT:$SHOULD_VERIFY:$VERIFY_RESULT" in
             success:true:success|success:false:skipped)
               ;;

@@ -250,7 +250,9 @@ test("workflows require branch notes and publish accumulated changes every day o
   assert.doesNotMatch(qualityWorkflow, /run build(?:\r?\n|$)/u);
   assert.match(qualityWorkflow, /cache-dependency-path: \$\{\{ matrix\.directory \}\}\/package-lock\.json/);
   assert.doesNotMatch(qualityWorkflow, /npm run package:smoke:all/);
-  assert.match(qualityWorkflow, /name: Quality gate[\s\S]*needs: \[preflight, verify\][\s\S]*if: \$\{\{ always\(\) \}\}/);
+  assert.match(qualityWorkflow, /name: Quality gate[\s\S]*needs: \[preflight, verify, cli\][\s\S]*if: \$\{\{ always\(\) \}\}/);
+  assert.match(qualityWorkflow, /npm run test:cli\s+npm run package:smoke:cli/);
+  assert.match(qualityWorkflow, /test "\$CLI_RESULT" = "success"/);
   assert.match(qualityWorkflow, /success:true:success\|success:false:skipped/);
   assert.match(releaseWorkflow, /schedule:[\s\S]*cron:\s*["']0 2 \* \* \*["']/);
   assert.match(releaseWorkflow, /workflow_dispatch:/);
