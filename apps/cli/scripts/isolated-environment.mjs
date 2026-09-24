@@ -16,14 +16,19 @@ export function isolatedEnvironment(testHome) {
     npm_config_cache: path.join(testHome, "npm-cache"), npm_config_userconfig: path.join(testHome, "npmrc"),
     TMPDIR: temp, TMP: temp, TEMP: temp, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull,
   });
+  // npm can provide both Path and PATH on Windows. Node forwards only one spelling
+  // to subprocesses, so normalize it before probing Git with the isolated HOME.
+  const originalPath = process.env.PATH ?? "";
+  for (const key of Object.keys(env)) if (key.toUpperCase() === "PATH") delete env[key];
+  env.PATH = originalPath;
+  if (spawnSync("git", ["--version"], { env, timeout: 10_000 }).status === 0) return env;
   // Skip PATH wrappers that depend on the real HOME, without exposing that HOME to a test.
-  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
-  const originalPath = env[pathKey] ?? "";
   for (const directory of originalPath.split(path.delimiter)) {
     if (!directory) continue;
-    const executable = path.join(directory, process.platform === "win32" ? "git.exe" : "git");
+    const resolvedDirectory = directory.replace(/^"(.*)"$/, "$1");
+    const executable = path.join(resolvedDirectory, process.platform === "win32" ? "git.exe" : "git");
     if (!fs.existsSync(executable)) continue;
-    const candidate = { ...env, [pathKey]: `${directory}${path.delimiter}${originalPath}` };
+    const candidate = { ...env, PATH: `${resolvedDirectory}${path.delimiter}${originalPath}` };
     if (spawnSync(executable, ["--version"], { env: candidate, timeout: 10_000 }).status === 0) return candidate;
   }
   throw new Error("No Git installation works with an isolated HOME. Install Git before running CLI checks.");
