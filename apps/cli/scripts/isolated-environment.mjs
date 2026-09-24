@@ -21,7 +21,9 @@ export function isolatedEnvironment(testHome) {
   const originalPath = process.env.PATH ?? "";
   for (const key of Object.keys(env)) if (key.toUpperCase() === "PATH") delete env[key];
   env.PATH = originalPath;
-  if (spawnSync("git", ["--version"], { env, timeout: 10_000 }).status === 0) return env;
+  const probe = (file, candidate) => spawnSync(file, ["--version"], { env: candidate, timeout: 10_000, encoding: "utf8" });
+  let attempted = probe("git", env);
+  if (attempted.status === 0) return env;
   // Skip PATH wrappers that depend on the real HOME, without exposing that HOME to a test.
   for (const directory of originalPath.split(path.delimiter)) {
     if (!directory) continue;
@@ -29,7 +31,8 @@ export function isolatedEnvironment(testHome) {
     const executable = path.join(resolvedDirectory, process.platform === "win32" ? "git.exe" : "git");
     if (!fs.existsSync(executable)) continue;
     const candidate = { ...env, PATH: `${resolvedDirectory}${path.delimiter}${originalPath}` };
-    if (spawnSync(executable, ["--version"], { env: candidate, timeout: 10_000 }).status === 0) return candidate;
+    attempted = probe(executable, candidate);
+    if (attempted.status === 0) return candidate;
   }
-  throw new Error("No Git installation works with an isolated HOME. Install Git before running CLI checks.");
+  throw new Error(`Git cannot run in the isolated HOME (status ${attempted.status}): ${attempted.error?.message ?? attempted.stderr?.trim() ?? "unknown startup failure"}`);
 }
