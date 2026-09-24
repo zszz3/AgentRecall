@@ -1,8 +1,8 @@
 # AgentRecall CLI 使用与配置
 
-`agentrecall-cli` 是独立的源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关和多仓库绑定。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
+`agentrecall-cli` 是独立的源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览和项目级安装。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
 
-当前没有 GitHub 登录、资产下载、Session 查询或上传能力。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得仓库权限。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
+当前不提供 GitHub 登录、组织成员管理、Session 查询或上传。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
 
 ## 配置两个团队、三个项目
 
@@ -27,7 +27,7 @@ agentrecall team current --project experiments
 agentrecall team disable
 ```
 
-路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留本地配置，`team current` 会拒绝返回可用团队配置；`status`、列表和编辑命令仍可用于检查与管理配置。当前开关仅作用于 CLI，尚未接入桌面端。
+路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除。当前开关仅作用于 CLI，尚未接入桌面端。
 
 ## 命令
 
@@ -41,6 +41,11 @@ agentrecall team disable
 | `team use <id>` / `team use --personal` | 设置或清除默认团队 |
 | `team enable` / `team disable` | 开启或关闭团队功能 |
 | `team current [--project <id>]` | 读取当前生效的项目和团队；未开启、未绑定或个人项目会明确报错 |
+| `team sync [--project <id>] [--transport https\|ssh]` | 主动拉取资产仓库默认分支并缓存 Skill，不自动安装 |
+| `skill list [--project <id>]` | 查看当前团队已缓存的 Skill |
+| `skill preview <id> [--target codex\|claude] [--file <path>] [--project <id>]` | 预览正文、支持文件、完整版本号和可选安装位置 |
+| `skill install <id> --target codex\|claude --revision <sha> [--project <id>]` | 安装已选择版本；不同内容或本地修改均不覆盖 |
+| `skill uninstall <id> --target codex\|claude [--project <id>]` | 移走未修改的受管安装，保留备份；关闭团队后仍可使用 |
 | `project add <id> [--path <目录>] [--remote <名称>] [--name <名称>] [--team <id>\|--personal]` | 登记业务仓库；路径默认当前目录 |
 | `project list` | 查看已登记项目 |
 | `project bind <id> --team <id>\|--personal\|--inherit` | 指定团队、改为个人或恢复继承默认团队 |
@@ -94,3 +99,5 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 根目录 `npm run setup:cli` 只安装 CLI 和其共享配置模块的开发依赖，两个桌面应用继续独立安装。执行 `npm run test:cli` 检查配置、并发写入、命令行为和 Git 归属；执行 `npm run package:smoke:cli` 做类型检查、打包和隔离的安装、重装、卸载验证。测试使用临时主目录、npm 前缀和合成仓库。
 
 当前发布工作流仍只发布 V1/V2 桌面包，不自动发布 CLI。后续范围与状态见 [团队功能开发计划](agentrecall-cli-team-plan.md)。
+
+团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产缓存和安装记录均为独立的版本 1 格式；未知版本或损坏记录会拒绝读取，不会自动重置。

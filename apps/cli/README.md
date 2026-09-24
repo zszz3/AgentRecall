@@ -1,6 +1,6 @@
 # AgentRecall CLI
 
-独立命令 `agentrecall`，用于管理本地项目和可选团队配置。团队默认关闭；本版本不连接远端、不下载资产、不上传 Session，也不要求安装或启动桌面应用。
+独立命令 `agentrecall`，用于管理本地项目和可选团队配置，主动拉取、预览和安装团队 Skill。团队默认关闭；只有 `team sync` 会主动访问资产仓库，不上传 Session，也不要求安装或启动桌面应用。
 
 这是源码预览包，尚未发布到 npm 或桌面 Release 附件。需要 Node.js 22.13+ 和 Git 2.31+。在仓库根目录构建：
 
@@ -24,3 +24,5 @@ agentrecall status --project backend
 上面的地址是示例，需要换成自己的资产仓库地址。所有命令支持 `--json`。配置默认保存在 `~/.agentrecall-cli/config.json`，可用 `AGENTRECALL_HOME` 指定独立目录，不读取桌面数据库或原始 Agent 会话。
 
 完整的命令、项目识别、配置格式和限制见仓库中的 [CLI 使用与配置](../../docs/v2/cli.md)，或在线查看 [使用指南](https://github.com/zszz3/AgentRecall/blob/main/docs/v2/cli.md)。
+
+登记项目后，使用 `team sync`、`skill list` 和 `skill preview <id>` 查看团队资产。安装时必须显式提供目标客户端和预览中的版本。资产仓库格式、安装与恢复流程见 [团队 Skill 指南](../../docs/v2/team-assets.md)。

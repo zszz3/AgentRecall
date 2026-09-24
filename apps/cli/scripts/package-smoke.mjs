@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { isolatedEnvironment } from "./isolated-environment.mjs";
 
 const testHome = fs.mkdtempSync(path.join(os.tmpdir(), "agentrecall-cli-package-"));
@@ -41,6 +42,21 @@ try {
   command(["team", "enable"]);
   assert.equal(command(["team", "current"], project).team.id, "example");
   assert.equal(command(["status", "--project", "business"]).project.id, "business");
+  const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Test review\n---\nReview the change.\n").toString("base64"), executable: false }];
+  const commit = "1".repeat(40);
+  fs.mkdirSync(path.join(env.AGENTRECALL_HOME, "assets"));
+  fs.writeFileSync(path.join(env.AGENTRECALL_HOME, "assets", "example.json"), JSON.stringify({
+    schemaVersion: 1, repository: "https://github.com/example/assets", commit,
+    skills: [{ id: "review", description: "Test review", files, digest: createHash("sha256").update(JSON.stringify(files)).digest("hex") }],
+  }));
+  assert.equal(command(["skill", "list"], project).skills[0].id, "review");
+  assert.equal(command(["skill", "preview", "review"], project).commit, commit);
+  const installed = command(["skill", "install", "review", "--target", "claude", "--revision", commit], project);
+  assert.equal(installed.status, "installed");
+  command(["team", "disable"]);
+  const removed = command(["skill", "uninstall", "review", "--target", "claude"], project);
+  assert.ok(fs.existsSync(path.join(removed.backupPath, "SKILL.md")));
+  assert.ok(!fs.existsSync(installed.path));
   const config = path.join(env.AGENTRECALL_HOME, "config.json");
   const before = fs.readFileSync(config, "utf8");
   // Reinstall exercises the update path without publishing or contacting a registry.
