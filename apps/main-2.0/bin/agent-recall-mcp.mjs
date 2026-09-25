@@ -118,24 +118,6 @@ export function cleanUserMessageContent(text) {
   return cleaned;
 }
 
-function searchTerms(query) {
-  const terms = [];
-  const pattern = /"([^"]+)"|(\S+)/gu;
-  for (const match of String(query ?? "").matchAll(pattern)) {
-    const quoted = Boolean(match[1]);
-    const value = (match[1] ?? match[2] ?? "").trim();
-    if (!value || value.toLocaleLowerCase() === "and") continue;
-    // 与主程序 parseSearchClauses 对齐:丢弃 AND 操作符和单字符检索词(除非显式加引号)。
-    if (!quoted && [...value].length < 2) continue;
-    if (!terms.includes(value)) terms.push(value);
-  }
-  return terms;
-}
-
-function likePattern(term) {
-  return `%${term.replace(/[\\%_]/gu, (value) => `\\${value}`)}%`;
-}
-
 function toResult(row) {
   return {
     sessionKey: row.session_key,
@@ -153,6 +135,7 @@ const RESULT_COLUMNS = `
 `;
 
 export async function searchSessions(db, { query = "", source = "", project = "", limit = 20 } = {}) {
+  const { parseSearchClauses, escapeLike } = await import("../out/mcp/session-search-query.js");
   const cap = clamp(limit, 20, MAX_RESULTS);
   const filters = [];
   const params = [];
@@ -161,16 +144,16 @@ export async function searchSessions(db, { query = "", source = "", project = ""
     filters.push(`s.source = $${params.length}`);
   }
   if (project) {
-    params.push(`%${project}%`);
-    filters.push(`s.project_path ILIKE $${params.length}`);
+    params.push(`%${escapeLike(project)}%`);
+    filters.push(`s.project_path ILIKE $${params.length} ESCAPE '\\'`);
   }
 
   const q = String(query || "").trim();
-  const terms = q ? searchTerms(q) : [];
+  const terms = q ? parseSearchClauses(q) : [];
   if (terms.length > 0) {
     const searchable = `concat_ws(' ', t.search_text, s.original_title, s.first_question, s.custom_title, s.ai_summary)`;
     for (const term of terms) {
-      params.push(likePattern(term));
+      params.push(`%${escapeLike(term)}%`);
       filters.push(`${searchable} ILIKE $${params.length} ESCAPE '\\'`);
     }
     params.push(q, cap);
@@ -283,6 +266,7 @@ export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 
 // session" without a sessionKey — the missing piece for natural-language
 // migration like "把这次会话迁移到 claude".
 export async function getLatestSessions(db, { source = "", projectPath = "", limit = 5 } = {}) {
+  const { escapeLike } = await import("../out/mcp/session-search-query.js");
   const cap = clamp(limit, 1, 20);
   const filters = [];
   const params = [];
@@ -291,8 +275,8 @@ export async function getLatestSessions(db, { source = "", projectPath = "", lim
     filters.push(`s.source = $${params.length}`);
   }
   if (projectPath) {
-    params.push(`%${projectPath}%`);
-    filters.push(`s.project_path ILIKE $${params.length}`);
+    params.push(`%${escapeLike(projectPath)}%`);
+    filters.push(`s.project_path ILIKE $${params.length} ESCAPE '\\'`);
   }
   const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   params.push(cap);

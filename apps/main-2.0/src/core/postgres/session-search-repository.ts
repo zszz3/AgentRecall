@@ -8,16 +8,15 @@ import type {
 import { AGENT_RECALL_INVOCATION_SURFACES } from "../../shared/runtime-invocation";
 import { LIVE_SESSION_INACTIVITY_TIMEOUT_MS } from "../refresh-policy";
 import type { PostgresDatabase } from "./database";
+import { escapeLike, parseSearchClauses } from "../session-search-query";
 import {
   SESSION_ACTIVITY_SQL,
   SESSION_SELECT_SQL,
   AGENTRECALL_CREATED_SESSION_SQL,
   RUNTIME_SESSION_BINDING_MATCH_SQL,
-  escapeLike,
   hydrateSession,
   isoValue,
   numberValue,
-  parseSearchClauses,
   searchSnippet,
   searchTerms,
   type SessionRow,
