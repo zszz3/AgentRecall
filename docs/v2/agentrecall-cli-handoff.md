@@ -8,7 +8,7 @@
 
 此前单 Skill 流程的验证基线为 [`c4525acc701490264eff473bd297d143b7d3cc75`](https://github.com/zszz3/AgentRecall/commit/c4525acc701490264eff473bd297d143b7d3cc75)。该提交的 CLI、V1、V2 在 Linux/macOS/Windows 上的检查，以及仓库检查和 Quality gate，均已通过：[完整 CI 记录](https://github.com/zszz3/AgentRecall/actions/runs/36114851838)。交接文档提交本身不改变产品代码，不能将这条 CI 记录当作任意后续提交的验证。
 
-当前源码进一步支持工作配置的列表、预览和批量 Skill 安装，版本 1/2 清单兼容，并对失败回退和部分结果作出明确处理。完整团队产品尚未完成：整组持续归属、更新与卸载，以及其他资产类型仍需开发；多人 Chat 删除另有未提交工作，必须单独收尾。当前代码与 CI 以 PR 最新提交为准。
+当前源码进一步支持工作配置的列表、预览、批量安装、本地归属、共享保护和整组卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：整组版本更新及其他资产类型仍需开发；多人 Chat 删除另有未提交工作，必须单独收尾。当前代码与 CI 以 PR 最新提交为准。
 
 ## 2. 到哪里接着做
 
@@ -56,7 +56,7 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 | R04/R05 团队开关和多仓库 | 默认关闭、显式启停、默认团队和项目覆盖、worktree/克隆/fork/歧义识别 | 桌面开关及入口 |
 | R06 GitHub 资产读取 | 显式 HTTPS/SSH 同步，复用本机 Git 身份 | 创建/加入空间、成员权限管理、真实私有仓库验收 |
 | R07 资产格式 | 版本 1/2 清单、来源、文件校验、离线缓存及工作配置预览 | Rules、Docs、MCP、Agent 模板 |
-| R08/R09 安装与版本管理 | Codex/Claude 安装、单 Skill 版本管理、工作配置批量预检/安装及失败回退 | 整组持续归属与生命周期、其他资产、逐行差异、PR 贡献与审核、分支订阅 |
+| R08/R09 安装与版本管理 | Codex/Claude 安装、单 Skill 版本管理、工作配置批量安装、持久化归属、共享保护及整组卸载 | 整组版本更新、其他资产、逐行差异、PR 贡献与审核、分支订阅 |
 | R10 桌面团队入口 | 未开始 | 接入共享服务及用户可见界面 |
 | R11—R14 完整 Session 分享 | 未开始 | 包格式、对象存储、团队授权、主动上传、浏览和撤回 |
 | R15—R19 Context / Improvement | 未开始 | 知识维护、检索、改进提案、验证发布、可选自动召回 |
@@ -69,7 +69,8 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 
 | 命令 | 行为 |
 | --- | --- |
-| `work-config list / preview / install` | 工作配置的批量安装清单；预览全部 Skill 与冲突，失败仅回退本次新副本 |
+| `work-config list / preview / install` | 团队清单、冲突预览及安装，保存本地共享引用 |
+| `work-config installed / status / uninstall` | 离线查看本地配置、实际状态及整组卸载；保留共享和原有独立 Skill |
 | `team sync` | 手动读取资产仓库默认分支，替换校验完成的缓存 |
 | `skill list / preview` | 查看当前团队缓存；可预览指定支持文件 |
 | `skill install` | 显式选择目标客户端与完整 Git 版本，安装到当前项目 |
@@ -94,6 +95,7 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 | [git-assets.ts](../../packages/workspace-core/src/git-assets.ts) | Git 对象读取；bare clone，不检出或执行仓库内容 |
 | [asset-storage.ts](../../packages/workspace-core/src/asset-storage.ts) | 有界 JSON 读取及资产锁 |
 | [team-assets.ts](../../packages/workspace-core/src/team-assets.ts) | 同步、缓存、项目操作协调，以及提交前再次核对团队状态 |
+| [project-work-configs.ts](../../packages/workspace-core/src/project-work-configs.ts) | 项目本地归属格式、记录原子写入、引用保护、状态与整组卸载恢复 |
 | [project-skills.ts](../../packages/workspace-core/src/project-skills.ts) | 安装归属、文件校验、差异、备份、更新与恢复 |
 | [CLI 测试目录](../../apps/cli/test) | `workspace.test.ts`、`cli.test.ts`、`team-assets.test.ts` |
 | [CLI 验证脚本](../../apps/cli/scripts) | 测试环境隔离、独立打包、临时目录安装/更新/卸载 |
@@ -116,12 +118,12 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 
 ## 7. 下一步建议：工作配置持续管理
 
-当前交付的是批量安装清单，安装后的 Skill 独立管理，没有持久化的配置启用关系，也没有整组更新/卸载命令。两个配置引用同一 Skill 时复用相同内容，但手动修改或卸载 Skill 会影响全部使用者。
+当前已记录工作配置的本地归属，支持共享引用保护、离线状态和整组卸载。原有独立安装不被认领为可随配置删除的文件；被引用的 Skill 无法通过单独命令绕过保护。仍未提供整组版本更新。
 
 下一段开发重点：
 
-1. 明确并实现工作配置的本地归属记录、版本兼容和重叠引用规则，再提供整组状态、更新和卸载。不能把当前批量安装结果当成已存在的持久化启用状态。
-2. 用两组有重叠 Skill 的配置验证：卸载一个配置保留另一配置使用的资产；对共同资产的更新明确呈现影响范围。
+1. 在现有归属记录上实现整组版本更新，先定义新增/移除引用与共享 Skill 版本分歧的行为，不能直接对每项调用单 Skill 更新。
+2. 继续保留现有共享卸载测试；新增对共同资产更新的影响预览、跨版本兼容与失败恢复验收。
 3. 复用现有单 Skill 校验、锁、备份及批量失败报告；多个目录不是一次原子提交，异常终止的恢复规则必须明确。
 4. 扩展 Rules/Docs/MCP/Agent 模板前核实客户端当前格式，MCP 只引用本地密钥。V2 桌面接入使用同一服务，不能新增 V1 依赖。
 5. 更新总计划和用户指南，保持真实成员/私有仓库验收、PR 贡献与 Session 分享的未完成状态。
@@ -138,7 +140,7 @@ R00 可作为另一项独立收尾任务：在 Chat 工作区核对历史 Sessio
 - 上述完整 CI 已覆盖 Linux/macOS/Windows 的 CLI、V1、V2 和 Quality gate。
 - 尚未做真实私有团队仓库、两名真实成员协作、桌面团队入口或 Session 分享验收。
 
-工作配置增量本地 CLI 测试已扩展到 26 项，包含格式兼容、重叠引用、多项目/客户端与 worktree、预检冲突、失败回退及内容被修改时的部分状态。
+工作配置增量本地 CLI 测试已扩展到 33 项，包含格式兼容、重叠引用、多项目/客户端与 worktree、预检冲突、引用保护、并发安装、整组卸载、记录写入失败、提交后的清理失败及内容被修改时的部分状态。
 
 接手后先检查实际代码和 CI，不必为了阅读交接文档重新跑全仓测试。开发发生变化时，在 CLI 工作区按风险执行：
 

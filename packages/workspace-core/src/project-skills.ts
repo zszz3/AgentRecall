@@ -166,11 +166,20 @@ export function previewSkillInstall(root: string, skill: TeamSkill, repository: 
   }
 }
 
-// This is a batch installation recipe, not a persistent ownership group. Existing
-// identical Skills are reused; compensation only moves this attempt's new copies.
-export async function installProjectSkills(root: string, skills: TeamSkill[], repository: string, commit: string, target: ProjectSkillTarget, publish: (operation: (assertOwned: () => void) => Promise<void>) => Promise<void>) {
+export function inspectProjectSkill(root: string, id: string, target: ProjectSkillTarget) {
+  const destination = skillDestination(root, id, target);
+  if (!statIfPresent(destination)) return null;
+  return inspectOwned(destination).record;
+}
+
+export type SkillInstallResult = { id: string; status: "installed" | "existing" | "reverted" | "recovery_required"; path: string; commit: string; backupPath: string | null };
+
+// Ownership is recorded before releasing the publication lock. After that commit,
+// cleanup/lock-release failures must not compensate the durable installation.
+export async function installProjectSkills(root: string, skills: TeamSkill[], repository: string, commit: string, target: ProjectSkillTarget, publish: (operation: (assertOwned: () => void) => Promise<void>) => Promise<void>, recordInstallation: (results: SkillInstallResult[]) => void) {
   const prepared: Array<{ skill: TeamSkill; operation: ReturnType<typeof prepareSkillInstall> }> = [];
-  const results: Array<{ id: string; status: "installed" | "existing" | "reverted" | "recovery_required"; path: string; commit: string; backupPath: string | null }> = [];
+  const results: SkillInstallResult[] = [];
+  let recorded = false;
   const cleanupFailed: string[] = [];
   let failed = false;
   let failure: unknown;
@@ -192,12 +201,14 @@ export async function installProjectSkills(root: string, skills: TeamSkill[], re
         await setImmediate();
       }
       assertOwned();
+      recordInstallation(results);
+      recorded = true;
     });
     failedSkillId = null;
   } catch (error) {
     failed = true;
     failure = error;
-    for (const result of [...results].reverse()) {
+    for (const result of recorded ? [] : [...results].reverse()) {
       if (result.status === "existing") continue;
       try {
         const { record } = inspectOwned(skillDestination(root, result.id, target));
@@ -218,7 +229,8 @@ export async function installProjectSkills(root: string, skills: TeamSkill[], re
       await setImmediate();
     }
   }
-  const details = { failedSkillId, causeCode: failure instanceof WorkspaceError ? failure.code : failed ? "FILE_OPERATION_FAILED" : null, skills: results, cleanupFailed };
+  const details = { recorded, failedSkillId, causeCode: failure instanceof WorkspaceError ? failure.code : failed ? "FILE_OPERATION_FAILED" : null, skills: results, cleanupFailed };
+  if (recorded && failed) throw new WorkspaceError("WORK_CONFIG_RECOVERY_REQUIRED", "工作配置已记录，但操作收尾失败。请先运行 work-config status 核对实际状态。", details);
   if (cleanupFailed.length || results.some((result) => result.status === "recovery_required")) {
     throw new WorkspaceError("WORK_CONFIG_RECOVERY_REQUIRED", "工作配置操作未完全结束。请检查以下 Skill 和暂存目录，保留的内容不会被强制删除："
       + [...results.filter((result) => result.status === "recovery_required").map((result) => result.id), ...cleanupFailed].join("、"), details);

@@ -8,6 +8,7 @@ import { GitAssetSource, type AssetTransport } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { inspectCheckout } from "./git.js";
+import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
 type Context = Awaited<ReturnType<WorkspaceService["currentTeam"]>>;
@@ -91,18 +92,26 @@ export class TeamAssetService {
     const snapshot = await this.snapshot(context);
     const config = this.findWorkConfig(snapshot, id);
     const root = target ? await this.projectRoot(directory, context.project.id) : undefined;
-    const preview = () => ({
-      teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
-      id: config.id, name: config.name, description: config.description, target: target ?? null,
-      skills: config.skills.map((skillId) => {
-        const skill = snapshot.skills.find((item) => item.id === skillId)!;
-        return {
+    const preview = () => {
+      const skills = config.skills.map((id) => snapshot.skills.find((skill) => skill.id === id)!);
+      let configurationConflict: string | null = null;
+      let installedRevision: string | null = null;
+      if (root && target) {
+        const records = new ProjectWorkConfigs(root);
+        installedRevision = records.state.configs.find((item) => item.id === id && item.target === target)?.revision ?? null;
+        try { records.prepareInstall(config, snapshot.repository, snapshot.commit, target, skills); }
+        catch (error) { if (!(error instanceof WorkspaceError)) throw error; configurationConflict = error.message; }
+      }
+      return {
+        teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
+        id: config.id, name: config.name, description: config.description, target: target ?? null, installedRevision, configurationConflict,
+        skills: skills.map((skill) => ({
           id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest,
           ...(root && target ? previewSkillInstall(root, skill, snapshot.repository, target)
             : { destination: null, status: "unselected" as const, installedRevision: null, reason: null }),
-        };
-      }),
-    });
+        })),
+      };
+    };
     if (!root) return this.commitForTeam(directory, context, preview);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => this.commitForTeam(root, context, () => {
       assertOwned();
@@ -118,9 +127,34 @@ export class TeamAssetService {
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "资产版本与预览不一致，请重新预览并使用返回的 --revision。");
       const config = this.findWorkConfig(snapshot, id);
       const skills = config.skills.map((skillId) => snapshot.skills.find((skill) => skill.id === skillId)!);
+      const recordInstallation = new ProjectWorkConfigs(root).prepareInstall(config, snapshot.repository, snapshot.commit, target, skills);
       const installed = await installProjectSkills(root, skills, snapshot.repository, snapshot.commit, target,
-        (publish) => this.commitForTeam(root, context, (assertConfigOwned) => publish(() => { assertOwned(); assertConfigOwned(); })));
+        (publish) => this.commitForTeam(root, context, (assertConfigOwned) => publish(() => { assertOwned(); assertConfigOwned(); })), recordInstallation);
       return { workConfigId: config.id, name: config.name, path: root, commit, skills: installed };
+    });
+  }
+
+  async installedWorkConfigs(directory: string, projectId?: string) {
+    const root = await this.projectRoot(directory, projectId);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      assertOwned();
+      return new ProjectWorkConfigs(root).state.configs;
+    });
+  }
+
+  async workConfigStatus(directory: string, id: string, target: ProjectSkillTarget, projectId?: string) {
+    const root = await this.projectRoot(directory, projectId);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      assertOwned();
+      return new ProjectWorkConfigs(root).status(id, target);
+    });
+  }
+
+  async uninstallWorkConfig(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string) {
+    const root = await this.projectRoot(directory, projectId);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      assertOwned();
+      return new ProjectWorkConfigs(root).uninstall(id, target, commit, assertOwned);
     });
   }
 
@@ -171,13 +205,18 @@ export class TeamAssetService {
     const context = await this.workspace.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      new ProjectWorkConfigs(root).assertUnreferenced(id, target);
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "资产版本与预览不一致，请重新预览并使用返回的 --revision。");
       const skill = snapshot.skills.find((item) => item.id === id);
       if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill。");
       const prepared = prepareSkillInstall(root, skill, snapshot.repository, snapshot.commit, target, fromRevision);
       try {
-        return await this.commitForTeam(root, context, () => { assertOwned(); return prepared.commit(); });
+        return await this.commitForTeam(root, context, () => {
+          assertOwned();
+          new ProjectWorkConfigs(root).assertUnreferenced(id, target);
+          return prepared.commit();
+        });
       } finally { prepared.cleanup(); }
     });
   }
@@ -195,6 +234,7 @@ export class TeamAssetService {
     const root = await this.projectRoot(directory, projectId);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       assertOwned();
+      new ProjectWorkConfigs(root).assertUnreferenced(id, target);
       return rollbackProjectSkill(root, id, target, backup, fromRevision);
     });
   }
@@ -204,6 +244,7 @@ export class TeamAssetService {
     const root = await this.projectRoot(directory, projectId);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       assertOwned();
+      new ProjectWorkConfigs(root).assertUnreferenced(id, target);
       return uninstallProjectSkill(root, id, target);
     });
   }

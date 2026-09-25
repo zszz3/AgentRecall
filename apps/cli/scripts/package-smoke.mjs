@@ -71,6 +71,11 @@ try {
   assert.equal(updated.status, "updated");
   assert.equal(command(["skill", "backups", "review"], project).backups[0].revision, commit);
   command(["team", "disable"]);
+  assert.equal(command(["work-config", "installed"], project)[0].id, "backend");
+  assert.equal(command(["work-config", "status", "backend", "--target", "codex"], project).revision, commit);
+  command(["work-config", "uninstall", "backend", "--target", "codex", "--revision", commit], project);
+  assert.deepEqual(command(["work-config", "installed"], project), []);
+  assert.ok(!fs.existsSync(path.join(project, ".agents", "skills", "review")));
   const restored = command(["skill", "rollback", "review", "--target", "claude", "--backup", path.basename(updated.backupPath), "--from-revision", next], project);
   assert.equal(restored.commit, commit);
   assert.equal(fs.readFileSync(path.join(installed.path, "SKILL.md"), "utf8"), Buffer.from(files[0].content, "base64").toString("utf8"));
