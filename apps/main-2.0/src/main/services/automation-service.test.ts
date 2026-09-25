@@ -6,7 +6,6 @@ import type { AutomationChange, WorkflowAutomationProjection } from "../../share
 import type { McpRegistryStore } from "../../automation/engine/main/mcp-registry-store";
 import type { StartMcpBridgeOptions } from "../../automation/engine/main/bridges/mcp-bridge";
 import type { EvaluationService } from "./evaluation-service";
-import type { TeamChatService } from "../team-chat/team-chat-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { BuiltinSkillMcpServer, type ManagedMcp } from "../../automation/engine/main/mcp-builtin-server";
 import { NativeAutomationService, type AutomationServiceOptions } from "./automation-service";
@@ -73,15 +72,6 @@ function fixture(optionOverrides: Partial<AutomationServiceOptions> = {}) {
     configuredAgentReferences: vi.fn(async () => []),
     close: vi.fn(async () => { calls.push("evaluations-close"); }),
   } as unknown as EvaluationService;
-  const teamChats = {
-    connect: vi.fn(async () => {
-      calls.push("team-chat-start");
-      return { state: "ready", mode: "local", databaseLabel: "Local database" } as const;
-    }),
-    close: vi.fn(async () => { calls.push("team-chat-close"); }),
-    configuredAgentReferences: vi.fn(async () => []),
-    handleMcpRequest: vi.fn(async () => ({ ok: true })),
-  } as unknown as TeamChatService;
   const database = {
     query: vi.fn(async () => ({ rows: [] })),
   } as unknown as PostgresDatabase;
@@ -110,7 +100,6 @@ function fixture(optionOverrides: Partial<AutomationServiceOptions> = {}) {
       hub,
       registry,
       evaluations,
-      teamChats,
       workflowCore: {
         initialize: vi.fn(async () => undefined),
         ensureDefinitions: vi.fn(async () => undefined),
@@ -141,7 +130,6 @@ function fixture(optionOverrides: Partial<AutomationServiceOptions> = {}) {
     hub,
     registry,
     evaluations,
-    teamChats,
     startBridge,
     database,
     emit: (value: AppSnapshot) => {
@@ -209,12 +197,11 @@ describe("NativeAutomationService", () => {
   });
 
   it("prepares the persisted snapshot without starting execution infrastructure", async () => {
-    const { service, calls, teamChats } = fixture();
+    const { service, calls } = fixture();
 
     await Promise.all([service.requirePrepared(), service.requirePrepared()]);
 
     expect(calls).toEqual(["channels", "database", "mcp", "bundled"]);
-    expect(teamChats.connect).not.toHaveBeenCalled();
     expect(service.health()).toEqual({ state: "idle" });
   });
 
@@ -285,25 +272,14 @@ describe("NativeAutomationService", () => {
   });
 
   it("initializes the native engine once in dependency order", async () => {
-    const { service, calls, hub, teamChats, startBridge } = fixture();
+    const { service, calls, hub, startBridge } = fixture();
 
     await Promise.all([service.initialize(), service.initialize()]);
 
-    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "router", "bridge", "discovery", "managed-token", "runtime", "team-chat-start"]);
-    expect(teamChats.connect).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["channels", "database", "mcp", "bundled", "router", "bridge", "discovery", "managed-token", "runtime"]);
     expect(hub.loadModelChannels).toHaveBeenCalledWith(path.join("/user-data", "runtime-channels.json"));
     expect(hub.loadPersistedState).toHaveBeenCalledWith(expect.any(Object));
     const bridgeOptions = startBridge.mock.calls[0]?.[1];
-    await expect(bridgeOptions?.studio?.handleMcpRequest(
-      "studio-token",
-      "/mcp/studio/list-members",
-      {},
-    )).resolves.toEqual({ ok: true });
-    expect(teamChats.handleMcpRequest).toHaveBeenCalledWith(
-      "studio-token",
-      "/mcp/studio/list-members",
-      {},
-    );
     expect(bridgeOptions?.coreWorkflow?.submitNodeOutput({ executionId: "unknown" }))
       .toBeUndefined();
     expect(hub.setWorkflowMcpManagedToken).toHaveBeenCalledWith("test-token");
@@ -360,7 +336,7 @@ describe("NativeAutomationService", () => {
   });
 
   it("blocks Agent deletion and reports references from every owning module", async () => {
-    const { service, hub, teamChats, evaluations, emit } = fixture();
+    const { service, hub, evaluations, emit } = fixture();
     const worker = {
       id: "worker", name: "Worker", description: "", runtimeAgentId: "codex" as const,
       channelId: "codex-openai", modelId: "default", tags: [], createdAt: 1, updatedAt: 1,
@@ -369,14 +345,11 @@ describe("NativeAutomationService", () => {
     vi.mocked(hub.configuredAgentDeletionReferences).mockReturnValue([
       { agentId: "worker", agentName: "Worker", location: "Chat Support" },
     ]);
-    vi.mocked(teamChats.configuredAgentReferences).mockResolvedValue([
-      { agentId: "worker", location: "Team Chat room Release member Reviewer" },
-    ]);
     vi.mocked(evaluations.configuredAgentReferences).mockResolvedValue([
       { agentId: "worker", location: "Evaluation experiment Regression" },
     ]);
 
-    await expect(service.deleteConfiguredAgent("worker")).rejects.toThrow(/Chat Support.*Team Chat room Release member Reviewer.*Evaluation experiment Regression/);
+    await expect(service.deleteConfiguredAgent("worker")).rejects.toThrow(/Chat Support.*Evaluation experiment Regression/);
     expect(hub.updateConfiguredAgents).not.toHaveBeenCalled();
   });
 
@@ -476,15 +449,14 @@ describe("NativeAutomationService", () => {
   });
 
   it("flushes runtime state before bridge and registry shutdown", async () => {
-    const { service, calls, evaluations, teamChats } = fixture();
+    const { service, calls, evaluations } = fixture();
     await service.initialize();
 
     await service.shutdown();
     await service.shutdown();
 
-    expect(calls.slice(-6)).toEqual(["team-chat-close", "evaluations-close", "hub-stop", "bridge-stop", "router-stop", "registry-close"]);
+    expect(calls.slice(-5)).toEqual([ "evaluations-close", "hub-stop", "bridge-stop", "router-stop", "registry-close"]);
     expect(service.evaluations).toBe(evaluations);
-    expect(service.teamChat).toBe(teamChats);
     await expect(service.requireReady()).rejects.toThrow(/stopped/i);
   });
 });

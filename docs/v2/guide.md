@@ -2,7 +2,7 @@
 
 [返回项目首页](../../README.md)
 
-AgentRecall v2 是预览版，提供会话搜索和整理，也包含 Runtime、Agent、Chat、Workflow、Eval、MCP、目录记忆和 Skill 库。
+AgentRecall v2 是预览版，提供会话搜索和整理，也包含 Runtime、Agent、Workflow、Eval、MCP、目录记忆和 Skill 库。
 
 v2 使用独立的启动命令、应用数据和数据库，可以和 v1 同时运行，默认不会自动读取 v1 数据；如需迁移，可在 **设置 → 关于 → V1 数据迁移** 中手动导入。
 
@@ -42,14 +42,14 @@ agent-recall-v2 --update
 
 1. 如果只想搜索历史会话，打开 **Session**，点击 **更新索引**。Claude Code 和 Codex 默认启用。
 2. 如果还使用其他编码 Agent，在 **设置 → 可选来源** 中开启对应来源，再更新索引。
-3. 如果要使用 Chat、Workflow 或 Eval，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
+3. 如果要使用 Workflow 或 Eval，先在 **Runtime** 中准备执行配置并创建 Agent；如果要从 Codex 或 Claude Code 使用 AgentRecall 工具，直接打开 **MCP** 连接客户端。
 4. 如果要使用 AI 摘要或 AI 找会话，在 **Provider → AI 摘要与搜索** 中选择服务。
 
 应用启动后会常驻菜单栏或系统托盘。默认终端、全局快捷键、主题和语言都可以在设置中调整。
 
 ## 2. 准备 Runtime 和 Agent
 
-Chat、Workflow 和 Eval 依赖 Runtime 中保存的 Agent。第一次使用这些功能前，先完成本节；MCP Gateway 与 Runtime Agent 无关。
+Workflow 和 Eval 依赖 Runtime 中保存的 Agent。第一次使用这些功能前，先完成本节；MCP Gateway 与 Runtime Agent 无关。
 
 ### 理解三个概念
 
@@ -91,8 +91,8 @@ dsh --version
 当前官方标准入口是 `dsh --profile headless "<task>"`。它每次创建一个 fresh 会话，只在结束时返回最终文本，不提供单次模型覆盖、会话续接或 AgentRecall 自定义 MCP 注入。因此：
 
 - AgentRecall 不会改写 DSH 的 `settings.yaml` 或凭据文件，模型与凭据继续由 DSH 管理；
-- Chat、Workflow 和 Eval 的每次调用都是独立运行，界面不会宣称保留 DSH 上下文；
-- DSH 会为 Chat、Workflow、Eval 和配置测试的每次调用创建并持久化 fresh session；这些记录会保留在 `$DSH_HOME/sessions`，当前官方 headless 入口没有删除 API，AgentRecall 不会自动清理；
+- Workflow 和 Eval 的每次调用都是独立运行，界面不会宣称保留 DSH 上下文；
+- DSH 会为 Workflow、Eval 和配置测试的每次调用创建并持久化 fresh session；这些记录会保留在 `$DSH_HOME/sessions`，当前官方 headless 入口没有删除 API，AgentRecall 不会自动清理；
 - 非 `Default` 模型会被明确拒绝，避免看似切换成功、实际仍使用 DSH 默认模型；
 - 如果需要交互式续接或 MCP，请改用支持相应能力的 Runtime。
 
@@ -106,7 +106,7 @@ dsh --version
 - Codex 模型支持的推理强度。
 - 名称、描述和标签。
 
-保存后，这个 Agent 就可以出现在 Chat、Workflow、Eval 和 MCP 的选择列表中。Agent 只保存可复用的执行身份；具体会话是否延续，由 Chat 或其他使用场景决定。
+保存后，这个 Agent 就可以出现在 Workflow、Eval 和 MCP 的选择列表中。Agent 只保存可复用的执行身份；具体会话是否延续，由具体使用场景决定。
 
 ## 3. 工作台
 
@@ -114,7 +114,7 @@ dsh --version
 
 - 会话数、消息数、Token 用量、缓存率和来源分布。
 - Claude Code、Codex 的额度。
-- 最近会话、Workflow 和 Chat 工作室。
+- 最近会话和 Workflow。
 - Runtime、MCP、Memory 和 Skills 的当前状态。
 
 在会话卡片中搜索会跳转到 Session 页面。点击最近会话可以打开详情；来源支持 Resume 时，也可以直接继续会话。
@@ -141,11 +141,13 @@ WorkBuddy 首版是只读本地来源，可搜索、查看和导出会话中的�
 
 ### AgentRecall 发起的 Runtime 会话
 
-Workflow、Eval、Team Chat、Agent、Skill 探索和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。Runtime 返回可靠 Session 引用后，由这些调用新建的 Session 可通过 **普通会话**右侧的 **AgentRecall 调用**切换项单独查看，不会挤占普通会话列表；切换项会显示当前搜索条件下的匹配数量。Runtime 没有提供 Session 引用时，AgentRecall 会保留调用记录并说明原因，不会根据目录变化、标题、路径或时间猜测归属。
+Workflow、Eval、Agent、Skill 探索和配置测试所调用的 Runtime 会被记录为 AgentRecall 调用。Runtime 返回可靠 Session 引用后，由这些调用新建的 Session 可通过 **普通会话**右侧的 **AgentRecall 调用**切换项单独查看，不会挤占普通会话列表；切换项会显示当前搜索条件下的匹配数量。Runtime 没有提供 Session 引用时，AgentRecall 会保留调用记录并说明原因，不会根据目录变化、标题、路径或时间猜测归属。
 
 选择 **AgentRecall 调用**后，可以查看全部 AgentRecall Session；点击数量右侧的倒三角，可以从折叠菜单继续按 `workflow`、`eval`、`chat`、`agent`、`skill` 和 `system` 类型筛选。切换到 **全部**会同时显示普通 Session 与 AgentRecall 创建的 Session。Workbench 用量和项目计数可按相同口径切换。收藏、标签、隐藏和批量操作仍按原有规则工作，调用分类不会修改这些状态。
 
-Session 详情会显示关联调用的用途、状态、时间和可用的业务返回入口。Workflow 运行记录、Eval 结果和 Team Chat 消息也可以直接打开对应 Session。如果 Runtime 尚未返回 Session 引用、Session 仍在等待索引，或业务记录没有可追溯的调用，页面会分别显示原因。
+Session 详情会显示关联调用的用途、状态、时间和可用的业务返回入口。Workflow 运行记录和 Eval 结果也可以直接打开对应 Session。如果 Runtime 尚未返回 Session 引用、Session 仍在等待索引，或业务记录没有可追溯的调用，页面会分别显示原因。
+
+多人 Chat 已移除，应用不再创建房间、发送消息或恢复待处理的聊天任务。升级会保留已有聊天数据及其关联的 Runtime 调用和 Session，历史 `chat` 分类仍可用于筛选；对应 Session 详情中的聊天来源入口不可再打开。
 
 ### 搜索和筛选
 
@@ -209,36 +211,7 @@ SSH 环境中的 Claude Code 和 Codex 会话可以在同一台远程主机上�
 
 本地和云端都发生变化时会显示内容冲突。可以选择用本地版本更新云端，也可以把云端版本恢复成新的本地副本。删除云端副本不会删除本地会话。
 
-## 5. 使用多 Agent Chat
-
-Chat 让多个独立 Agent 在同一个项目目录中协作。使用前，需要先在 Runtime 中创建至少一个 Agent。
-
-### 创建工作室
-
-点击 **新建房间**，填写房间名称和可选的工作目录，然后添加员工：
-
-- 每名员工选择一个已保存的 Agent。
-- 可以为员工设置更适合当前房间的显示名称。
-- 同一个 Agent 可以添加多次并承担不同角色。
-- 一个房间最多可以添加 24 名员工。
-
-每名员工拥有独立会话，不会与其他员工共享对话上下文。
-
-### 发送消息
-
-不带 `@名称` 的消息只会记录到房间，不会调用任何 Agent。需要 Agent 处理时，可以：
-
-- 在输入框中输入 `@名称`。
-- 在 **发送给**中选择一个或多个员工。
-- 点击右侧员工，把它加入本轮接收者。
-
-Enter 发送，Shift+Enter 换行。Agent 回复生成期间可以停止本轮。
-
-员工首次回复后，支持持续会话的 Runtime 会继续沿用该员工的上下文；不支持延续的 Runtime 每次使用新上下文。点击员工旁的 **开始新会话**只会重置该员工，不影响房间中的其他成员。
-
-房间还支持修改名称、继续添加员工、加载更早消息和归档。永久删除会同时删除这个工作室的 Chat 数据，操作前请确认内容不再需要。
-
-## 6. 创建和运行 Workflow
+## 5. 创建和运行 Workflow
 
 Workflow 把一个任务拆成可重复运行的 Agent 或脚本节点，并保留每次运行的状态和产出。
 
@@ -274,7 +247,7 @@ Workflow 把一个任务拆成可重复运行的 Agent 或脚本节点，并保�
 
 运行异常时，页面会根据当前状态提供继续、回到保存点、保留现场或放弃恢复等操作。发生文件冲突时，先查看差异，再确认如何处理。
 
-## 7. 评估 Agent
+## 6. 评估 Agent
 
 Eval 用固定输入重复运行 Agent，帮助比较输出质量和观察后续变化。
 
@@ -304,7 +277,7 @@ Eval 用固定输入重复运行 Agent，帮助比较输出质量和观察后续
 
 运行后可以查看平均分、最低分、通过率和耗时，也可以展开每个 Case 查看 Agent 输出、各评估器得分和失败原因。概览页会汇总近期实验、失败 Case 和整体通过率。
 
-## 8. 通过 MCP Gateway 使用工具
+## 7. 通过 MCP Gateway 使用工具
 
 MCP 页面只有一个工具入口。AgentRecall 为 Codex 和 Claude Code 各维护一个名为 `agent-recall` 的 Gateway 配置，不再把工具服务绑定到 Runtime Agent。AgentRecall 需要保持运行，Gateway 才能访问页面中已启用的工具。
 
@@ -319,7 +292,7 @@ Gateway 对外固定开放七个工具：
 - `get_tool` 根据稳定的 `toolRef` 返回完整说明和输入 Schema。
 - `call_tool` 根据同一个 `toolRef` 调用已启用的实际工具。
 
-四个直接工具和三个 Gateway 工具不会重复出现在通用索引中。依赖当前 Workflow Run、Review Revision 或 Studio 房间上下文的临时工具也不会进入全局索引，只在对应执行上下文中使用。
+四个直接工具和三个 Gateway 工具不会重复出现在通用索引中。依赖当前 Workflow Run 或 Review Revision 上下文的临时工具也不会进入全局索引，只在对应执行上下文中使用。
 
 ### 管理工具源
 
@@ -327,7 +300,7 @@ Gateway 对外固定开放七个工具：
 
 页面中的工具源开关和单个工具开关是 Gateway 的开放边界：关闭后配置仍保留，但外部客户端无法再通过索引或直接工具调用它。内置 Session、Skill 和 Workflow 工具源与自定义工具源都在同一页面管理。
 
-## 9. 使用目录 Memory
+## 8. 使用目录 Memory
 
 目录 Memory 为主动选择的项目目录建立彼此隔离的长期记忆，默认关闭。
 
@@ -368,7 +341,7 @@ Agent Hook 会先把新 Turn 增量追加到 OpenViking。达到上下文阈值�
 
 目录 Memory 与 **设置 → Skills** 中跨设备同步的 Memories 不是同一功能：前者服务于选定项目的长期记忆，后者同步支持的编码 Agent 记忆文件。
 
-## 10. 管理 Skills
+## 9. 管理 Skills
 
 Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 
@@ -401,7 +374,7 @@ Skills 页面包含 **本 App Skill**和**本地 Skill**两个区域。
 
 系统、项目或插件管理的 Skill 不一定支持上传。AI 探索公共 Skill 时，可以在设置中指定使用哪个 Runtime；自动模式会选择第一个可用 Runtime。
 
-## 11. Provider、同步与常用设置
+## 10. Provider、同步与常用设置
 
 ### Provider
 
@@ -413,7 +386,7 @@ Provider 页面有三个独立目标：
 
 Codex 和 Claude Code 配置可以只保存在 AgentRecall 中，也可以通过单独按钮写入对应工具。AI 摘要与搜索的设置只用于会话摘要、AI 找会话和相关会话处理，不会创建新的编码 Agent 会话。
 
-Chat、Workflow 和 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
+Workflow 和 Eval 使用的模型统一在 **Runtime → 执行配置**中管理。
 
 ### 远程同步
 

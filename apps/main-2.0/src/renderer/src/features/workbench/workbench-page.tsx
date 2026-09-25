@@ -10,7 +10,6 @@ import {
   Cpu,
   GitBranch,
   GripVertical,
-  MessageCircleMore,
   MessagesSquare,
   PlugZap,
   Plus,
@@ -28,7 +27,6 @@ import { toolCountLabel } from "../../../../automation/engine/renderer/src/pages
 import type { InstalledSkill } from "../../../../core/skill-manager";
 import type { OpenVikingMemorySnapshot } from "../../../../core/openviking-memory";
 import type { WorkflowWorkbenchItem } from "../../../../shared/ipc/automation";
-import type { TeamChatRoomSummary } from "../../../../shared/team-chat";
 import type {
   SessionSearchResult,
   SessionOriginFilter,
@@ -67,7 +65,6 @@ export const DEFAULT_WORKBENCH_CARD_ORDER = [
   "sessions",
   "workflows",
   "memories",
-  "chat",
   "runtimes",
   "mcp",
   "skills",
@@ -159,7 +156,6 @@ export interface WorkbenchPageProps {
   runtimeChannels: AgentChannel[];
   runtimeOverviewAvailable: boolean;
   mcpServers: McpServerDefinition[] | null;
-  chatRooms: TeamChatRoomSummary[] | null;
   memoryEnabled: boolean;
   memorySnapshot: OpenVikingMemorySnapshot | null;
   memoryLoading: boolean;
@@ -167,7 +163,6 @@ export interface WorkbenchPageProps {
   skillsLoading: boolean;
   onShowRuntimes: () => void;
   onShowMcp: () => void;
-  onShowChat: (roomId?: string) => void;
   onShowMemories: () => void;
   onShowSkills: () => void;
 }
@@ -209,7 +204,6 @@ export function WorkbenchPage({
   runtimeChannels,
   runtimeOverviewAvailable,
   mcpServers,
-  chatRooms,
   memoryEnabled,
   memorySnapshot,
   memoryLoading,
@@ -217,7 +211,6 @@ export function WorkbenchPage({
   skillsLoading,
   onShowRuntimes,
   onShowMcp,
-  onShowChat,
   onShowMemories,
   onShowSkills,
 }: WorkbenchPageProps): ReactElement {
@@ -583,40 +576,6 @@ export function WorkbenchPage({
                 : l("No managed directories yet.", "还没有受管理目录。")}
             action={l("Open Memory", "打开 Memory")}
             onOpen={onShowMemories}
-          />
-        </article>
-
-        <article
-          className={`workbench-card-slot is-secondary ${draggingCard === "chat" ? "is-dragging" : ""}`}
-          {...layoutCardProps("chat")}
-        >
-          {layoutControls("chat")}
-          <WorkbenchFeatureCard
-            icon={<MessageCircleMore size={18} />}
-            title="Chat"
-            metric={chatRooms === null
-              ? l("Loading chat groups…", "正在加载聊天群…")
-              : l(`${chatRooms.length} chat groups`, `${chatRooms.length} 个聊天群`)}
-            description={l(
-              "Continue a recent group or create a new multi-Agent conversation.",
-              "继续最近的聊天群，或创建新的多 Agent 对话。",
-            )}
-            rows={(chatRooms ?? []).slice(0, 3).map((room) => {
-              const activityAt = Date.parse(room.lastMessageAt ?? room.updatedAt);
-              return {
-                id: room.id,
-                title: room.name,
-                detail: `${room.agentCount} ${l("members", "名员工")} · ${
-                  Number.isFinite(activityAt) ? formatRelativeTime(activityAt, language) : l("No messages yet", "暂无消息")
-                }`,
-                onOpen: () => onShowChat(room.id),
-              };
-            })}
-            empty={chatRooms === null
-              ? l("Loading chat groups…", "正在加载聊天群…")
-              : l("No chat groups yet.", "还没有聊天群。")}
-            action={l("Open Chat", "打开 Chat")}
-            onOpen={() => onShowChat()}
           />
         </article>
 

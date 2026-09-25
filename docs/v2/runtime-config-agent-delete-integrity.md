@@ -8,7 +8,7 @@ V2 Runtime 页面把“执行配置”和“Agent”拆成两个视图，但两�
 
 - 离开 Runtime 页面时保存执行配置，自动生成的 Agent 可能没有同步到 Agent 编辑状态，随后被旧列表覆盖；直接点击保存则能看到新 Agent。
 - 删除执行配置时，只检查了用户创建的 Agent，忽略了按执行配置自动生成的托管 Agent。
-- 删除 Agent 时，只校验了 Workflow 节点的显式引用，Chat、Task、Team、Team Chat 房间、Workflow 审核 Agent 和评估实验均未完整覆盖；托管 Agent 还被校验逻辑主动豁免。
+- 删除 Agent 时，只校验了 Workflow 节点的显式引用，Chat、Task、Team、Workflow 审核 Agent 和评估实验均未完整覆盖；托管 Agent 还被校验逻辑主动豁免。
 - 系统内还存在一个不属于 Runtime Agent 列表的 `default-agent`，Chat 和 Workflow 会隐式回退到它，导致用户看到的配置与实际执行路由不一致。
 
 ## 数据关系
@@ -19,7 +19,6 @@ V2 Runtime 页面把“执行配置”和“Agent”拆成两个视图，但两�
        <- ChatState.configuredAgentId
        <- TaskState.configuredAgentId
        <- AgentTeamMember.configuredAgentId
-       <- TeamChatRoom.agents[].configuredAgentId
        <- WorkflowDraftState.reviewerConfiguredAgentId
        <- Workflow LLM node.configuredAgentId
        <- EvaluationExperiment.agentId
@@ -44,7 +43,7 @@ V2 Runtime 页面把“执行配置”和“Agent”拆成两个视图，但两�
 - 托管 Agent 可以绕过 Workflow 节点引用检查。
 - Workflow 审核 Agent 不在检查范围内。
 - Chat、Task 和 Team 不在检查范围内。
-- Team Chat 房间成员和评估实验保存在 AgentHub 之外，原删除入口无法看到这些引用。
+- 评估实验保存在 AgentHub 之外，由 AutomationService 汇总引用后校验删除。多人 Chat 已移除，保留的历史房间数据不再阻止删除 Agent。
 - 删除后 `normalizeRunSelections` 会把部分失效引用静默改成默认 Agent，掩盖数据完整性问题。
 
 ### 内置默认 Agent 绕过 Runtime Agent 列表
@@ -60,7 +59,7 @@ V2 Runtime 页面把“执行配置”和“Agent”拆成两个视图，但两�
 删除操作遵循以下规则：
 
 1. 删除执行配置前，必须确认没有任何 Agent 的 `channelId` 指向它，托管 Agent 与用户 Agent 一视同仁。
-2. 删除 Agent 前，必须确认 Chat、Task、Team、Team Chat 房间成员、Workflow 审核、Workflow 显式节点和评估实验均未引用它。
+2. 删除 Agent 前，必须确认 Chat、Task、Team、Workflow 审核、Workflow 显式节点和评估实验均未引用它。
 3. 用户保存入口必须在 `AgentHub` 状态变更前开启删除校验，失败时不得修改内存状态或持久化数据；内部初始化和迁移可以显式跳过用户删除语义。
 4. Renderer 可以保留即时提示，但主进程统一服务校验是最终约束，IPC 和 MCP 删除入口都不能绕过。
 5. 执行配置保存产生的新托管 Agent 必须立即合并到 Agent 编辑状态；合并时保留用户未保存的 Agent 编辑和明确删除，不得再用旧列表覆盖新 Agent。
@@ -71,7 +70,7 @@ V2 Runtime 页面把“执行配置”和“Agent”拆成两个视图，但两�
 - 保存新增执行配置后，返回快照包含对应托管 Agent。
 - 执行配置被托管 Agent 或用户 Agent 使用时，保存删除操作失败且原配置仍存在。
 - Agent 被 Chat、Task、Team、Workflow 审核或 Workflow 节点使用时，删除失败且原 Agent 仍存在。
-- Agent 被 Team Chat 房间成员或评估实验使用时，删除失败，提示中包含所有引用位置。
+- Agent 被评估实验使用时，删除失败，提示中包含所有引用位置。
 - 新 Chat 和新 Workflow 不会自动选择 Agent，界面明确显示未配置状态。
 - Workflow 顶层不再保存执行 Agent；规划/评审 Agent 和每个 LLM 节点分别从 Runtime Agent 列表显式选择，未配置节点无法执行。
 - 历史 `default-agent` 引用恢复后迁移到 `runtime-agent:codex-openai`，运行态与持久化快照中不再生成内置默认 Agent。

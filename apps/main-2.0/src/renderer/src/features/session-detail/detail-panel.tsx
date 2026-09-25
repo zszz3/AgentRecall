@@ -228,14 +228,13 @@ function invocationOwnerActionLabel(
 ): string {
   const exactOwner =
     (invocation.surface === "workflow" && Boolean(invocation.ownerReference.workflowId))
-    || (invocation.surface === "team_chat" && Boolean(invocation.ownerReference.roomId))
     || (invocation.surface === "evaluation" && Boolean(invocation.ownerReference.runId))
     || (invocation.surface === "system" && Boolean(invocation.ownerReference.channelId))
     || (invocation.surface === "agent" && Boolean(invocation.ownerReference.agentId));
   if (exactOwner) return localize(language, "Back to source", "返回调用来源");
   if (invocation.surface === "skill") return localize(language, "Open Skills", "打开 Skills");
   if (invocation.surface === "workflow") return localize(language, "Open Workflows", "打开工作流");
-  if (invocation.surface === "team_chat") return localize(language, "Open Team Chat", "打开团队聊天");
+  if (invocation.surface === "team_chat") return localize(language, "Multi-agent Chat removed", "多人 Chat 已移除");
   if (invocation.surface === "evaluation") return localize(language, "Open Evaluations", "打开评测");
   if (invocation.surface === "system") return localize(language, "Open Runtimes", "打开 Runtime");
   return localize(language, "Open Workbench", "打开工作台");
@@ -863,7 +862,7 @@ export function DetailPanel({
                 ? invocationOwnerActions
                 : invocationOwnerActions.slice(0, INVOCATION_OWNER_ACTION_LIMIT))
                 .map((invocation) => (
-                  <button type="button" key={invocation.invocationId} onClick={() => onOpenInvocationOwner(invocation)}>
+                  <button type="button" key={invocation.invocationId} disabled={invocation.surface === "team_chat"} onClick={() => onOpenInvocationOwner(invocation)}>
                     <CornerUpLeft size={15} /> {invocationOwnerActionLabel(invocation, language)}
                   </button>
                 ))}

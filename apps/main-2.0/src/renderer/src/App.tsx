@@ -30,7 +30,6 @@ import {
   type SessionBulkDeletePreview,
   type SessionBulkDeleteRequest,
 } from "../../core/session-bulk-delete";
-import type { TeamChatRoomSummary } from "../../shared/team-chat";
 import { OPTIONAL_SESSION_SOURCE_DESCRIPTORS } from "../../core/session-sources";
 import type {
   EnvironmentUpsertInput,
@@ -127,8 +126,6 @@ const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
 const WorkflowFeaturePage = lazy(() =>
   import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
-const TeamChatPage = lazy(() =>
-  import("./features/team-chat/team-chat-page").then((module) => ({ default: module.TeamChatPage })));
 const EvaluationFeaturePage = lazy(() =>
   import("./features/eval/eval-page").then((module) => ({ default: module.EvalPage })));
 const RuntimeFeaturePage = lazy(() =>
@@ -214,13 +211,9 @@ export function App(): ReactElement {
   const [workbenchWorkflowError, setWorkbenchWorkflowError] = useState<string | null>(null);
   const [workflowInitialRequest, setWorkflowInitialRequest] = useState<WorkflowInitialRequest>();
   const [workbenchMcpServers, setWorkbenchMcpServers] = useState<McpServerDefinition[] | null>(null);
-  const [workbenchChatRooms, setWorkbenchChatRooms] = useState<TeamChatRoomSummary[] | null>(null);
   const [workbenchMemorySnapshot, setWorkbenchMemorySnapshot] = useState<OpenVikingMemorySnapshot | null>(null);
   const [workbenchMemoryLoading, setWorkbenchMemoryLoading] = useState(true);
   const [workbenchSkills, setWorkbenchSkills] = useState<InstalledSkill[] | null>(null);
-  const [preferredTeamChatRoomId, setPreferredTeamChatRoomId] = useState<string>();
-  const [preferredTeamChatMessageId, setPreferredTeamChatMessageId] = useState<string>();
-  const [preferredTeamChatAgentId, setPreferredTeamChatAgentId] = useState<string>();
   const [preferredEvaluationRunId, setPreferredEvaluationRunId] = useState<string>();
   const [preferredEvaluationCaseId, setPreferredEvaluationCaseId] = useState<string>();
   const [preferredEvaluationEvaluatorId, setPreferredEvaluationEvaluatorId] = useState<string>();
@@ -232,7 +225,6 @@ export function App(): ReactElement {
     let active = true;
     const timers: number[] = [];
     setWorkbenchMcpServers(null);
-    setWorkbenchChatRooms(null);
     setWorkbenchMemorySnapshot(null);
     setWorkbenchMemoryLoading(true);
     setWorkbenchSkills(null);
@@ -256,14 +248,6 @@ export function App(): ReactElement {
           if (active) setWorkbenchMcpServers(servers);
         } catch {
           if (active) setWorkbenchMcpServers([]);
-        }
-      },
-      async () => {
-        try {
-          const rooms = await window.sessionSearch.teamChat.listRooms();
-          if (active) setWorkbenchChatRooms(rooms);
-        } catch {
-          if (active) setWorkbenchChatRooms([]);
         }
       },
       async () => {
@@ -1858,7 +1842,6 @@ export function App(): ReactElement {
               runtimeChannels={automation.detailsLoaded ? automation.snapshot.channels : []}
               runtimeOverviewAvailable={automation.detailsLoaded}
               mcpServers={workbenchMcpServers}
-              chatRooms={workbenchChatRooms}
               memoryEnabled={Boolean(appSettings?.openVikingMemoryEnabled)}
               memorySnapshot={workbenchMemorySnapshot}
               memoryLoading={workbenchMemoryLoading}
@@ -1866,11 +1849,6 @@ export function App(): ReactElement {
               skillsLoading={workbenchSkills === null}
               onShowRuntimes={() => void navigateToPage("runtimes")}
               onShowMcp={() => void navigateToPage("mcp")}
-              onShowChat={(roomId) => {
-                setPreferredTeamChatRoomId(roomId);
-                setPreferredTeamChatMessageId(undefined);
-                void navigateToPage("team-chat");
-              }}
               onShowMemories={() => void navigateToPage("memories")}
               onShowSkills={() => void navigateToPage("skills")}
             />
@@ -2048,26 +2026,6 @@ export function App(): ReactElement {
               }}
             /> : null}
 
-            {activePage === "team-chat" ? (
-              <TeamChatPage
-                language={language}
-                preferredRoomId={preferredTeamChatRoomId}
-                preferredMessageId={preferredTeamChatMessageId}
-                preferredAgentId={preferredTeamChatAgentId}
-                onPreferredConsumed={() => {
-                  setPreferredTeamChatRoomId(undefined);
-                  setPreferredTeamChatMessageId(undefined);
-                  setPreferredTeamChatAgentId(undefined);
-                }}
-                onOpenSession={(sessionKey) => {
-                  void (async () => {
-                    const session = await window.sessionSearch.getSession(sessionKey);
-                    if (session) await openDetail(session);
-                  })().catch(reportSessionDetailError);
-                }}
-              />
-            ) : null}
-
             {activePage === "evaluation" ? (
               <EvaluationFeaturePage
                 language={language}
@@ -2235,14 +2193,6 @@ export function App(): ReactElement {
                 ...(invocation.ownerReference.runId ? { runId: invocation.ownerReference.runId } : {}),
                 ...(invocation.ownerReference.nodeId ? { nodeId: invocation.ownerReference.nodeId } : {}),
               } : undefined);
-              return;
-            }
-            if (invocation.surface === "team_chat") {
-              const roomId = invocation.ownerReference.roomId;
-              setPreferredTeamChatRoomId(roomId);
-              setPreferredTeamChatMessageId(roomId ? invocation.ownerReference.messageId : undefined);
-              setPreferredTeamChatAgentId(roomId ? invocation.ownerReference.agentId : undefined);
-              void navigateToPage("team-chat");
               return;
             }
             if (invocation.surface === "evaluation") {

@@ -292,7 +292,6 @@ describe("App workflow workbench wiring", () => {
       previewBulkDelete: vi.fn(),
       bulkDeleteSessions: vi.fn(),
       setOpenSession: vi.fn(),
-      teamChat: { listRooms: vi.fn(async () => []) },
     });
     ({ App } = await import("./App"));
   });

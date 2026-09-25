@@ -54,8 +54,6 @@ import { resolveAutomationPaths, type AutomationPaths } from "./automation-paths
 import { EvaluationService, type EvaluationServiceDependencies } from "./evaluation-service";
 import type { PostgresDatabase } from "../../core/postgres/database";
 import { PostgresRuntimeInvocationRepository } from "../../core/postgres/runtime-invocation-repository";
-import { TeamChatService } from "../team-chat/team-chat-service";
-import { PostgresTeamChatStore } from "../team-chat/postgres-team-chat-store";
 import { McpAutomationModule } from "./mcp-automation-module";
 import {
   WorkflowPortableService,
@@ -122,7 +120,6 @@ interface AutomationServiceDependencies {
   hub?: AgentHub;
   registry?: McpRegistryStore;
   evaluations?: EvaluationService;
-  teamChats?: TeamChatService;
   workflowCore?: WorkflowCoreService;
   loadBundledWorkflows?: (rootPath: string) => Promise<BundledWorkflowDefinition[]>;
   loadBundledWorkflowSummaries?: (rootPath: string) => Promise<BundledWorkflowSummary[]>;
@@ -276,7 +273,6 @@ export class NativeAutomationService {
   readonly workflowPlanning: WorkflowPlanningService;
   readonly mcp: McpAutomationModule;
   readonly evaluations: EvaluationService;
-  readonly teamChat: TeamChatService;
   readonly portableWorkflows: WorkflowPortableService;
   private readonly hubInstance: AgentHub;
   private readonly runtimeInvocations: PostgresRuntimeInvocationRepository;
@@ -449,18 +445,6 @@ export class NativeAutomationService {
       ...(options.chooseEvaluationDatasetDirectory
         ? { chooseDatasetDirectory: options.chooseEvaluationDatasetDirectory }
         : {}),
-    });
-    this.teamChat = dependencies.teamChats ?? new TeamChatService({
-      storeFactory: () => new PostgresTeamChatStore(options.database),
-      configuredAgents: () => this.hubInstance.snapshot().configuredAgents,
-      executeAgent: (input, onEvent, signal) => this.configuredAgentExecutor.runConversation({
-        ...input,
-        invocation: {
-          surface: "team_chat",
-          role: "member",
-          ownerReference: input.ownerReference,
-        },
-      }, onEvent, signal),
     });
     this.runtime = this.hubInstance;
     this.workflows = this.hubInstance;
@@ -653,10 +637,6 @@ export class NativeAutomationService {
           return this.options.gatewayDirect?.getSession(body) ?? { ok: false, error: "Session Gateway is unavailable." };
         },
       },
-      studio: {
-        handleMcpRequest: (token, route, body) =>
-          this.teamChat.handleMcpRequest(token, route, body),
-      },
       coreWorkflow: {
         submitNodeOutput: (body) => this.workflowCoreOutputs.submit(body),
       },
@@ -665,7 +645,6 @@ export class NativeAutomationService {
     this.hubInstance.setWorkflowMcpDiscoveryPath(this.bridge.discoveryPath);
     this.hubInstance.setWorkflowMcpManagedToken(this.bridge.token);
     await this.hubInstance.initialize();
-    void this.teamChat.connect().catch(() => undefined);
   }
 
   private async refreshWorkflowGatewayCatalog(): Promise<void> {
@@ -707,11 +686,8 @@ export class NativeAutomationService {
     const removedAgents = currentAgents.filter((agent) => !nextAgentIds.has(agent.id));
     const removedAgentIds = new Set(removedAgents.map((agent) => agent.id));
     const agentNames = new Map(removedAgents.map((agent) => [agent.id, agent.name || agent.id]));
-    const [teamChatReferences, evaluationReferences] = await Promise.all([
-      this.teamChat.configuredAgentReferences(removedAgentIds),
-      this.evaluations.configuredAgentReferences(removedAgentIds),
-    ]);
-    const externalReferences: ConfiguredAgentReference[] = [...teamChatReferences, ...evaluationReferences]
+    const evaluationReferences = await this.evaluations.configuredAgentReferences(removedAgentIds);
+    const externalReferences: ConfiguredAgentReference[] = evaluationReferences
       .map((reference) => ({
         ...reference,
         agentName: agentNames.get(reference.agentId) ?? reference.agentId,
@@ -842,7 +818,6 @@ export class NativeAutomationService {
 
   private async shutdownInternal(): Promise<void> {
     await (this.initializePromise ?? this.preparePromise)?.catch(() => undefined);
-    await this.teamChat.close();
     await this.evaluations.close();
     await this.hubInstance.shutdown();
     await this.bridge?.stop();
