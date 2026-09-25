@@ -1,12 +1,12 @@
 # AgentRecall CLI 使用与配置
 
-`agentrecall-cli` 是独立的源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览和项目级安装。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
+`agentrecall-cli` 是独立的源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
 
 当前不提供 GitHub 登录、组织成员管理、Session 查询或上传。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
 
 ## 配置两个团队、三个项目
 
-团队资产仓库保存未来要共享的 AI 工作资产；业务仓库保存项目代码。两者分别登记，同一个团队可以对应多个业务项目。
+团队资产仓库保存共享的 AI 工作资产；业务仓库保存项目代码。两者分别登记，同一个团队可以对应多个业务项目。
 
 ```sh
 agentrecall init
@@ -27,7 +27,7 @@ agentrecall team current --project experiments
 agentrecall team disable
 ```
 
-路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除。当前开关仅作用于 CLI，尚未接入桌面端。
+路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除，或通过 `skill backups` 和 `skill rollback` 管理本地恢复。当前开关仅作用于 CLI，尚未接入桌面端。
 
 ## 命令
 
@@ -45,6 +45,10 @@ agentrecall team disable
 | `skill list [--project <id>]` | 查看当前团队已缓存的 Skill |
 | `skill preview <id> [--target codex\|claude] [--file <path>] [--project <id>]` | 预览正文、支持文件、完整版本号和可选安装位置 |
 | `skill install <id> --target codex\|claude --revision <sha> [--project <id>]` | 安装已选择版本；不同内容或本地修改均不覆盖 |
+| `skill diff <id> --target codex\|claude [--file <path>] [--project <id>]` | 查看当前安装与缓存的文件差异；可展开新旧内容 |
+| `skill update <id> --target codex\|claude --from-revision <旧 sha> --revision <新 sha> [--project <id>]` | 更新未修改的受管安装，并保留旧版本备份 |
+| `skill backups <id> [--project <id>]` | 查看当前客户端安装版本和本地备份；关闭团队后仍可使用 |
+| `skill rollback <id> --target codex\|claude --backup <名称> --from-revision <当前 sha\|none> [--project <id>]` | 从指定备份恢复；当前安装另存备份，none 只接受空目标；关闭团队后仍可使用 |
 | `skill uninstall <id> --target codex\|claude [--project <id>]` | 移走未修改的受管安装，保留备份；关闭团队后仍可使用 |
 | `project add <id> [--path <目录>] [--remote <名称>] [--name <名称>] [--team <id>\|--personal]` | 登记业务仓库；路径默认当前目录 |
 | `project list` | 查看已登记项目 |

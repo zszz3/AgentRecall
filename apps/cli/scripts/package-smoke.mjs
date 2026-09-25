@@ -45,15 +45,27 @@ try {
   const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Test review\n---\nReview the change.\n").toString("base64"), executable: false }];
   const commit = "1".repeat(40);
   fs.mkdirSync(path.join(env.AGENTRECALL_HOME, "assets"));
-  fs.writeFileSync(path.join(env.AGENTRECALL_HOME, "assets", "example.json"), JSON.stringify({
+  const cache = path.join(env.AGENTRECALL_HOME, "assets", "example.json");
+  const writeSnapshot = (commit, files) => fs.writeFileSync(cache, JSON.stringify({
     schemaVersion: 1, repository: "https://github.com/example/assets", commit,
     skills: [{ id: "review", description: "Test review", files, digest: createHash("sha256").update(JSON.stringify(files)).digest("hex") }],
   }));
+  writeSnapshot(commit, files);
   assert.equal(command(["skill", "list"], project).skills[0].id, "review");
   assert.equal(command(["skill", "preview", "review"], project).commit, commit);
   const installed = command(["skill", "install", "review", "--target", "claude", "--revision", commit], project);
   assert.equal(installed.status, "installed");
+  const next = "2".repeat(40);
+  const updatedFiles = [{ ...files[0], content: Buffer.from("---\nname: review\ndescription: Test review\n---\nReview the updated change.\n").toString("base64") }];
+  writeSnapshot(next, updatedFiles);
+  assert.equal(command(["skill", "diff", "review", "--target", "claude"], project).changes[0].status, "modified");
+  const updated = command(["skill", "update", "review", "--target", "claude", "--revision", next, "--from-revision", commit], project);
+  assert.equal(updated.status, "updated");
+  assert.equal(command(["skill", "backups", "review"], project).backups[0].revision, commit);
   command(["team", "disable"]);
+  const restored = command(["skill", "rollback", "review", "--target", "claude", "--backup", path.basename(updated.backupPath), "--from-revision", next], project);
+  assert.equal(restored.commit, commit);
+  assert.equal(fs.readFileSync(path.join(installed.path, "SKILL.md"), "utf8"), Buffer.from(files[0].content, "base64").toString("utf8"));
   const removed = command(["skill", "uninstall", "review", "--target", "claude"], project);
   assert.ok(fs.existsSync(path.join(removed.backupPath, "SKILL.md")));
   assert.ok(!fs.existsSync(installed.path));
