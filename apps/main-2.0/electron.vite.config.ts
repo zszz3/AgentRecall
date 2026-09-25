@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    resolve: { alias: { "@agentrecall/workspace-core": resolve("../../packages/workspace-core/src/index.ts") } },
     build: {
       rollupOptions: {
         input: {

@@ -104,6 +104,10 @@ v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认�
 
 > 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。
 
+## V2 团队工作区
+
+V2 新增默认关闭的[团队工作区](docs/v2/team-workspace.md)，可配置项目与资产仓库、预览安装 Skill、更新和卸载工作配置，与独立 CLI 共用配置。完整 Session 分享仍未开放。
+
 ## 独立 CLI（源码预览）
 
 `agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。团队默认关闭，无需启动桌面；当前尚未接入桌面端或 Session 分享。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。

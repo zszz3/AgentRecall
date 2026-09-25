@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/logo.png" alt="agent-recall-v2 Logo" width="860">
+  <img src="https://raw.githubusercontent.com/zszz3/AgentRecall/main/apps/main-2.0/assets/logo.png" alt="agent-recall-v2 Logo" width="860">
 </p>
 
 <h1 align="center">agent-recall-v2</h1>
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <img src="./assets/show.png" alt="agent-recall-v2 界面预览" width="860">
+  <img src="https://raw.githubusercontent.com/zszz3/AgentRecall/main/apps/main-2.0/assets/show.png" alt="agent-recall-v2 界面预览" width="860">
 </p>
 
 `agent-recall-v2` 是仓库中的独立预览版应用。它和 AgentRecall 1.0 拥有不同的包名、命令、应用数据目录、数据库、更新缓存与 MCP 标识，可以同时运行；当前不读取或导入 V1 的 SQLite 数据。
@@ -315,7 +315,7 @@ npm run package:smoke:v2
 ## Star History
 
 <a href="https://www.star-history.com/?repos=zszz3%2FAgentRecall&type=date&legend=top-left">
-  <img src="./assets/star-history.svg" alt="AgentRecall Star History Chart" width="900" />
+  <img src="https://raw.githubusercontent.com/zszz3/AgentRecall/main/apps/main-2.0/assets/star-history.svg" alt="AgentRecall Star History Chart" width="900" />
 </a>
 
 有任何问题，请提交issue。如果觉得我们的项目还不错，欢迎star✨。

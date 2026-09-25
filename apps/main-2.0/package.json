@@ -33,7 +33,11 @@
     "out/mcp/*.js",
     "dist/main/index.js",
     "bin",
-    "assets",
+    "assets/app-icon.png",
+    "assets/tray-icon-template.svg",
+    "assets/tray-iconTemplate*.png",
+    "assets/bundled-skills",
+    "assets/automation",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
@@ -71,6 +75,7 @@
     "embedded-postgres": "18.4.0-beta.17",
     "lucide-react": "^0.468.0",
     "pg": "^8.22.0",
+    "proper-lockfile": "^4.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
@@ -96,6 +101,7 @@
     "@electric-sql/pglite": "^0.5.4",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.20.0",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@types/ssh2": "1.15.5",

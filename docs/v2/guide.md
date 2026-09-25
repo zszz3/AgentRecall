@@ -438,3 +438,7 @@ Chat、Workflow 和 Eval 使用的模型统一在 **Runtime → 执行配置**�
 - **外观**：切换主题、语言和 macOS Dock 显示方式。
 
 v2 仍是预览版。执行 `agent-recall-v2 --update`，或在 **设置 → 关于** 中检查并安装更新。
+
+## 团队工作区
+
+V2 侧栏的「团队」入口默认未启用，可管理项目与 GitHub 资产仓库，手动同步、预览并安装 Skill 和工作配置。开关、项目归属及版本管理与独立 CLI 共用；不会自动上传 Session。配置、确认与失败恢复见[团队工作区指南](team-workspace.md)。

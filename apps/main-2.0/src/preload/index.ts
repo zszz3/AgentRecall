@@ -47,6 +47,7 @@ import { createProvidersApi } from "./providers";
 import { createRemoteSessionsApi } from "./remote-sessions";
 import { createOpenVikingMemoryApi } from "./openviking-memory";
 import { createDiscoveryApi } from "./discovery";
+import { createTeamWorkspaceApi } from "./team-workspace";
 import { createSkillsApi } from "./skills";
 import { createTeamChatApi } from "./team-chat";
 
@@ -57,6 +58,7 @@ export interface AiAssistantReply {
 
 const api = {
   platform: process.platform as NodeJS.Platform,
+  teamWorkspace: createTeamWorkspaceApi(ipcRenderer),
   automation: createAutomationApi(ipcRenderer),
   quota: createQuotaApi(ipcRenderer),
   teamChat: createTeamChatApi(ipcRenderer),

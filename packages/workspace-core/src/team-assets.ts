@@ -12,18 +12,28 @@ import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
 type Context = Awaited<ReturnType<WorkspaceService["currentTeam"]>>;
+type AssetSelection = { projectId: string; root: string; repository?: string };
 
 export class TeamAssetService {
   private readonly cacheDirectory: string;
-  constructor(private readonly workspace: WorkspaceService, private readonly source = new GitAssetSource()) {
+  constructor(private readonly workspace: WorkspaceService, private readonly source = new GitAssetSource(), private readonly selection?: AssetSelection) {
     this.cacheDirectory = path.join(path.dirname(workspace.store.filePath), "assets");
+  }
+
+  private async currentTeam(directory: string, projectId?: string): Promise<Context> {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    if (this.selection && (context.project.id !== this.selection.projectId || context.project.root !== this.selection.root
+      || this.selection.repository !== undefined && context.team.repository !== this.selection.repository)) {
+      throw new WorkspaceError("TEAM_CHANGED", "选中的项目或资产来源已改变，请刷新后重新选择。");
+    }
+    return context;
   }
 
   private async commitForTeam<T>(directory: string, expected: Context, action: (assertOwned: () => void) => T | Promise<T>): Promise<T> {
     // Use the config writer's lock only for the final check and commit, so disabling
     // a team can proceed while a network operation is still in flight.
     return withAssetLock(path.dirname(this.workspace.store.filePath), ".config.lock", async (assertOwned) => {
-      const current = await this.workspace.currentTeam(directory, expected.project.id);
+      const current = await this.currentTeam(directory, expected.project.id);
       if (JSON.stringify(current) !== JSON.stringify(expected)) throw new WorkspaceError("TEAM_CHANGED", "项目或团队配置已改变，本次操作取消，请重新选择。");
       assertOwned();
       return action(assertOwned);
@@ -31,7 +41,7 @@ export class TeamAssetService {
   }
 
   async sync(directory: string, projectId?: string, transport: AssetTransport = "https", signal?: AbortSignal) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     if (!["https", "ssh"].includes(transport)) throw new WorkspaceError("INVALID_ARGUMENTS", "传输方式只能是 https 或 ssh。");
     return withAssetLock(this.cacheDirectory, `.${context.team.id}.lock`, async (assertOwned) => {
       const scratch = await fs.mkdtemp(path.join(this.cacheDirectory, ".download-"));
@@ -64,11 +74,12 @@ export class TeamAssetService {
   }
 
   async list(directory: string, projectId?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const snapshot = await this.snapshot(context);
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
+      workConfigs: snapshot.schemaVersion === 2 ? snapshot.workConfigs : [],
     }));
   }
 
@@ -79,7 +90,7 @@ export class TeamAssetService {
   }
 
   async listWorkConfigs(directory: string, projectId?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const snapshot = await this.snapshot(context);
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
@@ -88,7 +99,7 @@ export class TeamAssetService {
   }
 
   async previewWorkConfig(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const snapshot = await this.snapshot(context);
     const config = this.findWorkConfig(snapshot, id);
     const root = target ? await this.projectRoot(directory, context.project.id) : undefined;
@@ -120,7 +131,7 @@ export class TeamAssetService {
   }
 
   async installWorkConfig(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
@@ -143,7 +154,7 @@ export class TeamAssetService {
   }
 
   async diffWorkConfig(directory: string, id: string, target: ProjectSkillTarget, projectId?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
@@ -154,7 +165,7 @@ export class TeamAssetService {
   }
 
   async updateWorkConfig(directory: string, id: string, target: ProjectSkillTarget, fromRevision: string, commit: string, projectId?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
@@ -178,12 +189,14 @@ export class TeamAssetService {
     const root = await this.projectRoot(directory, projectId);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       assertOwned();
-      return new ProjectWorkConfigs(root).uninstall(id, target, commit, assertOwned);
+      const records = new ProjectWorkConfigs(root);
+      if (this.selection?.repository && records.status(id, target).repository !== this.selection.repository) throw new WorkspaceError("TEAM_CHANGED", "选中的安装来源已改变，请重新查看状态。");
+      return records.uninstall(id, target, commit, assertOwned);
     });
   }
 
   async preview(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget, file = "SKILL.md") {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const snapshot = await this.snapshot(context);
     const skill = snapshot.skills.find((item) => item.id === id);
     if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill，请先运行 skill list。");
@@ -208,11 +221,12 @@ export class TeamAssetService {
     const checkout = await inspectCheckout(directory) ?? await inspectCheckout(status.project.root);
     if (!checkout) throw new WorkspaceError("NO_PROJECT", "本地项目路径已不存在，请重新登记项目。");
     await this.workspace.status(checkout.root, status.project.id);
+    if (this.selection && (status.project.id !== this.selection.projectId || checkout.root !== this.selection.root)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
     return checkout.root;
   }
 
   async diff(directory: string, id: string, target: ProjectSkillTarget, projectId?: string, file?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
@@ -226,7 +240,7 @@ export class TeamAssetService {
   }
 
   async install(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string, fromRevision?: string) {
-    const context = await this.workspace.currentTeam(directory, projectId);
+    const context = await this.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       new ProjectWorkConfigs(root).assertUnreferenced(id, target);

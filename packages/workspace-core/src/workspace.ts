@@ -56,9 +56,10 @@ export class WorkspaceService {
     return project;
   }
 
-  async bindProject(projectId: string, teamId: string | null | undefined): Promise<ProjectBinding> {
+  async bindProject(projectId: string, teamId: string | null | undefined, expectedRoot?: string): Promise<ProjectBinding> {
     const config = await this.store.update((current) => {
       if (!current.projects.some((project) => project.id === projectId)) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
+      if (expectedRoot !== undefined && current.projects.find((project) => project.id === projectId)?.root !== expectedRoot) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
       return {
         ...current,
         projects: current.projects.map((project) => {
@@ -71,9 +72,10 @@ export class WorkspaceService {
     return config.projects.find((project) => project.id === projectId)!;
   }
 
-  async removeProject(projectId: string): Promise<void> {
+  async removeProject(projectId: string, expectedRoot?: string): Promise<void> {
     await this.store.update((config) => {
       if (!config.projects.some((project) => project.id === projectId)) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
+      if (expectedRoot !== undefined && config.projects.find((project) => project.id === projectId)?.root !== expectedRoot) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，取消移除。");
       return { ...config, projects: config.projects.filter((project) => project.id !== projectId) };
     });
   }
