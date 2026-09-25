@@ -125,6 +125,8 @@ function formatDateInput(date: Date): string {
 
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
+const TeamWorkspacePage = lazy(() =>
+  import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
 const WorkflowFeaturePage = lazy(() =>
   import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
 const TeamChatPage = lazy(() =>
@@ -2145,6 +2147,7 @@ export function App(): ReactElement {
                 onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
               />
             ) : null}
+            {activePage === "team-workspace" ? <TeamWorkspacePage language={language} /> : null}
           </Suspense>
         </div>
       </section>

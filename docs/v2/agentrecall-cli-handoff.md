@@ -8,7 +8,7 @@
 
 此前单 Skill 流程的验证基线为 [`c4525acc701490264eff473bd297d143b7d3cc75`](https://github.com/zszz3/AgentRecall/commit/c4525acc701490264eff473bd297d143b7d3cc75)。该提交的 CLI、V1、V2 在 Linux/macOS/Windows 上的检查，以及仓库检查和 Quality gate，均已通过：[完整 CI 记录](https://github.com/zszz3/AgentRecall/actions/runs/36114851838)。交接文档提交本身不改变产品代码，不能将这条 CI 记录当作任意后续提交的验证。
 
-当前源码进一步支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
+当前源码还已接入 V2 团队页，并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
 
 ## 2. 到哪里接着做
 
@@ -17,7 +17,7 @@
 | 工作区 | 分支 / 状态 | 接手方式 |
 | --- | --- | --- |
 | `~/.codex/worktrees/cli-foundation/agentrecall` | `codex/cli-foundation`；产品代码已推送 | CLI 和团队资产开发从这里继续。交接写入前工作区干净 |
-| `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；`5de21c0a`，已推送 | R00 删除 Chat 的独立工作区，见 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) |
+| `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；`21410c07`，已推送 | R00 删除 Chat 的独立工作区，见 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) |
 | `~/learnspace/agentrecall` | `codex/incremental-session-indexing`，`bc1dc8d4` | 原工作区，不能误当成 CLI 最新代码；有未跟踪的 `.agentrecall/`、`output/` 和旧版计划文档 |
 
 CLI 同机接手：
@@ -37,7 +37,7 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 
 以 [总开发计划](agentrecall-cli-team-plan.md) 的产品边界和 R00—R20 TODO 表为准：
 
-- 新团队功能只面向 V2 及配套 CLI，不在 V1 产品代码上实现；桌面入口后续接入 `apps/main-2.0`。
+- 新团队功能只面向 V2 及配套 CLI，不在 V1 产品代码上实现；桌面入口已接入 `apps/main-2.0`。
 - 参考 TeamAI 的 Git 团队资产协作方式。团队功能默认关闭，个人使用不依赖团队服务。
 - 一个客户端可配置多个业务仓库及其团队资产仓库；两类仓库身份不能混用。
 - 用户最终可以主动分享完整 Session；开启团队、安装 Skill 或 Hook 均不等于同意上传。
@@ -51,17 +51,17 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 
 | 范围 | 当前已有 | 未完成 |
 | --- | --- | --- |
-| R01/R02 配置与共享模块 | 版本 1 配置、无界面 workspace-core、原子保存与锁、错误和大小校验 | 桌面使用同一配置；按实际消费需求提取更多共享能力 |
+| R01/R02 配置与共享模块 | 版本 1 配置、无界面 workspace-core、原子保存与锁、错误和大小校验 | 按实际消费需求提取更多共享能力 |
 | R03 独立 CLI | 独立包、配置/项目/团队命令、人读与 JSON 输出、隔离打包验证 | Session 列表/搜索、正式独立分发 |
-| R04/R05 团队开关和多仓库 | 默认关闭、显式启停、默认团队和项目覆盖、worktree/克隆/fork/歧义识别 | 桌面开关及入口 |
+| R04/R05 团队开关和多仓库 | 默认关闭、显式启停、默认团队和项目覆盖、worktree/克隆/fork/歧义识别 | 未来召回和后台任务的停用处理 |
 | R06 GitHub 资产读取 | 显式 HTTPS/SSH 同步，复用本机 Git 身份 | 创建/加入空间、成员权限管理、真实私有仓库验收 |
 | R07 资产格式 | 版本 1/2 清单、来源、文件校验、离线缓存及工作配置预览 | Rules、Docs、MCP、Agent 模板 |
 | R08/R09 安装与版本管理 | Codex/Claude 安装、单 Skill 版本管理、工作配置批量安装、持久化归属、共享保护、整组差异/更新及卸载 | 跨配置协调更新、整组历史回滚、其他资产、逐行差异、PR 贡献与审核、分支订阅 |
-| R10 桌面团队入口 | 未开始 | 接入共享服务及用户可见界面 |
+| R10 桌面团队入口 | 已有团队开关、项目/仓库绑定、同步取消、预览安装、整组更新/卸载，复用 CLI 配置 | 真实私有仓库与完整原生界面验收、更多资产类型 |
 | R11—R14 完整 Session 分享 | 未开始 | 包格式、对象存储、团队授权、主动上传、浏览和撤回 |
 | R15—R19 Context / Improvement | 未开始 | 知识维护、检索、改进提案、验证发布、可选自动召回 |
 | R20 验证与交付 | CLI 本地与三平台检查通过，文档和分支发布说明已有 | 真实团队验收、合入、独立分发及后续阶段验收 |
-| R00 多人 Chat 删除 | 独立 PR #585 已提交，99 项受影响测试与 V2 构建通过，历史 Session 保留有回归覆盖 | 完整 CI、真实界面验收、审核与合入 |
+| R00 多人 Chat 删除 | 独立 PR #585 已提交，99 项受影响测试与 V2 构建通过，历史 Session 保留有回归覆盖 | 真实界面验收、审核与合入 |
 
 ### 当前可用命令
 
@@ -123,13 +123,13 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 
 下一段开发重点：
 
-1. 优先完成 V2 桌面入口和其他资产类型；如扩展跨配置协调升级，必须先设计多个配置共同确认共享版本的行为，不能绕过目前的共享保护。
+1. 继续实现其他资产类型与真实团队验收；如扩展跨配置协调升级，必须先设计多个配置共同确认共享版本的行为，不能绕过目前的共享保护。
 2. 保留现有整组更新、共享卸载和失败恢复测试；整组历史回滚需要额外的配置版本与可恢复内容记录。
 3. 复用现有单 Skill 校验、锁、备份及批量失败报告；多个目录不是一次原子提交，异常终止的恢复规则必须明确。
-4. 扩展 Rules/Docs/MCP/Agent 模板前核实客户端当前格式，MCP 只引用本地密钥。V2 桌面接入使用同一服务，不能新增 V1 依赖。
+4. 扩展 Rules/Docs/MCP/Agent 模板前核实客户端当前格式，MCP 只引用本地密钥。V2 桌面已使用同一服务，不能新增 V1 依赖。
 5. 更新总计划和用户指南，保持真实成员/私有仓库验收、PR 贡献与 Session 分享的未完成状态。
 
-R00 已在独立 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) 完成源码删除、历史 Session 回归与本地构建验证。当前是草稿，需跟进 CI、界面验收和审核；不要把它当成已经发布。工作区的 `apps/main-2.0/node_modules` 仍是未跟踪的本地依赖链接，不要误提交。
+R00 已在独立 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) 完成源码删除、历史 Session 回归与本地构建验证。当前最新提交的三平台 V2 CI 已通过，仍是草稿，需完成真实界面验收和审核；不要把它当成已经发布。工作区的 `apps/main-2.0/node_modules` 仍是未跟踪的本地依赖链接，不要误提交。
 
 ## 8. 验证证据与接手命令
 
@@ -139,7 +139,7 @@ R00 已在独立 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) 完成
 - 本地 `npm run package:smoke:cli`：类型检查、构建、临时 HOME/npm 前缀中的安装、重装、Skill 操作与卸载通过。
 - 发布说明检查与 diff 格式检查通过。
 - 上述完整 CI 已覆盖 Linux/macOS/Windows 的 CLI、V1、V2 和 Quality gate。
-- 尚未做真实私有团队仓库、两名真实成员协作、桌面团队入口或 Session 分享验收。
+- 该基线尚未做桌面验收；后续已完成下文记录的受控浏览器检查。真实私有团队仓库、两名真实成员协作、完整原生界面及 Session 分享仍未验收。
 
 工作配置增量本地 CLI 测试已扩展到 40 项，包含格式兼容、重叠引用、多项目/客户端与 worktree、预检冲突、引用保护、并发安装、整组卸载、记录写入失败、提交后的清理失败及内容被修改时的部分状态。
 
@@ -156,3 +156,9 @@ git diff --check
 只需 CLI 时，不要误运行安装全部桌面依赖的根 `npm run setup`。不要用真实用户的 Agent 目录做安装测试，不要对当前全局 npm 前缀做安装/卸载冒烟。
 
 继续现有 CLI 工作应保留 PR #584 的上下文；若拆独立分支，必须明确其对未合并 CLI 分支的依赖。完成测试、推送、合入与发布是不同状态，交接与汇报中分别记录。
+
+## V2 桌面入口增量
+
+主进程入口在 `apps/main-2.0/src/main/services/team-workspace-service.ts`，IPC、preload 和 Renderer 页面均以 `team-workspace` 命名。主进程直接打包 workspace-core，共用 CLI 配置；输入在 IPC 校验，修改前固定项目目录、资产来源和版本。窗口销毁和应用退出会取消同步；移除绑定与卸载使用原生确认。使用方法与当前限制见[团队工作区指南](team-workspace.md)。
+
+新增 IPC/界面及相关 App 测试 21 项通过；V2 类型检查、构建、隔离 npm 安装及临时 PostgreSQL 验证通过。受控浏览器验证了窄屏、桌面双列、预览、冲突禁止更新和关闭后的本地管理。临时服务和测试窗口均已清理，未使用真实用户项目或凭据。发布包排除了文档媒体与重复源 Logo，并验证实际图标、内置资产、渲染 Logo 和运行依赖仍存在。
