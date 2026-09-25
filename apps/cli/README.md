@@ -27,4 +27,4 @@ agentrecall status --project backend
 
 登记项目后，使用 `team sync`、`skill list` 和 `skill preview <id>` 查看团队资产。安装时必须显式提供目标客户端和预览中的版本。更新前用 `skill diff` 查看变化，`skill update` 保存旧版本备份，`skill backups` 和 `skill rollback` 可在离线时恢复。资产仓库格式、安装与恢复流程见 [团队 Skill 指南](../../docs/v2/team-assets.md)。
 
-团队可使用 `work-config list/preview/install` 选择一组 Skill。安装后可用 `work-config installed/status/uninstall` 查看归属和整组卸载，共用 Skill 与原有独立安装会保留。整组更新及其他资产类型尚未提供。
+团队可使用 `work-config list/preview/install` 选择一组 Skill。安装后可用 `work-config installed/status/uninstall` 查看归属和整组卸载，共用 Skill 与原有独立安装会保留。整组升级使用 `work-config diff/update` 并指定新旧版本；共享内容冲突会阻止更新。跨配置协调升级和其他资产类型尚未提供。

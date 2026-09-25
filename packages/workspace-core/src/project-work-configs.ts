@@ -5,7 +5,7 @@ import { setImmediate } from "node:timers/promises";
 import { z } from "zod";
 import { assetId, revision, type TeamSkill, type WorkConfig } from "./asset-format.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
-import { inspectProjectSkill, rollbackProjectSkill, uninstallProjectSkill, type ProjectSkillTarget, type SkillInstallResult } from "./project-skills.js";
+import { inspectProjectSkill, prepareSkillInstall, rollbackProjectSkill, uninstallProjectSkill, type ProjectSkillTarget, type SkillInstallResult } from "./project-skills.js";
 
 const targetSchema = z.enum(["codex", "claude"]);
 const repositorySchema = z.string().regex(/^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+$/);
@@ -21,6 +21,14 @@ const stateSchema = z.strictObject({
   })).max(256),
 });
 type State = z.infer<typeof stateSchema>;
+type UpdateChange = {
+  id: string;
+  membership: "added" | "retained" | "removed";
+  action: "install" | "reuse" | "update" | "backup" | "keep_shared" | "keep_independent" | "missing" | "conflict";
+  currentRevision: string | null;
+  otherConfigs: string[];
+  reason: string | null;
+};
 const maximum = 1024 * 1024;
 
 function invalidState(): WorkspaceError {
@@ -103,7 +111,7 @@ export class ProjectWorkConfigs {
   prepareInstall(config: WorkConfig, repository: string, commit: string, target: ProjectSkillTarget, skills: TeamSkill[]) {
     const previous = this.state.configs.find((item) => item.id === config.id && item.target === target);
     if (previous && (previous.repository !== repository || previous.revision !== commit || JSON.stringify(previous.skills) !== JSON.stringify(config.skills))) {
-      throw new WorkspaceError("WORK_CONFIG_CHANGED", "这个客户端已安装同名工作配置的其他版本或来源。请先查看并卸载原配置，再选择新版本安装。");
+      throw new WorkspaceError("WORK_CONFIG_CHANGED", "此客户端已安装同名配置的其他版本或来源。同来源升级请用 work-config diff/update；切换来源前请先卸载原配置。");
     }
     const next = structuredClone(this.state);
     if (!previous) next.configs.push({ id: config.id, name: config.name, repository, revision: commit, target, skills: config.skills });
@@ -146,6 +154,153 @@ export class ProjectWorkConfigs {
         return { id, state, action, otherConfigs };
       }),
     };
+  }
+
+  async planUpdate(config: WorkConfig, repository: string, commit: string, target: ProjectSkillTarget, skills: TeamSkill[], assertOwned: () => void) {
+    const previous = this.state.configs.find((item) => item.id === config.id && item.target === target);
+    if (!previous) throw new WorkspaceError("WORK_CONFIG_NOT_INSTALLED", "此客户端尚未安装这个工作配置，请先使用 work-config install。");
+    if (previous.repository !== repository) throw new WorkspaceError("WORK_CONFIG_CHANGED", "当前团队与已安装配置的来源不同，不能跨来源更新。请先查看原配置。");
+    const changes: UpdateChange[] = [];
+    const incoming = new Map(skills.map((skill) => [skill.id, skill]));
+    for (const id of new Set([...previous.skills, ...config.skills])) {
+      assertOwned();
+      const desired = incoming.get(id);
+      const expected = this.state.skills.find((item) => item.id === id && item.target === target);
+      const otherConfigs = this.state.configs.filter((item) => item.id !== config.id && item.target === target && item.skills.includes(id)).map((item) => item.id);
+      const change: UpdateChange = { id, membership: !desired ? "removed" : previous.skills.includes(id) ? "retained" : "added", action: "conflict", currentRevision: null, otherConfigs, reason: null };
+      if (!desired && otherConfigs.length) change.action = "keep_shared";
+      else if (!desired && !expected!.removable) change.action = "keep_independent";
+      else {
+        try {
+          const actual = inspectProjectSkill(this.root, id, target);
+          change.currentRevision = actual?.commit ?? null;
+          if (actual && (actual.skillId !== id || actual.repository !== repository || expected && actual.digest !== expected.digest)) {
+            change.reason = "安装内容与记录不一致，请先检查本地修改。";
+          } else if (!desired) {
+            change.action = actual ? "backup" : "missing";
+          } else if (expected && (expected.repository !== repository || expected.digest !== desired.digest)
+            && (otherConfigs.length || !expected.removable)) {
+            change.reason = otherConfigs.length ? "新内容会影响其他工作配置：" + otherConfigs.join("、") : "这是原有独立安装，不能通过配置更新覆盖。";
+          } else if (!actual) {
+            change.action = "install";
+          } else if (actual.digest === desired.digest) {
+            change.action = "reuse";
+          } else if (expected?.removable && !otherConfigs.length) {
+            change.action = "update";
+          } else {
+            change.reason = "目标已有不同内容，需要先处理原有安装。";
+          }
+        } catch (error) {
+          if (!(error instanceof WorkspaceError)) throw error;
+          change.reason = error.message;
+        }
+      }
+      changes.push(change);
+      await setImmediate();
+    }
+    assertOwned();
+    return { id: config.id, name: config.name, repository, target, fromRevision: previous.revision, revision: commit, canUpdate: changes.every((change) => change.action !== "conflict"), changes };
+  }
+
+  async update(config: WorkConfig, repository: string, commit: string, target: ProjectSkillTarget, skills: TeamSkill[], fromRevision: string,
+    assertOwned: () => void, publish: (operation: (assertOwned: () => void) => Promise<void>) => Promise<void>) {
+    const plan = await this.planUpdate(config, repository, commit, target, skills, assertOwned);
+    if (plan.fromRevision !== fromRevision) throw new WorkspaceError("INSTALLATION_CHANGED", "当前配置版本与已选择的旧版本不同，请重新查看 work-config diff。");
+    if (!plan.canUpdate) throw new WorkspaceError("WORK_CONFIG_UPDATE_CONFLICT", "工作配置包含冲突，尚未修改任何安装。请先查看 work-config diff 中的原因。", plan);
+    const incoming = new Map(skills.map((skill) => [skill.id, skill]));
+    const next = structuredClone(this.state);
+    next.configs = next.configs.map((item) => item.id === config.id && item.target === target
+      ? { id: config.id, name: config.name, repository, target, revision: commit, skills: config.skills } : item);
+    next.skills = next.skills.filter((skill) => next.configs.some((item) => item.target === skill.target && item.skills.includes(skill.id)));
+    for (const skill of skills) {
+      const row = next.skills.find((item) => item.id === skill.id && item.target === target);
+      if (row) row.digest = skill.digest;
+      else next.skills.push({ id: skill.id, target, repository, digest: skill.digest, removable: plan.changes.find((change) => change.id === skill.id)!.action === "install" });
+    }
+    validateState(next);
+    const prepared: Array<{ change: UpdateChange; operation: ReturnType<typeof prepareSkillInstall> }> = [];
+    const effects: Array<{ id: string; kind: "installed" | "updated" | "removed"; backupPath: string | null; state: "applied" | "restored" | "recovery_required" }> = [];
+    const cleanupFailed: string[] = [];
+    let recorded = false;
+    let failed = false;
+    let failure: unknown;
+    try {
+      for (const change of plan.changes) {
+        assertOwned();
+        if (change.action === "install" || change.action === "reuse" || change.action === "update") {
+          prepared.push({ change, operation: prepareSkillInstall(this.root, incoming.get(change.id)!, repository, commit, target,
+            change.action === "update" ? change.currentRevision! : undefined) });
+        }
+        await setImmediate();
+      }
+      await publish(async (assertPublicationOwned) => {
+        for (const change of plan.changes) {
+          assertPublicationOwned();
+          switch (change.action) {
+            case "install": case "reuse": case "update": {
+              if (change.action === "update") {
+                const expected = this.state.skills.find((item) => item.id === change.id && item.target === target)!;
+                const actual = inspectProjectSkill(this.root, change.id, target);
+                if (!actual || actual.digest !== expected.digest || actual.commit !== change.currentRevision) throw new WorkspaceError("SKILL_CONFLICT", "Skill 在更新前发生变化，已停止处理。");
+              }
+              const result = prepared.find((item) => item.change.id === change.id)!.operation.commit();
+              if (result.status !== "existing") effects.push({ id: change.id, kind: result.status, backupPath: result.backupPath, state: "applied" });
+              break;
+            }
+            case "backup": {
+              const expected = this.state.skills.find((item) => item.id === change.id && item.target === target)!;
+              const actual = inspectProjectSkill(this.root, change.id, target);
+              if (!actual || actual.repository !== expected.repository || actual.digest !== expected.digest) throw new WorkspaceError("SKILL_CONFLICT", "准备移除的 Skill 已发生变化。");
+              effects.push({ id: change.id, kind: "removed", backupPath: uninstallProjectSkill(this.root, change.id, target).backupPath, state: "applied" });
+              break;
+            }
+            case "keep_shared": case "keep_independent": case "missing": break;
+            case "conflict": throw new WorkspaceError("WORK_CONFIG_UPDATE_CONFLICT", "配置仍有冲突，不能更新。");
+          }
+          await setImmediate();
+        }
+        assertPublicationOwned();
+        this.save(next);
+        recorded = true;
+      });
+    } catch (error) {
+      failed = true;
+      failure = error;
+      for (const effect of recorded ? [] : [...effects].reverse()) {
+        try {
+          if (effect.kind === "removed") {
+            rollbackProjectSkill(this.root, effect.id, target, path.basename(effect.backupPath!), null);
+            effect.backupPath = null;
+          } else {
+            const actual = inspectProjectSkill(this.root, effect.id, target);
+            if (!actual || actual.repository !== repository || actual.commit !== commit || actual.digest !== incoming.get(effect.id)!.digest) throw new WorkspaceError("SKILL_CONFLICT", "更新后的内容又发生变化，停止自动回退。");
+            effect.backupPath = effect.kind === "updated"
+              ? rollbackProjectSkill(this.root, effect.id, target, path.basename(effect.backupPath!), commit).backupPath
+              : uninstallProjectSkill(this.root, effect.id, target).backupPath;
+          }
+          effect.state = "restored";
+        } catch {
+          // Keep the last durable bindings and all surviving copies/backups.
+          effect.state = "recovery_required";
+        }
+        await setImmediate();
+      }
+    } finally {
+      for (const item of prepared) {
+        try { item.operation.cleanup(); }
+        catch { cleanupFailed.push(item.change.id); }
+        await setImmediate();
+      }
+    }
+    const details = { recorded, fromRevision, revision: commit, effects, cleanupFailed, causeCode: failure instanceof WorkspaceError ? failure.code : failed ? "FILE_OPERATION_FAILED" : null };
+    if (recorded && failed || cleanupFailed.length || effects.some((effect) => effect.state === "recovery_required")) {
+      throw new WorkspaceError("WORK_CONFIG_RECOVERY_REQUIRED", "工作配置更新需要核对恢复状态。请先查看 work-config status 和各 Skill 的备份；不要强制覆盖现有内容。", details);
+    }
+    if (failed) {
+      if (!effects.length) throw failure;
+      throw new WorkspaceError("WORK_CONFIG_UPDATE_FAILED", "工作配置更新失败，文件已回退，原归属记录保留。请检查失败原因后重试。", details);
+    }
+    return { ...plan, effects };
   }
 
   async uninstall(id: string, target: ProjectSkillTarget, commit: string, assertOwned: () => void) {

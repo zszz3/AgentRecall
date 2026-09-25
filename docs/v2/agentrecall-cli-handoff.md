@@ -8,7 +8,7 @@
 
 此前单 Skill 流程的验证基线为 [`c4525acc701490264eff473bd297d143b7d3cc75`](https://github.com/zszz3/AgentRecall/commit/c4525acc701490264eff473bd297d143b7d3cc75)。该提交的 CLI、V1、V2 在 Linux/macOS/Windows 上的检查，以及仓库检查和 Quality gate，均已通过：[完整 CI 记录](https://github.com/zszz3/AgentRecall/actions/runs/36114851838)。交接文档提交本身不改变产品代码，不能将这条 CI 记录当作任意后续提交的验证。
 
-当前源码进一步支持工作配置的列表、预览、批量安装、本地归属、共享保护和整组卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：整组版本更新及其他资产类型仍需开发；多人 Chat 删除另有未提交工作，必须单独收尾。当前代码与 CI 以 PR 最新提交为准。
+当前源码进一步支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
 
 ## 2. 到哪里接着做
 
@@ -17,7 +17,7 @@
 | 工作区 | 分支 / 状态 | 接手方式 |
 | --- | --- | --- |
 | `~/.codex/worktrees/cli-foundation/agentrecall` | `codex/cli-foundation`；产品代码已推送 | CLI 和团队资产开发从这里继续。交接写入前工作区干净 |
-| `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；基点 `96577cd3`，有大量未提交改动 | R00 删除 Chat 的独立工作区，核对时未找到该分支的 PR |
+| `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；`5de21c0a`，已推送 | R00 删除 Chat 的独立工作区，见 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) |
 | `~/learnspace/agentrecall` | `codex/incremental-session-indexing`，`bc1dc8d4` | 原工作区，不能误当成 CLI 最新代码；有未跟踪的 `.agentrecall/`、`output/` 和旧版计划文档 |
 
 CLI 同机接手：
@@ -29,7 +29,7 @@ git branch --show-current
 gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 ```
 
-其他机器可在全新、干净的 AgentRecall 克隆中执行 `gh pr checkout 584` 获取已推送的 CLI 改动。**Chat 删除的未提交改动不会随 PR 或普通 clone 带过来**；接手 R00 需要原工作区，或另行移交并核验那份改动。
+其他机器可在全新、干净的 AgentRecall 克隆中执行 `gh pr checkout 584` 获取已推送的 CLI 改动。接手 Chat 删除可在另一干净克隆中执行 `gh pr checkout 585`；两项工作保持独立，不要混入同一分支。
 
 不要对这些目录执行丢弃改动、清理未跟踪文件或强制重置。其他工作树属于独立任务，不要混入 CLI 提交。
 
@@ -56,12 +56,12 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 | R04/R05 团队开关和多仓库 | 默认关闭、显式启停、默认团队和项目覆盖、worktree/克隆/fork/歧义识别 | 桌面开关及入口 |
 | R06 GitHub 资产读取 | 显式 HTTPS/SSH 同步，复用本机 Git 身份 | 创建/加入空间、成员权限管理、真实私有仓库验收 |
 | R07 资产格式 | 版本 1/2 清单、来源、文件校验、离线缓存及工作配置预览 | Rules、Docs、MCP、Agent 模板 |
-| R08/R09 安装与版本管理 | Codex/Claude 安装、单 Skill 版本管理、工作配置批量安装、持久化归属、共享保护及整组卸载 | 整组版本更新、其他资产、逐行差异、PR 贡献与审核、分支订阅 |
+| R08/R09 安装与版本管理 | Codex/Claude 安装、单 Skill 版本管理、工作配置批量安装、持久化归属、共享保护、整组差异/更新及卸载 | 跨配置协调更新、整组历史回滚、其他资产、逐行差异、PR 贡献与审核、分支订阅 |
 | R10 桌面团队入口 | 未开始 | 接入共享服务及用户可见界面 |
 | R11—R14 完整 Session 分享 | 未开始 | 包格式、对象存储、团队授权、主动上传、浏览和撤回 |
 | R15—R19 Context / Improvement | 未开始 | 知识维护、检索、改进提案、验证发布、可选自动召回 |
 | R20 验证与交付 | CLI 本地与三平台检查通过，文档和分支发布说明已有 | 真实团队验收、合入、独立分发及后续阶段验收 |
-| R00 多人 Chat 删除 | 另一工作区已有删除与保留边界的改动 | 本轮未复跑其测试；历史 Session 最终核验、独立提交、PR 与合入均未完成 |
+| R00 多人 Chat 删除 | 独立 PR #585 已提交，99 项受影响测试与 V2 构建通过，历史 Session 保留有回归覆盖 | 完整 CI、真实界面验收、审核与合入 |
 
 ### 当前可用命令
 
@@ -70,6 +70,7 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 | 命令 | 行为 |
 | --- | --- |
 | `work-config list / preview / install` | 团队清单、冲突预览及安装，保存本地共享引用 |
+| `work-config diff / update` | 预览整组引用与文件变化，按新旧版本更新；共享或独立内容冲突阻止改动 |
 | `work-config installed / status / uninstall` | 离线查看本地配置、实际状态及整组卸载；保留共享和原有独立 Skill |
 | `team sync` | 手动读取资产仓库默认分支，替换校验完成的缓存 |
 | `skill list / preview` | 查看当前团队缓存；可预览指定支持文件 |
@@ -118,17 +119,17 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 
 ## 7. 下一步建议：工作配置持续管理
 
-当前已记录工作配置的本地归属，支持共享引用保护、离线状态和整组卸载。原有独立安装不被认领为可随配置删除的文件；被引用的 Skill 无法通过单独命令绕过保护。仍未提供整组版本更新。
+当前已记录工作配置的本地归属，支持共享引用保护、离线状态和整组卸载。原有独立安装不被认领为可随配置删除的文件；被引用的 Skill 无法通过单独命令绕过保护。已支持同来源的整组差异与版本更新，仍未提供跨配置协调升级或整组历史版本回滚。
 
 下一段开发重点：
 
-1. 在现有归属记录上实现整组版本更新，先定义新增/移除引用与共享 Skill 版本分歧的行为，不能直接对每项调用单 Skill 更新。
-2. 继续保留现有共享卸载测试；新增对共同资产更新的影响预览、跨版本兼容与失败恢复验收。
+1. 优先完成 V2 桌面入口和其他资产类型；如扩展跨配置协调升级，必须先设计多个配置共同确认共享版本的行为，不能绕过目前的共享保护。
+2. 保留现有整组更新、共享卸载和失败恢复测试；整组历史回滚需要额外的配置版本与可恢复内容记录。
 3. 复用现有单 Skill 校验、锁、备份及批量失败报告；多个目录不是一次原子提交，异常终止的恢复规则必须明确。
 4. 扩展 Rules/Docs/MCP/Agent 模板前核实客户端当前格式，MCP 只引用本地密钥。V2 桌面接入使用同一服务，不能新增 V1 依赖。
 5. 更新总计划和用户指南，保持真实成员/私有仓库验收、PR 贡献与 Session 分享的未完成状态。
 
-R00 可作为另一项独立收尾任务：在 Chat 工作区核对历史 Session 保留、Workflow MCP、Agent/Workflow/Eval 可用性，再运行受影响测试和 V2 检查，单独提交和开 PR。该工作区还有未跟踪的发布说明、工作台测试和 `apps/main-2.0/node_modules`；不要把依赖目录误提交。
+R00 已在独立 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) 完成源码删除、历史 Session 回归与本地构建验证。当前是草稿，需跟进 CI、界面验收和审核；不要把它当成已经发布。工作区的 `apps/main-2.0/node_modules` 仍是未跟踪的本地依赖链接，不要误提交。
 
 ## 8. 验证证据与接手命令
 
@@ -140,7 +141,7 @@ R00 可作为另一项独立收尾任务：在 Chat 工作区核对历史 Sessio
 - 上述完整 CI 已覆盖 Linux/macOS/Windows 的 CLI、V1、V2 和 Quality gate。
 - 尚未做真实私有团队仓库、两名真实成员协作、桌面团队入口或 Session 分享验收。
 
-工作配置增量本地 CLI 测试已扩展到 33 项，包含格式兼容、重叠引用、多项目/客户端与 worktree、预检冲突、引用保护、并发安装、整组卸载、记录写入失败、提交后的清理失败及内容被修改时的部分状态。
+工作配置增量本地 CLI 测试已扩展到 40 项，包含格式兼容、重叠引用、多项目/客户端与 worktree、预检冲突、引用保护、并发安装、整组卸载、记录写入失败、提交后的清理失败及内容被修改时的部分状态。
 
 接手后先检查实际代码和 CI，不必为了阅读交接文档重新跑全仓测试。开发发生变化时，在 CLI 工作区按风险执行：
 
