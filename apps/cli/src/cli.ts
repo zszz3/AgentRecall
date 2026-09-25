@@ -29,6 +29,8 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
   agentrecall work-config install <id> --target codex|claude --revision <预览中的版本>
   agentrecall work-config installed          查看项目已安装的工作配置（可离线）
   agentrecall work-config status <id> --target codex|claude
+  agentrecall work-config diff <id> --target codex|claude
+  agentrecall work-config update <id> --target codex|claude --from-revision <当前配置版本> --revision <新版本>
   agentrecall work-config uninstall <id> --target codex|claude --revision <当前配置版本>
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
@@ -94,6 +96,8 @@ async function main(): Promise<void> {
     "work-config install": { count: 3, flags: ["project", "target", "revision"] },
     "work-config installed": { count: 2, flags: ["project"] },
     "work-config status": { count: 3, flags: ["project", "target"] },
+    "work-config diff": { count: 3, flags: ["project", "target"] },
+    "work-config update": { count: 3, flags: ["project", "target", "from-revision", "revision"] },
     "work-config uninstall": { count: 3, flags: ["project", "target", "revision"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
@@ -106,10 +110,10 @@ async function main(): Promise<void> {
   const teamFlags = Number(values.team !== undefined) + Number(Boolean(values.personal)) + Number(Boolean(values.inherit));
   if (teamFlags > 1 || key === "project bind" && teamFlags !== 1) invalidArguments("请只选择 --team、--personal 或 --inherit 中的一项。");
   if (key === "team add" && !values.repo) invalidArguments("缺少 --repo。");
-  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback", "work-config install", "work-config status", "work-config uninstall"].includes(key) && !values.target) invalidArguments("缺少 --target。");
+  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback", "work-config install", "work-config status", "work-config uninstall", "work-config diff", "work-config update"].includes(key) && !values.target) invalidArguments("缺少 --target。");
   if (values.target !== undefined && values.target !== "codex" && values.target !== "claude") invalidArguments("--target 只能为 codex 或 claude。");
-  if (["skill install", "skill update", "work-config install", "work-config uninstall"].includes(key) && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览资产或查看安装状态，再通过 --revision 提供完整版本。");
-  if ((key === "skill update" || key === "skill rollback") && !/^[a-f0-9]{40}$/.test(values["from-revision"] ?? "")
+  if (["skill install", "skill update", "work-config install", "work-config uninstall", "work-config update"].includes(key) && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览资产或查看安装状态，再通过 --revision 提供完整版本。");
+  if ((key === "skill update" || key === "skill rollback" || key === "work-config update") && !/^[a-f0-9]{40}$/.test(values["from-revision"] ?? "")
     && !(key === "skill rollback" && values["from-revision"] === "none")) invalidArguments("请通过 --from-revision 提供当前完整版本；恢复到空位置时可使用 none。");
   if (key === "skill rollback" && !values.backup) invalidArguments("缺少 --backup。");
   if (values.transport !== undefined && values.transport !== "https" && values.transport !== "ssh") invalidArguments("--transport 只能为 https 或 ssh。");
@@ -213,6 +217,16 @@ async function main(): Promise<void> {
     case "work-config uninstall": {
       const result = await assets.uninstallWorkConfig(directory, id!, values.target as "codex" | "claude", values.revision!, values.project);
       output(result, `已卸载工作配置 ${result.id}。共用和原有独立 Skill 保留；${result.backups.length} 个 Skill 已移入备份。\n${result.backups.map((item) => `${item.id}\t${item.backupPath}`).join("\n")}`); break;
+    }
+    case "work-config diff": {
+      const result = await assets.diffWorkConfig(directory, id!, values.target as "codex" | "claude", values.project);
+      const actions = { install: "安装", reuse: "复用现有内容", update: "备份并更新", backup: "移入备份", keep_shared: "保留其他配置使用的内容", keep_independent: "保留原有独立安装", missing: "移除缺失项的引用", conflict: "阻止更新" };
+      const membership = { added: "新增引用", retained: "保留引用", removed: "移除引用" };
+      output(result, `当前版本：${result.fromRevision}\n新版本：${result.revision}\n${result.canUpdate ? "检查通过，可选择更新。" : "存在冲突，尚未修改任何文件。"}\n${result.changes.map((item) => `${item.id}\t${membership[item.membership]}\t${actions[item.action]}${item.reason ? `\n${item.reason}` : ""}${item.otherConfigs.length ? `\n其他引用：${item.otherConfigs.join("、")}` : ""}`).join("\n")}\n具体文件内容可用 skill diff 或 skill preview 查看。`); break;
+    }
+    case "work-config update": {
+      const result = await assets.updateWorkConfig(directory, id!, values.target as "codex" | "claude", values["from-revision"]!, values.revision!, values.project);
+      output(result, `已更新工作配置 ${result.name}。\n版本：${result.revision}\n${result.effects.map((item) => `${item.id}\t${item.kind === "installed" ? "已安装" : item.kind === "updated" ? "已更新" : "已移入备份"}${item.backupPath ? `\t${item.backupPath}` : ""}`).join("\n") || "文件内容保持不变，配置版本与引用已保存。"}`); break;
     }
     case "project add": {
       const project = await service.addProject({

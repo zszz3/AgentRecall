@@ -70,10 +70,16 @@ try {
   const updated = command(["skill", "update", "review", "--target", "claude", "--revision", next, "--from-revision", commit], project);
   assert.equal(updated.status, "updated");
   assert.equal(command(["skill", "backups", "review"], project).backups[0].revision, commit);
+  const nextWorkSnapshot = JSON.parse(fs.readFileSync(cache, "utf8"));
+  nextWorkSnapshot.schemaVersion = 2;
+  nextWorkSnapshot.workConfigs = workSnapshot.workConfigs;
+  fs.writeFileSync(cache, JSON.stringify(nextWorkSnapshot));
+  assert.equal(command(["work-config", "diff", "backend", "--target", "codex"], project).changes[0].action, "update");
+  assert.equal(command(["work-config", "update", "backend", "--target", "codex", "--from-revision", commit, "--revision", next], project).revision, next);
   command(["team", "disable"]);
   assert.equal(command(["work-config", "installed"], project)[0].id, "backend");
-  assert.equal(command(["work-config", "status", "backend", "--target", "codex"], project).revision, commit);
-  command(["work-config", "uninstall", "backend", "--target", "codex", "--revision", commit], project);
+  assert.equal(command(["work-config", "status", "backend", "--target", "codex"], project).revision, next);
+  command(["work-config", "uninstall", "backend", "--target", "codex", "--revision", next], project);
   assert.deepEqual(command(["work-config", "installed"], project), []);
   assert.ok(!fs.existsSync(path.join(project, ".agents", "skills", "review")));
   const restored = command(["skill", "rollback", "review", "--target", "claude", "--backup", path.basename(updated.backupPath), "--from-revision", next], project);

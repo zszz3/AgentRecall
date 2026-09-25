@@ -142,6 +142,30 @@ export class TeamAssetService {
     });
   }
 
+  async diffWorkConfig(directory: string, id: string, target: ProjectSkillTarget, projectId?: string) {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    const root = await this.projectRoot(directory, context.project.id);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      const snapshot = await this.snapshot(context);
+      const config = this.findWorkConfig(snapshot, id);
+      const skills = config.skills.map((id) => snapshot.skills.find((skill) => skill.id === id)!);
+      return this.commitForTeam(root, context, (assertConfigOwned) => new ProjectWorkConfigs(root).planUpdate(config, snapshot.repository, snapshot.commit, target, skills, () => { assertOwned(); assertConfigOwned(); }));
+    });
+  }
+
+  async updateWorkConfig(directory: string, id: string, target: ProjectSkillTarget, fromRevision: string, commit: string, projectId?: string) {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    const root = await this.projectRoot(directory, context.project.id);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      const snapshot = await this.snapshot(context);
+      if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "缓存与选定的新版本不同，请重新查看 work-config diff。");
+      const config = this.findWorkConfig(snapshot, id);
+      const skills = config.skills.map((id) => snapshot.skills.find((skill) => skill.id === id)!);
+      return new ProjectWorkConfigs(root).update(config, snapshot.repository, snapshot.commit, target, skills, fromRevision, assertOwned,
+        (publish) => this.commitForTeam(root, context, (assertConfigOwned) => publish(() => { assertOwned(); assertConfigOwned(); })));
+    });
+  }
+
   async workConfigStatus(directory: string, id: string, target: ProjectSkillTarget, projectId?: string) {
     const root = await this.projectRoot(directory, projectId);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {

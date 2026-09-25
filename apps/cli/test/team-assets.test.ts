@@ -468,6 +468,161 @@ test("corrupt, future, oversized and linked project ownership records fail close
   assert.deepEqual(await fs.readdir(outside), []);
 });
 
+async function workConfigUpdateFixture(t: Parameters<typeof fixture>[0], mode: "owned" | "shared" | "independent" = "owned") {
+  const state = await workConfigFixture(t);
+  if (mode === "independent") await state.assets.install(state.business, "review", "codex", state.synced.commit);
+  await state.assets.installWorkConfig(state.business, "backend", "codex", state.synced.commit);
+  if (mode === "shared") await state.assets.installWorkConfig(state.business, "review-only", "codex", state.synced.commit);
+  await fs.appendFile(path.join(state.source, "skills", "review", "SKILL.md"), "New team instructions\n");
+  await fs.mkdir(path.join(state.source, "skills", "verify"), { recursive: true });
+  await fs.writeFile(path.join(state.source, "skills", "verify", "SKILL.md"), "---\nname: verify\ndescription: Verify changes\n---\nRun checks.\n");
+  state.manifest.skills.push({ id: "verify", path: "skills/verify" });
+  state.manifest.workConfigs[0]!.skills = ["review", "verify"];
+  await fs.writeFile(path.join(state.source, "agentrecall.json"), JSON.stringify(state.manifest));
+  await commit(state.source);
+  const next = await state.assets.sync(state.business);
+  return { ...state, next, record: path.join(state.business, ".agentrecall-work-configs.json"), installed: path.join(state.business, ".agents", "skills") };
+}
+
+test("whole-config update previews all membership changes and commits one concurrent version transition", async (t) => {
+  const { assets, business, home, installed, synced, next } = await workConfigUpdateFixture(t);
+  const plan = await assets.diffWorkConfig(business, "backend", "codex");
+  assert.equal(plan.canUpdate, true);
+  assert.equal(plan.fromRevision, synced.commit);
+  assert.equal(plan.revision, next.commit);
+  assert.deepEqual(plan.changes.map((item) => [item.id, item.membership, item.action]), [
+    ["review", "retained", "update"], ["lint", "removed", "backup"], ["verify", "added", "install"],
+  ]);
+  assert.equal((await cli(home, business, ["work-config", "diff", "backend", "--target", "codex"])).code, 0);
+  const attempts = await Promise.all(Array.from({ length: 2 }, () => cli(home, business, [
+    "work-config", "update", "backend", "--target", "codex", "--from-revision", synced.commit, "--revision", next.commit,
+  ])));
+  assert.equal(attempts.filter((attempt) => attempt.code === 0).length, 1, JSON.stringify(attempts));
+  assert.ok(attempts.filter((attempt) => attempt.code !== 0).every((attempt) => ["INSTALLATION_CHANGED", "ASSETS_BUSY"].includes(attempt.result.error?.code ?? "")));
+  assert.equal(await fs.readFile(path.join(installed, "review", "SKILL.md"), "utf8"), markdown + "New team instructions\n");
+  await assert.rejects(fs.access(path.join(installed, "lint")), { code: "ENOENT" });
+  await fs.access(path.join(installed, "verify", "SKILL.md"));
+  const status = await assets.workConfigStatus(business, "backend", "codex");
+  assert.equal(status.revision, next.commit);
+  assert.deepEqual(status.skills.map((skill) => [skill.id, skill.state]), [["review", "ready"], ["verify", "ready"]]);
+  assert.equal((await assets.backups(business, "review")).backups.length, 1);
+  const repeated = await assets.updateWorkConfig(business, "backend", "codex", next.commit, next.commit);
+  assert.deepEqual(repeated.effects, []);
+  assert.equal((await assets.backups(business, "review")).backups.length, 1);
+});
+
+test("updates cannot change shared content but can detach it without affecting the remaining config", async (t) => {
+  const { assets, business, source, manifest, installed, record, synced, next } = await workConfigUpdateFixture(t, "shared");
+  const before = await fs.readFile(record, "utf8");
+  const plan = await assets.diffWorkConfig(business, "backend", "codex");
+  assert.equal(plan.canUpdate, false);
+  assert.deepEqual(plan.changes[0]?.otherConfigs, ["review-only"]);
+  await assert.rejects(assets.updateWorkConfig(business, "backend", "codex", synced.commit, next.commit), { code: "WORK_CONFIG_UPDATE_CONFLICT" });
+  assert.equal(await fs.readFile(record, "utf8"), before);
+  assert.equal(await fs.readFile(path.join(installed, "review", "SKILL.md"), "utf8"), markdown);
+  manifest.workConfigs[0]!.skills = ["verify"];
+  await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify(manifest));
+  await commit(source);
+  const detached = await assets.sync(business);
+  assert.equal((await assets.diffWorkConfig(business, "backend", "codex")).changes[0]?.action, "keep_shared");
+  await assets.updateWorkConfig(business, "backend", "codex", synced.commit, detached.commit);
+  assert.equal(await fs.readFile(path.join(installed, "review", "SKILL.md"), "utf8"), markdown);
+  assert.equal((await assets.workConfigStatus(business, "review-only", "codex")).revision, synced.commit);
+});
+
+test("independent content and manual edits block whole-config updates before any write", async (t) => {
+  const independent = await workConfigUpdateFixture(t, "independent");
+  assert.equal((await independent.assets.diffWorkConfig(independent.business, "backend", "codex")).canUpdate, false);
+  await assert.rejects(independent.assets.updateWorkConfig(independent.business, "backend", "codex", independent.synced.commit, independent.next.commit), { code: "WORK_CONFIG_UPDATE_CONFLICT" });
+  const owned = await workConfigUpdateFixture(t);
+  const before = await fs.readFile(owned.record, "utf8");
+  await fs.appendFile(path.join(owned.installed, "lint", "SKILL.md"), "Local change");
+  assert.equal((await owned.assets.diffWorkConfig(owned.business, "backend", "codex")).canUpdate, false);
+  await assert.rejects(owned.assets.updateWorkConfig(owned.business, "backend", "codex", owned.synced.commit, owned.next.commit), { code: "WORK_CONFIG_UPDATE_CONFLICT" });
+  assert.equal(await fs.readFile(owned.record, "utf8"), before);
+  assert.equal(await fs.readFile(path.join(owned.installed, "review", "SKILL.md"), "utf8"), markdown);
+});
+
+test("metadata failure rolls back replacement, removal and addition together", async (t) => {
+  const { assets, business, record, installed, synced, next } = await workConfigUpdateFixture(t);
+  const before = await fs.readFile(record, "utf8");
+  const rename = syncFs.renameSync;
+  const failure = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (path.basename(String(destination)) === ".agentrecall-work-configs.json") throw new Error("Synthetic metadata failure");
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.updateWorkConfig(business, "backend", "codex", synced.commit, next.commit), { code: "WORK_CONFIG_UPDATE_FAILED" });
+  failure.mock.restore();
+  assert.equal(await fs.readFile(record, "utf8"), before);
+  assert.equal(await fs.readFile(path.join(installed, "review", "SKILL.md"), "utf8"), markdown);
+  await fs.access(path.join(installed, "lint", "SKILL.md"));
+  await assert.rejects(fs.access(path.join(installed, "verify")), { code: "ENOENT" });
+  assert.ok(!(await fs.readdir(business)).some((name) => name.startsWith(".agentrecall-skill-stage-") || name.endsWith(".tmp") || name.endsWith(".lock")));
+  await assets.updateWorkConfig(business, "backend", "codex", synced.commit, next.commit);
+  assert.equal((await assets.workConfigStatus(business, "backend", "codex")).revision, next.commit);
+});
+
+test("incomplete update recovery reports surviving backups and keeps old ownership", async (t) => {
+  const { assets, business, record, synced, next } = await workConfigUpdateFixture(t);
+  const before = await fs.readFile(record, "utf8");
+  const rename = syncFs.renameSync;
+  const failure = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (path.basename(String(destination)) === ".agentrecall-work-configs.json" || String(source).includes(".agentrecall-skill-backups")) throw new Error("Synthetic recovery failure");
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.updateWorkConfig(business, "backend", "codex", synced.commit, next.commit), (error: unknown) => {
+    assert.ok(error instanceof WorkspaceError);
+    assert.equal(error.code, "WORK_CONFIG_RECOVERY_REQUIRED");
+    assert.equal(error.details?.recorded, false);
+    assert.match(JSON.stringify(error.details), /recovery_required/);
+    return true;
+  });
+  failure.mock.restore();
+  assert.equal(await fs.readFile(record, "utf8"), before);
+  assert.ok((await assets.backups(business, "review")).backups.some((backup) => backup.valid && backup.revision === synced.commit));
+  assert.ok((await assets.backups(business, "lint")).backups.some((backup) => backup.valid && backup.revision === synced.commit));
+});
+
+test("new references to existing independent Skills preserve ownership on later uninstall", async (t) => {
+  const { assets, business, source, manifest, synced } = await workConfigFixture(t);
+  await assets.installWorkConfig(business, "review-only", "codex", synced.commit);
+  await assets.install(business, "lint", "codex", synced.commit);
+  manifest.workConfigs[1]!.skills.push("lint");
+  await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify(manifest));
+  await commit(source);
+  const next = await assets.sync(business);
+  const plan = await assets.diffWorkConfig(business, "review-only", "codex");
+  assert.deepEqual(plan.changes.map((change) => change.action), ["reuse", "reuse"]);
+  await assets.updateWorkConfig(business, "review-only", "codex", synced.commit, next.commit);
+  assert.equal((await assets.workConfigStatus(business, "review-only", "codex")).skills[1]?.action, "keep_independent");
+  await assets.uninstallWorkConfig(business, "review-only", "codex", next.commit);
+  await fs.access(path.join(business, ".agents", "skills", "lint", "SKILL.md"));
+});
+
+test("stale pins and team disable during update staging leave the old group intact", async (t) => {
+  const { service, assets, business, record, installed, synced, next } = await workConfigUpdateFixture(t);
+  await assert.rejects(assets.updateWorkConfig(business, "backend", "codex", synced.commit, "0".repeat(40)), { code: "SNAPSHOT_CHANGED" });
+  await assert.rejects(assets.updateWorkConfig(business, "backend", "codex", "0".repeat(40), next.commit), { code: "INSTALLATION_CHANGED" });
+  const before = await fs.readFile(record, "utf8");
+  const write = syncFs.writeFileSync;
+  let disabled = false;
+  const change = t.mock.method(syncFs, "writeFileSync", (...args: Parameters<typeof syncFs.writeFileSync>) => {
+    const result = write(...args);
+    if (!disabled && path.basename(String(args[0])) === ".agentrecall-install.json") {
+      disabled = true;
+      const config = JSON.parse(syncFs.readFileSync(service.store.filePath, "utf8"));
+      write(service.store.filePath, JSON.stringify({ ...config, teamEnabled: false }));
+    }
+    return result;
+  });
+  await assert.rejects(assets.updateWorkConfig(business, "backend", "codex", synced.commit, next.commit), { code: "TEAM_DISABLED" });
+  change.mock.restore();
+  assert.equal(disabled, true);
+  assert.equal(await fs.readFile(record, "utf8"), before);
+  assert.equal(await fs.readFile(path.join(installed, "review", "SKILL.md"), "utf8"), markdown);
+  assert.ok(!(await fs.readdir(business)).some((name) => name.startsWith(".agentrecall-skill-stage-") || name.endsWith(".lock")));
+});
+
 async function commit(directory: string) {
   await execute("git", ["-C", directory, "add", "."]);
   await execute("git", ["-C", directory, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "asset fixture"]);
