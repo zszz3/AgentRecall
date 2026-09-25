@@ -1,5 +1,5 @@
 export class WorkspaceError extends Error {
-  constructor(readonly code: string, message: string) {
+  constructor(readonly code: string, message: string, readonly details?: Readonly<Record<string, unknown>>) {
     super(message);
     this.name = "WorkspaceError";
   }

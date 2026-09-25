@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { setImmediate } from "node:timers/promises";
 import { z } from "zod";
 import { assetId, portableAssetPath, revision, MAX_FILE_BYTES, MAX_SNAPSHOT_BYTES, skillFromFiles, type SkillFile, type TeamSkill } from "./asset-format.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
@@ -149,6 +150,84 @@ export function uninstallProjectSkill(root: string, id: string, target: ProjectS
   const backup = path.join(backups, `${id}-${randomUUID()}`);
   fs.renameSync(destination, backup);
   return { status: "uninstalled" as const, path: destination, backupPath: backup };
+}
+
+export function previewSkillInstall(root: string, skill: TeamSkill, repository: string, target: ProjectSkillTarget) {
+  let destination: string | null = null;
+  try {
+    destination = skillDestination(root, skill.id, target);
+    if (!statIfPresent(destination)) return { destination, status: "new" as const, installedRevision: null, reason: null };
+    const { record } = inspectOwned(destination);
+    if (record.repository !== repository || record.skillId !== skill.id || record.digest !== skill.digest) throw conflict();
+    return { destination, status: "existing" as const, installedRevision: record.commit, reason: null };
+  } catch (error) {
+    if (!(error instanceof WorkspaceError)) throw error;
+    return { destination, status: "conflict" as const, installedRevision: null, reason: error.message };
+  }
+}
+
+// This is a batch installation recipe, not a persistent ownership group. Existing
+// identical Skills are reused; compensation only moves this attempt's new copies.
+export async function installProjectSkills(root: string, skills: TeamSkill[], repository: string, commit: string, target: ProjectSkillTarget, publish: (operation: (assertOwned: () => void) => Promise<void>) => Promise<void>) {
+  const prepared: Array<{ skill: TeamSkill; operation: ReturnType<typeof prepareSkillInstall> }> = [];
+  const results: Array<{ id: string; status: "installed" | "existing" | "reverted" | "recovery_required"; path: string; commit: string; backupPath: string | null }> = [];
+  const cleanupFailed: string[] = [];
+  let failed = false;
+  let failure: unknown;
+  let failedSkillId: string | null = null;
+  try {
+    for (const skill of skills) {
+      failedSkillId = skill.id;
+      prepared.push({ skill, operation: prepareSkillInstall(root, skill, repository, commit, target) });
+      // Let the project lock heartbeat run between potentially large Skill copies.
+      await setImmediate();
+    }
+    // Prepare every directory before publishing the first one.
+    await publish(async (assertOwned) => {
+      for (const { skill, operation } of prepared) {
+        assertOwned();
+        failedSkillId = skill.id;
+        const result = operation.commit();
+        results.push({ id: skill.id, status: result.status === "existing" ? "existing" : "installed", path: result.path, commit: result.commit, backupPath: null });
+        await setImmediate();
+      }
+      assertOwned();
+    });
+    failedSkillId = null;
+  } catch (error) {
+    failed = true;
+    failure = error;
+    for (const result of [...results].reverse()) {
+      if (result.status === "existing") continue;
+      try {
+        const { record } = inspectOwned(skillDestination(root, result.id, target));
+        const expected = skills.find((skill) => skill.id === result.id)!;
+        if (record.commit !== commit || record.repository !== repository || record.skillId !== result.id || record.digest !== expected.digest) throw conflict();
+        result.backupPath = uninstallProjectSkill(root, result.id, target).backupPath;
+        result.status = "reverted";
+      } catch {
+        // Preserve changed or inaccessible copies; report each unresolved target.
+        result.status = "recovery_required";
+      }
+      await setImmediate();
+    }
+  } finally {
+    for (const { skill, operation } of prepared) {
+      try { operation.cleanup(); }
+      catch { cleanupFailed.push(skill.id); }
+      await setImmediate();
+    }
+  }
+  const details = { failedSkillId, causeCode: failure instanceof WorkspaceError ? failure.code : failed ? "FILE_OPERATION_FAILED" : null, skills: results, cleanupFailed };
+  if (cleanupFailed.length || results.some((result) => result.status === "recovery_required")) {
+    throw new WorkspaceError("WORK_CONFIG_RECOVERY_REQUIRED", "工作配置操作未完全结束。请检查以下 Skill 和暂存目录，保留的内容不会被强制删除："
+      + [...results.filter((result) => result.status === "recovery_required").map((result) => result.id), ...cleanupFailed].join("、"), details);
+  }
+  if (failed) {
+    if (!results.length) throw failure;
+    throw new WorkspaceError("WORK_CONFIG_INSTALL_FAILED", "工作配置安装失败（" + failedSkillId + "）；本次新安装已移至备份，已有 Skill 保留。请用 skill backups 查看后重试。", details);
+  }
+  return results;
 }
 
 function changedInstallation(): WorkspaceError {

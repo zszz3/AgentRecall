@@ -75,7 +75,7 @@ export class GitAssetSource {
       throw new WorkspaceError("INVALID_MANIFEST", "agentrecall.json 不是有效的 JSON。");
     }
     const parsed = manifestSchema.safeParse(manifestValue);
-    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用 schemaVersion 1 和 skills 列表。");
+    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用 schemaVersion 1，或使用 schemaVersion 2 并提供 workConfigs 列表。");
     const skills = [];
     let retainedBytes = 0;
     for (const item of parsed.data.skills) {
@@ -89,6 +89,12 @@ export class GitAssetSource {
       }
       skills.push(skillFromFiles(item.id, files));
     }
-    return validateSnapshot({ schemaVersion: 1, repository: canonical, commit, skills }, canonical);
+    return validateSnapshot({
+      schemaVersion: parsed.data.schemaVersion,
+      repository: canonical,
+      commit,
+      skills,
+      ...(parsed.data.schemaVersion === 2 ? { workConfigs: parsed.data.workConfigs } : {}),
+    }, canonical);
   }
 }

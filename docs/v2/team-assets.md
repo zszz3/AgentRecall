@@ -65,6 +65,45 @@ Codex 的项目目录是 `.agents/skills/<id>`，Claude Code 是 `.claude/skills
 
 这些安装文件属于项目工作区；是否纳入业务仓库版本管理由用户决定，CLI 不自动修改 `.gitignore` 或提交代码。
 
+## 工作配置：批量选择 Skill
+
+工作配置把一组 Skill 组成可选的安装清单。例如后端开发配置同时包含 `review` 与 `lint`。资产仓库根目录使用格式版本 2：
+
+```json
+{
+  "schemaVersion": 2,
+  "skills": [
+    { "id": "review", "path": "skills/review" },
+    { "id": "lint", "path": "skills/lint" }
+  ],
+  "workConfigs": [
+    {
+      "id": "backend",
+      "name": "后端开发",
+      "description": "代码审查与检查",
+      "skills": ["review", "lint"]
+    }
+  ]
+}
+```
+
+两个 Skill 目录都需要满足前面的文件和 frontmatter 规则。最多 64 个工作配置；每个配置引用 1—64 个已声明的 Skill，不能重复引用，配置 ID 不能重复。名称最长 200 字符、描述最长 4096 字符；完整缓存仍遵守 16 MiB 限制。版本 1 的清单和缓存继续可读，工作配置列表为空；使用新字段必须显式改为版本 2。旧版 CLI 会拒绝版本 2，不会静默忽略配置。这里的格式版本与桌面应用的 V1/V2 是两回事；这些团队功能面向 V2 配套 CLI。
+
+```sh
+agentrecall team sync
+agentrecall work-config list
+agentrecall work-config preview backend --target codex
+agentrecall work-config install backend --target codex --revision <预览返回的完整提交版本>
+```
+
+选择 `claude` 可安装到 Claude Code。命令支持 `--project`、`--cwd` 和 `--json`。指定客户端预览时，会逐项显示待安装、可复用或冲突及原因，预览不写入客户端目录；未指定客户端时只显示清单，不检查本地冲突。要查看某个 Skill 的正文和支持文件，继续使用 `skill preview`。
+
+安装在任何目标生效前检查全部 Skill；目标版本必须与缓存一致。相同来源、相同内容且未被修改的已有 Skill 会复用，返回其实际安装版本；其他已有内容会阻止安装，不自动更新。正常失败时，仅将本次新安装的目录移入备份，已有 Skill 不动。若回退失败或内容在操作期间被修改，则保留现场、明确报错，JSON 的 `error.details` 返回逐项结果、备份路径和需要清理的 Skill。可以用 `skill backups` 检查并按前面的恢复流程处理。
+
+这是一份批量安装清单，安装后各 Skill 独立管理：不记录工作配置的持续启用状态，不提供整组更新、整组卸载或引用计数。多个配置可复用同一 Skill；之后手动更新或卸载该 Skill 会影响所有使用它的工作方式。团队清单删除某个引用不会自动删除本地文件。
+
+多目录发布不是单次原子替换；强制终止可能留下部分安装或暂存目录。重新预览会显示实际状态，确认后可重试以补齐缺失项，或按 Skill 单独恢复。不会在启动时自动清理用户文件。整组生命周期管理、Rules/Docs/MCP/Agent 模板仍需后续实现。
+
 ## 更新、卸载与恢复
 
 `team sync` 只更新缓存，不会改变已安装的 Skill。要切换版本，先查看文件增删、内容或执行权限变化，并按需查看一个文件的新旧正文：

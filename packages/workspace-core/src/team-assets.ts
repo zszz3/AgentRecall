@@ -5,10 +5,10 @@ import { randomUUID } from "node:crypto";
 import { WorkspaceService } from "./workspace.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
 import { GitAssetSource, type AssetTransport } from "./git-assets.js";
-import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot } from "./asset-format.js";
+import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { inspectCheckout } from "./git.js";
-import { diffProjectSkill, listSkillBackups, prepareSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
+import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
 type Context = Awaited<ReturnType<WorkspaceService["currentTeam"]>>;
 
@@ -18,14 +18,14 @@ export class TeamAssetService {
     this.cacheDirectory = path.join(path.dirname(workspace.store.filePath), "assets");
   }
 
-  private async commitForTeam<T>(directory: string, expected: Context, action: () => T): Promise<T> {
+  private async commitForTeam<T>(directory: string, expected: Context, action: (assertOwned: () => void) => T | Promise<T>): Promise<T> {
     // Use the config writer's lock only for the final check and commit, so disabling
     // a team can proceed while a network operation is still in flight.
     return withAssetLock(path.dirname(this.workspace.store.filePath), ".config.lock", async (assertOwned) => {
       const current = await this.workspace.currentTeam(directory, expected.project.id);
       if (JSON.stringify(current) !== JSON.stringify(expected)) throw new WorkspaceError("TEAM_CHANGED", "项目或团队配置已改变，本次操作取消，请重新选择。");
       assertOwned();
-      return action();
+      return action(assertOwned);
     });
   }
 
@@ -69,6 +69,59 @@ export class TeamAssetService {
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
     }));
+  }
+
+  private findWorkConfig(snapshot: AssetSnapshot, id: string): WorkConfig {
+    const config = snapshot.schemaVersion === 2 ? snapshot.workConfigs.find((item) => item.id === id) : undefined;
+    if (!config) throw new WorkspaceError("WORK_CONFIG_NOT_FOUND", "当前团队中找不到这个工作配置；请确认资产仓库使用 schemaVersion 2 并先运行 work-config list。");
+    return config;
+  }
+
+  async listWorkConfigs(directory: string, projectId?: string) {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    const snapshot = await this.snapshot(context);
+    return this.commitForTeam(directory, context, () => ({
+      teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
+      workConfigs: snapshot.schemaVersion === 2 ? snapshot.workConfigs : [],
+    }));
+  }
+
+  async previewWorkConfig(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget) {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    const snapshot = await this.snapshot(context);
+    const config = this.findWorkConfig(snapshot, id);
+    const root = target ? await this.projectRoot(directory, context.project.id) : undefined;
+    const preview = () => ({
+      teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
+      id: config.id, name: config.name, description: config.description, target: target ?? null,
+      skills: config.skills.map((skillId) => {
+        const skill = snapshot.skills.find((item) => item.id === skillId)!;
+        return {
+          id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest,
+          ...(root && target ? previewSkillInstall(root, skill, snapshot.repository, target)
+            : { destination: null, status: "unselected" as const, installedRevision: null, reason: null }),
+        };
+      }),
+    });
+    if (!root) return this.commitForTeam(directory, context, preview);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => this.commitForTeam(root, context, () => {
+      assertOwned();
+      return preview();
+    }));
+  }
+
+  async installWorkConfig(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string) {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    const root = await this.projectRoot(directory, context.project.id);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      const snapshot = await this.snapshot(context);
+      if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "资产版本与预览不一致，请重新预览并使用返回的 --revision。");
+      const config = this.findWorkConfig(snapshot, id);
+      const skills = config.skills.map((skillId) => snapshot.skills.find((skill) => skill.id === skillId)!);
+      const installed = await installProjectSkills(root, skills, snapshot.repository, snapshot.commit, target,
+        (publish) => this.commitForTeam(root, context, (assertConfigOwned) => publish(() => { assertOwned(); assertConfigOwned(); })));
+      return { workConfigId: config.id, name: config.name, path: root, commit, skills: installed };
+    });
   }
 
   async preview(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget, file = "SKILL.md") {

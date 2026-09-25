@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import syncFs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { GitAssetSource, TeamAssetService } from "@agentrecall/workspace-core";
+import { GitAssetSource, TeamAssetService, WorkspaceError } from "@agentrecall/workspace-core";
 import { cli, execute, fixture, repository } from "./fixtures.js";
 
 const markdown = "---\nname: review\ndescription: Review a chosen change\n---\nRead the diff before commenting.\n";
@@ -155,7 +155,168 @@ test("concurrent updates cannot silently replace a newer install", async (t) => 
   assert.equal((await assets.backups(business, "review")).backups.length, 1);
 });
 
+async function workConfigFixture(t: Parameters<typeof fixture>[0]) {
+  const state = await assetsFixture(t);
+  await fs.mkdir(path.join(state.source, "skills", "lint"), { recursive: true });
+  await fs.writeFile(path.join(state.source, "skills", "lint", "SKILL.md"), "---\nname: lint\ndescription: Lint a change\n---\nRun lint.\n");
+  const manifest = {
+    schemaVersion: 2,
+    skills: [{ id: "review", path: "skills/review" }, { id: "lint", path: "skills/lint" }],
+    workConfigs: [
+      { id: "backend", name: "Backend", description: "Review and lint", skills: ["review", "lint"] },
+      { id: "review-only", name: "Review only", description: "Review changes", skills: ["review"] },
+    ],
+  };
+  await fs.writeFile(path.join(state.source, "agentrecall.json"), JSON.stringify(manifest));
+  await commit(state.source);
+  await state.service.setTeamEnabled(true);
+  const synced = await state.assets.sync(state.business);
+  return { ...state, manifest, synced };
+}
 
+test("work configurations preview local status, reuse overlapping Skills and isolate projects and clients", async (t) => {
+  const { service, assets, business, home, root, synced } = await workConfigFixture(t);
+  assert.equal((await assets.listWorkConfigs(business)).workConfigs[0]?.id, "backend");
+  assert.ok((await assets.previewWorkConfig(business, "backend")).skills.every((skill) => skill.status === "unselected"));
+  const preview = await assets.previewWorkConfig(business, "backend", undefined, "codex");
+  assert.deepEqual(preview.skills.map((skill) => [skill.id, skill.status]), [["review", "new"], ["lint", "new"]]);
+  await assert.rejects(fs.access(path.join(business, ".agents")), { code: "ENOENT" });
+  const first = await assets.installWorkConfig(business, "review-only", "codex", synced.commit);
+  assert.equal(first.skills[0]?.status, "installed");
+  const installed = await assets.installWorkConfig(business, "backend", "codex", synced.commit);
+  assert.deepEqual(installed.skills.map((skill) => skill.status), ["existing", "installed"]);
+  assert.ok((await assets.installWorkConfig(business, "backend", "codex", synced.commit)).skills.every((skill) => skill.status === "existing"));
+  assert.ok((await assets.previewWorkConfig(business, "backend", undefined, "codex")).skills.every((skill) => skill.status === "existing"));
+  assert.equal((await cli(home, business, ["work-config", "list"])).code, 0);
+  assert.equal((await cli(home, business, ["work-config", "preview", "backend", "--target", "codex"])).code, 0);
+  const fromCli = await cli(home, business, ["work-config", "install", "backend", "--target", "claude", "--revision", synced.commit]);
+  assert.equal(fromCli.code, 0, fromCli.stdout);
+  const other = await repository(path.join(root, "other"), "https://github.com/example/other");
+  await service.addProject({ id: "other", directory: other, teamId: "engineering" });
+  assert.ok((await assets.previewWorkConfig(other, "backend", undefined, "codex")).skills.every((skill) => skill.status === "new"));
+  const worktree = path.join(root, "linked checkout");
+  await execute("git", ["-C", other, "worktree", "add", "--detach", worktree]);
+  const linked = await assets.installWorkConfig(worktree, "backend", "codex", synced.commit);
+  const realWorktree = await fs.realpath(worktree);
+  assert.ok(linked.skills.every((skill) => skill.path.startsWith(realWorktree + path.sep)));
+  await assert.rejects(fs.access(path.join(other, ".agents")), { code: "ENOENT" });
+  await service.setTeamEnabled(false);
+  await assert.rejects(assets.listWorkConfigs(business), { code: "TEAM_DISABLED" });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), { code: "TEAM_DISABLED" });
+});
+
+test("work configuration conflicts and stale versions fail before publishing any Skill", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  await fs.mkdir(path.join(business, ".agents", "skills", "lint"), { recursive: true });
+  await fs.writeFile(path.join(business, ".agents", "skills", "lint", "SKILL.md"), "personal\n");
+  const preview = await assets.previewWorkConfig(business, "backend", undefined, "codex");
+  assert.deepEqual(preview.skills.map((skill) => skill.status), ["new", "conflict"]);
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", "0".repeat(40)), { code: "SNAPSHOT_CHANGED" });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), { code: "SKILL_CONFLICT" });
+  await assert.rejects(fs.access(path.join(business, ".agents", "skills", "review")), { code: "ENOENT" });
+  assert.ok(!(await fs.readdir(business)).some((name) => name.startsWith(".agentrecall-skill-stage-") || name.endsWith(".lock")));
+});
+
+test("disabling the team while staging a work configuration prevents publication and cleans staging", async (t) => {
+  const { service, assets, business, synced } = await workConfigFixture(t);
+  const write = syncFs.writeFileSync;
+  let disabled = false;
+  const changingConfig = t.mock.method(syncFs, "writeFileSync", (...args: Parameters<typeof syncFs.writeFileSync>) => {
+    const result = write(...args);
+    if (!disabled && path.basename(String(args[0])) === ".agentrecall-install.json") {
+      disabled = true;
+      const config = JSON.parse(syncFs.readFileSync(service.store.filePath, "utf8"));
+      write(service.store.filePath, JSON.stringify({ ...config, teamEnabled: false }));
+    }
+    return result;
+  });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), { code: "TEAM_DISABLED" });
+  changingConfig.mock.restore();
+  assert.equal(disabled, true);
+  await assert.rejects(fs.access(path.join(business, ".agents")), { code: "ENOENT" });
+  assert.ok(!(await fs.readdir(business)).some((name) => name.startsWith(".agentrecall-skill-stage-") || name.endsWith(".lock")));
+});
+
+test("failed batch publication backs up only new copies and preserves pre-existing Skills", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  const rename = syncFs.renameSync;
+  const failure = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (String(source).includes(".agentrecall-skill-stage-") && path.basename(String(destination)) === "lint") throw new Error("Synthetic failure");
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), (error: unknown) => {
+    assert.ok(error instanceof WorkspaceError);
+    assert.equal(error.code, "WORK_CONFIG_INSTALL_FAILED");
+    assert.equal(error.details?.failedSkillId, "lint");
+    assert.match(JSON.stringify(error.details), /reverted/);
+    return true;
+  });
+  await assert.rejects(fs.access(path.join(business, ".agents", "skills", "review")), { code: "ENOENT" });
+  assert.equal((await assets.backups(business, "review")).backups[0]?.valid, true);
+  failure.mock.restore();
+  await assets.install(business, "review", "codex", synced.commit);
+  const failAgain = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (String(source).includes(".agentrecall-skill-stage-") && path.basename(String(destination)) === "lint") throw new Error("Synthetic failure");
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), { code: "WORK_CONFIG_INSTALL_FAILED" });
+  failAgain.mock.restore();
+  assert.equal(await fs.readFile(path.join(business, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  assert.equal((await assets.backups(business, "review")).backups.length, 1);
+  assert.ok(!(await fs.readdir(business)).some((name) => name.startsWith(".agentrecall-skill-stage-") || name.endsWith(".lock")));
+});
+
+test("batch recovery preserves edits and reports partial installation instead of success", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  const rename = syncFs.renameSync;
+  const review = path.join(business, ".agents", "skills", "review", "SKILL.md");
+  const failure = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (String(source).includes(".agentrecall-skill-stage-") && path.basename(String(destination)) === "lint") {
+      syncFs.appendFileSync(review, "Manual change during publication");
+      throw new Error("Synthetic failure");
+    }
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), (error: unknown) => {
+    assert.ok(error instanceof WorkspaceError);
+    assert.equal(error.code, "WORK_CONFIG_RECOVERY_REQUIRED");
+    assert.match(JSON.stringify(error.details), /recovery_required/);
+    return true;
+  });
+  failure.mock.restore();
+  assert.match(await fs.readFile(review, "utf8"), /Manual change/);
+  await assert.rejects(fs.access(path.join(business, ".agents", "skills", "lint")), { code: "ENOENT" });
+});
+
+test("manifest and cache versions preserve old Skills and reject invalid work-config references", async (t) => {
+  const { assets, business, source, manifest, cache } = await workConfigFixture(t);
+  const lastValid = await fs.readFile(cache, "utf8");
+  await fs.writeFile(cache, JSON.stringify({ schemaVersion: 2, repository: "https://github.com/example/assets", commit: "1".repeat(40), skills: [], workConfigs: [] }));
+  assert.deepEqual((await assets.listWorkConfigs(business)).workConfigs, []);
+  await fs.writeFile(cache, lastValid);
+  for (const workConfigs of [
+    [{ ...manifest.workConfigs[0]!, skills: ["unknown"] }],
+    [{ ...manifest.workConfigs[0]!, skills: ["review", "review"] }],
+    [manifest.workConfigs[0], manifest.workConfigs[0]],
+  ]) {
+    await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify({ ...manifest, workConfigs }));
+    await commit(source);
+    await assert.rejects(assets.sync(business), { code: "INVALID_ASSET" });
+    assert.equal(await fs.readFile(cache, "utf8"), lastValid);
+  }
+  await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify({ schemaVersion: 1, skills: manifest.skills }));
+  await commit(source);
+  await assets.sync(business);
+  assert.deepEqual((await assets.listWorkConfigs(business)).workConfigs, []);
+  assert.equal((await assets.list(business)).skills.length, 2);
+  await assert.rejects(assets.previewWorkConfig(business, "backend"), { code: "WORK_CONFIG_NOT_FOUND" });
+  await fs.writeFile(cache, lastValid);
+  assert.equal((await assets.listWorkConfigs(business)).workConfigs.length, 2);
+  const snapshot = JSON.parse(lastValid);
+  snapshot.workConfigs[0].skills = ["missing"];
+  await fs.writeFile(cache, JSON.stringify(snapshot));
+  await assert.rejects(assets.listWorkConfigs(business), { code: "INVALID_ASSET" });
+});
 
 async function commit(directory: string) {
   await execute("git", ["-C", directory, "add", "."]);
@@ -226,7 +387,7 @@ test("failed or cancelled sync preserves the last snapshot and disabling a team 
   await service.setTeamEnabled(true);
   await assets.sync(business);
   const original = await fs.readFile(cache, "utf8");
-  await fs.writeFile(path.join(source, "agentrecall.json"), '{"schemaVersion":2,"skills":[]}');
+  await fs.writeFile(path.join(source, "agentrecall.json"), '{"schemaVersion":3,"skills":[]}');
   await commit(source);
   await assert.rejects(assets.sync(business), { code: "INVALID_MANIFEST" });
   assert.equal(await fs.readFile(cache, "utf8"), original);

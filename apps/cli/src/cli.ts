@@ -24,15 +24,18 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
   agentrecall skill backups <id>           列出当前项目中该 Skill 的本地备份
   agentrecall skill rollback <id> --target codex|claude --backup <备份名称> --from-revision <当前版本|none>
   agentrecall skill uninstall <id> --target codex|claude
+  agentrecall work-config list                列出团队工作配置
+  agentrecall work-config preview <id> [--target codex|claude]
+  agentrecall work-config install <id> --target codex|claude --revision <预览中的版本>
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
   agentrecall project remove <id>          移除本地绑定（保留代码仓库）
   agentrecall project bind <id> --team <id>|--personal|--inherit
 
-所有命令支持 --json；add 支持 --name；sync 和 skill 命令支持 --project。
+所有命令支持 --json；add 支持 --name；sync、skill 和 work-config 命令支持 --project。
 --cwd <dir> 指定操作目录；Skill 只安装到该项目，不改变个人 Skill。
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
-只有 team sync 主动连接远端。安装必须显式选择版本和客户端；不上传 Session。
+只有 team sync 主动连接远端。安装必须显式选择版本和客户端；不上传 Session。工作配置是批量安装清单，安装后按 Skill 独立管理。
 `;
 
 const options = {
@@ -67,7 +70,7 @@ async function main(): Promise<void> {
   if (values.help || positionals.length === 0 && Object.keys(values).every((flag) => flag === "json")) { output({ help }, help.trimEnd()); return; }
   if (values.version) { output({ version: packageInfo.version }, packageInfo.version); return; }
   const [command, action, id] = positionals;
-  const key = command === "team" || command === "project" || command === "skill" ? `${command} ${action ?? ""}` : command!;
+  const key = command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
   const commands: Record<string, { count: number; flags: string[] }> = {
     init: { count: 1, flags: [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
     "team add": { count: 3, flags: ["repo", "name"] }, "team list": { count: 2, flags: [] },
@@ -83,6 +86,9 @@ async function main(): Promise<void> {
     "skill backups": { count: 3, flags: ["project"] },
     "skill rollback": { count: 3, flags: ["project", "target", "backup", "from-revision"] },
     "skill uninstall": { count: 3, flags: ["project", "target"] },
+    "work-config list": { count: 2, flags: ["project"] },
+    "work-config preview": { count: 3, flags: ["project", "target"] },
+    "work-config install": { count: 3, flags: ["project", "target", "revision"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
     "project bind": { count: 3, flags: ["team", "personal", "inherit"] },
@@ -94,9 +100,9 @@ async function main(): Promise<void> {
   const teamFlags = Number(values.team !== undefined) + Number(Boolean(values.personal)) + Number(Boolean(values.inherit));
   if (teamFlags > 1 || key === "project bind" && teamFlags !== 1) invalidArguments("请只选择 --team、--personal 或 --inherit 中的一项。");
   if (key === "team add" && !values.repo) invalidArguments("缺少 --repo。");
-  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback"].includes(key) && !values.target) invalidArguments("缺少 --target。");
+  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback", "work-config install"].includes(key) && !values.target) invalidArguments("缺少 --target。");
   if (values.target !== undefined && values.target !== "codex" && values.target !== "claude") invalidArguments("--target 只能为 codex 或 claude。");
-  if ((key === "skill install" || key === "skill update") && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览 Skill，再通过 --revision 提供完整版本。");
+  if ((key === "skill install" || key === "skill update" || key === "work-config install") && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览资产，再通过 --revision 提供完整版本。");
   if ((key === "skill update" || key === "skill rollback") && !/^[a-f0-9]{40}$/.test(values["from-revision"] ?? "")
     && !(key === "skill rollback" && values["from-revision"] === "none")) invalidArguments("请通过 --from-revision 提供当前完整版本；恢复到空位置时可使用 none。");
   if (key === "skill rollback" && !values.backup) invalidArguments("缺少 --backup。");
@@ -175,6 +181,19 @@ async function main(): Promise<void> {
       const result = await assets.uninstall(directory, id!, values.target as "codex" | "claude", values.project);
       output(result, `已卸载，保留的备份：${result.backupPath}`); break;
     }
+    case "work-config list": {
+      const result = await assets.listWorkConfigs(directory, values.project);
+      output(result, `团队：${result.teamId}\n版本：${result.commit}\n${result.workConfigs.map((item) => `${item.id}\t${item.name}\t${item.description}\n包含：${item.skills.join(", ")}`).join("\n") || "暂无工作配置。"}`); break;
+    }
+    case "work-config preview": {
+      const result = await assets.previewWorkConfig(directory, id!, values.project, values.target as "codex" | "claude" | undefined);
+      const labels = { new: "待安装", existing: "复用已有内容", conflict: "有冲突", unselected: "未选择客户端" };
+      output(result, `版本：${result.commit}\n工作配置：${result.name}\n${result.description}\n目标：${result.target ?? "未选择"}\n${result.skills.map((skill) => `${skill.id}\t${labels[skill.status]}\t${skill.files} 个文件${skill.destination ? `\t${skill.destination}` : ""}${skill.reason ? `\n${skill.reason}` : ""}`).join("\n")}`); break;
+    }
+    case "work-config install": {
+      const result = await assets.installWorkConfig(directory, id!, values.target as "codex" | "claude", values.revision!, values.project);
+      output(result, `已完成工作配置 ${result.name}（${result.skills.length} 个 Skill）到 ${result.path}\n清单版本：${result.commit}\n${result.skills.map((skill) => `${skill.id}\t${skill.status === "existing" ? "复用已有内容" : "已安装"}\t${skill.commit}`).join("\n")}\n安装后按 Skill 独立管理。`); break;
+    }
     case "project add": {
       const project = await service.addProject({
         id: id!, name: values.name, directory: path.resolve(directory, values.path ?? "."), remote: values.remote,
@@ -201,7 +220,7 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   const known = error instanceof WorkspaceError;
-  const failure = { code: known ? error.code : "OPERATION_FAILED", message: known ? error.message : "操作失败，请检查目录是否存在、文件权限及 Git 安装状态。" };
+  const failure = { code: known ? error.code : "OPERATION_FAILED", message: known ? error.message : "操作失败，请检查目录是否存在、文件权限及 Git 安装状态。", ...(known && error.details ? { details: error.details } : {}) };
   if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ ok: false, error: failure })}\n`);
   else process.stderr.write(`${failure.message}\n`);
   process.exitCode = failure.code === "INVALID_ARGUMENTS" ? 2 : 1;

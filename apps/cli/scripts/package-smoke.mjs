@@ -55,6 +55,14 @@ try {
   assert.equal(command(["skill", "preview", "review"], project).commit, commit);
   const installed = command(["skill", "install", "review", "--target", "claude", "--revision", commit], project);
   assert.equal(installed.status, "installed");
+  const workSnapshot = JSON.parse(fs.readFileSync(cache, "utf8"));
+  workSnapshot.schemaVersion = 2;
+  workSnapshot.workConfigs = [{ id: "backend", name: "Backend", description: "Review changes", skills: ["review"] }];
+  fs.writeFileSync(cache, JSON.stringify(workSnapshot));
+  assert.equal(command(["work-config", "list"], project).workConfigs[0].id, "backend");
+  assert.equal(command(["work-config", "preview", "backend", "--target", "codex"], project).skills[0].status, "new");
+  assert.equal(command(["work-config", "install", "backend", "--target", "codex", "--revision", commit], project).skills[0].status, "installed");
+  assert.equal(command(["work-config", "install", "backend", "--target", "codex", "--revision", commit], project).skills[0].status, "existing");
   const next = "2".repeat(40);
   const updatedFiles = [{ ...files[0], content: Buffer.from("---\nname: review\ndescription: Test review\n---\nReview the updated change.\n").toString("base64") }];
   writeSnapshot(next, updatedFiles);

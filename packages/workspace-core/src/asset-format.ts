@@ -12,10 +12,22 @@ export function portableAssetPath(value: string): boolean {
     part !== "." && part !== ".." && !/[. ]$/.test(part) && /^[^<>:"\\|?*\x00-\x1f]+$/.test(part)
     && !/^(?:\.git|\.agentrecall-install\.json|con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part));
 }
-export const manifestSchema = z.strictObject({
+const manifestV1Schema = z.strictObject({
   schemaVersion: z.literal(1),
   skills: z.array(z.strictObject({ id: assetId, path: z.string().refine(portableAssetPath) })).max(64),
 });
+const workConfigSchema = z.strictObject({
+  id: assetId,
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().min(1).max(4096),
+  skills: z.array(assetId).min(1).max(64),
+});
+const manifestV2Schema = z.strictObject({
+  schemaVersion: z.literal(2),
+  skills: z.array(z.strictObject({ id: assetId, path: z.string().refine(portableAssetPath) })).max(64),
+  workConfigs: z.array(workConfigSchema).max(64),
+});
+export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema]);
 const fileSchema = z.strictObject({
   path: z.string().refine(portableAssetPath),
   content: z.string().refine((value) => Buffer.from(value, "base64").toString("base64") === value),
@@ -25,13 +37,18 @@ const skillSchema = z.strictObject({
   id: assetId, description: z.string().min(1).max(4096),
   files: z.array(fileSchema).min(1).max(200), digest: z.string().regex(/^[a-f0-9]{64}$/),
 });
-const snapshotSchema = z.strictObject({
+const snapshotV1Schema = z.strictObject({
   schemaVersion: z.literal(1), repository: z.string(), commit: revision,
   skills: z.array(skillSchema).max(64),
 });
+const snapshotV2Schema = z.strictObject({
+  schemaVersion: z.literal(2), repository: z.string(), commit: revision,
+  skills: z.array(skillSchema).max(64), workConfigs: z.array(workConfigSchema).max(64),
+});
 export type SkillFile = z.infer<typeof fileSchema>;
 export type TeamSkill = z.infer<typeof skillSchema>;
-export type AssetSnapshot = z.infer<typeof snapshotSchema>;
+export type WorkConfig = z.infer<typeof workConfigSchema>;
+export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema>;
 
 export function fileDigest(files: SkillFile[]): string {
   return createHash("sha256").update(JSON.stringify([...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0))).digest("hex");
@@ -77,13 +94,20 @@ export function skillFromFiles(id: string, files: SkillFile[]): TeamSkill {
 }
 
 export function validateSnapshot(value: unknown, repository: string): AssetSnapshot {
-  const parsed = snapshotSchema.safeParse(value);
+  const parsed = z.union([snapshotV1Schema, snapshotV2Schema]).safeParse(value);
   if (!parsed.success || parsed.data.repository !== repository) throw invalidAsset();
   const snapshot = parsed.data;
   if (new Set(snapshot.skills.map((skill) => skill.id)).size !== snapshot.skills.length) throw invalidAsset();
   for (const skill of snapshot.skills) {
     const checked = skillFromFiles(skill.id, skill.files);
     if (checked.description !== skill.description || checked.digest !== skill.digest) throw invalidAsset();
+  }
+  if (snapshot.schemaVersion === 2) {
+    const ids = new Set(snapshot.skills.map((skill) => skill.id));
+    if (new Set(snapshot.workConfigs.map((config) => config.id)).size !== snapshot.workConfigs.length
+      || snapshot.workConfigs.some((config) => new Set(config.skills).size !== config.skills.length || config.skills.some((id) => !ids.has(id)))) {
+      throw invalidAsset();
+    }
   }
   if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > MAX_SNAPSHOT_BYTES) {
     throw new WorkspaceError("ASSETS_TOO_LARGE", "完整资产包超过 16 MiB，请拆分资产仓库后重试。");
