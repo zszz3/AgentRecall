@@ -1,8 +1,10 @@
 # AgentRecall CLI 使用与配置
 
-`agentrecall-cli` 是独立的源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
+`agentrecall-cli` 是 V2 配套的独立源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚，以及多个 Skill 的工作配置批量安装。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
 
 当前不提供 GitHub 登录、组织成员管理、Session 查询或上传。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
+
+这些团队功能后续只接入 V2 桌面端；当前 CLI 独立运行，不使用 V1 代码或数据。
 
 ## 配置两个团队、三个项目
 
@@ -50,6 +52,9 @@ agentrecall team disable
 | `skill backups <id> [--project <id>]` | 查看当前客户端安装版本和本地备份；关闭团队后仍可使用 |
 | `skill rollback <id> --target codex\|claude --backup <名称> --from-revision <当前 sha\|none> [--project <id>]` | 从指定备份恢复；当前安装另存备份，none 只接受空目标；关闭团队后仍可使用 |
 | `skill uninstall <id> --target codex\|claude [--project <id>]` | 移走未修改的受管安装，保留备份；关闭团队后仍可使用 |
+| `work-config list [--project <id>]` | 查看团队的工作配置安装清单 |
+| `work-config preview <id> [--target codex\|claude] [--project <id>]` | 查看整组 Skill；选择客户端后逐项显示复用、新增或冲突 |
+| `work-config install <id> --target codex\|claude --revision <sha> [--project <id>]` | 全部预检后安装；失败只回退本次新副本，已有内容保留 |
 | `project add <id> [--path <目录>] [--remote <名称>] [--name <名称>] [--team <id>\|--personal]` | 登记业务仓库；路径默认当前目录 |
 | `project list` | 查看已登记项目 |
 | `project bind <id> --team <id>\|--personal\|--inherit` | 指定团队、改为个人或恢复继承默认团队 |
@@ -57,7 +62,7 @@ agentrecall team disable
 
 ID 使用小写字母开头，后续可包含小写字母、数字和连字符，最多 64 个字符。显示名称可使用中文。
 
-所有命令支持 `--json`，成功输出 `{ "ok": true, "data": ... }`，失败输出 `{ "ok": false, "error": { "code": ..., "message": ... } }`。退出码为成功 `0`、配置或运行失败 `1`、命令参数错误 `2`。不带 `--json` 时错误写入标准错误。`--help` 和 `--version` 不访问配置。
+所有命令支持 `--json`，成功输出 `{ "ok": true, "data": ... }`，失败输出 `{ "ok": false, "error": { "code": ..., "message": ... } }`。退出码为成功 `0`、配置或运行失败 `1`、命令参数错误 `2`。批量操作未完全成功时，错误可附带 `details`，包含各 Skill 的实际结果、备份路径与待清理项。不带 `--json` 时错误写入标准错误。`--help` 和 `--version` 不访问配置。
 
 `--cwd <目录>` 指定当前操作目录，`--path` 相对于该目录解析。没有跨命令保存的“当前项目”：通常根据当前 Git 仓库判断；在仓库之外可用 `--project` 明确选择。处于已绑定仓库 A 内时指定项目 B 会失败，避免把团队配置用于错误项目。
 
@@ -104,4 +109,4 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 当前发布工作流仍只发布 V1/V2 桌面包，不自动发布 CLI。后续范围与状态见 [团队功能开发计划](agentrecall-cli-team-plan.md)。
 
-团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产缓存和安装记录均为独立的版本 1 格式；未知版本或损坏记录会拒绝读取，不会自动重置。
+团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单和缓存支持格式版本 1/2，安装记录仍为版本 1；兼容规则和工作配置的范围以团队 Skill 指南为准。未知版本或损坏记录会拒绝读取，不会自动重置。
