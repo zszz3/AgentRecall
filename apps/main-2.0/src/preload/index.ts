@@ -48,7 +48,6 @@ import { createRemoteSessionsApi } from "./remote-sessions";
 import { createOpenVikingMemoryApi } from "./openviking-memory";
 import { createDiscoveryApi } from "./discovery";
 import { createSkillsApi } from "./skills";
-import { createTeamChatApi } from "./team-chat";
 
 export interface AiAssistantReply {
   reply: string;
@@ -59,7 +58,6 @@ const api = {
   platform: process.platform as NodeJS.Platform,
   automation: createAutomationApi(ipcRenderer),
   quota: createQuotaApi(ipcRenderer),
-  teamChat: createTeamChatApi(ipcRenderer),
   askAiAssistant: (messages: AiChatMessage[]): Promise<AiAssistantReply> => ipcRenderer.invoke("ai:assistant-chat", messages),
   searchSessions: (options: SearchOptions): Promise<SessionSearchResult[]> => ipcRenderer.invoke("search:sessions", options),
   searchSessionPage: (options: SearchOptions): Promise<SessionSearchPage> => ipcRenderer.invoke("search:session-page", options),

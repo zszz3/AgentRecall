@@ -40,13 +40,6 @@ export interface StartMcpBridgeOptions {
     searchSessions(body: unknown): Promise<unknown>;
     getSession(body: unknown): Promise<unknown>;
   };
-  studio?: {
-    handleMcpRequest(
-      token: string | undefined,
-      route: string,
-      body: unknown,
-    ): Promise<unknown>;
-  };
   coreWorkflow?: {
     submitNodeOutput(body: unknown): Promise<unknown | undefined> | unknown | undefined;
   };
@@ -55,8 +48,6 @@ export interface StartMcpBridgeOptions {
 interface McpBridgeRuntimeOptions {
   bundledSkillsRoot?: string;
   fetcher?: typeof fetch;
-  studio?: StartMcpBridgeOptions["studio"];
-  studioToken?: string;
   coreWorkflow?: StartMcpBridgeOptions["coreWorkflow"];
   updateConfiguredAgents?: StartMcpBridgeOptions["updateConfiguredAgents"];
   gateway?: StartMcpBridgeOptions["gateway"];
@@ -313,10 +304,6 @@ async function routeWorkflowRequest(hub: AgentHub, route: string, body: unknown,
     if (route === "/mcp/gateway/sessions/get") return options.gateway.getSession(body);
     return { ok: false, error: `Unknown AgentRecall Gateway route: ${route}` };
   }
-  if (route.startsWith("/mcp/studio/") || route.startsWith("/mcp/workspace/")) {
-    if (!options.studio) return { ok: false, error: "Studio collaboration is unavailable." };
-    return options.studio.handleMcpRequest(options.studioToken, route, body);
-  }
   const record = asRecord(body);
   if (route === "/mcp/workflow/node/complete" && options.coreWorkflow) {
     const coreResult = await options.coreWorkflow.submitNodeOutput(body);
@@ -504,11 +491,7 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
         return;
       }
       const route = request.url ?? "";
-      const studioToken = request.headers["x-agent-recall-studio-token"];
-      const scopedStudioRequest =
-        typeof studioToken === "string"
-        && (route.startsWith("/mcp/studio/") || route.startsWith("/mcp/workspace/"));
-      if (access === "read_only" && !READ_ONLY_ROUTES.has(route) && !scopedStudioRequest) {
+      if (access === "read_only" && !READ_ONLY_ROUTES.has(route)) {
         jsonResponse(response, 403, {
           ok: false,
           error: {
@@ -523,11 +506,9 @@ export async function startMcpBridge(hub: AgentHub, options: StartMcpBridgeOptio
         const runtimeOptions: McpBridgeRuntimeOptions = {};
         if (options.bundledSkillsRoot) runtimeOptions.bundledSkillsRoot = options.bundledSkillsRoot;
         if (options.fetcher) runtimeOptions.fetcher = options.fetcher;
-        if (options.studio) runtimeOptions.studio = options.studio;
         if (options.coreWorkflow) runtimeOptions.coreWorkflow = options.coreWorkflow;
         if (options.updateConfiguredAgents) runtimeOptions.updateConfiguredAgents = options.updateConfiguredAgents;
         if (options.gateway) runtimeOptions.gateway = options.gateway;
-        if (typeof studioToken === "string") runtimeOptions.studioToken = studioToken;
         const payload = await routeWorkflowRequest(hub, route, body, runtimeOptions);
         jsonResponse(response, 200, payload);
       } catch (error) {

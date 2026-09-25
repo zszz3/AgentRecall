@@ -5,7 +5,6 @@ import {
   Cpu,
   KeyRound,
   LayoutDashboard,
-  MessageCircleMore,
   MessagesSquare,
   PackageSearch,
   PlugZap,
@@ -19,7 +18,6 @@ const BRAND_LOGO_URL = new URL("../../../../assets/logo.png", import.meta.url).h
 export type AppPage =
   | "workbench"
   | "sessions"
-  | "team-chat"
   | "workflows"
   | "evaluation"
   | "runtimes"
@@ -64,9 +62,6 @@ export function AppNavigation({
         </NavigationItem>
         <NavigationItem page="sessions" activePage={activePage} onNavigate={onNavigate}>
           <MessagesSquare size={18} /><span>Session</span>
-        </NavigationItem>
-        <NavigationItem page="team-chat" activePage={activePage} onNavigate={onNavigate}>
-          <MessageCircleMore size={18} /><span>Chat</span>
         </NavigationItem>
         <NavigationItem page="workflows" activePage={activePage} onNavigate={onNavigate}>
           <Workflow size={18} /><span>Workflow</span>
