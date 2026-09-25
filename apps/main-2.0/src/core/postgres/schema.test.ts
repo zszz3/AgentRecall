@@ -424,7 +424,7 @@ describe("AgentRecall PostgreSQL schema", () => {
       where table_schema = 'agent_recall' and table_name = 'session_turns'
     `);
     expect(columns.rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ column_name: "search_vector", udt_name: "tsvector", is_generated: "ALWAYS" }),
+      expect.objectContaining({ column_name: "search_text", udt_name: "text", is_generated: "NEVER" }),
       expect.objectContaining({ column_name: "tool_names", udt_name: "_text" }),
       expect.objectContaining({ column_name: "derivation_version", udt_name: "int4" }),
       expect.objectContaining({ column_name: "source_turn_id", udt_name: "text" }),
@@ -432,6 +432,7 @@ describe("AgentRecall PostgreSQL schema", () => {
       expect.objectContaining({ column_name: "time_to_first_token_ms", udt_name: "int8" }),
       expect.objectContaining({ column_name: "abort_reason", udt_name: "text" }),
     ]));
+    expect(columns.rows.map((row) => row.column_name)).not.toContain("search_vector");
 
     const indexes = await database.query<{ indexname: string }>(`
       select indexname
@@ -439,18 +440,86 @@ describe("AgentRecall PostgreSQL schema", () => {
       where schemaname = 'agent_recall'
     `);
     expect(indexes.rows.map((row) => row.indexname)).toEqual(expect.arrayContaining([
-      "session_turns_search_vector_idx",
       "session_turns_search_text_trgm_idx",
       "trace_spans_parent_idx",
       "session_turns_source_turn_idx",
       "evaluation_results_subject_idx",
     ]));
+    expect(indexes.rows.map((row) => row.indexname)).not.toContain("session_turns_search_vector_idx");
 
     const extension = await database.query<{ extname: string }>(
       "select extname from pg_extension where extname = 'pg_trgm'",
     );
     expect(extension.rows).toEqual([{ extname: "pg_trgm" }]);
     await database.close();
+  });
+
+  it("removes unused Turn search vectors from an existing database without losing data", async () => {
+    const pool = new PGliteTestPool();
+    const legacyDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 55),
+    });
+    await legacyDatabase.initialize();
+    await legacyDatabase.query(`
+      insert into agent_recall.sessions (
+        session_key, raw_id, source, environment_id, project_path, file_path,
+        original_title, first_question, started_at, file_mtime_ms, file_size, indexed_at
+      ) values (
+        'codex:legacy-search-vector', 'legacy-search-vector', 'codex-cli', 'local', '/repo', '/tmp/legacy.jsonl',
+        'Legacy title', 'Legacy question', now(), 123, 456, now()
+      );
+      insert into agent_recall.session_turns (
+        id, session_key, turn_index, search_text, derivation_version
+      ) values (
+        'legacy-turn', 'codex:legacy-search-vector', 0, 'preserve this searchable text', 1
+      );
+    `);
+
+    const legacyColumns = await legacyDatabase.query<{ column_name: string }>(`
+      select column_name
+      from information_schema.columns
+      where table_schema = 'agent_recall'
+        and table_name = 'session_turns'
+        and column_name = 'search_vector'
+    `);
+    expect(legacyColumns.rows).toEqual([{ column_name: "search_vector" }]);
+    const legacyIndexes = await legacyDatabase.query<{ indexname: string }>(`
+      select indexname
+      from pg_indexes
+      where schemaname = 'agent_recall'
+        and indexname = 'session_turns_search_vector_idx'
+    `);
+    expect(legacyIndexes.rows).toEqual([{ indexname: "session_turns_search_vector_idx" }]);
+
+    const upgradedDatabase = new PostgresDatabase(pool, {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await upgradedDatabase.initialize();
+
+    const removedColumns = await upgradedDatabase.query<{ column_name: string }>(`
+      select column_name
+      from information_schema.columns
+      where table_schema = 'agent_recall'
+        and table_name = 'session_turns'
+        and column_name = 'search_vector'
+    `);
+    expect(removedColumns.rows).toEqual([]);
+    const removedIndexes = await upgradedDatabase.query<{ indexname: string }>(`
+      select indexname
+      from pg_indexes
+      where schemaname = 'agent_recall'
+        and indexname = 'session_turns_search_vector_idx'
+    `);
+    expect(removedIndexes.rows).toEqual([]);
+    const preserved = await upgradedDatabase.query<{ search_text: string }>(`
+      select search_text
+      from agent_recall.session_turns
+      where id = 'legacy-turn'
+    `);
+    expect(preserved.rows).toEqual([{ search_text: "preserve this searchable text" }]);
+    await upgradedDatabase.close();
   });
 
   it("invalidates Codex and Claude content freshness once while preserving user state", async () => {

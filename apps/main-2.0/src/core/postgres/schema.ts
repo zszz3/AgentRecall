@@ -2107,4 +2107,15 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         ADD COLUMN IF NOT EXISTS stage_scores jsonb;
     `,
   ],
+}, {
+  version: 56,
+  name: "remove unused turn search vectors",
+  statements: [
+    `
+      DROP INDEX IF EXISTS agent_recall.session_turns_search_vector_idx;
+
+      ALTER TABLE agent_recall.session_turns
+        DROP COLUMN IF EXISTS search_vector;
+    `,
+  ],
 }];

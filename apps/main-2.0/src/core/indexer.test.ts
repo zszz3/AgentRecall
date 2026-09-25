@@ -13,6 +13,10 @@ import { writeMigratedSession } from "./session-migration-writers";
 import { SessionStore } from "./session-store";
 import type { IndexedSession, LoadedSession, MigrationTarget, PortableSession, SessionSource } from "./types";
 
+// The V2 MCP binary is intentionally standalone and has no TypeScript declarations.
+// @ts-expect-error -- untyped .mjs binary
+import { searchSessions as searchMcpSessions } from "../../bin/agent-recall-mcp.mjs";
+
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
 
@@ -58,6 +62,60 @@ describe("indexer", () => {
     expect(status).toMatchObject({ running: false, indexed: 3, total: 3, error: null });
     expect(await store.searchSessions({ query: "Question", limit: 10 })).toHaveLength(3);
   });
+
+  it("fully preserves, repeatedly indexes, and searches a Turn larger than 3 MB", async () => {
+    const database = new PostgresDatabase(new PGliteTestPool(), {
+      migrationLock: false,
+      migrations: POSTGRES_MIGRATIONS,
+    });
+    await database.initialize();
+    const store = new SessionStore(database);
+    const marker = "UNIQUE_KEYWORD_AT_VERY_END_928374";
+    const content = `${Array.from(
+      { length: 250_000 },
+      (_, index) => `token${index.toString(36).padStart(7, "0")}`,
+    ).join(" ")} ${marker}`;
+    expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(3 * 1024 * 1024);
+    const oversized = session(90);
+    oversized.session.fileSize = Buffer.byteLength(content, "utf8");
+    oversized.messages = [{
+      role: "user",
+      content,
+      timestamp: "2026-06-01T10:00:00Z",
+      index: 0,
+    }];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      oversized.session.fileMtimeMs += 1;
+      const status = await syncLoadedSessionsInBatches(store, [oversized], { batchSize: 1 });
+      expect(status).toMatchObject({ indexed: 1, skipped: 0, total: 1, error: null });
+    }
+
+    const stored = await database.query<{
+      content: string;
+      search_text: string;
+      turn_count: number | string;
+    }>(`
+      select messages.content, turns.search_text,
+        (select count(*) from agent_recall.session_turns where session_key = $1) as turn_count
+      from agent_recall.session_turns turns
+      join agent_recall.turn_messages messages on messages.turn_id = turns.id
+      where turns.session_key = $1 and messages.role = 'user'
+    `, [oversized.session.sessionKey]);
+    expect(stored.rows).toHaveLength(1);
+    expect(stored.rows[0]?.content.length).toBe(content.length);
+    expect(stored.rows[0]?.content).toBe(content);
+    expect(stored.rows[0]?.search_text.endsWith(marker)).toBe(true);
+    expect(Number(stored.rows[0]?.turn_count)).toBe(1);
+
+    await expect(store.searchSessions({ query: marker, limit: 10 })).resolves.toEqual([
+      expect.objectContaining({ sessionKey: oversized.session.sessionKey }),
+    ]);
+    await expect(searchMcpSessions(database, { query: marker, limit: 10 })).resolves.toEqual([
+      expect.objectContaining({ sessionKey: oversized.session.sessionKey }),
+    ]);
+    await database.close();
+  }, 30_000);
 
   it("yields when the time budget is exhausted before the batch limit", async () => {
     const store = createInMemoryStore();
