@@ -8,7 +8,7 @@ import { GitAssetSource, type AssetTransport } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { inspectCheckout } from "./git.js";
-import { prepareSkillInstall, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
+import { diffProjectSkill, listSkillBackups, prepareSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
 type Context = Awaited<ReturnType<WorkspaceService["currentTeam"]>>;
 
@@ -100,7 +100,21 @@ export class TeamAssetService {
     return checkout.root;
   }
 
-  async install(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string) {
+  async diff(directory: string, id: string, target: ProjectSkillTarget, projectId?: string, file?: string) {
+    const context = await this.workspace.currentTeam(directory, projectId);
+    const root = await this.projectRoot(directory, context.project.id);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      const snapshot = await this.snapshot(context);
+      const skill = snapshot.skills.find((item) => item.id === id);
+      if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill。");
+      return this.commitForTeam(root, context, () => {
+        assertOwned();
+        return diffProjectSkill(root, skill, snapshot.repository, snapshot.commit, target, file);
+      });
+    });
+  }
+
+  async install(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string, fromRevision?: string) {
     const context = await this.workspace.currentTeam(directory, projectId);
     const root = await this.projectRoot(directory, context.project.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
@@ -108,10 +122,27 @@ export class TeamAssetService {
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "资产版本与预览不一致，请重新预览并使用返回的 --revision。");
       const skill = snapshot.skills.find((item) => item.id === id);
       if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill。");
-      const prepared = prepareSkillInstall(root, skill, snapshot.repository, snapshot.commit, target);
+      const prepared = prepareSkillInstall(root, skill, snapshot.repository, snapshot.commit, target, fromRevision);
       try {
         return await this.commitForTeam(root, context, () => { assertOwned(); return prepared.commit(); });
       } finally { prepared.cleanup(); }
+    });
+  }
+
+  async backups(directory: string, id: string, projectId?: string) {
+    const root = await this.projectRoot(directory, projectId);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      assertOwned();
+      return listSkillBackups(root, id);
+    });
+  }
+
+  async rollback(directory: string, id: string, target: ProjectSkillTarget, backup: string, fromRevision: string | null, projectId?: string) {
+    // Local recovery does not fetch team assets and remains available when disabled.
+    const root = await this.projectRoot(directory, projectId);
+    return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
+      assertOwned();
+      return rollbackProjectSkill(root, id, target, backup, fromRevision);
     });
   }
 

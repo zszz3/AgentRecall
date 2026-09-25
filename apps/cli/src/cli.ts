@@ -19,6 +19,10 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
   agentrecall skill list                   列出当前团队缓存的 Skill
   agentrecall skill preview <id> [--target codex|claude] [--file <path>]
   agentrecall skill install <id> --target codex|claude --revision <预览中的版本>
+  agentrecall skill diff <id> --target codex|claude [--file <path>]
+  agentrecall skill update <id> --target codex|claude --from-revision <旧版本> --revision <新版本>
+  agentrecall skill backups <id>           列出当前项目中该 Skill 的本地备份
+  agentrecall skill rollback <id> --target codex|claude --backup <备份名称> --from-revision <当前版本|none>
   agentrecall skill uninstall <id> --target codex|claude
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
@@ -37,6 +41,7 @@ const options = {
   path: { type: "string" }, remote: { type: "string" }, team: { type: "string" },
   personal: { type: "boolean" }, inherit: { type: "boolean" },
   target: { type: "string" }, revision: { type: "string" }, transport: { type: "string" }, file: { type: "string" },
+  "from-revision": { type: "string" }, backup: { type: "string" },
 } as const;
 
 function invalidArguments(message: string): never {
@@ -73,6 +78,10 @@ async function main(): Promise<void> {
     "skill list": { count: 2, flags: ["project"] },
     "skill preview": { count: 3, flags: ["project", "target", "file"] },
     "skill install": { count: 3, flags: ["project", "target", "revision"] },
+    "skill diff": { count: 3, flags: ["project", "target", "file"] },
+    "skill update": { count: 3, flags: ["project", "target", "revision", "from-revision"] },
+    "skill backups": { count: 3, flags: ["project"] },
+    "skill rollback": { count: 3, flags: ["project", "target", "backup", "from-revision"] },
     "skill uninstall": { count: 3, flags: ["project", "target"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
@@ -85,9 +94,12 @@ async function main(): Promise<void> {
   const teamFlags = Number(values.team !== undefined) + Number(Boolean(values.personal)) + Number(Boolean(values.inherit));
   if (teamFlags > 1 || key === "project bind" && teamFlags !== 1) invalidArguments("请只选择 --team、--personal 或 --inherit 中的一项。");
   if (key === "team add" && !values.repo) invalidArguments("缺少 --repo。");
-  if ((key === "skill install" || key === "skill uninstall") && !values.target) invalidArguments("缺少 --target。");
+  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback"].includes(key) && !values.target) invalidArguments("缺少 --target。");
   if (values.target !== undefined && values.target !== "codex" && values.target !== "claude") invalidArguments("--target 只能为 codex 或 claude。");
-  if (key === "skill install" && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览 Skill，再通过 --revision 提供完整版本。");
+  if ((key === "skill install" || key === "skill update") && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览 Skill，再通过 --revision 提供完整版本。");
+  if ((key === "skill update" || key === "skill rollback") && !/^[a-f0-9]{40}$/.test(values["from-revision"] ?? "")
+    && !(key === "skill rollback" && values["from-revision"] === "none")) invalidArguments("请通过 --from-revision 提供当前完整版本；恢复到空位置时可使用 none。");
+  if (key === "skill rollback" && !values.backup) invalidArguments("缺少 --backup。");
   if (values.transport !== undefined && values.transport !== "https" && values.transport !== "ssh") invalidArguments("--transport 只能为 https 或 ssh。");
   if (process.env.AGENTRECALL_HOME !== undefined && !process.env.AGENTRECALL_HOME.trim()) invalidArguments("AGENTRECALL_HOME 不能为空。");
   const directory = path.resolve(values.cwd ?? process.cwd());
@@ -139,9 +151,25 @@ async function main(): Promise<void> {
       const result = await assets.preview(directory, id!, values.project, values.target as "codex" | "claude" | undefined, values.file);
       output(result, `版本：${result.commit}\n${result.destination ? `安装位置：${result.destination}\n` : ""}文件：${result.files.map((file) => file.path).join(", ")}\n\n${result.file} (${result.encoding}):\n${result.content}`); break;
     }
-    case "skill install": {
-      const result = await assets.install(directory, id!, values.target as "codex" | "claude", values.revision!, values.project);
-      output(result, `${result.status === "existing" ? "相同内容已经安装" : "已安装"}：${result.path}\n版本：${result.commit}`); break;
+    case "skill install": case "skill update": {
+      const result = await assets.install(directory, id!, values.target as "codex" | "claude", values.revision!, values.project, values["from-revision"]);
+      output(result, `${result.status === "existing" ? "相同内容已经安装" : result.status === "updated" ? "已更新" : "已安装"}：${result.path}\n版本：${result.commit}${result.backupPath ? `\n旧版本备份：${result.backupPath}` : ""}`); break;
+    }
+    case "skill diff": {
+      const result = await assets.diff(directory, id!, values.target as "codex" | "claude", values.project, values.file);
+      const labels: Record<string, string> = { added: "新增", removed: "删除", modified: "修改" };
+      const detail = result.file ? `\n\n${result.file}\n当前版本 (${result.before?.encoding ?? "不存在"}):\n${result.before?.content ?? ""}\n新版本 (${result.after?.encoding ?? "不存在"}):\n${result.after?.content ?? ""}` : "";
+      const changes = result.changes.map((item) => `${labels[item.status]}\t${item.path}${item.beforeExecutable !== item.afterExecutable ? `（执行权限：${item.beforeExecutable === null ? "无文件" : item.beforeExecutable ? "开" : "关"} → ${item.afterExecutable === null ? "无文件" : item.afterExecutable ? "开" : "关"}）` : ""}`).join("\n");
+      output(result, `当前版本：${result.fromRevision}\n新版本：${result.revision}\n${changes || "文件内容和执行权限无变化。"}${detail}`); break;
+    }
+    case "skill backups": {
+      const result = await assets.backups(directory, id!, values.project);
+      const current = result.installations.map((item) => `${item.target} 当前版本：${item.status === "installed" ? item.revision : item.status === "absent" ? "未安装（none）" : "有冲突，请检查本地修改"}`).join("\n");
+      output(result, `${current}\n${result.backups.map((item) => `${item.backup}\t${item.valid ? item.revision : "备份有修改或格式损坏，不能自动恢复"}`).join("\n") || "暂无备份。"}`); break;
+    }
+    case "skill rollback": {
+      const result = await assets.rollback(directory, id!, values.target as "codex" | "claude", values.backup!, values["from-revision"] === "none" ? null : values["from-revision"]!, values.project);
+      output(result, `已恢复：${result.path}\n版本：${result.commit}${result.backupPath ? `\n替换前备份：${result.backupPath}` : ""}`); break;
     }
     case "skill uninstall": {
       const result = await assets.uninstall(directory, id!, values.target as "codex" | "claude", values.project);

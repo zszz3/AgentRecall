@@ -38,6 +38,10 @@ test("rejects unknown commands, conflicting flags and missing arguments before c
     ["session", "upload"], ["init", "extra"], ["team", "use", "a", "--personal"],
     ["skill", "install", "review", "--target", "codex"],
     ["skill", "uninstall", "review", "--target", "unknown"], ["team", "sync", "--transport", "file"],
+    ["skill", "update", "review", "--target", "codex", "--revision", "1".repeat(40)],
+    ["skill", "update", "review", "--target", "codex", "--revision", "1".repeat(40), "--from-revision", "none"],
+    ["skill", "rollback", "review", "--target", "claude", "--from-revision", "none"],
+    ["skill", "rollback", "review", "--target", "claude", "--backup", "anything"], ["skill", "diff", "review"],
   ]) {
     const result = await cli(home, root, args);
     assert.equal(result.code, 2, result.stdout);

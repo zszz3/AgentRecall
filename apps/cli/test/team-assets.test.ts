@@ -1,11 +1,161 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import syncFs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { GitAssetSource, TeamAssetService } from "@agentrecall/workspace-core";
 import { cli, execute, fixture, repository } from "./fixtures.js";
 
 const markdown = "---\nname: review\ndescription: Review a chosen change\n---\nRead the diff before commenting.\n";
+
+async function updateFixture(t: Parameters<typeof fixture>[0]) {
+  const state = await assetsFixture(t);
+  await state.service.setTeamEnabled(true);
+  const first = await state.assets.sync(state.business);
+  const installed = await state.assets.install(state.business, "review", "codex", first.commit);
+  await fs.appendFile(path.join(state.source, "skills", "review", "SKILL.md"), "New review instructions.\n");
+  await fs.rm(path.join(state.source, "skills", "review", "scripts", "example.txt"));
+  await fs.writeFile(path.join(state.source, "skills", "review", "new.txt"), "新内容\n");
+  await commit(state.source);
+  const second = await state.assets.sync(state.business);
+  return { ...state, first, second, installed };
+}
+
+test("previews additions, removals and content; explicit version update preserves a restorable backup", async (t) => {
+  const { assets, home, business, first, second, installed } = await updateFixture(t);
+  const diff = await assets.diff(business, "review", "codex");
+  assert.equal(diff.fromRevision, first.commit);
+  assert.equal(diff.revision, second.commit);
+  assert.deepEqual(diff.changes.map(({ path, status }) => ({ path, status })), [
+    { path: "SKILL.md", status: "modified" }, { path: "new.txt", status: "added" },
+    { path: "scripts/example.txt", status: "removed" },
+  ]);
+  const details = await assets.diff(business, "review", "codex", undefined, "SKILL.md");
+  assert.equal(details.before?.content, markdown);
+  assert.match(details.after?.content ?? "", /New review/);
+  assert.equal((await assets.diff(business, "review", "codex", undefined, "new.txt")).before, null);
+  assert.equal((await assets.diff(business, "review", "codex", undefined, "scripts/example.txt")).after, null);
+  await assert.rejects(assets.diff(business, "review", "codex", undefined, "../outside"), { code: "SKILL_FILE_NOT_FOUND" });
+  assert.equal((await cli(home, business, ["skill", "diff", "review", "--target", "codex", "--file", "SKILL.md"])).code, 0);
+  const updated = await cli(home, business, ["skill", "update", "review", "--target", "codex", "--from-revision", first.commit, "--revision", second.commit]);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.equal(await fs.readFile(path.join(installed.path, "SKILL.md"), "utf8"), markdown + "New review instructions.\n");
+  await assert.rejects(fs.access(path.join(installed.path, "scripts", "example.txt")), { code: "ENOENT" });
+  assert.equal(await fs.readFile(path.join(installed.path, "new.txt"), "utf8"), "新内容\n");
+  const { backups } = await assets.backups(business, "review");
+  assert.equal(backups.length, 1);
+  assert.equal(backups[0]?.revision, first.commit);
+  assert.equal(backups[0]?.valid, true);
+  const repeated = await assets.install(business, "review", "codex", second.commit, undefined, second.commit);
+  assert.equal(repeated.status, "existing");
+  assert.equal((await assets.backups(business, "review")).backups.length, 1);
+  assert.deepEqual((await assets.diff(business, "review", "codex")).changes, []);
+  const restored = await cli(home, business, ["skill", "rollback", "review", "--target", "codex", "--backup", backups[0]!.backup, "--from-revision", second.commit]);
+  assert.equal(restored.code, 0, restored.stdout);
+  assert.equal(await fs.readFile(path.join(installed.path, "SKILL.md"), "utf8"), markdown);
+  assert.equal((await assets.backups(business, "review")).backups[0]?.revision, second.commit);
+  assert.equal((await cli(home, business, ["skill", "backups", "review"])).code, 0);
+});
+
+test("stale versions, changed sources and local edits prevent updates and rollback", async (t) => {
+  const { service, assets, business, first, second, installed } = await updateFixture(t);
+  await assert.rejects(assets.install(business, "review", "codex", second.commit, undefined, "0".repeat(40)), { code: "INSTALLATION_CHANGED" });
+  const updated = await assets.install(business, "review", "codex", second.commit, undefined, first.commit);
+  assert.ok(updated.backupPath);
+  const backup = path.basename(updated.backupPath);
+  await assert.rejects(assets.rollback(business, "review", "codex", backup, first.commit), { code: "INSTALLATION_CHANGED" });
+  await assert.rejects(assets.rollback(business, "review", "codex", backup, null), { code: "INSTALLATION_CHANGED" });
+  await assert.rejects(assets.rollback(business, "review", "codex", "../" + backup, second.commit), { code: "INVALID_ARGUMENTS" });
+  await fs.appendFile(path.join(installed.path, "SKILL.md"), "Local edit");
+  await assert.rejects(assets.diff(business, "review", "codex"), { code: "SKILL_CONFLICT" });
+  await assert.rejects(assets.install(business, "review", "codex", second.commit, undefined, second.commit), { code: "SKILL_CONFLICT" });
+  await assert.rejects(assets.rollback(business, "review", "codex", backup, second.commit), { code: "SKILL_CONFLICT" });
+  await fs.writeFile(path.join(installed.path, "SKILL.md"), markdown + "New review instructions.\n");
+  const markerPath = path.join(installed.path, ".agentrecall-install.json");
+  const marker = JSON.parse(await fs.readFile(markerPath, "utf8"));
+  await fs.writeFile(markerPath, JSON.stringify({ ...marker, repository: "https://github.com/other/assets" }));
+  await assert.rejects(assets.diff(business, "review", "codex"), { code: "SKILL_CONFLICT" });
+  await assert.rejects(assets.rollback(business, "review", "codex", backup, second.commit), { code: "SKILL_CONFLICT" });
+  await fs.writeFile(markerPath, JSON.stringify(marker));
+  await service.setTeamEnabled(false);
+  await assert.rejects(assets.install(business, "review", "codex", second.commit, undefined, second.commit), { code: "TEAM_DISABLED" });
+  await assets.rollback(business, "review", "codex", backup, second.commit);
+  assert.equal(await fs.readFile(path.join(installed.path, "SKILL.md"), "utf8"), markdown);
+});
+
+test("old uninstall backups restore offline into an empty target; damaged and linked backups are rejected", async (t) => {
+  const { service, assets, business, root } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  const version = await assets.sync(business);
+  await assets.install(business, "review", "claude", version.commit);
+  const removed = await assets.uninstall(business, "review", "claude");
+  const backup = path.basename(removed.backupPath);
+  await service.setTeamEnabled(false);
+  const recordPath = path.join(removed.backupPath, ".agentrecall-install.json");
+  const old = await fs.readFile(recordPath, "utf8");
+  await fs.writeFile(recordPath, old.replace('"schemaVersion":1', '"schemaVersion":2'));
+  assert.equal((await assets.backups(business, "review")).backups[0]?.valid, false);
+  await assert.rejects(assets.rollback(business, "review", "claude", backup, null), { code: "SKILL_CONFLICT" });
+  await fs.writeFile(recordPath, old);
+  await fs.appendFile(path.join(removed.backupPath, "SKILL.md"), "Edited backup");
+  await assert.rejects(assets.rollback(business, "review", "claude", backup, null), { code: "SKILL_CONFLICT" });
+  await fs.writeFile(path.join(removed.backupPath, "SKILL.md"), markdown);
+  const renamed = path.join(root, "backup-content");
+  await fs.rename(removed.backupPath, renamed);
+  await fs.symlink(renamed, removed.backupPath, process.platform === "win32" ? "junction" : "dir");
+  assert.equal((await assets.backups(business, "review")).backups[0]?.valid, false);
+  await assert.rejects(assets.rollback(business, "review", "claude", backup, null), { code: "SKILL_CONFLICT" });
+  await fs.unlink(removed.backupPath);
+  await fs.rename(renamed, removed.backupPath);
+  const restored = await assets.rollback(business, "review", "claude", backup, null);
+  assert.equal(restored.commit, version.commit);
+  assert.equal(await fs.readFile(path.join(restored.path, "SKILL.md"), "utf8"), markdown);
+  assert.deepEqual((await assets.backups(business, "review")).backups, []);
+});
+
+test("replacement failures restore the current install, or retain an explicitly recoverable backup", async (t) => {
+  const { assets, business, first, second, installed } = await updateFixture(t);
+  const rename = syncFs.renameSync;
+  let publications = 0;
+  const failingPublish = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (String(source).includes(".agentrecall-skill-stage-")) {
+      publications++;
+      throw Object.assign(new Error("Synthetic publication failure"), { code: "EACCES" });
+    }
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.install(business, "review", "codex", second.commit, undefined, first.commit), { code: "SKILL_REPLACE_FAILED" });
+  assert.equal(publications, 1);
+  assert.equal(await fs.readFile(path.join(installed.path, "SKILL.md"), "utf8"), markdown);
+  assert.deepEqual((await assets.backups(business, "review")).backups, []);
+  failingPublish.mock.restore();
+  const failure = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (String(source).includes(".agentrecall-skill-stage-") || String(source).includes(".agentrecall-skill-backups")) {
+      throw Object.assign(new Error("Synthetic restore failure"), { code: "EACCES" });
+    }
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.install(business, "review", "codex", second.commit, undefined, first.commit), { code: "SKILL_RECOVERY_REQUIRED" });
+  failure.mock.restore();
+  await assert.rejects(fs.access(installed.path), { code: "ENOENT" });
+  const { backups } = await assets.backups(business, "review");
+  assert.equal(backups.length, 1);
+  await assets.rollback(business, "review", "codex", backups[0]!.backup, null);
+  assert.equal(await fs.readFile(path.join(installed.path, "SKILL.md"), "utf8"), markdown);
+  assert.ok(!(await fs.readdir(business)).some((file) => file.startsWith(".agentrecall-skill-stage-") || file.endsWith(".lock")));
+});
+
+test("concurrent updates cannot silently replace a newer install", async (t) => {
+  const { assets, home, business, first, second } = await updateFixture(t);
+  const results = await Promise.all(Array.from({ length: 3 }, () => cli(home, business, [
+    "skill", "update", "review", "--target", "codex", "--revision", second.commit, "--from-revision", first.commit,
+  ])));
+  assert.equal(results.filter((result) => result.code === 0).length, 1, JSON.stringify(results));
+  assert.ok(results.filter((result) => result.code !== 0).every((result) => result.result.error?.code === "INSTALLATION_CHANGED"), JSON.stringify(results));
+  assert.equal((await assets.backups(business, "review")).backups.length, 1);
+});
+
+
 
 async function commit(directory: string) {
   await execute("git", ["-C", directory, "add", "."]);
