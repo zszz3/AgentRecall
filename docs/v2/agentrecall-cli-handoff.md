@@ -1,6 +1,6 @@
 # AgentRecall CLI 与团队功能：开发交接
 
-核对日期：2026-09-25。面向接手开发的 agent；这是交接时的状态快照，后续状态以分支、PR 和 CI 的实时结果为准。
+核对日期：2026-09-26。面向接手开发的 agent；这是交接时的状态快照，后续状态以分支、PR 和 CI 的实时结果为准。
 
 ## 1. 当前结论
 
@@ -8,7 +8,7 @@
 
 此前单 Skill 流程的验证基线为 [`c4525acc701490264eff473bd297d143b7d3cc75`](https://github.com/zszz3/AgentRecall/commit/c4525acc701490264eff473bd297d143b7d3cc75)。该提交的 CLI、V1、V2 在 Linux/macOS/Windows 上的检查，以及仓库检查和 Quality gate，均已通过：[完整 CI 记录](https://github.com/zszz3/AgentRecall/actions/runs/36114851838)。交接文档提交本身不改变产品代码，不能将这条 CI 记录当作任意后续提交的验证。
 
-当前源码还已接入 V2 团队页，并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
+当前源码还已接入 V2 团队设置与 Skills 团队范围，并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
 
 ## 2. 到哪里接着做
 
@@ -159,6 +159,10 @@ git diff --check
 
 ## V2 桌面入口增量
 
-主进程入口在 `apps/main-2.0/src/main/services/team-workspace-service.ts`，IPC、preload 和 Renderer 页面均以 `team-workspace` 命名。主进程直接打包 workspace-core，共用 CLI 配置；输入在 IPC 校验，修改前固定项目目录、资产来源和版本。窗口销毁和应用退出会取消同步；移除绑定与卸载使用原生确认。使用方法与当前限制见[团队工作区指南](team-workspace.md)。
+主进程入口在 `apps/main-2.0/src/main/services/team-workspace-service.ts`，IPC 与 preload 以 `team-workspace` 命名；Renderer 的 `feature-scope.tsx` 提供范围切换，`team-assets-panel.tsx` 提供团队资产，`settings/team-settings.tsx` 管理配置。主进程直接打包 workspace-core，共用 CLI 配置；输入在 IPC 校验，修改前固定项目目录、资产来源和版本。窗口销毁和应用退出会取消同步；移除绑定与卸载使用原生确认。使用方法与当前限制见[团队工作区指南](team-workspace.md)。
 
 新增 IPC/界面及相关 App 测试 21 项通过；V2 类型检查、构建、隔离 npm 安装及临时 PostgreSQL 验证通过。受控浏览器验证了窄屏、桌面双列、预览、冲突禁止更新和关闭后的本地管理。临时服务和测试窗口均已清理，未使用真实用户项目或凭据。发布包排除了文档媒体与重复源 Logo，并验证实际图标、内置资产、渲染 Logo 和运行依赖仍存在。
+
+## 本地与团队范围调整
+
+侧栏不再提供独立团队页。各功能页使用「本地 / 团队」切换，团队设置只负责开关、资产仓库与项目绑定，Skills 团队范围管理资产与工作配置。其他类型尚未接入团队数据，显示未开放提示，不用个人数据充当团队结果。范围切换复用编辑页的离开确认。相关 IPC、界面、Settings、Skills 与 App 测试共 30 项通过，最新 CI 以 PR 当前提交为准。

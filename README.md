@@ -104,9 +104,9 @@ v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认�
 
 > 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。
 
-## V2 团队工作区
+## V2 本地与团队
 
-V2 新增默认关闭的[团队工作区](docs/v2/team-workspace.md)，可配置项目与资产仓库、预览安装 Skill、更新和卸载工作配置，与独立 CLI 共用配置。完整 Session 分享仍未开放。
+V2 各功能页区分[本地与团队范围](docs/v2/team-workspace.md)。默认关闭的团队功能及仓库绑定统一在设置中管理；Skills 页支持团队 Skill 和工作配置的安装、更新与卸载，与独立 CLI 共用配置。完整 Session 分享仍未开放。
 
 ## 独立 CLI（源码预览）
 

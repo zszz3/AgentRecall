@@ -91,6 +91,7 @@ import {
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
 import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
+import { FeatureScope } from "./features/team-workspace/feature-scope";
 import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
@@ -125,8 +126,7 @@ function formatDateInput(date: Date): string {
 
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
-const TeamWorkspacePage = lazy(() =>
-  import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
+
 const WorkflowFeaturePage = lazy(() =>
   import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
 const TeamChatPage = lazy(() =>
@@ -192,16 +192,18 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
+  const [contentScope, setContentScope] = useState<"local" | "team">("local");
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
+    setContentScope("local");
   }, [activePage]);
   const pageNavigationGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const setPageNavigationGuard = useCallback((guard: (() => Promise<boolean>) | null): void => {
     pageNavigationGuardRef.current = guard;
   }, []);
   const navigateToPage = useCallback(async (page: AppPage): Promise<boolean> => {
-    if (page === activePage) return true;
+    if (page === activePage) { setContentScope("local"); return true; }
     try {
       if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
       pageNavigationGuardRef.current = null;
@@ -1801,6 +1803,17 @@ export function App(): ReactElement {
 
       <section className="app-workspace">
         <div className="app-page-host">
+          <FeatureScope key={activePage} page={activePage} language={language} scope={contentScope} settingsOpen={settingsOpen}
+            onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }}
+            onScopeChange={async (next) => {
+              const version = pageNavigationVersionRef.current;
+              if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
+              if (version !== pageNavigationVersionRef.current) return false;
+              pageNavigationGuardRef.current = null;
+              setContentScope(next);
+              return true;
+            }}
+          >
           {activePage === "workbench" ? (
             <WorkbenchPage
               stats={stats}
@@ -2147,8 +2160,8 @@ export function App(): ReactElement {
                 onApplyToClaude={(claudeApiConfig) => void applyApiConfigToClaude(claudeApiConfig)}
               />
             ) : null}
-            {activePage === "team-workspace" ? <TeamWorkspacePage language={language} /> : null}
           </Suspense>
+          </FeatureScope>
         </div>
       </section>
 

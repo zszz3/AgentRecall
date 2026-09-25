@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { FolderOpen, RefreshCw, UsersRound } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamCatalog, TeamPayload, TeamRequest, TeamSnapshot } from "../../../../shared/ipc/team-workspace";
 import type { LanguageMode } from "../../language";
@@ -11,7 +11,7 @@ type Inspection = {
   data: Extract<TeamPayload, { kind: "skill-preview" | "work-preview" | "work-status" | "work-diff" }>;
 };
 
-export function TeamWorkspacePage({ language, api = window.sessionSearch.teamWorkspace }: { language: LanguageMode; api?: TeamWorkspaceApi }): ReactElement {
+export function TeamAssetsPanel({ language, settingsOpen = false, onOpenSettings, api = window.sessionSearch.teamWorkspace }: { language: LanguageMode; settingsOpen?: boolean; onOpenSettings(): void; api?: TeamWorkspaceApi }): ReactElement {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null);
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null);
@@ -24,10 +24,9 @@ export function TeamWorkspacePage({ language, api = window.sessionSearch.teamWor
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState<{ message: string; details?: Readonly<Record<string, unknown>> } | null>(null);
   const [feedback, setFeedback] = useState<{ message: string; backups: string[] } | null>(null);
-  const [teamForm, setTeamForm] = useState({ id: "", name: "", repository: "" });
-  const [projectForm, setProjectForm] = useState({ id: "", name: "", directory: "", remote: "" });
   const alive = useRef(false);
   const running = useRef(false);
+  const activeRequest = useRef<TeamRequest["action"] | null>(null);
   const inspectionElement = useRef<HTMLElement>(null);
   const config = snapshot?.config;
   const enabled = Boolean(config?.teamEnabled);
@@ -43,18 +42,25 @@ export function TeamWorkspacePage({ language, api = window.sessionSearch.teamWor
 
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; };
-  }, []);
+    return () => {
+      alive.current = false;
+      if (activeRequest.current === "sync") {
+        // The main process also cancels on window destruction if the bridge closes.
+        void api.request({ action: "cancel-sync" }).catch(() => undefined);
+      }
+    };
+  }, [api]);
 
   useEffect(() => {
     let active = true;
+    if (settingsOpen) return;
     void api.request({ action: "snapshot" }).then((reply) => {
       if (!active) return;
       if (!reply.ok) setError(reply.error);
       else if (reply.data.kind === "snapshot") setSnapshot(reply.data.value);
     }).catch(() => { if (active) setError({ message: "团队配置读取失败，请刷新后重试。" }); });
     return () => { active = false; };
-  }, [api, refreshKey]);
+  }, [api, refreshKey, settingsOpen]);
 
   useEffect(() => {
     let active = true;
@@ -76,6 +82,7 @@ export function TeamWorkspacePage({ language, api = window.sessionSearch.teamWor
   async function run(request: TeamRequest): Promise<void> {
     if (running.current) return;
     running.current = true;
+    activeRequest.current = request.action;
     setBusy(request.action);
     setError(null);
     setFeedback(null);
@@ -87,13 +94,11 @@ export function TeamWorkspacePage({ language, api = window.sessionSearch.teamWor
       switch (data.kind) {
         case "snapshot":
           setSnapshot(data.value);
-          if (request.action === "add-team") setTeamForm({ id: "", name: "", repository: "" });
-          if (request.action === "add-project") { setProjectForm({ id: "", name: "", directory: "", remote: "" }); setSelectedProject(request.id); }
           setInspection(null);
           setRefreshKey((value) => value + 1);
           setFeedback({ message: l("Configuration saved.", "配置已保存。"), backups: [] });
           break;
-        case "folder": if (data.value) setProjectForm((value) => ({ ...value, directory: data.value! })); break;
+        case "folder": break;
         case "complete":
           setFeedback({ message: data.message, backups: data.backups });
           setInspection(null);
@@ -109,58 +114,24 @@ export function TeamWorkspacePage({ language, api = window.sessionSearch.teamWor
       if (alive.current) setError({ message: l("The request failed. Refresh and try again.", "请求未完成，请刷新后重试。") });
     } finally {
       running.current = false;
+      activeRequest.current = null;
       if (alive.current) setBusy(null);
     }
   }
 
-  const bindingValue = (value: string | null | undefined) => value === undefined ? "__inherit__" : value === null ? "__personal__" : value;
-  const binding = (value: string): string | null | undefined => value === "__inherit__" ? undefined : value === "__personal__" ? null : value;
   const localConfigurations = catalog?.installed.filter((item) => item.target === target) ?? [];
 
   return (
     <section className="team-workspace">
       <header className="team-workspace-head">
-        <div><h2><UsersRound size={22} /> {l("Team workspace", "团队工作区")}</h2><p>{l("Share project skills and work configurations. Sessions are never uploaded here.", "按项目共享 Skill 和工作配置，这里不会上传 Session。")}</p></div>
+        <div><h2>{l("Team Skills", "团队 Skills")}</h2><p>{l("Share project skills and work configurations. Sessions are never uploaded here.", "按项目共享 Skill 和工作配置，这里不会上传 Session。")}</p></div>
         <button type="button" disabled={Boolean(busy)} onClick={() => { setError(null); setRefreshKey((value) => value + 1); }}><RefreshCw size={15} />{l("Refresh", "刷新")}</button>
       </header>
-      <label className="team-workspace-toggle">
-        <div><strong>{l("Enable team features", "启用团队功能")}</strong><p>{l("Off by default. Enabling does not sync or install anything automatically.", "默认关闭。启用不会自动同步或安装任何内容。")}</p></div>
-        <input aria-label={l("Enable team features", "启用团队功能")} type="checkbox" className="switch" checked={enabled} disabled={!snapshot || locked} onChange={(event) => void run({ action: "enable", enabled: event.currentTarget.checked })} />
-      </label>
-      {!enabled && <p className="team-workspace-notice">{l("Personal features remain available. Existing local configurations can still be inspected and removed below.", "个人功能照常可用。已安装的本地工作配置仍可在下方查看和卸载。")}</p>}
+      {!enabled && <div className="team-workspace-notice"><p>{l("Team features are off. Existing project installations remain available below.", "团队功能未启用。下方仍可管理已有项目安装。")}</p><button type="button" onClick={onOpenSettings}>{l("Open team settings", "前往团队设置")}</button></div>}
+      {enabled && !projects.length && <div className="team-workspace-notice"><p>{l("Add a project and its asset repository in Settings → Team.", "先在「设置 → 团队」中添加项目并绑定资产仓库。")}</p><button type="button" onClick={onOpenSettings}>{l("Set up a team", "配置团队")}</button></div>}
       {locked && <div role="status" className="team-workspace-notice">{l("A team operation is in progress.", "团队操作正在进行。")}{busy === "sync" && <button type="button" onClick={() => void api.request({ action: "cancel-sync" })}>{l("Cancel sync", "取消同步")}</button>}</div>}
       {error && <div role="alert" className="team-workspace-error"><p>{error.message}</p>{error.details && <details><summary>{l("Recovery details", "恢复详情")}</summary><pre>{JSON.stringify(error.details, null, 2)}</pre></details>}</div>}
       {feedback && <div role="status" className="team-workspace-notice"><p>{feedback.message}</p>{feedback.backups.map((backup) => <code key={backup}>{backup}</code>)}</div>}
-
-      {enabled && <details className="team-workspace-configuration" open={!teams.length || !projects.length}>
-        <summary>{l("Repositories and project bindings", "仓库与项目绑定")}</summary>
-        <p>{l("Add an existing GitHub asset repository. Access uses your existing Git credentials; no remote repository is created.", "添加现有的 GitHub 资产仓库，访问权限沿用本机 Git；不会创建远端仓库。")}</p>
-        <div className="team-workspace-forms">
-          <form onSubmit={(event) => { event.preventDefault(); void run({ action: "add-team", ...teamForm }); }}>
-            <h3>{l("Add asset repository", "添加资产仓库")}</h3>
-            <label>{l("Team ID", "团队 ID")}<input required pattern="[a-z][a-z0-9-]*" maxLength={64} value={teamForm.id} onChange={(event) => setTeamForm({ ...teamForm, id: event.currentTarget.value })} placeholder="engineering" /></label>
-            <label>{l("Name", "名称")}<input required maxLength={200} value={teamForm.name} onChange={(event) => setTeamForm({ ...teamForm, name: event.currentTarget.value })} /></label>
-            <label>GitHub<input required maxLength={2048} value={teamForm.repository} onChange={(event) => setTeamForm({ ...teamForm, repository: event.currentTarget.value })} placeholder="https://github.com/your-team/skills" /></label>
-            <button type="submit" disabled={locked}>{l("Add repository", "添加仓库")}</button>
-            <label>{l("Default team", "默认团队")}<select disabled={locked} value={config?.defaultTeamId ?? "__personal__"} onChange={(event) => void run({ action: "default-team", id: event.currentTarget.value === "__personal__" ? null : event.currentTarget.value })}><option value="__personal__">{l("Personal", "个人")}</option>{teams.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          </form>
-          <form onSubmit={(event) => { event.preventDefault(); void run({ action: "add-project", ...projectForm, remote: projectForm.remote || undefined }); }}>
-            <h3>{l("Add business project", "添加业务项目")}</h3>
-            <label>{l("Project ID", "项目 ID")}<input required pattern="[a-z][a-z0-9-]*" maxLength={64} value={projectForm.id} onChange={(event) => setProjectForm({ ...projectForm, id: event.currentTarget.value })} placeholder="backend" /></label>
-            <label>{l("Name", "名称")}<input required maxLength={200} value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.currentTarget.value })} /></label>
-            <label>{l("Git checkout", "Git 项目目录")}<div className="team-workspace-inline"><input required value={projectForm.directory} onChange={(event) => setProjectForm({ ...projectForm, directory: event.currentTarget.value })} /><button type="button" disabled={locked} onClick={() => void run({ action: "choose-folder" })}><FolderOpen size={15} />{l("Choose", "选择")}</button></div></label>
-            <label>{l("Remote name (optional)", "远端名称（可选）")}<input value={projectForm.remote} onChange={(event) => setProjectForm({ ...projectForm, remote: event.currentTarget.value })} placeholder="origin" /></label>
-            <button type="submit" disabled={locked}>{l("Add project", "添加项目")}</button>
-          </form>
-        </div>
-        {projects.map((item) => <div className="team-workspace-project" key={item.id}>
-          <div><strong>{item.name}</strong><small>{item.root}</small></div>
-          <select aria-label={l("Team for ", "所属团队：") + item.name} disabled={locked} value={bindingValue(item.teamId)} onChange={(event) => void run({ action: "bind-project", id: item.id, root: item.root, teamId: binding(event.currentTarget.value) })}>
-            <option value="__inherit__">{l("Use default", "跟随默认")}</option><option value="__personal__">{l("Personal", "个人")}</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-          </select>
-          <button type="button" disabled={locked} onClick={() => void run({ action: "remove-project", id: item.id, root: item.root })}>{l("Remove binding", "移除绑定")}</button>
-        </div>)}
-      </details>}
 
       {projects.length > 0 && <div className="team-workspace-toolbar">
         <label>{l("Project", "项目")}<select disabled={locked} value={project?.id ?? ""} onChange={(event) => setSelectedProject(event.currentTarget.value)}>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
