@@ -318,6 +318,156 @@ test("manifest and cache versions preserve old Skills and reject invalid work-co
   await assert.rejects(assets.listWorkConfigs(business), { code: "INVALID_ASSET" });
 });
 
+test("persisted work-config references keep shared Skills until the final owner is uninstalled", async (t) => {
+  const { service, assets, business, home, synced } = await workConfigFixture(t);
+  const concurrent = await Promise.all(["backend", "review-only"].map((id) => cli(home, business, ["work-config", "install", id, "--target", "codex", "--revision", synced.commit])));
+  assert.ok(concurrent.every((result) => result.code === 0), JSON.stringify(concurrent));
+  await assets.installWorkConfig(business, "backend", "claude", synced.commit);
+  const saved = new TeamAssetService(service);
+  assert.equal((await saved.installedWorkConfigs(business)).length, 3);
+  const status = await saved.workConfigStatus(business, "backend", "codex");
+  assert.deepEqual(status.skills.map((skill) => skill.action), ["keep_shared", "backup"]);
+  assert.deepEqual(status.skills[0]?.otherConfigs, ["review-only"]);
+  await assert.rejects(saved.uninstallWorkConfig(business, "backend", "codex", "0".repeat(40)), { code: "INSTALLATION_CHANGED" });
+  assert.equal((await cli(home, business, ["work-config", "status", "backend", "--target", "codex"])).code, 0);
+  await service.setTeamEnabled(false);
+  assert.equal((await cli(home, business, ["work-config", "installed"])).code, 0);
+  const removed = await cli(home, business, ["work-config", "uninstall", "backend", "--target", "codex", "--revision", synced.commit]);
+  assert.equal(removed.code, 0, removed.stdout);
+  const codex = path.join(business, ".agents", "skills");
+  assert.equal(await fs.readFile(path.join(codex, "review", "SKILL.md"), "utf8"), markdown);
+  await assert.rejects(fs.access(path.join(codex, "lint")), { code: "ENOENT" });
+  await saved.uninstallWorkConfig(business, "review-only", "codex", synced.commit);
+  await assert.rejects(fs.access(path.join(codex, "review")), { code: "ENOENT" });
+  assert.equal((await saved.backups(business, "review")).backups.length, 1);
+  assert.equal(await fs.readFile(path.join(business, ".claude", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  assert.equal((await saved.installedWorkConfigs(business)).length, 1);
+});
+
+test("legacy individual installs survive group uninstall and all single-Skill mutations enforce active references", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  await assets.install(business, "review", "codex", synced.commit);
+  const backup = await assets.uninstall(business, "review", "codex");
+  await assets.rollback(business, "review", "codex", path.basename(backup.backupPath), null);
+  await assets.installWorkConfig(business, "backend", "codex", synced.commit);
+  for (const operation of [
+    () => assets.install(business, "review", "codex", synced.commit),
+    () => assets.install(business, "review", "codex", synced.commit, undefined, synced.commit),
+    () => assets.uninstall(business, "review", "codex"),
+    () => assets.rollback(business, "review", "codex", path.basename(backup.backupPath), synced.commit),
+  ]) await assert.rejects(operation(), { code: "SKILL_IN_USE" });
+  const file = path.join(business, ".agents", "skills", "review", "SKILL.md");
+  await fs.appendFile(file, "Personal edit");
+  const status = await assets.workConfigStatus(business, "backend", "codex");
+  assert.equal(status.skills[0]?.state, "conflict");
+  assert.equal(status.skills[0]?.action, "keep_independent");
+  await assets.uninstallWorkConfig(business, "backend", "codex", synced.commit);
+  assert.match(await fs.readFile(file, "utf8"), /Personal edit/);
+  assert.deepEqual(await assets.installedWorkConfigs(business), []);
+});
+
+test("group uninstall preflights modified owned content and changed group versions", async (t) => {
+  const { assets, business, source, synced } = await workConfigFixture(t);
+  await assets.installWorkConfig(business, "backend", "codex", synced.commit);
+  const record = path.join(business, ".agentrecall-work-configs.json");
+  const before = await fs.readFile(record, "utf8");
+  await fs.appendFile(path.join(business, ".agents", "skills", "lint", "SKILL.md"), "Local edit");
+  await assert.rejects(assets.uninstallWorkConfig(business, "backend", "codex", synced.commit), { code: "SKILL_CONFLICT" });
+  assert.equal(await fs.readFile(record, "utf8"), before);
+  assert.equal(await fs.readFile(path.join(business, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  assert.deepEqual((await assets.backups(business, "review")).backups, []);
+  await commit(source);
+  const next = await assets.sync(business);
+  assert.notEqual(next.commit, synced.commit);
+  assert.ok((await assets.previewWorkConfig(business, "backend", undefined, "codex")).configurationConflict);
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", next.commit), { code: "WORK_CONFIG_CHANGED" });
+  assert.equal(await fs.readFile(record, "utf8"), before);
+});
+
+test("ownership write failures undo new installs and restore group removals before reporting failure", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  const rename = syncFs.renameSync;
+  const failWrite = () => t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (path.basename(String(destination)) === ".agentrecall-work-configs.json") throw new Error("Synthetic state write failure");
+    return rename(source, destination);
+  });
+  let failure = failWrite();
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), { code: "WORK_CONFIG_INSTALL_FAILED" });
+  failure.mock.restore();
+  assert.deepEqual(await assets.installedWorkConfigs(business), []);
+  await assert.rejects(fs.access(path.join(business, ".agents", "skills", "review")), { code: "ENOENT" });
+  await assets.installWorkConfig(business, "backend", "codex", synced.commit);
+  const record = path.join(business, ".agentrecall-work-configs.json");
+  const before = await fs.readFile(record, "utf8");
+  failure = failWrite();
+  await assert.rejects(assets.uninstallWorkConfig(business, "backend", "codex", synced.commit), { code: "WORK_CONFIG_UNINSTALL_FAILED" });
+  failure.mock.restore();
+  assert.equal(await fs.readFile(record, "utf8"), before);
+  assert.equal(await fs.readFile(path.join(business, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  assert.ok((await assets.workConfigStatus(business, "backend", "codex")).skills.every((skill) => skill.state === "ready"));
+  assert.ok(!(await fs.readdir(business)).some((name) => name.endsWith(".tmp") || name.endsWith(".lock") || name.startsWith(".agentrecall-skill-stage-")));
+});
+
+test("post-commit cleanup failure preserves durable ownership and allows an idempotent retry", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  const remove = syncFs.rmSync;
+  const failure = t.mock.method(syncFs, "rmSync", (...args: Parameters<typeof syncFs.rmSync>) => {
+    if (String(args[0]).includes(".agentrecall-skill-stage-")) throw new Error("Synthetic cleanup failure");
+    return remove(...args);
+  });
+  await assert.rejects(assets.installWorkConfig(business, "backend", "codex", synced.commit), (error: unknown) => {
+    assert.ok(error instanceof WorkspaceError);
+    assert.equal(error.code, "WORK_CONFIG_RECOVERY_REQUIRED");
+    assert.equal(error.details?.recorded, true);
+    return true;
+  });
+  failure.mock.restore();
+  assert.ok((await assets.workConfigStatus(business, "backend", "codex")).skills.every((skill) => skill.state === "ready"));
+  assert.ok((await assets.installWorkConfig(business, "backend", "codex", synced.commit)).skills.every((skill) => skill.status === "existing"));
+  await assets.uninstallWorkConfig(business, "backend", "codex", synced.commit);
+  assert.deepEqual(await assets.installedWorkConfigs(business), []);
+});
+
+test("failed uninstall recovery preserves ownership and exposes missing Skills for a safe retry", async (t) => {
+  const { assets, business, synced } = await workConfigFixture(t);
+  await assets.installWorkConfig(business, "backend", "codex", synced.commit);
+  const rename = syncFs.renameSync;
+  const failure = t.mock.method(syncFs, "renameSync", (source: syncFs.PathLike, destination: syncFs.PathLike) => {
+    if (path.basename(String(source)) === "lint" || String(source).includes(".agentrecall-skill-backups")) throw new Error("Synthetic move failure");
+    return rename(source, destination);
+  });
+  await assert.rejects(assets.uninstallWorkConfig(business, "backend", "codex", synced.commit), { code: "WORK_CONFIG_RECOVERY_REQUIRED" });
+  failure.mock.restore();
+  assert.deepEqual((await assets.workConfigStatus(business, "backend", "codex")).skills.map((skill) => skill.state), ["missing", "ready"]);
+  const backup = (await assets.backups(business, "review")).backups[0]!;
+  await assets.uninstallWorkConfig(business, "backend", "codex", synced.commit);
+  await assets.rollback(business, "review", "codex", backup.backup, null);
+  assert.equal(await fs.readFile(path.join(business, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  assert.deepEqual(await assets.installedWorkConfigs(business), []);
+});
+
+test("corrupt, future, oversized and linked project ownership records fail closed without rewriting data", async (t) => {
+  const { assets, business, root, synced } = await workConfigFixture(t);
+  const record = path.join(business, ".agentrecall-work-configs.json");
+  const empty = '{"schemaVersion":1,"configs":[],"skills":[]}';
+  for (const invalid of ['{"schemaVersion":2,"configs":[],"skills":[]}', '{"schemaVersion":1,"configs":[{}],"skills":[]}', "{"]) {
+    await fs.writeFile(record, invalid);
+    await assert.rejects(assets.installedWorkConfigs(business), { code: "INVALID_WORK_CONFIG_STATE" });
+    await assert.rejects(assets.install(business, "review", "codex", synced.commit), { code: "INVALID_WORK_CONFIG_STATE" });
+    assert.equal(await fs.readFile(record, "utf8"), invalid);
+  }
+  await fs.writeFile(record, empty + " ".repeat(1024 * 1024 - Buffer.byteLength(empty)));
+  assert.deepEqual(await assets.installedWorkConfigs(business), []);
+  await fs.appendFile(record, "中");
+  await assert.rejects(assets.installedWorkConfigs(business), { code: "WORK_CONFIG_STATE_TOO_LARGE" });
+  await fs.rm(record);
+  const outside = path.join(root, "outside-record");
+  await fs.mkdir(outside);
+  await fs.symlink(outside, record, process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(assets.installedWorkConfigs(business), { code: "INVALID_WORK_CONFIG_STATE" });
+  assert.deepEqual(await fs.readdir(outside), []);
+});
+
 async function commit(directory: string) {
   await execute("git", ["-C", directory, "add", "."]);
   await execute("git", ["-C", directory, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "asset fixture"]);

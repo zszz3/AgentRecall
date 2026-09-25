@@ -1,6 +1,6 @@
 # AgentRecall CLI 使用与配置
 
-`agentrecall-cli` 是 V2 配套的独立源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚，以及多个 Skill 的工作配置批量安装。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
+`agentrecall-cli` 是 V2 配套的独立源码预览包，可执行命令为 `agentrecall`。目前提供初始化、配置检查、团队开关、多仓库绑定，以及团队 Skill 的拉取、预览、项目级安装、差异查看、更新与回滚，以及工作配置批量安装、本地归属和整组卸载。需要 Node.js 22.13+、Git 2.31+；不依赖 Electron、PostgreSQL 或 OpenViking。
 
 当前不提供 GitHub 登录、组织成员管理、Session 查询或上传。这里登记的“团队”是本机保存的资产仓库配置，不代表已经加入该组织或取得权限；主动同步使用本机 Git 的既有 HTTPS/SSH 认证。CLI 尚未发布至 npm，也不包含在桌面版本安装包中。构建与安装见 [包说明](../../apps/cli/README.md)。
 
@@ -29,7 +29,7 @@ agentrecall team current --project experiments
 agentrecall team disable
 ```
 
-路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除，或通过 `skill backups` 和 `skill rollback` 管理本地恢复。当前开关仅作用于 CLI，尚未接入桌面端。
+路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除，或通过 `skill backups` 和 `skill rollback` 管理本地恢复。本地工作配置的 installed/status/uninstall 也仍可使用。当前开关仅作用于 CLI，尚未接入桌面端。
 
 ## 命令
 
@@ -54,11 +54,16 @@ agentrecall team disable
 | `skill uninstall <id> --target codex\|claude [--project <id>]` | 移走未修改的受管安装，保留备份；关闭团队后仍可使用 |
 | `work-config list [--project <id>]` | 查看团队的工作配置安装清单 |
 | `work-config preview <id> [--target codex\|claude] [--project <id>]` | 查看整组 Skill；选择客户端后逐项显示复用、新增或冲突 |
-| `work-config install <id> --target codex\|claude --revision <sha> [--project <id>]` | 全部预检后安装；失败只回退本次新副本，已有内容保留 |
+| `work-config install <id> --target codex\|claude --revision <sha> [--project <id>]` | 全部预检后安装并记录共享引用；同版本可重试，不自动更新已安装的配置 |
+| `work-config installed [--project <id>]` | 查看本地已安装配置及客户端；可离线使用 |
+| `work-config status <id> --target codex\|claude [--project <id>]` | 查看实际文件状态、共享引用及卸载影响；可离线使用 |
+| `work-config uninstall <id> --target codex\|claude --revision <sha> [--project <id>]` | 移除配置归属，仅将不再被引用且由配置创建的 Skill 移入备份；可离线使用 |
 | `project add <id> [--path <目录>] [--remote <名称>] [--name <名称>] [--team <id>\|--personal]` | 登记业务仓库；路径默认当前目录 |
 | `project list` | 查看已登记项目 |
 | `project bind <id> --team <id>\|--personal\|--inherit` | 指定团队、改为个人或恢复继承默认团队 |
 | `project remove <id>` | 移除本地绑定；不删除代码仓库或团队 |
+
+被工作配置引用的 Skill 不允许单独安装、更新、卸载或回滚；先通过 `work-config status` 查看归属，再处理相关配置。
 
 ID 使用小写字母开头，后续可包含小写字母、数字和连字符，最多 64 个字符。显示名称可使用中文。
 

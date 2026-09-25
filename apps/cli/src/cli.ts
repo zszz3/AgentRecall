@@ -27,6 +27,9 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
   agentrecall work-config list                列出团队工作配置
   agentrecall work-config preview <id> [--target codex|claude]
   agentrecall work-config install <id> --target codex|claude --revision <预览中的版本>
+  agentrecall work-config installed          查看项目已安装的工作配置（可离线）
+  agentrecall work-config status <id> --target codex|claude
+  agentrecall work-config uninstall <id> --target codex|claude --revision <当前配置版本>
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
   agentrecall project remove <id>          移除本地绑定（保留代码仓库）
@@ -35,7 +38,7 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
 所有命令支持 --json；add 支持 --name；sync、skill 和 work-config 命令支持 --project。
 --cwd <dir> 指定操作目录；Skill 只安装到该项目，不改变个人 Skill。
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
-只有 team sync 主动连接远端。安装必须显式选择版本和客户端；不上传 Session。工作配置是批量安装清单，安装后按 Skill 独立管理。
+只有 team sync 主动连接远端。安装必须显式选择版本和客户端；不上传 Session。工作配置记录共享引用，卸载时保留其他配置和原有独立安装。
 `;
 
 const options = {
@@ -89,6 +92,9 @@ async function main(): Promise<void> {
     "work-config list": { count: 2, flags: ["project"] },
     "work-config preview": { count: 3, flags: ["project", "target"] },
     "work-config install": { count: 3, flags: ["project", "target", "revision"] },
+    "work-config installed": { count: 2, flags: ["project"] },
+    "work-config status": { count: 3, flags: ["project", "target"] },
+    "work-config uninstall": { count: 3, flags: ["project", "target", "revision"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
     "project bind": { count: 3, flags: ["team", "personal", "inherit"] },
@@ -100,9 +106,9 @@ async function main(): Promise<void> {
   const teamFlags = Number(values.team !== undefined) + Number(Boolean(values.personal)) + Number(Boolean(values.inherit));
   if (teamFlags > 1 || key === "project bind" && teamFlags !== 1) invalidArguments("请只选择 --team、--personal 或 --inherit 中的一项。");
   if (key === "team add" && !values.repo) invalidArguments("缺少 --repo。");
-  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback", "work-config install"].includes(key) && !values.target) invalidArguments("缺少 --target。");
+  if (["skill install", "skill uninstall", "skill diff", "skill update", "skill rollback", "work-config install", "work-config status", "work-config uninstall"].includes(key) && !values.target) invalidArguments("缺少 --target。");
   if (values.target !== undefined && values.target !== "codex" && values.target !== "claude") invalidArguments("--target 只能为 codex 或 claude。");
-  if ((key === "skill install" || key === "skill update" || key === "work-config install") && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览资产，再通过 --revision 提供完整版本。");
+  if (["skill install", "skill update", "work-config install", "work-config uninstall"].includes(key) && !/^[a-f0-9]{40}$/.test(values.revision ?? "")) invalidArguments("请先预览资产或查看安装状态，再通过 --revision 提供完整版本。");
   if ((key === "skill update" || key === "skill rollback") && !/^[a-f0-9]{40}$/.test(values["from-revision"] ?? "")
     && !(key === "skill rollback" && values["from-revision"] === "none")) invalidArguments("请通过 --from-revision 提供当前完整版本；恢复到空位置时可使用 none。");
   if (key === "skill rollback" && !values.backup) invalidArguments("缺少 --backup。");
@@ -188,11 +194,25 @@ async function main(): Promise<void> {
     case "work-config preview": {
       const result = await assets.previewWorkConfig(directory, id!, values.project, values.target as "codex" | "claude" | undefined);
       const labels = { new: "待安装", existing: "复用已有内容", conflict: "有冲突", unselected: "未选择客户端" };
-      output(result, `版本：${result.commit}\n工作配置：${result.name}\n${result.description}\n目标：${result.target ?? "未选择"}\n${result.skills.map((skill) => `${skill.id}\t${labels[skill.status]}\t${skill.files} 个文件${skill.destination ? `\t${skill.destination}` : ""}${skill.reason ? `\n${skill.reason}` : ""}`).join("\n")}`); break;
+      output(result, `版本：${result.commit}\n工作配置：${result.name}\n${result.description}\n目标：${result.target ?? "未选择"}${result.configurationConflict ? `\n配置冲突：${result.configurationConflict}` : ""}\n${result.skills.map((skill) => `${skill.id}\t${labels[skill.status]}\t${skill.files} 个文件${skill.destination ? `\t${skill.destination}` : ""}${skill.reason ? `\n${skill.reason}` : ""}`).join("\n")}`); break;
     }
     case "work-config install": {
       const result = await assets.installWorkConfig(directory, id!, values.target as "codex" | "claude", values.revision!, values.project);
-      output(result, `已完成工作配置 ${result.name}（${result.skills.length} 个 Skill）到 ${result.path}\n清单版本：${result.commit}\n${result.skills.map((skill) => `${skill.id}\t${skill.status === "existing" ? "复用已有内容" : "已安装"}\t${skill.commit}`).join("\n")}\n安装后按 Skill 独立管理。`); break;
+      output(result, `已记录工作配置 ${result.name}（${result.skills.length} 个 Skill）到 ${result.path}\n清单版本：${result.commit}\n${result.skills.map((skill) => `${skill.id}\t${skill.status === "existing" ? "复用已有内容" : "已安装"}\t${skill.commit}`).join("\n")}\n可用 work-config status 查看共享引用和卸载影响。`); break;
+    }
+    case "work-config installed": {
+      const result = await assets.installedWorkConfigs(directory, values.project);
+      output(result, result.map((config) => `${config.id}\t${config.name}\t${config.target}\t${config.revision}`).join("\n") || "此项目暂无工作配置安装记录。"); break;
+    }
+    case "work-config status": {
+      const result = await assets.workConfigStatus(directory, id!, values.target as "codex" | "claude", values.project);
+      const states = { ready: "内容完整", missing: "文件缺失", conflict: "内容有变化或冲突" };
+      const actions = { keep_shared: "保留：其他配置仍在使用", keep_independent: "保留：原有独立安装", missing: "已缺失，仅移除引用", backup: "卸载时移入备份" };
+      output(result, `工作配置：${result.name}\n客户端：${result.target}\n版本：${result.revision}\n${result.skills.map((skill) => `${skill.id}\t${states[skill.state]}\t${skill.action === "backup" && skill.state === "conflict" ? "停止卸载，请先处理修改" : actions[skill.action]}${skill.otherConfigs.length ? `（${skill.otherConfigs.join("、")}）` : ""}`).join("\n")}`); break;
+    }
+    case "work-config uninstall": {
+      const result = await assets.uninstallWorkConfig(directory, id!, values.target as "codex" | "claude", values.revision!, values.project);
+      output(result, `已卸载工作配置 ${result.id}。共用和原有独立 Skill 保留；${result.backups.length} 个 Skill 已移入备份。\n${result.backups.map((item) => `${item.id}\t${item.backupPath}`).join("\n")}`); break;
     }
     case "project add": {
       const project = await service.addProject({
