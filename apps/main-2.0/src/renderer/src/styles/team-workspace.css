@@ -57,3 +57,19 @@
   .team-workspace-project { flex-wrap: wrap; }
   .team-workspace-project > div { flex-basis: 100%; }
 }
+
+.team-settings { height: auto; overflow: visible; padding: 0; }
+.team-settings .team-workspace-forms { grid-template-columns: 1fr; }
+.feature-scope { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.feature-scope-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border-subtle); }
+.feature-scope-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--panel-subtle); }
+.feature-scope-switch button, .feature-scope-settings, .feature-scope-empty button { border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.feature-scope-switch button[aria-pressed=true] { background: var(--panel-bg); color: var(--text); box-shadow: 0 1px 3px var(--border-subtle); }
+.feature-scope-switch button:disabled { opacity: .5; cursor: wait; }
+.feature-scope-settings { display: inline-flex; align-items: center; gap: 5px; }
+.feature-scope button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.feature-scope-content { flex: 1; min-height: 0; overflow: hidden; }
+.feature-scope-empty { max-width: 620px; padding: 48px 28px; }
+.feature-scope-empty h2 { font-size: 18px; margin: 0 0 14px; }
+.feature-scope-empty p { font-size: 13px; line-height: 1.7; color: var(--text-muted); }
+.feature-scope-empty button { padding-left: 0; color: var(--accent); }

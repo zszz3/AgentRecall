@@ -11,7 +11,6 @@ import {
   PlugZap,
   Settings,
   Workflow,
-  UsersRound,
 } from "lucide-react";
 import type { LanguageMode } from "../language";
 
@@ -27,8 +26,7 @@ export type AppPage =
   | "mcp"
   | "memories"
   | "skills"
-  | "providers"
-  | "team-workspace";
+  | "providers";
 
 export function AppNavigation({
   activePage,
@@ -72,9 +70,6 @@ export function AppNavigation({
         </NavigationItem>
         <NavigationItem page="workflows" activePage={activePage} onNavigate={onNavigate}>
           <Workflow size={18} /><span>Workflow</span>
-        </NavigationItem>
-        <NavigationItem page="team-workspace" activePage={activePage} onNavigate={onNavigate}>
-          <UsersRound size={18} /><span>{l("Team", "团队")}</span>
         </NavigationItem>
         <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate}>
           <Beaker size={18} /><span>Eval</span>
