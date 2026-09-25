@@ -8,7 +8,6 @@ import {
   DetailToolbar,
   InlineStatus,
   WorkbenchEmpty,
-  WorkbenchHeader,
   WorkbenchLayout,
   WorkbenchSection,
 } from "../../ui/workbench/Workbench";
@@ -128,21 +127,16 @@ export function McpPage({ language = "en" }: { language?: Language }) {
   );
   return (
     <section className="mcp-workbench">
-      <WorkbenchHeader
-        eyebrow="CAPABILITY REGISTRY"
-        title="MCP"
-        description={
-          zh
+      <header className="app-page-head automation-page-head">
+        <div><h2>MCP</h2><p>{zh
             ? "一个 Gateway 连接 Codex 与 Claude Code，并渐进式开放 AgentRecall 的全部工具。"
             : "One Gateway connects Codex and Claude Code and progressively exposes AgentRecall tools."
-        }
-        action={(
+        }</p></div>
           <button className="control-btn compact secondary" type="button" onClick={() => setClientsOpen(true)}>
             <Link2 size={13} />
             {zh ? "连接客户端" : "Connect clients"}
           </button>
-        )}
-      />
+      </header>
       <div className="mcp-gateway-overview">
         <div>
           <span>{zh ? "直接工具" : "Direct tools"}</span>
@@ -160,6 +154,7 @@ export function McpPage({ language = "en" }: { language?: Language }) {
       ) : null}
       <div className="mcp-workbench-body">
         <WorkbenchLayout
+          browserResize={{ storageKey: "agent-recall-mcp-pane", label: zh ? "调整 MCP 列表宽度" : "Resize MCP list" }}
           browser={
             <>
               <BrowserHeader

@@ -1,3 +1,4 @@
+import { ResizableSplit } from "../../components/resizable-split";
 import {
   Archive,
   Bot,
@@ -1068,6 +1069,8 @@ export function TeamChatPage({
             <div className="team-chat-feedback" role="alert" aria-atomic="true">{feedback}</div>
           ) : null}
           <div className="team-chat-layout">
+          <ResizableSplit className="team-chat-main" storageKey="agent-recall-chat-pane" initialWidth={208}
+            label={l("Resize room list", "调整房间列表宽度")}>
           <aside className="team-chat-room-rail">
             <div className="team-chat-rail-head">
               <span>{l("Rooms", "房间")}</span>
@@ -1300,6 +1303,8 @@ export function TeamChatPage({
               </div>
             )}
           </section>
+
+          </ResizableSplit>
 
           <aside className="team-chat-members">
             <div className="team-chat-rail-head">

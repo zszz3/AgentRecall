@@ -562,6 +562,8 @@ export type SessionStatsTrendGranularity = "day" | "week" | "month";
 
 export interface SessionStatsOptions {
   period?: SessionStatsPeriod;
+  /** Daily history for the V2 workbench; independent of summary period. */
+  dailyHistoryDays?: 7 | 30 | 90;
   excludeSubagents?: boolean;
   origin?: SessionOriginFilter;
 }

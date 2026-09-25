@@ -12,15 +12,67 @@ describe("SessionsPage search tools", () => {
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value) });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
+    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { platform: "darwin" } });
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("resizes the session sidebar and persists its independent width", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    await act(async () => root.render(<SessionsPage model={createModel()} actions={createActions()} />));
+    const handle = container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize session sidebar"]')!;
+    expect(handle).not.toBeNull();
+    const before = Number(handle.getAttribute("aria-valuenow"));
+    await act(async () => { handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
+    expect(Number(handle.getAttribute("aria-valuenow"))).toBe(before + 16);
+    expect(localStorage.getItem("agent-recall-sessions-pane")).toBe(String(before + 16));
+  });
+
+  it("updates disclosure accessibility immediately and preserves child filters while animating", async () => {
+    const actions = createActions();
+    const model = createModel();
+    model.sidebarSections.sources = true;
+    await act(async () => root.render(<SessionsPage model={model} actions={actions} />));
+    const parent = [...container.querySelectorAll<HTMLButtonElement>(".section-header")]
+      .find((button) => button.textContent === "Sources")!;
+    const disclosure = parent.nextElementSibling!;
+    const child = disclosure.querySelector<HTMLButtonElement>(".nav-group button")!;
+    expect(parent.getAttribute("aria-expanded")).toBe("true");
+    expect(disclosure.hasAttribute("inert")).toBe(false);
+    await act(async () => child.click());
+    expect(actions.setSource).toHaveBeenCalledWith("all");
+    parent.focus();
+    await act(async () => parent.click());
+    expect(actions.toggleSidebarSection).toHaveBeenCalledWith("sources");
+    await act(async () => root.render(<SessionsPage model={{ ...model,
+      sidebarSections: { ...model.sidebarSections, sources: false },
+    }} actions={actions} />));
+    expect(parent.getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure.getAttribute("aria-hidden")).toBe("true");
+    expect(disclosure.hasAttribute("inert")).toBe(true);
+    expect(disclosure.contains(child)).toBe(true);
+    expect(document.activeElement).toBe(parent);
+  });
+
+  it("exposes the complete long branch label without changing the row structure", async () => {
+    const model = createModel();
+    const tag = "refactor/" + "frontend-storage-foundation".repeat(12);
+    model.sessions[0]!.tags = ["branch:" + tag];
+    await act(async () => root.render(<SessionsPage model={model} actions={createActions()} />));
+    const label = container.querySelector(".row-tags .branch-tag");
+    expect(label?.getAttribute("title")).toBe(tag);
+    expect(label?.textContent).toBe(tag);
   });
 
   it("wires advanced, saved, grouped, and sorted search controls", async () => {

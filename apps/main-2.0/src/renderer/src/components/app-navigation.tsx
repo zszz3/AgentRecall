@@ -59,14 +59,25 @@ export function AppNavigation({
         <strong>AgentRecall</strong>
       </button>
       <nav aria-label={l("Main navigation", "主导航")}>
+        <div className="app-navigation-group" role="group" aria-label={l("Home", "首页")}>
+        <p aria-hidden="true">{l("Home", "首页")}</p>
         <NavigationItem page="workbench" activePage={activePage} onNavigate={onNavigate}>
           <LayoutDashboard size={18} /><span>{l("Workbench", "工作台")}</span>
         </NavigationItem>
+        </div>
+        <div className="app-navigation-group" role="group" aria-label={l("Work", "工作")}>
+        <p aria-hidden="true">{l("Work", "工作")}</p>
         <NavigationItem page="sessions" activePage={activePage} onNavigate={onNavigate}>
           <MessagesSquare size={18} /><span>Session</span>
         </NavigationItem>
         <NavigationItem page="team-chat" activePage={activePage} onNavigate={onNavigate}>
           <MessageCircleMore size={18} /><span>Chat</span>
+        </NavigationItem>
+        </div>
+        <div className="app-navigation-group" role="group" aria-label={l("Automation", "自动化")}>
+        <p aria-hidden="true">{l("Automation", "自动化")}</p>
+        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate}>
+          <Cpu size={18} /><span>Runtime</span>
         </NavigationItem>
         <NavigationItem page="workflows" activePage={activePage} onNavigate={onNavigate}>
           <Workflow size={18} /><span>Workflow</span>
@@ -74,21 +85,25 @@ export function AppNavigation({
         <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate}>
           <Beaker size={18} /><span>Eval</span>
         </NavigationItem>
-        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate}>
-          <Cpu size={18} /><span>Runtime</span>
-        </NavigationItem>
-        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate}>
-          <PlugZap size={18} /><span>MCP</span>
-        </NavigationItem>
+        </div>
+        <div className="app-navigation-group" role="group" aria-label={l("Knowledge", "知识")}>
+        <p aria-hidden="true">{l("Knowledge", "知识")}</p>
         <NavigationItem page="memories" activePage={activePage} onNavigate={onNavigate}>
           <BrainCircuit size={18} /><span>Memory</span>
         </NavigationItem>
         <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate}>
           <PackageSearch size={18} /><span>Skills</span>
         </NavigationItem>
+        </div>
+        <div className="app-navigation-group" role="group" aria-label={l("Connections", "连接")}>
+        <p aria-hidden="true">{l("Connections", "连接")}</p>
+        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate}>
+          <PlugZap size={18} /><span>MCP</span>
+        </NavigationItem>
         <NavigationItem page="providers" activePage={activePage} onNavigate={onNavigate}>
           <KeyRound size={18} /><span>Provider</span>
         </NavigationItem>
+        </div>
       </nav>
       <button
         className={`app-navigation-settings ${settingsOpen ? "active" : ""}`}
@@ -115,6 +130,7 @@ function NavigationItem({
   return (
     <button
       data-page={page}
+      aria-current={activePage === page ? "page" : undefined}
       className={activePage === page ? "active" : ""}
       onClick={() => onNavigate(page)}
     >

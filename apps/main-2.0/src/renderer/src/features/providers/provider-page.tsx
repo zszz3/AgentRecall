@@ -1104,7 +1104,7 @@ export function ProviderPage({
                 </div>
                 <div>
                   <span>{l("Config file", "配置文件")}</span>
-                  <strong>{codexConfig?.configPath ?? "~/.codex/config.toml"}</strong>
+                  <strong title={codexConfig?.configPath ?? "~/.codex/config.toml"}>{codexConfig?.configPath ?? "~/.codex/config.toml"}</strong>
                   <em>{codexConfigError || (codexConfig?.exists ? l(`${codexConfig.providers.length} providers`, `${codexConfig.providers.length} 个供应商`) : l("Not created yet", "尚未创建"))}</em>
                 </div>
               </div>
@@ -1114,7 +1114,7 @@ export function ProviderPage({
                   <span className="settings-field-sub">{l("Leave empty to use ~/.codex.", "留空使用 ~/.codex。")}</span>
                 </div>
                 <div className="provider-path-input">
-                  <input type="text" value={draftApiConfig.customConfigDir} disabled={!settings || saving} placeholder="~/.codex" onChange={(event) => updateDraftApiConfig({ customConfigDir: event.currentTarget.value })} />
+                  <input type="text" title={draftApiConfig.customConfigDir || "~/.codex"} value={draftApiConfig.customConfigDir} disabled={!settings || saving} placeholder="~/.codex" onChange={(event) => updateDraftApiConfig({ customConfigDir: event.currentTarget.value })} />
                   <button type="button" disabled={!settings || saving} onClick={() => void pickConfigDirectory("codex")}>{l("Browse", "选择")}</button>
                   <button type="button" disabled={!settings || saving || !draftApiConfig.customConfigDir} onClick={() => updateDraftApiConfig({ customConfigDir: "" })}>{l("Default", "默认")}</button>
                 </div>
@@ -1397,7 +1397,7 @@ export function ProviderPage({
               <div className="codex-config-visualizer">
                 <div>
                   <span>{l("Config file", "配置文件")}</span>
-                  <strong>{claudeConfig?.settingsPath ?? "~/.claude/settings.json"}</strong>
+                  <strong title={claudeConfig?.settingsPath ?? "~/.claude/settings.json"}>{claudeConfig?.settingsPath ?? "~/.claude/settings.json"}</strong>
                   <em>{claudeConfigError || (claudeConfig?.exists ? l("Loaded", "已读取") : l("Not created yet", "尚未创建"))}</em>
                 </div>
                 <div>
@@ -1412,7 +1412,7 @@ export function ProviderPage({
                   <span className="settings-field-sub">{l("Leave empty to use ~/.claude.", "留空使用 ~/.claude。")}</span>
                 </div>
                 <div className="provider-path-input">
-                  <input type="text" value={draftClaudeApiConfig.customConfigDir} disabled={!settings || saving} placeholder="~/.claude" onChange={(event) => updateDraftClaudeApiConfig({ customConfigDir: event.currentTarget.value })} />
+                  <input type="text" title={draftClaudeApiConfig.customConfigDir || "~/.claude"} value={draftClaudeApiConfig.customConfigDir} disabled={!settings || saving} placeholder="~/.claude" onChange={(event) => updateDraftClaudeApiConfig({ customConfigDir: event.currentTarget.value })} />
                   <button type="button" disabled={!settings || saving} onClick={() => void pickConfigDirectory("claude")}>{l("Browse", "选择")}</button>
                   <button type="button" disabled={!settings || saving || !draftClaudeApiConfig.customConfigDir} onClick={() => updateDraftClaudeApiConfig({ customConfigDir: "" })}>{l("Default", "默认")}</button>
                 </div>
@@ -1695,12 +1695,13 @@ export function ProviderPage({
               <label className="settings-field" data-summary-row="config-dir">
                 <div className="settings-field-text">
                   <span className="settings-field-title">{l("Config directory", "配置目录")}</span>
-                  <span className="settings-field-sub">{summaryView.configPath}</span>
+                  <span className="settings-field-sub" title={summaryView.configPath}>{summaryView.configPath}</span>
                 </div>
                 <div className="provider-path-input">
                   <input
                     type="text"
                     value={summaryView.configDir}
+                    title={summaryView.configDir || summaryView.configDirPlaceholder}
                     disabled={!settings || saving || !summaryView.configDirEditable}
                     placeholder={summaryView.configDirPlaceholder}
                     onChange={(event) => summaryView.setConfigDir(event.currentTarget.value)}

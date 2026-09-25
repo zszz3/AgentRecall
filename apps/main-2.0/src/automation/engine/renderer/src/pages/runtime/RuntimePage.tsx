@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ResizableSplit } from "../../../../../../renderer/src/components/resizable-split";
 import { CheckCircle2, Eye, EyeOff, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
 import { selectConfigChannelsForDisplay } from "../../../../shared/config-channels";
 import { DEFAULT_MODEL_ID } from "../../../../shared/models";
@@ -370,7 +371,8 @@ export function RuntimePage({
       </header> : null}
 
       <div className="runtime-layout">
-        <div className="runtime-config-workspace">
+        <ResizableSplit className="runtime-config-workspace" storageKey="agent-recall-runtime-pane" initialWidth={220}
+          label={language === "zh" ? "调整当前配置列表宽度" : "Resize Runtime configuration list"}>
           <aside className="runtime-config-sidebar" aria-label={language === "zh" ? "Runtime 配置" : "Runtime configs"}>
             <header>
               <div>
@@ -816,7 +818,7 @@ export function RuntimePage({
             </div>
           )}
           </section>
-        </div>
+        </ResizableSplit>
       </div>
 
       <div

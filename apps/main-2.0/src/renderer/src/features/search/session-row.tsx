@@ -112,7 +112,7 @@ export const SessionRow = memo(function SessionRow({
             <Star size={14} fill={session.favorited ? "currentColor" : "none"} />
           </button>
           {session.hidden ? <EyeOff size={14} /> : null}
-          <span className="session-name">{session.displayTitle}</span>
+          <span className="session-name" title={session.displayTitle}>{session.displayTitle}</span>
           <button
             className="title-edit-button"
             onClick={(event) => {
@@ -191,7 +191,7 @@ export const SessionRow = memo(function SessionRow({
       </div>
       <div className="row-tags">
         {session.tags.slice(0, 3).map((tagName) => (
-         <span key={tagName} className={isBranchTag(tagName) ? "branch-tag" : undefined}>
+         <span key={tagName} title={displayTagName(tagName)} className={isBranchTag(tagName) ? "branch-tag" : undefined}>
             {isBranchTag(tagName) ? "" : "#"}{displayTagName(tagName)}
          </span>
         ))}

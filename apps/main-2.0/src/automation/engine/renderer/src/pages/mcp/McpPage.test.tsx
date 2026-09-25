@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { Window } from "happy-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { McpServerDefinition } from "../../../../shared/mcp/types";
@@ -117,4 +119,67 @@ describe("McpPage", () => {
     // managed servers still expose the original Power enable/disable button
     expect(html).toContain("禁用");
   });
+});
+
+it("exposes an accessible resize separator for the MCP source list", () => {
+  const html = renderToStaticMarkup(<McpPage language="en" />);
+  expect(html).toContain('aria-label="Resize MCP list"');
+  expect(html).toContain('role="separator"');
+});
+
+// happy-dom does not implement @scope or browser layout. Keep the production
+// rules and media queries, unwrapping only their outer scope; the real page is
+// mounted under that same scope below. This tests scroll ownership, not pixels.
+const rendererStyles = new URL("../../../../../../renderer/src/styles/", import.meta.url);
+const scrollStyles = ["automation-upstream/part-05.css", "automation-upstream/part-06.css", "automation.css"]
+  .map(file => {
+    const css = readFileSync(new URL(file, rendererStyles), "utf8");
+    return css.startsWith("@scope (.automation-page) {")
+      ? css.replace(/^@scope \(\.automation-page\) \{/, "").replace(/\}\s*$/, "")
+      : css;
+  }).join("\n");
+
+it.each([
+  { width: 1200, stacked: false },
+  { width: 700, stacked: false },
+  { width: 480, stacked: true },
+])("keeps a long MCP list as the scroll owner at viewport $width (stacked: $stacked)", async ({ width, stacked }) => {
+  model.servers = Array.from({ length: 40 }, (_, index) => server({
+    id: `scroll-server-${index}`, name: `Scroll server ${index}`,
+  }));
+  model.draft = undefined;
+  const window = new Window({ width, height: 800 });
+  try {
+    const style = window.document.createElement("style");
+    style.textContent = scrollStyles;
+    window.document.head.append(style);
+    window.document.body.innerHTML = `<div class="automation-page">${renderToStaticMarkup(<McpPage language="en" />)}</div>`;
+    const split = window.document.querySelector(".resizable-split")!;
+    // The existing ResizableSplit tests cover when this state is selected.
+    split.setAttribute("data-stacked", String(stacked));
+    const sidebar = window.document.querySelector(".workbench-browser")!;
+    const header = sidebar.querySelector(".workbench-browser-header")!;
+    const list = sidebar.querySelector(".workbench-browser-list")!;
+    expect(header.parentElement).toBe(sidebar);
+    expect(list.parentElement).toBe(sidebar);
+    expect(list.querySelectorAll(".mcp-registry-row")).toHaveLength(40);
+    expect(list.textContent).toContain("Scroll server 39");
+
+    const sidebarStyle = window.getComputedStyle(sidebar);
+    expect(sidebarStyle.display).toBe("flex");
+    expect(sidebarStyle.flexDirection).toBe("column");
+    expect(parseFloat(sidebarStyle.minHeight)).toBe(0);
+    expect(sidebarStyle.overflow).toBe("hidden");
+    expect(window.getComputedStyle(header).flexShrink).toBe("0");
+
+    const listStyle = window.getComputedStyle(list);
+    expect(listStyle.display).toBe("block");
+    expect(listStyle.flexGrow).toBe("1");
+    expect(parseFloat(listStyle.flexBasis)).toBe(0);
+    expect(parseFloat(listStyle.minHeight)).toBe(0);
+    expect(listStyle.height).toBe("auto");
+    expect(listStyle.overflow).toBe("auto");
+  } finally {
+    await window.happyDOM.close();
+  }
 });

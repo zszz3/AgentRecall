@@ -123,6 +123,7 @@ export function useWorkbenchOverview(language: LanguageMode) {
     const nextStats = await window.sessionSearch.getStats({
       period: statsPeriod,
       origin: statsOrigin,
+      dailyHistoryDays: 90,
     });
     if (requestId === statsLoadSequence.current) setStats(nextStats);
   }, [statsOrigin, statsPeriod]);

@@ -157,12 +157,12 @@ function formatTrendBucketLabel(
   return `${month}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function dailyRanges(now: number): Array<Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive">> {
+function dailyRanges(now: number, count: number): Array<Pick<SessionDailyTokenUsage, "dayStart" | "dayEndExclusive">> {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, index) => {
+  return Array.from({ length: count }, (_, index) => {
     const start = new Date(today);
-    start.setDate(today.getDate() - (6 - index));
+    start.setDate(today.getDate() - (count - 1 - index));
     const end = new Date(start);
     end.setDate(start.getDate() + 1);
     return { dayStart: start.getTime(), dayEndExclusive: end.getTime() };
@@ -187,7 +187,6 @@ export class PostgresSessionStatsRepository {
   async getStats(
     options: SessionStatsOptions = {},
     now = Date.now(),
-    includePrevious = true,
   ): Promise<SessionStats> {
     const range = resolveStatsRange(options, now);
     const originPredicate = sessionOriginPredicate(options.origin);
@@ -195,6 +194,74 @@ export class PostgresSessionStatsRepository {
       ...(options.excludeSubagents ? ["sessions.is_subagent = false"] : []),
       ...(originPredicate ? [originPredicate] : []),
     ];
+    const { total, bySource } = await this.aggregateStatsForRange(range, sessionPredicates);
+    const sessionAnd = sessionPredicates.map((predicate) => `and ${predicate}`).join(" ");
+
+    const historyDays = options.dailyHistoryDays === 30 || options.dailyHistoryDays === 90 ? options.dailyHistoryDays : 7;
+    const days = dailyRanges(now, historyDays);
+    const dailyRows = await this.database.query<{
+      occurred_at: Date | string;
+      input_tokens: number | string;
+      output_tokens: number | string;
+      cached_input_tokens: number | string;
+      cache_creation_input_tokens: number | string;
+      reasoning_output_tokens: number | string;
+      total_tokens: number | string;
+    }>(
+      `
+        with ranked as (
+          select
+            events.*,
+            row_number() over (
+              partition by events.dedupe_key
+              order by events.total_tokens desc, events.occurred_at
+            ) as row_rank
+          from agent_recall.token_events events
+          join agent_recall.sessions sessions on sessions.session_key = events.session_key
+          where events.occurred_at >= $1 and events.occurred_at <= $2
+            ${sessionAnd}
+        )
+        select
+          occurred_at, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
+          reasoning_output_tokens, total_tokens
+        from ranked
+        where row_rank = 1
+      `,
+      [
+        new Date(days[0].dayStart).toISOString(),
+        new Date(now).toISOString(),
+      ],
+    );
+    // Bucket each event once, including for the longer workbench history window.
+    const dailyTotals = new Map(days.map(day => [day.dayStart, normalizedTokenUsage()]));
+    for (const row of dailyRows.rows) {
+      const usage = dailyTotals.get(startOfTrendBucket(timeValue(row.occurred_at), "day"));
+      if (!usage) continue;
+      usage.inputTokens += numberValue(row.input_tokens);
+      usage.outputTokens += numberValue(row.output_tokens);
+      usage.cachedInputTokens += numberValue(row.cached_input_tokens);
+      const cacheCreated = numberValue(row.cache_creation_input_tokens);
+      if (cacheCreated > 0) usage.cacheCreationInputTokens = (usage.cacheCreationInputTokens ?? 0) + cacheCreated;
+      usage.reasoningOutputTokens += numberValue(row.reasoning_output_tokens);
+      usage.totalTokens += numberValue(row.total_tokens);
+    }
+    const dailyTokenUsage = days.map<SessionDailyTokenUsage>(day => ({ ...day, ...dailyTotals.get(day.dayStart)! }));
+
+    const previousRange = resolvePreviousStatsRange(range);
+    const previousTotal = previousRange
+      ? (await this.aggregateStatsForRange(
+          resolveStatsRange(options, previousRange.until - 1),
+          sessionPredicates,
+        )).total
+      : null;
+
+    return { total, bySource, dailyTokenUsage, range, previousTotal };
+  }
+
+  private async aggregateStatsForRange(
+    range: StatsRange,
+    sessionPredicates: readonly string[],
+  ): Promise<Pick<SessionStats, "total" | "bySource">> {
     const sessionWhere = sessionPredicates.length > 0
       ? `where ${sessionPredicates.join(" and ")}`
       : "";
@@ -374,75 +441,7 @@ export class PostgresSessionStatsRepository {
       }),
       emptyStatsSummary(),
     );
-
-    const days = dailyRanges(now);
-    const dailyRows = await this.database.query<{
-      occurred_at: Date | string;
-      input_tokens: number | string;
-      output_tokens: number | string;
-      cached_input_tokens: number | string;
-      cache_creation_input_tokens: number | string;
-      reasoning_output_tokens: number | string;
-      total_tokens: number | string;
-    }>(
-      `
-        with ranked as (
-          select
-            events.*,
-            row_number() over (
-              partition by events.dedupe_key
-              order by events.total_tokens desc, events.occurred_at
-            ) as row_rank
-          from agent_recall.token_events events
-          join agent_recall.sessions sessions on sessions.session_key = events.session_key
-          where events.occurred_at >= $1 and events.occurred_at <= $2
-            ${sessionAnd}
-        )
-        select
-          occurred_at, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
-          reasoning_output_tokens, total_tokens
-        from ranked
-        where row_rank = 1
-      `,
-      [
-        new Date(days[0].dayStart).toISOString(),
-        new Date(now).toISOString(),
-      ],
-    );
-    const dailyTokenUsage = days.map<SessionDailyTokenUsage>((day) => {
-      const usage = dailyRows.rows
-        .filter((row) => {
-          const timestamp = timeValue(row.occurred_at);
-          return timestamp >= day.dayStart && timestamp < day.dayEndExclusive;
-        })
-        .reduce<TokenUsage>(
-          (sum, row) => ({
-            inputTokens: sum.inputTokens + numberValue(row.input_tokens),
-            outputTokens: sum.outputTokens + numberValue(row.output_tokens),
-            cachedInputTokens: sum.cachedInputTokens + numberValue(row.cached_input_tokens),
-            ...((sum.cacheCreationInputTokens ?? 0) + numberValue(row.cache_creation_input_tokens) > 0
-              ? { cacheCreationInputTokens: (sum.cacheCreationInputTokens ?? 0) + numberValue(row.cache_creation_input_tokens) }
-              : {}),
-            reasoningOutputTokens: sum.reasoningOutputTokens + numberValue(row.reasoning_output_tokens),
-            totalTokens: sum.totalTokens + numberValue(row.total_tokens),
-          }),
-          normalizedTokenUsage(),
-        );
-      return { ...day, ...usage };
-    });
-
-    const previousRange = resolvePreviousStatsRange(range);
-    const previousTotal = includePrevious && previousRange
-      ? (
-          await this.getStats(
-            { ...options, period: previousRange.period },
-            previousRange.until - 1,
-            false,
-          )
-        ).total
-      : null;
-
-    return { total, bySource, dailyTokenUsage, range, previousTotal };
+    return { total, bySource };
   }
 
   async getStatsTrend(

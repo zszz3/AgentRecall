@@ -1,4 +1,5 @@
 .provider-page {
+  --provider-content-width: 1120px;
   display: flex;
   width: 100%;
   height: 100%;
@@ -9,14 +10,14 @@
   background: var(--app-bg);
 }
 
-.provider-page-head > div {
-  width: min(100%, 980px);
-  margin: 0 auto;
+.provider-page .provider-page-head > div:first-child {
+  width: 100%;
+  margin: 0;
 }
 
 .api-target-tabs {
   display: flex;
-  width: min(100%, 1024px);
+  width: min(100%, calc(var(--provider-content-width) + 44px));
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 6px;
@@ -55,32 +56,35 @@
 }
 
 .api-config-body > .settings-pane {
-  width: min(100%, 980px);
+  width: min(100%, var(--provider-content-width));
   margin: 0 auto;
 }
 
 .api-provider-switch {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 248px));
+  gap: 10px;
 }
 
 .api-provider-switch--compact {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 248px));
 }
 
 .codex-provider-switch {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 248px));
 }
 
 .summary-provider-switch {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 248px));
 }
 
 .api-provider-switch button {
   display: grid;
-  min-height: 36px;
-  padding: 6px 8px;
+  min-width: 0;
+  min-height: 64px;
+  align-content: center;
+  gap: 4px;
+  padding: 12px 16px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--panel-subtle);
@@ -106,9 +110,9 @@
   min-width: 0;
   overflow: hidden;
   color: currentColor;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -117,8 +121,8 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 10.5px;
-  line-height: 1.1;
+  font-size: var(--text-sm);
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -181,6 +185,7 @@
 
 .provider-model-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -194,6 +199,7 @@
 
 .provider-path-input {
   display: grid;
+  min-width: 0;
   grid-template-columns: minmax(0, 1fr) max-content max-content;
   gap: 6px;
 }
@@ -310,7 +316,7 @@
 
 .api-settings-form .settings-field {
   display: grid;
-  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  grid-template-columns: minmax(160px, .3fr) minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   padding: 10px 12px;
@@ -320,6 +326,15 @@
 .api-settings-form .settings-field select {
   width: 100%;
   min-width: 0;
+}
+
+.api-settings-form .settings-field-text { min-width: 0; }
+.api-settings-form .settings-field-sub[title] {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .api-model-grid {
@@ -335,11 +350,12 @@
 }
 
 .api-config-actions {
+  flex-wrap: wrap;
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 12px 22px 14px;
+  padding: 12px max(22px, calc((100% - var(--provider-content-width)) / 2)) 14px;
   border-top: 1px solid var(--border);
   background: var(--panel-bg);
 }
@@ -372,13 +388,19 @@
 
 .api-config-status {
   min-width: 0;
+  max-width: 100%;
   margin-right: auto;
-  overflow: hidden;
+  padding: 8px 0;
   color: var(--text-muted);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
+
+.api-settings-form .settings-field > .api-config-status { grid-column: 1 / -1; }
+.api-config-actions { row-gap: 12px; }
+.api-config-feedback { flex: 1 1 240px; }
 
 .api-config-status.running {
   color: var(--running-text);
@@ -390,15 +412,6 @@
 
 .api-config-status.error {
   color: var(--danger);
-}
-
-@media (max-width: 900px) {
-  .api-provider-switch--compact,
-  .codex-provider-switch,
-  .summary-provider-switch {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
 }
 
 @media (max-width: 640px) {

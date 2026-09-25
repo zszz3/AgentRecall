@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   CodexIncrementalState,
@@ -894,4 +894,42 @@ describe("PostgresSessionRepository", () => {
         buckets: [{ totalTokens: 175 }],
       });
   });
+
+  it("extends daily workbench history independently of summary period and bounds unsupported ranges", async () => {
+    await repository.upsertIndexedSession(session(), messages, tokens, traces);
+    const now = Date.parse("2026-08-25T12:00:00.000Z");
+    const recent = await statsRepository.getStats({ period: "allTime", dailyHistoryDays: 30 }, now);
+    const history = await statsRepository.getStats({ period: "allTime", dailyHistoryDays: 90 }, now);
+    expect(recent.dailyTokenUsage).toHaveLength(30);
+    expect(history.dailyTokenUsage).toHaveLength(90);
+    expect(recent.total).toEqual(history.total);
+    expect(recent.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(0);
+    expect(history.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(175);
+    for (let i = 1; i < history.dailyTokenUsage.length; i++) {
+      expect(history.dailyTokenUsage[i].dayStart).toBe(history.dailyTokenUsage[i - 1].dayEndExclusive);
+    }
+    const invalid = await statsRepository.getStats({ period: "allTime", dailyHistoryDays: -1 as 7 }, now);
+    expect(invalid.dailyTokenUsage).toHaveLength(7);
+  });
+
+  it.each([7, 30, 90] as const)("loads %i-day history once while comparing the previous summary", async (dailyHistoryDays) => {
+    await repository.upsertIndexedSession(session(), messages, tokens, traces);
+    const now = Date.parse("2026-07-21T12:00:00.000Z");
+    const query = vi.spyOn(database, "query");
+    try {
+      const stats = await statsRepository.getStats({ period: "today", dailyHistoryDays }, now);
+      expect(stats.total.totalTokens).toBe(0);
+      expect(stats.previousTotal?.totalTokens).toBe(175);
+      expect(stats.dailyTokenUsage).toHaveLength(dailyHistoryDays);
+      expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(175);
+      // Two summaries need three aggregates each; only the current request needs
+      // daily events. Bound database work without asserting SQL formatting.
+      expect(query.mock.calls.length).toBeLessThanOrEqual(7);
+      const historyStart = new Date(stats.dailyTokenUsage[0].dayStart).toISOString();
+      expect(query.mock.calls.filter(([, values]) => values?.[0] === historyStart)).toHaveLength(1);
+    } finally {
+      query.mockRestore();
+    }
+  });
+
 });
