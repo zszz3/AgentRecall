@@ -164,4 +164,27 @@ describe("V2 team workspace IPC", () => {
     await expect(fs.access(path.join(saved.root, ".agents", "skills", "review"))).rejects.toMatchObject({ code: "ENOENT" });
     expect((await assets.backups(saved.root, "review", saved.id)).backups).toHaveLength(1);
   });
+  it("connects repositories and local projects without asking for internal IDs or enabling sharing", async () => {
+    const { api, workspace } = harness();
+    const result = await api.request({ action: "add-team", repository: "git@github.com:Example/Assets.git", makeDefault: true });
+    expect(result.ok).toBe(true);
+    const saved = (await workspace.store.read())!;
+    expect(saved.teamEnabled).toBe(false);
+    expect(saved.teams).toHaveLength(1);
+    expect(saved.teams[0]).toMatchObject({ name: "example/assets", repository: "https://github.com/example/assets" });
+    expect(saved.defaultTeamId).toBe(saved.teams[0]!.id);
+    expect(saved.teams[0]!.id).toMatch(/^team-/);
+    expect(await api.request({ action: "add-team", repository: "https://github.com/example/assets" })).toMatchObject({ ok: false, error: { code: "TEAM_EXISTS" } });
+    const directory = path.join(root, "local-project");
+    await fs.mkdir(directory);
+    await execute("git", ["init", "-q", directory]);
+    expect(await api.request({ action: "add-project", directory, teamId: saved.defaultTeamId })).toMatchObject({ ok: true });
+    const updated = (await workspace.store.read())!;
+    expect(updated.projects[0]).toMatchObject({ name: "local-project", teamId: saved.defaultTeamId });
+    expect(updated.projects[0]!.id).toMatch(/^project-/);
+    expect(await api.request({ action: "add-project", directory })).toMatchObject({ ok: false, error: { code: "PROJECT_EXISTS" } });
+    expect((await workspace.store.read())?.projects).toHaveLength(1);
+    expect((await workspace.store.read())?.teamEnabled).toBe(false);
+  });
+
 });

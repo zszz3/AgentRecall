@@ -1,4 +1,6 @@
 import { WorkspaceError } from "./errors.js";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
 import {
   WorkspaceConfigStore,
   type WorkspaceConfig, type ProjectBinding, type TeamSpace,
@@ -22,11 +24,13 @@ export class WorkspaceService {
     this.store = new WorkspaceConfigStore(homeDirectory);
   }
 
-  async addTeam(input: { id: string; name?: string; repository: string }): Promise<TeamSpace> {
-    const team: TeamSpace = { id: input.id, name: input.name ?? input.id, repository: canonicalGitHubRepository(input.repository) };
+  async addTeam(input: { id?: string; name?: string; repository: string; makeDefault?: boolean }): Promise<TeamSpace> {
+    const repository = canonicalGitHubRepository(input.repository);
+    const team: TeamSpace = { id: input.id ?? `team-${randomUUID()}`, name: input.name ?? input.id ?? repository.slice("https://github.com/".length), repository };
     await this.store.update((config) => {
       if (config.teams.some((item) => item.id === team.id)) throw new WorkspaceError("TEAM_EXISTS", "团队 ID 已存在，请选择另一个 ID。");
-      return { ...config, teams: [...config.teams, team] };
+      if (!input.id && config.teams.some((item) => item.repository === repository)) throw new WorkspaceError("TEAM_EXISTS", "这个团队仓库已经添加，请从团队列表中选择。");
+      return { ...config, teams: [...config.teams, team], ...(input.makeDefault ? { defaultTeamId: team.id } : {}) };
     });
     return team;
   }
@@ -39,12 +43,12 @@ export class WorkspaceService {
     return this.store.update((config) => ({ ...config, teamEnabled: enabled }));
   }
 
-  async addProject(input: { id: string; name?: string; directory: string; remote?: string; teamId?: string | null }): Promise<ProjectBinding> {
+  async addProject(input: { id?: string; name?: string; directory: string; remote?: string; teamId?: string | null }): Promise<ProjectBinding> {
     const checkout = await inspectCheckout(input.directory);
     if (!checkout) throw new WorkspaceError("NOT_A_REPOSITORY", "请选择一个非裸 Git 仓库目录。");
     const identity = await checkoutRepository(checkout, input.remote);
     const project: ProjectBinding = {
-      id: input.id, name: input.name ?? input.id, root: checkout.root, gitCommonDir: checkout.gitCommonDir,
+      id: input.id ?? `project-${randomUUID()}`, name: input.name ?? input.id ?? path.basename(checkout.root).slice(0, 200), root: checkout.root, gitCommonDir: checkout.gitCommonDir,
       ...identity, ...(input.teamId !== undefined ? { teamId: input.teamId } : {}),
     };
     await this.store.update((config) => {
