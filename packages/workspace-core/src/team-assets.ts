@@ -7,7 +7,7 @@ import { WorkspaceError, hasErrorCode } from "./errors.js";
 import { GitAssetSource, type AssetTransport } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
-import { inspectCheckout } from "./git.js";
+import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
@@ -18,6 +18,53 @@ export class TeamAssetService {
   private readonly cacheDirectory: string;
   constructor(private readonly workspace: WorkspaceService, private readonly source = new GitAssetSource(), private readonly selection?: AssetSelection) {
     this.cacheDirectory = path.join(path.dirname(workspace.store.filePath), "assets");
+  }
+
+  async initialize(repository: string, name?: string, transport: AssetTransport = "https", signal?: AbortSignal) {
+    const canonical = canonicalGitHubRepository(repository);
+    if (!["https", "ssh"].includes(transport) || name !== undefined && (!name.trim() || name.trim().length > 200)) {
+      throw new WorkspaceError("INVALID_ARGUMENTS", "请使用 https 或 ssh，名称需为 1—200 个字符。");
+    }
+    if (signal?.aborted) throw new WorkspaceError("CANCELLED", "初始化已取消。");
+    const before = await this.workspace.store.initialize();
+    if (before.teams.filter((team) => team.repository === canonical).length > 1) {
+      throw new WorkspaceError("AMBIGUOUS_TEAM", "这个仓库已登记为多个团队，请先整理重复的团队配置后再初始化。");
+    }
+    const directory = path.dirname(this.workspace.store.filePath);
+    const staging = path.join(directory, "initialization");
+    // Separate lock target: config writes acquire their own lock while init is in flight.
+    return withAssetLock(staging, ".init.lock", async (assertOwned) => {
+      const scratch = await fs.mkdtemp(path.join(staging, ".init-"));
+      let remoteReady = false;
+      let localReady = false;
+      try {
+        const result = await this.source.initialize(canonical, scratch, transport, assertOwned, signal);
+        remoteReady = true;
+        let config;
+        try {
+          config = await this.workspace.store.update((current) => {
+            assertOwned();
+            if (signal?.aborted) throw new WorkspaceError("CANCELLED", "初始化已取消。");
+            const matches = current.teams.filter((team) => team.repository === canonical);
+            if (matches.length > 1) throw new WorkspaceError("AMBIGUOUS_TEAM", "这个仓库对应多个团队，请先整理重复配置。");
+            if (matches.length) return current;
+            return { ...current, teams: [...current.teams, { id: `team-${randomUUID()}`, name: name?.trim() ?? canonical.slice("https://github.com/".length), repository: canonical }] };
+          });
+          localReady = true;
+        } catch {
+          throw new WorkspaceError("INIT_LOCAL_CONFIG_FAILED", "远端资产仓库已就绪，但本地团队配置未保存。请检查配置文件、权限或锁后重新执行 init；不会覆盖远端已有内容。", { repository: canonical, commit: result.snapshot.commit, remoteCreated: result.created });
+        }
+        return {
+          team: config.teams.find((team) => team.repository === canonical)!,
+          created: result.created, commit: result.snapshot.commit, teamEnabled: config.teamEnabled,
+          skills: result.snapshot.skills.length,
+          workConfigs: result.snapshot.schemaVersion === 2 ? result.snapshot.workConfigs.length : 0,
+        };
+      } finally {
+        try { await fs.rm(scratch, { recursive: true, force: true }); }
+        catch { throw new WorkspaceError("INIT_CLEANUP_FAILED", "初始化临时目录未能清理，请检查目录权限并重试。", { directory: scratch, remoteReady, localReady }); }
+      }
+    });
   }
 
   private async currentTeam(directory: string, projectId?: string): Promise<Context> {

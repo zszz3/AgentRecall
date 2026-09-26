@@ -6,6 +6,22 @@
 
 这些团队功能已接入 V2 的[团队工作区](team-workspace.md)，与 CLI 共用配置和服务。CLI 可独立运行，不使用 V1 代码或数据。
 
+## 初始化团队资产仓库
+
+```sh
+agentrecall init https://github.com/your-team/ai-assets --name 我的团队
+```
+
+仓库必须已在 GitHub 创建。这个命令会主动访问远端：空仓库会在 `main` 创建并推送一条基础模板提交，包含 `agentrecall.json`、说明文件和参考 TeamAI 的 `skills/rules/docs/env/members` 目录。当前清单支持 Skills 与工作配置，其余目录仅预留，不代表已实现自动分发、成员系统或 TeamAI 格式兼容。
+
+非空仓库必须已有合法的 AgentRecall 清单；命令只校验，不补写或覆盖已有文件。重复运行复用远端版本和本地团队 ID，不重复创建提交。`--name` 只用于首次登记；已有名称保留。默认 HTTPS，也可使用 `--transport ssh`，沿用已有 Git 身份，不自动登录或安装认证工具。
+
+初始化保留当前团队开关和默认团队，不自动绑定当前代码目录、不安装 Skill/Hook、不上传 Session。完成后在 V2 团队范围里创建项目；或用输出的团队 ID 执行 `project add <id> --path <业务目录> --team <团队ID>`，开启团队后再手动 `team sync` 获取缓存。
+
+推送失败或网络中断时会报告结果未确认，重试会重新检查远端；若远端已就绪而本地配置写入失败，会明确报告部分完成，不删除远端提交。取消时不回滚已经完成的远端写入。初始化的临时 Git 目录在成功、失败或取消后清理。
+
+不带仓库地址的 `agentrecall init` 继续只创建个人配置，不访问网络。`team add` 也仍然只登记地址，不初始化远端。
+
 ## 配置两个团队、三个项目
 
 团队资产仓库保存共享的 AI 工作资产；业务仓库保存项目代码。两者分别登记，同一个团队可以对应多个业务项目。
@@ -36,6 +52,7 @@ agentrecall team disable
 | 命令 | 行为 |
 | --- | --- |
 | `init` | 创建默认关闭的个人配置；重复执行保留现有配置 |
+| `init <repo-url> [--name <名称>] [--transport https\|ssh]` | 初始化空团队仓库或校验已有资产仓库，再登记本地团队；空仓库会推送模板 |
 | `status [--project <id>]` | 显示配置路径、当前项目、配置的团队与生效状态 |
 | `doctor [--project <id>]` | 检查配置格式及当前目录的 Git 绑定；不测试远端权限或所有历史路径 |
 | `team add <id> --repo <url> [--name <名称>]` | 登记团队资产仓库 |

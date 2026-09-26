@@ -1,6 +1,6 @@
 # AgentRecall CLI
 
-V2 配套独立命令 `agentrecall`，用于管理本地项目和可选团队配置，主动拉取、预览、安装、更新和回滚团队 Skill。团队默认关闭；只有 `team sync` 会主动访问资产仓库，不上传 Session，也不要求安装或启动桌面应用。
+V2 配套独立命令 `agentrecall`，用于管理本地项目和可选团队配置，主动拉取、预览、安装、更新和回滚团队 Skill。团队默认关闭；`init <仓库地址>` 可初始化空团队仓库，`team sync` 主动读取资产，不上传 Session，也不要求安装或启动桌面应用。
 
 这是源码预览包，尚未发布到 npm 或桌面 Release 附件。需要 Node.js 22.13+ 和 Git 2.31+。在仓库根目录构建：
 
@@ -11,6 +11,8 @@ node apps/cli/bin/agentrecall.mjs --help
 ```
 
 若需要安装命令，在 `apps/cli` 目录运行 `npm pack --ignore-scripts`，然后用 `npm install -g <生成的 tgz 文件路径>` 安装。更新时重新构建、打包、安装；卸载使用 `npm uninstall -g agentrecall-cli`，已有配置会保留。
+
+空团队仓库可运行 `agentrecall init <GitHub 仓库地址>`：会在远端提交基础模板并登记本地团队，重复运行不覆盖已有资产。只需保存地址时使用下面的 `team add` 流程。
 
 ```sh
 agentrecall init
