@@ -10,6 +10,7 @@ import "./styles/sessions.css";
 import "./styles/session-detail.css";
 import "./styles/skills.css";
 import "./styles/settings.css";
+import "./styles/team-workspace.css";
 import "./styles/providers.css";
 import "./styles/overlays.css";
 import "./styles/app-shell.css";

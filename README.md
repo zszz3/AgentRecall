@@ -104,6 +104,14 @@ v2 的命令、应用数据、数据库和更新缓存都与 v1 分开，默认�
 
 > 更详细的使用说明请查看 [AgentRecall v2 Guide](./docs/v2/guide.md)。
 
+## V2 本地与团队
+
+V2 提供独立的[团队空间](docs/v2/team-workspace.md)，按团队和项目集中管理共享会话、Skills 与文档，本地页面保持原有布局。团队功能默认关闭，连接与开关在设置中管理，与 CLI 共用配置。会话通过右键预览并主动分享到私有仓库；文档有本地冲突时不会覆盖。
+
+## 独立 CLI（源码预览）
+
+`agentrecall-cli` 提供独立的 `agentrecall` 命令，可管理多仓库与团队绑定，主动拉取团队 Skill，预览后安装到项目中的 Codex 或 Claude Code。团队默认关闭，无需启动桌面；当前尚未接入桌面端或 Session 分享。构建安装见 [CLI 包说明](./apps/cli/README.md)，配置见 [CLI 使用指南](./docs/v2/cli.md)，资产流程见 [团队 Skill 指南](./docs/v2/team-assets.md)。
+
 ## 隐私与安全
 
 - 会话索引与元数据保存在本机，不经过 AgentRecall 提供的第三方服务。

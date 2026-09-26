@@ -91,6 +91,7 @@ import {
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
 import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
+import { TeamSessionShareDialog } from "./features/team-workspace/team-session-share-dialog";
 import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
@@ -112,6 +113,7 @@ import {
   migrationTargetsForSession,
 } from "./session-ui";
 
+const TeamWorkspacePage = lazy(() => import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
@@ -125,6 +127,7 @@ function formatDateInput(date: Date): string {
 
 const SkillsPage = lazy(() =>
   import("./features/skills/skills-page").then((module) => ({ default: module.SkillsPage })));
+
 const WorkflowFeaturePage = lazy(() =>
   import("./features/automation/workflow-feature-page").then((module) => ({ default: module.WorkflowFeaturePage })));
 const TeamChatPage = lazy(() =>
@@ -190,6 +193,7 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
+  const [teamShareSessionKey, setTeamShareSessionKey] = useState<string | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
@@ -2146,6 +2150,7 @@ export function App(): ReactElement {
               />
             ) : null}
           </Suspense>
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 
@@ -2283,6 +2288,7 @@ export function App(): ReactElement {
           ),
         }}
       />
+      {teamShareSessionKey && <TeamSessionShareDialog language={language} sessionKey={teamShareSessionKey} onClose={() => setTeamShareSessionKey(null)} />}
       {contextMenu ? (
         <SessionContextMenu
           state={contextMenu}
@@ -2304,6 +2310,7 @@ export function App(): ReactElement {
             )
           )}
           canMigrate={canMigrateSession(contextMenu.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
+          onShareTeam={() => { setTeamShareSessionKey(contextMenu.session.sessionKey); setContextMenu(null); }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
           onSelectMultiple={() => beginBulkSelection(contextMenu.session.sessionKey)}

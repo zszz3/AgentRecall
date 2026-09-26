@@ -13,6 +13,8 @@ apps/main-2.0/   Preview Electron app; PostgreSQL and asynchronous stores
   src/core/        Domain logic, loaders, persistence, and shared application types
   src/automation/  V2 Agent, Chat, Workflow, Eval, and runtime engine
 scripts/         Repository setup, release-note, packaging, and release checks
+apps/cli/        Standalone CLI source preview; local project and team configuration
+packages/workspace-core/ Shared headless configuration and Git project resolution
 docs/            User guides, troubleshooting, and durable design documents
 .release-notes/ User-facing release-note fragments consumed by the release workflow
 assets/          Repository-level images and distributable assets
@@ -25,6 +27,9 @@ Keep changes in the lowest owning area. Do not place V2-only behavior in shared 
 ```sh
 npm run setup:v1              # install the V1 workspace
 npm run setup:v2              # install the V2 workspace
+npm run setup:cli             # install only CLI and workspace-core dependencies
+npm run test:cli              # isolated CLI and configuration tests
+npm run package:smoke:cli     # build and isolated CLI install/update/uninstall checks
 npm run dev:v1                # run V1 from source
 npm run dev:v2                # run V2 from source
 npm run test:v1               # V1 tests
@@ -38,6 +43,8 @@ npm run release:preflight     # full release preflight; expensive
 ```
 
 Run focused Vitest files from the affected app while iterating, for example `npm exec vitest run src/core/skill-manager.test.ts` with the working directory set to `apps/main-2.0`. Run the app-level test or typecheck only when the focused check passes. Do not default to the full repository suite or repeat a passing check merely before a commit; use the full suite for repository-wide changes, CI diagnosis, release preparation, or an explicit user request.
+
+The root npm workspaces contain only the CLI and its shared configuration module; V1/V2 keep independent installs. CLI configuration, current limitations, and source-package verification are documented in [docs/v2/cli.md](docs/v2/cli.md).
 
 ## Working method
 
