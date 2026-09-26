@@ -80,13 +80,15 @@ export class TeamWorkspaceService {
         await workspace.setTeamEnabled(request.enabled);
         return snapshot();
       case "add-team":
-        await workspace.addTeam({ id: request.id, name: request.name, repository: request.repository });
+        await workspace.store.initialize();
+        await workspace.addTeam({ id: request.id, name: request.name, repository: request.repository, makeDefault: request.makeDefault });
         return snapshot();
       case "default-team":
         await workspace.setDefaultTeam(request.id);
         return snapshot();
       case "add-project":
         if (!path.isAbsolute(request.directory)) throw new WorkspaceError("INVALID_ARGUMENTS", "请选择项目文件夹，或填写项目的完整绝对路径。");
+        await workspace.store.initialize();
         await workspace.addProject({ id: request.id, name: request.name, directory: request.directory, remote: request.remote, teamId: request.teamId });
         return snapshot();
       case "bind-project":

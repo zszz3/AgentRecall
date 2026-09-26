@@ -52,11 +52,15 @@ describe("V2 team settings and feature scopes", () => {
     await act(async () => root.render(<TeamSettings language="zh" api={{ request }} />));
     const toggle = container.querySelector<HTMLInputElement>('[aria-label="启用团队功能"]')!;
     expect(toggle.checked).toBe(false);
-    expect(container.textContent).toContain("各功能页中查看");
+    expect(container.textContent).toContain("各功能页使用团队资产");
     await act(async () => toggle.click());
     expect(toggle.checked).toBe(true);
     expect(request.mock.calls.map(([input]) => input.action)).not.toContain("sync");
-    expect(container.textContent).toContain("添加资产仓库");
+    expect(container.querySelector("form")).toBeNull();
+    await act(async () => button("连接团队").click());
+    expect(container.textContent).toContain("仓库地址");
+    expect(container.textContent).not.toContain("团队 ID");
+    expect(container.textContent).not.toContain("项目 ID");
     expect(request.mock.calls.map(([input]) => input.action)).not.toContain("catalog");
   });
 
@@ -172,6 +176,33 @@ describe("V2 team settings and feature scopes", () => {
     await act(async () => button("同步资产").click());
     await act(async () => root.render(<p>Local content</p>));
     expect(request).toHaveBeenCalledWith({ action: "cancel-sync" });
+  });
+
+  it("opens a minimal team form, retains failed input, and closes it only after the repository is saved", async () => {
+    let fail = true;
+    let saved = { ...config(), teams: [], projects: [], defaultTeamId: null } as WorkspaceConfig;
+    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+      if (input.action === "add-team") {
+        if (fail) return { ok: false, error: { code: "TEAM_OPERATION_FAILED", message: "请重试" } };
+        saved = config();
+      }
+      return ok({ kind: "snapshot", value: { config: saved, busy: false } });
+    });
+    await act(async () => root.render(<TeamSettings language="zh" api={{ request }} />));
+    expect(container.querySelector("form")).toBeNull();
+    await act(async () => button("连接团队").click());
+    const input = container.querySelector<HTMLInputElement>('input[placeholder="https://github.com/your-team/ai-assets"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => { setter.call(input, repository); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(input.value).toBe(repository);
+    expect(container.textContent).toContain("请重试");
+    expect(request).toHaveBeenCalledWith({ action: "add-team", repository, name: undefined, makeDefault: true });
+    fail = false;
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.textContent).toContain("Example");
+    expect(container.textContent).toContain("团队仓库已保存");
   });
 
 });
