@@ -196,17 +196,17 @@ export function App(): ReactElement {
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
-    setContentScope("local");
   }, [activePage]);
   const pageNavigationGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const setPageNavigationGuard = useCallback((guard: (() => Promise<boolean>) | null): void => {
     pageNavigationGuardRef.current = guard;
   }, []);
-  const navigateToPage = useCallback(async (page: AppPage): Promise<boolean> => {
-    if (page === activePage) { setContentScope("local"); return true; }
+  const navigateToPage = useCallback(async (page: AppPage, preserveScope = false): Promise<boolean> => {
+    if (page === activePage) { if (!preserveScope) setContentScope("local"); return true; }
     try {
       if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
       pageNavigationGuardRef.current = null;
+      if (!preserveScope) setContentScope("local");
       setActivePage(page);
       return true;
     } catch (error) {
@@ -1794,7 +1794,7 @@ export function App(): ReactElement {
         settingsOpen={settingsOpen}
         signalUpdate={shouldSignalAppUpdate}
         language={language}
-        onNavigate={(page) => void navigateToPage(page)}
+        onNavigate={(page) => void navigateToPage(page, true)}
         onOpenSettings={() => {
           setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
           setSettingsOpen(true);
@@ -1803,7 +1803,7 @@ export function App(): ReactElement {
 
       <section className="app-workspace">
         <div className="app-page-host">
-          <FeatureScope key={activePage} page={activePage} language={language} scope={contentScope} settingsOpen={settingsOpen}
+          <FeatureScope page={activePage} language={language} scope={contentScope} settingsOpen={settingsOpen}
             onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }}
             onScopeChange={async (next) => {
               const version = pageNavigationVersionRef.current;
@@ -1840,6 +1840,7 @@ export function App(): ReactElement {
               onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
               onShowSessions={(submittedQuery) => {
                 setQuery(submittedQuery);
+                setContentScope("local");
                 setActivePage("sessions");
                 setLiveStatus("all");
               }}
@@ -1853,6 +1854,7 @@ export function App(): ReactElement {
                 setLiveStatus("all");
                 setDateRange("all");
                 setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
+                setContentScope("local");
                 setActivePage("sessions");
               }}
               workflows={workbenchWorkflowSnapshot?.workflows ?? []}
@@ -2141,9 +2143,11 @@ export function App(): ReactElement {
                 onViewSession={async (rawId) => {
                   const session = await window.sessionSearch.findSessionByRawId(rawId);
                   if (session) {
+                    setContentScope("local");
                     setActivePage("sessions");
                     window.requestAnimationFrame(() => openDetail(session));
                   } else {
+                    setContentScope("local");
                     setActivePage("sessions");
                   }
                 }}
