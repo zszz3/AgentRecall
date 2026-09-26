@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { renameSync } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceService } from "./workspace.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
 import { GitAssetSource, type AssetTransport } from "./git-assets.js";
@@ -58,7 +58,7 @@ export class TeamAssetService {
           team: config.teams.find((team) => team.repository === canonical)!,
           created: result.created, commit: result.snapshot.commit, teamEnabled: config.teamEnabled,
           skills: result.snapshot.skills.length,
-          workConfigs: result.snapshot.schemaVersion === 2 ? result.snapshot.workConfigs.length : 0,
+          workConfigs: "workConfigs" in result.snapshot ? result.snapshot.workConfigs.length : 0,
         };
       } finally {
         try { await fs.rm(scratch, { recursive: true, force: true }); }
@@ -126,12 +126,75 @@ export class TeamAssetService {
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
-      workConfigs: snapshot.schemaVersion === 2 ? snapshot.workConfigs : [],
+      workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
+      documents: snapshot.schemaVersion === 3 ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
     }));
   }
 
+  async previewDocument(directory: string, id: string, projectId?: string) {
+    const context = await this.currentTeam(directory, projectId);
+    const snapshot = await this.snapshot(context);
+    const document = snapshot.schemaVersion === 3 ? snapshot.documents.find((item) => item.id === id) : undefined;
+    if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "当前团队没有这份文档，请同步后重试。");
+    const root = await this.projectRoot(directory, context.project.id);
+    const destination = path.join(root, ...document.target.split("/"));
+    const local = await this.localDocument(root, document.target);
+    return this.commitForTeam(directory, context, () => ({ ...document, repository: snapshot.repository, commit: snapshot.commit, destination,
+      local, status: local === null ? "new" as const : local === document.content ? "existing" as const : "conflict" as const }));
+  }
+
+  private async localDocument(root: string, target: string): Promise<string | null> {
+    let current = root;
+    const parts = target.split("/");
+    for (let index = 0; index < parts.length; index++) {
+      current = path.join(current, parts[index]!);
+      let stat;
+      try { stat = await fs.lstat(current); } catch (error) { if (hasErrorCode(error, "ENOENT")) return null; throw error; }
+      if (stat.isSymbolicLink() || (index < parts.length - 1 ? !stat.isDirectory() : !stat.isFile())) throw new WorkspaceError("DOCUMENT_CONFLICT", "文档路径包含链接或非普通文件，已停止应用。");
+    }
+    const handle = await fs.open(current, "r");
+    try {
+      const buffer = Buffer.alloc(1024 * 1024 + 1); let length = 0;
+      while (length < buffer.length) { const result = await handle.read(buffer, length, buffer.length - length, null); if (!result.bytesRead) break; length += result.bytesRead; }
+      if (length > 1024 * 1024) throw new WorkspaceError("DOCUMENT_CONFLICT", "本地文档超过 1 MiB，请在编辑器中手动比较。");
+      try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, length)); }
+      catch { throw new WorkspaceError("DOCUMENT_CONFLICT", "本地文件不是 UTF-8 文本，已停止应用。"); }
+    } finally { await handle.close(); }
+  }
+
+  async installDocument(directory: string, id: string, commit: string, projectId?: string) {
+    const context = await this.currentTeam(directory, projectId);
+    const root = await this.projectRoot(directory, context.project.id);
+    return withAssetLock(root, ".agentrecall-document.lock", async (assertOwned) => {
+      const snapshot = await this.snapshot(context);
+      if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "文档版本已改变，请重新预览。");
+      const document = snapshot.schemaVersion === 3 ? snapshot.documents.find((item) => item.id === id) : undefined;
+      if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "找不到指定文档。");
+      return this.commitForTeam(directory, context, async () => {
+        assertOwned();
+        const local = await this.localDocument(root, document.target);
+        if (local === document.content) return { status: "existing" as const };
+        if (local !== null) throw new WorkspaceError("DOCUMENT_CONFLICT", "本地已有不同内容，请先手动合并；不会覆盖原文件。");
+        const destination = path.join(root, ...document.target.split("/"));
+        await fs.mkdir(path.dirname(destination), { recursive: true });
+        await this.localDocument(root, document.target);
+        assertOwned();
+        const temporary = path.join(root, `.agentrecall-document-${randomUUID()}.tmp`);
+        try {
+          const handle = await fs.open(temporary, "wx", 0o600);
+          try { await handle.writeFile(document.content); await handle.sync(); } finally { await handle.close(); }
+          await this.localDocument(root, document.target);
+          assertOwned();
+          try { await fs.link(temporary, destination); }
+          catch (error) { if (hasErrorCode(error, "EEXIST")) throw new WorkspaceError("DOCUMENT_CONFLICT", "目标文件刚刚被创建，请重新预览。"); throw error; }
+        } finally { await fs.rm(temporary, { force: true }); }
+        return { status: "installed" as const, digest: createHash("sha256").update(document.content).digest("hex") };
+      });
+    });
+  }
+
   private findWorkConfig(snapshot: AssetSnapshot, id: string): WorkConfig {
-    const config = snapshot.schemaVersion === 2 ? snapshot.workConfigs.find((item) => item.id === id) : undefined;
+    const config = "workConfigs" in snapshot ? snapshot.workConfigs.find((item) => item.id === id) : undefined;
     if (!config) throw new WorkspaceError("WORK_CONFIG_NOT_FOUND", "当前团队中找不到这个工作配置；请确认资产仓库使用 schemaVersion 2 并先运行 work-config list。");
     return config;
   }
@@ -141,7 +204,7 @@ export class TeamAssetService {
     const snapshot = await this.snapshot(context);
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
-      workConfigs: snapshot.schemaVersion === 2 ? snapshot.workConfigs : [],
+      workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
     }));
   }
 

@@ -1,14 +1,16 @@
 // @vitest-environment happy-dom
 import path from "node:path";
-import { act, useState } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceConfig } from "@agentrecall/workspace-core";
 import type { TeamPayload, TeamReply, TeamRequest, TeamCatalog } from "../../../../shared/ipc/team-workspace";
 import { TeamProjectBrowser } from "./team-project-browser";
+import { TeamDocumentsPanel } from "./team-documents-panel";
+import { TeamSessionShareDialog } from "./team-session-share-dialog";
 import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamSettings } from "../settings/team-settings";
-import { FeatureScope } from "./feature-scope";
+import { TeamWorkspacePage } from "./team-workspace-page";
 import { AppNavigation } from "../../components/app-navigation";
 
 const repository = "https://github.com/example/assets";
@@ -27,7 +29,7 @@ const selection = (saved = config(), id = saved.projects[0]!.id) => {
 };
 const catalog = (id = "business", root = projectRoot, skillId = "review"): TeamCatalog => ({
   projectId: id, root, notice: null, installed: [],
-  assets: { teamId: "example", repository, commit: revision, skills: [{ id: skillId, description: "Review changes", files: 1, digest: "a".repeat(64) }], workConfigs: [] },
+  assets: { teamId: "example", repository, commit: revision, skills: [{ id: skillId, description: "Review changes", files: 1, digest: "a".repeat(64) }], documents: [], workConfigs: [] },
 });
 let container: HTMLDivElement;
 let root: Root;
@@ -58,7 +60,7 @@ describe("V2 team settings and feature scopes", () => {
     await act(async () => root.render(<TeamSettings language="zh" api={{ request }} />));
     const toggle = container.querySelector<HTMLInputElement>('[aria-label="启用团队功能"]')!;
     expect(toggle.checked).toBe(false);
-    expect(container.textContent).toContain("各功能页使用团队资产");
+    expect(container.textContent).toContain("团队空间中使用共享资产");
     await act(async () => toggle.click());
     expect(toggle.checked).toBe(true);
     expect(request.mock.calls.map(([input]) => input.action)).not.toContain("sync");
@@ -134,31 +136,22 @@ describe("V2 team settings and feature scopes", () => {
     expect(container.querySelector(".team-workspace-inspection")).not.toBeNull();
     expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
   });
-  it("keeps local content separate, respects the leave guard and routes team setup to settings", async () => {
-    const leave = vi.fn(async () => false);
+  it("offers one team entry with three resource categories and routes setup to settings", async () => {
     const openSettings = vi.fn();
-    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: { request: async () => ok({ kind: "snapshot", value: { config: config(), busy: false } }) } } });
-    function Page() {
-      const [scope, setScope] = useState<"local" | "team">("local");
-      return <><AppNavigation activePage="sessions" settingsOpen={false} signalUpdate={false} language="zh" onNavigate={() => undefined} onOpenSettings={openSettings} />
-        <FeatureScope page="sessions" language="zh" scope={scope} settingsOpen={false} onOpenSettings={openSettings} onScopeChange={async (next) => { if (!await leave()) return false; setScope(next); return true; }}><p>私人会话内容</p></FeatureScope></>;
-    }
-    await act(async () => root.render(<Page />));
-    expect(container.querySelector('[data-page="team-workspace"]')).toBeNull();
-    const teamButton = container.querySelector<HTMLButtonElement>('.feature-scope-switch button:last-child')!;
-    await act(async () => teamButton.click());
-    expect(container.textContent).toContain("私人会话内容");
-    expect(teamButton.getAttribute("aria-pressed")).toBe("false");
-    leave.mockResolvedValue(true);
-    await act(async () => teamButton.click());
-    expect(container.textContent).not.toContain("私人会话内容");
+    const request = vi.fn(async (input: TeamRequest) => input.action === "catalog" ? ok({ kind: "catalog", value: catalog() }) : ok({ kind: "snapshot", value: { config: config(), busy: false } }));
+    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: { request } } });
+    await act(async () => root.render(<><AppNavigation activePage="team-space" settingsOpen={false} signalUpdate={false} language="zh" onNavigate={() => undefined} onOpenSettings={openSettings} /><TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={openSettings} /></>));
+    expect(container.querySelectorAll('[data-page="team-space"]')).toHaveLength(1);
+    expect(container.querySelector('.feature-scope-switch')).toBeNull();
     await act(async () => button("Example").click());
     await act(async () => button("业务项目").click());
-    expect(container.textContent).toContain("Session 不会自动上传");
+    const tabs = container.querySelector('[aria-label="项目资源"]')!;
+    expect([...tabs.querySelectorAll("button")].map((item) => item.textContent)).toEqual(["共享会话", "Skills", "文档"]);
+    await act(async () => tabs.querySelectorAll("button")[2]!.click());
+    expect(container.textContent).toContain("AGENTS.md");
     await act(async () => button("团队设置").click());
     expect(openSettings).toHaveBeenCalledOnce();
-    await act(async () => button("返回本地").click());
-    expect(container.textContent).toContain("私人会话内容");
+    expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
   });
 
   it("uses refreshed ownership state and cancels sync when leaving the asset view", async () => {
@@ -218,8 +211,8 @@ describe("V2 team settings and feature scopes", () => {
     saved.projects.push({ ...saved.projects[0]!, id: "other-project", name: "其他团队项目", teamId: "other" });
     const request = vi.fn(async (): Promise<TeamReply> => ok({ kind: "snapshot", value: { config: saved, busy: false } }));
     Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: { request } } });
-    const props = { language: "zh" as const, scope: "team" as const, settingsOpen: false, onScopeChange: vi.fn(async () => true), onOpenSettings: vi.fn() };
-    await act(async () => root.render(<FeatureScope {...props} page="sessions">Local sessions</FeatureScope>));
+    const props = { language: "zh" as const, settingsOpen: false, onOpenSettings: vi.fn() };
+    await act(async () => root.render(<TeamWorkspacePage {...props} />));
     expect(container.textContent).toContain("我的团队");
     expect(container.textContent).not.toContain("其他团队项目");
     await act(async () => button("Example").click());
@@ -227,9 +220,9 @@ describe("V2 team settings and feature scopes", () => {
     expect(container.textContent).not.toContain("其他团队项目");
     await act(async () => button("业务项目").click());
     expect(container.querySelector('[aria-label="团队与项目"]')?.textContent).toContain("Example业务项目");
-    await act(async () => root.render(<FeatureScope {...props} page="memories">Local memory</FeatureScope>));
+    await act(async () => container.querySelectorAll<HTMLButtonElement>('[aria-label="项目资源"] button')[2]!.click());
     expect(container.querySelector('[aria-label="团队与项目"]')?.textContent).toContain("Example业务项目");
-    expect(container.textContent).toContain("Memory");
+    expect(container.textContent).toContain("文档");
     saved = { ...saved, projects: saved.projects.map((item) => item.id === "business" ? { ...item, teamId: "other" } : item) };
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="刷新团队与项目"]')!.click());
     expect(container.textContent).not.toContain("业务项目");
@@ -264,4 +257,45 @@ describe("V2 team settings and feature scopes", () => {
     expect(container.textContent).not.toContain("业务项目");
   });
 
+});
+
+
+describe("document and session sharing interactions", () => {
+  it("keeps conflicting document content visible and cannot apply it", async () => {
+    const document = { id: "instructions", name: "团队规范", path: "rules/AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
+    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+      if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: { ...catalog().assets!, documents: [document] } } });
+      if (input.action === "document-preview") return ok({ kind: "document-preview", value: { ...document, repository, commit: revision, destination: path.join(projectRoot, "AGENTS.md"), content: "team guidance", local: "local edits", status: "conflict" } });
+      return ok({ kind: "cancelled" });
+    });
+    await act(async () => root.render(<TeamDocumentsPanel language="zh" selection={selection()} api={{ request }} />));
+    await act(async () => button("团队规范").click());
+    expect(container.textContent).toContain("team guidance");
+    expect(container.textContent).toContain("local edits");
+    expect(button("应用到项目").disabled).toBe(true);
+    expect(request.mock.calls.some(([input]) => input.action === "document-install")).toBe(false);
+  });
+
+  it("does not upload on opening the share dialog and clears a preview after changing destination", async () => {
+    const saved = config(); saved.projects[0]!.repository = "https://github.com/example/business";
+    saved.projects.push({ ...saved.projects[0]!, id: "second", name: "第二项目" });
+    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: saved, busy: false } });
+      if (input.action === "session-preview") return ok({ kind: "session-preview", value: { token: "00000000-0000-4000-8000-000000000001", repository, projectRepository: "https://github.com/example/business", expiresAt: Date.now() + 60_000, bytes: 50, files: [], missingAttachments: [], children: [], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:example", displayTitle: "完整示例", originalTitle: "完整示例", source: "codex-cli" }, messages: [{ index: 0, timestamp: "1", role: "user", content: "完整的消息内容" }], traceEvents: [] } } });
+      return ok({ kind: "cancelled" });
+    });
+    vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);
+    const api = { request };
+    await act(async () => root.render(<TeamSessionShareDialog sessionKey="codex:example" language="zh" onClose={() => undefined} api={api} />));
+    expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
+    await act(async () => button("预览完整会话").click());
+    expect(container.textContent).toContain("完整的消息内容");
+    expect(button("确认分享").disabled).toBe(false);
+    expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
+    const select = container.querySelector("select")!;
+    await act(async () => { select.value = "second"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(container.textContent).not.toContain("确认分享");
+    await act(async () => root.render(<p>Local</p>));
+    expect(request).toHaveBeenCalledWith({ action: "cancel-sync" });
+  });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -139,7 +140,7 @@ export class GitAssetSource {
       throw new WorkspaceError("INVALID_MANIFEST", "agentrecall.json 不是有效的 JSON。");
     }
     const parsed = manifestSchema.safeParse(manifestValue);
-    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用 schemaVersion 1，或使用 schemaVersion 2 并提供 workConfigs 列表。");
+    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1、2 或 3；文档清单需要版本 3。");
     const skills = [];
     let retainedBytes = 0;
     for (const item of parsed.data.skills) {
@@ -153,12 +154,27 @@ export class GitAssetSource {
       }
       skills.push(skillFromFiles(item.id, files));
     }
+    const documents = [];
+    if (parsed.data.schemaVersion === 3) {
+      for (const document of parsed.data.documents) {
+        const entry = entries.find((item) => item.path === document.path);
+        if (!entry) throw new WorkspaceError("INVALID_ASSET", "清单中的文档不存在，请检查文档路径。");
+        const bytes = await read(entry);
+        retainedBytes += bytes.length;
+        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
+        let content: string;
+        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw new WorkspaceError("INVALID_ASSET", "团队文档必须为 UTF-8 文本。"); }
+        documents.push({ ...document, content, digest: createHash("sha256").update(content).digest("hex") });
+      }
+    }
     return validateSnapshot({
       schemaVersion: parsed.data.schemaVersion,
       repository: canonical,
       commit,
       skills,
-      ...(parsed.data.schemaVersion === 2 ? { workConfigs: parsed.data.workConfigs } : {}),
+      ...("workConfigs" in parsed.data ? { workConfigs: parsed.data.workConfigs } : {}),
+      ...(parsed.data.schemaVersion === 3 ? { documents } : {}),
     }, canonical);
   }
 }

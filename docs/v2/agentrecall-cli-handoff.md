@@ -8,7 +8,7 @@
 
 此前单 Skill 流程的验证基线为 [`c4525acc701490264eff473bd297d143b7d3cc75`](https://github.com/zszz3/AgentRecall/commit/c4525acc701490264eff473bd297d143b7d3cc75)。该提交的 CLI、V1、V2 在 Linux/macOS/Windows 上的检查，以及仓库检查和 Quality gate，均已通过：[完整 CI 记录](https://github.com/zszz3/AgentRecall/actions/runs/36114851838)。交接文档提交本身不改变产品代码，不能将这条 CI 记录当作任意后续提交的验证。
 
-当前源码还已接入 V2 团队设置与 Skills 团队范围，并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
+当前源码还已接入 V2 独立团队空间（共享会话、Skills、文档），并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2/3 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
 
 ## 2. 到哪里接着做
 
@@ -16,7 +16,7 @@
 
 | 工作区 | 分支 / 状态 | 接手方式 |
 | --- | --- | --- |
-| `~/.codex/worktrees/cli-foundation/agentrecall` | `codex/cli-foundation`；产品代码已推送 | CLI 和团队资产开发从这里继续。交接写入前工作区干净 |
+| `~/.codex/worktrees/cli-foundation/agentrecall` | `codex/cli-foundation`；产品代码已推送 | CLI 和团队资产开发从这里继续。以 git status 核对当前工作区 |
 | `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；`21410c07`，已推送 | R00 删除 Chat 的独立工作区，见 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) |
 | `~/learnspace/agentrecall` | `codex/incremental-session-indexing`，`bc1dc8d4` | 原工作区，不能误当成 CLI 最新代码；有未跟踪的 `.agentrecall/`、`output/` 和旧版计划文档 |
 
@@ -55,10 +55,10 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 | R03 独立 CLI | 独立包、配置/项目/团队命令、人读与 JSON 输出、隔离打包验证 | Session 列表/搜索、正式独立分发 |
 | R04/R05 团队开关和多仓库 | 默认关闭、显式启停、默认团队和项目覆盖、worktree/克隆/fork/歧义识别 | 未来召回和后台任务的停用处理 |
 | R06 GitHub 资产读取 | 显式 HTTPS/SSH 同步，复用本机 Git 身份 | 创建/加入空间、成员权限管理、真实私有仓库验收 |
-| R07 资产格式 | 版本 1/2 清单、来源、文件校验、离线缓存及工作配置预览 | Rules、Docs、MCP、Agent 模板 |
+| R07 资产格式 | 版本 1/2/3 清单、来源、文件校验、离线缓存及工作配置预览 | 文档编辑/PR/回滚、延期的 MCP/Agent 模板 |
 | R08/R09 安装与版本管理 | Codex/Claude 安装、单 Skill 版本管理、工作配置批量安装、持久化归属、共享保护、整组差异/更新及卸载 | 跨配置协调更新、整组历史回滚、其他资产、逐行差异、PR 贡献与审核、分支订阅 |
 | R10 桌面团队入口 | 已有团队开关、项目/仓库绑定、同步取消、预览安装、整组更新/卸载，复用 CLI 配置 | 真实私有仓库与完整原生界面验收、更多资产类型 |
-| R11—R14 完整 Session 分享 | 未开始 | 包格式、对象存储、团队授权、主动上传、浏览和撤回 |
+| R11—R14 完整 Session 分享 | 私有 GitHub 附件、完整快照、右键预览/确认上传、浏览/下载/撤回 | 真实私有仓库联调、CLI 分享、搜索筛选、导入恢复与断点续传 |
 | R15—R19 Context / Improvement | 未开始 | 知识维护、检索、改进提案、验证发布、可选自动召回 |
 | R20 验证与交付 | CLI 本地与三平台检查通过，文档和分支发布说明已有 | 真实团队验收、合入、独立分发及后续阶段验收 |
 | R00 多人 Chat 删除 | 独立 PR #585 已提交，99 项受影响测试与 V2 构建通过，历史 Session 保留有回归覆盖 | 真实界面验收、审核与合入 |
@@ -159,15 +159,15 @@ git diff --check
 
 ## V2 桌面入口增量
 
-主进程入口在 `apps/main-2.0/src/main/services/team-workspace-service.ts`，IPC 与 preload 以 `team-workspace` 命名；Renderer 的 `feature-scope.tsx` 提供范围切换，`team-assets-panel.tsx` 提供团队资产，`settings/team-settings.tsx` 管理配置。主进程直接打包 workspace-core，共用 CLI 配置；输入在 IPC 校验，修改前固定项目目录、资产来源和版本。窗口销毁和应用退出会取消同步；移除绑定与卸载使用原生确认。使用方法与当前限制见[团队工作区指南](team-workspace.md)。
+主进程入口在 `apps/main-2.0/src/main/services/team-workspace-service.ts`，IPC 与 preload 以 `team-workspace` 命名；Renderer 的 `team-workspace-page.tsx` 提供独立团队入口与三类资源，`team-assets-panel.tsx` 提供 Skills，`settings/team-settings.tsx` 管理配置。主进程直接打包 workspace-core，共用 CLI 配置；输入在 IPC 校验，修改前固定项目目录、资产来源和版本。窗口销毁和应用退出会取消同步；移除绑定与卸载使用原生确认。使用方法与当前限制见[团队工作区指南](team-workspace.md)。
 
 新增 IPC/界面及相关 App 测试 21 项通过；V2 类型检查、构建、隔离 npm 安装及临时 PostgreSQL 验证通过。受控浏览器验证了窄屏、桌面双列、预览、冲突禁止更新和关闭后的本地管理。临时服务和测试窗口均已清理，未使用真实用户项目或凭据。发布包排除了文档媒体与重复源 Logo，并验证实际图标、内置资产、渲染 Logo 和运行依赖仍存在。
 
 ## 当前团队与项目层级
 
-设置只管理团队开关和仓库连接。功能页切换到团队范围后，先选团队、再进入该团队的项目；项目内使用 Skills，并保留当前团队/项目跨功能页导航。个人功能和主动打开本地 Session 仍在本地范围。项目创建与旧项目关联在团队内完成，新增项目显式写入所属团队；界面不再暴露默认团队继承。
+设置管理团队开关和连接。独立团队空间中先选团队、再进项目，项目内切换共享会话、Skills 和文档。本地页面移除 FeatureScope，会话右键提供主动分享。新增项目显式归属团队。
 
-当前仍使用原有配置格式：旧继承按原有默认值归组，个人项目保留在未归属入口，不迁移或删除原始记录。项目当前需关联本地 Git 目录，同团队共用资产仓库；还没有远端逻辑项目、项目独立资产分区或完整 Session/Memory 团队服务。不要将导航层级当成远端多租户授权已完成。
+当前仍使用原有配置格式：旧继承按原有默认值归组，个人项目保留在未归属入口，不迁移或删除原始记录。项目当前需关联本地 Git 目录，同团队共用资产仓库；尚无项目独立资产分区或团队 Memory。会话按业务 GitHub 地址识别项目，权限来自私有资产仓库；真实两用户权限验收仍待完成。
 
 Renderer 的 `team-project-browser.tsx` 负责团队/项目选择与管理，`team-assets-panel.tsx` 只操作明确传入的项目。切换团队不会展示其他团队的项目，旧请求不能覆盖新保存的配置或当前项目的资产。相关 V2 测试 34 项通过；跨平台结果以 PR 当前提交为准。
 
@@ -178,3 +178,15 @@ Renderer 的 `team-project-browser.tsx` 负责团队/项目选择与管理，`te
 服务入口为 `TeamAssetService.initialize`，Git 初始化与资产校验在 `GitAssetSource.initialize/readSnapshot`。初始化锁使用独立 staging 目录，避免与配置写锁共享 proper-lockfile 的进程内锁标识。测试位于 `apps/cli/test/team-init.test.ts`，全部使用临时主目录、npm 前缀与合成 Git 仓库。操作说明以 CLI 指南为准。
 
 初始化验证：CLI 46 项测试、类型检查及隔离打包/安装/重装/卸载通过；V2 类型检查与构建通过。已对用户指定的公开空仓库执行真实 HTTPS 初始化，并再次执行确认复用同一个 Git 提交和本地团队 ID；仅提交模板，未安装 Skill/Hook 或上传 Session。该证据不代表 SSH、私有仓库权限或组织成员管理已验收。
+
+
+## 三类资源首版的接手入口
+
+当前产品范围为共享会话、Skills、文档；团队 Memory 与工具配置延期。本地页面的范围切换已移除，所有团队内容集中到团队空间，会话分享从右键发起。
+
+- 会话存储与包服务：`team-session-github.ts`、`team-session-sharing.ts`。私有 GitHub 仓库 Release 附件，主进程凭据和确认，完整大小/哈希校验、十分钟预览、窗口销毁及停用时取消。没有修改个人 Supabase 同步的授权模型。
+- 文档：workspace-core 清单版本 3 的 documents，Git 对象读取、严格 UTF-8、完整校验、预览版本固定与创建缺失文件。不同本地内容、链接或来源改变均拒绝写入。
+- 界面：`team-workspace-page.tsx`、`team-sessions-panel.tsx`、`team-documents-panel.tsx`、`team-session-share-dialog.tsx`；会话正文只对显示分页，包内内容不截断。
+- 验证：相关 V2/IPC/界面/会话模拟测试、CLI 文档合成仓库测试、V2 类型检查及构建；浏览器验收使用真实 React 组件和合成数据。真实私有仓库两成员上传/下载/撤权仍未验收。没有上传任何个人会话。
+
+当前明确限制、格式和配置步骤统一见[团队空间指南](team-workspace.md)。后续优先真实私有仓库端到端验收和 PR 审核；CLI Session 分享、检索筛选、导入恢复、断点续传以及文档编辑/贡献仍是后续范围，不能将首版当作 R11—R14 全部完成。

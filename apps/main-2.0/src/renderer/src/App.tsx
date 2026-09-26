@@ -91,7 +91,7 @@ import {
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
 import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
-import { FeatureScope } from "./features/team-workspace/feature-scope";
+import { TeamSessionShareDialog } from "./features/team-workspace/team-session-share-dialog";
 import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
@@ -113,6 +113,7 @@ import {
   migrationTargetsForSession,
 } from "./session-ui";
 
+const TeamWorkspacePage = lazy(() => import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
 const FILE_MANAGER_LABEL = IS_MAC ? "Finder" : RUNTIME_PLATFORM === "win32" ? "Explorer" : "File Manager";
@@ -192,7 +193,7 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
-  const [contentScope, setContentScope] = useState<"local" | "team">("local");
+  const [teamShareSessionKey, setTeamShareSessionKey] = useState<string | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
@@ -201,12 +202,11 @@ export function App(): ReactElement {
   const setPageNavigationGuard = useCallback((guard: (() => Promise<boolean>) | null): void => {
     pageNavigationGuardRef.current = guard;
   }, []);
-  const navigateToPage = useCallback(async (page: AppPage, preserveScope = false): Promise<boolean> => {
-    if (page === activePage) { if (!preserveScope) setContentScope("local"); return true; }
+  const navigateToPage = useCallback(async (page: AppPage): Promise<boolean> => {
+    if (page === activePage) return true;
     try {
       if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
       pageNavigationGuardRef.current = null;
-      if (!preserveScope) setContentScope("local");
       setActivePage(page);
       return true;
     } catch (error) {
@@ -1794,7 +1794,7 @@ export function App(): ReactElement {
         settingsOpen={settingsOpen}
         signalUpdate={shouldSignalAppUpdate}
         language={language}
-        onNavigate={(page) => void navigateToPage(page, true)}
+        onNavigate={(page) => void navigateToPage(page)}
         onOpenSettings={() => {
           setSettingsInitialSection(shouldSignalAppUpdate ? "about" : "terminal");
           setSettingsOpen(true);
@@ -1803,17 +1803,6 @@ export function App(): ReactElement {
 
       <section className="app-workspace">
         <div className="app-page-host">
-          <FeatureScope page={activePage} language={language} scope={contentScope} settingsOpen={settingsOpen}
-            onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }}
-            onScopeChange={async (next) => {
-              const version = pageNavigationVersionRef.current;
-              if (pageNavigationGuardRef.current && !(await pageNavigationGuardRef.current())) return false;
-              if (version !== pageNavigationVersionRef.current) return false;
-              pageNavigationGuardRef.current = null;
-              setContentScope(next);
-              return true;
-            }}
-          >
           {activePage === "workbench" ? (
             <WorkbenchPage
               stats={stats}
@@ -1840,7 +1829,6 @@ export function App(): ReactElement {
               onResumeSession={(session) => void runAction(resumeActionLabel(session.source, language), () => window.sessionSearch.resumeSession(session.sessionKey), (result) => resumeRouteMessage(result, language))}
               onShowSessions={(submittedQuery) => {
                 setQuery(submittedQuery);
-                setContentScope("local");
                 setActivePage("sessions");
                 setLiveStatus("all");
               }}
@@ -1854,7 +1842,6 @@ export function App(): ReactElement {
                 setLiveStatus("all");
                 setDateRange("all");
                 setCustomDateRange({ dayStart: day.dayStart, dayEndExclusive: day.dayEndExclusive });
-                setContentScope("local");
                 setActivePage("sessions");
               }}
               workflows={workbenchWorkflowSnapshot?.workflows ?? []}
@@ -2143,11 +2130,9 @@ export function App(): ReactElement {
                 onViewSession={async (rawId) => {
                   const session = await window.sessionSearch.findSessionByRawId(rawId);
                   if (session) {
-                    setContentScope("local");
                     setActivePage("sessions");
                     window.requestAnimationFrame(() => openDetail(session));
                   } else {
-                    setContentScope("local");
                     setActivePage("sessions");
                   }
                 }}
@@ -2165,7 +2150,7 @@ export function App(): ReactElement {
               />
             ) : null}
           </Suspense>
-          </FeatureScope>
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 
@@ -2303,6 +2288,7 @@ export function App(): ReactElement {
           ),
         }}
       />
+      {teamShareSessionKey && <TeamSessionShareDialog language={language} sessionKey={teamShareSessionKey} onClose={() => setTeamShareSessionKey(null)} />}
       {contextMenu ? (
         <SessionContextMenu
           state={contextMenu}
@@ -2324,6 +2310,7 @@ export function App(): ReactElement {
             )
           )}
           canMigrate={canMigrateSession(contextMenu.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
+          onShareTeam={() => { setTeamShareSessionKey(contextMenu.session.sessionKey); setContextMenu(null); }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
           onSelectMultiple={() => beginBulkSelection(contextMenu.session.sessionKey)}

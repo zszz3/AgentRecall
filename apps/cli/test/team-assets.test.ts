@@ -807,3 +807,53 @@ test("complete cache byte limits and repository identity are enforced before ret
   await fs.writeFile(cache, JSON.stringify({ ...JSON.parse(original), repository: "https://github.com/another/team" }));
   await assert.rejects(assets.list(business), { code: "INVALID_ASSET" });
 });
+
+test("v3 documents preserve BOM and local content, pin versions and reject unsafe targets", async (t) => {
+  const { service, assets, business, source, cache } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  const original = await assets.sync(business);
+  assert.deepEqual((await assets.list(business)).documents, []);
+  const content = "\ufeff# 团队约定\n保留完整内容。\n";
+  await fs.writeFile(path.join(source, "AGENTS.md"), content);
+  const manifest = { schemaVersion: 3, skills: [{ id: "review", path: "skills/review" }], workConfigs: [], documents: [{ id: "instructions", name: "团队约定", path: "AGENTS.md", target: "AGENTS.md" }] };
+  await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify(manifest));
+  await commit(source);
+  const synced = await assets.sync(business);
+  const preview = await assets.previewDocument(business, "instructions");
+  assert.equal(preview.content, content);
+  assert.equal(preview.status, "new");
+  await assert.rejects(assets.installDocument(business, "instructions", original.commit), { code: "SNAPSHOT_CHANGED" });
+  assert.equal((await assets.installDocument(business, "instructions", synced.commit)).status, "installed");
+  assert.equal((await assets.installDocument(business, "instructions", synced.commit)).status, "existing");
+  await fs.writeFile(path.join(business, "AGENTS.md"), "my local edits");
+  assert.equal((await assets.previewDocument(business, "instructions")).status, "conflict");
+  await assert.rejects(assets.installDocument(business, "instructions", synced.commit), { code: "DOCUMENT_CONFLICT" });
+  assert.equal(await fs.readFile(path.join(business, "AGENTS.md"), "utf8"), "my local edits");
+  const snapshot = JSON.parse(await fs.readFile(cache, "utf8"));
+  await fs.writeFile(cache, JSON.stringify({ ...snapshot, documents: [{ ...snapshot.documents[0], content: "tampered" }] }));
+  await assert.rejects(assets.previewDocument(business, "instructions"), { code: "INVALID_ASSET" });
+  for (const target of ["../AGENTS.md", ".github/workflows/build.md", "docs/CON.md", "docs/a.md/../../outside.md"]) {
+    await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify({ ...manifest, documents: [{ ...manifest.documents[0], target }] }));
+    await commit(source);
+    await assert.rejects(assets.sync(business), { code: "INVALID_MANIFEST" });
+  }
+});
+
+test("documents reject linked parents and invalid UTF-8 while accepting the exact byte limit", async (t) => {
+  const { service, assets, business, source, root } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  const manifest = { schemaVersion: 3, skills: [], workConfigs: [], documents: [{ id: "guide", name: "Guide", path: "guide.md", target: "docs/guide.md" }] };
+  await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify(manifest));
+  await fs.writeFile(path.join(source, "guide.md"), "汉".repeat(349525) + "a");
+  await commit(source);
+  const version = await assets.sync(business);
+  assert.equal(Buffer.byteLength((await assets.previewDocument(business, "guide")).content), 1024 * 1024);
+  const outside = path.join(root, "outside"); await fs.mkdir(outside);
+  await fs.symlink(outside, path.join(business, "docs"), process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(assets.installDocument(business, "guide", version.commit), { code: "DOCUMENT_CONFLICT" });
+  assert.deepEqual(await fs.readdir(outside), []);
+  await fs.appendFile(path.join(source, "guide.md"), "汉"); await commit(source);
+  await assert.rejects(assets.sync(business));
+  await fs.writeFile(path.join(source, "guide.md"), Buffer.from([0xff, 0xfe])); await commit(source);
+  await assert.rejects(assets.sync(business), { code: "INVALID_ASSET" });
+});

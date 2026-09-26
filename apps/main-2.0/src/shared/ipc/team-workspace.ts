@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { WorkspaceConfig, TeamAssetService } from "@agentrecall/workspace-core";
+import type { TeamSessionPage, TeamSessionContent, TeamSessionPreview } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
 
 const id = z.string().min(1).max(64).regex(/^[a-z][a-z0-9-]*$/);
@@ -23,6 +24,12 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("bind-project"), id, root: directory, teamId: id.nullable().optional() }).strict(),
   z.object({ action: z.literal("remove-project"), id, root: directory }).strict(),
   z.object({ action: z.literal("catalog"), scope }).strict(),
+  z.object({ action: z.literal("document-preview"), scope: selectedScope, id }).strict(),
+  z.object({ action: z.literal("document-install"), scope: selectedScope, id, revision }).strict(),
+  z.object({ action: z.literal("session-list"), scope: selectedScope, page: z.number().int().min(1).max(100) }).strict(),
+  z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory }).strict(),
+  z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
+  ...(["session-detail", "session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
   z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]) }).strict(),
   z.object({ action: z.literal("cancel-sync") }).strict(),
   z.object({ action: z.literal("skill-preview"), ...asset, file: z.string().min(1).max(180).optional() }).strict(),
@@ -46,6 +53,10 @@ export type TeamCatalog = {
 export type TeamPayload =
   | { kind: "snapshot"; value: TeamSnapshot }
   | { kind: "folder"; value: string | null }
+  | { kind: "document-preview"; value: Result<"previewDocument"> }
+  | { kind: "session-list"; value: TeamSessionPage }
+  | { kind: "session-preview"; value: TeamSessionPreview }
+  | { kind: "session-detail"; value: TeamSessionContent }
   | { kind: "catalog"; value: TeamCatalog }
   | { kind: "skill-preview"; value: Result<"preview"> }
   | { kind: "work-preview"; value: Result<"previewWorkConfig"> }
