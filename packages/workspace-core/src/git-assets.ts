@@ -10,18 +10,28 @@ const execute = promisify(execFile);
 export type AssetTransport = "https" | "ssh";
 type CloneRepository = (repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal) => Promise<void>;
 
-async function runGit(args: string[], maximum: number, signal?: AbortSignal): Promise<Buffer> {
+async function runGit(args: string[], maximum: number, signal?: AbortSignal, input?: string): Promise<Buffer> {
   try {
-    const result = await execute("git", args, {
+    const pending = execute("git", args, {
       encoding: "buffer", timeout: 60_000, maxBuffer: maximum, windowsHide: true, signal,
       env: {
         ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_COMMON_DIR: undefined, GIT_INDEX_FILE: undefined,
+        GIT_AUTHOR_NAME: undefined, GIT_AUTHOR_EMAIL: undefined, GIT_COMMITTER_NAME: undefined, GIT_COMMITTER_EMAIL: undefined,
         GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -oBatchMode=yes",
       },
     });
-    return result.stdout;
+    let inputFailure: Error | undefined;
+    const onInputError = (error: Error) => { inputFailure = error; pending.child.kill(); };
+    // Git can reject the command before consuming stdin. Observe EPIPE and close the child.
+    pending.child.stdin?.once("error", onInputError);
+    pending.child.stdin?.end(input);
+    try {
+      const result = await pending;
+      if (inputFailure) throw inputFailure;
+      return result.stdout;
+    } finally { pending.child.stdin?.removeListener("error", onInputError); }
   } catch {
-    if (signal?.aborted) throw new WorkspaceError("CANCELLED", "资产同步已取消，已有缓存保留。");
+    if (signal?.aborted) throw new WorkspaceError("CANCELLED", "Git 操作已取消，已有本地资产保留。");
     throw new WorkspaceError("ASSET_GIT_FAILED", "无法读取资产仓库。请检查网络、Git 安装和所选 HTTPS/SSH 的仓库访问权限；不会自动登录或索取凭据。");
   }
 }
@@ -42,7 +52,61 @@ export class GitAssetSource {
     const canonical = canonicalGitHubRepository(repository);
     const gitDirectory = path.join(scratch, "repository.git");
     await this.cloneRepository(canonical, gitDirectory, transport, signal);
+    return this.readSnapshot(canonical, gitDirectory, signal);
+  }
+
+  async initialize(repository: string, scratch: string, transport: AssetTransport, assertOwned: () => void, signal?: AbortSignal): Promise<{ created: boolean; snapshot: AssetSnapshot }> {
+    const canonical = canonicalGitHubRepository(repository);
+    const gitDirectory = path.join(scratch, "repository.git");
+    const hooks = path.join(scratch, "empty-hooks");
+    await fs.mkdir(hooks);
+    await this.cloneRepository(canonical, gitDirectory, transport, signal);
+    const git = (args: string[], input?: string) => runGit(["--git-dir", gitDirectory, "-c", `core.hooksPath=${hooks}`, ...args], 1024 * 1024, signal, input);
+    // Use the clone's recorded fetch URL, never a separately configured push URL.
+    const url = (await git(["config", "--local", "--get", "remote.origin.url"])).toString("utf8").trim();
+    const refs = await git(["ls-remote", "--refs", "--", url]);
+    if (refs.length > 0) return { created: false, snapshot: await this.readSnapshot(canonical, gitDirectory, signal) };
+
+    const files: Record<string, string> = {
+      "agentrecall.json": JSON.stringify({ schemaVersion: 2, skills: [], workConfigs: [] }, null, 2) + "\n",
+      "README.md": "# AgentRecall 团队资产\n\n此仓库由 agentrecall init 初始化。团队资产在 Git 中共同维护，项目选择需要的资产安装到本地。\n\n## 目录\n\n- agentrecall.json：AgentRecall 资产清单。当前支持 Skills 和工作配置。\n- skills/：每个 Skill 使用独立目录和 SKILL.md，并在清单 skills 中登记 id 与 path。\n- rules/、docs/、env/、members/：参考 TeamAI 的目录组织预留，当前不会自动分发或上传成员信息。请勿提交密钥。\n\n## 使用\n\n在 AgentRecall V2 设置中连接团队；进入团队后创建项目并关联本地 Git 目录，再手动同步和选择安装。CLI 也可使用 team enable、project add --team、team sync。初始化不会自动开启团队功能、安装 Hook 或上传 Session。\n\n## 添加 Skill\n\n创建 skills/review/SKILL.md，YAML frontmatter 包含 name: review 与非空 description，然后在 agentrecall.json 的 skills 中添加 {\"id\":\"review\",\"path\":\"skills/review\"}。提交并推送后，团队成员可手动同步、预览和安装。\n",
+      ...Object.fromEntries(["skills", "rules", "docs", "env", "members"].map((directory) => [`${directory}/.gitkeep`, ""])),
+    };
+    // Build Git objects directly: no checkout, filters, hooks, user files or signing.
+    const blobs = new Map<string, string>();
+    for (const [file, content] of Object.entries(files)) {
+      blobs.set(file, (await git(["hash-object", "-w", "--stdin"], content)).toString("ascii").trim());
+    }
+    const entries: string[] = [];
+    for (const file of ["README.md", "agentrecall.json"]) entries.push(`100644 blob ${blobs.get(file)}\t${file}`);
+    for (const directory of ["skills", "rules", "docs", "env", "members"]) {
+      const tree = (await git(["mktree"], `100644 blob ${blobs.get(`${directory}/.gitkeep`)}\t.gitkeep\n`)).toString("ascii").trim();
+      entries.push(`040000 tree ${tree}\t${directory}`);
+    }
+    const tree = (await git(["mktree"], entries.join("\n") + "\n")).toString("ascii").trim();
+    const commit = (await git(["-c", "user.name=AgentRecall", "-c", "user.email=agentrecall@users.noreply.github.com", "-c", "commit.gpgSign=false", "commit-tree", tree], "Initialize AgentRecall team assets\n")).toString("ascii").trim();
+    await git(["update-ref", "refs/heads/main", commit]);
+    await git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    const snapshot = await this.readSnapshot(canonical, gitDirectory, signal);
+    if ((await git(["ls-remote", "--refs", "--", url])).length > 0) {
+      throw new WorkspaceError("INIT_REMOTE_CHANGED", "仓库在初始化期间已出现提交，本次未推送。请重新执行 init 校验已有内容。");
+    }
+    assertOwned();
+    if (signal?.aborted) throw new WorkspaceError("CANCELLED", "初始化已取消，尚未推送模板。");
+    try {
+      // This root commit has no parents: a normal push cannot overwrite a concurrently created branch.
+      await git(["push", "--porcelain", "--", url, `${commit}:refs/heads/main`]);
+    } catch {
+      throw new WorkspaceError("INIT_PUSH_UNCONFIRMED", "初始化推送未完成或结果未确认。请检查仓库写权限后重新执行 init；重试会先校验远端，不会覆盖已有提交。", { repository: canonical, remoteMayHaveChanged: true });
+    }
+    return { created: true, snapshot };
+  }
+
+  private async readSnapshot(canonical: string, gitDirectory: string, signal?: AbortSignal): Promise<AssetSnapshot> {
     const git = (args: string[], limit: number) => runGit(["--git-dir", gitDirectory, ...args], limit, signal);
+    if (!(await git(["for-each-ref", "--format=%(refname)"], 1024 * 1024)).length) {
+      throw new WorkspaceError("EMPTY_ASSET_REPOSITORY", "团队仓库为空，请先运行 agentrecall init <仓库地址> 初始化。");
+    }
     const commit = (await git(["rev-parse", "HEAD^{commit}"], 1024)).toString("ascii").trim();
     let tree: string;
     try { tree = new TextDecoder("utf-8", { fatal: true }).decode(await git(["ls-tree", "-r", "-z", "--long", commit], 1024 * 1024)); }

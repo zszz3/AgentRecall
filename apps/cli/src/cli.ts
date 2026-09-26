@@ -7,6 +7,8 @@ import packageInfo from "../package.json" with { type: "json" };
 const help = `AgentRecall CLI — 本地项目与可选团队配置
 
   agentrecall init                         初始化个人配置（团队默认关闭）
+  agentrecall init <repo-url> [--name <名称>] [--transport https|ssh]
+                                          初始化空团队仓库或接入已有资产仓库
   agentrecall status [--project <id>]       查看当前项目与团队状态
   agentrecall doctor                       检查配置与当前目录的仓库绑定
   agentrecall team add <id> --repo <url>    登记团队资产仓库（不连接或下载）
@@ -40,7 +42,7 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
 所有命令支持 --json；add 支持 --name；sync、skill 和 work-config 命令支持 --project。
 --cwd <dir> 指定操作目录；Skill 只安装到该项目，不改变个人 Skill。
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
-只有 team sync 主动连接远端。安装必须显式选择版本和客户端；不上传 Session。工作配置记录共享引用，卸载时保留其他配置和原有独立安装。
+init <repo-url> 会连接远端；空仓库会提交并推送基础模板，已有仓库只校验。team sync 主动读取远端。安装必须显式选择版本和客户端；不上传 Session。工作配置记录共享引用，卸载时保留其他配置和原有独立安装。
 `;
 
 const options = {
@@ -77,7 +79,7 @@ async function main(): Promise<void> {
   const [command, action, id] = positionals;
   const key = command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
   const commands: Record<string, { count: number; flags: string[] }> = {
-    init: { count: 1, flags: [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
+    init: { count: action ? 2 : 1, flags: action ? ["name", "transport"] : [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
     "team add": { count: 3, flags: ["repo", "name"] }, "team list": { count: 2, flags: [] },
     "team use": { count: values.personal ? 2 : 3, flags: ["personal"] },
     "team enable": { count: 2, flags: [] }, "team disable": { count: 2, flags: [] },
@@ -123,6 +125,20 @@ async function main(): Promise<void> {
   const assets = new TeamAssetService(service);
   switch (key) {
     case "init": {
+      if (action) {
+        const controller = new AbortController();
+        const cancel = () => controller.abort();
+        process.once("SIGINT", cancel);
+        process.once("SIGTERM", cancel);
+        try {
+          const result = await assets.initialize(action, values.name, values.transport as "https" | "ssh" | undefined, controller.signal);
+          output(result, `${result.created ? "已初始化空团队仓库并推送基础模板。" : "已有团队仓库已校验，远端内容未修改。"}\n团队：${result.team.name}（${result.team.id}）\n仓库：${result.team.repository}\n版本：${result.commit}\n团队功能${result.teamEnabled ? "已开启" : "保持关闭"}；未安装 Skill 或 Hook，未上传 Session。\n下一步：在 V2 选择该团队并新建项目，或用 project add <id> --path <业务目录> --team ${result.team.id} 关联项目；开启团队后用 team sync 手动同步。`);
+        } finally {
+          process.removeListener("SIGINT", cancel);
+          process.removeListener("SIGTERM", cancel);
+        }
+        break;
+      }
       const config = await service.store.initialize();
       output({ configPath: service.store.filePath, config }, "配置已就绪。重复初始化会保留已有配置；新配置的团队功能默认关闭。");
       break;

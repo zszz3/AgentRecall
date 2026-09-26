@@ -170,3 +170,11 @@ git diff --check
 当前仍使用原有配置格式：旧继承按原有默认值归组，个人项目保留在未归属入口，不迁移或删除原始记录。项目当前需关联本地 Git 目录，同团队共用资产仓库；还没有远端逻辑项目、项目独立资产分区或完整 Session/Memory 团队服务。不要将导航层级当成远端多租户授权已完成。
 
 Renderer 的 `team-project-browser.tsx` 负责团队/项目选择与管理，`team-assets-panel.tsx` 只操作明确传入的项目。切换团队不会展示其他团队的项目，旧请求不能覆盖新保存的配置或当前项目的资产。相关 V2 测试 34 项通过；跨平台结果以 PR 当前提交为准。
+
+## 仓库初始化
+
+`agentrecall init <repo-url> [--name <名称>] [--transport https|ssh]` 已实现。空远端创建基础模板提交，非空远端仅校验合法清单，成功后幂等登记本地团队；开关、默认团队、项目绑定均不自动改变。Git 对象在临时 bare 仓库构造，不读取业务文件或执行仓库脚本。推送不使用强制覆盖；不确定推送结果和远端成功/本地失败分别报告，可重试。`init` 不带地址的个人配置行为保持不变。
+
+服务入口为 `TeamAssetService.initialize`，Git 初始化与资产校验在 `GitAssetSource.initialize/readSnapshot`。初始化锁使用独立 staging 目录，避免与配置写锁共享 proper-lockfile 的进程内锁标识。测试位于 `apps/cli/test/team-init.test.ts`，全部使用临时主目录、npm 前缀与合成 Git 仓库。操作说明以 CLI 指南为准。
+
+初始化验证：CLI 46 项测试、类型检查及隔离打包/安装/重装/卸载通过；V2 类型检查与构建通过。已对用户指定的公开空仓库执行真实 HTTPS 初始化，并再次执行确认复用同一个 Git 提交和本地团队 ID；仅提交模板，未安装 Skill/Hook 或上传 Session。该证据不代表 SSH、私有仓库权限或组织成员管理已验收。
