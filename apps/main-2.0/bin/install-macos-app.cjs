@@ -59,6 +59,10 @@ function readInstalledMacosAppVersion(appPath) {
   }
 }
 
+function quoteShellArgument(value) {
+  return `"${value.replace(/[\\"$`]/g, "\\$&")}"`;
+}
+
 // True when the launcher still references this package's baked CLI path.
 // Bundles that were generated (or refreshed) by another AgentRecall install
 // are left alone at uninstall time instead of being removed blindly.
@@ -66,7 +70,13 @@ function launcherReferencesPackage(appPath, packagePath) {
   if (!packagePath) return true;
   try {
     const launcher = fs.readFileSync(path.join(appPath, "Contents", "MacOS", "AgentRecall"), "utf8");
-    return launcher.includes(`"${path.join(packagePath, "bin", "agent-recall.cjs")}"`);
+    const cliPath = path.join(packagePath, "bin", "agent-recall.cjs");
+    // New launchers pass an escaped argument; old ones embed a raw fallback
+    // path. Accepting both spellings together can match a different install.
+    if (launcher.startsWith("#!/bin/zsh\nexec /bin/zsh -lc '\n")) {
+      return launcher.endsWith(` ${quoteShellArgument(cliPath)} "$@"\n`);
+    }
+    return launcher.includes(`[ -f "${cliPath}" ]`);
   } catch {
     // Unreadable launcher: keep the historical remove-everything behavior.
     return true;
@@ -109,15 +119,17 @@ function buildInfoPlist(version) {
 // as a fallback for when the login shell cannot resolve the command at all.
 function buildLauncherScript(nodePath, cliPath) {
   return `#!/bin/zsh
-resolved=$(/bin/zsh -lc 'command -v agent-recall-v2' 2>/dev/null)
+exec /bin/zsh -lc '
+resolved=$(command -v agent-recall-v2 2>/dev/null)
 if [ -n "\${resolved}" ] && [ -x "\${resolved}" ]; then
-  exec "\${resolved}"
+  exec "\${resolved}" "\${@:3}"
 fi
-if [ -x "${nodePath}" ] && [ -f "${cliPath}" ]; then
-  exec "${nodePath}" "${cliPath}"
+if [ -x "$1" ] && [ -f "$2" ]; then
+  exec "$1" "$2" "\${@:3}"
 fi
 echo "未找到 agent-recall-v2：请重新安装，或运行 agent-recall-v2 install-app 重新生成启动器。" >&2
 exit 1
+' agent-recall-launcher ${quoteShellArgument(nodePath)} ${quoteShellArgument(cliPath)} "$@"
 `;
 }
 
