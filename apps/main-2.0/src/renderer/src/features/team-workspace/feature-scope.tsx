@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Settings } from "lucide-react";
+import { TeamProjectBrowser } from "./team-project-browser";
 import type { AppPage } from "../../components/app-navigation";
 import type { LanguageMode } from "../../language";
 
@@ -42,12 +43,12 @@ export function FeatureScope({ page, language, scope, settingsOpen, children, on
     </div>
     {failed && <p role="alert">{l("Could not switch. Save your changes and try again.", "未能切换范围，请保存当前修改后重试。")}</p>}
     <div className="feature-scope-content">
-      {scope === "local" ? children : page === "skills" ? <Suspense fallback={<p role="status">{l("Loading team Skills…", "正在读取团队 Skills…")}</p>}><TeamAssetsPanel language={language} settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} /></Suspense> : <section className="feature-scope-empty">
+      {scope === "local" ? children : <TeamProjectBrowser language={language} settingsOpen={settingsOpen} onOpenSettings={onOpenSettings}>{(selection) => page === "skills" ? <Suspense fallback={<p role="status">{l("Loading team Skills…", "正在读取团队 Skills…")}</p>}><TeamAssetsPanel key={selection.project.id + selection.project.root + selection.team?.id} language={language} selection={selection} onOpenSettings={onOpenSettings} /></Suspense> : <section className="feature-scope-empty">
         <h2>{l(names[page][0], names[page][1])} · {l("Team", "团队")}</h2>
         <p>{page === "providers" ? l("Provider credentials stay on this device. Sharing provider templates is not available yet.", "Provider 凭据保存在本机，团队配置模板尚未开放。") : l("Team content for this feature is not available yet. Your local content remains in Local.", "此功能的团队内容尚未开放，个人内容仍在「本地」范围中。")}</p>
         <p>{page === "sessions" ? l("Sessions are not uploaded automatically.", "Session 不会自动上传。") : l("Team Skills and work configurations are available in Skills → Team.", "已支持的团队 Skill 和工作配置可在「Skills → 团队」中使用。")}</p>
         <button type="button" onClick={() => void change("local")}>{l("Back to local", "返回本地")}</button>
-      </section>}
+      </section>}</TeamProjectBrowser>}
     </div>
   </div>;
 }
