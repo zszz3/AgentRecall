@@ -176,3 +176,23 @@ agentrecall skill uninstall review --target codex
 资产按 Git 提交版本固定，支持用户主动查看差异、更新和回滚，但暂不提供分支订阅、PR 贡献、差异合并或后台自动更新。Rules、Docs、MCP/Agent 配置组合仍在计划中；桌面在现有功能页区分本地与团队范围。现有桌面 Skill 库负责用户级管理；本次新增项目级复制和归属检查，未把桌面扫描器或数据库引入 CLI。
 
 配置、缓存、安装记录均拒绝未知版本与损坏数据。缓存损坏可重新同步，安装记录损坏则停止自动处理并保留目录；卸载备份保留原格式。独立 CLI 的分发仍为源码构建，尚未发布到 npm。
+
+## 文档清单
+
+文档使用 `schemaVersion: 3`，保留版本 2 的 `skills` 和 `workConfigs`，增加 `documents`。版本 1/2 继续读取，文档列表为空；旧客户端遇到版本 3 会明确拒绝，需要升级，不会静默重写清单。
+
+```json
+{
+  "schemaVersion": 3,
+  "skills": [],
+  "workConfigs": [],
+  "documents": [
+    { "id": "agent-rules", "name": "团队开发约定", "path": "rules/AGENTS.md", "target": "AGENTS.md" },
+    { "id": "architecture", "name": "项目架构", "path": "docs/architecture.md", "target": "docs/architecture.md" }
+  ]
+}
+```
+
+`path` 是资产仓库中的 Markdown 文件，`target` 是业务项目中的位置，只允许根目录 `AGENTS.md`、`CLAUDE.md` 或 `docs/` 下的 `.md` 文件。ID 与目标路径必须唯一，拒绝路径穿越、大小写/规范化冲突、文件/目录冲突、符号链接和 Git LFS。文档是严格 UTF-8，保留 BOM，单文件最多 1 MiB，最多 128 份；与 Skills 合并计入 8 MiB 原始文件及 16 MiB 完整缓存限制。
+
+在 V2「团队空间 → 团队 → 项目 → 文档」中同步、预览并应用。应用固定预览版本，创建缺失文件；相同内容直接保留，不同内容拒绝覆盖。当前文档操作由桌面提供，CLI `team sync` 也能读取版本 3；暂未提供独立文档应用命令。仓库初始化仍生成版本 2 空清单，发布文档时按上述示例显式升级版本。

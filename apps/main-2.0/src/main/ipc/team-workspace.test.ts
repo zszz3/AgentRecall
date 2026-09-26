@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitAssetSource, TeamAssetService, WorkspaceError, WorkspaceService } from "@agentrecall/workspace-core";
+import { TeamSessionSharing } from "../services/team-session-sharing";
 import { TeamWorkspaceService } from "../services/team-workspace-service";
 import { createTeamWorkspaceApi } from "../../preload/team-workspace";
 import { registerTeamWorkspaceIpc } from "./team-workspace";
@@ -31,10 +32,10 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-function harness() {
+function harness(sharing?: TeamSessionSharing) {
   const chooseFolder = vi.fn(async () => null as string | null);
   const confirm = vi.fn(async () => false);
-  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm });
+  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm }, sharing);
   services.push(service);
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const sender = Object.assign(new EventEmitter(), { id: 17 });
@@ -74,8 +75,9 @@ describe("V2 team workspace IPC", () => {
     expect((await workspace.store.read())?.projects).toEqual([]);
     await workspace.setTeamEnabled(false);
     expect(await api.request({ action: "snapshot" })).toMatchObject({ ok: true, data: { value: { config: { teamEnabled: false } } } });
-    expect(sender.listenerCount("destroyed")).toBe(0);
+    expect(sender.listenerCount("destroyed")).toBe(1);
     dispose();
+    expect(sender.listenerCount("destroyed")).toBe(0);
     expect(handlers.size).toBe(0);
   });
 
@@ -187,4 +189,40 @@ describe("V2 team workspace IPC", () => {
     expect((await workspace.store.read())?.teamEnabled).toBe(false);
   });
 
+});
+
+
+it("enforces team/project scope for sessions and cancels retained previews on window destruction", async () => {
+  const sharing = new TeamSessionSharing({
+    store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() },
+    ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn(),
+  });
+  const list = vi.spyOn(sharing, "list").mockResolvedValue({ page: 1, items: [], hasMore: false });
+  const cancel = vi.spyOn(sharing, "cancel");
+  const { api, workspace, sender, dispose } = harness(sharing);
+  const saved = await project(workspace);
+  const scope = { projectId: saved.id, root: saved.root, repository: "https://github.com/example/assets" };
+  expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: false, error: { code: "TEAM_DISABLED" } });
+  await workspace.setTeamEnabled(true);
+  expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: false, error: { code: "TEAM_PROJECT_REPOSITORY_REQUIRED" } });
+  expect(list).not.toHaveBeenCalled();
+  sender.emit("destroyed");
+  expect(cancel).toHaveBeenCalledWith(sender.id);
+  expect(sender.listenerCount("destroyed")).toBe(0);
+  dispose();
+});
+
+
+it("disabling teams cancels the current download before persisting disabled mode", async () => {
+  const { api, workspace } = harness();
+  const saved = await project(workspace); await workspace.setTeamEnabled(true);
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  vi.spyOn(GitAssetSource.prototype, "load").mockImplementation((_repository, _scratch, _transport, signal) => new Promise((_resolve, reject) => {
+    signal!.addEventListener("abort", () => reject(new WorkspaceError("CANCELLED", "同步已取消")), { once: true }); started();
+  }));
+  const download = api.request({ action: "sync", scope: { projectId: saved.id, root: saved.root, repository: "https://github.com/example/assets" }, transport: "https" });
+  await ready;
+  expect(await api.request({ action: "enable", enabled: false })).toMatchObject({ ok: true, data: { value: { config: { teamEnabled: false } } } });
+  expect(await download).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
 });

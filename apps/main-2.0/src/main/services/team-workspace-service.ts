@@ -1,5 +1,6 @@
 import { WorkspaceError, WorkspaceService, TeamAssetService } from "@agentrecall/workspace-core";
 import path from "node:path";
+import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPayload, TeamReply, TeamRequest } from "../../shared/ipc/team-workspace";
 
 interface TeamDialogs {
@@ -7,23 +8,25 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
-  private sync: { owner: number; abort: AbortController } | null = null;
+  private readonly operations = new Map<AbortController, number>();
   private readonly pending = new Set<Promise<TeamPayload>>();
 
-  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs) {}
+  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing) {}
 
   cancel(owner: number): void {
-    if (this.sync?.owner === owner) this.sync.abort.abort();
+    for (const [abort, requestOwner] of this.operations) if (requestOwner === owner) abort.abort();
+    this.sharing?.cancel(owner);
   }
 
   async close(): Promise<void> {
     this.closed = true;
-    this.sync?.abort.abort();
+    for (const abort of this.operations.keys()) abort.abort();
+    this.sharing?.close();
     await Promise.allSettled([...this.pending]);
   }
 
@@ -50,18 +53,23 @@ export class TeamWorkspaceService {
           : "移除项目「" + project.name + "」的绑定？代码仓库、已安装 Skill 和备份都将保留。";
         if (!await this.dialogs.confirm(owner, message)) return { ok: true, data: { kind: "cancelled" } };
       }
+      if (request.action === "enable" && !request.enabled) {
+        for (const abort of this.operations.keys()) abort.abort();
+        this.sharing?.close();
+        await Promise.allSettled([...this.pending]);
+      }
       if (this.closed) throw new WorkspaceError("TEAM_CLOSED", "团队服务已关闭，本次操作取消。");
       const mutating = writes.has(request.action);
       if (mutating && this.busy) throw new WorkspaceError("TEAM_BUSY", "另一个团队操作正在进行，请等待完成或取消同步后重试。");
       if (mutating) this.busy = true;
       const abort = new AbortController();
-      if (request.action === "sync") this.sync = { owner, abort };
-      const operation = this.execute(workspace, request, abort.signal);
+      this.operations.set(abort, owner);
+      const operation = this.execute(workspace, request, abort.signal, owner);
       this.pending.add(operation);
       try { return { ok: true, data: await operation }; }
       finally {
         this.pending.delete(operation);
-        if (request.action === "sync" && this.sync?.abort === abort) this.sync = null;
+        this.operations.delete(abort);
         if (mutating) this.busy = false;
       }
     } catch (error) {
@@ -71,7 +79,7 @@ export class TeamWorkspaceService {
     }
   }
 
-  private async execute(workspace: WorkspaceService, request: Exclude<TeamRequest, { action: "choose-folder" | "cancel-sync" }>, signal: AbortSignal): Promise<TeamPayload> {
+  private async execute(workspace: WorkspaceService, request: Exclude<TeamRequest, { action: "choose-folder" | "cancel-sync" }>, signal: AbortSignal, owner: number): Promise<TeamPayload> {
     const snapshot = async (): Promise<TeamPayload> => ({ kind: "snapshot", value: { config: await workspace.store.read(), busy: false } });
     switch (request.action) {
       case "snapshot": return { kind: "snapshot", value: { config: await workspace.store.read(), busy: this.busy } };
@@ -108,7 +116,37 @@ export class TeamWorkspaceService {
     const root = project.root;
     const projectId = project.id;
     const complete = (message: string, backups: string[] = []): TeamPayload => ({ kind: "complete", message, backups });
+    const sessionContext = async (): Promise<TeamSessionContext> => {
+      const current = await workspace.currentTeam(root, projectId);
+      if (current.project.root !== root || current.team.repository !== request.scope.repository) throw new WorkspaceError("PROJECT_MISMATCH", "团队或项目已改变，请重新选择。");
+      if (!current.project.repository) throw new WorkspaceError("TEAM_PROJECT_REPOSITORY_REQUIRED", "会话分享需要项目关联一个 GitHub 代码仓库，以便团队成员识别同一个项目。");
+      return { repository: current.team.repository, projectRepository: current.project.repository, root, projectId };
+    };
+    if (request.action.startsWith("session-")) {
+      const sharing = this.sharing;
+      if (!sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话分享服务不可用，请重启应用。");
+      const context = await sessionContext();
+      const assertContext = async () => {
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        if (JSON.stringify(await sessionContext()) !== JSON.stringify(context)) throw new WorkspaceError("PROJECT_MISMATCH", "分享目标已改变，请重新预览。");
+      };
+      switch (request.action) {
+        case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal) };
+        case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal) };
+        case "session-detail": return { kind: "session-detail", value: await sharing.detail(context, request.id, signal) };
+        case "session-publish": return await sharing.publish(owner, context, request.token, signal, assertContext) ? complete("会话已分享到团队项目。本地原会话保留。") : { kind: "cancelled" };
+        case "session-download": return await sharing.download(owner, context, request.id, signal) ? complete("完整会话包已保存。") : { kind: "cancelled" };
+        case "session-withdraw": return await sharing.withdraw(owner, context, request.id, signal, assertContext) ? complete("分享已撤回。本地原会话保留。") : { kind: "cancelled" };
+      }
+    }
     switch (request.action) {
+      case "document-preview": return { kind: "document-preview", value: await assets.previewDocument(root, request.id, projectId) };
+      case "document-install": {
+        if (!await this.dialogs.confirm(owner, "将文档应用到项目目录？相同文件将保留，不同的已有内容不会被覆盖。")) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        await assets.installDocument(root, request.id, request.revision, projectId);
+        return complete("文档已应用到项目，已有内容保留。");
+      }
       case "catalog": {
         const installed = await assets.installedWorkConfigs(root, projectId);
         if (!config?.teamEnabled) return { kind: "catalog", value: { projectId, root, assets: null, installed, notice: "团队功能未启用，仍可管理已有本地配置。" } };
@@ -141,5 +179,6 @@ export class TeamWorkspaceService {
         return complete("工作配置已卸载，共用和原有独立 Skill 保留。", result.backups.map((item) => item.backupPath));
       }
     }
+    throw new WorkspaceError("INVALID_ARGUMENTS", "未知团队操作。");
   }
 }

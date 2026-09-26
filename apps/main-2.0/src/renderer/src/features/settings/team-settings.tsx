@@ -46,7 +46,7 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
       if (reply.data.kind === "snapshot") {
         setSnapshot(reply.data.value);
         if (request.action === "add-team") { setTeamForm({ name: "", repository: "" }); setEditor(null); }
-        setFeedback(request.action === "add-team" ? l("Team saved. Open the Team scope to manage its projects.", "团队已连接。进入功能页的「团队」范围，再管理它的项目。") : l("Saved.", "已保存。"));
+        setFeedback(request.action === "add-team" ? l("Team saved. Open Team Space to manage its projects.", "团队已连接。进入「团队空间」管理它的项目。") : l("Saved.", "已保存。"));
       }
     } catch { if (alive.current) setError(l("Could not save. Refresh and try again.", "操作未完成，请刷新后重试。")); }
     finally { running.current = false; if (alive.current) setBusy(false); }
@@ -57,7 +57,7 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
       <button type="button" className="team-settings-icon" aria-label={l("Refresh team settings", "刷新团队设置")} title={l("Refresh", "刷新")} disabled={busy} onClick={() => { setError(null); setRefreshKey((value) => value + 1); }}><RefreshCw size={15} /></button>
     </header>
     <label className="settings-field settings-toggle">
-      <span className="settings-field-text"><span className="settings-field-title">{l("Enable team features", "启用团队功能")}</span><span className="settings-field-sub">{l("Browse team assets inside each feature. Sessions stay private.", "在各功能页使用团队资产，Session 不会自动分享。")}</span></span>
+      <span className="settings-field-text"><span className="settings-field-title">{l("Enable team features", "启用团队功能")}</span><span className="settings-field-sub">{l("Browse shared assets in Team Space. Sessions are never uploaded automatically.", "在团队空间中使用共享资产，Session 不会自动分享。")}</span></span>
       <input aria-label={l("Enable team features", "启用团队功能")} type="checkbox" className="switch" checked={enabled} disabled={locked} onChange={(event) => void run({ action: "enable", enabled: event.currentTarget.checked })} />
     </label>
     {locked && snapshot && <p role="status" className="team-settings-message">{l("Saving or completing a team operation…", "正在处理团队操作…")}</p>}
