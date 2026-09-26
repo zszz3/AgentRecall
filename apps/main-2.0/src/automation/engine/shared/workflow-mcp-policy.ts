@@ -2,25 +2,6 @@ export type WorkflowMcpScope = "planning" | "review" | "runtime_review" | "node_
 export type WorkflowMcpToolDecision = "allow" | "approval_required" | "deny";
 
 export const WORKFLOW_MCP_SERVER_NAMES = ["agent_recall", "agent_recall_workflow"] as const;
-export const STUDIO_MCP_TOOL_NAMES = [
-  "studio_list_members",
-  "studio_get_context",
-  "studio_get_room_state",
-  "studio_inbox_list",
-  "studio_task_finish",
-  "studio_turn_list",
-  "studio_turn_get",
-  "studio_turn_events",
-  "studio_read_thread",
-  "studio_post",
-  "studio_read_messages",
-  "studio_read_range",
-  "studio_search",
-  "workspace_reserve",
-  "workspace_release",
-  "workspace_status",
-] as const;
-
 const PLANNING_ALLOWED = new Set([
   "agent_templates_list",
   "skill_templates_list",
@@ -74,7 +55,6 @@ const KNOWN_TOOLS = new Set([
   ...RUNTIME_REVIEW_ALLOWED,
   ...NODE_EXECUTION_ALLOWED,
 ]);
-const STUDIO_TOOLS = new Set<string>(STUDIO_MCP_TOOL_NAMES);
 
 export function workflowMcpToolDecision(
   scope: WorkflowMcpScope,
@@ -97,10 +77,6 @@ export function isWorkflowMcpServerName(value: string): boolean {
 
 export function workflowMcpToolNameFromIdentifier(identifier: string): string | undefined {
   return scopedMcpToolNameFromIdentifier(identifier, KNOWN_TOOLS);
-}
-
-export function studioMcpToolNameFromIdentifier(identifier: string): string | undefined {
-  return scopedMcpToolNameFromIdentifier(identifier, STUDIO_TOOLS);
 }
 
 function scopedMcpToolNameFromIdentifier(

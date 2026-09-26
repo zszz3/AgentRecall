@@ -1,6 +1,5 @@
 import { workflowMcpLaunchConfig, type WorkflowMcpBinding } from "../workflow/workflow-mcp-launch";
 import {
-  STUDIO_MCP_TOOL_NAMES,
   workflowMcpToolDecision,
   workflowMcpToolsForScope,
   type WorkflowMcpScope,
@@ -25,15 +24,10 @@ export function codexWorkflowMcpConfig(binding: WorkflowMcpBinding): CodexWorkfl
   );
   const reviewSubmissionEnabled = Boolean(binding.workflowId && binding.reviewRevision);
   const runtimeReviewSubmissionEnabled = scope === "runtime_review" && completionEnabled && reviewSubmissionEnabled;
-  const workflowTools = binding.workflowId
-    ? workflowMcpToolsForScope(scope)
-        .filter((toolName) => toolName !== "workflow_node_complete" || completionEnabled)
-    : [];
-  const studioTools = binding.studioToken ? [...STUDIO_MCP_TOOL_NAMES] : [];
-  const exposedTools = [...new Set([...workflowTools, ...studioTools])];
+  const exposedTools = workflowMcpToolsForScope(scope)
+    .filter((toolName) => toolName !== "workflow_node_complete" || completionEnabled);
   const approvedTools = exposedTools.filter((toolName) =>
-    studioTools.includes(toolName as (typeof STUDIO_MCP_TOOL_NAMES)[number])
-    || workflowMcpToolDecision(scope, toolName) === "allow");
+    workflowMcpToolDecision(scope, toolName) === "allow");
   return {
     args: [
       "-c", `mcp_servers.agent_recall.command=${JSON.stringify(config.command)}`,

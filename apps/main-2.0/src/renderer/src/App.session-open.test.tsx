@@ -31,7 +31,6 @@ const harness = vi.hoisted(() => ({
   sessionDetails: vi.fn((_props: unknown) => null),
   skillsPage: vi.fn((_props: unknown) => null),
   runtimeFeaturePage: vi.fn((_props: unknown) => null),
-  teamChatPage: vi.fn((_props: unknown) => null),
   remoteSessionsDialog: vi.fn((_props: unknown) => null),
   loadCatalog: vi.fn(async () => undefined),
   loadWorkbenchSessions: vi.fn(async () => undefined),
@@ -51,7 +50,6 @@ vi.mock("./features/sessions/sessions-page", () => ({ SessionsPage: harness.sess
 vi.mock("./features/sessions/session-details", () => ({ SessionDetails: harness.sessionDetails }));
 vi.mock("./features/skills/skills-page", () => ({ SkillsPage: harness.skillsPage }));
 vi.mock("./features/automation/runtime-feature-page", () => ({ RuntimeFeaturePage: harness.runtimeFeaturePage }));
-vi.mock("./features/team-chat/team-chat-page", () => ({ TeamChatPage: harness.teamChatPage }));
 vi.mock("./features/remote-sessions/remote-sessions-dialog", () => ({
   RemoteSessionsDialog: harness.remoteSessionsDialog,
 }));
@@ -252,7 +250,6 @@ describe("external session opening", () => {
       previewBulkDelete: harness.previewBulkDelete,
       bulkDeleteSessions: harness.bulkDeleteSessions,
       setOpenSession: harness.setOpenSession,
-      teamChat: { listRooms: vi.fn(async () => []) },
     };
     Reflect.set(window, "sessionSearch", sessionSearch);
     const { App } = await import("./App");
@@ -490,12 +487,7 @@ describe("external session opening", () => {
       });
       await Promise.resolve();
     });
-    await vi.waitFor(() => expect(harness.teamChatPage).toHaveBeenCalled());
-    expect(harness.teamChatPage.mock.calls.at(-1)?.[0]).toMatchObject({
-      preferredRoomId: "room-1",
-      preferredMessageId: "message-1",
-      preferredAgentId: "member-2",
-    });
+    await vi.waitFor(() => expect(harness.workbenchPage).toHaveBeenCalled());
 
     const skillPageCalls = harness.skillsPage.mock.calls.length;
     harness.workbenchPage.mockClear();

@@ -110,7 +110,6 @@ describe("MCP server tools", () => {
     delete process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN;
     capture();
     process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN = "managed-token";
-    process.env.AGENT_RECALL_STUDIO_TOKEN = "studio-token";
     process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE = "planning";
     capture();
     process.env.AGENT_RECALL_WORKFLOW_MCP_SCOPE = "review";
@@ -123,7 +122,7 @@ describe("MCP server tools", () => {
     process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID = "execution-1";
     capture();
 
-    expect(tools.size).toBeGreaterThan(30);
+    expect(tools.size).toBeGreaterThan(20);
     for (const tool of tools.values()) {
       expect(tool.description, tool.name).toMatch(/[\u3400-\u9fff]/u);
     }
@@ -251,33 +250,13 @@ describe("MCP server tools", () => {
     expect(resolveBridgeDiscoveryPath()).toBe("/tmp/custom-bridge.json");
   });
 
-  test("adds Studio and Workspace tools only for a scoped employee execution", () => {
-    delete process.env.AGENT_RECALL_STUDIO_TOKEN;
-    expect(mcpToolDefinitions().map((tool) => tool.name)).not.toContain("studio_send_message");
-
+  test("does not expose retired Chat tools with a legacy Studio token", async () => {
     process.env.AGENT_RECALL_STUDIO_TOKEN = "studio-scope";
     const names = mcpToolDefinitions().map((tool) => tool.name);
-    expect(names).not.toContain("studio_send_message");
-    expect(names).toEqual(expect.arrayContaining([
-      "studio_list_members",
-      "studio_get_context",
-      "studio_get_room_state",
-      "studio_inbox_list",
-      "studio_task_finish",
-      "studio_turn_list",
-      "studio_turn_get",
-      "studio_turn_events",
-      "studio_read_thread",
-      "studio_post",
-      "studio_read_messages",
-      "studio_read_range",
-      "studio_search",
-      "workspace_reserve",
-      "workspace_release",
-      "workspace_status",
-    ]));
+    expect(names.filter((name) => name.startsWith("studio_") || name.startsWith("workspace_"))).toEqual([]);
+    await expect(callMcpTool("studio_turn_get", { turnId: "turn-1" }))
+      .rejects.toThrow("Unknown MCP tool: studio_turn_get");
   });
-
 
   test("serves workflow tools from the long-lived agent stdio server", async () => {
     const tsxCli = path.resolve("node_modules", "tsx", "dist", "cli.mjs");
@@ -645,37 +624,6 @@ describe("MCP server tools", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({ authorization: "Bearer secret" }),
-      }),
-    );
-  });
-
-  test("forwards the scoped Studio token separately from the bridge token", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "agent-recall-studio-mcp-server-"));
-    const discoveryPath = path.join(dir, "bridge.json");
-    process.env.AGENT_RECALL_MCP_BRIDGE = discoveryPath;
-    process.env.AGENT_RECALL_STUDIO_TOKEN = "studio-scope";
-    await writeFile(
-      discoveryPath,
-      JSON.stringify({ host: "127.0.0.1", port: 48125, token: "bridge-secret" }),
-      "utf8",
-    );
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ ok: true }),
-    } as Response);
-
-    await callMcpTool("studio_turn_get", {
-      turnId: "turn-1",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:48125/mcp/studio/turn/get",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          authorization: "Bearer bridge-secret",
-          "x-agent-recall-studio-token": "studio-scope",
-        }),
       }),
     );
   });

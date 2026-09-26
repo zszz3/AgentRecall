@@ -241,6 +241,36 @@ describe("PostgreSQL Turn search", () => {
     expect(emptyPage.hasMore).toBe(false);
   });
 
+  it("keeps legacy Chat-created Sessions searchable and readable after the Chat surface is removed", async () => {
+    const invocations = new PostgresRuntimeInvocationRepository(database);
+    await invocations.begin({
+      id: "legacy-chat-created",
+      initiator: "agentrecall",
+      invocation: { surface: "team_chat", role: "member", ownerReference: { roomId: "retired-room", messageId: "retired-message" } },
+      runtimeId: "codex",
+      channelId: "codex-default",
+      environmentId: "local",
+      startedAt: 1,
+    });
+    await invocations.bind("legacy-chat-created", {
+      runtimeId: "codex", channelId: "codex-default", environmentId: "local",
+      sessionId: "one", relation: "created", boundAt: 2,
+    });
+    await invocations.finish("legacy-chat-created", "completed", 3);
+    const result = await searchRepository.searchSessionPage({
+      query: "登录", origin: "agentrecall", invocationSurface: "team_chat", excludeSubagents: true,
+    });
+    expect(result.sessions.map((item) => item.sessionKey)).toEqual(["codex:one"]);
+    await expect(repository.getSession("codex:one")).resolves.toMatchObject({
+      sessionKey: "codex:one",
+      originalTitle: "登录故障排查",
+      runtimeInvocations: [expect.objectContaining({
+        invocationId: "legacy-chat-created", surface: "team_chat", relation: "created",
+        ownerReference: { roomId: "retired-room", messageId: "retired-message" },
+      })],
+    });
+  });
+
   it("groups only sessions explicitly created by AgentRecall and keeps continued user sessions ordinary", async () => {
     const invocations = new PostgresRuntimeInvocationRepository(database);
     await invocations.begin({

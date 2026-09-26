@@ -32,7 +32,7 @@ This repository maintains both v1 and v2. They use separate commands, app data, 
 | Version | Best for | Launch command |
 | --- | --- | --- |
 | AgentRecall v1 | Managing local and remote agent sessions immediately after installation | `agent-recall` |
-| AgentRecall v2 (preview) | Using Workbench, Chat, Workflow, Eval, Runtime, and directory memory on top of session management | `agent-recall-v2` |
+| AgentRecall v2 (preview) | Using Workbench, Workflow, Eval, Runtime, and directory memory on top of session management | `agent-recall-v2` |
 
 ## AgentRecall v1
 
@@ -71,13 +71,12 @@ After launch, the app stays in the menu bar or system tray. Settings, theme, lan
 
 ## AgentRecall v2 (Preview)
 
-In addition to session management, remote sync, and usage statistics, v2 adds reusable Agents, multi-agent Chat, Workflow, Eval, MCP, directory memory, and a Skill library.
+In addition to session management, remote sync, and usage statistics, v2 adds reusable Agents, Workflow, Eval, MCP, directory memory, and a Skill library.
 
 ### Features
 
 - **Workbench and Sessions**: View usage, model quotas, and recent activity. Search, filter, and organize sessions from different sources. The detail page supports in-session search, Resume, migration, export, AI summaries, and remote restore.
-- **Runtime and Agents**: Prepare execution configurations for Codex, Claude Code, API, Hermes, OpenCode, OpenClaw, or DeepSeek Harness, then save reusable Agents for Chat, Workflow, and Eval. Runtimes that support MCP injection can also bind custom MCP Servers.
-- **Multi-agent Chat**: Create a studio with a shared project directory while each employee keeps an independent context. Use `@name` or the recipient list to request responses from one or more Agents.
+- **Runtime and Agents**: Prepare execution configurations for Codex, Claude Code, API, Hermes, OpenCode, OpenClaw, or DeepSeek Harness, then save reusable Agents for Workflow and Eval. Runtimes that support MCP injection can also bind custom MCP Servers.
 - **Workflow**: Describe a goal when creating a Workflow. The planning Agent asks one focused question at a time with a recommendation, then proposes a graph; you can also request generation explicitly. Review and apply the proposal to the canvas, edit inputs and Agent, script, Review, or approval nodes, then save and run. Conversations and pending proposals are saved with the Workflow. Reopen planning to refine an existing graph while keeping run history and controls.
 - **Eval**: Run an Agent repeatedly against a fixed dataset and evaluators, then review average scores, pass rates, failed cases, evaluation reasons, and historical results.
 - **MCP**: Register and test STDIO or HTTP MCP Servers, inspect their tool lists, and bind the services you need to new sessions for selected Agents.
