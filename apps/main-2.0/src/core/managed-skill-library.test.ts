@@ -264,6 +264,28 @@ describe("AgentRecall bundled Skills", () => {
     expect(library.list().skills.find((skill) => skill.managedId === "feishu-tech-diagram")?.categoryId).toBe("writing");
   });
 
+  it("keeps a deleted built-in Skill disabled across restarts and bundled updates", () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-disabled-builtin-"));
+    temporaryDirectories.push(fixtureRoot);
+    const libraryRoot = path.join(fixtureRoot, "skills");
+    const homeDir = path.join(fixtureRoot, "home");
+    const bundledRoot = fileURLToPath(new URL("../../assets/bundled-skills", import.meta.url));
+    const library = new ManagedSkillLibrary({ libraryRoot, homeDir });
+    library.ensureBuiltinSkills(bundledRoot);
+
+    library.delete("aihot");
+
+    const state = JSON.parse(fs.readFileSync(
+      path.join(libraryRoot, ".state", "disabled-builtins.json"),
+      "utf8",
+    )) as { schemaVersion: number; skillIds: string[] };
+    expect(state).toEqual({ schemaVersion: 1, skillIds: ["aihot"] });
+    const restartedLibrary = new ManagedSkillLibrary({ libraryRoot, homeDir });
+    restartedLibrary.ensureBuiltinSkills(bundledRoot);
+    expect(restartedLibrary.list().skills.some((skill) => skill.managedId === "aihot")).toBe(false);
+    expect(restartedLibrary.list().skills.some((skill) => skill.managedId === "brainstorming")).toBe(true);
+  });
+
   it("adds the current category to existing built-in metadata without re-importing the Skill", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "agent-recall-builtin-category-"));
     temporaryDirectories.push(fixtureRoot);
