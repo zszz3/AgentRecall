@@ -238,6 +238,8 @@ describe("document and session sharing interactions", () => {
     await act(async () => button("团队规范").click());
     expect(container.textContent).toContain("team guidance");
     expect(container.textContent).toContain("local edits");
+    expect(container.querySelector('[aria-label="文档列表"] .team-workspace-inspection')).toBeNull();
+    expect(container.querySelector('[aria-label="文档详情"]')?.textContent).toContain("team guidance");
     expect(button("应用到本地").disabled).toBe(true);
     expect(request.mock.calls.some(([input]) => input.action === "document-install")).toBe(false);
   });
@@ -279,5 +281,41 @@ it("shows local Skills independently of an empty team catalog without sharing th
   expect(container.textContent).toContain("团队仓库尚未发布 Skills");
   await act(async () => button("my-review").click());
   expect(container.textContent).toContain("My local review instructions");
+  expect(request.mock.calls.every(([input]) => input.action === "catalog" || input.action === "local-assets")).toBe(true);
+});
+
+it("opens local documents in a sibling reader, preserves the list and ignores closed or stale reads", async () => {
+  const pending = new Map<string, (value: TeamReply) => void>();
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: { ...catalog().assets!, documents: [] } } });
+    if (input.action === "local-assets") {
+      if (input.file) return new Promise((resolve) => { pending.set(input.file!, resolve); });
+      return ok({ kind: "local-assets", value: { directory: projectRoot, entries: [{ name: "first.md", path: "docs/first.md", bytes: 10 }, { name: "second.md", path: "docs/second.md", bytes: 10 }], limited: false, skipped: 0 } });
+    }
+    return ok({ kind: "cancelled" });
+  });
+  const api = { request };
+  await act(async () => root.render(<TeamDocumentsPanel language="zh" selection={selection()} api={api} />));
+  const list = container.querySelector<HTMLElement>('[aria-label="文档列表"]')!;
+  list.scrollTop = 180;
+  const first = button("first.md"), second = button("second.md");
+  await act(async () => first.click());
+  expect(container.querySelector('[aria-label="文档详情"]')?.textContent).toContain("正在打开文档");
+  expect(list.querySelector('[aria-label="文档详情"]')).toBeNull();
+  expect(list.scrollTop).toBe(180);
+  await act(async () => second.click());
+  await act(async () => pending.get("docs/second.md")!(ok({ kind: "local-preview", value: { path: "docs/second.md", content: "second content" } })));
+  await act(async () => pending.get("docs/first.md")!(ok({ kind: "local-preview", value: { path: "docs/first.md", content: "late first content" } })));
+  expect(container.querySelector('[aria-label="文档详情"]')?.textContent).toContain("second content");
+  expect(container.textContent).not.toContain("late first content");
+  expect(second.getAttribute("aria-pressed")).toBe("true");
+  await act(async () => container.querySelector('[aria-label="文档详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(container.querySelector('[aria-label="文档详情"]')).toBeNull();
+  expect(document.activeElement).toBe(second);
+  expect(list.scrollTop).toBe(180);
+  await act(async () => first.click());
+  await act(async () => button("关闭文档").click());
+  await act(async () => pending.get("docs/first.md")!(ok({ kind: "local-preview", value: { path: "docs/first.md", content: "closed content" } })));
+  expect(container.querySelector('[aria-label="文档详情"]')).toBeNull();
   expect(request.mock.calls.every(([input]) => input.action === "catalog" || input.action === "local-assets")).toBe(true);
 });
