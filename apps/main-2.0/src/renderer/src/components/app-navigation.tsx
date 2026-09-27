@@ -59,39 +59,45 @@ export function AppNavigation({
         <strong>AgentRecall</strong>
       </button>
       <nav aria-label={l("Main navigation", "主导航")}>
-        <NavigationItem page="workbench" activePage={activePage} onNavigate={onNavigate}>
+        <div className="app-navigation-label">{l("Workspace", "工作区")}</div>
+        <NavigationItem page="workbench" activePage={activePage} onNavigate={onNavigate} language={language}>
           <LayoutDashboard size={18} /><span>{l("Workbench", "工作台")}</span>
         </NavigationItem>
-        <NavigationItem page="sessions" activePage={activePage} onNavigate={onNavigate}>
+        <NavigationItem page="sessions" activePage={activePage} onNavigate={onNavigate} language={language}>
           <MessagesSquare size={18} /><span>Session</span>
         </NavigationItem>
-        <NavigationItem page="workflows" activePage={activePage} onNavigate={onNavigate}>
+        <div className="app-navigation-label">{l("Automation", "自动化")}</div>
+        <NavigationItem page="workflows" activePage={activePage} onNavigate={onNavigate} language={language}>
           <Workflow size={18} /><span>Workflow</span>
         </NavigationItem>
-        <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate}>
+        <NavigationItem page="evaluation" activePage={activePage} onNavigate={onNavigate} language={language}>
           <Beaker size={18} /><span>Eval</span>
         </NavigationItem>
-        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate}>
+        <NavigationItem page="runtimes" activePage={activePage} onNavigate={onNavigate} language={language}>
           <Cpu size={18} /><span>Runtime</span>
         </NavigationItem>
-        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate}>
+        <div className="app-navigation-label">{l("Resources", "资源")}</div>
+        <NavigationItem page="mcp" activePage={activePage} onNavigate={onNavigate} language={language}>
           <PlugZap size={18} /><span>MCP</span>
         </NavigationItem>
-        <NavigationItem page="memories" activePage={activePage} onNavigate={onNavigate}>
+        <NavigationItem page="memories" activePage={activePage} onNavigate={onNavigate} language={language}>
           <BrainCircuit size={18} /><span>Memory</span>
         </NavigationItem>
-        <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate}>
+        <NavigationItem page="skills" activePage={activePage} onNavigate={onNavigate} language={language}>
           <PackageSearch size={18} /><span>Skills</span>
         </NavigationItem>
-        <NavigationItem page="providers" activePage={activePage} onNavigate={onNavigate}>
+        <NavigationItem page="providers" activePage={activePage} onNavigate={onNavigate} language={language}>
           <KeyRound size={18} /><span>Provider</span>
         </NavigationItem>
-        <NavigationItem page="team-space" activePage={activePage} onNavigate={onNavigate}>
+        <div className="app-navigation-label">{l("Collaboration", "协作")}</div>
+        <NavigationItem page="team-space" activePage={activePage} onNavigate={onNavigate} language={language}>
           <UsersRound size={18} /><span>{l("Team Space", "团队空间")}</span>
         </NavigationItem>
       </nav>
       <button
         className={`app-navigation-settings ${settingsOpen ? "active" : ""}`}
+        aria-label={l("Settings", "设置")}
+        title={l("Settings", "设置")}
         onClick={onOpenSettings}
       >
         <Settings size={18} /><span>{l("Settings", "设置")}</span>
@@ -105,15 +111,20 @@ function NavigationItem({
   page,
   activePage,
   onNavigate,
+  language,
   children,
 }: {
   page: AppPage;
   activePage: AppPage;
   onNavigate(page: AppPage): void;
+  language: LanguageMode;
   children: ReactElement | ReactElement[];
 }): ReactElement {
+  const labels: Record<AppPage, string> = { workbench: language === "zh" ? "工作台" : "Workbench", sessions: "Session", workflows: "Workflow", evaluation: "Eval", runtimes: "Runtime", mcp: "MCP", memories: "Memory", skills: "Skills", providers: "Provider", "team-space": language === "zh" ? "团队空间" : "Team Space" };
   return (
     <button
+      title={labels[page]}
+      aria-label={labels[page]}
       data-page={page}
       className={activePage === page ? "active" : ""}
       onClick={() => onNavigate(page)}

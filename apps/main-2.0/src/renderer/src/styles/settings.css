@@ -25,8 +25,8 @@
   align-content: start;
   gap: 2px;
   padding: 12px 10px;
-  border-right: 1px solid var(--border);
-  background: var(--panel-subtle);
+  border-right: 0;
+  background: var(--sidebar-bg);
 }
 
 .settings-sidebar button {
@@ -66,25 +66,15 @@
 }
 
 .settings-sidebar button.active {
-  background: var(--accent-soft);
-  color: var(--accent-bright);
+  background: var(--panel-active);
+  color: var(--text);
 }
 
 .settings-sidebar button.active svg {
   color: var(--accent);
 }
 
-.settings-sidebar button.active::before {
-  content: "";
-  position: absolute;
-  left: -10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 18px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
-}
+
 
 .settings-sidebar button .settings-update-dot {
   width: 7px;
@@ -775,10 +765,10 @@
   min-width: 152px;
   height: 36px;
   padding: 0 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   outline: 0;
-  background: var(--panel-bg);
+  background: var(--panel-subtle);
   color: var(--text);
   font-size: 13px;
 }
@@ -1130,6 +1120,7 @@
 }
 
 .settings-dialog .switch:checked::before {
+  background: var(--accent-contrast);
   transform: translateX(17px);
 }
 

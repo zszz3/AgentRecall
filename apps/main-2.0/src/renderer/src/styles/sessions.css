@@ -269,9 +269,9 @@
   width: var(--live-filter-width);
   flex: 0 0 var(--live-filter-width);
   padding: 2px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 9px;
-  background: var(--panel-bg);
+  background: var(--panel-subtle);
 }
 
 .live-filter button {
@@ -295,8 +295,9 @@
 }
 
 .live-filter button.active {
-  background: var(--accent-soft);
-  color: var(--accent-bright);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  color: var(--text);
 }
 
 .date-filter {
@@ -308,9 +309,9 @@
   flex: 0 0 auto;
   gap: 2px;
   padding: 2px 4px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 9px;
-  background: var(--panel-bg);
+  background: var(--panel-subtle);
 }
 
 .date-filter svg {
@@ -340,8 +341,9 @@
 }
 
 .date-filter button.active {
-  background: var(--accent-soft);
-  color: var(--accent-bright);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  color: var(--text);
 }
 
 .date-filter:has(.date-filter-custom) {
@@ -377,9 +379,9 @@
   align-items: center;
   gap: 2px;
   padding: 2px 4px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 9px;
-  background: var(--panel-bg);
+  background: var(--panel-subtle);
 }
 
 .sort-filter svg {
@@ -410,8 +412,9 @@
 }
 
 .sort-filter button.active {
-  background: var(--accent-soft);
-  color: var(--accent-bright);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-xs);
+  color: var(--text);
 }
 
 .scope-filter {
@@ -929,7 +932,7 @@
   overscroll-behavior: contain;
   border-radius: var(--radius-md);
   background: var(--row-bg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .load-more-sessions {

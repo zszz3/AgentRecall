@@ -20,33 +20,33 @@
   color-scheme: light;
 
   --app-bg: #ffffff;
-  --sidebar-bg: #f3f4f6;
+  --sidebar-bg: #f7f7f7;
   --panel-bg: #ffffff;
-  --panel-subtle: #f6f8fa;
-  --panel-hover: #eef1f5;
-  --panel-active: #e5e7eb;
+  --panel-subtle: #f5f5f5;
+  --panel-hover: #eeeeee;
+  --panel-active: #ededed;
   --row-bg: #ffffff;
-  --row-hover-bg: #f6f8fa;
-  --row-selected-bg: #f1f6fd;
+  --row-hover-bg: #f5f5f5;
+  --row-selected-bg: #eeeeee;
   --message-bg: #ffffff;
-  --message-user-bg: #f6faff;
+  --message-user-bg: #f5f5f5;
 
-  --border: #d8dee8;
-  --border-subtle: #e5e7eb;
-  --border-strong: #cbd5e1;
-  --message-user-border: #bfdbfe;
+  --border: #e6e6e6;
+  --border-subtle: #ededed;
+  --border-strong: #d4d4d4;
+  --message-user-border: #e4e4e4;
 
-  --text: #111827;
-  --text-dim: #374151;
-  --text-muted: #6b7280;
-  --text-faint: #8a94a6;
+  --text: #1c1c1c;
+  --text-dim: #444444;
+  --text-muted: #707070;
+  --text-faint: #929292;
 
-  --accent: #4f6ef7;
-  --accent-hover: #3d5af5;
-  --accent-bright: #4f6ef7;
-  --accent-soft: #eef1fe;
-  --accent-line: #4f6ef7;
-  --accent-ring: rgba(79, 110, 247, 0.12);
+  --accent: #222222;
+  --accent-hover: #383838;
+  --accent-bright: #222222;
+  --accent-soft: #ededed;
+  --accent-line: #222222;
+  --accent-ring: rgba(28, 28, 28, 0.12);
   --accent-contrast: #ffffff;
 
   --danger: #c24130;
@@ -79,9 +79,9 @@
   --branch-icon: #0284c7;
   --overlay: rgba(31, 41, 55, 0.22);
   --dialog-overlay: rgba(15, 23, 42, 0.26);
-  --shadow-popover: 0 18px 48px rgba(15, 23, 42, 0.16);
-  --shadow-panel: -16px 0 48px rgba(15, 23, 42, 0.14);
-  --shadow-dialog: 0 34px 90px rgba(15, 23, 42, 0.2);
+  --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --shadow-panel: -16px 0 48px rgba(0, 0, 0, 0.10);
+  --shadow-dialog: 0 34px 90px rgba(0, 0, 0, 0.15);
 
   --running-bg: #fff7ed;
   --running-text: #a45013;
@@ -91,6 +91,10 @@
   --trend-down: #096b4b;
   --trend-new: #6d5dfc;
 
+  --navigation-width: 196px;
+  --control-bg: var(--panel-subtle);
+  --control-hover: var(--panel-hover);
+  --surface-raised: var(--panel-bg);
   --radius-sm: 6px;
   --radius: 8px;
   --radius-md: 10px;
@@ -143,35 +147,35 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --app-bg: #0a0b0d;
-  --sidebar-bg: #0d0e11;
-  --panel-bg: #15171b;
-  --panel-subtle: #1a1d22;
+  --app-bg: #181818;
+  --sidebar-bg: #121212;
+  --panel-bg: #202020;
+  --panel-subtle: #262626;
   --panel-hover: rgba(255, 255, 255, 0.06);
   --panel-active: rgba(255, 255, 255, 0.08);
-  --row-bg: #15171b;
-  --row-hover-bg: #1a1d22;
-  --row-selected-bg: rgba(123, 147, 248, 0.13);
+  --row-bg: #202020;
+  --row-hover-bg: #262626;
+  --row-selected-bg: rgba(255, 255, 255, 0.075);
   --message-bg: rgba(255, 255, 255, 0.018);
-  --message-user-bg: rgba(123, 147, 248, 0.12);
+  --message-user-bg: rgba(255, 255, 255, 0.055);
 
   --border: rgba(255, 255, 255, 0.08);
   --border-subtle: rgba(255, 255, 255, 0.065);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --message-user-border: rgba(123, 147, 248, 0.24);
+  --message-user-border: rgba(255, 255, 255, 0.12);
 
-  --text: #eceef1;
-  --text-dim: #c9ced6;
-  --text-muted: #9aa1aa;
-  --text-faint: #626871;
+  --text: #f2f2f2;
+  --text-dim: #cdcdcd;
+  --text-muted: #a0a0a0;
+  --text-faint: #858585;
 
-  --accent: #7b93f8;
-  --accent-hover: #95a9f9;
-  --accent-bright: #95a9f9;
-  --accent-soft: rgba(123, 147, 248, 0.14);
-  --accent-line: rgba(123, 147, 248, 0.55);
-  --accent-ring: rgba(123, 147, 248, 0.18);
-  --accent-contrast: #0e1020;
+  --accent: #f2f2f2;
+  --accent-hover: #dcdcdc;
+  --accent-bright: #ffffff;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --accent-line: #c8c8c8;
+  --accent-ring: rgba(255, 255, 255, 0.12);
+  --accent-contrast: #181818;
 
   --danger: #f0795f;
   --danger-hover: #f58c74;
@@ -195,7 +199,7 @@
   --zcode-badge-text: #93c5fd;
 
   --tag-bg: rgba(255, 255, 255, 0.05);
-  --tag-text: #c9ced6;
+  --tag-text: #cdcdcd;
   --branch-bg: rgba(14, 165, 233, 0.18);
   --branch-bg-hover: rgba(14, 165, 233, 0.3);
   --branch-border: rgba(56, 189, 248, 0.36);

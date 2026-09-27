@@ -75,6 +75,6 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
       {!teams.length && editor !== "team" && <p className="team-settings-empty">{l("Connect an existing team repository to get started.", "粘贴已有的团队仓库地址，即可开始配置。")}</p>}
       {teams.map((team) => <div className="team-settings-item" key={team.id}><span className="team-settings-item-icon"><GitBranch size={16} /></span><div className="team-settings-item-copy"><strong>{team.name}</strong><small title={team.repository}>{team.repository}</small></div></div>)}
     </section>
-    <p className="team-settings-footnote">{enabled ? l("Open the Team scope, choose a team, then create or open a project.", "连接后，进入「团队」范围，选择团队，再创建或打开项目。") : l("Team features are off. Saved repositories and local installations are kept.", "团队功能已关闭，仓库配置和已有本地安装会保留。")}</p>
+    <p className="team-settings-footnote">{enabled ? l("Open Team Space to browse shared assets and connect working directories.", "连接后，在「团队空间」浏览共享资产、接入工作目录。") : l("Team features are off. Saved repositories and local installations are kept.", "团队功能已关闭，仓库配置和已有本地安装会保留。")}</p>
   </section>;
 }

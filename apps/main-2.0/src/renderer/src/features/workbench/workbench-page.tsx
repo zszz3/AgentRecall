@@ -594,8 +594,8 @@ export function WorkbenchPage({
               )
               : l("Runtime status loads on demand", "Runtime 状态将在打开时加载")}
             description={l(
-              "Manage the model executors shared by Chat, Workflow, and AI exploration.",
-              "管理 Chat、Workflow 与 AI 探索共用的模型执行器。",
+              "Manage the model executors used by Workflow and AI exploration.",
+              "管理 Workflow 与 AI 探索使用的模型执行器。",
             )}
             rows={runtimeChannels.slice(0, 3).map((channel) => ({
               id: channel.id,
