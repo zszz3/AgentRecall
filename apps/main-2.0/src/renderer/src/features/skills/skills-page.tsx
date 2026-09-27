@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ResizableSplit } from "../../components/resizable-split";
 import type { ReactElement } from "react";
 import { Compass, PackagePlus, RefreshCw, Upload, X } from "lucide-react";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
@@ -357,7 +358,8 @@ export function SkillsPage({
             </div>
           ) : null}
 
-          <div className="managed-skills-grid">
+          <ResizableSplit className="managed-skills-grid" storageKey="agent-recall-skills-pane" initialWidth={320} minWidth={240} maxWidth={460}
+            label={l("Resize Skills list", "调整 Skills 列表宽度")}>
             <SkillLibraryList
               skills={filteredSkills}
               selectedId={selectedSkill?.managedId ?? null}
@@ -422,7 +424,7 @@ export function SkillsPage({
               onReveal={onReveal}
               onRequestDelete={setDeleteCandidate}
             />}
-          </div>
+          </ResizableSplit>
         </section>
 
         <LocalSkillsTab

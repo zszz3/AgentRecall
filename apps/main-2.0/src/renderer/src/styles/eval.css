@@ -7,8 +7,10 @@
   flex-direction: column;
   gap: 12px;
   overflow: hidden;
-  padding: 24px 28px 20px;
+  padding: 0 28px 20px;
 }
+
+.eval-page > .app-page-head { margin-inline: -28px; }
 
 /*
  * One segmented control on a single track. Separately framed buttons read as a
@@ -16,6 +18,8 @@
  */
 .eval-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   align-items: center;
   gap: 2px;
   align-self: flex-start;

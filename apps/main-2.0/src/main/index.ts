@@ -13,7 +13,6 @@ import {
   shell,
   Tray,
   type IpcMainInvokeEvent,
-  type MenuItemConstructorOptions,
 } from "electron";
 import Store from "electron-store";
 import { existsSync } from "node:fs";
@@ -34,6 +33,7 @@ import { createSessionIndexFailureLogger } from "./session-index-failure-log";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
+import { installApplicationMenu, refreshApplicationMenuZoom } from "./application-menu";
 import {
   type SessionJsonExportFormat,
 } from "../core/format-session";
@@ -1885,77 +1885,6 @@ function resolveAssetPath(relativePath: string): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-function createApplicationMenu(): void {
-  if (process.platform !== "darwin") {
-    Menu.setApplicationMenu(null);
-    return;
-  }
-
-  app.setAboutPanelOptions({ applicationName: PRODUCT_NAME });
-
-  const template: MenuItemConstructorOptions[] = [
-    {
-      label: PRODUCT_NAME,
-      submenu: [
-        { label: `About ${PRODUCT_NAME}`, role: "about" },
-        { type: "separator" },
-        {
-          label: "Settings...",
-          accelerator: "Command+,",
-          click: () => {
-            showWindow();
-            mainWindow?.webContents.send("open-settings");
-          },
-        },
-        { type: "separator" },
-        { role: "services" },
-        { type: "separator" },
-        { label: `Hide ${PRODUCT_NAME}`, accelerator: "Command+H", role: "hide" },
-        { label: "Hide Others", accelerator: "Command+Alt+H", role: "hideOthers" },
-        { label: "Show All", role: "unhide" },
-        { type: "separator" },
-        { label: `Quit ${PRODUCT_NAME}`, accelerator: "Command+Q", click: () => app.quit() },
-      ],
-    },
-    {
-      label: "File",
-      submenu: [{ role: "close" }],
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
-      ],
-    },
-    {
-      label: "View",
-      submenu: [
-        { label: "Refresh Now", accelerator: "CmdOrCtrl+R", click: () => void runIndexSync() },
-        { type: "separator" },
-        { role: "reload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-    {
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }],
-    },
-  ];
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
 
 function emitEnvironmentsUpdated(environments?: SessionEnvironment[]): void {
   if (environments) {
@@ -3031,7 +2960,11 @@ function registerIpc(): void {
     mainWindow?.webContents.send("open-session", sessionKey);
   });
   ipcMain.handle("settings:get", () => providerService.hydrateSettings());
-  ipcMain.handle("interface-zoom:set", (_event, factor: unknown) => interfaceZoomController.set(factor));
+  ipcMain.handle("interface-zoom:set", (_event, factor: unknown) => {
+    const result = interfaceZoomController.set(factor);
+    refreshApplicationMenuZoom();
+    return result;
+  });
   registerProvidersIpc(ipcMain, providerService, chooseProviderConfigDirectory);
   ipcMain.handle("settings:set", (_event, settings: AppSettingsUpdate) => applySettingsUpdate(settings));
   ipcMain.handle("v1-import:run", async () => {
@@ -3233,7 +3166,14 @@ app.whenReady().then(async () => {
   automationService = createAutomationService();
   registerIpc();
   quotaService.start();
-  createApplicationMenu();
+  installApplicationMenu({
+    productName: PRODUCT_NAME,
+    openSettings: () => {
+      showWindow();
+      mainWindow?.webContents.send("open-settings");
+    },
+    refresh: () => void runIndexSync(),
+  });
   createWindow();
   createTray();
   applyDockVisibility(getSettings().showInDock);

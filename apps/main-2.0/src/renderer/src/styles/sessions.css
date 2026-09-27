@@ -1,3 +1,68 @@
+.sessions-page .section-header {
+  width: 100%;
+  min-height: 30px;
+  margin: var(--space-3) 0 var(--space-1);
+  padding: 0 var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+.sessions-page .section-header > span { min-width: 0; }
+.sessions-page .section-header svg { flex: 0 0 auto; }
+.sessions-page .nav-group,
+.sessions-page .sidebar-tree { margin-left: var(--space-3); }
+.sessions-page .nav-group button,
+.sessions-page .tree-root,
+.sessions-page .tree-label {
+  min-height: 28px;
+  height: 28px;
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.sessions-page .nav-group button.active,
+.sessions-page .tree-root.active,
+.sessions-page .tree-label.active,
+.sessions-page .tree-tag-row.active .tree-label { font-weight: 600; }
+.sessions-page .tree-env-row > .tree-label { font-weight: 550; }
+.sessions-page .tree-proj-row { padding-left: var(--space-3); }
+.sessions-page .tree-tag-row { padding-left: var(--space-6); }
+.sessions-page .tree-chevron { height: 28px; }
+
+.session-disclosure {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows var(--motion-exit) var(--motion-easing-standard),
+    opacity var(--motion-exit) var(--motion-easing-standard);
+}
+.session-disclosure[data-expanded="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition-duration: var(--motion-enter);
+}
+.session-disclosure > div { min-height: 0; overflow: hidden; }
+.sessions-page .section-header svg,
+.sessions-page .tree-chevron svg {
+  transition: transform var(--motion-exit) var(--motion-easing-standard);
+}
+.sessions-page .section-header[aria-expanded="true"] svg,
+.sessions-page .tree-chevron[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+  transition-duration: var(--motion-enter);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-disclosure,
+  .sessions-page .section-header svg,
+  .sessions-page .tree-chevron svg { transition: none; }
+}
+
 .content {
   display: flex;
   min-width: 0;
@@ -31,8 +96,8 @@
 }
 
 .toolbar-secondary {
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .toolbar-filters {
@@ -41,10 +106,10 @@
   --date-filter-width: 214px;
   --sort-filter-width: 214px;
   display: flex;
-  width: max-content;
+  width: auto;
   min-width: 0;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex: 1 1 400px;
+  flex-wrap: wrap;
   justify-content: flex-start;
   align-items: center;
   gap: var(--toolbar-filter-gap);
@@ -807,6 +872,8 @@
 
 .result-count {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   align-items: center;
   justify-content: space-between;
   min-height: 30px;
@@ -822,6 +889,7 @@
 
 .bulk-result-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   min-width: 0;
   gap: 8px;
@@ -829,6 +897,8 @@
 
 .bulk-result-actions button {
   display: inline-flex;
+  white-space: nowrap;
+  flex-shrink: 0;
   align-items: center;
   gap: 4px;
   min-height: 26px;
@@ -1037,7 +1107,7 @@
 .session-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) minmax(0, clamp(90px, 22%, 240px));
   align-items: start;
   gap: 10px;
   flex: 0 0 auto;
@@ -1052,7 +1122,7 @@
 }
 
 .session-row.bulk-selecting {
-  grid-template-columns: 20px minmax(0, 1fr) max-content;
+  grid-template-columns: 20px minmax(0, 1fr) minmax(0, clamp(90px, 22%, 240px));
 }
 
 .session-bulk-checkbox {
@@ -1340,20 +1410,26 @@
 
 .row-tags {
   display: flex;
-  max-width: 150px;
-  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   align-items: flex-start;
   gap: 5px;
 }
 
 .row-tags span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--tag-bg);
   color: var(--tag-text);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
 }
 
 .row-tags span.branch-tag {
