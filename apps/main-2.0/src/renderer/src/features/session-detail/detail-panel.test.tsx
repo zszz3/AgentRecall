@@ -113,6 +113,20 @@ describe("DetailPanel Turn controls", () => {
               relation: "created",
               runtimeSessionId: "test-session",
               runtimeTurnId: "turn-1",
+            }, {
+              invocationId: "legacy-chat-invocation",
+              surface: "team_chat",
+              role: "member",
+              ownerReference: { roomId: "legacy-room" },
+              runtimeId: "codex",
+              channelId: "codex-default",
+              environmentId: "local",
+              status: "completed",
+              startedAt: 1,
+              finishedAt: 2,
+              relation: "created",
+              runtimeSessionId: "test-session",
+              runtimeTurnId: null,
             }],
           }}
           turns={[turn]}
@@ -163,13 +177,19 @@ describe("DetailPanel Turn controls", () => {
       .toContain("Created by AgentRecall");
     expect(container.querySelector(".runtime-invocation-history button")).toBeNull();
     const actionButtons = [...container.querySelectorAll<HTMLButtonElement>(".detail-actions > .detail-action-group > button")];
-    const sourceButton = actionButtons.at(-1);
+    const sourceButton = actionButtons.find((button) => button.textContent?.includes("Back to source"));
     expect(sourceButton?.textContent).toContain("Back to source");
     await act(async () => sourceButton?.click());
     expect(onOpenInvocationOwner).toHaveBeenCalledWith(expect.objectContaining({
       invocationId: "invocation-1",
       ownerReference: { workflowId: "workflow-1", runId: "run-1" },
     }));
+
+    const retiredChatButton = actionButtons.find((button) => button.textContent?.includes("Multi-agent Chat removed"));
+    expect(retiredChatButton?.disabled).toBe(true);
+    await act(async () => retiredChatButton?.click());
+    expect(onOpenInvocationOwner).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".runtime-invocation-history")?.textContent).toContain("Team Chat");
 
     const roleGroup = container.querySelector('[role="group"][aria-label="Conversation role filter"]');
     expect(roleGroup?.querySelectorAll("button")).toHaveLength(3);

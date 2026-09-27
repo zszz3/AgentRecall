@@ -1,21 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentRecallMcpContext,
   AgentChannel,
   ConfiguredAgent,
-  RuntimeConversation,
   RuntimeInvocationRequest,
   WorkflowAgentEvent,
   WorkflowAgentRequest,
   WorkflowAgentResponse,
 } from "../../shared/types";
 import { defaultModelForAgent, isModelForChannel } from "../../shared/models";
-
-const CONTINUABLE_WORKFLOW_RUNTIMES = new Set<WorkflowAgentRequest["runtimeId"]>(["codex", "claude"]);
-
-export function supportsConfiguredAgentConversation(runtimeId: WorkflowAgentRequest["runtimeId"]): boolean {
-  return CONTINUABLE_WORKFLOW_RUNTIMES.has(runtimeId);
-}
 
 export interface ConfiguredAgentExecutionTarget {
   runtimeId: WorkflowAgentRequest["runtimeId"];
@@ -56,71 +48,9 @@ export class ConfiguredAgentExecutionService {
     durationMs: number;
     executionReference?: WorkflowAgentResponse["executionReference"];
   }> {
-    const result = await this.executeConfiguredAgent(input, false, onEvent, signal);
-    return {
-      output: result.output,
-      durationMs: result.durationMs,
-      // The reference is what links a one-shot run to the session it created.
-      // Dropping it here left evaluation runs with no way back to their session.
-      ...(result.executionReference ? { executionReference: result.executionReference } : {}),
-    };
-  }
-
-  async runConversation(
-    input: {
-      configuredAgentId: string;
-      prompt: string;
-      workDir?: string;
-      runtimeConversation?: RuntimeConversation;
-      developerInstructions?: string;
-      agentRecallMcp?: AgentRecallMcpContext;
-      invocation: RuntimeInvocationRequest;
-    },
-    onEvent?: (event: WorkflowAgentEvent) => void,
-    signal?: AbortSignal,
-  ): Promise<{
-    output: string;
-    durationMs: number;
-    runtimeConversation?: RuntimeConversation;
-    executionReference?: WorkflowAgentResponse["executionReference"];
-  }> {
-    return this.executeConfiguredAgent(input, true, onEvent, signal);
-  }
-
-  private async executeConfiguredAgent(
-    input: {
-      configuredAgentId: string;
-      prompt: string;
-      workDir?: string;
-      runtimeConversation?: RuntimeConversation;
-      developerInstructions?: string;
-      agentRecallMcp?: AgentRecallMcpContext;
-      invocation: RuntimeInvocationRequest;
-      workflowExecution?: {
-        workflowId: string;
-        runId: string;
-        nodeId: string;
-        executionId: string;
-      };
-    },
-    allowContinuation: boolean,
-    onEvent?: (event: WorkflowAgentEvent) => void,
-    signal?: AbortSignal,
-  ): Promise<{
-    output: string;
-    durationMs: number;
-    runtimeConversation?: RuntimeConversation;
-    executionReference?: WorkflowAgentResponse["executionReference"];
-  }> {
     const target = this.resolve(input.configuredAgentId);
     if (!target) throw new Error(`Configured agent not found: ${input.configuredAgentId}`);
     const startedAt = Date.now();
-    const runtimeConversation =
-      allowContinuation &&
-      input.runtimeConversation?.runtimeId === target.runtimeId &&
-      supportsConfiguredAgentConversation(target.runtimeId)
-        ? structuredClone(input.runtimeConversation)
-        : undefined;
     const request: WorkflowAgentRequest = {
       invocationId: randomUUID(),
       configuredAgentId: input.configuredAgentId,
@@ -128,12 +58,10 @@ export class ConfiguredAgentExecutionService {
       runtimeId: target.runtimeId,
       runtimeConfig: { model: target.modelId, ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}) },
       executionMode: "oneshot",
-      continuationPolicy: runtimeConversation ? "resume-preferred" : "fresh",
-      ...(runtimeConversation ? { runtimeConversation } : {}),
+      continuationPolicy: "fresh",
       ...(input.developerInstructions?.trim()
         ? { developerInstructions: input.developerInstructions.trim() }
         : {}),
-      ...(input.agentRecallMcp ? { agentRecallMcp: { ...input.agentRecallMcp } } : {}),
       invocation: structuredClone(input.invocation),
       ...(input.workflowExecution ? {
         planningWorkflowId: input.workflowExecution.workflowId,
@@ -149,9 +77,6 @@ export class ConfiguredAgentExecutionService {
     return {
       output: response.content,
       durationMs: Date.now() - startedAt,
-      ...(allowContinuation && response.runtimeConversation
-        ? { runtimeConversation: structuredClone(response.runtimeConversation) }
-        : {}),
       ...(response.executionReference
         ? { executionReference: { ...response.executionReference } }
         : {}),

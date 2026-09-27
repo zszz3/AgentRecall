@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { RUNTIME_IDS } from "../shared/runtime-catalog";
 import {
-  STUDIO_MCP_TOOL_NAMES,
   workflowMcpScopeFromEnvironment,
   workflowMcpToolsForScope,
 } from "../shared/workflow-mcp-policy";
@@ -57,22 +56,6 @@ const TOOL_ROUTES: Record<string, string> = {
   workflow_context_append: "/mcp/workflow/context/append",
   workflow_run_context_append: "/mcp/workflow/run-context/append",
   workflow_node_complete: "/mcp/workflow/node/complete",
-  studio_list_members: "/mcp/studio/list-members",
-  studio_get_context: "/mcp/studio/get-context",
-  studio_get_room_state: "/mcp/studio/get-room-state",
-  studio_inbox_list: "/mcp/studio/inbox/list",
-  studio_task_finish: "/mcp/studio/task/finish",
-  studio_turn_list: "/mcp/studio/turn/list",
-  studio_turn_get: "/mcp/studio/turn/get",
-  studio_turn_events: "/mcp/studio/turn/events",
-  studio_read_thread: "/mcp/studio/read-thread",
-  studio_post: "/mcp/studio/post",
-  studio_read_messages: "/mcp/studio/read-messages",
-  studio_read_range: "/mcp/studio/read-range",
-  studio_search: "/mcp/studio/search",
-  workspace_reserve: "/mcp/workspace/reserve",
-  workspace_release: "/mcp/workspace/release",
-  workspace_status: "/mcp/workspace/status",
 };
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
@@ -313,7 +296,6 @@ function gatewayToolDefinitions(): McpToolDefinition[] {
 
 export function mcpToolDefinitions(): McpToolDefinition[] {
   const managed = Boolean(process.env.AGENT_RECALL_WORKFLOW_MCP_TOKEN);
-  const studioScoped = Boolean(process.env.AGENT_RECALL_STUDIO_TOKEN);
   if (process.env.AGENT_RECALL_MCP_MODE === "gateway") return gatewayToolDefinitions();
   const tools: McpToolDefinition[] = [
     {
@@ -583,139 +565,6 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
       }, ["workflowId", "runId"]),
     },
   ];
-  if (studioScoped) {
-    tools.push(
-      {
-        name: "studio_list_members",
-        description: "列出当前 AgentRecall Studio 中的员工及其可用状态。",
-        inputSchema: objectSchema({}),
-      },
-      {
-        name: "studio_get_context",
-        description: "通过不可变触发快照读取当前 Turn 的有限房间增量。",
-        inputSchema: objectSchema({
-          limit: { type: "integer", minimum: 1, maximum: 100 },
-        }),
-      },
-      {
-        name: "studio_get_room_state",
-        description: "读取当前房间元数据、当前任务和最新房间序号。",
-        inputSchema: objectSchema({}),
-      },
-      {
-        name: "studio_inbox_list",
-        description: "列出当前 Studio 员工收到的提及和 Turn 投递状态。",
-        inputSchema: objectSchema({
-          status: {
-            type: "string",
-            enum: ["queued", "running", "completed", "failed", "interrupted", "skipped"],
-          },
-          limit: { type: "integer", minimum: 1, maximum: 100 },
-        }),
-      },
-      {
-        name: "studio_task_finish",
-        description: "声明当前任务已完成、受阻或正在等待用户输入；重复提交相同结果是安全的。",
-        inputSchema: objectSchema({
-          taskId: { type: "string" },
-          status: {
-            type: "string",
-            enum: ["completed", "blocked", "waiting_input"],
-          },
-          summary: { type: "string", minLength: 1 },
-          evidence: {
-            type: "array",
-            maxItems: 20,
-            items: { type: "string" },
-          },
-        }, ["status", "summary"]),
-      },
-      {
-        name: "studio_turn_list",
-        description: "列出当前房间中的逻辑 Turn 和已脱敏的 Attempt 摘要。",
-        inputSchema: objectSchema({
-          limit: { type: "integer", minimum: 1, maximum: 50 },
-        }),
-      },
-      {
-        name: "studio_turn_get",
-        description: "读取当前房间中的一个逻辑 Turn 及其已脱敏 Attempt 摘要。",
-        inputSchema: objectSchema({
-          turnId: { type: "string", minLength: 1 },
-        }, ["turnId"]),
-      },
-      {
-        name: "studio_turn_events",
-        description: "读取当前房间中一个 Turn 的有限、已脱敏执行事件。",
-        inputSchema: objectSchema({
-          turnId: { type: "string", minLength: 1 },
-          limit: { type: "integer", minimum: 1, maximum: 200 },
-        }, ["turnId"]),
-      },
-      {
-        name: "studio_read_thread",
-        description: "读取当前房间中属于一个根消息话题的公开消息。",
-        inputSchema: objectSchema({
-          rootMessageId: { type: "string", minLength: 1 },
-          limit: { type: "integer", minimum: 1, maximum: 200 },
-        }, ["rootMessageId"]),
-      },
-      {
-        name: "studio_post",
-        description: "发布 Studio 可见信息，但不激活其他员工。",
-        inputSchema: objectSchema({
-          content: { type: "string", minLength: 1 },
-          replyTo: { type: "string" },
-        }, ["content"]),
-      },
-      {
-        name: "studio_read_messages",
-        description: "按 ID 读取当前 Studio 中的指定消息。",
-        inputSchema: objectSchema({
-          messageIds: { type: "array", minItems: 1, maxItems: 50, items: { type: "string" } },
-        }, ["messageIds"]),
-      },
-      {
-        name: "studio_read_range",
-        description: "读取当前 Studio 时间线中有限的序号范围。",
-        inputSchema: objectSchema({
-          after: { type: "integer", minimum: 0 },
-          before: { type: "integer", minimum: 1 },
-          limit: { type: "integer", minimum: 1, maximum: 100 },
-        }),
-      },
-      {
-        name: "studio_search",
-        description: "检索当前 Studio 中的可见消息。",
-        inputSchema: objectSchema({
-          query: { type: "string", minLength: 1 },
-          limit: { type: "integer", minimum: 1, maximum: 50 },
-        }, ["query"]),
-      },
-      {
-        name: "workspace_reserve",
-        description: "声明当前员工准备修改的项目相对路径。",
-        inputSchema: objectSchema({
-          paths: { type: "array", minItems: 1, maxItems: 50, items: { type: "string" } },
-          reason: { type: "string" },
-        }, ["paths"]),
-      },
-      {
-        name: "workspace_release",
-        description: "释放当前员工已预留的项目相对路径。",
-        inputSchema: objectSchema({
-          paths: { type: "array", minItems: 1, maxItems: 50, items: { type: "string" } },
-        }, ["paths"]),
-      },
-      {
-        name: "workspace_status",
-        description: "列出当前 Studio 中有效的路径预留。",
-        inputSchema: objectSchema({
-          paths: { type: "array", maxItems: 50, items: { type: "string" } },
-        }),
-      },
-    );
-  }
   if (managed && process.env.AGENT_RECALL_WORKFLOW_RUN_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_ID && process.env.AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID) {
     tools.push({
       name: "workflow_node_complete",
@@ -736,9 +585,6 @@ export function mcpToolDefinitions(): McpToolDefinition[] {
       ? workflowMcpToolsForScope(workflowMcpScopeFromEnvironment(process.env))
       : READ_ONLY_TOOL_NAMES,
   );
-  if (studioScoped) {
-    for (const toolName of STUDIO_MCP_TOOL_NAMES) allowed.add(toolName);
-  }
   return tools
     .filter((tool) => allowed.has(tool.name))
     .map((tool) => READ_ONLY_TOOL_NAMES.has(tool.name)
@@ -782,9 +628,6 @@ export async function callMcpTool(name: string, args: unknown): Promise<unknown>
     headers: {
       authorization: `Bearer ${discovery.token}`,
       "content-type": "application/json",
-      ...(process.env.AGENT_RECALL_STUDIO_TOKEN
-        ? { "x-agent-recall-studio-token": process.env.AGENT_RECALL_STUDIO_TOKEN }
-        : {}),
     },
     body: JSON.stringify({
       ...(args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : {}),

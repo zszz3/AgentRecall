@@ -47,7 +47,6 @@ export async function runCodexWorkflow(
     executionId: input.workflowNodeExecutionId,
     reviewRevision: input.workflowReviewRevision,
     ...(input.planningWorkflowId ? { managedToken: options.workflowMcpManagedToken?.() } : {}),
-    studioToken: input.agentRecallMcp?.studioToken,
   });
   const developerInstructions = developerInstructionsForWorkflowRequest(input);
 

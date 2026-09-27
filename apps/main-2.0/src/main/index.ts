@@ -130,7 +130,6 @@ import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
 import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
-import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
@@ -365,7 +364,6 @@ bootstrapApplicationPaths({
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
-let disposeTeamChatIpc: (() => void) | null = null;
 let disposeOpenVikingMemoryIpc: (() => void) | null = null;
 let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
 let openVikingControlService: OpenVikingControlService | null = null;
@@ -2773,12 +2771,6 @@ function registerIpc(): void {
       return filePath;
     },
   });
-  disposeTeamChatIpc = registerTeamChatIpc({
-    ipc: ipcMain,
-    service: automationService.teamChat,
-    send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
-    ensureReady: () => automationService!.requireReady(),
-  });
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
     if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
@@ -3358,8 +3350,6 @@ app.on("before-quit", (event) => {
   remoteEnvironmentLifecycle?.stopAll();
   disposeAutomationIpc?.();
   disposeAutomationIpc = null;
-  disposeTeamChatIpc?.();
-  disposeTeamChatIpc = null;
   disposeOpenVikingMemoryIpc?.();
   disposeOpenVikingMemoryIpc = null;
   globalShortcut.unregisterAll();
