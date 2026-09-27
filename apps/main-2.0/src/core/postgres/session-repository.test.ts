@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+// @ts-expect-error -- standalone MCP JavaScript boundary
+import { getLatestSessions, searchSessions } from "../../../bin/agent-recall-mcp.mjs";
+
 import type {
   CodexIncrementalState,
   IndexedSession,
@@ -893,5 +896,30 @@ describe("PostgresSessionRepository", () => {
         granularity: "day",
         buckets: [{ totalTokens: 175 }],
       });
+  });
+
+  it.each([
+    ["/projects/100%ready", "/projects/100-more-ready"],
+    ["/projects/team_work", "/projects/teamXwork"],
+    [String.raw`C:\projects\review`, "C:projectsreview"],
+    ["/projects/review", "/projects/unrelated"],
+  ])("matches MCP project filters literally for %s", async (projectPath, unrelatedPath) => {
+    for (const [index, path] of [projectPath, `${projectPath}/child`, unrelatedPath].entries()) {
+      await repository.upsertIndexedSession(session({
+        sessionKey: `codex:literal-${index}`,
+        rawId: `literal-${index}`,
+        projectPath: path,
+        fileMtimeMs: 200 + index,
+      }), messages);
+    }
+    const expected = [
+      expect.objectContaining({ sessionKey: "codex:literal-1" }),
+      expect.objectContaining({ sessionKey: "codex:literal-0" }),
+    ];
+    // Keep case-insensitive substring matching and newest-first tie ordering.
+    const project = projectPath.toUpperCase();
+    await expect(searchSessions(database, { project })).resolves.toEqual(expected);
+    await expect(searchSessions(database, { query: "cache", project })).resolves.toEqual(expected);
+    await expect(getLatestSessions(database, { projectPath: project })).resolves.toEqual(expected);
   });
 });
