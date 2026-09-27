@@ -4,7 +4,7 @@ import * as path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { listInstalledSkills } from "./skill-manager";
+import { deleteInstalledSkill, listInstalledSkills } from "./skill-manager";
 
 const temporaryDirectories: string[] = [];
 
@@ -114,11 +114,44 @@ describe("listInstalledSkills", () => {
   });
 });
 
-function writeSkill(directoryPath: string, name: string): void {
+describe("deleteInstalledSkill", () => {
+  it("deletes a user Skill directory found under a managed root", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-delete-local-skill-"));
+    temporaryDirectories.push(homeDir);
+    const codexHome = path.join(homeDir, ".codex");
+    const directoryPath = path.join(codexHome, "skills", "fixture-skill");
+    const skillPath = writeSkill(directoryPath, "Fixture Skill");
+
+    const result = deleteInstalledSkill(skillPath, { homeDir, codexHome, projectDirs: [] });
+
+    expect(result).toEqual({
+      deletedPath: directoryPath,
+      skillName: "Fixture Skill",
+      retainedBackupPaths: [],
+    });
+    expect(fs.existsSync(directoryPath)).toBe(false);
+  });
+
+  it("refuses to delete bundled Codex system Skills", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-delete-system-skill-"));
+    temporaryDirectories.push(homeDir);
+    const codexHome = path.join(homeDir, ".codex");
+    const directoryPath = path.join(codexHome, "skills", ".system", "fixture-system-skill");
+    const skillPath = writeSkill(directoryPath, "Fixture System Skill");
+
+    expect(() => deleteInstalledSkill(skillPath, { homeDir, codexHome, projectDirs: [] }))
+      .toThrow("Codex system skills cannot be deleted from this app.");
+    expect(fs.existsSync(directoryPath)).toBe(true);
+  });
+});
+
+function writeSkill(directoryPath: string, name: string): string {
   fs.mkdirSync(directoryPath, { recursive: true });
+  const skillPath = path.join(directoryPath, "SKILL.md");
   fs.writeFileSync(
-    path.join(directoryPath, "SKILL.md"),
+    skillPath,
     `---\nname: ${name}\ndescription: fixture\n---\n# ${name}\n`,
     "utf8",
   );
+  return skillPath;
 }

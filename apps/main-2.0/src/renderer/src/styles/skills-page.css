@@ -131,6 +131,10 @@
   font-weight: 620;
 }
 
+.skill-context-menu {
+  min-width: 132px;
+}
+
 .managed-skills-toolbar-actions button:hover:not(:disabled),
 .managed-skills-batch-bar button:hover:not(:disabled),
 .managed-skill-actions button:hover:not(:disabled),
