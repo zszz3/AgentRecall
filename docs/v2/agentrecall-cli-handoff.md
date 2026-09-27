@@ -1,6 +1,6 @@
 # AgentRecall CLI 与团队功能：开发交接
 
-核对日期：2026-09-26。面向接手开发的 agent；这是交接时的状态快照，后续状态以分支、PR 和 CI 的实时结果为准。
+核对日期：2026-09-27。面向接手开发的 agent；这是交接时的状态快照，后续状态以分支、PR 和 CI 的实时结果为准。
 
 ## 1. 当前结论
 
@@ -8,7 +8,7 @@
 
 此前单 Skill 流程的验证基线为 [`c4525acc701490264eff473bd297d143b7d3cc75`](https://github.com/zszz3/AgentRecall/commit/c4525acc701490264eff473bd297d143b7d3cc75)。该提交的 CLI、V1、V2 在 Linux/macOS/Windows 上的检查，以及仓库检查和 Quality gate，均已通过：[完整 CI 记录](https://github.com/zszz3/AgentRecall/actions/runs/36114851838)。交接文档提交本身不改变产品代码，不能将这条 CI 记录当作任意后续提交的验证。
 
-当前源码还已接入 V2 独立团队空间（共享会话、Skills、文档），并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2/3 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已独立提交为草稿 PR #585，仍需合入验收。当前代码与 CI 以 PR 最新提交为准。
+当前源码还已接入 V2 独立团队空间（共享会话、Skills、文档），并支持工作配置的列表、预览、批量安装、本地归属、共享保护、整组差异/更新和卸载，版本 1/2/3 清单兼容，并对失败恢复和部分结果作出明确处理。完整团队产品尚未完成：跨配置协调更新、整组历史回滚及其他资产类型仍需开发；多人 Chat 删除已合入当前开发分支，统一通过 PR #584 向 main 交付；原 PR #585 不再单独合入。当前代码与 CI 以 PR 最新提交为准。
 
 ## 2. 到哪里接着做
 
@@ -17,7 +17,7 @@
 | 工作区 | 分支 / 状态 | 接手方式 |
 | --- | --- | --- |
 | `~/.codex/worktrees/cli-foundation/agentrecall` | `codex/cli-foundation`；产品代码已推送 | CLI 和团队资产开发从这里继续。以 git status 核对当前工作区 |
-| `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；`21410c07`，已推送 | R00 删除 Chat 的独立工作区，见 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) |
+| `~/.codex/worktrees/remove-multi-agent-chat/agentrecall` | `codex/remove-multi-agent-chat`；`21410c07`，已推送 | 历史来源工作区，改动已并入 PR #584；后续统一在 cli-foundation 开发 |
 | `~/learnspace/agentrecall` | `codex/incremental-session-indexing`，`bc1dc8d4` | 原工作区，不能误当成 CLI 最新代码；有未跟踪的 `.agentrecall/`、`output/` 和旧版计划文档 |
 
 CLI 同机接手：
@@ -29,7 +29,7 @@ git branch --show-current
 gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 ```
 
-其他机器可在全新、干净的 AgentRecall 克隆中执行 `gh pr checkout 584` 获取已推送的 CLI 改动。接手 Chat 删除可在另一干净克隆中执行 `gh pr checkout 585`；两项工作保持独立，不要混入同一分支。
+其他机器在全新、干净的克隆中执行 `gh pr checkout 584`，即可获取 CLI、团队空间和多人 Chat 删除的合并改动。后续继续使用 `codex/cli-foundation`，统一一个 MR 到 main；不用再检出 PR #585。
 
 不要对这些目录执行丢弃改动、清理未跟踪文件或强制重置。其他工作树属于独立任务，不要混入 CLI 提交。
 
@@ -61,7 +61,7 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 | R11—R14 完整 Session 分享 | 私有 GitHub 附件、完整快照、右键预览/确认上传、浏览/下载/撤回 | 真实私有仓库联调、CLI 分享、搜索筛选、导入恢复与断点续传 |
 | R15—R19 Context / Improvement | 未开始 | 知识维护、检索、改进提案、验证发布、可选自动召回 |
 | R20 验证与交付 | CLI 本地与三平台检查通过，文档和分支发布说明已有 | 真实团队验收、合入、独立分发及后续阶段验收 |
-| R00 多人 Chat 删除 | 独立 PR #585 已提交，99 项受影响测试与 V2 构建通过，历史 Session 保留有回归覆盖 | 真实界面验收、审核与合入 |
+| R00 多人 Chat 删除 | 已合入 codex/cli-foundation，统一 PR #584；历史 Session 保留有回归覆盖 | 真实界面验收、审核与合入 |
 
 ### 当前可用命令
 
@@ -129,7 +129,7 @@ gh pr view 584 --json state,isDraft,headRefOid,statusCheckRollup
 4. 扩展 Rules/Docs/MCP/Agent 模板前核实客户端当前格式，MCP 只引用本地密钥。V2 桌面已使用同一服务，不能新增 V1 依赖。
 5. 更新总计划和用户指南，保持真实成员/私有仓库验收、PR 贡献与 Session 分享的未完成状态。
 
-R00 已在独立 [PR #585](https://github.com/zszz3/AgentRecall/pull/585) 完成源码删除、历史 Session 回归与本地构建验证。当前最新提交的三平台 V2 CI 已通过，仍是草稿，需完成真实界面验收和审核；不要把它当成已经发布。工作区的 `apps/main-2.0/node_modules` 仍是未跟踪的本地依赖链接，不要误提交。
+R00 的源码删除、历史 Session 回归和文档已合并到 `codex/cli-foundation`，随 PR #584 一次性审核和合入 main。原 PR #585 作为来源保留记录，不再单独交付；原工作区的本地依赖链接保留，不提交、不清理。尚未合入 main 或发布。
 
 ## 8. 验证证据与接手命令
 
