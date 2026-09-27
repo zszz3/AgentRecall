@@ -28,6 +28,6 @@ export interface TeamSessionContent {
 export interface TeamSessionPreview extends TeamSessionContent {
   token: string;
   repository: string;
-  projectRepository: string;
+  projectIdentity: string;
   expiresAt: number;
 }

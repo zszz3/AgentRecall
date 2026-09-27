@@ -45,7 +45,7 @@ agentrecall team current --project experiments
 agentrecall team disable
 ```
 
-路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除，或通过 `skill backups` 和 `skill rollback` 管理本地恢复。本地工作配置的 installed/status/uninstall 也仍可使用。V2 团队设置与 Skills 团队范围使用同一开关，CLI 修改后可在桌面点击刷新查看。
+路径需换成已有本地 Git 仓库。绑定和设置默认团队都不会开启团队功能，开启也不会触发网络访问。关闭保留配置和缓存，并阻止团队读取、同步和新安装；配置状态、团队/项目列表和配置编辑仍可用。已复制到客户端的本地 Skill 不会自动删除，可用 `skill uninstall` 移除，或通过 `skill backups` 和 `skill rollback` 管理本地恢复。本地工作配置的 installed/status/uninstall 也仍可使用。V2 团队设置与团队空间使用同一开关，CLI 修改后可在桌面点击刷新查看。
 
 ## 命令
 
@@ -123,7 +123,7 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 优先级为：总开关 → 项目显式团队或个人设置 → 全局默认团队。项目 `teamId` 缺省表示继承，`null` 表示个人，字符串表示显式团队。未绑定项目不会仅因全局设置而使用团队。
 
-`schemaVersion: 1` 是首个格式。未知字段、其他版本、损坏 JSON、重复 ID 或不存在的团队引用均报错并保留原文件，不自动迁移或重置。完整配置连同元数据不得超过 1 MiB。需要手动修复时先备份文件，再运行 `doctor` 检查。
+支持配置版本 1 和 2。版本 1 保存原有仓库绑定；版本 2 增加无本地目录的协作项目，首次创建时升级并保留旧记录，读取不重写。未知字段、未知版本、损坏 JSON、重复 ID 或不存在的团队引用均报错并保留原文件，不自动重置。完整配置连同元数据不得超过 1 MiB。需要手动修复时先备份文件，再运行 `doctor` 检查。
 
 配置服务位于 `packages/workspace-core`。多个 CLI 进程通过同一个目录锁完成读取、校验和原子替换，争用超时明确报错。锁在正常退出时清理，异常终止留下的锁由依赖库按过期时间回收；强制中断不会保证临时文件立即消失。V2 团队设置与 Skills 团队范围已接入同一服务；这不涉及共享或迁移 Session 数据库。
 
@@ -133,4 +133,18 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 当前发布工作流仍只发布 V1/V2 桌面包，不自动发布 CLI。后续范围与状态见 [团队功能开发计划](agentrecall-cli-team-plan.md)。
 
-团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单和缓存支持格式版本 1/2，安装记录仍为版本 1；兼容规则和工作配置的范围以团队 Skill 指南为准。未知版本或损坏记录会拒绝读取，不会自动重置。
+团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单和缓存支持格式版本 1/2/3，安装记录仍为版本 1；兼容规则和工作配置的范围以团队 Skill 指南为准。未知版本或损坏记录会拒绝读取，不会自动重置。
+
+## 不依赖本地仓库的协作项目
+
+```sh
+agentrecall project create "Agent 研究" --team engineering
+agentrecall team sync --project <返回的项目ID>
+agentrecall skill preview review --project <项目ID> --target codex
+agentrecall skill preview review --project <项目ID> --target codex --destination /path/to/folder
+agentrecall skill install review --project <项目ID> --target codex --destination /path/to/folder --revision <预览版本>
+```
+
+`project create` 只需要名称和团队；`project add` 保留原有 Git 仓库绑定方式。协作项目浏览不要求目录；安装、更新、卸载及查看本地安装时，通过 `--destination` 指定实际目录，目录可以不是 Git 仓库。选择目录不会改变项目共享身份，一个空间可应用到多个本地位置，各自管理安装记录。
+
+首次创建协作项目将本地配置升级到版本 2，旧记录保持原样。只读不升级；旧版本客户端遇到版本 2 会明确拒绝，应同时升级 CLI 和桌面。新项目的跨设备身份及当前同步边界见[团队空间](team-workspace.md#团队与项目)。

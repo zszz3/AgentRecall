@@ -26,13 +26,16 @@ const projectSchema = z.strictObject({
   // Missing inherits the global default; null explicitly keeps a project personal.
   teamId: id.nullable().optional(),
 });
-const configSchema = z.strictObject({
+const configV1Schema = z.strictObject({
   schemaVersion: z.literal(1),
   teamEnabled: z.boolean(),
   defaultTeamId: id.nullable(),
   teams: z.array(teamSchema),
   projects: z.array(projectSchema),
-}).superRefine((config, context) => {
+});
+const logicalProjectSchema = projectSchema.extend({ root: absolutePath.nullable(), gitCommonDir: absolutePath.nullable(), sharingKey: z.string().regex(/^space:[a-f0-9]{64}$/).optional() });
+const configV2Schema = configV1Schema.extend({ schemaVersion: z.literal(2), projects: z.array(logicalProjectSchema) });
+const configSchema = z.union([configV1Schema, configV2Schema]).superRefine((config, context) => {
   const teamIds = new Set(config.teams.map((team) => team.id));
   if (teamIds.size !== config.teams.length) context.addIssue({ code: "custom", path: ["teams"], message: "Duplicate team ID" });
   if (new Set(config.projects.map((project) => project.id)).size !== config.projects.length) {
@@ -45,13 +48,17 @@ const configSchema = z.strictObject({
     if (project.teamId && !teamIds.has(project.teamId)) {
       context.addIssue({ code: "custom", path: ["projects", index, "teamId"], message: "Unknown team" });
     }
+    if (project.root === null && (project.gitCommonDir !== null || project.repository !== null || project.remote !== null || !("sharingKey" in project) || !project.sharingKey)) {
+      context.addIssue({ code: "custom", path: ["projects", index], message: "Logical projects need a stable identity and no implicit local binding" });
+    }
+    if (project.root !== null && project.gitCommonDir === null) context.addIssue({ code: "custom", path: ["projects", index], message: "Local binding is incomplete" });
     if ((project.remote === null) !== (project.repository === null)) {
       context.addIssue({ code: "custom", path: ["projects", index, "remote"], message: "Remote and repository must be paired" });
     }
   }
 });
 
-export type WorkspaceConfig = z.infer<typeof configSchema>;
+export type WorkspaceConfig = Omit<z.infer<typeof configV2Schema>, "schemaVersion"> & { schemaVersion: 1 | 2 };
 export type TeamSpace = WorkspaceConfig["teams"][number];
 export type ProjectBinding = WorkspaceConfig["projects"][number];
 

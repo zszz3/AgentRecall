@@ -33,7 +33,7 @@ async function fixture() {
   const upload = vi.spyOn(remote, "upload").mockResolvedValue({ id: 17, title: "Example", author: "fixture", createdAt: "2026-09-26", bytes: 1, digest: "a".repeat(64), canWithdraw: true });
   const confirm = vi.fn(async () => true), save = vi.fn(async () => true);
   const service = new TeamSessionSharing({ store, confirm, save, ensureDetails: async () => undefined }, remote); services.push(service);
-  const context = { repository: "https://github.com/example/private", projectRepository: "https://github.com/example/business", projectId: "business", root };
+  const context = { repository: "https://github.com/example/private", projectIdentity: "https://github.com/example/business", projectId: "business", root };
   return { service, remote, upload, confirm, save, store, context, session, messages, traceEvents, signal: new AbortController().signal };
 }
 describe("complete team session snapshots", () => {
@@ -82,10 +82,14 @@ describe("complete team session snapshots", () => {
     const data = f.upload.mock.calls[0]![3], download = vi.spyOn(f.remote, "download").mockResolvedValue(data);
     await f.service.download(1, f.context, 17, f.signal);
     expect(f.save).toHaveBeenCalledWith(1, data, "session-17.agentrecall-session.json.gz");
+    const oldPacket = JSON.parse(gunzipSync(data).toString());
+    oldPacket.schemaVersion = 1; oldPacket.projectRepository = oldPacket.projectIdentity; delete oldPacket.projectIdentity;
+    download.mockResolvedValue(gzipSync(JSON.stringify(oldPacket)));
+    expect((await f.service.detail(f.context, 17, f.signal)).root.session.sessionKey).toBe(f.session.sessionKey);
     const packet = JSON.parse(gunzipSync(data).toString()); packet.records[0].files[0].data = Buffer.from("tampered").toString("base64"); download.mockResolvedValue(gzipSync(JSON.stringify(packet)));
     await expect(f.service.detail(f.context, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
     download.mockResolvedValue(data);
-    await expect(f.service.detail({ ...f.context, projectRepository: "https://github.com/other/code" }, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_PROJECT_MISMATCH" });
+    await expect(f.service.detail({ ...f.context, projectIdentity: "https://github.com/other/code" }, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_PROJECT_MISMATCH" });
     expect(f.save).toHaveBeenCalledOnce();
   });
 });
@@ -93,7 +97,7 @@ describe("complete team session snapshots", () => {
 
 it("accepts empty content and the exact complete packet limit, rejecting wrapper and multi-record overflow", async () => {
   const f = await fixture();
-  const packet = { schemaVersion: 1, repository: f.context.repository, projectRepository: f.context.projectRepository, rootSessionKey: f.session.sessionKey, records: [{ detail: { schemaVersion: 2, exportedAt: 1, session: f.session, messages: [{ index: 0, role: "user", content: "", timestamp: "1" }], traceEvents: [] }, files: [], missingAttachments: [] }] };
+  const packet = { schemaVersion: 2, repository: f.context.repository, projectIdentity: f.context.projectIdentity, rootSessionKey: f.session.sessionKey, records: [{ detail: { schemaVersion: 2, exportedAt: 1, session: f.session, messages: [{ index: 0, role: "user", content: "", timestamp: "1" }], traceEvents: [] }, files: [], missingAttachments: [] }] };
   const download = vi.spyOn(f.remote, "download").mockResolvedValue(gzipSync(JSON.stringify(packet)));
   expect((await f.service.detail(f.context, 17, f.signal)).root.messages[0]!.content).toBe("");
   const available = MAX_TEAM_SESSION_BYTES - Buffer.byteLength(JSON.stringify(packet));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { WorkspaceConfigStore } from "@agentrecall/workspace-core";
+import { WorkspaceConfigStore, WorkspaceService } from "@agentrecall/workspace-core";
 import { cli, execute, fixture, repository } from "./fixtures.js";
 
 test("normalizes GitHub transports while keeping forks distinct and credentials out of errors", async (t) => {
@@ -25,7 +25,7 @@ test("defaults to personal, keeps init idempotent, and refuses corrupt or future
   await service.addTeam({ id: "engineering", repository: "git@github.com:acme/assets.git" });
   await service.setTeamEnabled(true);
   assert.deepEqual(await service.store.initialize(), await service.store.read());
-  for (const content of ["{", JSON.stringify({ ...initial, schemaVersion: 2 }), JSON.stringify({ ...initial, unexpected: true })]) {
+  for (const content of ["{", JSON.stringify({ ...initial, schemaVersion: 99 }), JSON.stringify({ ...initial, unexpected: true })]) {
     await fs.writeFile(service.store.filePath, content);
     await assert.rejects(service.store.initialize(), { code: "INVALID_CONFIG" });
     assert.equal(await fs.readFile(service.store.filePath, "utf8"), content);
@@ -125,4 +125,33 @@ test("concurrent CLI processes preserve all edits and release the config lock af
   await assert.rejects(service.store.update(() => { throw new Error("cancelled"); }), /cancelled/);
   await new WorkspaceConfigStore(home).update((current) => ({ ...current, teamEnabled: true }));
   assert.deepEqual((await fs.readdir(home)).sort(), ["config.json"]);
+});
+
+
+test("logical projects need only a name, migrate on write and keep identities independent from directories", async (t) => {
+  const { service, root } = await fixture(t);
+  await service.store.initialize();
+  await service.addTeam({ id: "team", repository: "https://github.com/example/assets" });
+  const local = await repository(path.join(root, "local"), "https://github.com/example/code");
+  const legacy = await service.addProject({ id: "legacy", directory: local, teamId: "team" });
+  assert.equal((await service.store.read())?.schemaVersion, 1);
+  const space = await service.createProject({ name: "Agent 研究", teamId: "team" });
+  const saved = (await service.store.read())!;
+  assert.equal(saved.schemaVersion, 2);
+  assert.deepEqual(saved.projects.find((item) => item.id === legacy.id), legacy);
+  assert.equal(space.root, null); assert.equal(space.repository, null);
+  await service.setTeamEnabled(true);
+  assert.equal((await service.currentTeam(local, space.id)).project.id, space.id);
+  await assert.rejects(service.createProject({ name: " Agent 研究 ", teamId: "team" }), { code: "PROJECT_EXISTS" });
+  const other = new WorkspaceService(path.join(root, "other-device"));
+  await other.store.initialize(); await other.addTeam({ id: "different-local-id", repository: "https://github.com/example/assets" });
+  const sameSpace = await other.createProject({ name: "Agent 研究", teamId: "different-local-id" });
+  assert.equal(sameSpace.sharingKey, space.sharingKey);
+  const created = await cli(path.dirname(service.store.filePath), root, ["project", "create", "CLI Research", "--team", "team"]);
+  assert.equal(created.code, 0, created.stdout);
+  const before = await fs.readFile(service.store.filePath, "utf8");
+  await fs.writeFile(service.store.filePath, JSON.stringify({ ...saved, schemaVersion: 1 }));
+  await assert.rejects(service.store.read(), { code: "INVALID_CONFIG" });
+  await fs.writeFile(service.store.filePath, before);
+  assert.equal((await service.currentTeam(local, space.id)).project.sharingKey, space.sharingKey);
 });

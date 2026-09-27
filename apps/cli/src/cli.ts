@@ -4,7 +4,8 @@ import { parseArgs, stripVTControlCharacters } from "node:util";
 import { WorkspaceError, WorkspaceService, TeamAssetService, type WorkspaceStatus } from "@agentrecall/workspace-core";
 import packageInfo from "../package.json" with { type: "json" };
 
-const help = `AgentRecall CLI — 本地项目与可选团队配置
+const help = `
+AgentRecall CLI — 本地项目与可选团队配置
 
   agentrecall init                         初始化个人配置（团队默认关闭）
   agentrecall init <repo-url> [--name <名称>] [--transport https|ssh]
@@ -34,6 +35,7 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
   agentrecall work-config diff <id> --target codex|claude
   agentrecall work-config update <id> --target codex|claude --from-revision <当前配置版本> --revision <新版本>
   agentrecall work-config uninstall <id> --target codex|claude --revision <当前配置版本>
+  agentrecall project create <名称> --team <id> 创建协作项目（无需本地仓库）
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
   agentrecall project remove <id>          移除本地绑定（保留代码仓库）
@@ -43,11 +45,14 @@ const help = `AgentRecall CLI — 本地项目与可选团队配置
 --cwd <dir> 指定操作目录；Skill 只安装到该项目，不改变个人 Skill。
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
 init <repo-url> 会连接远端；空仓库会提交并推送基础模板，已有仓库只校验。team sync 主动读取远端。安装必须显式选择版本和客户端；不上传 Session。工作配置记录共享引用，卸载时保留其他配置和原有独立安装。
+
+协作项目的安装和本地管理：skill/work-config 命令加 --project <id> --destination <本地目录>。
 `;
 
 const options = {
   json: { type: "boolean" }, help: { type: "boolean", short: "h" }, version: { type: "boolean", short: "v" },
   cwd: { type: "string" }, project: { type: "string" }, repo: { type: "string" }, name: { type: "string" },
+  destination: { type: "string" },
   path: { type: "string" }, remote: { type: "string" }, team: { type: "string" },
   personal: { type: "boolean" }, inherit: { type: "boolean" },
   target: { type: "string" }, revision: { type: "string" }, transport: { type: "string" }, file: { type: "string" },
@@ -101,10 +106,12 @@ async function main(): Promise<void> {
     "work-config diff": { count: 3, flags: ["project", "target"] },
     "work-config update": { count: 3, flags: ["project", "target", "from-revision", "revision"] },
     "work-config uninstall": { count: 3, flags: ["project", "target", "revision"] },
+    "project create": { count: 3, flags: ["team"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
     "project bind": { count: 3, flags: ["team", "personal", "inherit"] },
   };
+  if (key.startsWith("skill ") || key.startsWith("work-config ")) commands[key]?.flags.push("destination");
   const spec = commands[key];
   if (!spec || positionals.length !== spec.count) invalidArguments("命令或参数数量不正确。");
   if (Object.keys(values).some((flag) => !["json", "cwd", ...spec.flags].includes(flag))) invalidArguments("此命令不支持所选选项。");
@@ -122,7 +129,13 @@ async function main(): Promise<void> {
   if (process.env.AGENTRECALL_HOME !== undefined && !process.env.AGENTRECALL_HOME.trim()) invalidArguments("AGENTRECALL_HOME 不能为空。");
   const directory = path.resolve(values.cwd ?? process.cwd());
   const service = new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(os.homedir(), ".agentrecall-cli"));
-  const assets = new TeamAssetService(service);
+  let assets = new TeamAssetService(service);
+  if (values.destination) {
+    if (!values.project) invalidArguments("选择安装位置时请同时指定 --project。");
+    const status = await service.status(directory, values.project);
+    if (!status.project || status.project.root !== null) invalidArguments("--destination 用于没有固定本地目录的协作项目。");
+    assets = new TeamAssetService(service, undefined, { projectId: status.project.id, root: null, directory: path.resolve(directory, values.destination), ...(status.team ? { repository: status.team.repository } : {}) });
+  }
   switch (key) {
     case "init": {
       if (action) {
@@ -243,6 +256,11 @@ async function main(): Promise<void> {
     case "work-config update": {
       const result = await assets.updateWorkConfig(directory, id!, values.target as "codex" | "claude", values["from-revision"]!, values.revision!, values.project);
       output(result, `已更新工作配置 ${result.name}。\n版本：${result.revision}\n${result.effects.map((item) => `${item.id}\t${item.kind === "installed" ? "已安装" : item.kind === "updated" ? "已更新" : "已移入备份"}${item.backupPath ? `\t${item.backupPath}` : ""}`).join("\n") || "文件内容保持不变，配置版本与引用已保存。"}`); break;
+    }
+    case "project create": {
+      if (!values.team) invalidArguments("创建协作项目需要 --team。");
+      const project = await service.createProject({ name: id!, teamId: values.team });
+      output(project, `已创建协作项目 ${project.name}（${project.id}），无需关联本地仓库。`); break;
     }
     case "project add": {
       const project = await service.addProject({

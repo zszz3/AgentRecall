@@ -232,14 +232,12 @@ describe("V2 team settings and feature scopes", () => {
   it("creates a project inside the selected team without inheriting another team's default", async () => {
     let saved = config();
     saved.teams.push({ id: "other", name: "第二团队", repository: "https://github.com/other/assets" });
-    const directory = path.resolve("fixtures/new-team-project");
     let holdRefresh = false;
     let finishRefresh!: (reply: TeamReply) => void;
     const previous = saved;
     const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
       if (input.action === "snapshot" && holdRefresh) { holdRefresh = false; return new Promise((resolve) => { finishRefresh = resolve; }); }
-      if (input.action === "choose-folder") return ok({ kind: "folder", value: directory });
-      if (input.action === "add-project") saved = { ...saved, projects: [...saved.projects, { ...saved.projects[0]!, id: "new", name: "new-project", root: directory, teamId: input.teamId }] };
+      if (input.action === "create-project") saved = { ...saved, schemaVersion: 2, projects: [...saved.projects, { ...saved.projects[0]!, id: "new", name: input.name, root: null, gitCommonDir: null, teamId: input.teamId }] };
       return ok({ kind: "snapshot", value: { config: saved, busy: false } });
     });
     await act(async () => root.render(<TeamProjectBrowser language="zh" api={{ request }} settingsOpen={false} onOpenSettings={vi.fn()}>{({ project }) => <p>{project.name}</p>}</TeamProjectBrowser>));
@@ -248,12 +246,16 @@ describe("V2 team settings and feature scopes", () => {
     holdRefresh = true;
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="刷新团队与项目"]')!.click());
     await act(async () => button("新建项目").click());
-    await act(async () => button("选择").click());
+    const nameInput = container.querySelector<HTMLInputElement>('input[placeholder="例如：Agent 研究"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => { setter.call(nameInput, "Agent 研究"); nameInput.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(container.querySelector("form")!.querySelectorAll("input")).toHaveLength(1);
     await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-    expect(request).toHaveBeenCalledWith({ action: "add-project", teamId: "other", directory, name: undefined, remote: undefined });
+    expect(request).toHaveBeenCalledWith({ action: "create-project", teamId: "other", name: "Agent 研究" });
+    expect(request.mock.calls.some(([input]) => input.action === "choose-folder")).toBe(false);
     await act(async () => finishRefresh(ok({ kind: "snapshot", value: { config: previous, busy: false } })));
     expect(saved.defaultTeamId).toBe("example");
-    expect(container.textContent).toContain("new-project");
+    expect(container.textContent).toContain("Agent 研究");
     expect(container.textContent).not.toContain("业务项目");
   });
 
@@ -277,11 +279,11 @@ describe("document and session sharing interactions", () => {
   });
 
   it("does not upload on opening the share dialog and clears a preview after changing destination", async () => {
-    const saved = config(); saved.projects[0]!.repository = "https://github.com/example/business";
+    const saved = config(); saved.schemaVersion = 2; saved.projects[0]!.root = null; saved.projects[0]!.gitCommonDir = null; saved.projects[0]!.repository = null; saved.projects[0]!.sharingKey = "space:" + "a".repeat(64);
     saved.projects.push({ ...saved.projects[0]!, id: "second", name: "第二项目" });
     const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
       if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-      if (input.action === "session-preview") return ok({ kind: "session-preview", value: { token: "00000000-0000-4000-8000-000000000001", repository, projectRepository: "https://github.com/example/business", expiresAt: Date.now() + 60_000, bytes: 50, files: [], missingAttachments: [], children: [], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:example", displayTitle: "完整示例", originalTitle: "完整示例", source: "codex-cli" }, messages: [{ index: 0, timestamp: "1", role: "user", content: "完整的消息内容" }], traceEvents: [] } } });
+      if (input.action === "session-preview") return ok({ kind: "session-preview", value: { token: "00000000-0000-4000-8000-000000000001", repository, projectIdentity: "https://github.com/example/business", expiresAt: Date.now() + 60_000, bytes: 50, files: [], missingAttachments: [], children: [], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:example", displayTitle: "完整示例", originalTitle: "完整示例", source: "codex-cli" }, messages: [{ index: 0, timestamp: "1", role: "user", content: "完整的消息内容" }], traceEvents: [] } } });
       return ok({ kind: "cancelled" });
     });
     vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);

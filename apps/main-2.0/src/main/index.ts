@@ -3075,7 +3075,7 @@ function registerIpc(): void {
       const sender = webContents.fromId(owner);
       const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
       if (!parent) return null;
-      const result = await dialog.showOpenDialog(parent, { title: "选择业务项目的 Git 仓库", properties: ["openDirectory"] });
+      const result = await dialog.showOpenDialog(parent, { title: "选择本地目录", properties: ["openDirectory"] });
       return result.canceled ? null : result.filePaths[0] ?? null;
     },
     confirm: confirmTeamOperation,

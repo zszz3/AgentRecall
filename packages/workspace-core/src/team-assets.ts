@@ -12,7 +12,7 @@ import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
 type Context = Awaited<ReturnType<WorkspaceService["currentTeam"]>>;
-type AssetSelection = { projectId: string; root: string; repository?: string };
+type AssetSelection = { projectId: string; root: string | null; directory?: string; repository?: string };
 
 export class TeamAssetService {
   private readonly cacheDirectory: string;
@@ -136,11 +136,11 @@ export class TeamAssetService {
     const snapshot = await this.snapshot(context);
     const document = snapshot.schemaVersion === 3 ? snapshot.documents.find((item) => item.id === id) : undefined;
     if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "当前团队没有这份文档，请同步后重试。");
-    const root = await this.projectRoot(directory, context.project.id);
-    const destination = path.join(root, ...document.target.split("/"));
-    const local = await this.localDocument(root, document.target);
+    const root = context.project.root || this.selection?.directory ? await this.projectRoot(directory, context.project.id) : null;
+    const destination = root ? path.join(root, ...document.target.split("/")) : null;
+    const local = root ? await this.localDocument(root, document.target) : null;
     return this.commitForTeam(directory, context, () => ({ ...document, repository: snapshot.repository, commit: snapshot.commit, destination,
-      local, status: local === null ? "new" as const : local === document.content ? "existing" as const : "conflict" as const }));
+      local, status: !root ? "unselected" as const : local === null ? "new" as const : local === document.content ? "existing" as const : "conflict" as const }));
   }
 
   private async localDocument(root: string, target: string): Promise<string | null> {
@@ -212,7 +212,7 @@ export class TeamAssetService {
     const context = await this.currentTeam(directory, projectId);
     const snapshot = await this.snapshot(context);
     const config = this.findWorkConfig(snapshot, id);
-    const root = target ? await this.projectRoot(directory, context.project.id) : undefined;
+    const root = target && (context.project.root || this.selection?.directory) ? await this.projectRoot(directory, context.project.id) : undefined;
     const preview = () => {
       const skills = config.skills.map((id) => snapshot.skills.find((skill) => skill.id === id)!);
       let configurationConflict: string | null = null;
@@ -256,6 +256,8 @@ export class TeamAssetService {
   }
 
   async installedWorkConfigs(directory: string, projectId?: string) {
+    const status = await this.workspace.status(directory, projectId);
+    if (status.project?.root === null && !this.selection?.directory) return [];
     const root = await this.projectRoot(directory, projectId);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       assertOwned();
@@ -316,7 +318,7 @@ export class TeamAssetService {
     let encoding: "utf8" | "base64" = "utf8";
     try { content = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(selected.content, "base64")); }
     catch { content = selected.content; encoding = "base64"; }
-    const root = target ? await this.projectRoot(directory, context.project.id) : undefined;
+    const root = target && (context.project.root || this.selection?.directory) ? await this.projectRoot(directory, context.project.id) : undefined;
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit, id: skill.id, description: skill.description,
       file, content, encoding,
@@ -328,6 +330,14 @@ export class TeamAssetService {
   private async projectRoot(directory: string, projectId?: string): Promise<string> {
     const status = await this.workspace.status(directory, projectId);
     if (!status.project) throw new WorkspaceError("NO_PROJECT", "请进入已登记的项目或使用 --project。");
+    if (status.project.root === null) {
+      if (this.selection && (status.project.id !== this.selection.projectId || this.selection.root !== null)) throw new WorkspaceError("PROJECT_MISMATCH", "项目已改变，请重新选择。");
+      const destination = this.selection?.directory;
+      if (!destination || !path.isAbsolute(destination)) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次安装或应用的本地目录。");
+      const root = await fs.realpath(destination);
+      if (!(await fs.stat(root)).isDirectory()) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请选择一个已有的本地目录。");
+      return root;
+    }
     const checkout = await inspectCheckout(directory) ?? await inspectCheckout(status.project.root);
     if (!checkout) throw new WorkspaceError("NO_PROJECT", "本地项目路径已不存在，请重新登记项目。");
     await this.workspace.status(checkout.root, status.project.id);

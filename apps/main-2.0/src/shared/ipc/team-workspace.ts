@@ -9,7 +9,7 @@ const directory = z.string().min(1).max(32768).refine((value) => !value.includes
 const repository = z.string().min(1).max(2048);
 const target = z.enum(["codex", "claude"]);
 const revision = z.string().regex(/^[a-f0-9]{40}$/);
-const scope = z.object({ projectId: id, root: directory, repository: repository.optional() }).strict();
+const scope = z.object({ projectId: id, root: directory.nullable(), directory: directory.optional(), repository: repository.optional() }).strict();
 const selectedScope = scope.extend({ repository });
 const asset = { scope, id, target };
 const selectedAsset = { scope: selectedScope, id, target };
@@ -20,9 +20,10 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("enable"), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, makeDefault: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("default-team"), id: id.nullable() }).strict(),
+  z.object({ action: z.literal("create-project"), name: text, teamId: id }).strict(),
   z.object({ action: z.literal("add-project"), id: id.optional(), name: text.optional(), directory, remote: text.optional(), teamId: id.nullable().optional() }).strict(),
-  z.object({ action: z.literal("bind-project"), id, root: directory, teamId: id.nullable().optional() }).strict(),
-  z.object({ action: z.literal("remove-project"), id, root: directory }).strict(),
+  z.object({ action: z.literal("bind-project"), id, root: directory.nullable(), teamId: id.nullable().optional() }).strict(),
+  z.object({ action: z.literal("remove-project"), id, root: directory.nullable() }).strict(),
   z.object({ action: z.literal("catalog"), scope }).strict(),
   z.object({ action: z.literal("document-preview"), scope: selectedScope, id }).strict(),
   z.object({ action: z.literal("document-install"), scope: selectedScope, id, revision }).strict(),
@@ -45,7 +46,7 @@ export type TeamRequest = z.infer<typeof teamRequestSchema>;
 type Result<M extends keyof TeamAssetService> = TeamAssetService[M] extends (...args: never[]) => infer R ? Awaited<R> : never;
 export type TeamSnapshot = { config: WorkspaceConfig | null; busy: boolean };
 export type TeamCatalog = {
-  projectId: string; root: string;
+  projectId: string; root: string | null;
   assets: Result<"list"> | null;
   installed: Result<"installedWorkConfigs">;
   notice: string | null;

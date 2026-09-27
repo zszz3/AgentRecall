@@ -857,3 +857,34 @@ test("documents reject linked parents and invalid UTF-8 while accepting the exac
   await fs.writeFile(path.join(source, "guide.md"), Buffer.from([0xff, 0xfe])); await commit(source);
   await assert.rejects(assets.sync(business), { code: "INVALID_ASSET" });
 });
+
+test("logical projects browse without a folder and apply to explicitly selected ordinary directories", async (t) => {
+  const { service, assets, business, source, root, home } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  await fs.writeFile(path.join(source, "agentrecall.json"), JSON.stringify({ schemaVersion: 3, skills: [{ id: "review", path: "skills/review" }], workConfigs: [{ id: "review-work", name: "Review", description: "Review", skills: ["review"] }], documents: [{ id: "rules", name: "Rules", path: "AGENTS.md", target: "AGENTS.md" }] }));
+  await fs.writeFile(path.join(source, "AGENTS.md"), "# shared instructions\n"); await commit(source);
+  const space = await service.createProject({ name: "Research", teamId: "engineering" });
+  const synced = await assets.sync(root, space.id);
+  assert.equal((await assets.list(root, space.id)).documents.length, 1);
+  assert.equal((await assets.previewDocument(root, "rules", space.id)).status, "unselected");
+  assert.equal((await assets.preview(root, "review", space.id, "codex")).destination, undefined);
+  assert.deepEqual(await assets.installedWorkConfigs(root, space.id), []);
+  await assert.rejects(assets.install(root, "review", "codex", synced.commit, space.id), { code: "LOCAL_DIRECTORY_REQUIRED" });
+  await assert.rejects(assets.installDocument(root, "rules", synced.commit, space.id), { code: "LOCAL_DIRECTORY_REQUIRED" });
+  await assert.rejects(fs.access(path.join(root, ".agents")), { code: "ENOENT" });
+  for (const name of ["plain-folder", "second-folder"]) {
+    const directory = path.join(root, name); await fs.mkdir(directory);
+    const selected = new TeamAssetService(service, undefined, { projectId: space.id, root: null, directory, repository: "https://github.com/example/assets" });
+    assert.equal((await selected.previewDocument(root, "rules", space.id)).destination, path.join(await fs.realpath(directory), "AGENTS.md"));
+    await selected.installDocument(root, "rules", synced.commit, space.id);
+    const installed = await cli(home, root, ["work-config", "install", "review-work", "--project", space.id, "--target", "codex", "--revision", synced.commit, "--destination", directory]);
+    assert.equal(installed.code, 0, installed.stdout);
+    assert.equal((await selected.installedWorkConfigs(root, space.id)).length, 1);
+    assert.equal(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8"), "# shared instructions\n");
+    assert.equal(await fs.readFile(path.join(directory, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  }
+  await assert.rejects(fs.access(path.join(business, "AGENTS.md")), { code: "ENOENT" });
+  assert.equal((await service.store.read())!.projects.find((project) => project.id === space.id)!.root, null);
+  await service.setTeamEnabled(false);
+  await assert.rejects(assets.list(root, space.id), { code: "TEAM_DISABLED" });
+});

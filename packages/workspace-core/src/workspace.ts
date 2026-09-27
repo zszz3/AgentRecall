@@ -1,5 +1,5 @@
 import { WorkspaceError } from "./errors.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   WorkspaceConfigStore,
@@ -43,16 +43,16 @@ export class WorkspaceService {
     return this.store.update((config) => ({ ...config, teamEnabled: enabled }));
   }
 
-  async addProject(input: { id?: string; name?: string; directory: string; remote?: string; teamId?: string | null }): Promise<ProjectBinding> {
+  async addProject(input: { id?: string; name?: string; directory: string; remote?: string; teamId?: string | null }): Promise<ProjectBinding & { root: string; gitCommonDir: string }> {
     const checkout = await inspectCheckout(input.directory);
     if (!checkout) throw new WorkspaceError("NOT_A_REPOSITORY", "请选择一个非裸 Git 仓库目录。");
     const identity = await checkoutRepository(checkout, input.remote);
-    const project: ProjectBinding = {
+    const project: ProjectBinding & { root: string; gitCommonDir: string } = {
       id: input.id ?? `project-${randomUUID()}`, name: input.name ?? input.id ?? path.basename(checkout.root).slice(0, 200), root: checkout.root, gitCommonDir: checkout.gitCommonDir,
       ...identity, ...(input.teamId !== undefined ? { teamId: input.teamId } : {}),
     };
     await this.store.update((config) => {
-      if (config.projects.some((item) => item.id === project.id || sameLocalPath(item.gitCommonDir, project.gitCommonDir))) {
+      if (config.projects.some((item) => item.id === project.id || item.gitCommonDir !== null && sameLocalPath(item.gitCommonDir, project.gitCommonDir))) {
         throw new WorkspaceError("PROJECT_EXISTS", "项目 ID 或本地仓库已绑定，请使用 project bind 修改团队，或选择另一个 ID。");
       }
       return { ...config, projects: [...config.projects, project] };
@@ -60,7 +60,22 @@ export class WorkspaceService {
     return project;
   }
 
-  async bindProject(projectId: string, teamId: string | null | undefined, expectedRoot?: string): Promise<ProjectBinding> {
+  async createProject(input: { name: string; teamId: string }): Promise<ProjectBinding> {
+    const name = input.name.trim();
+    if (!name || name.length > 200) throw new WorkspaceError("INVALID_ARGUMENTS", "请输入 1—200 字的项目名称。");
+    // Identity belongs to the collaboration space, not its local installation directory.
+    // Same normalized name within the same team resolves consistently on other members' devices.
+    const sharingKey = `space:${createHash("sha256").update(name.normalize("NFKC").toLowerCase()).digest("hex")}`;
+    const project = { id: `project-${randomUUID()}`, name, teamId: input.teamId, sharingKey, root: null, gitCommonDir: null, repository: null, remote: null };
+    await this.store.update((config) => {
+      if (!config.teams.some((team) => team.id === input.teamId)) throw new WorkspaceError("NO_TEAM", "请先选择一个已连接的团队。");
+      if (config.projects.some((item) => (item.teamId === undefined ? config.defaultTeamId : item.teamId) === input.teamId && item.name.normalize("NFKC").trim().toLowerCase() === name.normalize("NFKC").toLowerCase())) throw new WorkspaceError("PROJECT_EXISTS", "此团队已有同名项目，请打开已有项目。");
+      return { ...config, schemaVersion: 2, projects: [...config.projects, project] };
+    });
+    return project;
+  }
+
+  async bindProject(projectId: string, teamId: string | null | undefined, expectedRoot?: string | null): Promise<ProjectBinding> {
     const config = await this.store.update((current) => {
       if (!current.projects.some((project) => project.id === projectId)) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
       if (expectedRoot !== undefined && current.projects.find((project) => project.id === projectId)?.root !== expectedRoot) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
@@ -76,7 +91,7 @@ export class WorkspaceService {
     return config.projects.find((project) => project.id === projectId)!;
   }
 
-  async removeProject(projectId: string, expectedRoot?: string): Promise<void> {
+  async removeProject(projectId: string, expectedRoot?: string | null): Promise<void> {
     await this.store.update((config) => {
       if (!config.projects.some((project) => project.id === projectId)) throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
       if (expectedRoot !== undefined && config.projects.find((project) => project.id === projectId)?.root !== expectedRoot) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，取消移除。");
@@ -95,12 +110,13 @@ export class WorkspaceService {
     if (projectId && !config.projects.some((project) => project.id === projectId)) {
       throw new WorkspaceError("PROJECT_NOT_FOUND", "项目不存在，请先运行 project list 查看项目 ID。");
     }
-    const checkout = await inspectCheckout(directory);
+    const explicit = projectId ? config.projects.find((item) => item.id === projectId) : undefined;
+    const checkout = explicit?.root === null ? null : await inspectCheckout(directory);
     let project: ProjectBinding | undefined;
     if (!checkout) {
       project = projectId ? config.projects.find((item) => item.id === projectId) : undefined;
     } else {
-      const local = config.projects.filter((item) => sameLocalPath(item.gitCommonDir, checkout.gitCommonDir) || sameLocalPath(item.root, checkout.root));
+      const local = config.projects.filter((item) => item.gitCommonDir !== null && sameLocalPath(item.gitCommonDir, checkout.gitCommonDir) || item.root !== null && sameLocalPath(item.root, checkout.root));
       if (local.length > 1) throw new WorkspaceError("AMBIGUOUS_PROJECT", "本地仓库被重复绑定，请检查项目配置。");
       if (local[0]) {
         project = local[0];

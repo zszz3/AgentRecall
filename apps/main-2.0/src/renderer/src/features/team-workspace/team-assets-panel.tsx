@@ -7,7 +7,7 @@ import type { TeamProjectSelection } from "./team-project-browser";
 import type { LanguageMode } from "../../language";
 
 type Inspection = {
-  scope: { projectId: string; root: string; repository: string };
+  scope: { projectId: string; root: string | null; directory?: string; repository: string };
   target: "codex" | "claude";
   data: Extract<TeamPayload, { kind: "skill-preview" | "work-preview" | "work-status" | "work-diff" }>;
 };
@@ -29,9 +29,9 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
   const inspectionElement = useRef<HTMLElement>(null);
   const { project, team, enabled } = selection;
   const locked = Boolean(busy || selection.busy);
-  const scope = { projectId: project.id, root: project.root };
+  const scope = { projectId: project.id, root: project.root, ...(selection.directory ? { directory: selection.directory } : {}) };
   const inspection = storedInspection && storedInspection.scope.projectId === project.id
-    && storedInspection.scope.root === project.root && storedInspection.target === target ? storedInspection : null;
+    && storedInspection.scope.root === project.root && storedInspection.scope.directory === selection.directory && storedInspection.target === target ? storedInspection : null;
 
   useEffect(() => {
     alive.current = true;
@@ -49,13 +49,13 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
     setInspection(null);
     setCatalog(null);
     setCatalogLoading(true);
-    void api.request({ action: "catalog", scope: { projectId: project.id, root: project.root, ...(team ? { repository: team.repository } : {}) } }).then((reply) => {
+    void api.request({ action: "catalog", scope: { projectId: project.id, root: project.root, ...(selection.directory ? { directory: selection.directory } : {}), ...(team ? { repository: team.repository } : {}) } }).then((reply) => {
       if (!active) return;
       if (!reply.ok) setError(reply.error);
       else if (reply.data.kind === "catalog") setCatalog(reply.data.value);
     }).catch(() => { if (active) setError({ message: "项目资产读取失败，请刷新后重试。" }); }).finally(() => { if (active) setCatalogLoading(false); });
     return () => { active = false; };
-  }, [api, project.id, project.root, project.teamId, team?.id, team?.repository, enabled, refreshKey]);
+  }, [api, project.id, project.root, project.teamId, team?.id, team?.repository, enabled, refreshKey, selection.directory]);
 
   useEffect(() => { setInspection(null); }, [target]);
   useEffect(() => { if (inspection) inspectionElement.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [inspection]);
@@ -136,13 +136,13 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
           <label>{l("File", "文件")}<select disabled={locked} value={inspection.data.value.file} onChange={(event) => void run({ action: "skill-preview", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, file: event.currentTarget.value })}>{inspection.data.value.files.map((file) => <option key={file.path}>{file.path}</option>)}</select></label>
           {inspection.data.value.encoding === "base64" && <p>{l("Binary file shown as Base64.", "二进制文件，以 Base64 显示。")}</p>}
           <pre>{inspection.data.value.content}</pre>
-          <button type="button" className="is-primary" disabled={locked || !enabled} onClick={() => void run({ action: "skill-install", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "skill-preview" ? inspection.data.value.commit : "" })}>{l("Install this version", "安装此版本")}</button>
+          <button type="button" className="is-primary" disabled={locked || !enabled || !inspection.data.value.destination} onClick={() => void run({ action: "skill-install", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "skill-preview" ? inspection.data.value.commit : "" })}>{l("Install this version", "安装此版本")}</button>
         </>}
         {inspection.data.kind === "work-preview" && <>
           <p>{inspection.data.value.description}</p>
           {inspection.data.value.configurationConflict && <p className="team-workspace-error">{inspection.data.value.configurationConflict}</p>}
           <ul>{inspection.data.value.skills.map((skill) => <li key={skill.id}><strong>{skill.id}</strong> · {skill.status === "existing" ? l("Reuse existing", "复用现有内容") : skill.status === "conflict" ? l("Conflict", "有冲突") : l("Install", "待安装")}{skill.reason && <p>{skill.reason}</p>}{skill.destination && <small>{skill.destination}</small>}</li>)}</ul>
-          <button type="button" className="is-primary" disabled={locked || !enabled || Boolean(inspection.data.value.configurationConflict) || inspection.data.value.skills.some((skill) => skill.status === "conflict")} onClick={() => void run({ action: "work-install", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "work-preview" ? inspection.data.value.commit : "" })}>{l("Install configuration", "安装工作配置")}</button>
+          <button type="button" className="is-primary" disabled={locked || !enabled || Boolean(inspection.data.value.configurationConflict) || inspection.data.value.skills.some((skill) => skill.status === "conflict" || skill.status === "unselected")} onClick={() => void run({ action: "work-install", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "work-preview" ? inspection.data.value.commit : "" })}>{l("Install configuration", "安装工作配置")}</button>
         </>}
         {inspection.data.kind === "work-status" && <>
           <p>{l("Installed version: ", "已安装版本：")}<code>{inspection.data.value.revision}</code></p>

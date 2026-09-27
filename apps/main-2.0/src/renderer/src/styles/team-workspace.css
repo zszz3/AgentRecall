@@ -114,3 +114,8 @@
 .team-share-dialog::backdrop { background: #0006; }
 .team-share-dialog > .team-workspace { height: auto; }
 @media (max-width: 800px) { .team-document-comparison { grid-template-columns: 1fr; } .team-space-heading { padding: 20px; } }
+
+.team-local-destination { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 12px 28px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 12px; flex-wrap: wrap; }
+.team-local-destination span { overflow-wrap: anywhere; min-width: 0; }
+.team-project-local { margin: 16px 0; color: var(--text-muted); font-size: 12px; }
+.team-project-local summary { cursor: pointer; margin-bottom: 8px; }

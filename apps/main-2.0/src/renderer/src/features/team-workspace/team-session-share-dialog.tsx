@@ -15,7 +15,7 @@ export function TeamSessionShareDialog({ sessionKey, language, onClose, api = wi
   const config = snapshot?.config;
   const choices = (config?.projects ?? []).flatMap((project) => {
     const team = config?.teams.find((entry) => entry.id === (project.teamId === undefined ? config.defaultTeamId : project.teamId));
-    return team && project.repository ? [{ project, team }] : [];
+    return team ? [{ project, team }] : [];
   });
   const selected = choices.find((entry) => entry.project.id === projectId) ?? choices[0];
   useEffect(() => {
@@ -46,9 +46,9 @@ export function TeamSessionShareDialog({ sessionKey, language, onClose, api = wi
       <p>{l("Share a full snapshot, including conversation, tool events, available source files and attachments. Check the contents before confirming. A private team repository is required.", "分享完整快照，包括对话、工具事件、可读取的源文件和附件。确认前请检查内容；需要使用私有团队仓库。")}</p>
       {busy && <button onClick={() => { void api.request({ action: "cancel-sync" }).then(() => { if (alive.current) setError(l("Cancelled. If an upload was already sent, refresh the team list to check its result.", "已取消等待。如果上传请求已经发出，请刷新团队会话列表核对结果。")); }).catch(() => { if (alive.current) setError(l("Could not confirm cancellation. Wait for the request to finish.", "取消未确认，请等待当前请求结束。")); }); }}>{l("Cancel operation", "取消操作")}</button>}
       {error && <p className="team-workspace-error" role="alert">{error}</p>}
-      {done ? <p className="team-workspace-notice" role="status">{done}</p> : !snapshot ? <p role="status">{l("Loading…", "正在读取…")}</p> : !config?.teamEnabled ? <p className="team-workspace-notice">{l("Enable teams in Settings first. This session has not been uploaded.", "请先在设置中开启团队功能，这条会话尚未上传。")}</p> : !selected ? <p className="team-workspace-notice">{l("Create a team project linked to a GitHub code repository first.", "请先在团队空间创建项目并关联 GitHub 代码仓库。")}</p> : <>
+      {done ? <p className="team-workspace-notice" role="status">{done}</p> : !snapshot ? <p role="status">{l("Loading…", "正在读取…")}</p> : !config?.teamEnabled ? <p className="team-workspace-notice">{l("Enable teams in Settings first. This session has not been uploaded.", "请先在设置中开启团队功能，这条会话尚未上传。")}</p> : !selected ? <p className="team-workspace-notice">{l("Create a project in Team Space first.", "请先在团队空间创建一个项目。")}</p> : <>
         <label>{l("Destination project", "分享目标")}<select disabled={busy} value={selected.project.id} onChange={(event) => { setProjectId(event.currentTarget.value); setPreview(null); setError(""); }}>{choices.map(({ project, team }) => <option key={project.id} value={project.id}>{team.name} / {project.name}</option>)}</select></label>
-        <small>{selected.team.repository} · {selected.project.repository}</small>
+        <small>{selected.team.repository} · {selected.project.name}</small>
         {preview && <TeamSessionContentView content={preview} language={language} />}
         <footer className="team-space-actions"><button disabled={busy || snapshot.busy} onClick={() => void run(false)}>{busy ? l("Working…", "正在处理…") : preview ? l("Rebuild preview", "重新预览") : l("Preview full session", "预览完整会话")}</button>{preview && <button className="is-primary" disabled={busy || snapshot.busy} onClick={() => void run(true)}>{l("Confirm sharing…", "确认分享…")}</button>}</footer>
       </>}

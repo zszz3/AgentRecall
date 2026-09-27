@@ -16,9 +16,14 @@ const attachmentSchema = z.object({ id: z.string(), fileName: z.string(), mimeTy
 const messageSchema = z.object({ role: z.enum(["user", "assistant"]), content: z.string(), timestamp: z.string(), index: z.number(), sourceTurnId: z.string().nullable().optional(), phase: z.enum(["commentary", "final_answer"]).nullable().optional(), attachments: z.array(attachmentSchema).optional() }).passthrough();
 const traceSchema = z.object({ index: z.number(), kind: z.string(), source: z.string(), title: z.string(), detail: z.string(), timestamp: z.string() }).passthrough();
 const detailSchema = z.object({ schemaVersion: z.literal(2), exportedAt: z.number(), session: z.object({ sessionKey: z.string(), originalTitle: z.string(), displayTitle: z.string(), source: z.string() }).passthrough(), messages: z.array(messageSchema).max(100_000), traceEvents: z.array(traceSchema).max(100_000) }).strict();
-const packetSchema = z.object({ schemaVersion: z.literal(1), repository: z.string(), projectRepository: z.string(), rootSessionKey: z.string(), records: z.array(z.object({ detail: detailSchema, files: z.array(fileSchema).max(512), missingAttachments: z.array(z.string()).max(512) }).strict()).min(1).max(128) }).strict();
+const recordsSchema = z.array(z.object({ detail: detailSchema, files: z.array(fileSchema).max(512), missingAttachments: z.array(z.string()).max(512) }).strict()).min(1).max(128);
+const packetV1Schema = z.object({ schemaVersion: z.literal(1), repository: z.string(), projectRepository: z.string(), rootSessionKey: z.string(), records: recordsSchema }).strict();
+const packetV2Schema = z.object({ schemaVersion: z.literal(2), repository: z.string(), projectIdentity: z.string(), rootSessionKey: z.string(), records: recordsSchema }).strict();
+const packetSchema = z.union([packetV1Schema, packetV2Schema]).transform((packet) => packet.schemaVersion === 1
+  ? { schemaVersion: 2 as const, repository: packet.repository, projectIdentity: packet.projectRepository, rootSessionKey: packet.rootSessionKey, records: packet.records }
+  : packet);
 type Packet = z.infer<typeof packetSchema>;
-export interface TeamSessionContext { repository: string; projectRepository: string; projectId: string; root: string; }
+export interface TeamSessionContext { repository: string; projectIdentity: string; projectId: string; root: string | null; projectName?: string; }
 type Store = Pick<SessionStore, "getSession" | "searchSessions" | "getAllMessages" | "getTraceEvents" | "getSessionSourceArtifacts" | "getAttachmentFile">;
 interface Dependencies {
   store: Store;
@@ -32,7 +37,7 @@ export class TeamSessionSharing {
   constructor(private readonly dependencies: Dependencies, private readonly remote = new TeamSessionGitHub()) {}
   cancel(owner: number): void { for (const [key, item] of this.previews) if (item.owner === owner) { clearTimeout(item.timer); this.previews.delete(key); } }
   close(): void { for (const item of this.previews.values()) clearTimeout(item.timer); this.previews.clear(); }
-  private project(context: TeamSessionContext): string { return createHash("sha256").update(context.projectRepository).digest("hex").slice(0, 32); }
+  private project(context: TeamSessionContext): string { return createHash("sha256").update(context.projectIdentity).digest("hex").slice(0, 32); }
   private cancelled(signal: AbortSignal): void { if (signal.aborted) throw new WorkspaceError("CANCELLED", "团队会话操作已取消。"); }
   private content(packet: Packet, bytes: number): TeamSessionContent {
     const seen = new Set<string>();
@@ -58,7 +63,7 @@ export class TeamSessionSharing {
       if (data.length > MAX_TEAM_SESSION_BYTES) throw new Error("Too large");
       const json = await decompress(data, { maxOutputLength: MAX_TEAM_SESSION_BYTES });
       const packet = packetSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(json)));
-      if (packet.repository !== context.repository || packet.projectRepository !== context.projectRepository) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "分享包的团队或项目与当前选择不一致。");
+      if (packet.repository !== context.repository || packet.projectIdentity !== context.projectIdentity) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "分享包的团队或项目与当前选择不一致。");
       return this.content(packet, data.length);
     } catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("TEAM_SESSION_INVALID", "会话包格式或版本无效，或解压后超过 64 MiB。"); }
   }
@@ -107,7 +112,7 @@ export class TeamSessionSharing {
       if (retained > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "完整会话包超过 64 MiB，未上传。");
       records.push({ detail, files, missingAttachments });
     }
-    const packet = { schemaVersion: 1 as const, repository: context.repository, projectRepository: context.projectRepository, rootSessionKey: sessionKey, records };
+    const packet = { schemaVersion: 2 as const, repository: context.repository, projectIdentity: context.projectIdentity, rootSessionKey: sessionKey, records };
     const json = Buffer.from(JSON.stringify(packet));
     if (json.length > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "含附件及元数据的完整会话包超过 64 MiB，未上传。");
     const data = await compress(json); this.cancelled(signal);
@@ -119,12 +124,12 @@ export class TeamSessionSharing {
     const token = randomUUID();
     const timer = setTimeout(() => this.previews.delete(token), expiresAt - Date.now()); timer.unref();
     this.previews.set(token, { owner, context, data, content, expiresAt, timer });
-    return { ...content, token, repository: context.repository, projectRepository: context.projectRepository, expiresAt };
+    return { ...content, token, repository: context.repository, projectIdentity: context.projectIdentity, expiresAt };
   }
   async publish(owner: number, context: TeamSessionContext, token: string, signal: AbortSignal, assertContext: () => Promise<void>) {
     const pending = this.previews.get(token);
     if (!pending || pending.owner !== owner || pending.expiresAt <= Date.now() || JSON.stringify(pending.context) !== JSON.stringify(context)) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期或目标已改变，请重新预览。");
-    if (!await this.dependencies.confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的完整快照分享到私有仓库 ${context.repository}？\n项目：${context.projectRepository}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.data.length} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留；仓库成员可下载。`)) return null;
+    if (!await this.dependencies.confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的完整快照分享到私有仓库 ${context.repository}？\n项目：${context.projectName ?? context.projectIdentity}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.data.length} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留；仓库成员可下载。`)) return null;
     this.cancelled(signal); await assertContext();
     if (pending.expiresAt <= Date.now() || this.previews.get(token) !== pending) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期，请重新预览。");
     const result = await this.remote.upload(context.repository, this.project(context), (pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话"), pending.data, signal);

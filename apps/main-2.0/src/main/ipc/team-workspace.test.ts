@@ -204,8 +204,8 @@ it("enforces team/project scope for sessions and cancels retained previews on wi
   const scope = { projectId: saved.id, root: saved.root, repository: "https://github.com/example/assets" };
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: false, error: { code: "TEAM_DISABLED" } });
   await workspace.setTeamEnabled(true);
-  expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: false, error: { code: "TEAM_PROJECT_REPOSITORY_REQUIRED" } });
-  expect(list).not.toHaveBeenCalled();
+  expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true, data: { kind: "session-list" } });
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: `legacy:${saved.id}` }), 1, expect.any(AbortSignal));
   sender.emit("destroyed");
   expect(cancel).toHaveBeenCalledWith(sender.id);
   expect(sender.listenerCount("destroyed")).toBe(0);
@@ -225,4 +225,23 @@ it("disabling teams cancels the current download before persisting disabled mode
   await ready;
   expect(await api.request({ action: "enable", enabled: false })).toMatchObject({ ok: true, data: { value: { config: { teamEnabled: false } } } });
   expect(await download).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
+});
+
+it("creates a name-only space and exposes asset previews and sessions without a checkout", async () => {
+  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
+  const list = vi.spyOn(sharing, "list").mockResolvedValue({ page: 1, items: [], hasMore: false });
+  const { api, workspace, confirm } = harness(sharing);
+  await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
+  expect(await api.request({ action: "create-project", name: "Research", teamId: "team" })).toMatchObject({ ok: true });
+  const project = (await workspace.store.read())!.projects[0]!;
+  expect(project).toMatchObject({ name: "Research", root: null, repository: null });
+  const scope = { projectId: project.id, root: null, repository: "https://github.com/example/assets" };
+  expect(await api.request({ action: "catalog", scope })).toMatchObject({ ok: true, data: { kind: "catalog", value: { installed: [], root: null } } });
+  expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true });
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: project.sharingKey, root: null, projectName: "Research" }), 1, expect.any(AbortSignal));
+  expect(await api.request({ action: "skill-install", scope, id: "review", target: "codex", revision: "1".repeat(40) })).toMatchObject({ ok: false, error: { code: "LOCAL_DIRECTORY_REQUIRED" } });
+  expect(await api.request({ action: "catalog", scope: { ...scope, directory: "relative" } })).toMatchObject({ ok: false, error: { code: "INVALID_ARGUMENTS" } });
+  confirm.mockResolvedValue(true);
+  expect(await api.request({ action: "remove-project", id: project.id, root: null })).toMatchObject({ ok: true });
+  expect((await workspace.store.read())!.projects).toEqual([]);
 });
