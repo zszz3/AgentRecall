@@ -4,13 +4,13 @@ import type { TeamSessionContent, TeamSessionPage, TeamSharedSession } from "../
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { LanguageMode } from "../../language";
-import type { TeamProjectSelection } from "./team-project-browser";
+import type { TeamSelection } from "./team-workspace-page";
 import { TeamSessionContentView } from "./team-session-content";
 
-export function TeamSessionsPanel({ selection, language, api = window.sessionSearch.teamWorkspace }: { selection: TeamProjectSelection; language: LanguageMode; api?: TeamWorkspaceApi }) {
+export function TeamSessionsPanel({ selection, language, api = window.sessionSearch.teamWorkspace }: { selection: TeamSelection; language: LanguageMode; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const { project, team, enabled } = selection;
-  const scope = { projectId: project.id, root: project.root, repository: team?.repository ?? "" };
+  const { team, enabled } = selection;
+  const scope = { teamId: team.id, repository: team.repository };
   const [list, setList] = useState<TeamSessionPage | null>(null);
   const [page, setPage] = useState(1), [refresh, setRefresh] = useState(0);
   const [selectionDetail, setSelectionDetail] = useState<{ item: TeamSharedSession; content: TeamSessionContent } | null>(null);
@@ -30,7 +30,7 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
       }).catch(() => { if (active) setError(l("Could not load shared sessions.", "共享会话读取失败，请刷新重试。")); }).finally(() => { if (active) setLoading(false); });
     }
     return () => { active = false; };
-  }, [api, project.id, project.root, project.repository, team?.repository, enabled, page, refresh]);
+  }, [api, team.id, team.repository, enabled, page, refresh]);
   async function run(request: TeamRequest, item: TeamSharedSession) {
     if (running.current) return;
     running.current = true; setBusy(true); setError(""); setFeedback("");
@@ -46,10 +46,10 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   }
   const locked = busy || loading || selection.busy || !enabled || !team;
   return <section className="team-workspace">
-    <header className="team-workspace-head"><div><h2>{l("Shared sessions", "共享会话")}</h2><p>{l("Share from a local session’s right-click menu. Nothing is uploaded automatically.", "在本地会话的右键菜单中分享，不会自动上传。")}</p></div><button disabled={locked} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={14} />{l("Refresh", "刷新")}</button></header>
+    <header className="team-workspace-head"><div><h2>{l("Shared sessions", "共享会话")}</h2><p>{l("Share from a local session’s right-click menu. Nothing is uploaded automatically.", "在本地会话的右键菜单中分享，不会自动上传。")}</p></div><button className="team-icon-button" aria-label={l("Refresh sessions", "刷新会话")} title={l("Refresh sessions", "刷新会话")} disabled={locked} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} /></button></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{feedback && <p role="status" className="team-workspace-notice">{feedback}</p>}
     {!enabled || !team ? <p className="team-workspace-notice">{l("Enable teams in Settings to access shared sessions.", "在设置中启用团队后，可查看共享会话。")}</p> : loading ? <p role="status">{l("Loading…", "正在读取…")}</p> : list && <>
-      <div className="team-resource-list">{list.items.length ? list.items.map((item) => <button className="team-resource-row" key={item.id} disabled={locked} onClick={() => void run({ action: "session-detail", scope, id: item.id }, item)}><MessagesSquare size={19} /><span><strong>{item.title}</strong><small>{item.author} · {new Date(item.createdAt).toLocaleDateString()} · {(item.bytes / 1024 / 1024).toFixed(2)} MiB</small></span><span>{l("Read", "阅读")}</span></button>) : <p className="team-empty">{l("No shared sessions on this page.", "这一页还没有该项目的共享会话。")}</p>}</div>
+      <div className="team-resource-list">{list.items.length ? list.items.map((item) => <button className="team-resource-row" key={item.id} disabled={locked} onClick={() => void run({ action: "session-detail", scope, id: item.id }, item)}><MessagesSquare size={19} /><span><strong>{item.title}</strong><small>{item.author} · {new Date(item.createdAt).toLocaleDateString()} · {(item.bytes / 1024 / 1024).toFixed(2)} MiB</small></span><span>{l("Read", "阅读")}</span></button>) : <div className="team-empty"><MessagesSquare size={28} /><strong>{l("No shared sessions yet", "还没有共享会话")}</strong><p>{l("Right-click a local session and choose Share to team.", "在本地 Session 上右键，选择「分享到团队」。")}</p></div>}</div>
       {(page > 1 || list.hasMore) && <div className="team-space-actions"><button disabled={locked || page === 1} onClick={() => setPage((value) => value - 1)}>{l("Previous", "上一页")}</button><small>{page}</small><button disabled={locked || !list.hasMore || page >= 100} onClick={() => setPage((value) => value + 1)}>{l("Next", "下一页")}</button></div>}
     </>}
     {busy && <p role="status">{l("Working…", "正在处理…")}</p>}

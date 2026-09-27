@@ -123,7 +123,7 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 优先级为：总开关 → 项目显式团队或个人设置 → 全局默认团队。项目 `teamId` 缺省表示继承，`null` 表示个人，字符串表示显式团队。未绑定项目不会仅因全局设置而使用团队。
 
-支持配置版本 1 和 2。版本 1 保存原有仓库绑定；版本 2 增加无本地目录的协作项目，首次创建时升级并保留旧记录，读取不重写。未知字段、未知版本、损坏 JSON、重复 ID 或不存在的团队引用均报错并保留原文件，不自动重置。完整配置连同元数据不得超过 1 MiB。需要手动修复时先备份文件，再运行 `doctor` 检查。
+支持配置版本 1、2 和 3。版本 1 保存原有仓库绑定；版本 2 保留旧逻辑项目，版本 3 增加团队工作目录连接；首次修改连接时升级并保留旧记录，读取不重写。未知字段、未知版本、损坏 JSON、重复 ID 或不存在的团队引用均报错并保留原文件，不自动重置。完整配置连同元数据不得超过 1 MiB。需要手动修复时先备份文件，再运行 `doctor` 检查。
 
 配置服务位于 `packages/workspace-core`。多个 CLI 进程通过同一个目录锁完成读取、校验和原子替换，争用超时明确报错。锁在正常退出时清理，异常终止留下的锁由依赖库按过期时间回收；强制中断不会保证临时文件立即消失。V2 团队设置与 Skills 团队范围已接入同一服务；这不涉及共享或迁移 Session 数据库。
 
@@ -135,16 +135,23 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单和缓存支持格式版本 1/2/3，安装记录仍为版本 1；兼容规则和工作配置的范围以团队 Skill 指南为准。未知版本或损坏记录会拒绝读取，不会自动重置。
 
-## 不依赖本地仓库的协作项目
+## 团队工作目录接入
+
+团队浏览与工作目录分开。无需创建项目，可直接同步和预览团队资产：
 
 ```sh
-agentrecall project create "Agent 研究" --team engineering
-agentrecall team sync --project <返回的项目ID>
-agentrecall skill preview review --project <项目ID> --target codex
-agentrecall skill preview review --project <项目ID> --target codex --destination /path/to/folder
-agentrecall skill install review --project <项目ID> --target codex --destination /path/to/folder --revision <预览版本>
+agentrecall team sync --team engineering
+agentrecall skill list --team engineering
+agentrecall skill preview review --team engineering
+agentrecall directory add /path/to/work --team engineering --target codex
+agentrecall directory list --team engineering
+agentrecall skill preview review --team engineering --connection <连接ID> --target codex
+agentrecall skill install review --team engineering --connection <连接ID> --target codex --revision <预览版本>
+agentrecall directory disable <连接ID>
+agentrecall directory enable <连接ID>
+agentrecall directory remove <连接ID>
 ```
 
-`project create` 只需要名称和团队；`project add` 保留原有 Git 仓库绑定方式。协作项目浏览不要求目录；安装、更新、卸载及查看本地安装时，通过 `--destination` 指定实际目录，目录可以不是 Git 仓库。选择目录不会改变项目共享身份，一个空间可应用到多个本地位置，各自管理安装记录。
+工作目录不必是 Git 仓库。接入只登记位置与客户端，不安装或上传内容；停用/断开保留已安装文件和分享。多个目录独立管理安装，桌面可勾选同时启用 Codex 与 Claude Code。`--team` 和 `--connection` 不与旧的 `--project` / `--destination` 混用。
 
-首次创建协作项目将本地配置升级到版本 2，旧记录保持原样。只读不升级；旧版本客户端遇到版本 2 会明确拒绝，应同时升级 CLI 和桌面。新项目的跨设备身份及当前同步边界见[团队空间](team-workspace.md#团队与项目)。
+旧 `project add/create/bind` 与 `--project` / `--destination` 继续支持已保存的旧配置，桌面不再要求先创建项目。首次修改工作目录连接将配置升级到版本 3并保留旧 projects，旧客户端需升级。兼容细节见[团队空间](team-workspace.md)。

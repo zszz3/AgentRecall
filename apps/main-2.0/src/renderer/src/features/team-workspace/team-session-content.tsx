@@ -5,6 +5,7 @@ import type { LanguageMode } from "../../language";
 export function TeamSessionContentView({ content, language }: { content: TeamSessionContent; language: LanguageMode }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   return <div className="team-session-content">
+    {typeof content.root.session.projectPath === "string" && content.root.session.projectPath && <p>{l("Source directory: ", "来源工作目录：")}{content.root.session.projectPath}</p>}
     <p>{(content.bytes / 1024 / 1024).toFixed(2)} MiB · {content.children.length} {l("child sessions", "个子会话")} · {content.files.length} {l("files", "个文件")}</p>
     {content.missingAttachments.length > 0 && <details className="team-workspace-notice"><summary>{l("Unavailable attachments", "无法读取的附件")} · {content.missingAttachments.length}</summary><ul>{content.missingAttachments.map((name, index) => <li key={index}>{name}</li>)}</ul></details>}
     {[content.root, ...content.children].map((detail, index) => <SessionRecord key={detail.session.sessionKey} detail={detail} language={language} initiallyOpen={index === 0} />)}

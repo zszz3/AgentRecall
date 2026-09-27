@@ -63,7 +63,7 @@ async function project(workspace: WorkspaceService) {
 describe("V2 team workspace IPC", () => {
   it("reads without initialization, shares the CLI config, and rejects malformed requests before mutation", async () => {
     const { api, workspace, handlers, sender, dispose } = harness();
-    expect(await api.request({ action: "snapshot" })).toEqual({ ok: true, data: { kind: "snapshot", value: { config: null, busy: false } } });
+    expect(await api.request({ action: "snapshot" })).toEqual({ ok: true, data: { kind: "snapshot", value: { config: null, busy: false, directories: [] } } });
     await expect(fs.access(workspace.store.filePath)).rejects.toMatchObject({ code: "ENOENT" });
     const handler = handlers.get("team-workspace:request")!;
     expect(() => handler({ sender }, { action: "enable", enabled: "yes" })).toThrow(/Invalid input/);
@@ -243,5 +243,29 @@ it("creates a name-only space and exposes asset previews and sessions without a 
   expect(await api.request({ action: "catalog", scope: { ...scope, directory: "relative" } })).toMatchObject({ ok: false, error: { code: "INVALID_ARGUMENTS" } });
   confirm.mockResolvedValue(true);
   expect(await api.request({ action: "remove-project", id: project.id, root: null })).toMatchObject({ ok: true });
+  expect((await workspace.store.read())!.projects).toEqual([]);
+});
+
+it("opens teams without projects, reads connected local assets and guards installation clients", async () => {
+  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
+  const list = vi.spyOn(sharing, "list").mockResolvedValue({ page: 1, items: [], hasMore: false });
+  const { api, workspace, confirm } = harness(sharing);
+  await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
+  const scope = { teamId: "team", repository: "https://github.com/example/assets" };
+  expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true });
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ teamWide: true, projectIdentity: "team:shared" }), 1, expect.any(AbortSignal));
+  expect(await api.request({ action: "catalog", scope })).toMatchObject({ ok: true, data: { kind: "catalog", value: { installed: [] } } });
+  const directory = path.join(root, "no-git"); await fs.mkdir(directory); await fs.writeFile(path.join(directory, "AGENTS.md"), "personal rules");
+  expect(await api.request({ action: "connect-directory", teamId: "team", directory, targets: ["codex"] })).toMatchObject({ ok: true });
+  const connection = (await workspace.store.read())!.directories![0]!;
+  const local = { ...scope, connectionId: connection.id, directory: connection.path };
+  expect(await api.request({ action: "local-assets", scope: local, kind: "documents" })).toMatchObject({ ok: true, data: { kind: "local-assets", value: { entries: [{ path: "AGENTS.md" }] } } });
+  expect(await api.request({ action: "local-assets", scope: local, kind: "documents", file: "AGENTS.md" })).toMatchObject({ ok: true, data: { kind: "local-preview", value: { content: "personal rules" } } });
+  expect(await api.request({ action: "skill-install", scope: local, id: "review", target: "claude", revision: "1".repeat(40) })).toMatchObject({ ok: false, error: { code: "CLIENT_DISABLED" } });
+  expect(await api.request({ action: "disconnect-directory", teamId: "team", id: connection.id, directory: connection.path })).toMatchObject({ ok: true, data: { kind: "cancelled" } });
+  confirm.mockResolvedValue(true);
+  expect(await api.request({ action: "disconnect-directory", teamId: "team", id: connection.id, directory: connection.path })).toMatchObject({ ok: true });
+  expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe("personal rules");
+  expect(await api.request({ action: "local-assets", scope: local, kind: "documents" })).toMatchObject({ ok: false, error: { code: "PROJECT_MISMATCH" } });
   expect((await workspace.store.read())!.projects).toEqual([]);
 });

@@ -75,3 +75,10 @@ describe("private GitHub session storage", () => {
     await expect(remote.withdraw(repository, project, 17)).rejects.toMatchObject({ code: "TEAM_WITHDRAW_UNCONFIRMED" });
   });
 });
+
+it("team view includes legacy project assets but still restricts objects to its managed release", async () => {
+  const { remote } = harness((url) => url.includes("?per_page=") ? json([asset(), asset({ id: 18, name: asset().name.replace(project, "b".repeat(32)) })]) : undefined);
+  expect((await remote.list(repository, null)).items.map((item) => item.id)).toEqual([17, 18]);
+  expect(await remote.download(repository, null, 17)).toEqual(data);
+  await expect(remote.download(repository, null, 999)).rejects.toMatchObject({ code: "TEAM_SESSION_NOT_FOUND" });
+});

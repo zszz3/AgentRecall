@@ -155,3 +155,27 @@ test("logical projects need only a name, migrate on write and keep identities in
   await fs.writeFile(service.store.filePath, before);
   assert.equal((await service.currentTeam(local, space.id)).project.sharingKey, space.sharingKey);
 });
+
+test("directory connections preserve legacy projects, work without Git and reject stale or disabled selections", async (t) => {
+  const { service, root, home } = await fixture(t);
+  await service.store.initialize(); await service.addTeam({ id: "team", repository: "https://github.com/example/assets" });
+  const old = await repository(path.join(root, "legacy")); await service.addProject({ id: "old", directory: old, teamId: "team" });
+  const before = (await service.store.read())!;
+  assert.equal(service.directoryConnections(before).length, 1);
+  assert.equal((await service.store.read())!.schemaVersion, 1);
+  const plain = path.join(root, "plain"); await fs.mkdir(plain);
+  assert.equal((await cli(home, root, ["directory", "add", plain, "--team", "team", "--target", "claude"])).code, 0);
+  const saved = (await service.store.read())!;
+  assert.equal(saved.schemaVersion, 3); assert.deepEqual(saved.projects, before.projects);
+  const connection = saved.directories!.find((entry) => entry.id !== "old")!;
+  assert.deepEqual(connection.targets, ["claude"]);
+  await service.setTeamEnabled(true);
+  assert.equal((await service.teamContext("team", connection.id, connection.path)).directory?.path, await fs.realpath(plain));
+  await assert.rejects(service.teamContext("team", connection.id, old), { code: "PROJECT_MISMATCH" });
+  await service.updateDirectory("team", connection.id, connection.path, { enabled: false, targets: ["claude"] });
+  await assert.rejects(service.teamContext("team", connection.id, connection.path), { code: "DIRECTORY_DISABLED" });
+  await fs.writeFile(path.join(plain, "keep.md"), "keep");
+  await service.updateDirectory("team", connection.id, connection.path, null);
+  assert.equal(await fs.readFile(path.join(plain, "keep.md"), "utf8"), "keep");
+  assert.deepEqual((await service.store.read())!.projects, before.projects);
+});

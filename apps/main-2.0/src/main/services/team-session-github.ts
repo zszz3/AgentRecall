@@ -66,12 +66,12 @@ export class TeamSessionGitHub {
     return { id: asset.id, title: asset.label || "共享会话", author: asset.uploader.login, createdAt: asset.created_at, bytes: asset.size, digest: match[2]!, canWithdraw: asset.uploader.id === actor || admin };
   }
   async check(repository: string, signal?: AbortSignal): Promise<void> { await this.access(repository, true, signal); }
-  async list(repository: string, project: string, page = 1, signal?: AbortSignal): Promise<TeamSessionPage> {
+  async list(repository: string, project: string | null, page = 1, signal?: AbortSignal): Promise<TeamSessionPage> {
     const { path, token, repo } = await this.access(repository, false, signal);
     const release = await this.release(path, token, signal); if (!release) return { items: [], page, hasMore: false };
     const [actor, assets] = await Promise.all([this.actor(token, signal), this.json(token, `https://api.github.com/repos/${path}/releases/${release.id}/assets?per_page=100&page=${page}`, signal)]);
     const all = z.array(assetSchema).max(100).parse(assets);
-    return { items: all.filter((asset) => asset.name.startsWith(`ar1_${project}_`) && asset.state === "uploaded").map((asset) => this.item(asset, actor, repo.permissions?.admin === true)), page, hasMore: all.length === 100 };
+    return { items: all.filter((asset) => (project === null ? /^ar1_[a-f0-9]{32}_[a-f0-9]{64}\.json\.gz$/.test(asset.name) : asset.name.startsWith(`ar1_${project}_`)) && asset.state === "uploaded").map((asset) => this.item(asset, actor, repo.permissions?.admin === true)), page, hasMore: all.length === 100 };
   }
   private async binary(path: string, token: string, asset: Asset, signal?: AbortSignal): Promise<Buffer> {
     let response = await this.request(token, `https://api.github.com/repos/${path}/releases/assets/${asset.id}`, signal, { headers: { Accept: "application/octet-stream" } });
@@ -88,13 +88,13 @@ export class TeamSessionGitHub {
     if (data.length !== asset.size || createHash("sha256").update(data).digest("hex") !== expected) throw new WorkspaceError("TEAM_SESSION_INVALID", "共享会话的大小或校验值不一致。");
     return data;
   }
-  private async managedAsset(path: string, token: string, project: string, id: number, signal?: AbortSignal): Promise<Asset> {
+  private async managedAsset(path: string, token: string, project: string | null, id: number, signal?: AbortSignal): Promise<Asset> {
     const release = await this.release(path, token, signal);
     if (release) for (let page = 1; page <= 100; page++) {
       const all = z.array(assetSchema).max(100).parse(await this.json(token, `https://api.github.com/repos/${path}/releases/${release.id}/assets?per_page=100&page=${page}`, signal));
       const asset = all.find((entry) => entry.id === id);
       if (asset) {
-        if (!asset.name.startsWith(`ar1_${project}_`)) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "该会话不属于当前项目。");
+        if (project !== null && !asset.name.startsWith(`ar1_${project}_`)) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "该会话不属于当前项目。");
         this.item(asset, 0, false);
         return asset;
       }
@@ -102,7 +102,7 @@ export class TeamSessionGitHub {
     }
     throw new WorkspaceError("TEAM_SESSION_NOT_FOUND", "未找到这条受管分享，请刷新列表后重试。");
   }
-  async download(repository: string, project: string, id: number, signal?: AbortSignal): Promise<Buffer> {
+  async download(repository: string, project: string | null, id: number, signal?: AbortSignal): Promise<Buffer> {
     const { path, token } = await this.access(repository, false, signal);
     const asset = await this.managedAsset(path, token, project, id, signal);
     return this.binary(path, token, asset, signal);
@@ -138,7 +138,7 @@ export class TeamSessionGitHub {
       throw new WorkspaceError("TEAM_SHARE_UNCONFIRMED", "上传结果未确认。保留当前预览并重试会复用同一会话包，不会覆盖已有分享。");
     }
   }
-  async withdraw(repository: string, project: string, id: number, signal?: AbortSignal): Promise<void> {
+  async withdraw(repository: string, project: string | null, id: number, signal?: AbortSignal): Promise<void> {
     const { path, token, repo } = await this.access(repository, true, signal);
     const asset = await this.managedAsset(path, token, project, id, signal);
     const current = this.item(asset, await this.actor(token, signal), repo.permissions?.admin === true);

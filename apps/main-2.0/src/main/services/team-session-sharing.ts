@@ -23,7 +23,7 @@ const packetSchema = z.union([packetV1Schema, packetV2Schema]).transform((packet
   ? { schemaVersion: 2 as const, repository: packet.repository, projectIdentity: packet.projectRepository, rootSessionKey: packet.rootSessionKey, records: packet.records }
   : packet);
 type Packet = z.infer<typeof packetSchema>;
-export interface TeamSessionContext { repository: string; projectIdentity: string; projectId: string; root: string | null; projectName?: string; }
+export interface TeamSessionContext { repository: string; projectIdentity: string; projectId: string; root: string | null; projectName?: string; teamWide?: boolean; }
 type Store = Pick<SessionStore, "getSession" | "searchSessions" | "getAllMessages" | "getTraceEvents" | "getSessionSourceArtifacts" | "getAttachmentFile">;
 interface Dependencies {
   store: Store;
@@ -63,7 +63,7 @@ export class TeamSessionSharing {
       if (data.length > MAX_TEAM_SESSION_BYTES) throw new Error("Too large");
       const json = await decompress(data, { maxOutputLength: MAX_TEAM_SESSION_BYTES });
       const packet = packetSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(json)));
-      if (packet.repository !== context.repository || packet.projectIdentity !== context.projectIdentity) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "分享包的团队或项目与当前选择不一致。");
+      if (packet.repository !== context.repository || !context.teamWide && packet.projectIdentity !== context.projectIdentity) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "分享包的团队或项目与当前选择不一致。");
       return this.content(packet, data.length);
     } catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("TEAM_SESSION_INVALID", "会话包格式或版本无效，或解压后超过 64 MiB。"); }
   }
@@ -129,25 +129,25 @@ export class TeamSessionSharing {
   async publish(owner: number, context: TeamSessionContext, token: string, signal: AbortSignal, assertContext: () => Promise<void>) {
     const pending = this.previews.get(token);
     if (!pending || pending.owner !== owner || pending.expiresAt <= Date.now() || JSON.stringify(pending.context) !== JSON.stringify(context)) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期或目标已改变，请重新预览。");
-    if (!await this.dependencies.confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的完整快照分享到私有仓库 ${context.repository}？\n项目：${context.projectName ?? context.projectIdentity}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.data.length} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留；仓库成员可下载。`)) return null;
+    if (!await this.dependencies.confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的完整快照分享到私有仓库 ${context.repository}？\n分享范围：${context.projectName ?? context.projectIdentity}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.data.length} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留；仓库成员可下载。`)) return null;
     this.cancelled(signal); await assertContext();
     if (pending.expiresAt <= Date.now() || this.previews.get(token) !== pending) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期，请重新预览。");
     const result = await this.remote.upload(context.repository, this.project(context), (pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话"), pending.data, signal);
     clearTimeout(pending.timer); this.previews.delete(token); return result;
   }
-  list(context: TeamSessionContext, page: number, signal: AbortSignal) { return this.remote.list(context.repository, this.project(context), page, signal); }
+  list(context: TeamSessionContext, page: number, signal: AbortSignal) { return this.remote.list(context.repository, context.teamWide ? null : this.project(context), page, signal); }
   async detail(context: TeamSessionContext, id: number, signal: AbortSignal) {
-    const content = await this.decode(context, await this.remote.download(context.repository, this.project(context), id, signal));
+    const content = await this.decode(context, await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal));
     this.cancelled(signal);
     return content;
   }
   async download(owner: number, context: TeamSessionContext, id: number, signal: AbortSignal) {
-    const data = await this.remote.download(context.repository, this.project(context), id, signal);
+    const data = await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal);
     await this.decode(context, data); this.cancelled(signal);
     return this.dependencies.save(owner, data, `session-${id}.agentrecall-session.json.gz`);
   }
   async withdraw(owner: number, context: TeamSessionContext, id: number, signal: AbortSignal, assertContext: () => Promise<void>) {
     if (!await this.dependencies.confirm(owner, "撤回这条团队会话分享？本地原会话保留。已下载到成员设备的外部副本无法远程删除。")) return false;
-    this.cancelled(signal); await assertContext(); await this.remote.withdraw(context.repository, this.project(context), id, signal); return true;
+    this.cancelled(signal); await assertContext(); await this.remote.withdraw(context.repository, context.teamWide ? null : this.project(context), id, signal); return true;
   }
 }

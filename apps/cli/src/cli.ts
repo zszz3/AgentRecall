@@ -35,6 +35,9 @@ AgentRecall CLI — 本地项目与可选团队配置
   agentrecall work-config diff <id> --target codex|claude
   agentrecall work-config update <id> --target codex|claude --from-revision <当前配置版本> --revision <新版本>
   agentrecall work-config uninstall <id> --target codex|claude --revision <当前配置版本>
+  agentrecall directory add <目录> --team <id> [--target codex|claude]
+  agentrecall directory list [--team <id>]
+  agentrecall directory enable|disable|remove <连接ID>
   agentrecall project create <名称> --team <id> 创建协作项目（无需本地仓库）
   agentrecall project add <id> [--path <dir>] [--remote <name>] [--team <id>|--personal]
   agentrecall project list
@@ -46,12 +49,14 @@ AgentRecall CLI — 本地项目与可选团队配置
 AGENTRECALL_HOME 指定配置目录，默认 ~/.agentrecall-cli。
 init <repo-url> 会连接远端；空仓库会提交并推送基础模板，已有仓库只校验。team sync 主动读取远端。安装必须显式选择版本和客户端；不上传 Session。工作配置记录共享引用，卸载时保留其他配置和原有独立安装。
 
-协作项目的安装和本地管理：skill/work-config 命令加 --project <id> --destination <本地目录>。
+团队资产：team sync / skill / work-config 可用 --team <id>，安装时加 --connection <连接ID>。
+旧协作项目的安装和本地管理：skill/work-config 命令加 --project <id> --destination <本地目录>。
 `;
 
 const options = {
   json: { type: "boolean" }, help: { type: "boolean", short: "h" }, version: { type: "boolean", short: "v" },
   cwd: { type: "string" }, project: { type: "string" }, repo: { type: "string" }, name: { type: "string" },
+  connection: { type: "string" },
   destination: { type: "string" },
   path: { type: "string" }, remote: { type: "string" }, team: { type: "string" },
   personal: { type: "boolean" }, inherit: { type: "boolean" },
@@ -82,14 +87,14 @@ async function main(): Promise<void> {
   if (values.help || positionals.length === 0 && Object.keys(values).every((flag) => flag === "json")) { output({ help }, help.trimEnd()); return; }
   if (values.version) { output({ version: packageInfo.version }, packageInfo.version); return; }
   const [command, action, id] = positionals;
-  const key = command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
+  const key = command === "directory" || command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
   const commands: Record<string, { count: number; flags: string[] }> = {
     init: { count: action ? 2 : 1, flags: action ? ["name", "transport"] : [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
     "team add": { count: 3, flags: ["repo", "name"] }, "team list": { count: 2, flags: [] },
     "team use": { count: values.personal ? 2 : 3, flags: ["personal"] },
     "team enable": { count: 2, flags: [] }, "team disable": { count: 2, flags: [] },
     "team current": { count: 2, flags: ["project"] },
-    "team sync": { count: 2, flags: ["project", "transport"] },
+    "team sync": { count: 2, flags: ["project", "transport", "team"] },
     "skill list": { count: 2, flags: ["project"] },
     "skill preview": { count: 3, flags: ["project", "target", "file"] },
     "skill install": { count: 3, flags: ["project", "target", "revision"] },
@@ -106,12 +111,15 @@ async function main(): Promise<void> {
     "work-config diff": { count: 3, flags: ["project", "target"] },
     "work-config update": { count: 3, flags: ["project", "target", "from-revision", "revision"] },
     "work-config uninstall": { count: 3, flags: ["project", "target", "revision"] },
+    "directory add": { count: 3, flags: ["team", "target"] },
+    "directory list": { count: 2, flags: ["team"] },
+    "directory enable": { count: 3, flags: [] }, "directory disable": { count: 3, flags: [] }, "directory remove": { count: 3, flags: [] },
     "project create": { count: 3, flags: ["team"] },
     "project add": { count: 3, flags: ["path", "remote", "name", "team", "personal"] },
     "project list": { count: 2, flags: [] }, "project remove": { count: 3, flags: [] },
     "project bind": { count: 3, flags: ["team", "personal", "inherit"] },
   };
-  if (key.startsWith("skill ") || key.startsWith("work-config ")) commands[key]?.flags.push("destination");
+  if (key.startsWith("skill ") || key.startsWith("work-config ")) commands[key]?.flags.push("destination", "team", "connection");
   const spec = commands[key];
   if (!spec || positionals.length !== spec.count) invalidArguments("命令或参数数量不正确。");
   if (Object.keys(values).some((flag) => !["json", "cwd", ...spec.flags].includes(flag))) invalidArguments("此命令不支持所选选项。");
@@ -130,6 +138,14 @@ async function main(): Promise<void> {
   const directory = path.resolve(values.cwd ?? process.cwd());
   const service = new WorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(os.homedir(), ".agentrecall-cli"));
   let assets = new TeamAssetService(service);
+  if (values.team && (key === "team sync" || key.startsWith("skill ") || key.startsWith("work-config "))) {
+    if (values.project || values.destination) invalidArguments("团队操作使用 --connection 选择接入目录，不与旧项目选项混用。");
+    const config = await service.store.read();
+    const connection = values.connection && config ? service.directoryConnections(config).find((entry) => entry.id === values.connection && entry.teamId === values.team) : undefined;
+    if (values.connection && !connection) invalidArguments("找不到此团队接入的工作目录。");
+    const context = await service.teamContext(values.team, connection?.id, connection?.path, false);
+    assets = new TeamAssetService(service, undefined, { teamId: context.team.id, repository: context.team.repository, ...(connection ? { connectionId: connection.id, directory: connection.path } : {}) });
+  } else if (values.connection) invalidArguments("--connection 需要同时指定 --team。");
   if (values.destination) {
     if (!values.project) invalidArguments("选择安装位置时请同时指定 --project。");
     const status = await service.status(directory, values.project);
@@ -256,6 +272,23 @@ async function main(): Promise<void> {
     case "work-config update": {
       const result = await assets.updateWorkConfig(directory, id!, values.target as "codex" | "claude", values["from-revision"]!, values.revision!, values.project);
       output(result, `已更新工作配置 ${result.name}。\n版本：${result.revision}\n${result.effects.map((item) => `${item.id}\t${item.kind === "installed" ? "已安装" : item.kind === "updated" ? "已更新" : "已移入备份"}${item.backupPath ? `\t${item.backupPath}` : ""}`).join("\n") || "文件内容保持不变，配置版本与引用已保存。"}`); break;
+    }
+    case "directory add": {
+      if (!values.team) invalidArguments("接入工作目录需要 --team。");
+      await service.connectDirectory(values.team, path.resolve(directory, id!), [values.target === "claude" ? "claude" : "codex"]);
+      output({ connected: true }, "工作目录已接入；尚未安装或上传资产。"); break;
+    }
+    case "directory list": {
+      const config = await service.store.read();
+      const connections = config ? service.directoryConnections(config).filter((entry) => !values.team || entry.teamId === values.team) : [];
+      output(connections, connections.map((entry) => `${entry.id}\t${entry.path}\t${entry.enabled ? "启用" : "停用"}\t${entry.targets.join(",")}`).join("\n") || "暂无接入目录。"); break;
+    }
+    case "directory enable": case "directory disable": case "directory remove": {
+      const config = await service.store.read();
+      const connection = config ? service.directoryConnections(config).find((entry) => entry.id === id) : undefined;
+      if (!connection) invalidArguments("找不到此工作目录连接。");
+      await service.updateDirectory(connection.teamId, connection.id, connection.path, key === "directory remove" ? null : { enabled: key === "directory enable", targets: connection.targets });
+      output({ id, action: key }, "工作目录连接已更新，本地资产文件与已分享会话保留。"); break;
     }
     case "project create": {
       if (!values.team) invalidArguments("创建协作项目需要 --team。");

@@ -888,3 +888,26 @@ test("logical projects browse without a folder and apply to explicitly selected 
   await service.setTeamEnabled(false);
   await assert.rejects(assets.list(root, space.id), { code: "TEAM_DISABLED" });
 });
+
+test("team catalogs require no project; directory clients and disable are enforced at installation", async (t) => {
+  const { service, root, source, clone } = await assetsFixture(t);
+  await service.setTeamEnabled(true);
+  const saved = (await service.store.read())!;
+  await service.store.update((config) => ({ ...config, projects: [] }));
+  const team = new TeamAssetService(service, new GitAssetSource(clone), { teamId: "engineering", repository: "https://github.com/example/assets" });
+  const synced = await team.sync(root);
+  assert.equal((await team.list(root)).skills.length, 1);
+  assert.equal((await team.preview(root, "review", undefined, "codex")).destination, undefined);
+  assert.deepEqual(await team.installedWorkConfigs(root), []);
+  await assert.rejects(team.install(root, "review", "codex", synced.commit), { code: "LOCAL_DIRECTORY_REQUIRED" });
+  const directory = path.join(root, "destination"); await fs.mkdir(directory);
+  await service.connectDirectory("engineering", directory, ["codex"]);
+  const binding = (await service.store.read())!.directories![0]!;
+  const selected = new TeamAssetService(service, undefined, { teamId: "engineering", repository: "https://github.com/example/assets", connectionId: binding.id, directory: binding.path });
+  await assert.rejects(selected.install(root, "review", "claude", synced.commit), { code: "CLIENT_DISABLED" });
+  await selected.install(root, "review", "codex", synced.commit);
+  await service.updateDirectory("engineering", binding.id, binding.path, { enabled: false, targets: ["codex"] });
+  await assert.rejects(selected.install(root, "review", "codex", synced.commit), { code: "DIRECTORY_DISABLED" });
+  assert.equal(await fs.readFile(path.join(directory, ".agents", "skills", "review", "SKILL.md"), "utf8"), markdown);
+  assert.equal(saved.projects.length, 1); await fs.access(source);
+});

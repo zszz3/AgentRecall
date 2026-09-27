@@ -11,8 +11,8 @@ import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
-type Context = Awaited<ReturnType<WorkspaceService["currentTeam"]>>;
-type AssetSelection = { projectId: string; root: string | null; directory?: string; repository?: string };
+type Context = { team: import("./config.js").TeamSpace; project: import("./config.js").ProjectBinding | null; directory?: import("./config.js").DirectoryConnection | null };
+type AssetSelection = ({ projectId: string; root: string | null } | { teamId: string; connectionId?: string }) & { directory?: string; repository?: string };
 
 export class TeamAssetService {
   private readonly cacheDirectory: string;
@@ -68,8 +68,13 @@ export class TeamAssetService {
   }
 
   private async currentTeam(directory: string, projectId?: string): Promise<Context> {
+    if (this.selection && "teamId" in this.selection) {
+      const selected = await this.workspace.teamContext(this.selection.teamId, this.selection.connectionId, this.selection.directory);
+      if (this.selection.repository && selected.team.repository !== this.selection.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
+      return { ...selected, project: null };
+    }
     const context = await this.workspace.currentTeam(directory, projectId);
-    if (this.selection && (context.project.id !== this.selection.projectId || context.project.root !== this.selection.root
+    if (this.selection && (context.project?.id !== this.selection.projectId || context.project?.root !== this.selection.root
       || this.selection.repository !== undefined && context.team.repository !== this.selection.repository)) {
       throw new WorkspaceError("TEAM_CHANGED", "选中的项目或资产来源已改变，请刷新后重新选择。");
     }
@@ -80,7 +85,7 @@ export class TeamAssetService {
     // Use the config writer's lock only for the final check and commit, so disabling
     // a team can proceed while a network operation is still in flight.
     return withAssetLock(path.dirname(this.workspace.store.filePath), ".config.lock", async (assertOwned) => {
-      const current = await this.currentTeam(directory, expected.project.id);
+      const current = await this.currentTeam(directory, expected.project?.id);
       if (JSON.stringify(current) !== JSON.stringify(expected)) throw new WorkspaceError("TEAM_CHANGED", "项目或团队配置已改变，本次操作取消，请重新选择。");
       assertOwned();
       return action(assertOwned);
@@ -136,7 +141,7 @@ export class TeamAssetService {
     const snapshot = await this.snapshot(context);
     const document = snapshot.schemaVersion === 3 ? snapshot.documents.find((item) => item.id === id) : undefined;
     if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "当前团队没有这份文档，请同步后重试。");
-    const root = context.project.root || this.selection?.directory ? await this.projectRoot(directory, context.project.id) : null;
+    const root = context.project?.root || this.selection?.directory ? await this.projectRoot(directory, context.project?.id) : null;
     const destination = root ? path.join(root, ...document.target.split("/")) : null;
     const local = root ? await this.localDocument(root, document.target) : null;
     return this.commitForTeam(directory, context, () => ({ ...document, repository: snapshot.repository, commit: snapshot.commit, destination,
@@ -164,7 +169,7 @@ export class TeamAssetService {
 
   async installDocument(directory: string, id: string, commit: string, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const root = await this.projectRoot(directory, context.project.id);
+    const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-document.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "文档版本已改变，请重新预览。");
@@ -210,9 +215,10 @@ export class TeamAssetService {
 
   async previewWorkConfig(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget) {
     const context = await this.currentTeam(directory, projectId);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
     const snapshot = await this.snapshot(context);
     const config = this.findWorkConfig(snapshot, id);
-    const root = target && (context.project.root || this.selection?.directory) ? await this.projectRoot(directory, context.project.id) : undefined;
+    const root = target && (context.project?.root || this.selection?.directory) ? await this.projectRoot(directory, context.project?.id) : undefined;
     const preview = () => {
       const skills = config.skills.map((id) => snapshot.skills.find((skill) => skill.id === id)!);
       let configurationConflict: string | null = null;
@@ -242,7 +248,8 @@ export class TeamAssetService {
 
   async installWorkConfig(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const root = await this.projectRoot(directory, context.project.id);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
+    const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "资产版本与预览不一致，请重新预览并使用返回的 --revision。");
@@ -256,8 +263,11 @@ export class TeamAssetService {
   }
 
   async installedWorkConfigs(directory: string, projectId?: string) {
-    const status = await this.workspace.status(directory, projectId);
-    if (status.project?.root === null && !this.selection?.directory) return [];
+    if (this.selection && "teamId" in this.selection && !this.selection.connectionId) return [];
+    if (!this.selection || !("teamId" in this.selection)) {
+      const status = await this.workspace.status(directory, projectId);
+      if (status.project?.root === null && !this.selection?.directory) return [];
+    }
     const root = await this.projectRoot(directory, projectId);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       assertOwned();
@@ -267,7 +277,8 @@ export class TeamAssetService {
 
   async diffWorkConfig(directory: string, id: string, target: ProjectSkillTarget, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const root = await this.projectRoot(directory, context.project.id);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
+    const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
       const config = this.findWorkConfig(snapshot, id);
@@ -278,7 +289,8 @@ export class TeamAssetService {
 
   async updateWorkConfig(directory: string, id: string, target: ProjectSkillTarget, fromRevision: string, commit: string, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const root = await this.projectRoot(directory, context.project.id);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
+    const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "缓存与选定的新版本不同，请重新查看 work-config diff。");
@@ -309,6 +321,7 @@ export class TeamAssetService {
 
   async preview(directory: string, id: string, projectId?: string, target?: ProjectSkillTarget, file = "SKILL.md") {
     const context = await this.currentTeam(directory, projectId);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
     const snapshot = await this.snapshot(context);
     const skill = snapshot.skills.find((item) => item.id === id);
     if (!skill) throw new WorkspaceError("SKILL_NOT_FOUND", "当前团队中找不到这个 Skill，请先运行 skill list。");
@@ -318,7 +331,7 @@ export class TeamAssetService {
     let encoding: "utf8" | "base64" = "utf8";
     try { content = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(selected.content, "base64")); }
     catch { content = selected.content; encoding = "base64"; }
-    const root = target && (context.project.root || this.selection?.directory) ? await this.projectRoot(directory, context.project.id) : undefined;
+    const root = target && (context.project?.root || this.selection?.directory) ? await this.projectRoot(directory, context.project?.id) : undefined;
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit, id: skill.id, description: skill.description,
       file, content, encoding,
@@ -328,6 +341,13 @@ export class TeamAssetService {
   }
 
   private async projectRoot(directory: string, projectId?: string): Promise<string> {
+    if (this.selection && "teamId" in this.selection) {
+      const context = await this.workspace.teamContext(this.selection.teamId, this.selection.connectionId, this.selection.directory, false);
+      if (!context.directory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择接入的工作目录，再预览安装位置。");
+      const root = await fs.realpath(context.directory.path);
+      if (!(await fs.stat(root)).isDirectory()) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "本地目录不可用，请重新选择。");
+      return root;
+    }
     const status = await this.workspace.status(directory, projectId);
     if (!status.project) throw new WorkspaceError("NO_PROJECT", "请进入已登记的项目或使用 --project。");
     if (status.project.root === null) {
@@ -347,7 +367,8 @@ export class TeamAssetService {
 
   async diff(directory: string, id: string, target: ProjectSkillTarget, projectId?: string, file?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const root = await this.projectRoot(directory, context.project.id);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
+    const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
       const skill = snapshot.skills.find((item) => item.id === id);
@@ -361,7 +382,8 @@ export class TeamAssetService {
 
   async install(directory: string, id: string, target: ProjectSkillTarget, commit: string, projectId?: string, fromRevision?: string) {
     const context = await this.currentTeam(directory, projectId);
-    const root = await this.projectRoot(directory, context.project.id);
+    if (target && context.directory && !context.directory.targets.includes(target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录尚未启用该客户端。");
+    const root = await this.projectRoot(directory, context.project?.id);
     return withAssetLock(root, ".agentrecall-skill-install.lock", async (assertOwned) => {
       new ProjectWorkConfigs(root).assertUnreferenced(id, target);
       const snapshot = await this.snapshot(context);

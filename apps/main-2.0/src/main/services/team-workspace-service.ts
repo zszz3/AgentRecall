@@ -1,5 +1,6 @@
 import { WorkspaceError, WorkspaceService, TeamAssetService } from "@agentrecall/workspace-core";
 import path from "node:path";
+import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPayload, TeamReply, TeamRequest } from "../../shared/ipc/team-workspace";
 
@@ -8,7 +9,7 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
@@ -42,10 +43,10 @@ export class TeamWorkspaceService {
         this.cancel(owner);
         return { ok: true, data: { kind: "cancelled" } };
       }
-      if (request.action === "work-uninstall" || request.action === "remove-project") {
+      if (request.action === "work-uninstall" && !("teamId" in request.scope) || request.action === "remove-project") {
         const config = await workspace.store.read();
-        const id = request.action === "remove-project" ? request.id : request.scope.projectId;
-        const root = request.action === "remove-project" ? request.root : request.scope.root;
+        const id = request.action === "remove-project" ? request.id : "projectId" in request.scope ? request.scope.projectId : undefined;
+        const root = request.action === "remove-project" ? request.root : "root" in request.scope ? request.scope.root : null;
         const project = config?.projects.find((project) => project.id === id && project.root === root);
         if (!project) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重试。");
         const message = request.action === "work-uninstall"
@@ -80,9 +81,12 @@ export class TeamWorkspaceService {
   }
 
   private async execute(workspace: WorkspaceService, request: Exclude<TeamRequest, { action: "choose-folder" | "cancel-sync" }>, signal: AbortSignal, owner: number): Promise<TeamPayload> {
-    const snapshot = async (): Promise<TeamPayload> => ({ kind: "snapshot", value: { config: await workspace.store.read(), busy: false } });
+    const snapshot = async (): Promise<TeamPayload> => {
+      const config = await workspace.store.read();
+      return { kind: "snapshot", value: { config, busy: request.action === "snapshot" ? this.busy : false, directories: config ? workspace.directoryConnections(config) : [] } };
+    };
     switch (request.action) {
-      case "snapshot": return { kind: "snapshot", value: { config: await workspace.store.read(), busy: this.busy } };
+      case "snapshot": return snapshot();
       case "enable":
         await workspace.store.initialize();
         await workspace.setTeamEnabled(request.enabled);
@@ -93,6 +97,17 @@ export class TeamWorkspaceService {
         return snapshot();
       case "default-team":
         await workspace.setDefaultTeam(request.id);
+        return snapshot();
+      case "connect-directory":
+        await workspace.connectDirectory(request.teamId, request.directory, request.targets);
+        return snapshot();
+      case "update-directory":
+        await workspace.updateDirectory(request.teamId, request.id, request.directory, { enabled: request.enabled, targets: request.targets });
+        return snapshot();
+      case "disconnect-directory":
+        if (!await this.dialogs.confirm(owner, `断开工作目录 ${request.directory}？本地文件、已安装资产和已分享会话均保留。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+        await workspace.updateDirectory(request.teamId, request.id, request.directory, null);
         return snapshot();
       case "create-project":
         await workspace.createProject({ name: request.name, teamId: request.teamId });
@@ -113,18 +128,39 @@ export class TeamWorkspaceService {
       }
     }
     const config = await workspace.store.read();
-    const project = config?.projects.find((project) => project.id === request.scope.projectId);
-    if (!project || project.root !== request.scope.root) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重新选择。");
+    const teamScope = "teamId" in request.scope ? request.scope : null;
+    const legacyScope = "projectId" in request.scope ? request.scope : null;
+    const project = legacyScope ? config?.projects.find((entry) => entry.id === legacyScope.projectId) : undefined;
+    if (legacyScope && (!project || project.root !== legacyScope.root)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重新选择。");
+    const teamContext = teamScope ? await workspace.teamContext(teamScope.teamId, teamScope.connectionId, teamScope.directory, false) : null;
+    if (teamScope && teamContext?.team.repository !== teamScope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
+    if (teamContext?.directory && "target" in request && !teamContext.directory.targets.includes(request.target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录没有启用该客户端，请到工作目录设置中调整。");
     const assets = new TeamAssetService(workspace, undefined, request.scope);
-    if (request.scope.directory && (!path.isAbsolute(request.scope.directory) || project.root !== null)) throw new WorkspaceError("INVALID_ARGUMENTS", "本地位置无效，请重新选择目录。");
-    const root = project.root ?? this.directory;
-    const projectId = project.id;
+    if (request.scope.directory && (!path.isAbsolute(request.scope.directory) || legacyScope && project?.root !== null)) throw new WorkspaceError("INVALID_ARGUMENTS", "本地位置无效，请重新选择目录。");
+    const localDirectory = teamScope ? teamContext?.directory?.path : project?.root ?? request.scope.directory;
+    if (request.action === "local-assets") {
+      if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择要查看的本地工作目录。");
+      const result = await readTeamLocalAssets(localDirectory, request.kind, request.file, signal);
+      if (teamScope) await workspace.teamContext(teamScope.teamId, teamScope.connectionId, teamScope.directory, false);
+      else {
+        const fresh = (await workspace.store.read())?.projects.find((item) => item.id === project?.id);
+        if (!fresh || JSON.stringify(fresh) !== JSON.stringify(project)) throw new WorkspaceError("PROJECT_MISMATCH", "项目已改变，请重新选择。");
+      }
+      return "entries" in result ? { kind: "local-assets", value: result } : { kind: "local-preview", value: result };
+    }
+    const root = project?.root ?? this.directory;
+    const projectId = project?.id;
     const complete = (message: string, backups: string[] = []): TeamPayload => ({ kind: "complete", message, backups });
     const sessionContext = async (): Promise<TeamSessionContext> => {
+      if (teamScope) {
+        const current = await workspace.teamContext(teamScope.teamId);
+        if (current.team.repository !== teamScope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
+        return { repository: current.team.repository, teamWide: true, projectIdentity: "team:shared", projectId: "", root: null, projectName: current.team.name };
+      }
       const current = await workspace.currentTeam(root, projectId);
-      if (current.project.root !== request.scope.root || current.team.repository !== request.scope.repository) throw new WorkspaceError("PROJECT_MISMATCH", "团队或项目已改变，请重新选择。");
-      const identity = "sharingKey" in current.project && current.project.sharingKey ? current.project.sharingKey : current.project.repository ?? `legacy:${current.project.id}`;
-      return { repository: current.team.repository, projectIdentity: identity, projectName: current.project.name, root: current.project.root, projectId };
+      if (current.project.root !== legacyScope?.root || current.team.repository !== request.scope.repository) throw new WorkspaceError("PROJECT_MISMATCH", "团队或项目已改变，请重新选择。");
+      const identity = current.project.sharingKey ?? current.project.repository ?? `legacy:${current.project.id}`;
+      return { repository: current.team.repository, projectIdentity: identity, projectName: current.project.name, root: current.project.root, projectId: current.project.id };
     };
     if (request.action.startsWith("session-")) {
       const sharing = this.sharing;
@@ -138,7 +174,7 @@ export class TeamWorkspaceService {
         case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal) };
         case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal) };
         case "session-detail": return { kind: "session-detail", value: await sharing.detail(context, request.id, signal) };
-        case "session-publish": return await sharing.publish(owner, context, request.token, signal, assertContext) ? complete("会话已分享到团队项目。本地原会话保留。") : { kind: "cancelled" };
+        case "session-publish": return await sharing.publish(owner, context, request.token, signal, assertContext) ? complete("会话已分享到团队。本地原会话保留。") : { kind: "cancelled" };
         case "session-download": return await sharing.download(owner, context, request.id, signal) ? complete("完整会话包已保存。") : { kind: "cancelled" };
         case "session-withdraw": return await sharing.withdraw(owner, context, request.id, signal, assertContext) ? complete("分享已撤回。本地原会话保留。") : { kind: "cancelled" };
       }
@@ -146,19 +182,19 @@ export class TeamWorkspaceService {
     switch (request.action) {
       case "document-preview": return { kind: "document-preview", value: await assets.previewDocument(root, request.id, projectId) };
       case "document-install": {
-        if (!project.root && !request.scope.directory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次应用的本地目录。");
-        if (!await this.dialogs.confirm(owner, `将文档应用到 ${request.scope.directory ?? project.root ?? "未选择目录"}？相同文件将保留，不同的已有内容不会被覆盖。`)) return { kind: "cancelled" };
+        if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次应用的本地目录。");
+        if (!await this.dialogs.confirm(owner, `将文档应用到 ${localDirectory ?? "未选择目录"}？相同文件将保留，不同的已有内容不会被覆盖。`)) return { kind: "cancelled" };
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
         await assets.installDocument(root, request.id, request.revision, projectId);
         return complete("文档已应用到项目，已有内容保留。");
       }
       case "catalog": {
         const installed = await assets.installedWorkConfigs(root, projectId);
-        if (!config?.teamEnabled) return { kind: "catalog", value: { projectId, root: project.root, assets: null, installed, notice: "团队功能未启用，仍可管理已有本地配置。" } };
-        try { return { kind: "catalog", value: { projectId, root: project.root, assets: await assets.list(root, projectId), installed, notice: null } }; }
+        if (!config?.teamEnabled) return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: null, installed, notice: "团队功能未启用，仍可管理已有本地配置。" } };
+        try { return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: await assets.list(root, projectId), installed, notice: null } }; }
         catch (error) {
           if (!(error instanceof WorkspaceError) || !["ASSETS_NOT_SYNCED", "NO_TEAM"].includes(error.code)) throw error;
-          return { kind: "catalog", value: { projectId, root: project.root, assets: null, installed, notice: error.message } };
+          return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: null, installed, notice: error.message } };
         }
       }
       case "sync":
@@ -180,6 +216,8 @@ export class TeamWorkspaceService {
         return complete("工作配置已更新，旧内容的备份已保留。", result.effects.flatMap((item) => item.backupPath ? [item.backupPath] : []));
       }
       case "work-uninstall": {
+        if (teamScope && !await this.dialogs.confirm(owner, `卸载 ${localDirectory ?? "所选目录"} 的工作配置？其他配置共用的 Skill 和原有独立内容保留。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
         const result = await assets.uninstallWorkConfig(root, request.id, request.target, request.revision, projectId);
         return complete("工作配置已卸载，共用和原有独立 Skill 保留。", result.backups.map((item) => item.backupPath));
       }

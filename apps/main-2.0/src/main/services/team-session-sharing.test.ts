@@ -90,6 +90,8 @@ describe("complete team session snapshots", () => {
     await expect(f.service.detail(f.context, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
     download.mockResolvedValue(data);
     await expect(f.service.detail({ ...f.context, projectIdentity: "https://github.com/other/code" }, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_PROJECT_MISMATCH" });
+    expect((await f.service.detail({ ...f.context, teamWide: true, projectIdentity: "team:shared" }, 17, f.signal)).root.session.sessionKey).toBe(f.session.sessionKey);
+    await expect(f.service.detail({ ...f.context, teamWide: true, repository: "https://github.com/other/team" }, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_PROJECT_MISMATCH" });
     expect(f.save).toHaveBeenCalledOnce();
   });
 });

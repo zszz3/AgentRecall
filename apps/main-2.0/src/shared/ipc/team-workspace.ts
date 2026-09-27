@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WorkspaceConfig, TeamAssetService } from "@agentrecall/workspace-core";
+import type { WorkspaceConfig, TeamAssetService, DirectoryConnection } from "@agentrecall/workspace-core";
 import type { TeamSessionPage, TeamSessionContent, TeamSessionPreview } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
 
@@ -9,8 +9,11 @@ const directory = z.string().min(1).max(32768).refine((value) => !value.includes
 const repository = z.string().min(1).max(2048);
 const target = z.enum(["codex", "claude"]);
 const revision = z.string().regex(/^[a-f0-9]{40}$/);
-const scope = z.object({ projectId: id, root: directory.nullable(), directory: directory.optional(), repository: repository.optional() }).strict();
-const selectedScope = scope.extend({ repository });
+const legacyScope = z.object({ projectId: id, root: directory.nullable(), directory: directory.optional(), repository: repository.optional() }).strict();
+const teamScope = z.object({ teamId: id, repository, connectionId: id.optional(), directory: directory.optional() }).strict();
+const scope = z.union([legacyScope, teamScope]);
+const selectedScope = z.union([legacyScope.extend({ repository }), teamScope]);
+export type TeamScope = z.infer<typeof scope>;
 const asset = { scope, id, target };
 const selectedAsset = { scope: selectedScope, id, target };
 
@@ -20,11 +23,15 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("enable"), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, makeDefault: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("default-team"), id: id.nullable() }).strict(),
+  z.object({ action: z.literal("connect-directory"), teamId: id, directory, targets: z.array(target).min(1).max(2) }).strict(),
+  z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2) }).strict(),
+  z.object({ action: z.literal("disconnect-directory"), teamId: id, id, directory }).strict(),
   z.object({ action: z.literal("create-project"), name: text, teamId: id }).strict(),
   z.object({ action: z.literal("add-project"), id: id.optional(), name: text.optional(), directory, remote: text.optional(), teamId: id.nullable().optional() }).strict(),
   z.object({ action: z.literal("bind-project"), id, root: directory.nullable(), teamId: id.nullable().optional() }).strict(),
   z.object({ action: z.literal("remove-project"), id, root: directory.nullable() }).strict(),
   z.object({ action: z.literal("catalog"), scope }).strict(),
+  z.object({ action: z.literal("local-assets"), scope, kind: z.enum(["skills", "documents"]), file: z.string().min(1).max(2048).optional() }).strict(),
   z.object({ action: z.literal("document-preview"), scope: selectedScope, id }).strict(),
   z.object({ action: z.literal("document-install"), scope: selectedScope, id, revision }).strict(),
   z.object({ action: z.literal("session-list"), scope: selectedScope, page: z.number().int().min(1).max(100) }).strict(),
@@ -44,14 +51,18 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
 ]);
 export type TeamRequest = z.infer<typeof teamRequestSchema>;
 type Result<M extends keyof TeamAssetService> = TeamAssetService[M] extends (...args: never[]) => infer R ? Awaited<R> : never;
-export type TeamSnapshot = { config: WorkspaceConfig | null; busy: boolean };
+export type TeamSnapshot = { config: WorkspaceConfig | null; busy: boolean; directories?: DirectoryConnection[] };
 export type TeamCatalog = {
   projectId: string; root: string | null;
   assets: Result<"list"> | null;
   installed: Result<"installedWorkConfigs">;
   notice: string | null;
 };
+export type TeamLocalAsset = { path: string; name: string; bytes: number };
+export type TeamLocalCatalog = { directory: string; entries: TeamLocalAsset[]; limited: boolean; skipped: number };
 export type TeamPayload =
+  | { kind: "local-assets"; value: TeamLocalCatalog }
+  | { kind: "local-preview"; value: { path: string; content: string } }
   | { kind: "snapshot"; value: TeamSnapshot }
   | { kind: "folder"; value: string | null }
   | { kind: "document-preview"; value: Result<"previewDocument"> }

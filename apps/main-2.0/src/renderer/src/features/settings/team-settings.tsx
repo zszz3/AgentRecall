@@ -46,14 +46,14 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
       if (reply.data.kind === "snapshot") {
         setSnapshot(reply.data.value);
         if (request.action === "add-team") { setTeamForm({ name: "", repository: "" }); setEditor(null); }
-        setFeedback(request.action === "add-team" ? l("Team saved. Open Team Space to manage its projects.", "团队已连接。进入「团队空间」管理它的项目。") : l("Saved.", "已保存。"));
+        setFeedback(request.action === "add-team" ? l("Team saved. Open Team Space to browse assets and connect working directories.", "团队已连接。进入「团队空间」浏览资产、接入工作目录。") : l("Saved.", "已保存。"));
       }
     } catch { if (alive.current) setError(l("Could not save. Refresh and try again.", "操作未完成，请刷新后重试。")); }
     finally { running.current = false; if (alive.current) setBusy(false); }
   }
   return <section className="settings-pane team-settings">
     <header className="settings-pane-head settings-pane-head-row">
-      <div><h3>{l("Team", "团队")}</h3><p>{l("Connect your teams here; manage projects inside each team.", "在这里连接团队，项目在各自团队内管理。")}</p></div>
+      <div><h3>{l("Team", "团队")}</h3><p>{l("Connect your teams here; choose working directories in Team Space.", "在这里连接团队，在团队空间管理资产和工作目录。")}</p></div>
       <button type="button" className="team-settings-icon" aria-label={l("Refresh team settings", "刷新团队设置")} title={l("Refresh", "刷新")} disabled={busy} onClick={() => { setError(null); setRefreshKey((value) => value + 1); }}><RefreshCw size={15} /></button>
     </header>
     <label className="settings-field settings-toggle">

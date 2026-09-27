@@ -1,21 +1,22 @@
+import { TeamLocalAssetsPanel } from "./team-local-assets-panel";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { RefreshCw } from "lucide-react";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamCatalog, TeamPayload, TeamRequest } from "../../../../shared/ipc/team-workspace";
-import type { TeamProjectSelection } from "./team-project-browser";
+import type { TeamSelection } from "./team-workspace-page";
 import type { LanguageMode } from "../../language";
 
 type Inspection = {
-  scope: { projectId: string; root: string | null; directory?: string; repository: string };
+  scope: { teamId: string; connectionId?: string; directory?: string; repository: string };
   target: "codex" | "claude";
   data: Extract<TeamPayload, { kind: "skill-preview" | "work-preview" | "work-status" | "work-diff" }>;
 };
 
-export function TeamAssetsPanel({ language, selection, onOpenSettings, api = window.sessionSearch.teamWorkspace }: { language: LanguageMode; selection: TeamProjectSelection; onOpenSettings(): void; api?: TeamWorkspaceApi }): ReactElement {
+export function TeamAssetsPanel({ language, selection, onOpenSettings, api = window.sessionSearch.teamWorkspace }: { language: LanguageMode; selection: TeamSelection; onOpenSettings(): void; api?: TeamWorkspaceApi }): ReactElement {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null);
-  const [target, setTarget] = useState<"codex" | "claude">("codex");
+  const [target, setTarget] = useState<"codex" | "claude">(selection.connection?.targets[0] ?? "codex");
   const [transport, setTransport] = useState<"https" | "ssh">("https");
   const [storedInspection, setInspection] = useState<Inspection | null>(null);
   const [busy, setBusy] = useState<TeamRequest["action"] | null>(null);
@@ -27,11 +28,11 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
   const running = useRef(false);
   const activeRequest = useRef<TeamRequest["action"] | null>(null);
   const inspectionElement = useRef<HTMLElement>(null);
-  const { project, team, enabled } = selection;
+  const { connection, team, enabled } = selection;
   const locked = Boolean(busy || selection.busy);
-  const scope = { projectId: project.id, root: project.root, ...(selection.directory ? { directory: selection.directory } : {}) };
-  const inspection = storedInspection && storedInspection.scope.projectId === project.id
-    && storedInspection.scope.root === project.root && storedInspection.scope.directory === selection.directory && storedInspection.target === target ? storedInspection : null;
+  const scope = { teamId: team.id, repository: team.repository, ...(connection ? { connectionId: connection.id, directory: connection.path } : {}) };
+  const inspection = storedInspection && storedInspection.scope.teamId === team.id
+    && storedInspection.scope.directory === connection?.path && storedInspection.target === target ? storedInspection : null;
 
   useEffect(() => {
     alive.current = true;
@@ -49,13 +50,13 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
     setInspection(null);
     setCatalog(null);
     setCatalogLoading(true);
-    void api.request({ action: "catalog", scope: { projectId: project.id, root: project.root, ...(selection.directory ? { directory: selection.directory } : {}), ...(team ? { repository: team.repository } : {}) } }).then((reply) => {
+    void api.request({ action: "catalog", scope }).then((reply) => {
       if (!active) return;
       if (!reply.ok) setError(reply.error);
       else if (reply.data.kind === "catalog") setCatalog(reply.data.value);
-    }).catch(() => { if (active) setError({ message: "项目资产读取失败，请刷新后重试。" }); }).finally(() => { if (active) setCatalogLoading(false); });
+    }).catch(() => { if (active) setError({ message: "团队资产读取失败，请刷新后重试。" }); }).finally(() => { if (active) setCatalogLoading(false); });
     return () => { active = false; };
-  }, [api, project.id, project.root, project.teamId, team?.id, team?.repository, enabled, refreshKey, selection.directory]);
+  }, [api, team.id, team.repository, connection?.id, connection?.path, enabled, refreshKey]);
 
   useEffect(() => { setInspection(null); }, [target]);
   useEffect(() => { if (inspection) inspectionElement.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [inspection]);
@@ -85,7 +86,7 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
           setRefreshKey((value) => value + 1);
           break;
         case "skill-preview": case "work-preview": case "work-status": case "work-diff":
-          if ("scope" in request && "target" in request) setInspection({ scope: { ...request.scope, repository: data.value.repository }, target: request.target, data });
+          if ("scope" in request && "teamId" in request.scope && "target" in request) setInspection({ scope: { ...request.scope, repository: data.value.repository }, target: request.target, data });
           break;
         case "catalog": setCatalog(data.value); break;
         case "cancelled": break;
@@ -104,30 +105,31 @@ export function TeamAssetsPanel({ language, selection, onOpenSettings, api = win
   return (
     <section className="team-workspace">
       <header className="team-workspace-head">
-        <div><h2>Skills</h2><p>{l("Choose skills from the team shared repository for this project.", "从团队共享仓库选择此项目要使用的 Skill 和工作配置。")}</p></div>
-        <button type="button" disabled={Boolean(busy)} onClick={() => { setError(null); setRefreshKey((value) => value + 1); }}><RefreshCw size={15} />{l("Refresh", "刷新")}</button>
+        <div><h2>Skills</h2><p>{l("Browse team Skills and choose where to use them.", "从团队共享仓库选择要使用的 Skill 和工作配置。")}</p></div>
+        <button type="button" className="team-icon-button" aria-label={l("Refresh assets", "刷新资产")} title={l("Refresh assets", "刷新资产")} disabled={Boolean(busy)} onClick={() => { setError(null); setRefreshKey((value) => value + 1); }}><RefreshCw size={15} /></button>
       </header>
-      {!enabled && <div className="team-workspace-notice"><p>{l("Team features are off. Existing project installations remain available below.", "团队功能未启用。下方仍可管理已有项目安装。")}</p><button type="button" onClick={onOpenSettings}>{l("Open team settings", "前往团队设置")}</button></div>}
+      {!enabled && <div className="team-workspace-notice"><p>{l("Team features are off. Existing local installations remain available below.", "团队功能未启用。下方仍可管理已有本地安装。")}</p><button type="button" onClick={onOpenSettings}>{l("Open team settings", "前往团队设置")}</button></div>}
       {locked && <div role="status" className="team-workspace-notice">{l("A team operation is in progress.", "团队操作正在进行。")}{busy === "sync" && <button type="button" onClick={() => void api.request({ action: "cancel-sync" })}>{l("Cancel sync", "取消同步")}</button>}</div>}
       {error && <div role="alert" className="team-workspace-error"><p>{error.message}</p>{error.details && <details><summary>{l("Recovery details", "恢复详情")}</summary><pre>{JSON.stringify(error.details, null, 2)}</pre></details>}</div>}
       {feedback && <div role="status" className="team-workspace-notice"><p>{feedback.message}</p>{feedback.backups.map((backup) => <code key={backup}>{backup}</code>)}</div>}
 
+      <TeamLocalAssetsPanel key={refreshKey} selection={selection} kind="skills" language={language} api={api} />
+      <h3>{l("Team Skills", "团队 Skills")} <span className="team-count">{catalog?.assets?.skills.length ?? 0}</span></h3>
       <div className="team-workspace-toolbar">
-        <label>{l("Client", "客户端")}<select disabled={locked} value={target} onChange={(event) => setTarget(event.currentTarget.value as "codex" | "claude")}><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label>
-        <label>{l("Connection", "连接方式")}<select disabled={locked || !enabled} value={transport} onChange={(event) => setTransport(event.currentTarget.value as "https" | "ssh")}><option value="https">HTTPS</option><option value="ssh">SSH</option></select></label>
+        <label>{l("Client", "客户端")}<select disabled={locked} value={target} onChange={(event) => setTarget(event.currentTarget.value as "codex" | "claude")}>{(!connection || connection.targets.includes("codex")) && <option value="codex">Codex</option>}{(!connection || connection.targets.includes("claude")) && <option value="claude">Claude Code</option>}</select></label>
+        <details className="team-sync-options"><summary>{l("Connection", "连接方式")}</summary><label><select disabled={locked || !enabled} value={transport} onChange={(event) => setTransport(event.currentTarget.value as "https" | "ssh")}><option value="https">HTTPS</option><option value="ssh">SSH</option></select></label></details>
         <button type="button" className="is-primary" disabled={locked || !enabled || !team} onClick={() => team && void run({ action: "sync", scope: { ...scope, repository: team.repository }, transport })}>{l("Sync assets", "同步资产")}</button>
         {team && <small>{team.name} · {team.repository}</small>}
       </div>
-      {catalogLoading && <p role="status">{l("Loading project assets…", "正在读取项目资产…")}</p>}
+      {catalogLoading && <p role="status">{l("Loading team assets…", "正在读取团队资产…")}</p>}
       {catalog?.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
       {enabled && catalog?.assets && <div className="team-workspace-assets">
-        <section><h3>Skills <span>{catalog.assets.skills.length}</span></h3>{catalog.assets.skills.map((skill) => <article key={skill.id}><div><strong>{skill.id}</strong><p>{skill.description}</p></div><button type="button" disabled={locked} onClick={() => void run({ action: "skill-preview", scope, id: skill.id, target })}>{l("Preview", "预览")}</button></article>)}</section>
-        <section><h3>{l("Work configurations", "工作配置")} <span>{catalog.assets.workConfigs.length}</span></h3>{catalog.assets.workConfigs.map((item) => <article key={item.id}><div><strong>{item.name}</strong><p>{item.description}</p><small>{item.skills.join(" · ")}</small></div><button type="button" disabled={locked} onClick={() => void run({ action: "work-preview", scope, id: item.id, target })}>{l("Preview", "预览")}</button></article>)}</section>
+        <section>{!catalog.assets.skills.length && <p>{l("The team repository has not published any Skills yet.", "团队仓库尚未发布 Skills，本地内容在上方查看。")}</p>}{catalog.assets.skills.map((skill) => <article key={skill.id}><div><strong>{skill.id}</strong><p>{skill.description}</p></div><button type="button" disabled={locked} onClick={() => void run({ action: "skill-preview", scope, id: skill.id, target })}>{l("Preview", "预览")}</button></article>)}</section>
+        {catalog.assets.workConfigs.length > 0 && <section><h3>{l("Work configurations", "工作配置")} <span>{catalog.assets.workConfigs.length}</span></h3>{catalog.assets.workConfigs.map((item) => <article key={item.id}><div><strong>{item.name}</strong><p>{item.description}</p><small>{item.skills.join(" · ")}</small></div><button type="button" disabled={locked} onClick={() => void run({ action: "work-preview", scope, id: item.id, target })}>{l("Preview", "预览")}</button></article>)}</section>}
       </div>}
-      <section className="team-workspace-installed"><h3>{l("Installed work configurations", "已安装的工作配置")}</h3>
-        {!localConfigurations.length && <p>{l("No recorded configurations for this client.", "此客户端暂无工作配置记录。")}</p>}
+      {localConfigurations.length > 0 && <section className="team-workspace-installed"><h3>{l("Installed work configurations", "已安装的工作配置")}</h3>
         {localConfigurations.map((item) => <article key={item.id}><div><strong>{item.name}</strong><small>{item.repository}</small></div><button type="button" disabled={locked} onClick={() => void run({ action: "work-status", scope, id: item.id, target })}>{l("Status", "查看状态")}</button><button type="button" disabled={locked || !enabled} onClick={() => void run({ action: "work-diff", scope, id: item.id, target })}>{l("Compare update", "查看更新")}</button></article>)}
-      </section>
+      </section>}
       {inspection && <section ref={inspectionElement} className="team-workspace-inspection" aria-label={l("Asset preview", "资产预览")}>
         <header><h3>{inspection.data.kind === "skill-preview" ? inspection.data.value.id : inspection.data.value.name}</h3><button type="button" onClick={() => setInspection(null)}>{l("Close", "关闭")}</button></header>
         <small>{inspection.scope.repository} · {inspection.target}</small>
