@@ -11,6 +11,7 @@ const outdir = path.join(root, "out", "mcp");
 
 await build({
   entryPoints: [
+    path.join(root, "src", "core", "session-search-query.ts"),
     path.join(root, "src", "mcp", "migration-entry.ts"),
     path.join(root, "src", "mcp", "skill-entry.ts"),
     path.join(root, "src", "mcp", "gateway-entry.ts"),
@@ -18,6 +19,8 @@ await build({
     path.join(root, "src", "mcp", "eval-entry.ts"),
   ],
   outdir,
+  // Keep the installed binary contract flat even with entries outside src/mcp.
+  entryNames: "[name]",
   bundle: true,
   format: "esm",
   platform: "node",

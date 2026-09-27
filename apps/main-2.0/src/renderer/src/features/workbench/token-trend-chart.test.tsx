@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TokenTrendChart } from "./token-trend-chart";
 import type { SessionDailyTokenUsage } from "../../../../core/types";
 
@@ -11,16 +11,29 @@ const points: SessionDailyTokenUsage[] = Array.from({ length: 90 }, (_, i) => ({
 }));
 
 beforeEach(() => {
-  window.localStorage.clear();
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(String(key)) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => { values.delete(String(key)); },
+    setItem: (key, value) => { values.set(String(key), String(value)); },
+  };
+  vi.stubGlobal("localStorage", storage);
+});
+
+afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 it.each(["invalid", "365", "unavailable"])("defaults safely when the saved range is %s", async (stored) => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
   window.localStorage.setItem("agent-recall.workbench-token-trend-period.v2", stored);
   if (stored === "unavailable") {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("Storage unavailable", "SecurityError"); });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Storage read-only", "QuotaExceededError"); });
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => { throw new DOMException("Storage unavailable", "SecurityError"); });
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new DOMException("Storage read-only", "QuotaExceededError"); });
   }
   const host = document.createElement("div");
   const root = createRoot(host);
@@ -33,6 +46,10 @@ it.each(["invalid", "365", "unavailable"])("defaults safely when the saved range
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(host.querySelector("select")?.value).toBe("90");
+    if (stored === "unavailable") {
+      expect(window.localStorage.getItem).toHaveBeenCalled();
+      expect(window.localStorage.setItem).toHaveBeenCalled();
+    }
   } finally {
     await act(async () => root.unmount());
     vi.restoreAllMocks();
@@ -112,8 +129,8 @@ it.each([7, 30, 90])("offers one chart Tab stop with bounded date navigation and
     await key("ArrowLeft");
     assertCurrent(0);
     expect(onSelectDay).not.toHaveBeenCalled();
-    // Browsers also dispatch this native button click for Enter and Space.
-    // The real keyboard default action is covered by the Electron smoke.
+    // happy-dom does not synthesize the button click for Enter or Space.
+    // Dispatch it separately; this does not verify native keyboard activation.
     await act(async () => buttons[0].click());
     expect(onSelectDay).toHaveBeenCalledExactlyOnceWith(points[90 - days]);
     await key("End");
