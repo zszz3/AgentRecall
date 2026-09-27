@@ -25,15 +25,22 @@ export class WorkspaceService {
     this.store = new WorkspaceConfigStore(homeDirectory);
   }
 
-  async addTeam(input: { id?: string; name?: string; repository: string; makeDefault?: boolean }): Promise<TeamSpace> {
+  async addTeam(input: { id?: string; name?: string; repository: string; transport?: "https" | "ssh"; makeDefault?: boolean }): Promise<TeamSpace> {
     const repository = canonicalGitHubRepository(input.repository);
-    const team: TeamSpace = { id: input.id ?? `team-${randomUUID()}`, name: input.name ?? input.id ?? repository.slice("https://github.com/".length), repository };
+    const team: TeamSpace = { id: input.id ?? `team-${randomUUID()}`, name: input.name ?? input.id ?? repository.slice("https://github.com/".length), repository, ...(input.transport ? { transport: input.transport } : {}) };
     await this.store.update((config) => {
       if (config.teams.some((item) => item.id === team.id)) throw new WorkspaceError("TEAM_EXISTS", "团队 ID 已存在，请选择另一个 ID。");
       if (!input.id && config.teams.some((item) => item.repository === repository)) throw new WorkspaceError("TEAM_EXISTS", "这个团队仓库已经添加，请从团队列表中选择。");
-      return { ...config, teams: [...config.teams, team], ...(input.makeDefault ? { defaultTeamId: team.id } : {}) };
+      return { ...config, ...(input.transport ? { schemaVersion: 4 as const, directories: this.directoryConnections(config) } : {}), teams: [...config.teams, team], ...(input.makeDefault ? { defaultTeamId: team.id } : {}) };
     });
     return team;
+  }
+
+  async setTeamTransport(id: string, transport: "https" | "ssh"): Promise<void> {
+    await this.store.update((config) => {
+      if (!config.teams.some((team) => team.id === id)) throw new WorkspaceError("NO_TEAM", "团队不存在，请刷新。");
+      return { ...config, schemaVersion: 4, directories: this.directoryConnections(config), teams: config.teams.map((team) => team.id === id ? { ...team, transport } : team) };
+    });
   }
 
   async setDefaultTeam(teamId: string | null): Promise<WorkspaceConfig> {
@@ -62,7 +69,7 @@ export class WorkspaceService {
   }
 
   directoryConnections(config: WorkspaceConfig): DirectoryConnection[] {
-    if (config.schemaVersion === 3) return config.directories ?? [];
+    if (config.schemaVersion >= 3) return config.directories ?? [];
     return config.projects.flatMap((project) => {
       const teamId = project.teamId === undefined ? config.defaultTeamId : project.teamId;
       return project.root && teamId ? [{ id: project.id, teamId, path: project.root, enabled: true, targets: ["codex", "claude"] as Array<"codex" | "claude"> }] : [];
@@ -77,7 +84,7 @@ export class WorkspaceService {
       if (!config.teams.some((team) => team.id === teamId)) throw new WorkspaceError("NO_TEAM", "团队不存在，请刷新。");
       const directories = this.directoryConnections(config);
       if (directories.some((entry) => sameLocalPath(entry.path, root))) throw new WorkspaceError("DIRECTORY_CONNECTED", "此工作目录已经接入团队，请在列表中管理。");
-      return { ...config, schemaVersion: 3, directories: [...directories, { id: `directory-${randomUUID()}`, teamId, path: root, enabled: true, targets }] };
+      return { ...config, schemaVersion: config.schemaVersion === 4 ? 4 : 3, directories: [...directories, { id: `directory-${randomUUID()}`, teamId, path: root, enabled: true, targets }] };
     });
   }
 
@@ -85,7 +92,7 @@ export class WorkspaceService {
     await this.store.update((config) => {
       const directories = this.directoryConnections(config);
       if (!directories.some((entry) => entry.id === id && entry.teamId === teamId && entry.path === expectedPath)) throw new WorkspaceError("PROJECT_MISMATCH", "工作目录连接已改变，请刷新。");
-      return { ...config, schemaVersion: 3, directories: change ? directories.map((entry) => entry.id === id ? { ...entry, ...change } : entry) : directories.filter((entry) => entry.id !== id) };
+      return { ...config, schemaVersion: config.schemaVersion === 4 ? 4 : 3, directories: change ? directories.map((entry) => entry.id === id ? { ...entry, ...change } : entry) : directories.filter((entry) => entry.id !== id) };
     });
   }
 
@@ -112,7 +119,7 @@ export class WorkspaceService {
     await this.store.update((config) => {
       if (!config.teams.some((team) => team.id === input.teamId)) throw new WorkspaceError("NO_TEAM", "请先选择一个已连接的团队。");
       if (config.projects.some((item) => (item.teamId === undefined ? config.defaultTeamId : item.teamId) === input.teamId && item.name.normalize("NFKC").trim().toLowerCase() === name.normalize("NFKC").toLowerCase())) throw new WorkspaceError("PROJECT_EXISTS", "此团队已有同名项目，请打开已有项目。");
-      return { ...config, schemaVersion: config.schemaVersion === 3 ? 3 : 2, projects: [...config.projects, project] };
+      return { ...config, schemaVersion: config.schemaVersion >= 3 ? config.schemaVersion : 2, projects: [...config.projects, project] };
     });
     return project;
   }

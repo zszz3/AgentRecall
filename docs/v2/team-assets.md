@@ -1,6 +1,6 @@
 # 团队 Skill：拉取、预览和项目安装
 
-团队资产第一版支持 Skill。用户登记 GitHub 资产仓库并绑定业务项目后，主动拉取清单，查看指定版本，再选择安装到该项目的 Codex 或 Claude Code。独立 CLI 无需运行桌面、数据库或 Memory 服务；V2 的[团队工作区](team-workspace.md)也可操作相同资产。
+团队资产支持 Skills 与 Markdown 文档。用户连接 GitHub 资产仓库并接入工作目录后，一次同步即可更新已启用客户端的 Skills 与文档。下文单项安装与工作配置命令保留为高级管理能力。独立 CLI 无需运行桌面、数据库或 Memory 服务；V2 的[团队工作区](team-workspace.md)也可操作相同资产。
 
 ## 准备资产仓库
 
@@ -42,9 +42,9 @@ Read the selected diff and relevant tests before reporting findings.
 
 清单最多 64 个 Skill。每个 Skill 最多 200 个文件、每个文件最多 1 MiB；本次选中文件总计最多 8 MiB，缓存中的完整 JSON（含 Base64 内容和元数据）最多 16 MiB。路径必须兼容 macOS/Windows；拒绝目录穿越、大小写或 Unicode 规范化冲突、符号链接、子模块和 Git LFS 指针。超限明确失败，不截断文件。
 
-## 拉取与选择安装
+## 整轮同步与高级单项管理
 
-先按 [CLI 配置指南](cli.md) 登记团队与业务项目，并开启团队功能。在业务仓库内运行：
+先按 [CLI 配置指南](cli.md) 登记团队与工作目录，并开启团队功能。`team sync` 会直接更新所有启用目录，不是只缓存清单。以下单项命令用于高级预览、恢复或独立管理。在业务仓库内运行：
 
 ```sh
 agentrecall team sync
@@ -195,4 +195,4 @@ agentrecall skill uninstall review --target codex
 
 `path` 是资产仓库中的 Markdown 文件，`target` 是业务项目中的位置，只允许根目录 `AGENTS.md`、`CLAUDE.md` 或 `docs/` 下的 `.md` 文件。ID 与目标路径必须唯一，拒绝路径穿越、大小写/规范化冲突、文件/目录冲突、符号链接和 Git LFS。文档是严格 UTF-8，保留 BOM，单文件最多 1 MiB，最多 128 份；与 Skills 合并计入 8 MiB 原始文件及 16 MiB 完整缓存限制。
 
-在 V2「团队空间 → 团队 → 文档」中同步、预览并应用。应用固定预览版本，创建缺失文件；相同内容直接保留，不同内容拒绝覆盖。当前文档操作由桌面提供，CLI `team sync` 也能读取版本 3；暂未提供独立文档应用命令。仓库初始化仍生成版本 2 空清单，发布文档时按上述示例显式升级版本。
+在 V2 团队顶部点击「同步团队」，统一更新 Skills 与文档。文档页仅浏览内容，不再逐项应用。新建的团队文档记录归属，后续未修改版本自动更新并保留备份；同名个人文件和本地修改保留。原先没有归属记录的文件不自动认领。完整兼容及退役规则见[团队空间指南](team-workspace.md)。仓库初始化仍生成版本 2 空清单，发布文档时显式升级资产清单到版本 3。

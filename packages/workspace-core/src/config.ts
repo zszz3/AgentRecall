@@ -37,7 +37,9 @@ const logicalProjectSchema = projectSchema.extend({ root: absolutePath.nullable(
 const configV2Schema = configV1Schema.extend({ schemaVersion: z.literal(2), projects: z.array(logicalProjectSchema) });
 const directorySchema = z.strictObject({ id, teamId: id, path: absolutePath, enabled: z.boolean(), targets: z.array(z.enum(["codex", "claude"])).min(1).max(2).refine((items) => new Set(items).size === items.length) });
 const configV3Schema = configV2Schema.extend({ schemaVersion: z.literal(3), directories: z.array(directorySchema) });
-const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema]).superRefine((config, context) => {
+const connectedTeamSchema = teamSchema.extend({ transport: z.enum(["https", "ssh"]).optional() });
+const configV4Schema = configV3Schema.extend({ schemaVersion: z.literal(4), teams: z.array(connectedTeamSchema) });
+const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema, configV4Schema]).superRefine((config, context) => {
   const teamIds = new Set(config.teams.map((team) => team.id));
   if (teamIds.size !== config.teams.length) context.addIssue({ code: "custom", path: ["teams"], message: "Duplicate team ID" });
   if (new Set(config.projects.map((project) => project.id)).size !== config.projects.length) {
@@ -46,7 +48,7 @@ const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema]).s
   if (config.defaultTeamId !== null && !teamIds.has(config.defaultTeamId)) {
     context.addIssue({ code: "custom", path: ["defaultTeamId"], message: "Unknown team" });
   }
-  if (config.schemaVersion === 3) {
+  if ("directories" in config) {
     const keys = new Set<string>();
     for (const entry of config.directories) {
       if (keys.has(entry.id) || !teamIds.has(entry.teamId)) context.addIssue({ code: "custom", path: ["directories"], message: "Invalid directory connection" });
@@ -67,7 +69,7 @@ const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema]).s
   }
 });
 
-export type WorkspaceConfig = Omit<z.infer<typeof configV2Schema>, "schemaVersion"> & { schemaVersion: 1 | 2 | 3; directories?: z.infer<typeof directorySchema>[] };
+export type WorkspaceConfig = Omit<z.infer<typeof configV2Schema>, "schemaVersion" | "teams"> & { teams: z.infer<typeof connectedTeamSchema>[]; schemaVersion: 1 | 2 | 3 | 4; directories?: z.infer<typeof directorySchema>[] };
 export type DirectoryConnection = z.infer<typeof directorySchema>;
 export type TeamSpace = WorkspaceConfig["teams"][number];
 export type ProjectBinding = WorkspaceConfig["projects"][number];

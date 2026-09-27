@@ -8,6 +8,7 @@ import { GitAssetSource, type AssetTransport } from "./git-assets.js";
 import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
+import { distributeTeamAssets, validatePullReport, MAX_PULL_REPORT_BYTES, type TeamPullReport } from "./team-pull.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 import { diffProjectSkill, listSkillBackups, installProjectSkills, prepareSkillInstall, previewSkillInstall, rollbackProjectSkill, skillDestination, uninstallProjectSkill, type ProjectSkillTarget } from "./project-skills.js";
 
@@ -48,7 +49,7 @@ export class TeamAssetService {
             const matches = current.teams.filter((team) => team.repository === canonical);
             if (matches.length > 1) throw new WorkspaceError("AMBIGUOUS_TEAM", "这个仓库对应多个团队，请先整理重复配置。");
             if (matches.length) return current;
-            return { ...current, teams: [...current.teams, { id: `team-${randomUUID()}`, name: name?.trim() ?? canonical.slice("https://github.com/".length), repository: canonical }] };
+            return { ...current, schemaVersion: 4, directories: this.workspace.directoryConnections(current), teams: [...current.teams, { id: `team-${randomUUID()}`, name: name?.trim() ?? canonical.slice("https://github.com/".length), repository: canonical, transport }] };
           });
           localReady = true;
         } catch {
@@ -113,6 +114,37 @@ export class TeamAssetService {
         finally { await fs.rm(scratch, { recursive: true, force: true }); }
       }
     });
+  }
+
+  async pull(directory: string, projectId?: string, transport?: AssetTransport, signal?: AbortSignal): Promise<TeamPullReport> {
+    const context = await this.currentTeam(directory, projectId);
+    const config = (await this.workspace.store.read())!;
+    const connections = this.workspace.directoryConnections(config).filter((entry) => entry.teamId === context.team.id);
+    if (connections.length > 32) throw new WorkspaceError("TOO_MANY_DIRECTORIES", "一次同步最多处理 32 个工作目录，请先整理连接列表。");
+    const operationDirectory = path.join(path.dirname(this.workspace.store.filePath), "pulls", context.team.id);
+    return withAssetLock(operationDirectory, ".pull.lock", async (assertPullOwned) => {
+      const fetched = await this.sync(directory, projectId, transport ?? context.team.transport ?? "https", signal);
+      const snapshot = await this.snapshot(context);
+      if (snapshot.commit !== fetched.commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "同步版本已被其他进程更新，请重新同步。");
+      assertPullOwned();
+      const report = await distributeTeamAssets(this.workspace, context.team, connections, snapshot, signal);
+      const file = path.join(operationDirectory, "latest.json"), temporary = path.join(operationDirectory, `.report-${randomUUID()}.tmp`);
+      try {
+        const handle = await fs.open(temporary, "wx", 0o600);
+        try { await handle.writeFile(JSON.stringify(report)); await handle.sync(); } finally { await handle.close(); }
+        assertPullOwned(); await fs.rename(temporary, file);
+      } catch { throw new WorkspaceError("PULL_STATUS_NOT_SAVED", "文件同步已执行，但结果未能保存。请检查目录与备份，重试会重新核对已有文件。"); }
+      finally { await fs.rm(temporary, { force: true }); }
+      return report;
+    });
+  }
+
+  async pullStatus(teamId: string): Promise<TeamPullReport | null> {
+    const context = await this.workspace.teamContext(teamId, undefined, undefined, false);
+    try {
+      const value = validatePullReport(await readBoundedJson(path.join(path.dirname(this.workspace.store.filePath), "pulls", teamId, "latest.json"), MAX_PULL_REPORT_BYTES));
+      return value.repository === context.team.repository ? value : null;
+    } catch (error) { if (hasErrorCode(error, "ENOENT")) return null; throw new WorkspaceError("INVALID_PULL_STATUS", "上次同步结果无法读取，请重新同步以核对状态。"); }
   }
 
   private async snapshot(context: Context): Promise<AssetSnapshot> {

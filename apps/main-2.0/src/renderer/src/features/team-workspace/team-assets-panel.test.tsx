@@ -2,320 +2,109 @@
 import path from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkspaceConfig } from "@agentrecall/workspace-core";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { WorkspaceConfig, TeamPullReport } from "@agentrecall/workspace-core";
 import type { TeamPayload, TeamReply, TeamRequest, TeamCatalog } from "../../../../shared/ipc/team-workspace";
-import { TeamDocumentsPanel } from "./team-documents-panel";
-import { TeamSessionShareDialog } from "./team-session-share-dialog";
 import { TeamAssetsPanel } from "./team-assets-panel";
-import { TeamSettings } from "../settings/team-settings";
+import { TeamDocumentsPanel } from "./team-documents-panel";
 import { TeamWorkspacePage } from "./team-workspace-page";
-import { AppNavigation } from "../../components/app-navigation";
+import { TeamSessionShareDialog } from "./team-session-share-dialog";
+import { TeamSettings } from "../settings/team-settings";
 
-const repository = "https://github.com/example/assets";
-const revision = "1".repeat(40);
-const projectRoot = path.resolve("fixtures/team-workspace");
+const repository = "https://github.com/example/assets", revision = "1".repeat(40), rootPath = path.resolve("fixtures/team");
+const team = { id: "example", name: "Example", repository };
+const config: WorkspaceConfig = { schemaVersion: 3, teamEnabled: true, defaultTeamId: null, teams: [team], projects: [], directories: [{ id: "directory-one", teamId: team.id, path: rootPath, enabled: true, targets: ["codex"] }] };
+const selection = { team, enabled: true, busy: false };
 const ok = (data: TeamPayload): TeamReply => ({ ok: true, data });
-const config = (): WorkspaceConfig => ({
-  schemaVersion: 1, teamEnabled: true, defaultTeamId: "example",
-  teams: [{ id: "example", name: "Example", repository }],
-  projects: [{ id: "business", name: "业务项目", root: projectRoot, gitCommonDir: path.join(projectRoot, ".git"), repository: null, remote: null }],
-});
-const selection = (saved = config(), id = saved.projects[0]!.id) => {
-  const project = saved.projects.find((item) => item.id === id)!;
-  const teamId = project.teamId === undefined ? saved.defaultTeamId : project.teamId;
-  return { connection: project.root ? { id: project.id, teamId: teamId!, path: project.root, enabled: true, targets: ["codex", "claude"] as Array<"codex" | "claude"> } : undefined, team: saved.teams.find((item) => item.id === teamId)!, enabled: saved.teamEnabled, busy: false };
-};
-const catalog = (id = "business", root = projectRoot, skillId = "review"): TeamCatalog => ({
-  projectId: id, root, notice: null, installed: [],
-  assets: { teamId: "example", repository, commit: revision, skills: [{ id: skillId, description: "Review changes", files: 1, digest: "a".repeat(64) }], documents: [], workConfigs: [] },
-});
-let container: HTMLDivElement;
-let root: Root;
-beforeEach(() => {
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.restoreAllMocks();
-});
-function button(label: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label) || item.getAttribute("aria-label")?.includes(label));
-  if (!found) throw new Error("Button missing: " + label);
-  return found;
+const documentAsset = { id: "rules", name: "团队规范", path: "AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
+const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], workConfigs: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
+const preview = (id: string, content: string): TeamReply => ok({ kind: "document-preview", value: { ...documentAsset, id, content, repository, commit: revision, destination: null, local: null, status: "unselected" } });
+function base(input: TeamRequest): TeamReply {
+  if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config, directories: config.directories, busy: false } });
+  if (input.action === "catalog") return ok({ kind: "catalog", value: catalog });
+  if (input.action === "sync-status") return ok({ kind: "sync-status", value: null });
+  if (input.action === "session-list") return ok({ kind: "session-list", value: { items: [], page: 1, hasMore: false } });
+  return ok({ kind: "cancelled" });
 }
+let container: HTMLDivElement, root: Root;
+beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); container = document.createElement("div"); document.body.append(container); root = createRoot(container); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); });
+function button(label: string) { const value = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.includes(label) || item.getAttribute("aria-label")?.includes(label)); if (!value) throw new Error("Missing button " + label); return value; }
 
-describe("V2 team settings and feature scopes", () => {
-  it("starts disabled and enabling never triggers an automatic sync", async () => {
-    let saved: WorkspaceConfig | null = null;
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "enable") saved = { schemaVersion: 1, teamEnabled: input.enabled, defaultTeamId: null, teams: [], projects: [] };
-      return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-    });
-    await act(async () => root.render(<TeamSettings language="zh" api={{ request }} />));
-    const toggle = container.querySelector<HTMLInputElement>('[aria-label="启用团队功能"]')!;
-    expect(toggle.checked).toBe(false);
-    expect(container.textContent).toContain("团队空间中使用共享资产");
-    await act(async () => toggle.click());
-    expect(toggle.checked).toBe(true);
-    expect(request.mock.calls.map(([input]) => input.action)).not.toContain("sync");
-    expect(container.querySelector("form")).toBeNull();
-    await act(async () => button("连接团队").click());
-    expect(container.textContent).toContain("仓库地址");
-    expect(container.textContent).not.toContain("团队 ID");
-    expect(container.textContent).not.toContain("项目 ID");
-    expect(request.mock.calls.map(([input]) => input.action)).not.toContain("catalog");
-  });
-
-  it("previews before installing the pinned project, repository and revision and prevents duplicate submission", async () => {
-    let finish!: (reply: TeamReply) => void;
-    const install = new Promise<TeamReply>((resolve) => { finish = resolve; });
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: config(), busy: false } });
-      if (input.action === "catalog") return ok({ kind: "catalog", value: catalog() });
-      if (input.action === "skill-preview") return ok({ kind: "skill-preview", value: {
-        teamId: "example", repository, commit: revision, id: "review", description: "Review changes",
-        file: "SKILL.md", content: "Preview the review instructions.", encoding: "utf8",
-        files: [{ path: "SKILL.md", bytes: 32, executable: false }], destination: path.join(projectRoot, ".agents", "skills", "review"),
-      } });
-      if (input.action === "skill-install") return install;
-      return ok({ kind: "cancelled" });
-    });
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection()} api={{ request }} onOpenSettings={() => undefined} />));
-    expect(request.mock.calls.some(([input]) => input.action === "skill-install")).toBe(false);
-    await act(async () => button("预览").click());
-    expect(container.textContent).toContain("Preview the review instructions.");
-    expect(container.textContent).toContain(revision);
-    await act(async () => { button("安装此版本").click(); button("安装此版本").click(); });
-    expect(request.mock.calls.filter(([input]) => input.action === "skill-install")).toHaveLength(1);
-    expect(request).toHaveBeenCalledWith({ action: "skill-install", id: "review", target: "codex", revision, scope: { teamId: "example", connectionId: "business", directory: projectRoot, repository } });
-    expect(button("安装此版本").disabled).toBe(true);
-    await act(async () => finish(ok({ kind: "complete", message: "已安装", backups: [] })));
-    expect(container.textContent).toContain("已安装");
-  });
-
-  it("discards a late catalog response after switching projects", async () => {
-    let finish!: (reply: TeamReply) => void;
-    const first = new Promise<TeamReply>((resolve) => { finish = resolve; });
-    const saved = config();
-    const secondRoot = path.resolve("fixtures/second-team-project");
-    saved.projects.push({ ...saved.projects[0]!, id: "second", name: "第二项目", root: secondRoot, gitCommonDir: path.join(secondRoot, ".git") });
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-      if (input.action === "catalog") return "connectionId" in input.scope && input.scope.connectionId === "business" ? first : ok({ kind: "catalog", value: catalog("second", secondRoot, "second-skill") });
-      return ok({ kind: "cancelled" });
-    });
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection(saved)} api={{ request }} onOpenSettings={() => undefined} />));
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection(saved, "second")} api={{ request }} onOpenSettings={() => undefined} />));
-    expect(container.textContent).toContain("second-skill");
-    await act(async () => finish(ok({ kind: "catalog", value: catalog("business", projectRoot, "stale-skill") })));
-    expect(container.textContent).not.toContain("stale-skill");
-    expect(container.textContent).toContain("second-skill");
-  });
-
-  it("allows local group removal while disabled and retains the preview when native confirmation is cancelled", async () => {
-    const saved = config();
-    saved.teamEnabled = false;
-    const installed = { id: "backend", name: "后端配置", target: "codex" as const, repository, revision, skills: ["review"] };
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-      if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: null, installed: [installed] } });
-      if (input.action === "work-status") return ok({ kind: "work-status", value: { ...installed, skills: [{ id: "review", state: "ready", action: "backup", otherConfigs: [] }] } });
-      return ok({ kind: "cancelled" });
-    });
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection(saved)} api={{ request }} onOpenSettings={() => undefined} />));
-    await act(async () => button("查看状态").click());
-    expect(button("卸载工作配置").disabled).toBe(false);
-    await act(async () => button("卸载工作配置").click());
-    expect(request).toHaveBeenCalledWith({ action: "work-uninstall", id: "backend", target: "codex", revision, scope: { teamId: "example", connectionId: "business", directory: projectRoot, repository } });
-    expect(container.querySelector(".team-workspace-inspection")).not.toBeNull();
-    expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
-  });
-  it("offers one team entry with three resource categories and routes setup to settings", async () => {
-    const openSettings = vi.fn();
-    const request = vi.fn(async (input: TeamRequest) => input.action === "catalog" ? ok({ kind: "catalog", value: catalog() }) : ok({ kind: "snapshot", value: { config: config(), busy: false } }));
-    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { teamWorkspace: { request } } });
-    await act(async () => root.render(<><AppNavigation activePage="team-space" settingsOpen={false} signalUpdate={false} language="zh" onNavigate={() => undefined} onOpenSettings={openSettings} /><TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={openSettings} /></>));
-    expect(container.querySelectorAll('[data-page="team-space"]')).toHaveLength(1);
-    expect(container.querySelector('.feature-scope-switch')).toBeNull();
-    await act(async () => button("Example").click());
-    const tabs = container.querySelector('[aria-label="团队资源"]')!;
-    expect([...tabs.querySelectorAll("button")].map((item) => item.textContent)).toEqual(["共享会话", "Skills", "文档", "工作目录"]);
-    await act(async () => tabs.querySelectorAll("button")[2]!.click());
-    expect(container.textContent).toContain("团队文档");
-    await act(async () => button("团队设置").click());
-    expect(openSettings).toHaveBeenCalledOnce();
-    expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
-  });
-
-  it("uses refreshed ownership state and cancels sync when leaving the asset view", async () => {
-    let saved = config();
-    let finish!: (reply: TeamReply) => void;
-    const sync = new Promise<TeamReply>((resolve) => { finish = resolve; });
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-      if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: saved.teamEnabled ? catalog().assets : null } });
-      if (input.action === "sync") return sync;
-      if (input.action === "cancel-sync") finish(ok({ kind: "cancelled" }));
-      return ok({ kind: "cancelled" });
-    });
-    const api = { request };
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection(saved)} api={api} onOpenSettings={() => undefined} />));
-    saved = { ...saved, teamEnabled: false };
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection(saved)} api={api} onOpenSettings={() => undefined} />));
-    expect(container.textContent).toContain("团队功能未启用");
-    expect(button("同步资产").disabled).toBe(true);
-    saved = { ...saved, teamEnabled: true };
-    await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection(saved)} api={api} onOpenSettings={() => undefined} />));
-    await act(async () => button("同步资产").click());
-    await act(async () => root.render(<p>Local content</p>));
-    expect(request).toHaveBeenCalledWith({ action: "cancel-sync" });
-  });
-
-  it("opens a minimal team form, retains failed input, and closes it only after the repository is saved", async () => {
-    let fail = true;
-    let saved = { ...config(), teams: [], projects: [], defaultTeamId: null } as WorkspaceConfig;
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "add-team") {
-        if (fail) return { ok: false, error: { code: "TEAM_OPERATION_FAILED", message: "请重试" } };
-        saved = config();
-      }
-      return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-    });
-    await act(async () => root.render(<TeamSettings language="zh" api={{ request }} />));
-    expect(container.querySelector("form")).toBeNull();
-    await act(async () => button("连接团队").click());
-    const input = container.querySelector<HTMLInputElement>('input[placeholder="https://github.com/your-team/ai-assets"]')!;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    await act(async () => { setter.call(input, repository); input.dispatchEvent(new Event("input", { bubbles: true })); });
-    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-    expect(input.value).toBe(repository);
-    expect(container.textContent).toContain("请重试");
-    expect(request).toHaveBeenCalledWith({ action: "add-team", repository, name: undefined });
-    fail = false;
-    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-    expect(container.querySelector("form")).toBeNull();
-    expect(container.textContent).toContain("Example");
-    expect(container.textContent).toContain("团队已连接");
-  });
-
-  it("browses team assets without projects and connects directories separately", async () => {
-    const saved = { ...config(), projects: [] };
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "choose-folder") return ok({ kind: "folder", value: projectRoot });
-      if (input.action === "catalog") return ok({ kind: "catalog", value: catalog() });
-      if (input.action === "session-list") return ok({ kind: "session-list", value: { items: [], page: 1, hasMore: false } });
-      return ok({ kind: "snapshot", value: { config: saved, busy: false, directories: [] } });
-    });
-    await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
-    await act(async () => button("Example").click());
-    expect(container.textContent).not.toContain("新建项目");
-    expect(request).toHaveBeenCalledWith({ action: "session-list", scope: { teamId: "example", repository }, page: 1 });
-    await act(async () => button("工作目录").click());
-    await act(async () => button("接入工作目录").click());
-    await act(async () => button("选择").click());
-    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-    expect(request).toHaveBeenCalledWith({ action: "connect-directory", teamId: "example", directory: projectRoot, targets: ["codex"] });
-    expect(request.mock.calls.some(([input]) => input.action === "sync" || input.action === "skill-install")).toBe(false);
-  });
-
+it("opens a team without a project and performs one full sync, exposing partial results", async () => {
+  let finish!: (reply: TeamReply) => void;
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "sync" ? new Promise((resolve) => { finish = resolve; }) : base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  expect(container.textContent).not.toContain("新建项目");
+  expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
+  const syncButton = button("同步团队");
+  await act(async () => { syncButton.click(); syncButton.click(); });
+  expect(request.mock.calls.filter(([input]) => input.action === "sync")).toHaveLength(1);
+  expect(request).toHaveBeenCalledWith({ action: "sync", scope: { teamId: team.id, repository } });
+  const report: TeamPullReport = { schemaVersion: 1, repository, commit: revision, startedAt: 1, finishedAt: 2, status: "partial", directories: [{ id: "directory-one", path: rootPath, status: "partial", items: [{ kind: "skill", id: "review", target: "codex", status: "conflict", message: "保留了本地修改" }] }] };
+  await act(async () => finish(ok({ kind: "sync-result", value: report })));
+  expect(container.textContent).toContain("部分内容未同步"); expect(container.textContent).toContain("保留了本地修改");
 });
 
-
-describe("document and session sharing interactions", () => {
-  it("keeps conflicting document content visible and cannot apply it", async () => {
-    const document = { id: "instructions", name: "团队规范", path: "rules/AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: { ...catalog().assets!, documents: [document] } } });
-      if (input.action === "document-preview") return ok({ kind: "document-preview", value: { ...document, repository, commit: revision, destination: path.join(projectRoot, "AGENTS.md"), content: "team guidance", local: "local edits", status: "conflict" } });
-      return ok({ kind: "cancelled" });
-    });
-    await act(async () => root.render(<TeamDocumentsPanel language="zh" selection={selection()} api={{ request }} />));
-    await act(async () => button("团队规范").click());
-    expect(container.textContent).toContain("team guidance");
-    expect(container.textContent).toContain("local edits");
-    expect(container.querySelector('[aria-label="文档列表"] .team-workspace-inspection')).toBeNull();
-    expect(container.querySelector('[aria-label="文档详情"]')?.textContent).toContain("team guidance");
-    expect(button("应用到本地").disabled).toBe(true);
-    expect(request.mock.calls.some(([input]) => input.action === "document-install")).toBe(false);
-  });
-
-  it("does not upload on opening the share dialog and clears a preview after changing destination", async () => {
-    const saved = config(); saved.schemaVersion = 2; saved.projects[0]!.root = null; saved.projects[0]!.gitCommonDir = null; saved.projects[0]!.repository = null; saved.projects[0]!.sharingKey = "space:" + "a".repeat(64);
-    saved.projects = []; saved.teams.push({ id: "other", name: "第二团队", repository: "https://github.com/other/assets" });
-    const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-      if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config: saved, busy: false } });
-      if (input.action === "session-preview") return ok({ kind: "session-preview", value: { token: "00000000-0000-4000-8000-000000000001", repository, projectIdentity: "https://github.com/example/business", expiresAt: Date.now() + 60_000, bytes: 50, files: [], missingAttachments: [], children: [], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:example", displayTitle: "完整示例", originalTitle: "完整示例", source: "codex-cli" }, messages: [{ index: 0, timestamp: "1", role: "user", content: "完整的消息内容" }], traceEvents: [] } } });
-      return ok({ kind: "cancelled" });
-    });
-    vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);
-    const api = { request };
-    await act(async () => root.render(<TeamSessionShareDialog sessionKey="codex:example" language="zh" onClose={() => undefined} api={api} />));
-    expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
-    await act(async () => button("预览完整会话").click());
-    expect(container.textContent).toContain("完整的消息内容");
-    expect(button("确认分享").disabled).toBe(false);
-    expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
-    const select = container.querySelector("select")!;
-    await act(async () => { select.value = "other"; select.dispatchEvent(new Event("change", { bubbles: true })); });
-    expect(container.textContent).not.toContain("确认分享");
-    await act(async () => root.render(<p>Local</p>));
-    expect(request).toHaveBeenCalledWith({ action: "cancel-sync" });
-  });
+it("Skills only displays team resources and opens a reader without local/install controls", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "skill-preview" ? ok({ kind: "skill-preview", value: { teamId: team.id, repository, commit: revision, id: "review", description: "Review code", file: "SKILL.md", content: "Review instructions", encoding: "utf8", files: [{ path: "SKILL.md", bytes: 20, executable: false }] } }) : base(input));
+  await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection} api={{ request }} />));
+  expect(container.textContent).not.toContain("本地 Skills"); expect(container.textContent).not.toContain("工作配置"); expect(container.textContent).not.toContain("HTTPS");
+  await act(async () => button("review").click());
+  expect(container.querySelector('[aria-label="Skill 详情"]')?.textContent).toContain("Review instructions");
+  expect(container.textContent).not.toContain("安装此版本");
+  expect(request.mock.calls.every(([input]) => input.action === "catalog" || input.action === "skill-preview")).toBe(true);
 });
 
-it("shows local Skills independently of an empty team catalog without sharing them", async () => {
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-    if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: { ...catalog().assets!, skills: [] } } });
-    if (input.action === "local-assets") return input.file
-      ? ok({ kind: "local-preview", value: { path: input.file, content: "My local review instructions" } })
-      : ok({ kind: "local-assets", value: { directory: projectRoot, entries: [{ name: "my-review", path: ".agents/skills/my-review/SKILL.md", bytes: 100 }], limited: false, skipped: 0 } });
-    return ok({ kind: "cancelled" });
-  });
-  await act(async () => root.render(<TeamAssetsPanel language="zh" selection={selection()} api={{ request }} onOpenSettings={vi.fn()} />));
-  expect(container.textContent).toContain("my-review");
-  expect(container.textContent).toContain("团队仓库尚未发布 Skills");
-  await act(async () => button("my-review").click());
-  expect(container.textContent).toContain("My local review instructions");
-  expect(request.mock.calls.every(([input]) => input.action === "catalog" || input.action === "local-assets")).toBe(true);
-});
-
-it("opens local documents in a sibling reader, preserves the list and ignores closed or stale reads", async () => {
-  const pending = new Map<string, (value: TeamReply) => void>();
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
-    if (input.action === "catalog") return ok({ kind: "catalog", value: { ...catalog(), assets: { ...catalog().assets!, documents: [] } } });
-    if (input.action === "local-assets") {
-      if (input.file) return new Promise((resolve) => { pending.set(input.file!, resolve); });
-      return ok({ kind: "local-assets", value: { directory: projectRoot, entries: [{ name: "first.md", path: "docs/first.md", bytes: 10 }, { name: "second.md", path: "docs/second.md", bytes: 10 }], limited: false, skipped: 0 } });
-    }
-    return ok({ kind: "cancelled" });
-  });
-  const api = { request };
-  await act(async () => root.render(<TeamDocumentsPanel language="zh" selection={selection()} api={api} />));
-  const list = container.querySelector<HTMLElement>('[aria-label="文档列表"]')!;
-  list.scrollTop = 180;
-  const first = button("first.md"), second = button("second.md");
-  await act(async () => first.click());
-  expect(container.querySelector('[aria-label="文档详情"]')?.textContent).toContain("正在打开文档");
-  expect(list.querySelector('[aria-label="文档详情"]')).toBeNull();
-  expect(list.scrollTop).toBe(180);
-  await act(async () => second.click());
-  await act(async () => pending.get("docs/second.md")!(ok({ kind: "local-preview", value: { path: "docs/second.md", content: "second content" } })));
-  await act(async () => pending.get("docs/first.md")!(ok({ kind: "local-preview", value: { path: "docs/first.md", content: "late first content" } })));
-  expect(container.querySelector('[aria-label="文档详情"]')?.textContent).toContain("second content");
-  expect(container.textContent).not.toContain("late first content");
-  expect(second.getAttribute("aria-pressed")).toBe("true");
+it("document reader preserves scroll/focus and ignores stale or closed reads without per-file apply", async () => {
+  const pending = new Map<string, (reply: TeamReply) => void>();
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "document-preview" ? new Promise((resolve) => pending.set(input.id, resolve)) : base(input));
+  await act(async () => root.render(<TeamDocumentsPanel language="zh" selection={selection} api={{ request }} />));
+  const list = container.querySelector<HTMLElement>('[aria-label="文档列表"]')!; list.scrollTop = 150;
+  const first = button("团队规范"), second = button("第二文档");
+  await act(async () => first.click()); expect(container.textContent).toContain("正在打开文档");
+  await act(async () => second.click()); await act(async () => pending.get("second")!(preview("second", "second content")));
+  await act(async () => pending.get("rules")!(preview("rules", "late content")));
+  expect(container.textContent).toContain("second content"); expect(container.textContent).not.toContain("late content");
+  expect(list.querySelector('[aria-label="文档详情"]')).toBeNull(); expect(container.textContent).not.toContain("应用到本地");
   await act(async () => container.querySelector('[aria-label="文档详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(document.activeElement).toBe(second); expect(list.scrollTop).toBe(150);
+  await act(async () => first.click()); await act(async () => button("关闭文档").click()); await act(async () => pending.get("rules")!(preview("rules", "closed content")));
   expect(container.querySelector('[aria-label="文档详情"]')).toBeNull();
-  expect(document.activeElement).toBe(second);
-  expect(list.scrollTop).toBe(180);
-  await act(async () => first.click());
-  await act(async () => button("关闭文档").click());
-  await act(async () => pending.get("docs/first.md")!(ok({ kind: "local-preview", value: { path: "docs/first.md", content: "closed content" } })));
-  expect(container.querySelector('[aria-label="文档详情"]')).toBeNull();
-  expect(request.mock.calls.every(([input]) => input.action === "catalog" || input.action === "local-assets")).toBe(true);
+});
+
+it("cancels a running sync on leaving the team and does not sync merely on connection", async () => {
+  let finish!: (reply: TeamReply) => void;
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "sync") return new Promise((resolve) => { finish = resolve; });
+    if (input.action === "cancel-sync") { finish(ok({ kind: "cancelled" })); return ok({ kind: "cancelled" }); }
+    if (input.action === "choose-folder") return ok({ kind: "folder", value: rootPath });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click()); await act(async () => button("工作目录").click()); await act(async () => button("接入工作目录").click()); await act(async () => button("选择").click());
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(request).toHaveBeenCalledWith({ action: "connect-directory", teamId: team.id, directory: rootPath, targets: ["codex"] });
+  expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
+  await act(async () => button("同步团队").click()); await act(async () => root.render(<p>Local page</p>));
+  expect(request).toHaveBeenCalledWith({ action: "cancel-sync" });
+});
+
+it("keeps transport in team settings and persists an explicit connection choice", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  await act(async () => root.render(<TeamSettings language="zh" api={{ request }} />));
+  const select = container.querySelector<HTMLSelectElement>('[aria-label="连接方式：Example"]')!;
+  await act(async () => { select.value = "ssh"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(request).toHaveBeenCalledWith({ action: "team-transport", id: team.id, transport: "ssh" });
+  expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
+});
+
+it("session sharing remains explicit and never uploads when the dialog opens", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "session-preview" ? ok({ kind: "session-preview", value: { token: "00000000-0000-4000-8000-000000000001", repository, projectIdentity: "team:shared", expiresAt: Date.now() + 60_000, bytes: 1, files: [], missingAttachments: [], children: [], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:one", originalTitle: "Example", displayTitle: "Example", source: "codex-cli" }, messages: [], traceEvents: [] } } }) : base(input));
+  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);
+  await act(async () => root.render(<TeamSessionShareDialog sessionKey="codex:one" language="zh" onClose={vi.fn()} api={{ request }} />));
+  expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
+  await act(async () => button("预览完整会话").click());
+  expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
 });

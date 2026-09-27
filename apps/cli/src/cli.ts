@@ -18,7 +18,7 @@ AgentRecall CLI — 本地项目与可选团队配置
   agentrecall team use --personal          清除默认团队
   agentrecall team enable|disable          开启或关闭团队功能
   agentrecall team current [--project <id>] 读取当前可用的团队配置
-  agentrecall team sync [--transport https|ssh] 拉取当前项目的团队资产
+  agentrecall team sync [--transport https|ssh] 拉取并更新团队已启用目录中的资源
   agentrecall skill list                   列出当前团队缓存的 Skill
   agentrecall skill preview <id> [--target codex|claude] [--file <path>]
   agentrecall skill install <id> --target codex|claude --revision <预览中的版本>
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   const key = command === "directory" || command === "team" || command === "project" || command === "skill" || command === "work-config" ? `${command} ${action ?? ""}` : command!;
   const commands: Record<string, { count: number; flags: string[] }> = {
     init: { count: action ? 2 : 1, flags: action ? ["name", "transport"] : [] }, status: { count: 1, flags: ["project"] }, doctor: { count: 1, flags: ["project"] },
-    "team add": { count: 3, flags: ["repo", "name"] }, "team list": { count: 2, flags: [] },
+    "team add": { count: 3, flags: ["repo", "name", "transport"] }, "team transport": { count: 3, flags: ["transport"] }, "team list": { count: 2, flags: [] },
     "team use": { count: values.personal ? 2 : 3, flags: ["personal"] },
     "team enable": { count: 2, flags: [] }, "team disable": { count: 2, flags: [] },
     "team current": { count: 2, flags: ["project"] },
@@ -178,8 +178,13 @@ async function main(): Promise<void> {
       output(status, describeStatus(status)); break;
     }
     case "team add": {
-      const team = await service.addTeam({ id: id!, name: values.name, repository: values.repo! });
+      const team = await service.addTeam({ id: id!, name: values.name, repository: values.repo!, transport: values.transport as "https" | "ssh" | undefined });
       output(team, `已登记团队 ${team.name}。此操作不会启用团队功能或连接远端。`); break;
+    }
+    case "team transport": {
+      if (!values.transport) invalidArguments("缺少 --transport。");
+      await service.setTeamTransport(id!, values.transport as "https" | "ssh");
+      output({ id, transport: values.transport }, "团队连接方式已保存。"); break;
     }
     case "team use": {
       const config = await service.setDefaultTeam(values.personal ? null : id!);
@@ -199,8 +204,10 @@ async function main(): Promise<void> {
       process.once("SIGINT", cancel);
       process.once("SIGTERM", cancel);
       try {
-        const result = await assets.sync(directory, values.project, values.transport as "https" | "ssh" | undefined, controller.signal);
-        output(result, `已缓存 ${result.skills} 个 Skill。版本：${result.commit}。请用 skill preview 查看后选择安装。`);
+        const result = await assets.pull(directory, values.project, values.transport as "https" | "ssh" | undefined, controller.signal);
+        const issues = result.directories.flatMap((entry) => entry.items.filter((item) => item.status === "failed" || item.status === "conflict").map((item) => `${entry.path} · ${item.id}: ${item.message}`));
+        output(result, `${result.status === "complete" ? "团队资产已同步到启用的工作目录。" : result.status === "no-directories" ? "团队资源已拉取，尚无启用的工作目录。" : "同步未全部完成，请处理以下问题后重试。"}\n版本：${result.commit}\n${issues.join("\n")}`);
+        if (result.status === "partial" || result.status === "cancelled") process.exitCode = 1;
       } finally { process.removeListener("SIGINT", cancel); process.removeListener("SIGTERM", cancel); }
       break;
     }

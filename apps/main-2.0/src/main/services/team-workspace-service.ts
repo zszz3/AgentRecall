@@ -9,7 +9,7 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
@@ -93,7 +93,10 @@ export class TeamWorkspaceService {
         return snapshot();
       case "add-team":
         await workspace.store.initialize();
-        await workspace.addTeam({ id: request.id, name: request.name, repository: request.repository, makeDefault: request.makeDefault });
+        await workspace.addTeam({ id: request.id, name: request.name, repository: request.repository, transport: request.transport, makeDefault: request.makeDefault });
+        return snapshot();
+      case "team-transport":
+        await workspace.setTeamTransport(request.id, request.transport);
         return snapshot();
       case "default-team":
         await workspace.setDefaultTeam(request.id);
@@ -134,7 +137,7 @@ export class TeamWorkspaceService {
     if (legacyScope && (!project || project.root !== legacyScope.root)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重新选择。");
     const teamContext = teamScope ? await workspace.teamContext(teamScope.teamId, teamScope.connectionId, teamScope.directory, false) : null;
     if (teamScope && teamContext?.team.repository !== teamScope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
-    if (teamContext?.directory && "target" in request && !teamContext.directory.targets.includes(request.target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录没有启用该客户端，请到工作目录设置中调整。");
+    if (teamContext?.directory && "target" in request && request.target && !teamContext.directory.targets.includes(request.target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录没有启用该客户端，请到工作目录设置中调整。");
     const assets = new TeamAssetService(workspace, undefined, request.scope);
     if (request.scope.directory && (!path.isAbsolute(request.scope.directory) || legacyScope && project?.root !== null)) throw new WorkspaceError("INVALID_ARGUMENTS", "本地位置无效，请重新选择目录。");
     const localDirectory = teamScope ? teamContext?.directory?.path : project?.root ?? request.scope.directory;
@@ -194,12 +197,11 @@ export class TeamWorkspaceService {
         try { return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: await assets.list(root, projectId), installed, notice: null } }; }
         catch (error) {
           if (!(error instanceof WorkspaceError) || !["ASSETS_NOT_SYNCED", "NO_TEAM"].includes(error.code)) throw error;
-          return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: null, installed, notice: error.message } };
+          return { kind: "catalog", value: { projectId: projectId ?? "", root: project?.root ?? null, assets: null, installed, notice: error.code === "ASSETS_NOT_SYNCED" ? "点击上方「同步团队」，获取资源并更新已启用的工作目录。" : error.message } };
         }
       }
-      case "sync":
-        await assets.sync(root, projectId, request.transport, signal);
-        return complete("团队资产已同步，请先预览，再选择安装。");
+      case "sync-status": return { kind: "sync-status", value: await assets.pullStatus(request.scope.teamId) };
+      case "sync": return { kind: "sync-result", value: await assets.pull(root, projectId, request.transport, signal) };
       case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
       case "skill-install": {
         const result = await assets.install(root, request.id, request.target, request.revision, projectId);

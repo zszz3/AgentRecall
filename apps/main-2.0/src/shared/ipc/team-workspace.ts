@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WorkspaceConfig, TeamAssetService, DirectoryConnection } from "@agentrecall/workspace-core";
+import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
 import type { TeamSessionPage, TeamSessionContent, TeamSessionPreview } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
 
@@ -21,7 +21,9 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("snapshot") }).strict(),
   z.object({ action: z.literal("choose-folder") }).strict(),
   z.object({ action: z.literal("enable"), enabled: z.boolean() }).strict(),
-  z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, makeDefault: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, transport: z.enum(["https", "ssh"]).optional(), makeDefault: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal("team-transport"), id, transport: z.enum(["https", "ssh"]) }).strict(),
+  z.object({ action: z.literal("sync-status"), scope: teamScope }).strict(),
   z.object({ action: z.literal("default-team"), id: id.nullable() }).strict(),
   z.object({ action: z.literal("connect-directory"), teamId: id, directory, targets: z.array(target).min(1).max(2) }).strict(),
   z.object({ action: z.literal("update-directory"), teamId: id, id, directory, enabled: z.boolean(), targets: z.array(target).min(1).max(2) }).strict(),
@@ -38,9 +40,9 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory }).strict(),
   z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
   ...(["session-detail", "session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
-  z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]) }).strict(),
+  z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional() }).strict(),
   z.object({ action: z.literal("cancel-sync") }).strict(),
-  z.object({ action: z.literal("skill-preview"), ...asset, file: z.string().min(1).max(180).optional() }).strict(),
+  z.object({ action: z.literal("skill-preview"), ...asset, target: target.optional(), file: z.string().min(1).max(180).optional() }).strict(),
   z.object({ action: z.literal("skill-install"), ...selectedAsset, revision }).strict(),
   z.object({ action: z.literal("work-preview"), ...asset }).strict(),
   z.object({ action: z.literal("work-install"), ...selectedAsset, revision }).strict(),
@@ -61,6 +63,8 @@ export type TeamCatalog = {
 export type TeamLocalAsset = { path: string; name: string; bytes: number };
 export type TeamLocalCatalog = { directory: string; entries: TeamLocalAsset[]; limited: boolean; skipped: number };
 export type TeamPayload =
+  | { kind: "sync-result"; value: TeamPullReport }
+  | { kind: "sync-status"; value: TeamPullReport | null }
   | { kind: "local-assets"; value: TeamLocalCatalog }
   | { kind: "local-preview"; value: { path: string; content: string } }
   | { kind: "snapshot"; value: TeamSnapshot }

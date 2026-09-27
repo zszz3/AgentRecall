@@ -12,7 +12,7 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
   const [feedback, setFeedback] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [editor, setEditor] = useState<"team" | null>(null);
-  const [teamForm, setTeamForm] = useState({ name: "", repository: "" });
+  const [teamForm, setTeamForm] = useState({ name: "", repository: "", transport: "https" as "https" | "ssh" });
   const running = useRef(false);
   const alive = useRef(false);
   const firstInput = useRef<HTMLInputElement>(null);
@@ -45,7 +45,7 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
       if (!reply.ok) { setError(reply.error.message); return; }
       if (reply.data.kind === "snapshot") {
         setSnapshot(reply.data.value);
-        if (request.action === "add-team") { setTeamForm({ name: "", repository: "" }); setEditor(null); }
+        if (request.action === "add-team") { setTeamForm({ name: "", repository: "", transport: "https" }); setEditor(null); }
         setFeedback(request.action === "add-team" ? l("Team saved. Open Team Space to browse assets and connect working directories.", "团队已连接。进入「团队空间」浏览资产、接入工作目录。") : l("Saved.", "已保存。"));
       }
     } catch { if (alive.current) setError(l("Could not save. Refresh and try again.", "操作未完成，请刷新后重试。")); }
@@ -65,15 +65,16 @@ export function TeamSettings({ language, api = window.sessionSearch.teamWorkspac
     {feedback && <p role="status" className="team-settings-message">{feedback}</p>}
     <section className="team-settings-section" aria-label={l("Team repositories", "团队仓库")}>
       <header><h4>{l("Team repositories", "团队仓库")}<span>{teams.length}</span></h4><button type="button" className="team-settings-add" disabled={locked} onClick={() => { setEditor("team"); setError(null); setFeedback(null); }}><Plus size={14} />{l("Connect team", "连接团队")}</button></header>
-      {editor === "team" && <form ref={editorElement} className="team-settings-editor" onSubmit={(event) => { event.preventDefault(); void run({ action: "add-team", repository: teamForm.repository, name: teamForm.name.trim() || undefined }); }}>
+      {editor === "team" && <form ref={editorElement} className="team-settings-editor" onSubmit={(event) => { event.preventDefault(); void run({ action: "add-team", repository: teamForm.repository, transport: teamForm.transport, name: teamForm.name.trim() || undefined }); }}>
         <header><strong>{l("Connect a team repository", "连接团队仓库")}</strong><button type="button" className="team-settings-icon" disabled={locked} aria-label={l("Cancel connecting a team", "取消连接团队")} onClick={() => setEditor(null)}><X size={15} /></button></header>
-        <label>{l("Repository URL", "仓库地址")}<input ref={firstInput} required disabled={locked} maxLength={2048} value={teamForm.repository} onChange={(event) => setTeamForm({ ...teamForm, repository: event.currentTarget.value })} placeholder="https://github.com/your-team/ai-assets" /></label>
+        <label>{l("Repository URL", "仓库地址")}<input ref={firstInput} required disabled={locked} maxLength={2048} value={teamForm.repository} onChange={(event) => { const repository = event.currentTarget.value; setTeamForm({ ...teamForm, repository, transport: /^(git@|ssh:\/\/)/i.test(repository.trim()) ? "ssh" : "https" }); }} placeholder="https://github.com/your-team/ai-assets" /></label>
         <label>{l("Display name (optional)", "显示名称（选填）")}<input disabled={locked} maxLength={200} value={teamForm.name} onChange={(event) => setTeamForm({ ...teamForm, name: event.currentTarget.value })} placeholder={l("Use repository name", "默认使用仓库名称")} /></label>
+        <details><summary>{l("Connection options", "连接选项")}</summary><label>{l("Connection", "连接方式")}<select disabled={locked} value={teamForm.transport} onChange={(event) => setTeamForm({ ...teamForm, transport: event.currentTarget.value as "https" | "ssh" })}><option value="https">HTTPS</option><option value="ssh">SSH</option></select></label></details>
         <p>{l("GitHub HTTPS or SSH. Uses local Git access; saving does not download assets or grant membership.", "支持 GitHub HTTPS / SSH，沿用本机 Git 权限。保存后在 Skills 中手动同步。")}</p>
         <footer><button type="button" className="settings-action-button" disabled={locked} onClick={() => setEditor(null)}>{l("Cancel", "取消")}</button><button type="submit" className="settings-action-button is-primary" disabled={locked}>{l("Save repository", "保存仓库")}</button></footer>
       </form>}
       {!teams.length && editor !== "team" && <p className="team-settings-empty">{l("Connect an existing team repository to get started.", "粘贴已有的团队仓库地址，即可开始配置。")}</p>}
-      {teams.map((team) => <div className="team-settings-item" key={team.id}><span className="team-settings-item-icon"><GitBranch size={16} /></span><div className="team-settings-item-copy"><strong>{team.name}</strong><small title={team.repository}>{team.repository}</small></div></div>)}
+      {teams.map((team) => <div className="team-settings-item" key={team.id}><span className="team-settings-item-icon"><GitBranch size={16} /></span><div className="team-settings-item-copy"><strong>{team.name}</strong><small title={team.repository}>{team.repository}</small><details><summary>{l("Connection options", "连接选项")}</summary><label>{l("Connection", "连接方式")}<select disabled={locked} aria-label={l("Connection for ", "连接方式：") + team.name} value={team.transport ?? "https"} onChange={(event) => void run({ action: "team-transport", id: team.id, transport: event.currentTarget.value as "https" | "ssh" })}><option value="https">HTTPS</option><option value="ssh">SSH</option></select></label></details></div></div>)}
     </section>
     <p className="team-settings-footnote">{enabled ? l("Open Team Space to browse shared assets and connect working directories.", "连接后，在「团队空间」浏览共享资产、接入工作目录。") : l("Team features are off. Saved repositories and local installations are kept.", "团队功能已关闭，仓库配置和已有本地安装会保留。")}</p>
   </section>;

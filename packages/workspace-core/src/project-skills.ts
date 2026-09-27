@@ -258,7 +258,7 @@ function replaceDirectory(root: string, id: string, source: string, destination:
       if (statIfPresent(destination)) throw conflict();
       fs.renameSync(backup, destination);
     } catch {
-      throw new WorkspaceError("SKILL_RECOVERY_REQUIRED", `替换失败，原版本仍保存在 ${backup}。请用 skill backups 查看，并在确认目标状态后运行 skill rollback。`);
+      throw new WorkspaceError("SKILL_RECOVERY_REQUIRED", `替换失败，原版本仍保存在 ${backup}。请用 skill backups 查看，并在确认目标状态后运行 skill rollback。`, { backupPath: backup });
     }
     throw new WorkspaceError("SKILL_REPLACE_FAILED", "替换未能完成，原安装已恢复。请检查目录权限或占用情况后重试。");
   }
@@ -344,4 +344,20 @@ export function rollbackProjectSkill(root: string, id: string, target: ProjectSk
     backupPath = replaceDirectory(root, id, source, destination);
   }
   return { status: "restored" as const, path: destination, commit: record.commit, backupPath };
+}
+
+// Enumerate only direct, marked copies. Personal Skills without a marker never
+// become retirement candidates; damaged markers are retained and reported.
+export function markedProjectSkills(root: string, target: ProjectSkillTarget): string[] {
+  const base = safeDirectory(root, [target === "codex" ? ".agents" : ".claude", "skills"], false);
+  if (!statIfPresent(base)) return [];
+  const entries: fs.Dirent[] = [];
+  const directory = fs.opendirSync(base);
+  try {
+    for (let entry = directory.readSync(); entry; entry = directory.readSync()) {
+      entries.push(entry);
+      if (entries.length > 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "本地 Skill 目录超过 1024 项，请先整理后再同步。");
+    }
+  } finally { directory.closeSync(); }
+  return entries.filter((entry) => assetId.safeParse(entry.name).success && !entry.isSymbolicLink() && entry.isDirectory() && statIfPresent(path.join(base, entry.name, markerName))).map((entry) => entry.name);
 }

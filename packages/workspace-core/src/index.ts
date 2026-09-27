@@ -5,3 +5,5 @@ export { WorkspaceService } from "./workspace.js";
 export type { WorkspaceStatus } from "./workspace.js";
 export { TeamAssetService } from "./team-assets.js";
 export { GitAssetSource } from "./git-assets.js";
+
+export type { TeamPullReport } from "./team-pull.js";

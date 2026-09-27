@@ -16,7 +16,7 @@ agentrecall init https://github.com/your-team/ai-assets --name 我的团队
 
 非空仓库必须已有合法的 AgentRecall 清单；命令只校验，不补写或覆盖已有文件。重复运行复用远端版本和本地团队 ID，不重复创建提交。`--name` 只用于首次登记；已有名称保留。默认 HTTPS，也可使用 `--transport ssh`，沿用已有 Git 身份，不自动登录或安装认证工具。
 
-初始化保留当前团队开关和默认团队，不自动绑定当前代码目录、不安装 Skill/Hook、不上传 Session。完成后在 V2 团队范围里创建项目；或用输出的团队 ID 执行 `project add <id> --path <业务目录> --team <团队ID>`，开启团队后再手动 `team sync` 获取缓存。
+初始化保留当前团队开关和默认团队，不自动绑定当前代码目录、不安装 Skill/Hook、不上传 Session。完成后在团队空间接入工作目录，开启团队后点击同步；也可通过 `directory add <目录> --team <团队ID>` 接入，再运行 `team sync --team <团队ID>`。
 
 推送失败或网络中断时会报告结果未确认，重试会重新检查远端；若远端已就绪而本地配置写入失败，会明确报告部分完成，不删除远端提交。取消时不回滚已经完成的远端写入。初始化的临时 Git 目录在成功、失败或取消后清理。
 
@@ -60,7 +60,7 @@ agentrecall team disable
 | `team use <id>` / `team use --personal` | 设置或清除默认团队 |
 | `team enable` / `team disable` | 开启或关闭团队功能 |
 | `team current [--project <id>]` | 读取当前生效的项目和团队；未开启、未绑定或个人项目会明确报错 |
-| `team sync [--project <id>] [--transport https\|ssh]` | 主动拉取资产仓库默认分支并缓存 Skill，不自动安装 |
+| `team sync [--project <id>] [--transport https\|ssh]` | 拉取资产仓库默认分支，并安装/更新该团队所有已启用工作目录中的 Skills 和文档 |
 | `skill list [--project <id>]` | 查看当前团队已缓存的 Skill |
 | `skill preview <id> [--target codex\|claude] [--file <path>] [--project <id>]` | 预览正文、支持文件、完整版本号和可选安装位置 |
 | `skill install <id> --target codex\|claude --revision <sha> [--project <id>]` | 安装已选择版本；不同内容或本地修改均不覆盖 |
@@ -123,7 +123,7 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 优先级为：总开关 → 项目显式团队或个人设置 → 全局默认团队。项目 `teamId` 缺省表示继承，`null` 表示个人，字符串表示显式团队。未绑定项目不会仅因全局设置而使用团队。
 
-支持配置版本 1、2 和 3。版本 1 保存原有仓库绑定；版本 2 保留旧逻辑项目，版本 3 增加团队工作目录连接；首次修改连接时升级并保留旧记录，读取不重写。未知字段、未知版本、损坏 JSON、重复 ID 或不存在的团队引用均报错并保留原文件，不自动重置。完整配置连同元数据不得超过 1 MiB。需要手动修复时先备份文件，再运行 `doctor` 检查。
+支持配置版本 1、2、3 和 4。版本 1 保存原有仓库绑定；版本 2 保留旧逻辑项目，版本 3 增加团队工作目录连接，版本 4保存团队连接方式；首次修改连接时升级并保留旧记录，读取不重写。未知字段、未知版本、损坏 JSON、重复 ID 或不存在的团队引用均报错并保留原文件，不自动重置。完整配置连同元数据不得超过 1 MiB。需要手动修复时先备份文件，再运行 `doctor` 检查。
 
 配置服务位于 `packages/workspace-core`。多个 CLI 进程通过同一个目录锁完成读取、校验和原子替换，争用超时明确报错。锁在正常退出时清理，异常终止留下的锁由依赖库按过期时间回收；强制中断不会保证临时文件立即消失。V2 团队设置与 Skills 团队范围已接入同一服务；这不涉及共享或迁移 Session 数据库。
 
@@ -135,23 +135,19 @@ ID 使用小写字母开头，后续可包含小写字母、数字和连字符�
 
 团队资产仓库格式、权限边界和安装恢复见 [团队 Skill 指南](team-assets.md)。资产清单和缓存支持格式版本 1/2/3，安装记录仍为版本 1；兼容规则和工作配置的范围以团队 Skill 指南为准。未知版本或损坏记录会拒绝读取，不会自动重置。
 
-## 团队工作目录接入
-
-团队浏览与工作目录分开。无需创建项目，可直接同步和预览团队资产：
+## 团队工作目录与整轮同步
 
 ```sh
+agentrecall directory add /path/to/work --team engineering --target codex
+agentrecall directory list --team engineering
+agentrecall team transport engineering --transport ssh
 agentrecall team sync --team engineering
 agentrecall skill list --team engineering
 agentrecall skill preview review --team engineering
-agentrecall directory add /path/to/work --team engineering --target codex
-agentrecall directory list --team engineering
-agentrecall skill preview review --team engineering --connection <连接ID> --target codex
-agentrecall skill install review --team engineering --connection <连接ID> --target codex --revision <预览版本>
-agentrecall directory disable <连接ID>
-agentrecall directory enable <连接ID>
-agentrecall directory remove <连接ID>
 ```
 
-工作目录不必是 Git 仓库。接入只登记位置与客户端，不安装或上传内容；停用/断开保留已安装文件和分享。多个目录独立管理安装，桌面可勾选同时启用 Codex 与 Claude Code。`--team` 和 `--connection` 不与旧的 `--project` / `--destination` 混用。
+`team sync` 是整轮分发：拉取默认分支后，自动安装/更新该团队所有已启用目录中的 Skills 与文档，保留冲突并报告部分完成，取消时保留已完成写入和备份。有冲突、失败或取消时 CLI 退出码为 1，JSON 的 data.status 指明整轮状态；无启用目录时只拉取并返回 no-directories，不能视为资源已安装。
 
-旧 `project add/create/bind` 与 `--project` / `--destination` 继续支持已保存的旧配置，桌面不再要求先创建项目。首次修改工作目录连接将配置升级到版本 3并保留旧 projects，旧客户端需升级。兼容细节见[团队空间](team-workspace.md)。
+连接方式在团队设置或 `team transport` 保存；`team sync --transport` 可临时覆盖本轮。`--project` 仍可用于从旧项目确定团队，确定后同样同步该团队全部启用目录。不要把这个命令当作只下载缓存。
+
+旧的单 Skill、工作配置和 project 命令继续提供高级版本/恢复操作，相关命令可通过 `--connection` 指定已接入目录。完整写入和恢复规则见[团队空间指南](team-workspace.md)。

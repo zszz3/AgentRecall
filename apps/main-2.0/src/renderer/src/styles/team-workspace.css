@@ -161,3 +161,15 @@
   .team-documents-layout.has-reader > .team-documents-list { visibility: hidden; }
   .team-document-reader.team-workspace { position: absolute; inset: 0; z-index: 4; border-left: 0; }
 }
+
+.team-sync-control { padding: 0 32px 18px; flex-shrink: 0; max-height: 38%; overflow: auto; }
+.team-sync-control-main { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--panel-subtle); }
+.team-sync-control-main strong { font-size: 12px; font-weight: 550; }
+.team-sync-control p { font-size: 12px; line-height: 1.6; color: var(--text-muted); margin: 4px 0 0; }
+.team-sync-control-main .team-space-actions { flex-shrink: 0; }
+.team-sync-results { margin-top: 10px; font-size: 12px; }
+.team-sync-results summary { cursor: pointer; color: var(--text-muted); }
+.team-sync-results > div { padding: 12px 0; border-bottom: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.team-sync-results small { display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.team-sync-results strong { font-size: 12px; }
+@container team-space (max-width: 680px) { .team-sync-control { padding: 0 20px 14px; } .team-sync-control-main { flex-wrap: wrap; } }

@@ -269,3 +269,18 @@ it("opens teams without projects, reads connected local assets and guards instal
   expect(await api.request({ action: "local-assets", scope: local, kind: "documents" })).toMatchObject({ ok: false, error: { code: "PROJECT_MISMATCH" } });
   expect((await workspace.store.read())!.projects).toEqual([]);
 });
+
+it("one sync request installs team resources to enabled clients using the saved transport", async () => {
+  const { api, workspace, confirm } = harness();
+  const saved = await project(workspace); await workspace.setTeamEnabled(true); await workspace.setTeamTransport("example--team", "ssh");
+  const files = [{ path: "SKILL.md", content: Buffer.from("---\nname: review\ndescription: Review changes\n---\nReview code.\n").toString("base64"), executable: false }];
+  const repository = "https://github.com/example/assets";
+  const load = vi.spyOn(GitAssetSource.prototype, "load").mockResolvedValue({ schemaVersion: 3, repository, commit: "1".repeat(40), skills: [{ id: "review", description: "Review changes", files, digest: createHash("sha256").update(JSON.stringify(files)).digest("hex") }], workConfigs: [], documents: [{ id: "rules", name: "Rules", path: "AGENTS.md", target: "AGENTS.md", content: "Team rules", digest: createHash("sha256").update("Team rules").digest("hex") }] });
+  const scope = { teamId: "example--team", repository };
+  expect(await api.request({ action: "sync", scope })).toMatchObject({ ok: true, data: { kind: "sync-result", value: { status: "complete" } } });
+  expect(load.mock.calls[0]![2]).toBe("ssh"); expect(confirm).not.toHaveBeenCalled();
+  expect(await fs.readFile(path.join(saved.root, ".agents", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");
+  expect(await fs.readFile(path.join(saved.root, ".claude", "skills", "review", "SKILL.md"), "utf8")).toContain("Review code.");
+  expect(await fs.readFile(path.join(saved.root, "AGENTS.md"), "utf8")).toBe("Team rules");
+  expect(await api.request({ action: "sync-status", scope })).toMatchObject({ ok: true, data: { kind: "sync-status", value: { status: "complete" } } });
+});

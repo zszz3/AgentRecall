@@ -39,6 +39,8 @@ test("initializes an empty team repository once, preserves personal defaults and
   assert.equal(repeated.team.id, result.team.id);
   const config = (await service.store.read())!;
   assert.equal(config.teams.length, 1);
+  assert.equal(config.teams[0]?.transport, "https");
+  assert.equal(config.schemaVersion, 4);
   assert.equal(config.defaultTeamId, null);
   assert.deepEqual(config.projects, []);
   assert.deepEqual(await fs.readdir(path.join(home, "initialization")), []);

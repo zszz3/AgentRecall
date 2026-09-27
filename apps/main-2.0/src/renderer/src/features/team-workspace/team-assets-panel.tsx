@@ -1,166 +1,38 @@
-import { TeamLocalAssetsPanel } from "./team-local-assets-panel";
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
-import { RefreshCw } from "lucide-react";
+import { PackageSearch, X } from "lucide-react";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
-import type { TeamCatalog, TeamPayload, TeamRequest } from "../../../../shared/ipc/team-workspace";
+import type { TeamCatalog, TeamPayload } from "../../../../shared/ipc/team-workspace";
 import type { TeamSelection } from "./team-workspace-page";
 import type { LanguageMode } from "../../language";
 
-type Inspection = {
-  scope: { teamId: string; connectionId?: string; directory?: string; repository: string };
-  target: "codex" | "claude";
-  data: Extract<TeamPayload, { kind: "skill-preview" | "work-preview" | "work-status" | "work-diff" }>;
-};
-
-export function TeamAssetsPanel({ language, selection, onOpenSettings, api = window.sessionSearch.teamWorkspace }: { language: LanguageMode; selection: TeamSelection; onOpenSettings(): void; api?: TeamWorkspaceApi }): ReactElement {
+type Preview = Extract<TeamPayload, { kind: "skill-preview" }>["value"];
+export function TeamAssetsPanel({ language, selection, refreshKey = 0, api = window.sessionSearch.teamWorkspace }: { language: LanguageMode; selection: TeamSelection; refreshKey?: number; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [catalog, setCatalog] = useState<TeamCatalog | null>(null);
-  const [target, setTarget] = useState<"codex" | "claude">(selection.connection?.targets[0] ?? "codex");
-  const [transport, setTransport] = useState<"https" | "ssh">("https");
-  const [storedInspection, setInspection] = useState<Inspection | null>(null);
-  const [busy, setBusy] = useState<TeamRequest["action"] | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [error, setError] = useState<{ message: string; details?: Readonly<Record<string, unknown>> } | null>(null);
-  const [feedback, setFeedback] = useState<{ message: string; backups: string[] } | null>(null);
-  const alive = useRef(false);
-  const running = useRef(false);
-  const activeRequest = useRef<TeamRequest["action"] | null>(null);
-  const inspectionElement = useRef<HTMLElement>(null);
-  const { connection, team, enabled } = selection;
-  const locked = Boolean(busy || selection.busy);
-  const scope = { teamId: team.id, repository: team.repository, ...(connection ? { connectionId: connection.id, directory: connection.path } : {}) };
-  const inspection = storedInspection && storedInspection.scope.teamId === team.id
-    && storedInspection.scope.directory === connection?.path && storedInspection.target === target ? storedInspection : null;
-
+  const [catalog, setCatalog] = useState<TeamCatalog | null>(null), [preview, setPreview] = useState<Preview | null>(null), [selected, setSelected] = useState<string | null>(null), [error, setError] = useState("");
+  const requestVersion = useRef(0), panel = useRef<HTMLElement>(null), trigger = useRef<HTMLButtonElement | null>(null);
+  const { team, enabled } = selection, scope = { teamId: team.id, repository: team.repository };
   useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-      if (activeRequest.current === "sync") {
-        // The main process also cancels on window destruction if the bridge closes.
-        void api.request({ action: "cancel-sync" }).catch(() => undefined);
-      }
-    };
-  }, [api]);
-
-  useEffect(() => {
-    let active = true;
-    setInspection(null);
-    setCatalog(null);
-    setCatalogLoading(true);
-    void api.request({ action: "catalog", scope }).then((reply) => {
-      if (!active) return;
-      if (!reply.ok) setError(reply.error);
-      else if (reply.data.kind === "catalog") setCatalog(reply.data.value);
-    }).catch(() => { if (active) setError({ message: "团队资产读取失败，请刷新后重试。" }); }).finally(() => { if (active) setCatalogLoading(false); });
-    return () => { active = false; };
-  }, [api, team.id, team.repository, connection?.id, connection?.path, enabled, refreshKey]);
-
-  useEffect(() => { setInspection(null); }, [target]);
-  useEffect(() => { if (inspection) inspectionElement.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [inspection]);
-
-  async function run(request: TeamRequest): Promise<void> {
-    if (running.current) return;
-    running.current = true;
-    activeRequest.current = request.action;
-    setBusy(request.action);
-    setError(null);
-    setFeedback(null);
-    try {
-      const reply = await api.request(request);
-      if (!alive.current) return;
-      if (!reply.ok) { setError(reply.error); return; }
-      const data = reply.data;
-      switch (data.kind) {
-        case "snapshot":
-          setInspection(null);
-          setRefreshKey((value) => value + 1);
-          setFeedback({ message: l("Configuration saved.", "配置已保存。"), backups: [] });
-          break;
-        case "folder": break;
-        case "complete":
-          setFeedback({ message: data.message, backups: data.backups });
-          setInspection(null);
-          setRefreshKey((value) => value + 1);
-          break;
-        case "skill-preview": case "work-preview": case "work-status": case "work-diff":
-          if ("scope" in request && "teamId" in request.scope && "target" in request) setInspection({ scope: { ...request.scope, repository: data.value.repository }, target: request.target, data });
-          break;
-        case "catalog": setCatalog(data.value); break;
-        case "cancelled": break;
-      }
-    } catch {
-      if (alive.current) setError({ message: l("The request failed. Refresh and try again.", "请求未完成，请刷新后重试。") });
-    } finally {
-      running.current = false;
-      activeRequest.current = null;
-      if (alive.current) setBusy(null);
-    }
+    let active = true; requestVersion.current++; setCatalog(null); setPreview(null); setSelected(null); setError("");
+    if (enabled) void api.request({ action: "catalog", scope }).then((reply) => { if (!active) return; if (!reply.ok) setError(reply.error.message); else if (reply.data.kind === "catalog") setCatalog(reply.data.value); }).catch(() => { if (active) setError(l("Could not read team Skills.", "团队 Skills 读取失败，请刷新重试。")); });
+    return () => { active = false; requestVersion.current++; };
+  }, [api, team.id, team.repository, enabled, refreshKey]);
+  useEffect(() => { if (selected) panel.current?.focus({ preventScroll: true }); else if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); }, [selected]);
+  async function open(id: string, button?: HTMLButtonElement, file?: string) {
+    if (button) trigger.current = button;
+    const version = ++requestVersion.current; setSelected(id); setPreview(null); setError("");
+    try { const reply = await api.request({ action: "skill-preview", scope, id, ...(file ? { file } : {}) }); if (version !== requestVersion.current) return; if (!reply.ok) setError(reply.error.message); else if (reply.data.kind === "skill-preview") setPreview(reply.data.value); else setError(l("Could not open this Skill.", "无法打开这个 Skill，请重试。")); }
+    catch { if (version === requestVersion.current) setError(l("Could not open this Skill.", "无法打开这个 Skill，请重试。")); }
   }
-
-  const localConfigurations = catalog?.installed.filter((item) => item.target === target) ?? [];
-
-  return (
-    <section className="team-workspace">
-      <header className="team-workspace-head">
-        <div><h2>Skills</h2><p>{l("Browse team Skills and choose where to use them.", "从团队共享仓库选择要使用的 Skill 和工作配置。")}</p></div>
-        <button type="button" className="team-icon-button" aria-label={l("Refresh assets", "刷新资产")} title={l("Refresh assets", "刷新资产")} disabled={Boolean(busy)} onClick={() => { setError(null); setRefreshKey((value) => value + 1); }}><RefreshCw size={15} /></button>
-      </header>
-      {!enabled && <div className="team-workspace-notice"><p>{l("Team features are off. Existing local installations remain available below.", "团队功能未启用。下方仍可管理已有本地安装。")}</p><button type="button" onClick={onOpenSettings}>{l("Open team settings", "前往团队设置")}</button></div>}
-      {locked && <div role="status" className="team-workspace-notice">{l("A team operation is in progress.", "团队操作正在进行。")}{busy === "sync" && <button type="button" onClick={() => void api.request({ action: "cancel-sync" })}>{l("Cancel sync", "取消同步")}</button>}</div>}
-      {error && <div role="alert" className="team-workspace-error"><p>{error.message}</p>{error.details && <details><summary>{l("Recovery details", "恢复详情")}</summary><pre>{JSON.stringify(error.details, null, 2)}</pre></details>}</div>}
-      {feedback && <div role="status" className="team-workspace-notice"><p>{feedback.message}</p>{feedback.backups.map((backup) => <code key={backup}>{backup}</code>)}</div>}
-
-      <TeamLocalAssetsPanel key={refreshKey} selection={selection} kind="skills" language={language} api={api} />
-      <h3>{l("Team Skills", "团队 Skills")} <span className="team-count">{catalog?.assets?.skills.length ?? 0}</span></h3>
-      <div className="team-workspace-toolbar">
-        <label>{l("Client", "客户端")}<select disabled={locked} value={target} onChange={(event) => setTarget(event.currentTarget.value as "codex" | "claude")}>{(!connection || connection.targets.includes("codex")) && <option value="codex">Codex</option>}{(!connection || connection.targets.includes("claude")) && <option value="claude">Claude Code</option>}</select></label>
-        <details className="team-sync-options"><summary>{l("Connection", "连接方式")}</summary><label><select disabled={locked || !enabled} value={transport} onChange={(event) => setTransport(event.currentTarget.value as "https" | "ssh")}><option value="https">HTTPS</option><option value="ssh">SSH</option></select></label></details>
-        <button type="button" className="is-primary" disabled={locked || !enabled || !team} onClick={() => team && void run({ action: "sync", scope: { ...scope, repository: team.repository }, transport })}>{l("Sync assets", "同步资产")}</button>
-        {team && <small>{team.name} · {team.repository}</small>}
-      </div>
-      {catalogLoading && <p role="status">{l("Loading team assets…", "正在读取团队资产…")}</p>}
-      {catalog?.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
-      {enabled && catalog?.assets && <div className="team-workspace-assets">
-        <section>{!catalog.assets.skills.length && <p>{l("The team repository has not published any Skills yet.", "团队仓库尚未发布 Skills，本地内容在上方查看。")}</p>}{catalog.assets.skills.map((skill) => <article key={skill.id}><div><strong>{skill.id}</strong><p>{skill.description}</p></div><button type="button" disabled={locked} onClick={() => void run({ action: "skill-preview", scope, id: skill.id, target })}>{l("Preview", "预览")}</button></article>)}</section>
-        {catalog.assets.workConfigs.length > 0 && <section><h3>{l("Work configurations", "工作配置")} <span>{catalog.assets.workConfigs.length}</span></h3>{catalog.assets.workConfigs.map((item) => <article key={item.id}><div><strong>{item.name}</strong><p>{item.description}</p><small>{item.skills.join(" · ")}</small></div><button type="button" disabled={locked} onClick={() => void run({ action: "work-preview", scope, id: item.id, target })}>{l("Preview", "预览")}</button></article>)}</section>}
-      </div>}
-      {localConfigurations.length > 0 && <section className="team-workspace-installed"><h3>{l("Installed work configurations", "已安装的工作配置")}</h3>
-        {localConfigurations.map((item) => <article key={item.id}><div><strong>{item.name}</strong><small>{item.repository}</small></div><button type="button" disabled={locked} onClick={() => void run({ action: "work-status", scope, id: item.id, target })}>{l("Status", "查看状态")}</button><button type="button" disabled={locked || !enabled} onClick={() => void run({ action: "work-diff", scope, id: item.id, target })}>{l("Compare update", "查看更新")}</button></article>)}
-      </section>}
-      {inspection && <section ref={inspectionElement} className="team-workspace-inspection" aria-label={l("Asset preview", "资产预览")}>
-        <header><h3>{inspection.data.kind === "skill-preview" ? inspection.data.value.id : inspection.data.value.name}</h3><button type="button" onClick={() => setInspection(null)}>{l("Close", "关闭")}</button></header>
-        <small>{inspection.scope.repository} · {inspection.target}</small>
-        {"commit" in inspection.data.value && <p>{l("Version: ", "版本：")}<code>{inspection.data.value.commit}</code></p>}
-        {inspection.data.kind === "skill-preview" && <>
-          <label>{l("File", "文件")}<select disabled={locked} value={inspection.data.value.file} onChange={(event) => void run({ action: "skill-preview", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, file: event.currentTarget.value })}>{inspection.data.value.files.map((file) => <option key={file.path}>{file.path}</option>)}</select></label>
-          {inspection.data.value.encoding === "base64" && <p>{l("Binary file shown as Base64.", "二进制文件，以 Base64 显示。")}</p>}
-          <pre>{inspection.data.value.content}</pre>
-          <button type="button" className="is-primary" disabled={locked || !enabled || !inspection.data.value.destination} onClick={() => void run({ action: "skill-install", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "skill-preview" ? inspection.data.value.commit : "" })}>{l("Install this version", "安装此版本")}</button>
-        </>}
-        {inspection.data.kind === "work-preview" && <>
-          <p>{inspection.data.value.description}</p>
-          {inspection.data.value.configurationConflict && <p className="team-workspace-error">{inspection.data.value.configurationConflict}</p>}
-          <ul>{inspection.data.value.skills.map((skill) => <li key={skill.id}><strong>{skill.id}</strong> · {skill.status === "existing" ? l("Reuse existing", "复用现有内容") : skill.status === "conflict" ? l("Conflict", "有冲突") : l("Install", "待安装")}{skill.reason && <p>{skill.reason}</p>}{skill.destination && <small>{skill.destination}</small>}</li>)}</ul>
-          <button type="button" className="is-primary" disabled={locked || !enabled || Boolean(inspection.data.value.configurationConflict) || inspection.data.value.skills.some((skill) => skill.status === "conflict" || skill.status === "unselected")} onClick={() => void run({ action: "work-install", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "work-preview" ? inspection.data.value.commit : "" })}>{l("Install configuration", "安装工作配置")}</button>
-        </>}
-        {inspection.data.kind === "work-status" && <>
-          <p>{l("Installed version: ", "已安装版本：")}<code>{inspection.data.value.revision}</code></p>
-          <ul>{inspection.data.value.skills.map((skill) => <li key={skill.id}><strong>{skill.id}</strong> · {skill.state === "ready" ? l("Content verified", "内容完整") : skill.state === "missing" ? l("Missing", "文件缺失") : l("Changed or conflicting", "内容有变化或冲突")}<p>{skill.action === "keep_shared" ? l("Keep: shared by ", "保留：其他配置仍引用 ") + skill.otherConfigs.join("、") : skill.action === "keep_independent" ? l("Keep existing independent installation", "保留原有独立安装") : skill.action === "missing" ? l("Remove the missing reference", "仅移除缺失引用") : l("Move to backup on uninstall", "卸载时移入备份")}</p></li>)}</ul>
-          <button type="button" disabled={locked || inspection.data.value.skills.some((skill) => skill.action === "backup" && skill.state !== "ready")} onClick={() => void run({ action: "work-uninstall", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, revision: inspection.data.kind === "work-status" ? inspection.data.value.revision : "" })}>{l("Uninstall configuration…", "卸载工作配置…")}</button>
-        </>}
-        {inspection.data.kind === "work-diff" && <>
-          <p><code>{inspection.data.value.fromRevision}</code> → <code>{inspection.data.value.revision}</code></p>
-          <ul>{inspection.data.value.changes.map((change) => <li key={change.id}><strong>{change.id}</strong> · {{
-            install: l("Install", "安装"), reuse: l("Reuse", "复用"), update: l("Back up and update", "备份并更新"), backup: l("Move to backup", "移入备份"),
-            keep_shared: l("Keep shared content", "保留共享内容"), keep_independent: l("Keep independent content", "保留独立安装"),
-            missing: l("Remove missing reference", "移除缺失引用"), conflict: l("Conflict", "有冲突"),
-          }[change.action]}{change.reason && <p>{change.reason}</p>}{change.otherConfigs.length > 0 && <small>{l("Other references: ", "其他引用：")}{change.otherConfigs.join("、")}</small>}</li>)}</ul>
-          <button type="button" className="is-primary" disabled={locked || !enabled || !inspection.data.value.canUpdate} onClick={() => inspection.data.kind === "work-diff" && void run({ action: "work-update", scope: inspection.scope, id: inspection.data.value.id, target: inspection.target, fromRevision: inspection.data.value.fromRevision, revision: inspection.data.value.revision })}>{l("Apply this update", "按以上差异更新")}</button>
-        </>}
-      </section>}
+  function close() { requestVersion.current++; setSelected(null); setPreview(null); setError(""); }
+  return <div className={`team-documents-layout${selected ? " has-reader" : ""}`} onKeyDown={(event) => { if (event.key === "Escape" && selected) { event.stopPropagation(); close(); } }}>
+    <section className="team-workspace team-documents-list"><header className="team-workspace-head"><div><h2>Skills <span className="team-count">{catalog?.assets?.skills.length ?? 0}</span></h2><p>{l("Skills shared by your team. Syncing updates them in enabled working directories.", "团队共用的技能，同步时统一更新到已启用的工作目录。")}</p></div></header>
+      {!selected && error && <p className="team-workspace-error" role="alert">{error}</p>}
+      {!enabled ? <p>{l("Enable teams in Settings to browse shared Skills.", "在设置中启用团队后，可浏览共享 Skills。")}</p> : !catalog && !error ? <p role="status">{l("Loading…", "正在读取…")}</p> : <>
+        {catalog?.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
+        <div className="team-resource-list">{catalog?.assets?.skills.map((skill) => <button key={skill.id} className="team-resource-row" aria-pressed={selected === skill.id} disabled={selection.busy} onClick={(event) => void open(skill.id, event.currentTarget)}><PackageSearch size={18} /><span><strong>{skill.id}</strong><small>{skill.description}</small></span><span>{l("View", "查看")}</span></button>)}</div>
+        {catalog?.assets && !catalog.assets.skills.length && <div className="team-empty"><PackageSearch size={26} /><strong>{l("No team Skills yet", "团队还没有共享技能")}</strong><p>{l("Published team Skills will appear here after syncing.", "团队发布技能后，点击上方「同步团队」即可获取。")}</p></div>}
+      </>}
     </section>
-  );
+    {selected && <aside ref={panel} tabIndex={-1} className="team-document-reader team-workspace" aria-label={l("Skill details", "Skill 详情")}><header className="team-document-reader-head"><div><small>{l("Team Skill", "团队 Skill")}</small><h3>{selected}</h3>{preview && <small>{preview.commit.slice(0, 8)}</small>}</div><button className="team-icon-button" aria-label={l("Close Skill", "关闭 Skill")} onClick={close}><X size={17} /></button></header><div className="team-document-reader-body">{error ? <p role="alert" className="team-workspace-error">{error}</p> : !preview ? <p role="status">{l("Opening…", "正在打开…")}</p> : <><label>{l("File", "文件")}<select value={preview.file} onChange={(event) => void open(selected, undefined, event.currentTarget.value)}>{preview.files.map((file) => <option key={file.path}>{file.path}</option>)}</select></label>{preview.encoding === "base64" && <p>{l("Binary file shown as Base64.", "二进制文件，以 Base64 显示。")}</p>}<pre>{preview.content}</pre></>}</div></aside>}
+  </div>;
 }
