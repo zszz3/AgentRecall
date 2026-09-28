@@ -1498,3 +1498,9 @@
   color: var(--text-secondary);
   font-size: 12px;
 }
+
+/* Long Turn lists own their viewport; toolbar/find controls stay outside it. */
+.detail-body:has(.turn-list[data-virtualized="true"]) { display: flex; flex-direction: column; overflow: hidden; }
+.turn-conversation:has(.turn-list[data-virtualized="true"]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.turn-list[data-virtualized="true"] { display: block; min-height: 0; flex: 1; overflow-y: auto; overflow-anchor: none; }
+.turn-list-row { display: grid; gap: 7px; }

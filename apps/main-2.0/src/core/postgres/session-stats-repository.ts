@@ -200,7 +200,7 @@ export class PostgresSessionStatsRepository {
     const historyDays = options.dailyHistoryDays === 30 || options.dailyHistoryDays === 90 ? options.dailyHistoryDays : 7;
     const days = dailyRanges(now, historyDays);
     const dailyRows = await this.database.query<{
-      occurred_at: Date | string;
+      bucket_index: number;
       input_tokens: number | string;
       output_tokens: number | string;
       cached_input_tokens: number | string;
@@ -222,20 +222,27 @@ export class PostgresSessionStatsRepository {
             ${sessionAnd}
         )
         select
-          occurred_at, input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens,
-          reasoning_output_tokens, total_tokens
+          width_bucket(occurred_at, $3::timestamptz[]) - 1 as bucket_index,
+          sum(input_tokens) as input_tokens, sum(output_tokens) as output_tokens,
+          sum(cached_input_tokens) as cached_input_tokens,
+          sum(greatest(cache_creation_input_tokens, 0)) as cache_creation_input_tokens,
+          sum(reasoning_output_tokens) as reasoning_output_tokens, sum(total_tokens) as total_tokens
         from ranked
         where row_rank = 1
+        group by bucket_index
       `,
       [
         new Date(days[0].dayStart).toISOString(),
         new Date(now).toISOString(),
+        days.map(day => new Date(day.dayStart).toISOString()),
       ],
     );
-    // Bucket each event once, including for the longer workbench history window.
+    // Send local calendar boundaries as absolute instants, preserving DST and
+    // client/server timezone differences while returning at most one row per day.
     const dailyTotals = new Map(days.map(day => [day.dayStart, normalizedTokenUsage()]));
     for (const row of dailyRows.rows) {
-      const usage = dailyTotals.get(startOfTrendBucket(timeValue(row.occurred_at), "day"));
+      const day = days[row.bucket_index];
+      const usage = day ? dailyTotals.get(day.dayStart) : undefined;
       if (!usage) continue;
       usage.inputTokens += numberValue(row.input_tokens);
       usage.outputTokens += numberValue(row.output_tokens);

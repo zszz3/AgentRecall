@@ -321,7 +321,7 @@ export function App(): ReactElement {
     refreshStats,
     loadQuotas,
     refreshLiveSessions,
-  } = useWorkbenchOverview(language);
+  } = useWorkbenchOverview(language, activePage === "workbench");
   const [tags, setTags] = useState<string[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectTags, setProjectTags] = useState<ProjectTagEntry[]>([]);
@@ -656,7 +656,7 @@ export function App(): ReactElement {
         setSessionFamilyRefreshVersion((current) => current + 1);
         if (activePage === "sessions") void load();
         void loadSidebarMetadata();
-        void loadStats();
+        void loadStats(true);
         void loadWorkbenchSessions();
       }
     });
@@ -901,7 +901,7 @@ export function App(): ReactElement {
     await Promise.all([
       load(),
       options.metadata ? loadSidebarMetadata() : Promise.resolve(),
-      options.stats ? loadStats() : Promise.resolve(),
+      options.stats ? loadStats(true) : Promise.resolve(),
     ]);
     await refreshDetail();
   }
@@ -1028,7 +1028,7 @@ export function App(): ReactElement {
       if (removed) {
         if (detail?.sessionKey === session.sessionKey) closeDetail();
         setSelectedKey((current) => (current === session.sessionKey ? null : current));
-        await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
+        await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
         const message = session.sourceAvailable === false
           ? t("Cached session deleted.", "会话缓存已删除。")
           : session.source === "zcode-cli"
@@ -1237,7 +1237,7 @@ export function App(): ReactElement {
         return next;
       });
       setBulkDeleteDialog(null);
-      await Promise.all([load(), loadSidebarMetadata(), loadStats(), loadWorkbenchSessions()]);
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true), loadWorkbenchSessions()]);
       setActionStatus({
         kind: result.failed.length > 0 ? "error" : "success",
         message: result.failed.length > 0
@@ -1439,7 +1439,7 @@ export function App(): ReactElement {
           : {}),
         ...(targetEnvironmentId ? { targetEnvironmentId } : {}),
       });
-      await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
       await refreshLiveSessions();
       const strategyLabel = migrationStrategyLabel(result.strategy, language);
       const message = t(
@@ -1473,7 +1473,7 @@ export function App(): ReactElement {
     try {
       const status = await window.sessionSearch.refreshIndex();
       setIndexStatus(status);
-      await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
+      await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
       const successMessage = t(
         `Index refreshed: ${status.indexed} updated, ${status.skipped} skipped, ${status.total} total.`,
         `索引已更新：更新 ${status.indexed} 个，跳过 ${status.skipped} 个，共 ${status.total} 个。`,
@@ -1544,7 +1544,7 @@ export function App(): ReactElement {
           const status = await window.sessionSearch.refreshIndex();
           if (status.error) throw new Error(status.error);
         }
-        await Promise.all([load(), loadSidebarMetadata(), loadStats()]);
+        await Promise.all([load(), loadSidebarMetadata(), loadStats(true)]);
         if (optionalSourceRefreshGenerationRef.current !== generation) return;
         setPendingPersonalSources(emptyPendingPersonalSources());
         const message = t("Sources ready.", "来源已就绪。");
@@ -1617,7 +1617,7 @@ export function App(): ReactElement {
       window.sessionSearch.listEnvironments(),
       load(),
       loadSidebarMetadata(),
-      loadStats(),
+      loadStats(true),
     ]);
     appSettingsRef.current = nextSettings;
     setAppSettings(nextSettings);

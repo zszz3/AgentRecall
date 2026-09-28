@@ -30,11 +30,20 @@ export function ResizableSplit({ children, className, label, storageKey, initial
   useEffect(() => {
     const element = container.current;
     if (!element) return;
-    const measure = () => setAvailable(element.clientWidth);
+    let frame: number | null = null;
+    const measure = () => { frame = null; setAvailable(element.clientWidth); };
     measure();
-    const observer = new ResizeObserver(measure);
+    // ResizeObserver runs during layout delivery. Publish on the next frame so
+    // changing the grid cannot synchronously trigger another observer delivery.
+    const observer = new ResizeObserver(() => {
+      if (frame === null) frame = window.requestAnimationFrame(measure);
+    });
     observer.observe(element);
-    return () => { observer.disconnect(); stopDrag.current?.(); };
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      stopDrag.current?.();
+    };
   }, []);
   useEffect(() => {
     try { localStorage.setItem(storageKey, String(preferred)); }

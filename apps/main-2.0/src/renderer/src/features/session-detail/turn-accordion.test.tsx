@@ -1476,3 +1476,68 @@ describe("TurnAccordion in-conversation find", () => {
     expect(container.textContent).not.toContain("old needle");
   });
 });
+
+describe("large Turn list virtualization", () => {
+  let container: HTMLDivElement, root: Root;
+  beforeEach(() => {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function(this: HTMLElement) { return this.classList.contains("turn-list") ? 600 : 112; });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function(this: HTMLElement) { return Number.parseFloat(this.querySelector<HTMLElement>(".turn-list-content")?.style.height ?? "600"); });
+    vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function(this: HTMLElement, first: number | ScrollToOptions) {
+      this.scrollTop = typeof first === "number" ? first : first.top ?? this.scrollTop;
+      queueMicrotask(() => this.dispatchEvent(new Event("scroll")));
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+  });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); });
+  const manyTurns = (count: number) => Array.from({ length: count }, (_, index) => ({ ...createTurn(`turn-${index}`, index), startedAt: null, endedAt: null }));
+  const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 35)); });
+
+  it("bounds mounted rows for 10000 Turns and retains expanded details across scrolling", async () => {
+    const turns = manyTurns(10000), onLoadTurn = vi.fn(async (id: string) => createTurnDetail(turns[Number(id.slice(5))], "A".repeat(4000), "answer"));
+    await act(async () => root.render(<TurnAccordion sessionKey="large" turns={turns} loading={false} matchedTurnId={null} matchedMessageIndex={null} showTools query="" language="en" onLoadTurn={onLoadTurn} />));
+    expect(container.querySelectorAll(".turn-card").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll(".turn-card").length).toBeLessThan(40);
+    expect(onLoadTurn).not.toHaveBeenCalled();
+    await act(async () => container.querySelector<HTMLButtonElement>(".turn-card-summary")!.click());
+    expect(onLoadTurn).toHaveBeenCalledTimes(1);
+    await act(async () => container.querySelector<HTMLButtonElement>(".msg .expand-toggle")!.click());
+    const scroller = container.querySelector<HTMLElement>(".turn-list")!;
+    await act(async () => { scroller.scrollTop = 560000; scroller.dispatchEvent(new Event("scroll")); });
+    await settle();
+    expect(container.querySelector('[data-turn-id="turn-0"]')).toBeNull();
+    expect(container.querySelectorAll(".turn-card").length).toBeLessThan(40);
+    await act(async () => { scroller.scrollTop = 0; scroller.dispatchEvent(new Event("scroll")); }); await settle();
+    expect(container.querySelector('[data-turn-id="turn-0"] .turn-card-summary')?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector('[data-turn-id="turn-0"] .msg .expand-toggle')?.getAttribute("aria-expanded")).toBe("true");
+    expect(onLoadTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("mounts far search results and supports keyboard navigation to list boundaries", async () => {
+    const turns = manyTurns(10000), onLoadTurn = vi.fn(async (id: string) => createTurnDetail(turns[Number(id.slice(5))]));
+    await act(async () => root.render(<TurnAccordion sessionKey="jump" turns={turns} loading={false} matchedTurnId="turn-9999" matchedMessageIndex={99991} showTools query="" language="en" onLoadTurn={onLoadTurn} />));
+    await settle();
+    const last = container.querySelector<HTMLElement>('[data-turn-row="turn-9999"]')!;
+    expect(last.getAttribute("aria-posinset")).toBe("10000"); expect(last.getAttribute("aria-setsize")).toBe("10000");
+    expect(last.querySelector('[data-message-index="99991"]')?.classList.contains("match-target")).toBe(true);
+    await act(async () => { const button = last.querySelector<HTMLButtonElement>(".turn-card-summary")!; button.focus(); button.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })); });
+    await settle();
+    expect(document.activeElement?.closest<HTMLElement>("[data-turn-row]")?.dataset.turnRow).toBe("turn-0");
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }))); await settle();
+    expect(document.activeElement?.closest<HTMLElement>("[data-turn-row]")?.dataset.turnRow).toBe("turn-9999");
+    expect(container.querySelectorAll(".turn-card").length).toBeLessThan(40);
+  });
+
+  it("keeps in-conversation find covering offscreen Turns", async () => {
+    const turns = manyTurns(150), onCount = vi.fn();
+    const onLoadTurn = vi.fn(async (id: string) => createTurnDetail(turns[Number(id.slice(5))], id === "turn-140" ? "needle" : "other", "answer"));
+    await act(async () => root.render(<TurnAccordion sessionKey="find-large" turns={turns} loading={false} matchedTurnId={null} matchedMessageIndex={null} showTools query="" findQuery="needle" activeFindMatchIndex={0} language="en" onLoadTurn={onLoadTurn} onFindMatchCountChange={onCount} />));
+    await settle();
+    expect(onLoadTurn).toHaveBeenCalledTimes(150); expect(onCount).toHaveBeenLastCalledWith(1);
+    expect(container.querySelector('[data-find-key="turn-140:message:0"]')).not.toBeNull();
+    expect(container.querySelectorAll(".turn-card").length).toBeLessThan(40);
+  });
+});
