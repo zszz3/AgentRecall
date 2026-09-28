@@ -123,3 +123,5 @@ R00 的多人 Chat 删除已合入 `codex/cli-foundation`，与 CLI 和团队空
 ### 当前目录与配置分发
 
 当前交付切片以[团队空间指南](team-workspace.md)为准。旧逻辑项目创建流程撤出桌面，旧配置与分享保留；目录接入、客户端启停与整轮同步已实现。共享指令、MCP、公共 Env 使用资产清单版本 4，具体格式和客户端限制统一见[团队资产指南](team-assets.md)。本轮配置归属、更新、撤回与失败恢复覆盖在 `apps/cli/test/team-configuration.test.ts`，界面交互覆盖在 `team-assets-panel.test.tsx`；真实客户端的信任与 MCP 连接不以文件写入测试替代。
+
+性能改动、局部对比数据和下一步排序见 [V2 性能检查](performance.md)。

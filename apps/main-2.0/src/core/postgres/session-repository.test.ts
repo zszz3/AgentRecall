@@ -978,6 +978,49 @@ describe("PostgresSessionRepository", () => {
     expect(invalid.dailyTokenUsage).toHaveLength(7);
   });
 
+  it("returns bounded daily aggregates instead of transferring every token event", async () => {
+    await repository.upsertIndexedSession(session(), []);
+    const now = Date.parse("2026-09-28T12:00:00Z");
+    await database.query(`insert into agent_recall.token_events
+      (session_key, dedupe_key, occurred_at, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens)
+      select 'codex:session-a', 'bulk-' || n, $1::timestamptz - (n % 20) * interval '1 day', 2, 3, 5,
+        case when n % 2 = 0 then -3 else 2 end
+      from generate_series(1, 3000) n`, [new Date(now).toISOString()]);
+    const query = vi.spyOn(database, "query");
+    try {
+      const stats = await statsRepository.getStats({ period: "allTime", dailyHistoryDays: 30 }, now);
+      expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(15000);
+      expect(stats.dailyTokenUsage.reduce((sum, day) => sum + (day.cacheCreationInputTokens ?? 0), 0)).toBe(3000);
+      const dailyResult = await query.mock.results.at(-1)!.value;
+      expect(dailyResult.rows.length).toBeLessThanOrEqual(30);
+    } finally { query.mockRestore(); }
+  });
+
+  it.each([
+    ["America/New_York", "2026-03-09T12:00:00-04:00", 23],
+    ["America/New_York", "2026-11-02T12:00:00-05:00", 25],
+    ["Asia/Shanghai", "2026-03-09T12:00:00+08:00", 24],
+  ])("preserves local calendar boundaries and deduplication in %s at %s", async (zone, instant, yesterdayHours) => {
+    const previousTZ = process.env.TZ;
+    process.env.TZ = String(zone);
+    try {
+      const now = Date.parse(String(instant)), today = new Date(now); today.setHours(0, 0, 0, 0);
+      const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+      const first = new Date(today); first.setDate(first.getDate() - 6);
+      expect((today.getTime() - yesterday.getTime()) / 3600000).toBe(yesterdayHours);
+      const times = [first.getTime() - 1, first.getTime(), today.getTime() - 1, today.getTime(), now, now + 1];
+      await repository.upsertIndexedSession(session(), [], times.map((timestamp, index) => ({ ...tokens[0], timestamp, dedupeKey: "edge-" + index })));
+      await repository.upsertIndexedSession(session({ sessionKey: "remote-copy", rawId: "copy", source: "codex-app" }), [], [{ ...tokens[0], timestamp: today.getTime(), dedupeKey: "edge-3", totalTokens: 350, inputTokens: 275 }]);
+      const stats = await statsRepository.getStats({ period: "allTime" }, now);
+      expect(stats.dailyTokenUsage[0].totalTokens).toBe(175);
+      expect(stats.dailyTokenUsage[5].totalTokens).toBe(175);
+      expect(stats.dailyTokenUsage[6]).toMatchObject({ totalTokens: 525, cacheCreationInputTokens: 20 });
+      expect(stats.dailyTokenUsage.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(875);
+      const trend = await statsRepository.getStatsTrend({ period: "today" }, now);
+      expect(trend.buckets.at(-1)?.totalTokens).toBe(525);
+    } finally { if (previousTZ === undefined) delete process.env.TZ; else process.env.TZ = previousTZ; }
+  });
+
   it.each([7, 30, 90] as const)("loads %i-day history once while comparing the previous summary", async (dailyHistoryDays) => {
     await repository.upsertIndexedSession(session(), messages, tokens, traces);
     const now = Date.parse("2026-07-21T12:00:00.000Z");

@@ -8,15 +8,21 @@ let root: Root;
 let host: HTMLDivElement;
 let available: number;
 let resize: () => void;
+let notifyResize: () => void;
+let frames: Map<number, FrameRequestCallback>;
+function flushFrames() { const pending = [...frames.values()]; frames.clear(); for (const frame of pending) frame(0); }
 beforeEach(() => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
   const values = new Map<string, string>();
   vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value) });
   available = 1000;
+  frames = new Map(); let nextFrame = 0;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { const id = ++nextFrame; frames.set(id, callback); return id; });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => available);
   vi.stubGlobal("ResizeObserver", class {
-    constructor(callback: () => void) { resize = callback; }
+    constructor(callback: () => void) { notifyResize = callback; resize = () => { callback(); flushFrames(); }; }
     observe() {}
     disconnect() {}
   });
@@ -85,4 +91,15 @@ it.each(["pointerup", "pointercancel", "blur", "unmount"])("cleans up a pointer 
   expect(document.body.style.cursor).toBe("default");
   expect(document.body.style.userSelect).toBe("text");
   expect(localStorage.getItem("test-pane")).toBe("300");
+});
+
+it("coalesces layout notifications and cancels deferred work when unmounted", async () => {
+  await mount();
+  await act(async () => { available = 600; notifyResize(); available = 500; notifyResize(); });
+  expect(frames.size).toBe(1);
+  expect(host.firstElementChild?.getAttribute("data-stacked")).toBe("false");
+  await act(async () => flushFrames());
+  expect(host.firstElementChild?.getAttribute("data-stacked")).toBe("true");
+  await act(async () => { available = 1000; notifyResize(); root.render(null); });
+  expect(frames.size).toBe(0);
 });
