@@ -44,7 +44,7 @@ describe("complete team session snapshots", () => {
     expect(preview.missingAttachments).toEqual(["lost.png", "lost.png"]);
     const assertContext = vi.fn(async () => undefined);
     await f.service.publish(1, f.context, preview.token, f.signal, assertContext);
-    expect(f.confirm).toHaveBeenCalledOnce(); expect(assertContext).toHaveBeenCalledOnce();
+    expect(f.confirm).toHaveBeenCalledWith(1, expect.stringContaining("公开仓库中的分享可被任何人访问和下载")); expect(assertContext).toHaveBeenCalledOnce();
     const packet = JSON.parse(gunzipSync(f.upload.mock.calls[0]![3]).toString());
     expect(packet.records).toHaveLength(2);
     expect(Buffer.from(packet.records[0].files[0].data, "base64").toString()).toContain("完整源文件");

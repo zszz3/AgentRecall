@@ -30,14 +30,14 @@
 | 无项目的团队资产 | `TeamAssetService` 接受 teamId 选择，可直接同步、列出、预览；安装需固定 connectionId/path/client |
 | Skills | 单 Skill 安装、diff/update、备份/回滚/卸载；工作配置批量安装、整组差异/更新/卸载与共享引用保护 |
 | 文档 | 资产清单版本 3，AGENTS.md、CLAUDE.md 和 docs Markdown；整轮同步创建/更新受管文档并备份，个人冲突拒绝覆盖 |
-| 完整会话 | `team-session-sharing.ts`、`team-session-github.ts`；右键选团队、完整预览、系统确认、私有 GitHub Release 附件读写/下载/撤回 |
+| 完整会话 | `team-session-sharing.ts`、`team-session-github.ts`；右键选团队、完整预览、系统确认、公开或私有 GitHub Release 附件读写/下载/撤回 |
 | 本地资产 | `team-local-assets.ts`；主进程只读、有范围/大小上限、跳过链接；独立 IPC 及本地预览组件 |
 | 桌面 | `team-workspace-page.tsx` 管理团队和目录，三个资源面板及会话分享弹窗；没有全局 Local/Team 切换 |
 | CLI | team/skill/work-config 可用 --team，安装用 --connection；directory add/list/enable/disable/remove；旧 project 命令保留兼容 |
 
 ### 兼容边界
 
-旧仓库项目只读投影为工作目录连接。首次修改连接时升级配置为版本 3（或已有版本 4），保留原 projects、安装文件与目录内归属记录。无目录的旧逻辑项目不会变成连接。团队会话列表汇总同一私有仓库的旧项目分享，保留原包，不做远端搬迁或删除。
+旧仓库项目只读投影为工作目录连接。首次修改连接时升级配置为版本 3（或已有版本 4），保留原 projects、安装文件与目录内归属记录。无目录的旧逻辑项目不会变成连接。团队会话列表汇总同一团队仓库的旧项目分享，保留原包，不做远端搬迁或删除。
 
 会话包继续兼容版本 1/2，新的分享使用团队范围，来源工作目录保存在原始元数据中。跨团队仍按仓库权限和包内 repository 校验。不要将项目过滤当作 GitHub 仓库内的独立访问控制。
 
@@ -49,7 +49,7 @@
 
 当前核验应包括：CLI tests/typecheck、V2 团队 IPC/会话/本地扫描/界面测试、V2 类型检查与构建、发布说明检查。原 Chat 删除有历史 Session 与保留功能回归，合并基线曾通过 141 项检查；后续改动应核对对应最新结果。
 
-仍未完成：真实私有仓库两成员联调、个人贡献团队的 PR 流程、会话搜索筛选/导入恢复/断点续传、文档编辑/合并/回滚、跨配置协调更新、正式 CLI 分发、自动同步与召回。用户当前要求先 review，不推进 main 或发布。
+仍未完成：真实仓库两成员联调、个人贡献团队的 PR 流程、会话搜索筛选/导入恢复/断点续传、文档编辑/合并/回滚、跨配置协调更新、正式 CLI 分发、自动同步与召回。用户当前要求先 review，不推进 main 或发布。
 
 ## 整轮同步实现
 

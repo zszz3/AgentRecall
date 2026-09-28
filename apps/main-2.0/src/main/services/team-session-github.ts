@@ -19,7 +19,7 @@ async function currentToken(signal?: AbortSignal): Promise<string> {
   try {
     const { stdout } = await execute("gh", ["auth", "token", "--hostname", "github.com"], { timeout: 10_000, maxBuffer: 16_384, windowsHide: true, signal });
     const token = stdout.trim(); if (!token || /[\r\n]/.test(token)) throw new Error("Invalid token"); return token;
-  } catch { throw new WorkspaceError("TEAM_GITHUB_LOGIN", "请先安装 GitHub CLI 并运行 gh auth login，团队会话会使用该身份访问私有仓库。"); }
+  } catch { throw new WorkspaceError("TEAM_GITHUB_LOGIN", "请先安装 GitHub CLI 并运行 gh auth login，团队会话会使用该身份访问团队仓库。"); }
 }
 export class TeamSessionGitHub {
   constructor(private readonly fetcher: typeof fetch = fetch, private readonly tokenProvider: (signal?: AbortSignal) => Promise<string> = currentToken) {}
@@ -48,7 +48,6 @@ export class TeamSessionGitHub {
   private async access(repository: string, write: boolean, signal?: AbortSignal) {
     const path = this.repoPath(repository), token = await this.tokenProvider(signal);
     const repo = repoSchema.parse(await this.json(token, `https://api.github.com/repos/${path}`, signal));
-    if (!repo.private) throw new WorkspaceError("TEAM_PRIVATE_REPOSITORY_REQUIRED", "完整会话只允许分享到私有团队仓库。当前仓库公开，Skills 和文档仍可使用；本次未上传任何会话。");
     if (write && !repo.permissions?.push) throw new WorkspaceError("TEAM_SESSION_FORBIDDEN", "当前 GitHub 身份没有这个团队仓库的写权限。");
     return { path, token, repo };
   }
@@ -120,7 +119,7 @@ export class TeamSessionGitHub {
     try {
       // Recheck immediately before the content write; opening a preview never uploads.
       const fresh = repoSchema.parse(await this.json(token, `https://api.github.com/repos/${path}`, signal));
-      if (!fresh.private) throw new WorkspaceError("TEAM_PRIVATE_REPOSITORY_REQUIRED", "仓库已改为公开，本次上传取消。");
+      if (!fresh.permissions?.push) throw new WorkspaceError("TEAM_SESSION_FORBIDDEN", "当前 GitHub 身份已失去这个团队仓库的写权限，本次上传取消。");
       const response = await this.request(token, `https://uploads.github.com/repos/${path}/releases/${release.id}/assets?name=${encodeURIComponent(name)}&label=${encodeURIComponent(title.slice(0, 120))}`, signal, { method: "POST", headers: { "Content-Type": "application/gzip" }, body: new Uint8Array(data) });
       const asset = assetSchema.parse(JSON.parse((await this.bytes(response, 1024 * 1024)).toString("utf8")));
       if (asset.name !== name || asset.size !== data.length) throw new Error("Upload receipt mismatch");
