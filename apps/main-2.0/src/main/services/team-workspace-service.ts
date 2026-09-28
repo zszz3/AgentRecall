@@ -1,31 +1,36 @@
-import { WorkspaceError, WorkspaceService, TeamAssetService } from "@agentrecall/workspace-core";
+import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_PREVIEW_BYTES } from "@agentrecall/workspace-core";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { ConfigurationChange, ConfigurationPreview } from "@agentrecall/workspace-core";
 import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
-import type { TeamPayload, TeamReply, TeamRequest } from "../../shared/ipc/team-workspace";
+import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../shared/ipc/team-workspace";
 
 interface TeamDialogs {
   chooseFolder(owner: number): Promise<string | null>;
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
+  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: ConfigurationChange }>();
   private readonly operations = new Map<AbortController, number>();
   private readonly pending = new Set<Promise<TeamPayload>>();
 
   constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing) {}
 
   cancel(owner: number): void {
+    for (const [token, draft] of this.configurationPreviews) if (draft.owner === owner) this.configurationPreviews.delete(token);
     for (const [abort, requestOwner] of this.operations) if (requestOwner === owner) abort.abort();
     this.sharing?.cancel(owner);
   }
 
   async close(): Promise<void> {
     this.closed = true;
+    this.configurationPreviews.clear();
     for (const abort of this.operations.keys()) abort.abort();
     this.sharing?.close();
     await Promise.allSettled([...this.pending]);
@@ -55,6 +60,7 @@ export class TeamWorkspaceService {
         if (!await this.dialogs.confirm(owner, message)) return { ok: true, data: { kind: "cancelled" } };
       }
       if (request.action === "enable" && !request.enabled) {
+        this.configurationPreviews.clear();
         for (const abort of this.operations.keys()) abort.abort();
         this.sharing?.close();
         await Promise.allSettled([...this.pending]);
@@ -87,6 +93,9 @@ export class TeamWorkspaceService {
     };
     switch (request.action) {
       case "snapshot": return snapshot();
+      case "configuration-discard":
+        if (this.configurationPreviews.get(request.token)?.owner === owner) this.configurationPreviews.delete(request.token);
+        return { kind: "cancelled" };
       case "enable":
         await workspace.store.initialize();
         await workspace.setTeamEnabled(request.enabled);
@@ -131,16 +140,17 @@ export class TeamWorkspaceService {
       }
     }
     const config = await workspace.store.read();
-    const teamScope = "teamId" in request.scope ? request.scope : null;
-    const legacyScope = "projectId" in request.scope ? request.scope : null;
+    const scope: TeamScope = request.scope;
+    const teamScope = "teamId" in scope ? scope : null;
+    const legacyScope = "projectId" in scope ? scope : null;
     const project = legacyScope ? config?.projects.find((entry) => entry.id === legacyScope.projectId) : undefined;
     if (legacyScope && (!project || project.root !== legacyScope.root)) throw new WorkspaceError("PROJECT_MISMATCH", "项目绑定已改变，请刷新后重新选择。");
     const teamContext = teamScope ? await workspace.teamContext(teamScope.teamId, teamScope.connectionId, teamScope.directory, false) : null;
     if (teamScope && teamContext?.team.repository !== teamScope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新选择。");
     if (teamContext?.directory && "target" in request && request.target && !teamContext.directory.targets.includes(request.target)) throw new WorkspaceError("CLIENT_DISABLED", "此工作目录没有启用该客户端，请到工作目录设置中调整。");
     const assets = new TeamAssetService(workspace, undefined, request.scope);
-    if (request.scope.directory && (!path.isAbsolute(request.scope.directory) || legacyScope && project?.root !== null)) throw new WorkspaceError("INVALID_ARGUMENTS", "本地位置无效，请重新选择目录。");
-    const localDirectory = teamScope ? teamContext?.directory?.path : project?.root ?? request.scope.directory;
+    if (scope.directory && (!path.isAbsolute(scope.directory) || legacyScope && project?.root !== null)) throw new WorkspaceError("INVALID_ARGUMENTS", "本地位置无效，请重新选择目录。");
+    const localDirectory = teamScope ? teamContext?.directory?.path : project?.root ?? scope.directory;
     if (request.action === "local-assets") {
       if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择要查看的本地工作目录。");
       const result = await readTeamLocalAssets(localDirectory, request.kind, request.file, signal);
@@ -183,6 +193,39 @@ export class TeamWorkspaceService {
       }
     }
     switch (request.action) {
+      case "configuration-preview": {
+        for (const [token, draft] of this.configurationPreviews) if (draft.owner === owner || draft.expiresAt <= Date.now()) this.configurationPreviews.delete(token);
+        if (this.configurationPreviews.size >= 8) throw new WorkspaceError("CONFIGURATION_PREVIEWS_BUSY", "待发布预览过多，请先关闭其他编辑窗口。");
+        const preview = await assets.previewConfiguration(root, request.revision, request.change, projectId, signal);
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
+        const current = await workspace.teamContext(request.scope.teamId);
+        if (JSON.stringify(current.team) !== JSON.stringify(teamContext?.team)) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
+        const token = randomUUID(), expiresAt = Date.now() + 10 * 60 * 1000;
+        const value = { ...preview, token, expiresAt };
+        if (Buffer.byteLength(JSON.stringify({ ok: true, data: { kind: "configuration-preview", value } })) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整变更预览超过 4 MiB，请缩小内容后重试。");
+        this.configurationPreviews.set(token, { owner, expiresAt, team: JSON.stringify(current.team), preview, change: structuredClone(request.change) });
+        return { kind: "configuration-preview", value };
+      }
+      case "configuration-publish": {
+        const draft = this.configurationPreviews.get(request.token);
+        if (!draft || draft.owner !== owner || draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期或不属于当前窗口，请重新预览。");
+        const current = await workspace.teamContext(request.scope.teamId);
+        if (draft.team !== JSON.stringify(current.team) || draft.preview.repository !== request.scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
+        if (!await this.dialogs.confirm(owner, `将「${draft.preview.name}」发布到团队「${current.team.name}」的仓库 ${current.team.repository}？团队成员同步后即可使用，当前工作目录不会自动更新。`)) return { kind: "cancelled" };
+        if (signal.aborted) throw new WorkspaceError("CANCELLED", "发布已取消。");
+        if (draft.expiresAt <= Date.now()) throw new WorkspaceError("CONFIGURATION_PREVIEW_EXPIRED", "预览已过期，请重新预览。");
+        const latest = await workspace.teamContext(request.scope.teamId);
+        if (draft.team !== JSON.stringify(latest.team)) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
+        try {
+          const result = await assets.publishConfiguration(root, draft.preview, draft.change, projectId, signal);
+          this.configurationPreviews.delete(request.token);
+          return { kind: "configuration-published", value: result };
+        } catch (error) {
+          if (!(error instanceof WorkspaceError) || error.code !== "CONFIGURATION_CLEANUP_REQUIRED" || error.details?.published !== true || typeof error.details.commit !== "string") throw error;
+          this.configurationPreviews.delete(request.token);
+          return { kind: "configuration-published", value: { repository: current.team.repository, commit: error.details.commit, cacheUpdated: false, cleanupRequired: true } };
+        }
+      }
       case "document-preview": return { kind: "document-preview", value: await assets.previewDocument(root, request.id, projectId) };
       case "document-install": {
         if (!localDirectory) throw new WorkspaceError("LOCAL_DIRECTORY_REQUIRED", "请先选择本次应用的本地目录。");

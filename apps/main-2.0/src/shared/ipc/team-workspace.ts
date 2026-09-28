@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
 import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
 import type { TeamSessionPage, TeamSessionContent, TeamSessionPreview } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
@@ -19,6 +20,9 @@ const selectedAsset = { scope: selectedScope, id, target };
 
 export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("snapshot") }).strict(),
+  z.object({ action: z.literal("configuration-preview"), scope: teamScope.pick({ teamId: true, repository: true }), revision, change: configurationChangeSchema }).strict(),
+  z.object({ action: z.literal("configuration-publish"), scope: teamScope.pick({ teamId: true, repository: true }), token: z.string().uuid() }).strict(),
+  z.object({ action: z.literal("configuration-discard"), token: z.string().uuid() }).strict(),
   z.object({ action: z.literal("choose-folder") }).strict(),
   z.object({ action: z.literal("enable"), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal("add-team"), id: id.optional(), name: text.optional(), repository, transport: z.enum(["https", "ssh"]).optional(), makeDefault: z.boolean().optional() }).strict(),
@@ -63,6 +67,8 @@ export type TeamCatalog = {
 export type TeamLocalAsset = { path: string; name: string; bytes: number };
 export type TeamLocalCatalog = { directory: string; entries: TeamLocalAsset[]; limited: boolean; skipped: number };
 export type TeamPayload =
+  | { kind: "configuration-preview"; value: Result<"previewConfiguration"> & { token: string; expiresAt: number } }
+  | { kind: "configuration-published"; value: Result<"publishConfiguration"> }
   | { kind: "sync-result"; value: TeamPullReport }
   | { kind: "sync-status"; value: TeamPullReport | null }
   | { kind: "local-assets"; value: TeamLocalCatalog }

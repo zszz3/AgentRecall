@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import { configurationChangeSchema, type ConfigurationChange, type ConfigurationPreview } from "./configuration-format.js";
+import { revision as assetRevision } from "./asset-paths.js";
 import { renameSync } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -166,6 +168,66 @@ export class TeamAssetService {
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
       configuration: snapshot.schemaVersion === 4 ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
       documents: "documents" in snapshot ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
+    }));
+  }
+
+  private async withPreparedConfiguration<T>(context: Context, expectedRevision: string, input: unknown, signal: AbortSignal | undefined, operation: (prepared: Awaited<ReturnType<GitAssetSource["prepareConfiguration"]>>) => Promise<T>): Promise<T> {
+    const change = configurationChangeSchema.safeParse(input);
+    if (!change.success || !assetRevision.safeParse(expectedRevision).success) throw new WorkspaceError("INVALID_CONFIGURATION_CHANGE", "填写的资源格式无效，请检查名称、适用客户端、连接信息和变量引用；指令正文最多 1 MiB。");
+    if (signal?.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
+    const staging = path.join(path.dirname(this.workspace.store.filePath), "configuration-edits");
+    await fs.mkdir(staging, { recursive: true, mode: 0o700 });
+    const scratch = await fs.mkdtemp(path.join(staging, ".edit-"));
+    let prepared: Awaited<ReturnType<GitAssetSource["prepareConfiguration"]>> | undefined;
+    let failure: unknown;
+    try {
+      prepared = await this.source.prepareConfiguration(context.team.repository, scratch, context.team.transport ?? "https", change.data, expectedRevision, signal);
+      return await operation(prepared);
+    } catch (error) { failure = error; throw error; }
+    finally {
+      try { await fs.rm(scratch, { recursive: true, force: true }); }
+      catch {
+        throw new WorkspaceError("CONFIGURATION_CLEANUP_REQUIRED", prepared?.published
+          ? "资源已发布，但临时文件未能清理。请先同步查看结果，不要重复发布。"
+          : failure instanceof WorkspaceError && failure.code === "ASSET_PUBLISH_UNCONFIRMED"
+            ? "发布结果尚未确认，且临时文件清理失败。请先同步检查远端结果。"
+            : "操作已停止，但临时文件未能清理。请检查目录权限后重试。",
+        { repository: context.team.repository, published: prepared?.published === true, commit: prepared?.snapshot.commit, temporary: scratch });
+      }
+    }
+  }
+
+  async previewConfiguration(directory: string, expectedRevision: string, change: ConfigurationChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
+    const context = await this.currentTeam(directory, projectId);
+    return this.withPreparedConfiguration(context, expectedRevision, change, signal, async (prepared) => this.commitForTeam(directory, context, () => {
+      if (signal?.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
+      return prepared.preview;
+    }));
+  }
+
+  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: ConfigurationChange, projectId?: string, signal?: AbortSignal) {
+    const context = await this.currentTeam(directory, projectId);
+    if (preview.repository !== context.team.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新预览。");
+    return withAssetLock(this.cacheDirectory, `.${context.team.id}.lock`, async (assertOwned) => this.withPreparedConfiguration(context, preview.revision, change, signal, async (prepared) => {
+      if (JSON.stringify(prepared.preview) !== JSON.stringify(preview)) throw new WorkspaceError("CONFIGURATION_PREVIEW_CHANGED", "待发布内容与预览不一致，请重新预览。");
+      return this.commitForTeam(directory, context, async (assertConfigOwned) => {
+        const commit = await prepared.publish(() => { assertOwned(); assertConfigOwned(); });
+        const temporary = path.join(this.cacheDirectory, `.published-${randomUUID()}.tmp`);
+        let cacheUpdated = false;
+        try {
+          const handle = await fs.open(temporary, "wx", 0o600);
+          try { await handle.writeFile(JSON.stringify(prepared.snapshot)); await handle.sync(); } finally { await handle.close(); }
+          renameSync(temporary, path.join(this.cacheDirectory, `${context.team.id}.json`));
+          cacheUpdated = true;
+        } catch {
+          // The Git push already committed. A local cache error must not invite
+          // the user to publish the same edit again; a normal sync rebuilds it.
+        } finally {
+          try { await fs.rm(temporary, { force: true }); }
+          catch { cacheUpdated = false; /* The published resource is durable; a leftover cache temp needs local cleanup. */ }
+        }
+        return { repository: context.team.repository, commit, cacheUpdated, cleanupRequired: false };
+      });
     }));
   }
 

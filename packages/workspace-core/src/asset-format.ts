@@ -4,14 +4,9 @@ import { z } from "zod";
 import { WorkspaceError } from "./errors.js";
 
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
-export const MAX_FILE_BYTES = 1024 * 1024;
-export const assetId = z.string().max(64).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/).refine((value) => value !== "synced" && portableAssetPath(value));
-export const revision = z.string().regex(/^[a-f0-9]{40}$/);
-export function portableAssetPath(value: string): boolean {
-  return value.length > 0 && value.length <= 180 && value.split("/").every((part) =>
-    part !== "." && part !== ".." && !/[. ]$/.test(part) && /^[^<>:"\\|?*\x00-\x1f]+$/.test(part)
-    && !/^(?:\.git|\.agentrecall-install\.json|con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part));
-}
+export { MAX_FILE_BYTES, assetId, revision, portableAssetPath } from "./asset-paths.js";
+import { MAX_FILE_BYTES, assetId, revision, portableAssetPath } from "./asset-paths.js";
+import { configurationFields, instructionEntrySchema } from "./configuration-format.js";
 const manifestV1Schema = z.strictObject({
   schemaVersion: z.literal(1),
   skills: z.array(z.strictObject({ id: assetId, path: z.string().refine(portableAssetPath) })).max(64),
@@ -33,19 +28,6 @@ const documentEntrySchema = z.strictObject({
   target: z.string().refine((value) => portableAssetPath(value) && (value === "AGENTS.md" || value === "CLAUDE.md" || value.startsWith("docs/") && value.endsWith(".md"))),
 });
 const manifestV3Schema = manifestV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentEntrySchema).max(128) });
-const clients = z.array(z.enum(["codex", "claude"])).min(1).max(2).refine((items) => new Set(items).size === items.length).default(["codex", "claude"]);
-const configName = z.string().trim().min(1).max(200).refine((value) => !/[\r\n\0]/.test(value) && !value.includes("agentrecall:team"));
-const envName = z.string().max(128).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !["__proto__", "constructor", "prototype"].includes(name));
-const plainValue = z.string().max(8192).refine((value) => !value.includes("\0") && !value.includes("${") && !value.includes("agentrecall:team"));
-const environmentValue = z.union([plainValue, z.strictObject({ fromEnv: envName })]);
-const instructionEntrySchema = z.strictObject({ id: assetId, name: configName, path: z.string().refine(portableAssetPath).refine((value) => value.endsWith(".md")), targets: clients });
-const mcpBase = { id: assetId, name: configName, targets: clients };
-const mcpSchema = z.discriminatedUnion("transport", [
-  z.strictObject({ ...mcpBase, transport: z.literal("stdio"), command: z.string().min(1).max(2048).refine((value) => !/[\r\n\0]/.test(value)), args: z.array(plainValue).max(64).default([]), env: z.record(envName, environmentValue).refine((env) => Object.keys(env).length <= 64 && Object.entries(env).every(([key, value]) => typeof value === "string" || value.fromEnv === key)).default({}) }),
-  z.strictObject({ ...mcpBase, transport: z.literal("http"), url: z.string().url().max(2048).refine((value) => { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !value.includes("${"); }), headers: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9-]{0,127}$/).refine((name) => !["constructor", "prototype"].includes(name)), environmentValue).refine((value) => Object.keys(value).length <= 64).default({}) }),
-]);
-const environmentSchema = z.strictObject({ name: envName, value: plainValue, targets: clients });
-const configurationFields = { instructions: z.array(instructionEntrySchema).max(16), mcpServers: z.array(mcpSchema).max(32), environment: z.array(environmentSchema).max(64) };
 const manifestV4Schema = manifestV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields });
 export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema, manifestV4Schema]);
 const fileSchema = z.strictObject({

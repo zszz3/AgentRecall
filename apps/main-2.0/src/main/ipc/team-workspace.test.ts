@@ -284,3 +284,61 @@ it("one sync request installs team resources to enabled clients using the saved 
   expect(await fs.readFile(path.join(saved.root, "AGENTS.md"), "utf8")).toBe("Team rules");
   expect(await api.request({ action: "sync-status", scope })).toMatchObject({ ok: true, data: { kind: "sync-status", value: { status: "complete" } } });
 });
+
+describe("team configuration authoring", () => {
+  it("owns immutable previews per window and confirms before publishing", async () => {
+    const { api, service, workspace, confirm } = harness();
+    await project(workspace); await workspace.setTeamEnabled(true);
+    const scope = { teamId: "example--team", repository: "https://github.com/example/assets" };
+    const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "review", targets: ["codex" as const] } };
+    const preview = { repository: scope.repository, revision: "1".repeat(40), branch: "main", kind: change.kind, operation: change.operation, name: "TEAM_MODE", files: [{ path: "agentrecall.json", before: "{}", after: "{\"TEAM_MODE\":\"review\"}" }] };
+    vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue(preview);
+    const publish = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
+    const prepared = await api.request({ action: "configuration-preview", scope, revision: preview.revision, change });
+    expect(prepared.ok && prepared.data.kind).toBe("configuration-preview");
+    if (!prepared.ok || prepared.data.kind !== "configuration-preview") throw new Error("Missing preview");
+    const request = { action: "configuration-publish" as const, scope, token: prepared.data.value.token };
+    expect(await service.request(18, request)).toMatchObject({ ok: false, error: { code: "CONFIGURATION_PREVIEW_EXPIRED" } });
+    expect(confirm).not.toHaveBeenCalled(); expect(publish).not.toHaveBeenCalled();
+    expect(await api.request(request)).toEqual({ ok: true, data: { kind: "cancelled" } });
+    expect(publish).not.toHaveBeenCalled();
+    change.value.value = "mutated-after-preview";
+    confirm.mockResolvedValue(true);
+    expect(await api.request(request)).toMatchObject({ ok: true, data: { kind: "configuration-published", value: { cacheUpdated: true } } });
+    expect(publish.mock.calls[0][2].value).toMatchObject({ value: "review" });
+    expect(await api.request(request)).toMatchObject({ ok: false, error: { code: "CONFIGURATION_PREVIEW_EXPIRED" } });
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects expired, cancelled and changed-team previews and malformed drafts before publishing", async () => {
+    const { api, workspace, confirm, sender, handlers } = harness(); await project(workspace); await workspace.setTeamEnabled(true);
+    const scope = { teamId: "example--team", repository: "https://github.com/example/assets" };
+    const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "review", targets: ["codex" as const] } };
+    vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue({ repository: scope.repository, revision: "1".repeat(40), branch: "main", kind: change.kind, operation: change.operation, name: "TEAM_MODE", files: [] });
+    const publish = vi.spyOn(TeamAssetService.prototype, "publishConfiguration");
+    const prepare = async () => {
+      const result = await api.request({ action: "configuration-preview", scope, revision: "1".repeat(40), change });
+      if (!result.ok || result.data.kind !== "configuration-preview") throw new Error("Missing preview");
+      return { action: "configuration-publish" as const, scope, token: result.data.value.token };
+    };
+    const first = await prepare();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60 * 1000);
+    expect(await api.request(first)).toMatchObject({ ok: false, error: { code: "CONFIGURATION_PREVIEW_EXPIRED" } }); clock.mockRestore();
+    const second = await prepare(); sender.emit("destroyed");
+    expect(await api.request(second)).toMatchObject({ ok: false, error: { code: "CONFIGURATION_PREVIEW_EXPIRED" } });
+    const third = await prepare(); confirm.mockImplementation(async () => { await workspace.setTeamTransport(scope.teamId, "ssh"); return true; });
+    expect(await api.request(third)).toMatchObject({ ok: false, error: { code: "TEAM_CHANGED" } });
+    expect(() => handlers.get("team-workspace:request")!({ sender }, { action: "configuration-preview", scope, revision: "1".repeat(40), change: { ...change, value: { ...change.value, value: "${SECRET}" } } })).toThrow(/Invalid input/);
+    expect(publish).not.toHaveBeenCalled();
+  });
+});
+
+it("includes preview tokens and the reply envelope in the authoring size limit", async () => {
+  const { api, workspace } = harness(); await project(workspace); await workspace.setTeamEnabled(true);
+  const scope = { teamId: "example--team", repository: "https://github.com/example/assets" };
+  const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "review", targets: ["codex" as const] } };
+  const preview = { repository: scope.repository, revision: "1".repeat(40), branch: "main", kind: change.kind, operation: change.operation, name: "TEAM_MODE", files: [{ path: "agentrecall.json", before: null, after: "" }] };
+  preview.files[0].after = "a".repeat(4 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(preview)));
+  vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue(preview);
+  expect(await api.request({ action: "configuration-preview", scope, revision: preview.revision, change })).toMatchObject({ ok: false, error: { code: "ASSETS_TOO_LARGE" } });
+});

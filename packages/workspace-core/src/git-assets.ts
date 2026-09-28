@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
+import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationChange, type ConfigurationPreview } from "./configuration-format.js";
 import { WorkspaceError } from "./errors.js";
 import { canonicalGitHubRepository } from "./git.js";
 import { manifestSchema, MAX_FILE_BYTES, skillFromFiles, validateSnapshot, type AssetSnapshot, type SkillFile } from "./asset-format.js";
@@ -103,6 +104,113 @@ export class GitAssetSource {
     return { created: true, snapshot };
   }
 
+  async prepareConfiguration(repository: string, scratch: string, transport: AssetTransport, change: ConfigurationChange, expectedRevision: string, signal?: AbortSignal) {
+    const canonical = canonicalGitHubRepository(repository), gitDirectory = path.join(scratch, "repository.git");
+    await this.cloneRepository(canonical, gitDirectory, transport, signal);
+    const hooks = path.join(scratch, "empty-publish-hooks"); await fs.mkdir(hooks);
+    const git = (args: string[], input?: string, maximum = MAX_FILE_BYTES + 1) => runGit(["--git-dir", gitDirectory, "-c", `core.hooksPath=${hooks}`, ...args], maximum, signal, input);
+    const snapshot = await this.readSnapshot(canonical, gitDirectory, signal);
+    if (snapshot.commit !== expectedRevision) throw new WorkspaceError("ASSET_REVISION_CHANGED", "团队仓库已有新版本，请先同步团队，再重新编辑或预览。");
+    const branch = (await git(["symbolic-ref", "HEAD"])).toString("utf8").trim();
+    if (!branch.startsWith("refs/heads/")) throw new WorkspaceError("INVALID_ASSET_BRANCH", "无法确定团队仓库的默认分支。");
+    await git(["check-ref-format", branch]);
+    const originalManifest = (await git(["show", `${snapshot.commit}:agentrecall.json`])).toString("utf8");
+    const oldManifest = manifestSchema.parse(JSON.parse(originalManifest));
+    const manifest = {
+      schemaVersion: 4 as const, skills: oldManifest.skills,
+      workConfigs: "workConfigs" in oldManifest ? oldManifest.workConfigs : [],
+      documents: "documents" in oldManifest ? oldManifest.documents : [],
+      instructions: oldManifest.schemaVersion === 4 ? [...oldManifest.instructions] : [],
+      mcpServers: oldManifest.schemaVersion === 4 ? [...oldManifest.mcpServers] : [],
+      environment: oldManifest.schemaVersion === 4 ? [...oldManifest.environment] : [],
+    };
+    const files: ConfigurationPreview["files"] = [];
+    const changed = <T>(entries: T[], index: number, next: T) => {
+      if (change.operation === "create" && index >= 0) throw new WorkspaceError("CONFIGURATION_EXISTS", "同名团队资源已经存在，请打开原条目编辑。");
+      if (change.operation === "update" && index < 0) throw new WorkspaceError("CONFIGURATION_MISSING", "团队资源已不存在，请同步后重试。");
+      if (index < 0) entries.push(next); else entries[index] = next;
+    };
+    if (change.kind === "instructions") {
+      const { content, ...metadata } = change.value;
+      const index = manifest.instructions.findIndex((item) => item.id === metadata.id);
+      const previous = manifest.instructions[index];
+      const destination = previous?.path ?? `rules/${metadata.id}.md`;
+      const key = destination.normalize("NFC").toLowerCase();
+      if (manifest.instructions.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.documents.some((item) => item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.skills.some((item) => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) {
+        throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "这份文件还被其他团队资源使用，请先在仓库拆分文件再编辑。");
+      }
+      const before = snapshot.schemaVersion === 4 ? snapshot.instructions.find((item) => item.id === metadata.id)?.content ?? null : null;
+      changed(manifest.instructions, index, { ...metadata, path: destination });
+      if (previous && isDeepStrictEqual(previous, manifest.instructions[index]) && before === content) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。");
+      if (before !== content) files.push({ path: destination, before, after: content });
+    } else if (change.kind === "mcp") {
+      const index = manifest.mcpServers.findIndex((item) => item.id === change.value.id);
+      const previous = manifest.mcpServers[index];
+      changed(manifest.mcpServers, index, change.value);
+      if (previous && isDeepStrictEqual(previous, change.value)) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。");
+    } else {
+      const index = manifest.environment.findIndex((item) => item.name.toUpperCase() === change.value.name.toUpperCase());
+      const previous = manifest.environment[index];
+      if (previous && previous.name !== change.value.name) throw new WorkspaceError("CONFIGURATION_EXISTS", "已有名称仅大小写不同的变量，请使用原名称编辑。");
+      changed(manifest.environment, index, change.value);
+      if (previous && isDeepStrictEqual(previous, change.value)) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。");
+    }
+    const manifestText = JSON.stringify(manifestSchema.parse(manifest), null, 2) + "\n";
+    if (Buffer.byteLength(manifestText) > MAX_FILE_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整团队清单超过 1 MiB，请在仓库中整理资源后重试。");
+    files.unshift({ path: "agentrecall.json", before: originalManifest, after: manifestText });
+    const preview: ConfigurationPreview = { repository: canonical, revision: snapshot.commit, branch: branch.slice("refs/heads/".length), kind: change.kind, operation: change.operation, name: change.value.name, files };
+    if (Buffer.byteLength(JSON.stringify(preview)) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整变更预览超过 4 MiB，请缩小内容后重试。");
+
+    // Rebuild only the affected Git trees. No checkout, filters, hooks or user
+    // index are involved, and unrelated files retain their object ids and modes.
+    const writeTree = async (tree: string | null, parts: string[], blob: string, overwrite: boolean): Promise<string> => {
+      const raw = tree ? new TextDecoder("utf-8", { fatal: true }).decode(await git(["ls-tree", "-z", tree])) : "";
+      const entries = raw.split("\0").filter(Boolean).map((entry) => {
+        const match = /^(\d+) (blob|tree|commit) ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
+        if (!match) throw new WorkspaceError("INVALID_ASSET", "无法读取团队仓库文件目录。");
+        return { mode: match[1]!, type: match[2]!, oid: match[3]!, name: match[4]! };
+      });
+      const name = parts[0]!;
+      const existing = entries.find((entry) => entry.name.normalize("NFC").toLowerCase() === name.normalize("NFC").toLowerCase());
+      if (existing && existing.name !== name) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "文件路径存在大小写或字符规范化冲突，未覆盖已有文件。");
+      let next;
+      if (parts.length > 1) {
+        if (existing && existing.type !== "tree") throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "目标父路径不是目录，未覆盖已有内容。");
+        next = { mode: "040000", type: "tree", oid: await writeTree(existing?.oid ?? null, parts.slice(1), blob, overwrite), name };
+      } else {
+        if (existing && (!overwrite || existing.type !== "blob" || !["100644", "100755"].includes(existing.mode))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "目标文件已被其他内容占用，未覆盖已有文件。");
+        next = { mode: existing?.mode ?? "100644", type: "blob", oid: blob, name };
+      }
+      const updated = entries.filter((entry) => entry !== existing).concat(next);
+      return (await git(["mktree", "-z"], updated.map((entry) => `${entry.mode} ${entry.type} ${entry.oid}\t${entry.name}\0`).join(""))).toString("ascii").trim();
+    };
+    let tree = (await git(["rev-parse", "HEAD^{tree}"])).toString("ascii").trim();
+    for (const file of files) {
+      const blob = (await git(["hash-object", "-w", "--stdin"], file.after)).toString("ascii").trim();
+      tree = await writeTree(tree, file.path.split("/"), blob, file.before !== null);
+    }
+    const commit = (await git(["-c", "user.name=AgentRecall", "-c", "user.email=agentrecall@users.noreply.github.com", "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", snapshot.commit], `Update team ${change.kind}: ${change.value.name}\n`)).toString("ascii").trim();
+    await git(["update-ref", branch, commit, snapshot.commit]);
+    const updatedSnapshot = await this.readSnapshot(canonical, gitDirectory, signal);
+    const url = (await git(["config", "--local", "--get", "remote.origin.url"])).toString("utf8").trim();
+    let published = false;
+    return { preview, snapshot: updatedSnapshot, get published() { return published; }, publish: async (assertReady: () => void) => {
+      const remote = (await git(["ls-remote", "--refs", "--", url, branch])).toString("utf8").trim().split(/\s+/);
+      if (remote[0] !== snapshot.commit || remote[1] !== branch) throw new WorkspaceError("ASSET_REVISION_CHANGED", "团队仓库已有新版本，请先同步团队并重新预览，未覆盖其他成员的改动。");
+      assertReady();
+      if (signal?.aborted) throw new WorkspaceError("CANCELLED", "发布已取消，尚未推送。");
+      // The new commit's only parent is the previewed revision. The exact lease
+      // makes the ref comparison atomic, including concurrent deletes/rewinds;
+      // a successful update is still strictly fast-forward and rewrites no history.
+      try { await git(["push", "--porcelain", `--force-with-lease=${branch}:${snapshot.commit}`, "--", url, `${commit}:${branch}`]); }
+      catch { throw new WorkspaceError("ASSET_PUBLISH_UNCONFIRMED", "发布未完成或结果尚未确认。请检查仓库写权限和分支保护，并先同步查看远端结果，再重新编辑；不会强制覆盖。", { repository: canonical, commit }); }
+      published = true;
+      return commit;
+    } };
+  }
+
   private async readSnapshot(canonical: string, gitDirectory: string, signal?: AbortSignal): Promise<AssetSnapshot> {
     const git = (args: string[], limit: number) => runGit(["--git-dir", gitDirectory, ...args], limit, signal);
     if (!(await git(["for-each-ref", "--format=%(refname)"], 1024 * 1024)).length) {
@@ -140,7 +248,7 @@ export class GitAssetSource {
       throw new WorkspaceError("INVALID_MANIFEST", "agentrecall.json 不是有效的 JSON。");
     }
     const parsed = manifestSchema.safeParse(manifestValue);
-    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1、2 或 3；文档清单需要版本 3。");
+    if (!parsed.success) throw new WorkspaceError("INVALID_MANIFEST", "清单格式或版本不受支持；请使用受支持的 schemaVersion 1—4；共享指令、MCP 与 Env 需要版本 4。");
     const skills = [];
     let retainedBytes = 0;
     for (const item of parsed.data.skills) {

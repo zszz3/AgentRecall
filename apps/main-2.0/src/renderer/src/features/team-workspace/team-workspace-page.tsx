@@ -40,11 +40,11 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
 function TeamContent({ language, team, snapshot, api, onSnapshot }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories">("sessions");
-  const [syncing, setSyncing] = useState(false), [refreshKey, setRefreshKey] = useState(0);
+  const [syncing, setSyncing] = useState(false), [editingBusy, setEditingBusy] = useState(false), [refreshKey, setRefreshKey] = useState(0);
   const directories = (snapshot.directories ?? []).filter((entry) => entry.teamId === team.id);
-  const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing };
+  const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing || editingBusy };
   return <div className="team-space-project">
-    <TeamSyncControl team={team} enabled={selection.enabled} externalBusy={snapshot.busy} language={language} api={api} onBusy={setSyncing} onSynced={() => setRefreshKey((value) => value + 1)} />
+    <TeamSyncControl team={team} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy} language={language} api={api} onBusy={setSyncing} onSynced={() => setRefreshKey((value) => value + 1)} />
     <div className="team-space-tabs" role="group" aria-label={l("Team resources", "团队资源")}>
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
       <button aria-pressed={tab === "skills"} onClick={() => setTab("skills")}><PackageSearch size={16} />Skills</button>
@@ -54,7 +54,7 @@ function TeamContent({ language, team, snapshot, api, onSnapshot }: { language: 
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
     </div>
-    {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel key={tab} kind={tab} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
+    {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel key={tab} kind={tab} onBusy={setEditingBusy} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
 
   </div>;
 }

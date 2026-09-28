@@ -20,6 +20,9 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
+    // Browser-safe workspace schemas share the app's validator instead of
+    // bundling the workspace root's second copy of Zod.
+    resolve: { dedupe: ["zod"] },
     build: {
       rollupOptions: {
         input: {

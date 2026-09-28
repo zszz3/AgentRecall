@@ -136,3 +136,62 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   expect(container.querySelector('[aria-label="Env详情"]')).toBeNull();
   expect(request.mock.calls.every(([input]) => ["snapshot", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });
+
+it.each(["共享指令", "MCP", "Env"])("adds %s through an explicit preview and publish flow", async (label) => {
+  const token = "00000000-0000-4000-8000-000000000001";
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "configuration-preview") return ok({ kind: "configuration-preview", value: { token, expiresAt: Date.now() + 600000, repository, revision, branch: "main", kind: input.change.kind, operation: input.change.operation, name: input.change.value.name, files: [{ path: "agentrecall.json", before: "{}", after: JSON.stringify(input.change) }] } });
+    if (input.action === "configuration-publish") return ok({ kind: "configuration-published", value: { repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false } });
+    return base(input);
+  });
+  const fill = async (selector: string, value: string) => act(async () => {
+    const element = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
+    Object.getOwnPropertyDescriptor(element.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true })); element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click()); await act(async () => button(label).click());
+  await act(async () => button("新增 " + label).click());
+  expect(container.querySelector("dialog")?.open).toBe(true);
+  expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
+  if (label === "Env") {
+    await fill('dialog input[placeholder="TEAM_LOCALE"]', "TEAM_LANG"); await fill("dialog textarea", "zh-CN");
+  } else {
+    await fill('dialog input[maxlength="200"]', "Team resource");
+    if (label === "共享指令") await fill("dialog textarea", "Review before publishing.");
+    else {
+      await fill('dialog input[type="url"]', "https://example.invalid/tools");
+      await act(async () => button("添加字段").click());
+      await fill('dialog input[aria-label="字段名 1"]', "Authorization");
+      await fill('dialog input[aria-label="字段值 1"]', "TEAM_TOKEN");
+    }
+  }
+  await act(async () => button("预览变更").click());
+  const prepared = request.mock.calls.find(([input]) => input.action === "configuration-preview")?.[0];
+  expect(prepared?.action).toBe("configuration-preview");
+  if (prepared?.action !== "configuration-preview") throw new Error("Preview missing");
+  expect(prepared.change.operation).toBe("create");
+  if (prepared.change.kind === "mcp" && prepared.change.value.transport === "http") expect(prepared.change.value.headers).toEqual({ Authorization: { fromEnv: "TEAM_TOKEN" } });
+  expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
+  expect(container.querySelector("dialog")?.textContent).toContain("修改后");
+  await act(async () => button("发布到团队").click());
+  expect(request).toHaveBeenCalledWith({ action: "configuration-publish", scope: { teamId: team.id, repository }, token });
+  expect(container.querySelector("dialog")).toBeNull(); expect(container.textContent).toContain("已发布到团队");
+  expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
+});
+
+it("prefills edits and discards a preview on close without publishing", async () => {
+  const token = "00000000-0000-4000-8000-000000000002";
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "configuration-preview" ? ok({ kind: "configuration-preview", value: { token, expiresAt: Date.now() + 600000, repository, revision, branch: "main", kind: input.change.kind, operation: input.change.operation, name: input.change.value.name, files: [] } }) : base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click()); await act(async () => button("Env").click());
+  await act(async () => button("TEAM_MODE").click()); await act(async () => { const edit = button("编辑"); edit.focus(); edit.click(); });
+  const name = container.querySelector<HTMLInputElement>('dialog input[placeholder="TEAM_LOCALE"]')!;
+  expect(name.value).toBe("TEAM_MODE"); expect(name.disabled).toBe(true);
+  expect(container.querySelector("dialog textarea")?.textContent).toBe("review");
+  await act(async () => button("预览变更").click());
+  await act(async () => button("关闭编辑").click());
+  expect(request).toHaveBeenCalledWith({ action: "configuration-discard", token });
+  expect(document.activeElement).toBe(button("编辑"));
+  expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
+});
