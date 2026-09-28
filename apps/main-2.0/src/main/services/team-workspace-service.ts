@@ -18,6 +18,7 @@ export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
   private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange }>();
+  private readonly inspections = new Map<number, AbortController>();
   private readonly operations = new Map<AbortController, number>();
   private readonly pending = new Set<Promise<TeamPayload>>();
 
@@ -75,6 +76,8 @@ export class TeamWorkspaceService {
       if (mutating && this.busy) throw new WorkspaceError("TEAM_BUSY", "另一个团队操作正在进行，请等待完成或取消同步后重试。");
       if (mutating) this.busy = true;
       const abort = new AbortController();
+      if (request.action === "push-inspect" || request.action === "push-preview" || request.action === "push-publish") this.inspections.get(owner)?.abort();
+      if (request.action === "push-inspect") this.inspections.set(owner, abort);
       this.operations.set(abort, owner);
       const operation = this.execute(workspace, request, abort.signal, owner);
       this.pending.add(operation);
@@ -82,6 +85,7 @@ export class TeamWorkspaceService {
       finally {
         this.pending.delete(operation);
         this.operations.delete(abort);
+        if (this.inspections.get(owner) === abort) this.inspections.delete(owner);
         if (mutating) this.busy = false;
       }
     } catch (error) {
@@ -99,6 +103,7 @@ export class TeamWorkspaceService {
     switch (request.action) {
       case "snapshot": return snapshot();
       case "push-discard": this.push.discard(owner, request.token); return { kind: "cancelled" };
+      case "push-inspect": return { kind: "push-inspection", value: await this.push.inspect(request.scope, request.revision, request.item, signal) };
       case "push-preview": return { kind: "push-preview", value: await this.push.preview(owner, request.scope, request.revision, request.items, signal) };
       case "push-publish": return { kind: "push-result", value: await this.push.publish(owner, request.scope, request.token, signal) };
       case "configuration-discard":

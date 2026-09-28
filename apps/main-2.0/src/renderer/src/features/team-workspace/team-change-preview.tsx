@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { ConfigurationPreview } from "@agentrecall/workspace-core";
 import { renderLineDiff } from "../../../../core/text-diff";
 import type { LanguageMode } from "../../language";
 
-export function TeamChangePreview({ preview, language }: { preview: Pick<ConfigurationPreview, "files">; language: LanguageMode }) {
+export const TeamChangePreview = memo(function TeamChangePreview({ preview, language }: { preview: Pick<ConfigurationPreview, "files">; language: LanguageMode }) {
   return <div className="team-editor-preview">{preview.files.map((file, index) => <DiffFile key={file.path} file={file} language={language} initiallyOpen={index === 0} />)}</div>;
-}
+});
 function DiffFile({ file, language, initiallyOpen }: { file: ConfigurationPreview["files"][number]; language: LanguageMode; initiallyOpen: boolean }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [open, setOpen] = useState(initiallyOpen), [mode, setMode] = useState<"diff" | "full">("diff");

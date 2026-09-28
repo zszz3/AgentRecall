@@ -1,3 +1,4 @@
+import { inspectAssetChange } from "./asset-inspection.js";
 import fs from "node:fs/promises";
 import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
 import { revision as assetRevision } from "./asset-paths.js";
@@ -169,6 +170,20 @@ export class TeamAssetService {
       configuration: snapshot.schemaVersion === 4 ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
       documents: "documents" in snapshot ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
     }));
+  }
+
+  async inspectConfiguration(directory: string, expectedRevision: string, input: Exclude<AssetChange, { kind: "batch" }>, signal?: AbortSignal) {
+    if (Buffer.byteLength(JSON.stringify(input)) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "本地资源过大，请减少内容。");
+    const change = assetChangeSchema.parse(input);
+    if (change.kind === "batch") throw new WorkspaceError("INVALID_ARGUMENTS", "请选择单个资源查看差异。");
+    const context = await this.currentTeam(directory), snapshot = await this.snapshot(context);
+    if (snapshot.commit !== expectedRevision) throw new WorkspaceError("ASSET_REVISION_CHANGED", "团队缓存已更新，请重新打开 Push。");
+    if (signal?.aborted) throw new WorkspaceError("CANCELLED", "读取已取消。");
+    const item = inspectAssetChange(snapshot, change);
+    return this.commitForTeam(directory, context, () => {
+      if (signal?.aborted) throw new WorkspaceError("CANCELLED", "读取已取消。");
+      return item;
+    });
   }
 
   private async withPreparedConfiguration<T>(context: Context, expectedRevision: string, input: unknown, signal: AbortSignal | undefined, operation: (prepared: Awaited<ReturnType<GitAssetSource["prepareConfiguration"]>>) => Promise<T>): Promise<T> {

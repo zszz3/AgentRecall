@@ -15,6 +15,34 @@ export class TeamPushService {
   discard(owner: number, token: string) { const plan = this.plans.get(token); if (plan?.owner === owner) { clearTimeout(plan.timer); for (const session of plan.sessions) this.sharing?.discard(owner, session.preview.token); this.plans.delete(token); } }
   cancel(owner: number) { for (const [token, plan] of this.plans) if (plan.owner === owner) this.discard(owner, token); }
   close() { for (const [token, plan] of this.plans) this.discard(plan.owner, token); }
+  async inspect(scope: Scope, revision: string | undefined, item: TeamPushItem, signal: AbortSignal) {
+    const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
+    if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
+    let result: TeamPushPreview["items"][number];
+    if (item.kind === "turn") {
+      if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话读取服务不可用。");
+      const session = await this.sharing.inspectTurn(item.sessionKey, item.turnId, signal), turn = session.selectedTurns![0]!;
+      result = { key: item.key, name: `${session.root.session.displayTitle} · 第 ${turn.turnIndex + 1} 轮`, status: "added", files: [{ path: `Turn ${turn.turnIndex + 1}`, before: null, after: JSON.stringify(turn, null, 2) }], session };
+    } else {
+      if (!revision) throw new WorkspaceError("ASSET_REVISION_REQUIRED", "请先 Pull 获取团队版本。");
+      const assets = new TeamAssetService(workspace, undefined, scope);
+      let change: SingleChange;
+      if (item.kind === "configuration") change = item.change;
+      else {
+        const connection = await workspace.teamContext(scope.teamId, item.connectionId, item.directory);
+        const source = await readTeamLocalPush(connection.directory!.path, item.resource, item.file, signal);
+        change = source.kind === "skills" ? { kind: "skills", operation: "update", value: { id: item.id, name: item.name, files: source.files! } }
+          : { kind: "documents", operation: "update", value: { id: item.id, name: item.name, target: item.destination ?? `docs/team/${item.id}.md`, content: source.content! } };
+      }
+      result = { ...await assets.inspectConfiguration(this.directory, revision, change, signal), key: item.key };
+    }
+    if (signal.aborted) throw new WorkspaceError("CANCELLED", "读取已取消。");
+    const latest = await workspace.teamContext(scope.teamId);
+    if (JSON.stringify(latest.team) !== JSON.stringify(current.team)) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
+    const bytes = Buffer.byteLength(JSON.stringify(result));
+    if (bytes + 1024 > LIMIT) throw new WorkspaceError("ASSETS_TOO_LARGE", "此项 Diff 过大，请减少内容。");
+    return { item: result, bytes };
+  }
   async preview(owner: number, scope: Scope, revision: string | undefined, items: TeamPushItem[], signal: AbortSignal): Promise<TeamPushPreview> {
     this.cancel(owner);
     if (this.plans.size >= 8) throw new WorkspaceError("TEAM_BUSY", "其他窗口有待推送清单，请关闭后重试。");

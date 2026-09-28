@@ -82,3 +82,14 @@ it("bounds the complete multibyte Diff reply including duplicated turn content a
     expect(discard).toHaveBeenCalled(); expect(confirm).not.toHaveBeenCalled();
   } finally { bounded.close(); sharing.close(); }
 });
+
+it("inspects locally without preparing an upload or invalidating an existing selected preview", async () => {
+  const signal = new AbortController().signal;
+  const preview = await service.preview(7, scope, revision, [config], signal);
+  const inspect = vi.spyOn(TeamAssetService.prototype, "inspectConfiguration").mockResolvedValue({ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [{ path: "agentrecall.json", before: null, after: "review" }] });
+  vi.mocked(TeamAssetService.prototype.previewConfiguration).mockClear();
+  expect((await service.inspect(scope, revision, config, signal)).item).toMatchObject({ key: "env", status: "added" });
+  expect(inspect).toHaveBeenCalledOnce(); expect(TeamAssetService.prototype.previewConfiguration).not.toHaveBeenCalled(); expect(confirm).not.toHaveBeenCalled();
+  await expect(service.inspect({ ...scope, repository: "https://github.com/example/other" }, revision, config, signal)).rejects.toMatchObject({ code: "TEAM_CHANGED" });
+  expect((await service.publish(7, scope, preview.token, signal)).items[0]?.status).toBe("published");
+});

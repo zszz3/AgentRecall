@@ -169,3 +169,12 @@ it("bounds selected-turn packets including multibyte tools and metadata", async 
   await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, [turn.id])).rejects.toMatchObject({ code: "TEAM_SESSION_TOO_LARGE" });
   expect(f.upload).not.toHaveBeenCalled(); expect(f.store.getAttachmentFile).not.toHaveBeenCalled();
 });
+
+it("inspects a local Turn without GitHub, attachment packaging or retained upload tokens", async () => {
+  const f = await fixture(), turn = selectedTurn("one", 0);
+  f.store.getSessionTurn.mockResolvedValue(turn);
+  vi.mocked(f.remote.check).mockRejectedValue(new Error("offline"));
+  expect((await f.service.inspectTurn(f.session.sessionKey, turn.id, f.signal)).selectedTurns).toEqual([turn]);
+  expect(f.remote.check).not.toHaveBeenCalled(); expect(f.store.getAttachmentFile).not.toHaveBeenCalled(); expect(f.upload).not.toHaveBeenCalled();
+  await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, [turn.id])).rejects.toThrow("offline");
+});

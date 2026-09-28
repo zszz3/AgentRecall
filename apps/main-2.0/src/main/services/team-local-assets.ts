@@ -101,9 +101,13 @@ export async function readTeamLocalAssets(directory: string, kind: "skills" | "d
 
 /** Capture only the explicitly selected local resource; publication uses this immutable copy. */
 export async function readTeamLocalPush(directory: string, kind: "skills" | "documents", file: string, signal?: AbortSignal) {
-  const listed = await readTeamLocalAssets(directory, kind, undefined, signal);
-  if (!("entries" in listed) || !listed.entries.some(entry => entry.path === file)) throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", "所选资源已不存在，请重新选择。");
-  const root = listed.directory;
+  const parts = file.split("/");
+  const allowed = kind === "skills" ? SKILL_ROOTS.some(prefix => file.startsWith(prefix + "/") && file.slice(prefix.length + 1).split("/").length === 2 && parts.at(-1) === "SKILL.md")
+    : /\.md$/i.test(file) && (parts.length === 1 || parts[0] === "docs" && parts.length <= 7 && parts.slice(1, -1).every(part => !part.startsWith(".")));
+  if (!allowed) throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", "所选文件不在此目录的资源范围内。");
+  const root = await fs.realpath(directory);
+  const selected = await ordinaryPath(root, file);
+  if (!selected || !(await fs.stat(selected)).isFile()) throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", "所选资源已不存在，请重新选择。");
   const check = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "推送预览已取消。"); };
   let total = 0;
   const read = async (relative: string) => {

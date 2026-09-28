@@ -154,6 +154,12 @@ test("pushes selected Skill and document items atomically, with file additions, 
     { kind: "skills", operation: "update", value: { id: "review", name: "review", files: [file("SKILL.md", markdown + "Run checks.\n"), file("scripts/new.sh", "exit 1\n", true), file("icon.bin", Buffer.from([0, 255, 5]))] } },
     { kind: "documents", operation: "update", value: { id: "guide", name: "Guide", target: "docs/team/guide.md", content: "# Before\n" } },
   ] } };
+  const cached = await f.assets.inspectConfiguration(f.root, commit, update.value.changes[0]!);
+  assert.equal(cached.status, "modified");
+  assert.equal(cached.files.find(item => item.path === "scripts/old.sh")!.after, null);
+  assert.equal(cached.files.find(item => item.path === "scripts/new.sh")!.executable, true);
+  const cachedDoc = await f.assets.inspectConfiguration(f.root, commit, update.value.changes[1]!);
+  assert.equal(cachedDoc.status, "unchanged");
   const diff = await f.assets.previewConfiguration(f.root, commit, update);
   assert.deepEqual(diff.items!.map(item => item.status), ["modified", "unchanged"]);
   assert.equal(diff.files.find(item => item.path === "skills/review/scripts/old.sh")!.after, null);
@@ -175,4 +181,24 @@ test("rejects duplicate push destinations and existing unowned files before a ba
   const current = await head(f.remote);
   await assert.rejects(f.assets.previewConfiguration(f.root, current, document), { code: "CONFIGURATION_FILE_CONFLICT" });
   assert.equal(await head(f.remote), current);
+});
+
+test("browses cached differences offline without Git preparation and leaves publication validation intact", async t => {
+  const f = await setup(t), original = await head(f.remote);
+  const prepare = t.mock.method(f.source, "prepareConfiguration", async () => { throw new Error("Browsing must not prepare Git commits"); });
+  const load = t.mock.method(f.source, "load", async () => { throw new Error("Browsing must not fetch"); });
+  const timings: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const started = performance.now();
+    const diff = await f.assets.inspectConfiguration(f.root, original, env);
+    timings.push(performance.now() - started);
+    assert.equal(diff.status, "added"); assert.match(diff.files[0]!.after!, /TEAM_MODE/);
+  }
+  assert.equal(prepare.mock.callCount(), 0); assert.equal(load.mock.callCount(), 0);
+  prepare.mock.restore(); load.mock.restore();
+  const started = performance.now();
+  await f.assets.previewConfiguration(f.root, original, env);
+  t.diagnostic(`Local synthetic repo: cached inspection median ${timings.sort((a,b)=>a-b)[2]!.toFixed(1)} ms; full Git preparation ${(performance.now()-started).toFixed(1)} ms. No network latency simulated.`);
+  await fs.writeFile(path.join(f.seed, "other.txt"), "another member"); await f.push();
+  await assert.rejects(f.assets.previewConfiguration(f.root, original, env), { code: "ASSET_REVISION_CHANGED" });
 });

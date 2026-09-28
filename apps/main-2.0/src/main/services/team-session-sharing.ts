@@ -90,6 +90,20 @@ export class TeamSessionSharing {
       return this.content(packet, data.length);
     } catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("TEAM_SESSION_INVALID", "会话包格式或版本无效，或解压后超过 64 MiB。"); }
   }
+  async inspectTurn(sessionKey: string, turnId: string, signal: AbortSignal): Promise<TeamSessionContent> {
+    this.cancelled(signal);
+    const session = await this.dependencies.store.getSession(sessionKey);
+    if (!session || session.environmentKind !== "local") throw new WorkspaceError("TEAM_SESSION_SOURCE_REQUIRED", "请选择本机会话中的轮次。");
+    await this.dependencies.ensureDetails(sessionKey);
+    this.cancelled(signal);
+    const turn = await this.dependencies.store.getSessionTurn(sessionKey, turnId);
+    if (!turn || turn.id !== turnId) throw new WorkspaceError("TEAM_TURN_SELECTION_INVALID", "所选轮次已变化，请重新选择。");
+    const selected = turnSchema.parse(turn);
+    const attachments = [...new Map(selected.messages.flatMap(message => message.attachments ?? []).map(file => [file.id, file])).values()];
+    this.cancelled(signal);
+    return { root: { schemaVersion: 2, exportedAt: Date.now(), session: { sessionKey, originalTitle: session.originalTitle, displayTitle: session.displayTitle, source: session.source }, messages: [], traceEvents: [] }, selectedTurns: [selected], children: [], bytes: Buffer.byteLength(JSON.stringify(selected)),
+      files: attachments.filter(file => file.status === "available").map(file => ({ name: file.fileName, kind: "attachment", attachmentId: file.id, bytes: file.sizeBytes ?? 0 })), missingAttachments: attachments.filter(file => file.status !== "available").map(file => file.fileName) };
+  }
   async prepare(owner: number, context: TeamSessionContext, sessionKey: string, signal: AbortSignal, turnIds?: string[], retainOtherPreviews = false): Promise<TeamSessionPreview> {
     const selection = turnIds === undefined ? undefined : teamTurnSelectionSchema.safeParse(turnIds);
     if (selection && !selection.success) throw new WorkspaceError("TEAM_TURN_SELECTION_INVALID", `请选择 1–${MAX_SHARED_TURNS} 个不同轮次。`);

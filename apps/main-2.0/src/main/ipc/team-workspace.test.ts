@@ -376,3 +376,23 @@ it("validates item selections at IPC and retains the batch confirmation and wind
   expect(await api.request({ action: "push-publish", scope, token })).toMatchObject({ ok: true, data: { kind: "push-result", value: { items: [{ key: "env", status: "published" }] } } });
   expect(confirm).toHaveBeenCalledOnce(); expect(publish).toHaveBeenCalledOnce();
 });
+
+it("cancels superseded Diff reads without marking the workspace busy or preparing a push", async () => {
+  const { TeamPushService } = await import("../services/team-push-service");
+  const started: AbortSignal[] = [];
+  vi.spyOn(TeamPushService.prototype, "inspect").mockImplementation(async (_scope, _revision, _item, signal) => {
+    started.push(signal);
+    return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new WorkspaceError("CANCELLED", "superseded")), { once: true }));
+  });
+  const { api, sender } = harness();
+  const scope = { teamId: "team", repository: "https://github.com/example/assets" };
+  const item = { kind: "turn" as const, key: "one", sessionKey: "session", turnId: "one" };
+  const first = api.request({ action: "push-inspect", scope, item });
+  await vi.waitFor(() => expect(started).toHaveLength(1));
+  expect(await api.request({ action: "snapshot" })).toMatchObject({ ok: true, data: { value: { busy: false } } });
+  const second = api.request({ action: "push-inspect", scope, item: { ...item, key: "two", turnId: "two" } });
+  await vi.waitFor(() => expect(started).toHaveLength(2));
+  expect(await first).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
+  sender.emit("destroyed");
+  expect(await second).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
+});

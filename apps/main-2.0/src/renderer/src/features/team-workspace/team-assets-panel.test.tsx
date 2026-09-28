@@ -258,3 +258,31 @@ it("selects individual local assets, shows their current Diff, and keeps only fa
   expect(check("first")).toBeNull(); expect(check("second").checked).toBe(true); expect(check("unchecked").checked).toBe(false);
   expect(container.textContent).toContain("fixture failure"); expect(container.textContent).toContain("已推送 1 项");
 });
+
+it("keeps selection responsive during inspection, ignores stale replies and reuses viewed diffs", async () => {
+  let first!: (value: TeamReply) => void;
+  const inspections: string[] = [];
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, limited: false, skipped: 0, entries: input.kind === "skills" ? [{ name: "slow", path: ".agents/skills/slow/SKILL.md", bytes: 10 }, { name: "fast", path: ".agents/skills/fast/SKILL.md", bytes: 20 }] : [] } });
+    if (input.action === "push-inspect") {
+      inspections.push(input.item.key);
+      if (input.item.kind === "resource" && input.item.id === "slow") return new Promise(resolve => { first = resolve; });
+      return ok({ kind: "push-inspection", value: { bytes: 500, item: { key: input.item.key, name: "fast", status: "modified", files: [{ path: "SKILL.md", before: "old", after: "fresh" }] } } });
+    }
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click()); await act(async () => button("Push 推送").click());
+  await act(async () => button("slow").click());
+  expect(button("fast").disabled).toBe(false);
+  await act(async () => container.querySelector<HTMLInputElement>('input[aria-label="选择 fast"]')!.click());
+  expect(container.textContent).toContain("已选 1 项");
+  await act(async () => button("fast").click());
+  expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("+fresh");
+  await act(async () => first(ok({ kind: "push-inspection", value: { bytes: 100, item: { key: inspections[0]!, name: "slow", status: "added", files: [{ path: "SKILL.md", before: null, after: "late result" }] } } })));
+  expect(container.textContent).not.toContain("late result");
+  await act(async () => button("fast").click());
+  expect(inspections).toHaveLength(2);
+  await act(async () => button("刷新 Diff").click()); expect(inspections).toHaveLength(3);
+  expect(request.mock.calls.some(([input]) => input.action === "push-preview" || input.action === "push-publish")).toBe(false);
+});

@@ -67,3 +67,12 @@ it("captures the selected Skill's complete files, ignores its install marker and
   await expect(readTeamLocalPush(root, "skills", ".agents/skills/review/SKILL.md")).rejects.toMatchObject({ code: "LOCAL_ASSET_INVALID" });
   await expect(readTeamLocalPush(root, "documents", "../private.md")).rejects.toMatchObject({ code: "LOCAL_ASSET_NOT_FOUND" });
 });
+
+it("reads a selected document without rescanning other resources", async () => {
+  const { readTeamLocalPush } = await import("./team-local-assets");
+  await fs.mkdir(path.join(root, "docs")); await fs.writeFile(path.join(root, "docs", "one.md"), "Selected document");
+  const { vi } = await import("vitest");
+  const scan = vi.spyOn(fs, "opendir").mockRejectedValue(new Error("No directory scan expected"));
+  try { expect(await readTeamLocalPush(root, "documents", "docs/one.md")).toMatchObject({ content: "Selected document" }); expect(scan).not.toHaveBeenCalled(); }
+  finally { scan.mockRestore(); }
+});
