@@ -11,6 +11,7 @@ import { createInMemoryStore } from "./postgres/test-session-store";
 import { PGliteTestPool } from "./postgres/test-pglite";
 import { writeMigratedSession } from "./session-migration-writers";
 import { SessionStore } from "./session-store";
+import { SessionIndexFailures } from "./session-index-failures";
 import type { IndexedSession, LoadedSession, MigrationTarget, PortableSession, SessionSource } from "./types";
 
 // The V2 MCP binary is intentionally standalone and has no TypeScript declarations.
@@ -44,6 +45,92 @@ function session(index: number): LoadedSession {
 }
 
 describe("indexer", () => {
+  it("keeps failures visible during backoff, isolates other sessions and supports manual recovery", async () => {
+    const store = createInMemoryStore();
+    const state = new SessionIndexFailures(() => 0);
+    const logIndexFailure = vi.fn();
+    const upsert = vi.spyOn(store, "upsertIndexedSession");
+    upsert.mockRejectedValueOnce(new Error("transient database failure"));
+    const options = { failureState: state, logIndexFailure, indexFailureLogPath: "/fixture/log" };
+    try {
+      expect(await syncLoadedSessionsInBatches(store, [session(1), session(2)], options))
+        .toMatchObject({ indexed: 1, skipped: 1, error: expect.stringContaining("1 session") });
+      expect(await syncLoadedSessionsInBatches(store, [session(1), session(2)], options))
+        .toMatchObject({ indexed: 0, skipped: 2, error: expect.stringContaining("1 session") });
+      expect(upsert).toHaveBeenCalledTimes(2);
+      expect(logIndexFailure).toHaveBeenCalledTimes(1);
+      expect(await syncLoadedSessionsInBatches(store, [session(1)], { ...options, retryFailures: true }))
+        .toMatchObject({ indexed: 1, skipped: 0, error: null });
+      expect(state.deferred(session(1).session)).toBeUndefined();
+    } finally {
+      await store.close();
+    }
+  });
+  it.each(["failed", "missing"] as const)("preserves a %s diagnostic write during backoff until a retry writes it", async (writer) => {
+    const store = createInMemoryStore();
+    const state = new SessionIndexFailures(() => 0);
+    const upsert = vi.spyOn(store, "upsertIndexedSession").mockRejectedValue(new Error("index write failed"));
+    const logIndexFailure = vi.fn().mockRejectedValue(new Error("disk full"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const options = {
+      failureState: state,
+      indexFailureLogPath: "/fixture/session-index-failures.jsonl",
+      logIndexFailure: writer === "failed" ? logIndexFailure : undefined,
+    };
+    try {
+      for (let scan = 0; scan < 2; scan++) {
+        const status = await syncLoadedSessionsInBatches(store, [session(1)], options);
+        expect(status).toMatchObject({ indexed: 0, skipped: 1, total: 1 });
+        expect(status.error).toContain("Diagnostic details could not be written");
+        expect(status.error).not.toContain(options.indexFailureLogPath);
+      }
+      expect(upsert).toHaveBeenCalledTimes(1);
+      expect(logIndexFailure).toHaveBeenCalledTimes(writer === "failed" ? 1 : 0);
+
+      logIndexFailure.mockResolvedValue(undefined);
+      const retryOptions = { ...options, logIndexFailure };
+      await syncLoadedSessionsInBatches(store, [session(1)], { ...retryOptions, retryFailures: true });
+      const deferred = await syncLoadedSessionsInBatches(store, [session(1)], retryOptions);
+      expect(deferred.error).toContain(`Diagnostic log: ${options.indexFailureLogPath}`);
+      expect(upsert).toHaveBeenCalledTimes(2);
+      expect(logIndexFailure).toHaveBeenCalledTimes(writer === "failed" ? 2 : 1);
+    } finally {
+      upsert.mockRestore();
+      consoleError.mockRestore();
+      await store.close();
+    }
+  });
+
+  it("prunes disappeared failures only after a complete source scan", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-retry-prune-"));
+    const state = new SessionIndexFailures(() => 0);
+    const upsert = vi.spyOn(store, "upsertIndexedSession").mockRejectedValue(new Error("write failed"));
+    const options = { failureState: state, loadOptions: { homeDir }, logIndexFailure: vi.fn() };
+    try {
+      const filePath = writeCodexSession(homeDir, "retry-prune", "synthetic question", "Retry");
+      await syncDefaultSessionsInBatches(store, options);
+      const failedSession = upsert.mock.calls[0][0];
+      expect(state.deferred(failedSession)).toBeDefined();
+      fs.unlinkSync(filePath);
+
+      await syncLoadedSessionsInBatches(store, [], options);
+      expect(state.deferred(failedSession)).toBeDefined();
+      await expect(syncDefaultSessionsInBatches(store, {
+        ...options,
+        onProgress: () => { throw new Error("scan interrupted"); },
+      })).rejects.toThrow("scan interrupted");
+      expect(state.deferred(failedSession)).toBeDefined();
+
+      await syncDefaultSessionsInBatches(store, options);
+      expect(state.deferred(failedSession)).toBeUndefined();
+    } finally {
+      upsert.mockRestore();
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("indexes loaded sessions in batches and yields between batches", async () => {
     const store = createInMemoryStore();
     const progress: number[] = [];
@@ -64,9 +151,10 @@ describe("indexer", () => {
   });
 
   it("fully preserves, repeatedly indexes, and searches a Turn larger than 3 MB", async () => {
-    const database = new PostgresDatabase(new PGliteTestPool(), {
+    const pool = new PGliteTestPool();
+    const database = new PostgresDatabase(pool, {
       migrationLock: false,
-      migrations: POSTGRES_MIGRATIONS,
+      migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 55),
     });
     await database.initialize();
     const store = new SessionStore(database);
@@ -85,9 +173,19 @@ describe("indexer", () => {
       index: 0,
     }];
 
+    const failures = new SessionIndexFailures();
+    const logIndexFailure = vi.fn();
+    const failed = await syncLoadedSessionsInBatches(store, [oversized], { failureState: failures, logIndexFailure });
+    expect(failed).toMatchObject({ indexed: 0, skipped: 1 });
+    expect(logIndexFailure.mock.calls[0]?.[0].error.message).toContain("string is too long for tsvector");
+    expect(failures.deferred(oversized.session)).toBeDefined();
+    await new PostgresDatabase(pool, { migrationLock: false, migrations: POSTGRES_MIGRATIONS }).initialize();
+    // App restart after migration recreates the process-owned backoff state.
+    const upgradedFailures = new SessionIndexFailures();
+
     for (let attempt = 0; attempt < 3; attempt++) {
       oversized.session.fileMtimeMs += 1;
-      const status = await syncLoadedSessionsInBatches(store, [oversized], { batchSize: 1 });
+      const status = await syncLoadedSessionsInBatches(store, [oversized], { batchSize: 1, failureState: upgradedFailures });
       expect(status).toMatchObject({ indexed: 1, skipped: 0, total: 1, error: null });
     }
 
