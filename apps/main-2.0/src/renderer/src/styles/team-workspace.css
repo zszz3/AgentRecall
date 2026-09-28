@@ -163,10 +163,19 @@
 }
 
 .team-sync-control { padding: 0 32px 18px; flex-shrink: 0; max-height: 38%; overflow: auto; }
-.team-sync-control-main { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--panel-subtle); }
+.team-sync-control-main { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
 .team-sync-control-main strong { font-size: 12px; font-weight: 550; }
 .team-sync-control p { font-size: 12px; line-height: 1.6; color: var(--text-muted); margin: 4px 0 0; }
 .team-sync-control-main .team-space-actions { flex-shrink: 0; }
+.team-transfer-actions { display: inline-flex; align-items: center; padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-bg); box-shadow: var(--shadow-xs); }
+.team-transfer-actions > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 70px; height: 28px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; transition: background .12s ease, color .12s ease; }
+.team-transfer-actions > button:hover:not(:disabled) { background: var(--panel-hover); color: var(--text); }
+.team-transfer-actions > button:active:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.team-transfer-actions > button > svg { flex-shrink: 0; stroke-width: 1.7; }
+.team-transfer-spinner { animation: team-transfer-spin .85s linear infinite; }
+@keyframes team-transfer-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .team-transfer-spinner { animation: none; } }
+
 .team-sync-results { margin-top: 10px; font-size: 12px; }
 .team-sync-results summary { cursor: pointer; color: var(--text-muted); }
 .team-sync-results > div { padding: 12px 0; border-bottom: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
