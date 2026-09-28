@@ -237,6 +237,6 @@ MCP 支持 stdio 与 HTTP。同步仅写配置，不下载、运行服务器，�
 
 Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_environment_policy.set` 与 Claude Code 的 `env`。不导入个人 `.env` 文件，也不为普通字符串做 `${…}` 展开；包含此语法会拒绝，密钥引用应放在 MCP 的 `fromEnv` 中。Codex 现有的环境过滤策略仍然有效，公共 Env 不等同于传给所有 MCP 的变量；MCP 专用变量放在服务器自己的 `env` 中。
 
-团队配置通过「同步团队」统一更新，团队的「配置」页面可以查看内容与适用客户端，不提供自动上传本机配置的功能。配置落点、冲突与备份见[团队空间指南](team-workspace.md#同步写到哪里)。
+团队配置通过「同步团队」统一更新，团队的「共享指令」「MCP」「Env」独立页面可以分别查看内容与适用客户端，不提供自动上传本机配置的功能。配置落点、冲突与备份见[团队空间指南](team-workspace.md#同步写到哪里)。
 
 客户端格式依据：[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)、[Claude Code 项目设置](https://code.claude.com/docs/en/settings)。

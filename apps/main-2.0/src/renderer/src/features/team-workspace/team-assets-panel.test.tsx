@@ -109,19 +109,30 @@ it("session sharing remains explicit and never uploads when the dialog opens", a
   expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
 });
 
-it("team configuration groups three resource kinds and opens details in the existing reader", async () => {
+it("opens instructions, MCP and Env independently and clears the previous reader when switching", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
   await act(async () => button("Example").click());
-  await act(async () => button("配置").click());
-  expect(container.textContent).toContain("共享指令"); expect(container.textContent).toContain("MCP"); expect(container.textContent).toContain("TEAM_MODE");
-  await act(async () => button("知识工具").click());
-  expect(container.querySelector('[aria-label="配置详情"]')?.textContent).toContain("DOCS_AUTH");
-  await act(async () => button("关闭配置").click());
-  expect(document.activeElement).toBe(button("知识工具"));
+  const tabs = container.querySelector('[aria-label="团队资源"]')!;
+  expect([...tabs.querySelectorAll("button")].map(item => item.textContent)).toEqual(["共享会话", "Skills", "文档", "共享指令", "MCP", "Env", "工作目录"]);
+  await act(async () => button("共享指令").click());
+  expect(container.querySelector("h2")?.textContent).toContain("共享指令");
+  expect(container.textContent).not.toContain("知识工具"); expect(container.textContent).not.toContain("TEAM_MODE");
   await act(async () => button("代码约定").click());
-  expect(container.querySelector('[aria-label="配置详情"]')?.textContent).toContain("Run focused tests.");
-  await act(async () => container.querySelector('[aria-label="配置详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-  expect(container.querySelector('[aria-label="配置详情"]')).toBeNull();
+  expect(container.querySelector('[aria-label="共享指令详情"]')?.textContent).toContain("Run focused tests.");
+  await act(async () => button("MCP").click());
+  expect(container.querySelector('[aria-label="共享指令详情"]')).toBeNull();
+  expect(container.textContent).not.toContain("代码约定"); expect(container.textContent).not.toContain("TEAM_MODE");
+  await act(async () => button("知识工具").click());
+  expect(container.querySelector('[aria-label="MCP详情"]')?.textContent).toContain("DOCS_AUTH");
+  await act(async () => button("关闭详情").click());
+  expect(document.activeElement).toBe(button("知识工具"));
+  await act(async () => button("Env").click());
+  expect(container.querySelector("h2")?.textContent).toContain("Env");
+  expect(container.textContent).not.toContain("代码约定"); expect(container.textContent).not.toContain("知识工具");
+  await act(async () => button("TEAM_MODE").click());
+  expect(container.querySelector('[aria-label="Env详情"]')?.textContent).toContain("TEAM_MODE=review");
+  await act(async () => container.querySelector('[aria-label="Env详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(container.querySelector('[aria-label="Env详情"]')).toBeNull();
   expect(request.mock.calls.every(([input]) => ["snapshot", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });

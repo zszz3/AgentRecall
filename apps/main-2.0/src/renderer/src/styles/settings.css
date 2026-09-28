@@ -1703,18 +1703,6 @@
 }
 
 @media (max-width: 860px) {
-  .app {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-
-  .app::before {
-    width: 220px;
-  }
-
-  .app::after {
-    left: 220px;
-  }
-
   .content {
     padding-right: 12px;
     padding-left: 12px;

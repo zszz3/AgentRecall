@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronRight, Code2, FileText, FolderOpen, MessagesSquare, MoreHorizontal, PackageSearch, Plus, RefreshCw, Settings, Terminal, UsersRound } from "lucide-react";
+import { ArrowLeft, ChevronRight, Code2, FileCode2, FileText, FolderOpen, MessagesSquare, MoreHorizontal, PackageSearch, Plug, Plus, RefreshCw, Settings, SlidersHorizontal, Terminal, UsersRound } from "lucide-react";
 import type { DirectoryConnection, TeamSpace } from "@agentrecall/workspace-core";
 import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
@@ -39,7 +39,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
 }
 function TeamContent({ language, team, snapshot, api, onSnapshot }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "configuration" | "directories">("sessions");
+  const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "instructions" | "mcp" | "environment" | "directories">("sessions");
   const [syncing, setSyncing] = useState(false), [refreshKey, setRefreshKey] = useState(0);
   const directories = (snapshot.directories ?? []).filter((entry) => entry.teamId === team.id);
   const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing };
@@ -49,10 +49,12 @@ function TeamContent({ language, team, snapshot, api, onSnapshot }: { language: 
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
       <button aria-pressed={tab === "skills"} onClick={() => setTab("skills")}><PackageSearch size={16} />Skills</button>
       <button aria-pressed={tab === "documents"} onClick={() => setTab("documents")}><FileText size={16} />{l("Documents", "文档")}</button>
-      <button aria-pressed={tab === "configuration"} onClick={() => setTab("configuration")}><Settings size={16} />{l("Configuration", "配置")}</button>
+      <button aria-pressed={tab === "instructions"} onClick={() => setTab("instructions")}><FileCode2 size={16} />{l("Shared instructions", "共享指令")}</button>
+      <button aria-pressed={tab === "mcp"} onClick={() => setTab("mcp")}><Plug size={16} />MCP</button>
+      <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
     </div>
-    {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "configuration" ? <TeamConfigurationPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
+    {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel key={tab} kind={tab} selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
 
   </div>;
 }
