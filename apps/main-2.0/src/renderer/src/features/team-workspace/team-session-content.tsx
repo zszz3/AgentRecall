@@ -1,15 +1,24 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { TeamSessionContent, TeamSessionDetail } from "../../../../shared/team-sessions";
+import { TurnAccordion } from "../session-detail/turn-accordion";
 import type { LanguageMode } from "../../language";
 
 export function TeamSessionContentView({ content, language }: { content: TeamSessionContent; language: LanguageMode }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
+  const turnsById = useMemo(() => new Map(content.selectedTurns?.map((turn) => [turn.id, turn])), [content.selectedTurns]);
+  const loadTurn = useCallback(async (id: string) => turnsById.get(id) ?? null, [turnsById]);
+  const snapshotKey = `${content.root.session.sessionKey}:${content.root.exportedAt}`;
   return <div className="team-session-content">
     {typeof content.root.session.projectPath === "string" && content.root.session.projectPath && <p>{l("Source directory: ", "来源工作目录：")}{content.root.session.projectPath}</p>}
+    {content.selectedTurns && <p className="team-workspace-notice">{l(`Selected turns · ${content.selectedTurns.length}. This is a partial session.`, `所选轮次 · ${content.selectedTurns.length}，这是会话片段。`)}</p>}
     <p>{(content.bytes / 1024 / 1024).toFixed(2)} MiB · {content.children.length} {l("child sessions", "个子会话")} · {content.files.length} {l("files", "个文件")}</p>
     {content.missingAttachments.length > 0 && <details className="team-workspace-notice"><summary>{l("Unavailable attachments", "无法读取的附件")} · {content.missingAttachments.length}</summary><ul>{content.missingAttachments.map((name, index) => <li key={index}>{name}</li>)}</ul></details>}
-    {[content.root, ...content.children].map((detail, index) => <SessionRecord key={detail.session.sessionKey} detail={detail} language={language} initiallyOpen={index === 0} />)}
-    <details><summary>{l("Included source files and attachments", "包含的源文件与附件")}</summary><ul>{content.files.map((file, index) => <li key={index}>{file.name} · {(file.bytes / 1024).toFixed(1)} KiB · {file.kind}</li>)}</ul></details>
+    {content.selectedTurns ? <section className="team-session-turns" aria-label={l("Shared turns", "分享轮次")}>
+      <TurnAccordion key={snapshotKey} sessionKey={snapshotKey} turns={content.selectedTurns}
+        loading={false} matchedTurnId={null} matchedMessageIndex={null} showTools query="" language={language}
+        onLoadTurn={loadTurn} turnNumbering="source" attachmentAccess="download" />
+    </section> : [content.root, ...content.children].map((detail, index) => <SessionRecord key={detail.session.sessionKey} detail={detail} language={language} initiallyOpen={index === 0} />)}
+    <details><summary>{content.selectedTurns ? l("Included attachments", "包含的附件") : l("Included source files and attachments", "包含的源文件与附件")}</summary><ul>{content.files.map((file, index) => <li key={index}>{file.name} · {(file.bytes / 1024).toFixed(1)} KiB · {file.kind}</li>)}</ul></details>
   </div>;
 }
 function SessionRecord({ detail, language, initiallyOpen }: { detail: TeamSessionDetail; language: LanguageMode; initiallyOpen: boolean }) {

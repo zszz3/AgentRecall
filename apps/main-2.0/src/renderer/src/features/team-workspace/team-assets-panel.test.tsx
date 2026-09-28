@@ -8,6 +8,7 @@ import type { TeamPayload, TeamReply, TeamRequest, TeamCatalog } from "../../../
 import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
 import { TeamWorkspacePage } from "./team-workspace-page";
+import { TeamSessionContentView } from "./team-session-content";
 import { TeamSessionShareDialog } from "./team-session-share-dialog";
 import { TeamSettings } from "../settings/team-settings";
 
@@ -194,4 +195,37 @@ it("prefills edits and discards a preview on close without publishing", async ()
   expect(request).toHaveBeenCalledWith({ action: "configuration-discard", token });
   expect(document.activeElement).toBe(button("编辑"));
   expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
+});
+
+it("previews selected turn IDs explicitly and keeps full-session sharing separate", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);
+  await act(async () => root.render(<TeamSessionShareDialog sessionKey="codex:one" turnIds={["turn-2", "turn-9"]} language="zh" onClose={vi.fn()} api={{ request }} />));
+  expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
+  expect(container.textContent).toContain("分享 2 个所选轮次");
+  expect(container.textContent).not.toContain("预览完整会话");
+  await act(async () => button("预览所选轮次").click());
+  expect(request).toHaveBeenCalledWith({ action: "session-preview", scope: { teamId: team.id, repository }, sessionKey: "codex:one", turnIds: ["turn-2", "turn-9"] });
+  expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
+});
+
+
+it("reuses the session Turn reader for shared fragments without accessing local attachments", async () => {
+  const previewAttachment = vi.fn(); Object.assign(window, { sessionSearch: { previewAttachment } });
+  const turn = { id: "selected-turn", turnIndex: 8, sourceMessageIndex: 16, synthetic: false, status: "completed" as const,
+    startedAt: null, endedAt: null, userPreview: "Review **changes**", assistantPreview: "Done", inputTokens: 0, outputTokens: 0,
+    cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0, errorCount: 0, toolNames: ["read"], messageCount: 1, spanCount: 1,
+    messages: [{ messageIndex: 0, sourceMessageIndex: 16, role: "user" as const, content: "Review **changes**", timestamp: "", attachments: [{ id: "shared", fileName: "selected.txt", mimeType: "text/plain", previewKind: "text" as const, status: "available" as const }] }],
+    spans: [{ id: "read", parentSpanId: null, spanIndex: 0, kind: "tool" as const, name: "read", status: "completed" as const, startedAt: null, endedAt: null, callId: "call", input: { path: "selected.txt" }, output: { text: "Selected output" }, error: null, attributes: {} }],
+  };
+  await act(async () => root.render(<TeamSessionContentView language="zh" content={{ bytes: 50, children: [], files: [], missingAttachments: [], selectedTurns: [turn], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:one", originalTitle: "Example", displayTitle: "Example", source: "codex-cli" }, messages: [], traceEvents: [] } }} />));
+  expect(container.querySelector(".team-session-record")).toBeNull();
+  expect(container.querySelector(".turn-card-summary")!.textContent).toContain("第 9 轮");
+  await act(async () => container.querySelector<HTMLButtonElement>(".turn-card-summary")!.click());
+  expect(container.querySelector(".msg-body strong")?.textContent).toBe("changes");
+  expect(container.querySelector(".msg.tool")).not.toBeNull();
+  expect(container.textContent).toContain("Selected output");
+  const attachment = container.querySelector<HTMLButtonElement>(".message-attachments button")!;
+  expect(attachment.disabled).toBe(true); expect(attachment.title).toContain("下载分享包");
+  await act(async () => attachment.click()); expect(previewAttachment).not.toHaveBeenCalled();
 });

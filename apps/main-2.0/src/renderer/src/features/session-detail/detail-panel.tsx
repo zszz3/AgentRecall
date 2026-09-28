@@ -247,6 +247,7 @@ export function DetailPanel({
   matchedTurnId,
   onLoadTurn,
   onMigrateTurn,
+  onShareTurns,
   messages,
   matchedContextMessages,
   matchedMessageIndex,
@@ -297,6 +298,7 @@ export function DetailPanel({
   matchedTurnId: string | null;
   onLoadTurn: (turnId: string) => Promise<SessionTurnDetail | null>;
   onMigrateTurn?: (turn: SessionTurnSummary) => void;
+  onShareTurns?: (turnIds: string[]) => void;
   messages: SessionMessage[];
   matchedContextMessages: SessionMessage[];
   matchedMessageIndex: number | null;
@@ -1007,6 +1009,7 @@ export function DetailPanel({
                 isSubagent={session.isSubagent === true}
                 onLoadTurn={onLoadTurn}
                 onMigrateTurn={onMigrateTurn}
+                onShareTurns={onShareTurns}
                 onFindMatchCountChange={setTurnSearchMatchCount}
               />
             </section>

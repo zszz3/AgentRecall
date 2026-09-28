@@ -185,7 +185,7 @@ export class TeamWorkspaceService {
       };
       switch (request.action) {
         case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal) };
-        case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal) };
+        case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal, request.turnIds) };
         case "session-detail": return { kind: "session-detail", value: await sharing.detail(context, request.id, signal) };
         case "session-publish": return await sharing.publish(owner, context, request.token, signal, assertContext) ? complete("会话已分享到团队。本地原会话保留。") : { kind: "cancelled" };
         case "session-download": return await sharing.download(owner, context, request.id, signal) ? complete("完整会话包已保存。") : { kind: "cancelled" };

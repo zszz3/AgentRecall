@@ -25,8 +25,8 @@ async function fixture() {
   const store = {
     getSession: vi.fn(async (key: string) => key === session.sessionKey ? session : child), searchSessions: vi.fn(async () => [session, child]),
     getAllMessages: vi.fn(async () => messages), getTraceEvents: vi.fn(async () => traceEvents),
-    getSessionSourceArtifacts: vi.fn(async () => [{ kind: "session-file" as const, mimeType: "application/json", fileName: "synthetic.jsonl", bytes: Buffer.from('{"raw":"完整源文件"}\n') }]),
-    getAttachmentFile: vi.fn(async () => null),
+    getSessionTurn: vi.fn(), getSessionSourceArtifacts: vi.fn(async () => [{ kind: "session-file" as const, mimeType: "application/json", fileName: "synthetic.jsonl", bytes: Buffer.from('{"raw":"完整源文件"}\n') }]),
+    getAttachmentFile: vi.fn<import("../../core/session-store").SessionStore["getAttachmentFile"]>().mockResolvedValue(null),
   };
   const remote = new TeamSessionGitHub(vi.fn(), async () => "fixture");
   vi.spyOn(remote, "check").mockResolvedValue();
@@ -115,4 +115,56 @@ it("accepts empty content and the exact complete packet limit, rejecting wrapper
   json = JSON.stringify(packet); expect(Buffer.byteLength(json)).toBeGreaterThan(MAX_TEAM_SESSION_BYTES);
   download.mockResolvedValue(gzipSync(json));
   await expect(f.service.detail(f.context, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
+});
+
+function selectedTurn(id: string, turnIndex: number): import("../../core/types").SessionTurnDetail {
+  return { id, turnIndex, sourceMessageIndex: turnIndex * 2, synthetic: false, status: "completed", startedAt: null, endedAt: null,
+    userPreview: `问题 ${id}`, assistantPreview: "回答", inputTokens: 1, outputTokens: 2, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: 3,
+    errorCount: 0, toolNames: ["read"], messageCount: 1, spanCount: 1,
+    messages: [{ messageIndex: 0, sourceMessageIndex: turnIndex * 2, role: "user", content: `完整消息 ${id}`, timestamp: "", attachments: [{ id: "selected-attachment", fileName: "selected.txt", status: "available", previewKind: "text", mimeType: "text/plain" }] }],
+    spans: [{ id: `span-${id}`, parentSpanId: null, spanIndex: 0, kind: "tool", name: "read", status: "completed", startedAt: null, endedAt: null, callId: `call-${id}`, input: { file: "selected.txt" }, output: { text: `完整工具输出 ${id}` }, error: null, attributes: { nested: { preserved: true } } }],
+  };
+}
+
+it("exports only selected turns in source order, preserving tool payloads and only their attachments", async () => {
+  const f = await fixture(); f.session.firstQuestion = "UNSELECTED_SECRET"; f.session.aiSummary = "UNSELECTED_SUMMARY";
+  f.messages[0]!.content = "UNSELECTED_MESSAGE";
+  const attachmentPath = path.join(root, "selected.txt"); await fs.writeFile(attachmentPath, "SELECTED_ATTACHMENT");
+  f.store.getAttachmentFile.mockResolvedValue({ cachePath: attachmentPath, id: "selected-attachment", fileName: "selected.txt", mimeType: "text/plain", previewKind: "text", status: "available" });
+  const first = selectedTurn("first", 1), last = selectedTurn("last", 8);
+  f.store.getSessionTurn.mockImplementation(async (sessionKey: string, id: string) => sessionKey === f.session.sessionKey ? [first, last].find((turn) => turn.id === id) ?? null : null);
+  const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal, ["last", "first"]);
+  expect(preview.selectedTurns?.map((turn) => turn.id)).toEqual(["first", "last"]);
+  expect(preview.children).toEqual([]); expect(preview.root.messages).toEqual([]);
+  expect(f.store.searchSessions).not.toHaveBeenCalled(); expect(f.store.getAllMessages).not.toHaveBeenCalled(); expect(f.store.getTraceEvents).not.toHaveBeenCalled(); expect(f.store.getSessionSourceArtifacts).not.toHaveBeenCalled();
+  expect(f.store.getAttachmentFile).toHaveBeenCalledExactlyOnceWith(f.session.sessionKey, "selected-attachment");
+  first.messages[0]!.content = "CHANGED_AFTER_PREVIEW";
+  await f.service.publish(1, f.context, preview.token, f.signal, async () => undefined);
+  expect(f.confirm).toHaveBeenCalledWith(1, expect.stringContaining("2 个所选轮次"));
+  const data = f.upload.mock.calls[0]![3], text = gunzipSync(data).toString(), packet = JSON.parse(text);
+  expect(text).not.toMatch(/UNSELECTED|完整源文件|codex:child|CHANGED_AFTER_PREVIEW/);
+  expect(packet.records[0].files[0].attachmentId).toBe("selected-attachment");
+  expect(packet.schemaVersion).toBe(3); expect(packet.selectedTurns[1].spans).toEqual(last.spans);
+  expect(Buffer.from(packet.records[0].files[0].data, "base64").toString()).toBe("SELECTED_ATTACHMENT");
+  const download = vi.spyOn(f.remote, "download").mockResolvedValue(data);
+  expect((await f.service.detail(f.context, 17, f.signal)).selectedTurns).toEqual(preview.selectedTurns);
+  packet.records[0].detail.messages.push(f.messages[0]); download.mockResolvedValue(gzipSync(JSON.stringify(packet)));
+  await expect(f.service.detail(f.context, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
+});
+
+it("rejects empty, duplicate, oversized and missing turn selections without falling back to full sharing", async () => {
+  const f = await fixture(); f.store.getSessionTurn.mockResolvedValue(null);
+  for (const ids of [[], ["one", "one"], Array.from({ length: 501 }, (_, i) => `turn-${i}`), ["foreign-turn"]]) {
+    await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, ids)).rejects.toMatchObject({ code: "TEAM_TURN_SELECTION_INVALID" });
+  }
+  expect(f.upload).not.toHaveBeenCalled(); expect(f.store.getSessionSourceArtifacts).not.toHaveBeenCalled();
+  expect(f.store.getSessionTurn).toHaveBeenCalledExactlyOnceWith(f.session.sessionKey, "foreign-turn");
+});
+
+it("bounds selected-turn packets including multibyte tools and metadata", async () => {
+  const f = await fixture(), turn = selectedTurn("one", 0);
+  turn.spans[0]!.output = { text: "汉".repeat(Math.floor(MAX_TEAM_SESSION_BYTES / 3)) };
+  f.store.getSessionTurn.mockResolvedValue(turn);
+  await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, [turn.id])).rejects.toMatchObject({ code: "TEAM_SESSION_TOO_LARGE" });
+  expect(f.upload).not.toHaveBeenCalled(); expect(f.store.getAttachmentFile).not.toHaveBeenCalled();
 });

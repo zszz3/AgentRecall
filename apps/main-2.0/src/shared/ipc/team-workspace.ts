@@ -2,6 +2,7 @@ import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
 import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
 import type { TeamSessionPage, TeamSessionContent, TeamSessionPreview } from "../team-sessions";
+import { teamTurnSelectionSchema } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
 
 const id = z.string().min(1).max(64).regex(/^[a-z][a-z0-9-]*$/);
@@ -41,7 +42,7 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("document-preview"), scope: selectedScope, id }).strict(),
   z.object({ action: z.literal("document-install"), scope: selectedScope, id, revision }).strict(),
   z.object({ action: z.literal("session-list"), scope: selectedScope, page: z.number().int().min(1).max(100) }).strict(),
-  z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory }).strict(),
+  z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory, turnIds: teamTurnSelectionSchema.optional() }).strict(),
   z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
   ...(["session-detail", "session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
   z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional() }).strict(),

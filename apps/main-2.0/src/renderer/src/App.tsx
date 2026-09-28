@@ -190,7 +190,7 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
-  const [teamShareSessionKey, setTeamShareSessionKey] = useState<string | null>(null);
+  const [teamShare, setTeamShare] = useState<{ sessionKey: string; turnIds?: string[] } | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
@@ -2170,6 +2170,7 @@ export function App(): ReactElement {
             t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
           ),
           migrate: beginMigrate,
+          shareTurns: (session, turnIds) => setTeamShare({ sessionKey: session.sessionKey, turnIds }),
           uploadRemote: (session) => void uploadRemoteSession(session),
           copyResume: (session) => void runAction(
             t("Copying resume command", "正在复制 Resume 命令"),
@@ -2238,7 +2239,7 @@ export function App(): ReactElement {
           ),
         }}
       />
-      {teamShareSessionKey && <TeamSessionShareDialog language={language} sessionKey={teamShareSessionKey} onClose={() => setTeamShareSessionKey(null)} />}
+      {teamShare && <TeamSessionShareDialog language={language} {...teamShare} onClose={() => setTeamShare(null)} />}
       {contextMenu ? (
         <SessionContextMenu
           state={contextMenu}
@@ -2260,7 +2261,7 @@ export function App(): ReactElement {
             )
           )}
           canMigrate={canMigrateSession(contextMenu.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
-          onShareTeam={() => { setTeamShareSessionKey(contextMenu.session.sessionKey); setContextMenu(null); }}
+          onShareTeam={() => { setTeamShare({ sessionKey: contextMenu.session.sessionKey }); setContextMenu(null); }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
           onSelectMultiple={() => beginBulkSelection(contextMenu.session.sessionKey)}

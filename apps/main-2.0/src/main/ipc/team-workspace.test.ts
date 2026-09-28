@@ -194,7 +194,7 @@ describe("V2 team workspace IPC", () => {
 
 it("enforces team/project scope for sessions and cancels retained previews on window destruction", async () => {
   const sharing = new TeamSessionSharing({
-    store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() },
+    store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionTurn: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() },
     ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn(),
   });
   const list = vi.spyOn(sharing, "list").mockResolvedValue({ page: 1, items: [], hasMore: false });
@@ -228,7 +228,7 @@ it("disabling teams cancels the current download before persisting disabled mode
 });
 
 it("creates a name-only space and exposes asset previews and sessions without a checkout", async () => {
-  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
+  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionTurn: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
   const list = vi.spyOn(sharing, "list").mockResolvedValue({ page: 1, items: [], hasMore: false });
   const { api, workspace, confirm } = harness(sharing);
   await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
@@ -247,7 +247,7 @@ it("creates a name-only space and exposes asset previews and sessions without a 
 });
 
 it("opens teams without projects, reads connected local assets and guards installation clients", async () => {
-  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
+  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionTurn: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
   const list = vi.spyOn(sharing, "list").mockResolvedValue({ page: 1, items: [], hasMore: false });
   const { api, workspace, confirm } = harness(sharing);
   await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
@@ -341,4 +341,18 @@ it("includes preview tokens and the reply envelope in the authoring size limit",
   preview.files[0].after = "a".repeat(4 * 1024 * 1024 - Buffer.byteLength(JSON.stringify(preview)));
   vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue(preview);
   expect(await api.request({ action: "configuration-preview", scope, revision: preview.revision, change })).toMatchObject({ ok: false, error: { code: "ASSETS_TOO_LARGE" } });
+});
+
+it("validates selected turn IDs at IPC and forwards them with the authenticated window scope", async () => {
+  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionTurn: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
+  const prepare = vi.spyOn(sharing, "prepare").mockRejectedValue(new WorkspaceError("FIXTURE_PREPARE", "fixture"));
+  const { api, workspace, sender } = harness(sharing);
+  await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
+  const scope = { teamId: "team", repository: "https://github.com/example/assets" };
+  for (const turnIds of [[], ["duplicate", "duplicate"], Array.from({ length: 501 }, (_, i) => `turn-${i}`)]) {
+    expect(await api.request({ action: "session-preview", scope, sessionKey: "codex:one", turnIds })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });
+  }
+  expect(prepare).not.toHaveBeenCalled();
+  expect(await api.request({ action: "session-preview", scope, sessionKey: "codex:one", turnIds: ["turn-2", "turn-9"] })).toMatchObject({ ok: false, error: { code: "FIXTURE_PREPARE" } });
+  expect(prepare).toHaveBeenCalledWith(sender.id, expect.objectContaining({ repository: scope.repository, teamWide: true }), "codex:one", expect.any(AbortSignal), ["turn-2", "turn-9"]);
 });

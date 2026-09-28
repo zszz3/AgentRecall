@@ -5,7 +5,7 @@ import type { TeamSessionPreview } from "../../../../shared/team-sessions";
 import type { LanguageMode } from "../../language";
 import { TeamSessionContentView } from "./team-session-content";
 
-export function TeamSessionShareDialog({ sessionKey, language, onClose, api = window.sessionSearch.teamWorkspace }: { sessionKey: string; language: LanguageMode; onClose(): void; api?: TeamWorkspaceApi }) {
+export function TeamSessionShareDialog({ sessionKey, turnIds, language, onClose, api = window.sessionSearch.teamWorkspace }: { sessionKey: string; turnIds?: string[]; language: LanguageMode; onClose(): void; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const dialog = useRef<HTMLDialogElement>(null), alive = useRef(false), running = useRef(false);
   const [snapshot, setSnapshot] = useState<TeamSnapshot | null>(null);
@@ -30,7 +30,7 @@ export function TeamSessionShareDialog({ sessionKey, language, onClose, api = wi
     running.current = true; setBusy(true); setError("");
     const scope = { teamId: selected.id, repository: selected.repository };
     try {
-      const reply = await api.request(publish && preview ? { action: "session-publish", scope, token: preview.token } : { action: "session-preview", scope, sessionKey });
+      const reply = await api.request(publish && preview ? { action: "session-publish", scope, token: preview.token } : { action: "session-preview", scope, sessionKey, ...(turnIds ? { turnIds } : {}) });
       if (!alive.current) return;
       if (!reply.ok) { setError(reply.error.message); if (reply.error.code === "TEAM_PREVIEW_EXPIRED") setPreview(null); }
       else if (reply.data.kind === "session-preview") setPreview(reply.data.value);
@@ -40,14 +40,14 @@ export function TeamSessionShareDialog({ sessionKey, language, onClose, api = wi
   }
   return <dialog ref={dialog} className="team-share-dialog" aria-label={l("Share to team", "分享到团队")} onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <section className="team-workspace"><header className="team-workspace-head"><h2>{l("Share to team", "分享到团队")}</h2><button disabled={busy} onClick={onClose}>{l("Close", "关闭")}</button></header>
-      <p>{l("Share a full snapshot, including conversation, tool events, available source files and attachments. Check the contents before confirming. A private team repository is required.", "分享完整快照，包括对话、工具事件、可读取的源文件和附件。确认前请检查内容；需要使用私有团队仓库。")}</p>
+      <p>{turnIds ? l(`Share ${turnIds.length} selected turns, including their messages, tool records and available attachments. Original session files and child sessions are excluded. A private team repository is required.`, `分享 ${turnIds.length} 个所选轮次，包含其中的消息、工具记录和可读取附件；不包含原始会话文件和子会话。需要使用私有团队仓库。`) : l("Share a full snapshot, including conversation, tool events, available source files and attachments. Check the contents before confirming. A private team repository is required.", "分享完整快照，包括对话、工具事件、可读取的源文件和附件。确认前请检查内容；需要使用私有团队仓库。")}</p>
       {busy && <button onClick={() => { void api.request({ action: "cancel-sync" }).then(() => { if (alive.current) setError(l("Cancelled. If an upload was already sent, refresh the team list to check its result.", "已取消等待。如果上传请求已经发出，请刷新团队会话列表核对结果。")); }).catch(() => { if (alive.current) setError(l("Could not confirm cancellation. Wait for the request to finish.", "取消未确认，请等待当前请求结束。")); }); }}>{l("Cancel operation", "取消操作")}</button>}
       {error && <p className="team-workspace-error" role="alert">{error}</p>}
       {done ? <p className="team-workspace-notice" role="status">{done}</p> : !snapshot ? <p role="status">{l("Loading…", "正在读取…")}</p> : !config?.teamEnabled ? <p className="team-workspace-notice">{l("Enable teams in Settings first. This session has not been uploaded.", "请先在设置中开启团队功能，这条会话尚未上传。")}</p> : !selected ? <p className="team-workspace-notice">{l("Connect a team repository in Settings first.", "请先在设置中连接团队仓库。")}</p> : <>
         <label>{l("Destination team", "分享目标")}<select disabled={busy} value={selected.id} onChange={(event) => { setTeamId(event.currentTarget.value); setPreview(null); setError(""); }}>{choices.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
         <small>{selected.repository}</small>
-        {preview && <TeamSessionContentView content={preview} language={language} />}
-        <footer className="team-space-actions"><button disabled={busy || snapshot.busy} onClick={() => void run(false)}>{busy ? l("Working…", "正在处理…") : preview ? l("Rebuild preview", "重新预览") : l("Preview full session", "预览完整会话")}</button>{preview && <button className="is-primary" disabled={busy || snapshot.busy} onClick={() => void run(true)}>{l("Confirm sharing…", "确认分享…")}</button>}</footer>
+        {preview && <TeamSessionContentView key={preview.token} content={preview} language={language} />}
+        <footer className="team-space-actions"><button disabled={busy || snapshot.busy} onClick={() => void run(false)}>{busy ? l("Working…", "正在处理…") : preview ? l("Rebuild preview", "重新预览") : turnIds ? l("Preview selected turns", "预览所选轮次") : l("Preview full session", "预览完整会话")}</button>{preview && <button className="is-primary" disabled={busy || snapshot.busy} onClick={() => void run(true)}>{l("Confirm sharing…", "确认分享…")}</button>}</footer>
       </>}
     </section>
   </dialog>;
