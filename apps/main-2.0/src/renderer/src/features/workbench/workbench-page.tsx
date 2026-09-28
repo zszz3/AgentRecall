@@ -313,7 +313,7 @@ export function WorkbenchPage({
       <header className="app-page-head workbench-page-head">
         <div>
           <h2>{l("Workbench", "工作台")}</h2>
-          <p>One for all</p>
+          <p>{l("Your usage overview and recent work.", "用量概览与最近的工作。")}</p>
         </div>
         <button
           type="button"
@@ -440,7 +440,7 @@ export function WorkbenchPage({
         <TokenTrendChart points={stats.dailyTokenUsage} language={language} onSelectDay={onSelectTrendDay} />
         </section>
 
-        <div className={`workbench-primary-grid ${layoutEditing ? "is-editing" : ""}`}>
+        <div className={`workbench-primary-grid ${layoutEditing ? "is-editing" : ""}`} role="region" aria-label={l("Continue work", "继续工作")}>
         <article
           className={`workbench-card-slot is-secondary ${draggingCard === "sessions" ? "is-dragging" : ""}`}
           {...layoutCardProps("sessions")}
@@ -767,8 +767,8 @@ function WorkbenchQuota({
       <div className="quota-identity"><i>{provider === "codex" ? "CX" : "CC"}</i><strong>{displayName}</strong></div>
       {available ? <div className="workbench-quota-windows">{quotas.map((quota) => <WorkbenchQuotaWindow key={quota.key} quota={quota} language={language} />)}</div> : (
         <div className="workbench-quota-empty">
-          <span>{loading ? l("Checking quota...", "正在检查额度...") : card?.detail || l("Quota is unavailable.", "额度暂不可用。")}</span>
-          {!loading ? <button onClick={onOpenSettings}>{l("Open settings", "打开设置")}</button> : null}
+          <span>{loading && !card ? l("Checking quota...", "正在检查额度...") : card?.detail || l("Quota is unavailable.", "额度暂不可用。")}</span>
+          {!loading || card ? <button onClick={onOpenSettings}>{l("Open settings", "打开设置")}</button> : null}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ReactElement, UIEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactElement, UIEvent } from "react";
 import { CheckCircle2, Copy, FolderInput, FolderOpen, Search } from "lucide-react";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import { localize, type LanguageMode } from "../../language";
@@ -30,6 +30,7 @@ export function LocalSkillsTab({
   onImported,
   onCopyPath,
   onReveal,
+  onOpenContextMenu,
 }: {
   active: boolean;
   snapshot: InstalledSkillsSnapshot | null;
@@ -43,6 +44,7 @@ export function LocalSkillsTab({
   onImported: (managedId: string) => void;
   onCopyPath: (skillPath: string) => void;
   onReveal: (directoryPath: string) => void;
+  onOpenContextMenu: (event: ReactMouseEvent, skill: InstalledSkill) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const skills = snapshot?.skills ?? EMPTY_LOCAL_SKILLS;
@@ -190,6 +192,10 @@ export function LocalSkillsTab({
                   aria-selected={activeRow}
                   tabIndex={activeRow ? 0 : -1}
                   onClick={() => setSelectedPath(skill.path)}
+                  onContextMenu={(event) => {
+                    setSelectedPath(skill.path);
+                    onOpenContextMenu(event, skill);
+                  }}
                 >
                   <span className={`local-skill-state ${managed ? "managed" : ""}`} aria-hidden="true">
                     {managed ? <CheckCircle2 size={13} /> : null}

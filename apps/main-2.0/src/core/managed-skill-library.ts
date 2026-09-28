@@ -72,6 +72,11 @@ interface ManagedSkillMetadata {
   categoryId: SkillCategoryId | null;
 }
 
+interface DisabledBuiltinSkillsState {
+  schemaVersion: 1;
+  skillIds: string[];
+}
+
 export interface AgentRecallBuiltinSkillDefinition {
   /** Directory name under assets/bundled-skills/. */
   id: string;
@@ -250,7 +255,9 @@ export class ManagedSkillLibrary {
   }
 
   ensureBuiltinSkills(bundledSkillsPath: string): void {
+    const disabledBuiltinIds = this.readDisabledBuiltinIds();
     for (const definition of AGENT_RECALL_BUILTIN_SKILLS) {
+      if (disabledBuiltinIds.has(definition.installId)) continue;
       const sourceDir = path.join(bundledSkillsPath, definition.id);
       if (!fs.existsSync(path.join(sourceDir, "SKILL.md"))) continue;
       const managedId = safeManagedSkillId(definition.installId);
@@ -524,6 +531,10 @@ export class ManagedSkillLibrary {
     fs.accessSync(path.dirname(realLibraryRoot), fs.constants.W_OK);
     if (metadataStat) fs.accessSync(path.dirname(metadataPath), fs.constants.W_OK);
 
+    const disabledBuiltinIdsBeforeDelete = this.readDisabledBuiltinIds();
+    const shouldDisableBuiltin = skill.origin.kind === "builtin"
+      && !disabledBuiltinIdsBeforeDelete.has(normalizedId);
+
     const ownedInstallations = new Map<string, {
       installation: ManagedSkillInstallation;
       stat: fs.Stats;
@@ -572,6 +583,9 @@ export class ManagedSkillLibrary {
     const sourceBackupPath = path.join(libraryParent, backupStem);
     const metadataBackupPath = path.join(libraryParent, `${backupStem}.metadata`);
 
+    if (shouldDisableBuiltin) {
+      this.writeDisabledBuiltinIds(new Set([...disabledBuiltinIdsBeforeDelete, normalizedId]));
+    }
     try {
       for (const [physicalKey, owned] of ownedInstallations) {
         const { installation } = owned;
@@ -696,6 +710,13 @@ export class ManagedSkillLibrary {
       restore(stagedMetadata);
       if (sourceRestored) {
         for (const staged of [...stagedLinks].reverse()) restore(staged);
+        if (shouldDisableBuiltin) {
+          try {
+            this.writeDisabledBuiltinIds(disabledBuiltinIdsBeforeDelete);
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
+        }
       } else if (stagedLinks.length > 0) {
         rollbackErrors.push(new Error(
           "Skipped restoring installed Skill links because the managed Skill source was not safely restored.",
@@ -823,6 +844,33 @@ export class ManagedSkillLibrary {
 
   private metadataPath(managedId: string): string {
     return path.join(this.libraryRoot, ".metadata", `${managedId}.json`);
+  }
+
+  private disabledBuiltinsPath(): string {
+    return path.join(this.libraryRoot, ".state", "disabled-builtins.json");
+  }
+
+  private readDisabledBuiltinIds(): Set<string> {
+    try {
+      const value = JSON.parse(fs.readFileSync(this.disabledBuiltinsPath(), "utf8")) as Partial<DisabledBuiltinSkillsState>;
+      if (value.schemaVersion !== 1 || !Array.isArray(value.skillIds)) return new Set();
+      const builtinIds = new Set(AGENT_RECALL_BUILTIN_SKILLS.map((definition) => definition.installId));
+      return new Set(value.skillIds.filter((id): id is string => typeof id === "string" && builtinIds.has(id)));
+    } catch {
+      return new Set();
+    }
+  }
+
+  private writeDisabledBuiltinIds(skillIds: Set<string>): void {
+    const statePath = this.disabledBuiltinsPath();
+    const temporaryPath = `${statePath}.${randomUUID()}.tmp`;
+    const state: DisabledBuiltinSkillsState = {
+      schemaVersion: 1,
+      skillIds: [...skillIds].sort(),
+    };
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    fs.renameSync(temporaryPath, statePath);
   }
 
   private readMetadata(managedId: string): ManagedSkillMetadata | null {

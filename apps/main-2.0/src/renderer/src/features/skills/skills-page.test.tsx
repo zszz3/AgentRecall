@@ -12,6 +12,7 @@ describe("SkillsPage local Skills lifecycle", () => {
   let root: Root;
   let listSkillImportCandidates: ReturnType<typeof vi.fn>;
   let importLocalSkills: ReturnType<typeof vi.fn>;
+  let deleteSkill: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -20,9 +21,25 @@ describe("SkillsPage local Skills lifecycle", () => {
     root = createRoot(container);
     listSkillImportCandidates = vi.fn();
     importLocalSkills = vi.fn();
+    deleteSkill = vi.fn(async (skillPath: string) => ({
+      deletedPath: skillPath.replace(/\/SKILL\.md$/, ""),
+      skillName: "alpha",
+      retainedBackupPaths: [],
+    }));
     Object.defineProperty(window, "sessionSearch", {
       configurable: true,
-      value: { importLocalSkills, listSkillImportCandidates },
+      value: {
+        deleteSkill,
+        getSkillSyncSnapshot: vi.fn(async () => ({
+          status: { kind: "unconfigured" as const, setupSql: "", remediation: "settings" as const, message: "" },
+          remoteSkillGroups: [],
+          bindings: [],
+          scannedAt: 0,
+        })),
+        importLocalSkills,
+        listSkillImportCandidates,
+        listSkills: vi.fn(async () => snapshot()),
+      },
     });
   });
 
@@ -134,6 +151,44 @@ describe("SkillsPage local Skills lifecycle", () => {
     expect(listSkillImportCandidates).toHaveBeenCalledTimes(2);
   });
 
+  it("opens a context menu, confirms deletion, and rescans the local list", async () => {
+    listSkillImportCandidates
+      .mockResolvedValueOnce(snapshot(skill("alpha")))
+      .mockResolvedValueOnce(snapshot());
+
+    await act(async () => root.render(<Harness />));
+    await click("#local-skills-tab");
+    await contextMenu(".local-skill-row");
+    expect(container.querySelector('[role="menu"]')?.textContent).toContain("Delete");
+    await mouseDown('[role="menuitem"]');
+    await click('[role="menuitem"]');
+
+    expect(container.querySelector('[role="dialog"]')?.textContent)
+      .toContain("permanently deletes the local Skill");
+    await click(".managed-skill-delete-dialog .danger-action");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteSkill).toHaveBeenCalledWith("fixtures/codex/skills/alpha/SKILL.md");
+    expect(listSkillImportCandidates).toHaveBeenLastCalledWith(true);
+    expect(localSkillNames()).toEqual([]);
+  });
+
+  it("does not offer deletion for Codex system Skills", async () => {
+    listSkillImportCandidates.mockResolvedValueOnce(snapshot({
+      ...skill("system-skill"),
+      source: "codex-system",
+    }));
+
+    await act(async () => root.render(<Harness />));
+    await click("#local-skills-tab");
+    await contextMenu(".local-skill-row");
+
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+  });
+
   function localSkillCount(): string | null {
     return container.querySelector("#local-skills-tab small")?.textContent ?? null;
   }
@@ -152,6 +207,29 @@ describe("SkillsPage local Skills lifecycle", () => {
     expect(element).not.toBeNull();
     await act(async () => {
       element!.click();
+      await Promise.resolve();
+    });
+  }
+
+  async function contextMenu(selector: string): Promise<void> {
+    const element = container.querySelector<HTMLElement>(selector);
+    expect(element).not.toBeNull();
+    await act(async () => {
+      element!.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 140,
+        clientY: 90,
+      }));
+      await Promise.resolve();
+    });
+  }
+
+  async function mouseDown(selector: string): Promise<void> {
+    const element = container.querySelector<HTMLElement>(selector);
+    expect(element).not.toBeNull();
+    await act(async () => {
+      element!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
   }
@@ -191,7 +269,7 @@ function Harness() {
           onOpenSqlEditor={() => undefined}
           onCopyPath={() => undefined}
           onReveal={() => undefined}
-          onDelete={async () => undefined}
+          onDelete={skills.deleteSkill}
         />
       ) : null}
     </>

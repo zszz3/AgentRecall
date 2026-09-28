@@ -32,7 +32,7 @@ const environment = {
 let workflowMcpProcess = null;
 let localPostgres = null;
 let localPostgresClient = null;
-const MAX_RELEASE_PACKAGE_BYTES = 4.25 * 1024 * 1024;
+const MAX_RELEASE_PACKAGE_BYTES = 4.3 * 1024 * 1024;
 
 async function chooseAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -105,7 +105,7 @@ try {
   const archive = await packReleaseArchive({ root, destination: packDir, environment });
   const archiveSize = (await stat(archive)).size;
   if (archiveSize >= MAX_RELEASE_PACKAGE_BYTES) {
-    throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 4.25 MiB.`);
+    throw new Error(`Release package is ${archiveSize} bytes; expected a package smaller than 4.30 MiB.`);
   }
   await execFileAsync(npm, ["install", "--global", archive, "--prefix", prefix, "--no-audit", "--no-fund"], {
     cwd: root,

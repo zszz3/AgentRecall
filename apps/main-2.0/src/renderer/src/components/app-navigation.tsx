@@ -126,6 +126,7 @@ function NavigationItem({
       title={labels[page]}
       aria-label={labels[page]}
       data-page={page}
+      aria-current={activePage === page ? "page" : undefined}
       className={activePage === page ? "active" : ""}
       onClick={() => onNavigate(page)}
     >

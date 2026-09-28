@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import { ResizableSplit } from "../../components/resizable-split";
+import type { MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { Compass, PackagePlus, RefreshCw, Upload, X } from "lucide-react";
 import type { InstalledSkill, InstalledSkillsSnapshot } from "../../../../core/skill-manager";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
@@ -8,6 +9,7 @@ import { isSkillCategoryId } from "../../../../core/skill-categories";
 import { formatCompactNumber } from "../../format-count";
 import { localize, type LanguageMode } from "../../language";
 import { buildUnifiedSkillEntries } from "../../skill-sync-view-model";
+import { skillSourceLabel } from "../../skill-manager";
 import type { SkillsFeedback } from "../../app-types";
 import { LocalSkillsTab } from "./local-skills-tab";
 import { CloudSkillDetail } from "./cloud-skill-detail";
@@ -15,6 +17,7 @@ import { SkillDiscoveryDialog } from "./skill-discovery-dialog";
 import { planBatchSkillTargetInstall } from "./skill-batch-install";
 import { SkillBatchTargetDialog } from "./skill-batch-target-dialog";
 import { SkillLibraryDetail } from "./skill-library-detail";
+import { SkillContextMenu, type SkillContextMenuState } from "./skill-context-menu";
 import {
   filterManagedSkills,
   SkillLibraryList,
@@ -97,7 +100,8 @@ export function SkillsPage({
   const [selectedRemoteFingerprint, setSelectedRemoteFingerprint] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
-  const [deleteCandidate, setDeleteCandidate] = useState<ManagedSkill | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<InstalledSkill | null>(null);
+  const [contextMenu, setContextMenu] = useState<SkillContextMenuState | null>(null);
   const [targetBusy, setTargetBusy] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchTargetDialogOpen, setBatchTargetDialogOpen] = useState(false);
@@ -137,6 +141,22 @@ export function SkillsPage({
     setDiscoveryOpen(true);
     onInitialDiscoveryConsumed?.();
   }, [initialDiscoveryOpen, onInitialDiscoveryConsumed]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     if (selectedRemoteFingerprint) {
@@ -266,17 +286,36 @@ export function SkillsPage({
     else onRefresh();
   };
 
+  const openContextMenu = (event: ReactMouseEvent, skill: InstalledSkill) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const deletable = skill.source !== "codex-system";
+    if (!deletable) {
+      setContextMenu(null);
+      return;
+    }
+    if (isManagedSkill(skill)) {
+      setSelectedRemoteFingerprint(null);
+      setSelectedId(skill.managedId);
+    }
+    setContextMenu({ skill, x: event.clientX, y: event.clientY });
+  };
+
   const confirmDelete = async () => {
     if (!deleteCandidate) return;
-    const deletedId = deleteCandidate.managedId;
+    const deletedId = isManagedSkill(deleteCandidate) ? deleteCandidate.managedId : null;
     try {
       await onDelete(deleteCandidate);
       setDeleteCandidate(null);
-      setCheckedIds((current) => {
-        const next = new Set(current);
-        next.delete(deletedId);
-        return next;
-      });
+      if (deletedId) {
+        setCheckedIds((current) => {
+          const next = new Set(current);
+          next.delete(deletedId);
+          return next;
+        });
+      } else {
+        onRefreshLocal();
+      }
     } catch {
       // App-level feedback already contains the actionable filesystem error.
     }
@@ -357,7 +396,8 @@ export function SkillsPage({
             </div>
           ) : null}
 
-          <div className="managed-skills-grid">
+          <ResizableSplit className="managed-skills-grid" storageKey="agent-recall-skills-pane" initialWidth={320} minWidth={240} maxWidth={460}
+            label={l("Resize Skills list", "调整 Skills 列表宽度")}>
             <SkillLibraryList
               skills={filteredSkills}
               selectedId={selectedSkill?.managedId ?? null}
@@ -390,6 +430,7 @@ export function SkillsPage({
               }}
               evalBadgeCounts={evalBadgeCountsMap}
               onNavigateToEval={onNavigateToEval}
+              onOpenContextMenu={openContextMenu}
             />
             {selectedRemoteGroup ? (
               <CloudSkillDetail
@@ -420,9 +461,8 @@ export function SkillsPage({
               onOpenSqlEditor={onOpenSqlEditor}
               onCopyPath={onCopyPath}
               onReveal={onReveal}
-              onRequestDelete={setDeleteCandidate}
             />}
-          </div>
+          </ResizableSplit>
         </section>
 
         <LocalSkillsTab
@@ -438,10 +478,21 @@ export function SkillsPage({
           onImported={libraryChanged}
           onCopyPath={onCopyPath}
           onReveal={onReveal}
+          onOpenContextMenu={openContextMenu}
         />
       </section>
 
       <SkillDiscoveryDialog open={discoveryOpen} language={language} onClose={() => setDiscoveryOpen(false)} onImported={libraryChanged} />
+      {contextMenu ? (
+        <SkillContextMenu
+          state={contextMenu}
+          language={language}
+          onDelete={() => {
+            setDeleteCandidate(contextMenu.skill);
+            setContextMenu(null);
+          }}
+        />
+      ) : null}
       <SkillBatchTargetDialog
         open={batchTargetDialogOpen}
         skills={managedSkills.filter((skill) => checkedIds.has(skill.managedId))}
@@ -460,10 +511,14 @@ export function SkillsPage({
             onMouseDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => { if (event.key === "Escape") setDeleteCandidate(null); }}
           >
-            <header><h3 id="skill-delete-dialog-title">{l("Delete from Skill library?", "从 Skill 库删除？")}</h3><button type="button" className="icon-button" onClick={() => setDeleteCandidate(null)} aria-label={l("Close", "关闭")}><X size={16} /></button></header>
-            <p>{l(`AgentRecall will delete “${deleteCandidate.name}” and remove only links it owns. Existing conflicting folders remain untouched.`, `AgentRecall 会删除“${deleteCandidate.name}”，并只移除自己创建的链接；有冲突的原目录不会被修改。`)}</p>
+            <header><h3 id="skill-delete-dialog-title">{isManagedSkill(deleteCandidate)
+              ? l("Delete from Skill library?", "从 Skill 库删除？")
+              : l("Delete local Skill?", "删除本地 Skill？")}</h3><button type="button" className="icon-button" onClick={() => setDeleteCandidate(null)} disabled={loading} aria-label={l("Close", "关闭")}><X size={16} /></button></header>
+            <p>{isManagedSkill(deleteCandidate)
+              ? l(`AgentRecall will delete “${deleteCandidate.name}” and remove only links it owns. Existing conflicting folders remain untouched.`, `AgentRecall 会删除“${deleteCandidate.name}”，并只移除自己创建的链接；有冲突的原目录不会被修改。`)
+              : l(`This permanently deletes the local Skill “${deleteCandidate.name}” from ${skillSourceLabel(deleteCandidate.source)}. A copy already added to this app is not affected.`, `这会从 ${skillSourceLabel(deleteCandidate.source)} 永久删除本地 Skill“${deleteCandidate.name}”。已加入本 App 的副本不受影响。`)}</p>
             <code title={deleteCandidate.directoryPath}>{deleteCandidate.directoryPath}</code>
-            <footer><button type="button" autoFocus onClick={() => setDeleteCandidate(null)}>{l("Cancel", "取消")}</button><button type="button" className="danger-action" onClick={() => void confirmDelete()}>{l("Delete", "删除")}</button></footer>
+            <footer><button type="button" autoFocus onClick={() => setDeleteCandidate(null)} disabled={loading}>{l("Cancel", "取消")}</button><button type="button" className="danger-action" disabled={loading} onClick={() => void confirmDelete()}>{loading ? l("Deleting…", "正在删除…") : l("Delete", "删除")}</button></footer>
           </section>
         </div>
       ) : null}

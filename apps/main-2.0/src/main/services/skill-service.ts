@@ -774,13 +774,18 @@ export class SkillService {
       const normalized = path.resolve(skillPath);
       const skill = this.managedLibrary.list().skills.find((item) =>
         path.resolve(item.path) === normalized || path.resolve(item.directoryPath) === normalized);
-      if (!skill) throw new Error("Skill is no longer installed or is outside the managed library.");
-      return this.managedLibrary.delete(skill.managedId);
+      if (skill) return this.managedLibrary.delete(skill.managedId);
     }
     const projectDirs = this.operations.skillProjectDirsFromIndexedProjects(
       await this.dependencies.getStore().listProjects(),
     );
-    return this.operations.deleteInstalledSkill(skillPath, { projectDirs });
+    const result = this.operations.deleteInstalledSkill(skillPath, {
+      homeDir: this.dependencies.homeDir,
+      codexHome: this.dependencies.codexHome,
+      projectDirs,
+    });
+    this.importCandidatesCache = null;
+    return result;
   }
 
   getUsageHookStatus(): boolean {

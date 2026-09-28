@@ -52,6 +52,7 @@ import {
   getLiveSessionState,
   type LiveStatusFilter,
 } from "../../live-filter";
+import { ResizableSplit } from "../../components/resizable-split";
 import type { SidebarSectionId, SidebarSectionsState } from "../../sidebar-sections";
 import type { LanguageMode } from "../../language";
 import { environmentTarget } from "../environments/environment-display";
@@ -328,6 +329,8 @@ export function SessionsPage({
         </button>
       </header>
 
+      <ResizableSplit className="sessions-layout" storageKey="agent-recall-sessions-pane" initialWidth={240}
+        minWidth={200} maxWidth={440} label={l("Resize session sidebar", "调整会话侧栏宽度")}>
       <SessionSidebar model={model} actions={actions} l={l} />
 
       <section className="content">
@@ -672,6 +675,7 @@ export function SessionsPage({
           </nav>
         ) : null}
       </section>
+      </ResizableSplit>
     </div>
   );
 }
@@ -722,7 +726,7 @@ function SessionSidebar({
         expanded={model.sidebarSections.environments}
         onToggle={() => actions.toggleSidebarSection("environments")}
       />
-      {model.sidebarSections.environments ? (
+      <SessionDisclosure expanded={model.sidebarSections.environments}>
         <nav className="sidebar-tree">
           <button
             className={`tree-row tree-root ${
@@ -756,9 +760,7 @@ function SessionSidebar({
                     aria-expanded={!environmentCollapsed}
                     aria-label={environmentCollapsed ? l("Expand", "展开") : l("Collapse", "折叠")}
                   >
-                    {environmentCollapsed
-                      ? <ChevronRight size={13} />
-                      : <ChevronDown size={13} />}
+                    <ChevronRight size={13} />
                   </button>
                   <button
                     className={`tree-label ${environmentActive ? "active" : ""}`}
@@ -774,8 +776,8 @@ function SessionSidebar({
                     <em className="tree-count">{group.projects.length}</em>
                   </button>
                 </div>
-                {!environmentCollapsed
-                  ? visibleProjects.map((project) => {
+                <SessionDisclosure expanded={!environmentCollapsed}>
+                  {visibleProjects.map((project) => {
                       const projectKey = `${project.environmentId}:${project.path}`;
                       const expanded = model.expandedTreeProjects.has(projectKey);
                       const active =
@@ -792,9 +794,7 @@ function SessionSidebar({
                                 aria-expanded={expanded}
                                 aria-label={expanded ? l("Collapse", "折叠") : l("Expand", "展开")}
                               >
-                                {expanded
-                                  ? <ChevronDown size={13} />
-                                  : <ChevronRight size={13} />}
+                                <ChevronRight size={13} />
                               </button>
                             ) : <span className="tree-chevron-spacer" />}
                             <button
@@ -807,8 +807,8 @@ function SessionSidebar({
                               <em>{formatRelativeTime(projectSortTimestamp(project), model.language)}</em>
                             </button>
                           </div>
-                          {expanded
-                            ? project.tags.map((tagName) => (
+                          <SessionDisclosure expanded={expanded}>
+                            {project.tags.map((tagName) => (
                                 <div
                                   key={tagName}
                                   className={`tree-row tree-tag-row ${
@@ -850,13 +850,12 @@ function SessionSidebar({
                                     <Trash2 size={13} />
                                   </button>
                                 </div>
-                              ))
-                            : null}
+                              ))}
+                          </SessionDisclosure>
                         </div>
                       );
-                    })
-                  : null}
-                {!environmentCollapsed && hiddenProjectCount > 0 ? (
+                    })}
+                {hiddenProjectCount > 0 ? (
                   <button
                     type="button"
                     className="tree-project-more"
@@ -869,46 +868,50 @@ function SessionSidebar({
                     <span>{l(`Show ${nextProjectCount} more projects`, `再显示 ${nextProjectCount} 个项目`)}</span>
                   </button>
                 ) : null}
+                </SessionDisclosure>
               </div>
             );
           })}
         </nav>
-      ) : null}
+      </SessionDisclosure>
 
       <SidebarSectionHeader
         title={l("Sources", "来源")}
         expanded={model.sidebarSections.sources}
         onToggle={() => actions.toggleSidebarSection("sources")}
       />
-      {model.sidebarSections.sources ? (
+      <SessionDisclosure expanded={model.sidebarSections.sources}>
         <nav className="nav-group">
           {model.sourceFilters.map((item) => (
             <button
               key={item.label}
               className={model.source === item.value ? "active" : ""}
+              aria-pressed={model.source === item.value}
               onClick={() => actions.setSource(item.value)}
             >
               {sourceFilterLabel(item, model.language)}
             </button>
           ))}
         </nav>
-      ) : null}
+      </SessionDisclosure>
 
       <SidebarSectionHeader
         title={l("Views", "视图")}
         expanded={model.sidebarSections.views}
         onToggle={() => actions.toggleSidebarSection("views")}
       />
-      {model.sidebarSections.views ? (
+      <SessionDisclosure expanded={model.sidebarSections.views}>
         <nav className="nav-group">
           <button
             className={model.visibility === "default" ? "active" : ""}
+            aria-pressed={model.visibility === "default"}
             onClick={() => actions.setVisibility("default")}
           >
             {l("All", "全部")}
           </button>
           <button
             className={model.visibility === "favorites" ? "active" : ""}
+            aria-pressed={model.visibility === "favorites"}
             onClick={() => actions.setVisibility("favorites")}
           >
             <Star size={14} />
@@ -916,13 +919,14 @@ function SessionSidebar({
           </button>
           <button
             className={model.visibility === "hidden" ? "active" : ""}
+            aria-pressed={model.visibility === "hidden"}
             onClick={() => actions.setVisibility("hidden")}
           >
             <EyeOff size={14} />
             {l("Hidden", "隐藏")}
           </button>
         </nav>
-      ) : null}
+      </SessionDisclosure>
     </section>
   );
 }
@@ -939,7 +943,18 @@ function SidebarSectionHeader({
   return (
     <button className="section-header" onClick={onToggle} aria-expanded={expanded}>
       <span>{title}</span>
-      {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      <ChevronRight size={14} />
     </button>
+  );
+}
+
+
+// Keep children mounted for the closing transition, but remove them from keyboard
+// navigation and the accessibility tree as soon as their parent closes.
+function SessionDisclosure({ expanded, children }: { expanded: boolean; children: ReactNode }): ReactElement {
+  return (
+    <div className="session-disclosure" data-expanded={expanded} inert={!expanded} aria-hidden={!expanded}>
+      <div>{children}</div>
+    </div>
   );
 }
