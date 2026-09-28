@@ -72,7 +72,7 @@
 
 ### 当前开发切片
 
-独立的 `codex/cli-foundation` 分支包含以下第 1—4 步的源码预览，见 [PR #584](https://github.com/zszz3/AgentRecall/pull/584)，已包含 Chat 移除，后续统一一个 MR 到 main；索引优化仍独立。
+独立的 `codex/cli-foundation` 分支包含以下第 1—4 步的源码预览，见 [PR #584](https://github.com/zszz3/AgentRecall/pull/584)，已包含 Chat 移除，后续统一一个 MR 到 main；增量索引优化已通过 [PR #588](https://github.com/zszz3/AgentRecall/pull/588) 合入 main，并同步到本分支。
 
 | 顺序 | 对应任务 | 本次先交付的范围 | 验收方式 |
 | --- | --- | --- | --- |
