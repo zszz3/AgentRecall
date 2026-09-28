@@ -10,8 +10,8 @@ export function indexFailureFingerprint(diagnostic: SessionIndexFailureDiagnosti
   ])).digest("hex");
 }
 
-function sourceRevision(session: IndexedSession): string {
-  return JSON.stringify([session.source, session.filePath, session.fileMtimeMs, session.fileSize]);
+function sourceRevision(session: IndexedSession, dependencyMtimeMs: number): string {
+  return JSON.stringify([session.source, session.filePath, session.fileMtimeMs, session.fileSize, dependencyMtimeMs]);
 }
 
 // Process-owned: restarting after an app/schema upgrade immediately retries all
@@ -28,19 +28,19 @@ export class SessionIndexFailures {
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  deferred(session: IndexedSession): SessionIndexFailureDiagnostic | undefined {
+  deferred(session: IndexedSession, dependencyMtimeMs = 0): SessionIndexFailureDiagnostic | undefined {
     const failure = this.failures.get(session.sessionKey);
-    return failure?.revision === sourceRevision(session) && this.now() < failure.retryAt
+    return failure?.revision === sourceRevision(session, dependencyMtimeMs) && this.now() < failure.retryAt
       ? failure.diagnostic : undefined;
   }
 
-  record(session: IndexedSession, diagnostic: SessionIndexFailureDiagnostic): SessionIndexFailureDiagnostic {
-    const enriched = { ...diagnostic, revision: { fileMtimeMs: session.fileMtimeMs, fileSize: session.fileSize } };
+  record(session: IndexedSession, diagnostic: SessionIndexFailureDiagnostic, dependencyMtimeMs = 0): SessionIndexFailureDiagnostic {
+    const enriched = { ...diagnostic, revision: { fileMtimeMs: session.fileMtimeMs, fileSize: session.fileSize, dependencyMtimeMs } };
     const fingerprint = indexFailureFingerprint(enriched);
     const previous = this.failures.get(session.sessionKey);
     const count = previous?.fingerprint === fingerprint ? previous.count + 1 : 1;
     this.failures.set(session.sessionKey, {
-      revision: sourceRevision(session), fingerprint, count,
+      revision: sourceRevision(session, dependencyMtimeMs), fingerprint, count,
       retryAt: this.now() + Math.min(15 * 60_000, 30_000 * 2 ** Math.min(count - 1, 5)),
       diagnostic: enriched,
       diagnosticWritten: false,

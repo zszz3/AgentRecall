@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SessionIndexFailures } from "./session-index-failures";
+import { indexFailureFingerprint, SessionIndexFailures } from "./session-index-failures";
 import type { IndexedSession } from "./types";
 
 const session: IndexedSession = {
@@ -73,6 +73,25 @@ describe("session indexing backoff", () => {
     expect(state.deferred(changed)).toBeDefined();
     now = 70_000;
     expect(state.deferred(changed)).toBeUndefined();
+  });
+
+  it("resets the delay and diagnostic fingerprint for a new metadata dependency revision", () => {
+    let now = 0;
+    const state = new SessionIndexFailures(() => now);
+    const first = state.record(session, diagnostic, 100);
+    now = 30_000;
+    state.record(session, diagnostic, 100);
+    now = 40_000;
+    expect(state.deferred(session, 100)).toBeDefined();
+    expect(state.deferred(session, 200)).toBeUndefined();
+
+    const changed = state.record(session, diagnostic, 200);
+    expect(changed.revision).toMatchObject({ dependencyMtimeMs: 200 });
+    expect(indexFailureFingerprint(changed)).not.toBe(indexFailureFingerprint(first));
+    now = 69_999;
+    expect(state.deferred(session, 200)).toBeDefined();
+    now = 70_000;
+    expect(state.deferred(session, 200)).toBeUndefined();
   });
 
   it("retains the diagnostic write result only for the current failure", () => {

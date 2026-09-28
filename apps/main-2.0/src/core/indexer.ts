@@ -60,6 +60,7 @@ export interface BatchIndexOptions {
   timeBudgetMs?: number;
   loadOptions?: SessionLoadOptions;
   forceReindex?: (item: LoadedSession) => boolean;
+  dependencyMtimeMs?: (item: LoadedSession) => number;
   failureState?: SessionIndexFailures;
   retryFailures?: boolean;
   onProgress?: (status: IndexStatus) => void;
@@ -74,7 +75,7 @@ export interface SessionIndexFailureDiagnostic {
   source: LoadedSession["session"]["source"];
   sessionKey: string;
   filePath: string;
-  revision?: { fileMtimeMs: number; fileSize: number };
+  revision?: { fileMtimeMs: number; fileSize: number; dependencyMtimeMs?: number };
   error: {
     name: string;
     message: string;
@@ -121,8 +122,11 @@ export async function syncLoadedSessionsInBatches(
   );
 
   for await (const loadedItem of loaded) {
-    const deferred = !options.retryFailures && !options.forceReindex?.(loadedItem)
-      ? options.failureState?.deferred(loadedItem.session) : undefined;
+    const dependencyMtimeMs = options.dependencyMtimeMs?.(loadedItem) ?? 0;
+    // Automatic invalidation bypasses freshness, not retry backoff. A new
+    // dependency revision retries immediately; only manual refresh ignores delay.
+    const deferred = !options.retryFailures
+      ? options.failureState?.deferred(loadedItem.session, dependencyMtimeMs) : undefined;
     if (deferred) {
       failures.push(deferred);
       diagnosticLogFailed ||= !options.failureState?.hasWrittenDiagnostic(loadedItem.session.sessionKey);
@@ -227,7 +231,7 @@ export async function syncLoadedSessionsInBatches(
             ? { name: error.name, message: error.message, stack: error.stack ?? null }
             : { name: "UnknownError", message: String(error), stack: null },
         };
-        diagnostic = options.failureState?.record(loadedItem.session, diagnostic) ?? diagnostic;
+        diagnostic = options.failureState?.record(loadedItem.session, diagnostic, dependencyMtimeMs) ?? diagnostic;
         failures.push(diagnostic);
         skipped++;
         if (options.logIndexFailure) {
@@ -339,6 +343,7 @@ export async function syncDefaultSessionsInBatches(
     });
   }
   const dependencyChangedFiles = new Set<string>();
+  const dependencyMtimeByFile = new Map<string, number>();
   let fileSkipped = 0;
   const shouldSkipFile = loadOptions.shouldSkipFile;
   const onSkippedFile = loadOptions.onSkippedFile;
@@ -370,6 +375,7 @@ export async function syncDefaultSessionsInBatches(
     },
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0, source) => {
       scannedFilePaths.add(filePath);
+      dependencyMtimeByFile.set(filePath, dependencyMtimeMs);
       const customDecision = shouldSkipFile?.(filePath, stat, dependencyMtimeMs, source);
       if (customDecision !== undefined) return customDecision;
       const snapshot = findSessionFileSnapshot(indexedFiles, filePath, stat, source);
@@ -393,6 +399,7 @@ export async function syncDefaultSessionsInBatches(
   })();
   const status = await syncLoadedSessionsInBatches(store, loaded, {
     ...options,
+    dependencyMtimeMs: (item) => dependencyMtimeByFile.get(item.session.filePath) ?? 0,
     forceReindex: (item) =>
       dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),

@@ -131,6 +131,67 @@ describe("indexer", () => {
     }
   });
 
+  it("backs off failed metadata reindexing until the dependency changes, the timer expires or recovery is requested", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-metadata-retry-"));
+    let now = 0;
+    const state = new SessionIndexFailures(() => now);
+    const originalUpsert = store.upsertIndexedSession.bind(store);
+    const upsert = vi.spyOn(store, "upsertIndexedSession");
+    const options = { failureState: state, loadOptions: { homeDir }, logIndexFailure: vi.fn() };
+    try {
+      const filePath = writeClaudeSession(homeDir, "metadata-retry", "synthetic metadata question");
+      const metadataPath = path.join(homeDir, ".claude", "sessions", "metadata-retry.json");
+      fs.mkdirSync(path.dirname(metadataPath), { recursive: true });
+      fs.writeFileSync(metadataPath, JSON.stringify({ sessionId: "metadata-retry", cwd: "/repo/original" }));
+      expect(await syncDefaultSessionsInBatches(store, options))
+        .toMatchObject({ indexed: 1, skipped: 0, total: 1, error: null });
+      const snapshot = (await store.listIndexedSessionFiles()).find((item) => item.filePath === filePath)!;
+      upsert.mockClear();
+      upsert.mockRejectedValue(new Error("metadata reindex write failed"));
+
+      fs.writeFileSync(metadataPath, JSON.stringify({ sessionId: "metadata-retry", cwd: "/repo/updated" }));
+      const updatedAt = new Date(snapshot.indexedAt + 1000);
+      fs.utimesSync(metadataPath, updatedAt, updatedAt);
+      expect(await syncDefaultSessionsInBatches(store, options))
+        .toMatchObject({ indexed: 0, skipped: 1, total: 1, error: expect.stringContaining("1 session") });
+      expect(upsert).toHaveBeenCalledTimes(1);
+      expect(await syncDefaultSessionsInBatches(store, options))
+        .toMatchObject({ indexed: 0, skipped: 1, total: 1, error: expect.stringContaining("1 session") });
+      expect(upsert).toHaveBeenCalledTimes(1);
+
+      now = 1000;
+      fs.writeFileSync(metadataPath, JSON.stringify({ sessionId: "metadata-retry", cwd: "/repo/latest" }));
+      const changedAt = new Date(snapshot.indexedAt + 2000);
+      fs.utimesSync(metadataPath, changedAt, changedAt);
+      await syncDefaultSessionsInBatches(store, options);
+      expect(upsert).toHaveBeenCalledTimes(2);
+      expect(upsert.mock.calls[1][0]).toMatchObject({
+        projectPath: "/repo/latest", fileMtimeMs: snapshot.fileMtimeMs, fileSize: snapshot.fileSize,
+      });
+
+      now = 30_999;
+      await syncDefaultSessionsInBatches(store, options);
+      expect(upsert).toHaveBeenCalledTimes(2);
+      now = 31_000;
+      await syncDefaultSessionsInBatches(store, options);
+      expect(upsert).toHaveBeenCalledTimes(3);
+      await syncDefaultSessionsInBatches(store, options);
+      expect(upsert).toHaveBeenCalledTimes(3);
+
+      upsert.mockImplementation(originalUpsert);
+      expect(await syncDefaultSessionsInBatches(store, { ...options, retryFailures: true }))
+        .toMatchObject({ indexed: 1, skipped: 0, total: 1, error: null });
+      expect(upsert).toHaveBeenCalledTimes(4);
+      expect(await store.getSession(snapshot.sessionKey)).toMatchObject({ projectPath: "/repo/latest" });
+      expect(state.deferred(upsert.mock.calls[3][0], fs.statSync(metadataPath).mtimeMs)).toBeUndefined();
+    } finally {
+      upsert.mockRestore();
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("indexes loaded sessions in batches and yields between batches", async () => {
     const store = createInMemoryStore();
     const progress: number[] = [];
@@ -157,6 +218,12 @@ describe("indexer", () => {
       migrations: POSTGRES_MIGRATIONS.filter((migration) => migration.version <= 55),
     });
     await database.initialize();
+    // The current writer requires fingerprints; retain the pre-56 search vector
+    // so the first attempt still reproduces the oversized-tsvector failure.
+    await database.query(`
+      ALTER TABLE agent_recall.session_turns ADD COLUMN index_fingerprint text;
+      ALTER TABLE agent_recall.session_raw_events ADD COLUMN index_fingerprint text;
+    `);
     const store = new SessionStore(database);
     const marker = "UNIQUE_KEYWORD_AT_VERY_END_928374";
     const content = `${Array.from(
