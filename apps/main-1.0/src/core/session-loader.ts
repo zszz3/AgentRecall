@@ -44,6 +44,7 @@ import type {
   SessionFormat,
   SessionMessage,
   SessionSource,
+  SessionSourceMetadata,
   SessionTraceEvent,
   SessionTraceKind,
   TokenUsage,
@@ -112,6 +113,7 @@ export interface SessionLoadOptions {
   cursorWorkspacePathMap?: ReadonlyMap<string, string>;
   shouldSkipFile?: (filePath: string, stat: VirtualSessionFileStat, dependencyMtimeMs?: number) => boolean;
   onSkippedFile?: (filePath: string, stat: VirtualSessionFileStat) => void;
+  refreshCodexSessionMetadata?: (metadata: SessionSourceMetadata) => void | Promise<void>;
   incrementalCodexSessions?: ReadonlyMap<string, { offset: number; loaded: LoadedSession }>;
   loadIncrementalCodexSession?: (
     filePath: string,
@@ -3090,6 +3092,22 @@ export function* loadCodexSessionsIterator(
   }
 }
 
+function readCodexSessionMetaHint(filePath: string): ReturnType<typeof parseCodexSessionMetaLine> {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.allocUnsafe(256 * 1024);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.toString("utf8", 0, bytesRead).split(/\r?\n/, 1)[0]?.trim();
+    return firstLine ? parseCodexSessionMetaLine(JSON.parse(firstLine)) : null;
+  } catch {
+    // Missing, partially written, or unusually large headers use the full scanner.
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 export async function* loadCodexSessionsAsyncIterator(
   codexDir = path.join(os.homedir(), ".codex"),
   sourceOverride?: SessionSource,
@@ -3109,7 +3127,25 @@ export async function* loadCodexSessionsAsyncIterator(
 
   for (const filePath of walkJsonlFiles(sessionsDir)) {
     const stat = safeStat(filePath);
-    if (shouldSkipFile(options, filePath, stat, indexStat.mtimeMs)) continue;
+    const metaHint = readCodexSessionMetaHint(filePath);
+    const source = sourceOverride || (CODEX_APP_ORIGINATORS.has(metaHint?.originator || "") ? "codex-app" : "codex-cli");
+    // The title catalog is shared by all conversations. Refresh its metadata
+    // independently so renaming one conversation cannot invalidate every rollout.
+    const dependencyMtimeMs = options.refreshCodexSessionMetadata && metaHint ? 0 : indexStat.mtimeMs;
+    if (shouldSkipFile(options, filePath, stat, dependencyMtimeMs)) {
+      if (options.refreshCodexSessionMetadata && metaHint) {
+        const indexedTitle = titleMap.get(metaHint.id);
+        const timestamp = indexedTitle?.updatedAt ? Date.parse(indexedTitle.updatedAt) : metaHint.ts;
+        await options.refreshCodexSessionMetadata({
+          filePath,
+          rawId: metaHint.id,
+          source,
+          originalTitle: cleanTitle(indexedTitle?.title || metaHint.title || "") || null,
+          timestamp: Number.isFinite(timestamp) ? timestamp : metaHint.ts,
+        });
+      }
+      continue;
+    }
     const incrementalBase = await options.loadIncrementalCodexSession?.(filePath)
       ?? options.incrementalCodexSessions?.get(filePath);
     const scanned = await scanCodexSessionFileAsync(

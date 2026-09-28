@@ -1608,13 +1608,24 @@ export async function* loadCodexSessionsAsyncIterator(
   for (const filePath of walkJsonlFiles(sessionsDir)) {
     const stat = safeStat(filePath);
     const metaHint = readCodexSessionMetaHint(filePath);
-    if (shouldSkipFile(
-      options,
-      filePath,
-      stat,
-      indexStat.mtimeMs,
-      codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents),
-    )) continue;
+    const source = codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents);
+    // The title catalog is shared by all conversations. Refresh its metadata
+    // independently so renaming one conversation cannot invalidate every rollout.
+    const dependencyMtimeMs = options.refreshCodexSessionMetadata && metaHint ? 0 : indexStat.mtimeMs;
+    if (shouldSkipFile(options, filePath, stat, dependencyMtimeMs, source)) {
+      if (options.refreshCodexSessionMetadata && metaHint) {
+        const indexedTitle = titleMap.get(metaHint.id);
+        const timestamp = indexedTitle?.updatedAt ? Date.parse(indexedTitle.updatedAt) : metaHint.ts;
+        await options.refreshCodexSessionMetadata({
+          filePath,
+          rawId: metaHint.id,
+          source,
+          originalTitle: cleanTitle(indexedTitle?.title || metaHint.title || "") || null,
+          timestamp: Number.isFinite(timestamp) ? timestamp : metaHint.ts,
+        });
+      }
+      continue;
+    }
     const incrementalBase = await options.loadIncrementalCodexSession?.(filePath)
       ?? options.incrementalCodexSessions?.get(filePath);
     const scanned = await scanCodexSessionFileAsync(

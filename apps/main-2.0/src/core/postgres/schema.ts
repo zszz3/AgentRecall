@@ -2118,4 +2118,15 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
         DROP COLUMN IF EXISTS search_vector;
     `,
   ],
+}, {
+  version: 57,
+  name: "retain unchanged session events and turns during indexing",
+  statements: [
+    // The unreleased indexing preview used version 56 for these columns.
+    // Preserve its fingerprints and finish the mainline version-56 cleanup.
+    `ALTER TABLE agent_recall.session_turns ADD COLUMN IF NOT EXISTS index_fingerprint text;`,
+    `ALTER TABLE agent_recall.session_raw_events ADD COLUMN IF NOT EXISTS index_fingerprint text;`,
+    `DROP INDEX IF EXISTS agent_recall.session_turns_search_vector_idx;`,
+    `ALTER TABLE agent_recall.session_turns DROP COLUMN IF EXISTS search_vector;`,
+  ],
 }];
