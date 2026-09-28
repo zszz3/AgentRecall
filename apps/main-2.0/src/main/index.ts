@@ -32,6 +32,7 @@ import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatu
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { createIndexProgressPublisher } from "./index-progress";
 import { createSessionIndexFailureLogger } from "./session-index-failure-log";
+import { SessionIndexFailures } from "../core/session-index-failures";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
@@ -1861,7 +1862,7 @@ function createTray(): void {
     Menu.buildFromTemplate([
       { label: `Open ${PRODUCT_NAME}`, click: () => showWindow() },
       { label: "快速搜索会话…", click: showQuickSearch },
-      { label: "Refresh Now", click: () => void runIndexSync() },
+      { label: "Refresh Now", click: () => void runIndexSync(true) },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },
     ]),
@@ -1978,13 +1979,20 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
   return remoteEnvironmentLifecycle;
 }
 
-function runIndexSync(): Promise<IndexStatus> {
+const sessionIndexFailures = new SessionIndexFailures();
+let indexFailureLogger: ReturnType<typeof createSessionIndexFailureLogger> | undefined;
+let retryIndexFailures = false;
+
+function runIndexSync(retryFailures = false): Promise<IndexStatus> {
+  retryIndexFailures ||= retryFailures;
   return indexRunCoordinator.request(async () => {
+    const retryFailuresThisRun = retryIndexFailures;
+    retryIndexFailures = false;
     const settings = getSettings();
     await pruneDisabledOptionalSources(settings);
     indexStatus = { ...indexStatus, running: true, error: null };
     indexProgressPublisher.publish(indexStatus, true);
-    const indexFailureLogger = createSessionIndexFailureLogger(app.getPath("userData"));
+    indexFailureLogger ??= createSessionIndexFailureLogger(app.getPath("userData"));
 
     return syncDefaultSessionsInBatches(store, {
       batchSize: 50,
@@ -2012,6 +2020,8 @@ function runIndexSync(): Promise<IndexStatus> {
       },
       indexFailureLogPath: indexFailureLogger.logPath,
       logIndexFailure: indexFailureLogger.write,
+      failureState: sessionIndexFailures,
+      retryFailures: retryFailuresThisRun,
       onEnvironmentsChanged: emitEnvironmentsUpdated,
       onProgress: (status) => {
         indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
@@ -2731,7 +2741,7 @@ function registerIpc(): void {
       includeCodeBuddy: getSettings().includeCodeBuddyCli,
       includeCodeWiz: getSettings().includeCodeWizCli,
     }),
-    refreshIndex: runIndexSync,
+    refreshIndex: () => runIndexSync(true),
     getIndexStatus: () => indexStatus,
     setCustomTitle: (sessionKey, title) =>
       setSessionCustomTitleAndSyncTerminal(sessionKey, title, {
@@ -3206,7 +3216,7 @@ app.whenReady().then(async () => {
       showWindow();
       mainWindow?.webContents.send("open-settings");
     },
-    refresh: () => void runIndexSync(),
+    refresh: () => void runIndexSync(true),
   });
   createWindow();
   createTray();
