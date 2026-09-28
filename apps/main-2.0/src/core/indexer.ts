@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
+import type { SessionIndexFailures } from "./session-index-failures";
 import {
   loadClaudeCliSessionRows,
   loadCodeBuddyCliSessionFile,
@@ -59,6 +60,9 @@ export interface BatchIndexOptions {
   timeBudgetMs?: number;
   loadOptions?: SessionLoadOptions;
   forceReindex?: (item: LoadedSession) => boolean;
+  dependencyMtimeMs?: (item: LoadedSession) => number;
+  failureState?: SessionIndexFailures;
+  retryFailures?: boolean;
   onProgress?: (status: IndexStatus) => void;
   onEnvironmentsChanged?: () => void;
   yieldToEventLoop?: () => Promise<void>;
@@ -71,6 +75,7 @@ export interface SessionIndexFailureDiagnostic {
   source: LoadedSession["session"]["source"];
   sessionKey: string;
   filePath: string;
+  revision?: { fileMtimeMs: number; fileSize: number; dependencyMtimeMs?: number };
   error: {
     name: string;
     message: string;
@@ -117,116 +122,130 @@ export async function syncLoadedSessionsInBatches(
   );
 
   for await (const loadedItem of loaded) {
-    try {
-      const item = await resolveExecutionEnvironment(
-        store,
-        loadedItem,
-        sshEnvironmentByHostAlias,
-        options.onEnvironmentsChanged,
-      );
-      let sessionKeyMigrated = false;
-      if (item.session.source === "cursor-agent") {
-        if (!cursorSessionKeysByIdentity) {
-          cursorSessionKeysByIdentity = new Map();
-          for (const identity of await store.listSessionIdentitiesBySource("cursor-agent")) {
-            const key = `${identity.storageEnvironmentId}\u0000${identity.rawId}`;
-            const sessionKeys = cursorSessionKeysByIdentity.get(key) ?? new Set<string>();
-            sessionKeys.add(identity.sessionKey);
-            cursorSessionKeysByIdentity.set(key, sessionKeys);
-          }
-        }
-        const storageEnvironmentId =
-          item.session.storageEnvironmentId ?? item.session.environmentId ?? "local";
-        const identityKey = `${storageEnvironmentId}\u0000${item.session.rawId}`;
-        for (const previousKey of cursorSessionKeysByIdentity.get(identityKey) ?? []) {
-          if (previousKey === item.session.sessionKey) continue;
-          sessionKeyMigrated =
-            await store.migrateSessionKeyPreservingUserState(previousKey, item.session.sessionKey)
-            || sessionKeyMigrated;
-        }
-        cursorSessionKeysByIdentity.set(identityKey, new Set([item.session.sessionKey]));
-      }
-      const resumableFamily =
-        item.session.source === "claude-cli"
-        || item.session.source === "claude-app"
-        || item.session.source === "stepcode-claude"
-          ? "claude"
-          : item.session.source === "codex-cli"
-            || item.session.source === "codex-app"
-            || item.session.source === "stepcode-codex"
-            ? "codex"
-            : null;
-      if (resumableFamily) {
-        if (!resumableSessionKeysByIdentity) {
-          resumableSessionKeysByIdentity = new Map();
-          for (const source of [
-            "claude-cli",
-            "claude-app",
-            "stepcode-claude",
-            "codex-cli",
-            "codex-app",
-            "stepcode-codex",
-          ] as const) {
-            const family = source === "claude-cli" || source === "claude-app" || source === "stepcode-claude"
-              ? "claude"
-              : "codex";
-            for (const identity of await store.listSessionIdentitiesBySource(source)) {
-              const key = `${family}\u0000${identity.storageEnvironmentId}\u0000${identity.rawId}`;
-              const sessionKeys = resumableSessionKeysByIdentity.get(key) ?? new Set<string>();
+    const dependencyMtimeMs = options.dependencyMtimeMs?.(loadedItem) ?? 0;
+    // Automatic invalidation bypasses freshness, not retry backoff. A new
+    // dependency revision retries immediately; only manual refresh ignores delay.
+    const deferred = !options.retryFailures
+      ? options.failureState?.deferred(loadedItem.session, dependencyMtimeMs) : undefined;
+    if (deferred) {
+      failures.push(deferred);
+      diagnosticLogFailed ||= !options.failureState?.hasWrittenDiagnostic(loadedItem.session.sessionKey);
+      skipped++;
+    } else {
+      try {
+        const item = await resolveExecutionEnvironment(
+          store,
+          loadedItem,
+          sshEnvironmentByHostAlias,
+          options.onEnvironmentsChanged,
+        );
+        let sessionKeyMigrated = false;
+        if (item.session.source === "cursor-agent") {
+          if (!cursorSessionKeysByIdentity) {
+            cursorSessionKeysByIdentity = new Map();
+            for (const identity of await store.listSessionIdentitiesBySource("cursor-agent")) {
+              const key = `${identity.storageEnvironmentId}\u0000${identity.rawId}`;
+              const sessionKeys = cursorSessionKeysByIdentity.get(key) ?? new Set<string>();
               sessionKeys.add(identity.sessionKey);
-              resumableSessionKeysByIdentity.set(key, sessionKeys);
+              cursorSessionKeysByIdentity.set(key, sessionKeys);
             }
           }
+          const storageEnvironmentId =
+            item.session.storageEnvironmentId ?? item.session.environmentId ?? "local";
+          const identityKey = `${storageEnvironmentId}\u0000${item.session.rawId}`;
+          for (const previousKey of cursorSessionKeysByIdentity.get(identityKey) ?? []) {
+            if (previousKey === item.session.sessionKey) continue;
+            sessionKeyMigrated =
+              await store.migrateSessionKeyPreservingUserState(previousKey, item.session.sessionKey)
+              || sessionKeyMigrated;
+          }
+          cursorSessionKeysByIdentity.set(identityKey, new Set([item.session.sessionKey]));
         }
-        const storageEnvironmentId =
-          item.session.storageEnvironmentId ?? item.session.environmentId ?? "local";
-        const identityKey = `${resumableFamily}\u0000${storageEnvironmentId}\u0000${item.session.rawId}`;
-        for (const previousKey of resumableSessionKeysByIdentity.get(identityKey) ?? []) {
-          if (previousKey === item.session.sessionKey) continue;
-          sessionKeyMigrated =
-            await store.migrateSessionKeyPreservingUserState(previousKey, item.session.sessionKey)
-            || sessionKeyMigrated;
+        const resumableFamily =
+          item.session.source === "claude-cli"
+          || item.session.source === "claude-app"
+          || item.session.source === "stepcode-claude"
+            ? "claude"
+            : item.session.source === "codex-cli"
+              || item.session.source === "codex-app"
+              || item.session.source === "stepcode-codex"
+              ? "codex"
+              : null;
+        if (resumableFamily) {
+          if (!resumableSessionKeysByIdentity) {
+            resumableSessionKeysByIdentity = new Map();
+            for (const source of [
+              "claude-cli",
+              "claude-app",
+              "stepcode-claude",
+              "codex-cli",
+              "codex-app",
+              "stepcode-codex",
+            ] as const) {
+              const family = source === "claude-cli" || source === "claude-app" || source === "stepcode-claude"
+                ? "claude"
+                : "codex";
+              for (const identity of await store.listSessionIdentitiesBySource(source)) {
+                const key = `${family}\u0000${identity.storageEnvironmentId}\u0000${identity.rawId}`;
+                const sessionKeys = resumableSessionKeysByIdentity.get(key) ?? new Set<string>();
+                sessionKeys.add(identity.sessionKey);
+                resumableSessionKeysByIdentity.set(key, sessionKeys);
+              }
+            }
+          }
+          const storageEnvironmentId =
+            item.session.storageEnvironmentId ?? item.session.environmentId ?? "local";
+          const identityKey = `${resumableFamily}\u0000${storageEnvironmentId}\u0000${item.session.rawId}`;
+          for (const previousKey of resumableSessionKeysByIdentity.get(identityKey) ?? []) {
+            if (previousKey === item.session.sessionKey) continue;
+            sessionKeyMigrated =
+              await store.migrateSessionKeyPreservingUserState(previousKey, item.session.sessionKey)
+              || sessionKeyMigrated;
+          }
+          resumableSessionKeysByIdentity.set(identityKey, new Set([item.session.sessionKey]));
         }
-        resumableSessionKeysByIdentity.set(identityKey, new Set([item.session.sessionKey]));
-      }
-      if (
-        !sessionKeyMigrated
-        && !options.forceReindex?.(item)
-        && await store.isIndexedSessionFresh(item.session)
-      ) {
-        await store.touchIndexedAtIfMissing(item.session.sessionKey);
+        if (
+          !sessionKeyMigrated
+          && !options.forceReindex?.(item)
+          && await store.isIndexedSessionFresh(item.session)
+        ) {
+          await store.touchIndexedAtIfMissing(item.session.sessionKey);
+          skipped++;
+        } else {
+          await store.upsertIndexedSession(
+            item.session,
+            item.messages,
+            item.tokenEvents,
+            item.traceEvents,
+            item.codexIncrementalState,
+          );
+          indexed++;
+        }
+        options.failureState?.recovered(loadedItem.session.sessionKey);
+      } catch (error) {
+        let diagnostic: SessionIndexFailureDiagnostic = {
+          source: loadedItem.session.source,
+          sessionKey: loadedItem.session.sessionKey,
+          filePath: loadedItem.session.filePath,
+          error: error instanceof Error
+            ? { name: error.name, message: error.message, stack: error.stack ?? null }
+            : { name: "UnknownError", message: String(error), stack: null },
+        };
+        diagnostic = options.failureState?.record(loadedItem.session, diagnostic, dependencyMtimeMs) ?? diagnostic;
+        failures.push(diagnostic);
         skipped++;
-      } else {
-        await store.upsertIndexedSession(
-          item.session,
-          item.messages,
-          item.tokenEvents,
-          item.traceEvents,
-          item.codexIncrementalState,
-        );
-        indexed++;
-      }
-    } catch (error) {
-      const diagnostic: SessionIndexFailureDiagnostic = {
-        source: loadedItem.session.source,
-        sessionKey: loadedItem.session.sessionKey,
-        filePath: loadedItem.session.filePath,
-        error: error instanceof Error
-          ? { name: error.name, message: error.message, stack: error.stack ?? null }
-          : { name: "UnknownError", message: String(error), stack: null },
-      };
-      failures.push(diagnostic);
-      skipped++;
-      if (options.logIndexFailure) {
-        try {
-          await options.logIndexFailure(diagnostic);
-        } catch (logError) {
+        if (options.logIndexFailure) {
+          try {
+            await options.logIndexFailure(diagnostic);
+            options.failureState?.markDiagnosticWritten(loadedItem.session.sessionKey);
+          } catch (logError) {
+            diagnosticLogFailed = true;
+            console.error("[indexer] Could not write session indexing diagnostic", logError);
+          }
+        } else {
           diagnosticLogFailed = true;
-          console.error("[indexer] Could not write session indexing diagnostic", logError);
+          console.error("[indexer] Session indexing failed", diagnostic);
         }
-      } else {
-        diagnosticLogFailed = true;
-        console.error("[indexer] Session indexing failed", diagnostic);
       }
     }
     total++;
@@ -324,6 +343,7 @@ export async function syncDefaultSessionsInBatches(
     });
   }
   const dependencyChangedFiles = new Set<string>();
+  const dependencyMtimeByFile = new Map<string, number>();
   let fileSkipped = 0;
   const shouldSkipFile = loadOptions.shouldSkipFile;
   const onSkippedFile = loadOptions.onSkippedFile;
@@ -355,6 +375,7 @@ export async function syncDefaultSessionsInBatches(
     },
     shouldSkipFile: (filePath, stat, dependencyMtimeMs = 0, source) => {
       scannedFilePaths.add(filePath);
+      dependencyMtimeByFile.set(filePath, dependencyMtimeMs);
       const customDecision = shouldSkipFile?.(filePath, stat, dependencyMtimeMs, source);
       if (customDecision !== undefined) return customDecision;
       const snapshot = findSessionFileSnapshot(indexedFiles, filePath, stat, source);
@@ -378,11 +399,13 @@ export async function syncDefaultSessionsInBatches(
   })();
   const status = await syncLoadedSessionsInBatches(store, loaded, {
     ...options,
+    dependencyMtimeMs: (item) => dependencyMtimeByFile.get(item.session.filePath) ?? 0,
     forceReindex: (item) =>
       dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   });
   await store.refreshSessionSourceMetadata(metadataUpdates);
+  options.failureState?.pruneUnseenSources(scannedFilePaths, scannedSessionKeys);
   // Prune sessions whose source files no longer exist in local storage. Cursor
   // is the exception: its shared database can forget one conversation while our
   // parsed message cache remains the only readable copy.
