@@ -8,12 +8,16 @@ import type { AssetSnapshot } from "./asset-format.js";
 import type { DirectoryConnection, TeamSpace } from "./config.js";
 import { withAssetLock } from "./asset-storage.js";
 import { inspectProjectSkill, markedProjectSkills, prepareSkillInstall, uninstallProjectSkill } from "./project-skills.js";
+import { configurationFiles, ProjectConfiguration } from "./project-configuration.js";
 import { ProjectDocuments } from "./project-documents.js";
 import { ProjectWorkConfigs } from "./project-work-configs.js";
 
-const itemSchema = z.object({ kind: z.enum(["skill", "document", "directory"]), id: z.string().max(200), target: z.enum(["codex", "claude"]).optional(), status: z.enum(["installed", "updated", "unchanged", "retired", "conflict", "failed"]), message: z.string().max(500).optional(), backup: z.string().max(512).optional() }).strict();
-const pullReportSchema = z.object({ schemaVersion: z.literal(1), repository: z.string().max(2048), commit: z.string().regex(/^[a-f0-9]{40}$/), startedAt: z.number(), finishedAt: z.number(), status: z.enum(["complete", "partial", "cancelled", "no-directories"]), directories: z.array(z.object({ id: z.string().max(64), path: z.string().max(32768), status: z.enum(["complete", "partial", "skipped", "cancelled"]), items: z.array(itemSchema).max(512) }).strict()).max(32) }).strict();
-export type TeamPullReport = z.infer<typeof pullReportSchema>;
+const itemSchema = z.object({ kind: z.enum(["skill", "document", "directory", "instruction", "configuration", "mcp", "environment"]), id: z.string().max(200), target: z.enum(["codex", "claude"]).optional(), status: z.enum(["installed", "updated", "unchanged", "retired", "conflict", "failed"]), message: z.string().max(500).optional(), backup: z.string().max(512).optional() }).strict();
+const pullReportV2Schema = z.object({ schemaVersion: z.literal(2), repository: z.string().max(2048), commit: z.string().regex(/^[a-f0-9]{40}$/), startedAt: z.number(), finishedAt: z.number(), status: z.enum(["complete", "partial", "cancelled", "no-directories"]), directories: z.array(z.object({ id: z.string().max(64), path: z.string().max(32768), status: z.enum(["complete", "partial", "skipped", "cancelled"]), items: z.array(itemSchema).max(512) }).strict()).max(32) }).strict();
+const legacyItemSchema = itemSchema.extend({ kind: z.enum(["skill", "document", "directory"]) });
+const pullReportV1Schema = pullReportV2Schema.extend({ schemaVersion: z.literal(1), directories: z.array(pullReportV2Schema.shape.directories.element.extend({ items: z.array(legacyItemSchema).max(512) })).max(32) });
+const pullReportSchema = z.union([pullReportV1Schema, pullReportV2Schema]);
+export type TeamPullReport = z.infer<typeof pullReportV2Schema> | z.infer<typeof pullReportV1Schema>;
 export const MAX_PULL_REPORT_BYTES = 16 * 1024 * 1024;
 export function validatePullReport(value: unknown): TeamPullReport {
   if (Buffer.byteLength(JSON.stringify(value)) > MAX_PULL_REPORT_BYTES) throw new WorkspaceError("PULL_REPORT_TOO_LARGE", "同步结果超过大小限制，文件操作可能已完成，请检查各目录及备份后重试。");
@@ -22,14 +26,14 @@ export function validatePullReport(value: unknown): TeamPullReport {
 
 
 export async function distributeTeamAssets(workspace: WorkspaceService, team: TeamSpace, connections: DirectoryConnection[], snapshot: AssetSnapshot, signal?: AbortSignal): Promise<TeamPullReport> {
-  const report: TeamPullReport = { schemaVersion: 1, repository: team.repository, commit: snapshot.commit, startedAt: Date.now(), finishedAt: Date.now(), status: connections.some((entry) => entry.enabled) ? "complete" : "no-directories", directories: [] };
+  const report: z.infer<typeof pullReportV2Schema> = { schemaVersion: 2, repository: team.repository, commit: snapshot.commit, startedAt: Date.now(), finishedAt: Date.now(), status: connections.some((entry) => entry.enabled) ? "complete" : "no-directories", directories: [] };
   const cancelled = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "同步已取消，已完成的文件和备份保留。"); };
   for (const connection of connections) {
-    const result: TeamPullReport["directories"][number] = { id: connection.id, path: connection.path, status: !connection.enabled ? "skipped" : signal?.aborted ? "cancelled" : "complete", items: [] };
+    const result: (typeof report)["directories"][number] = { id: connection.id, path: connection.path, status: !connection.enabled ? "skipped" : signal?.aborted ? "cancelled" : "complete", items: [] };
     report.directories.push(result);
     if (result.status === "skipped") continue;
     if (signal?.aborted) { report.status = "cancelled"; continue; }
-    const issue = (kind: "skill" | "document" | "directory", id: string, error: unknown, target?: "codex" | "claude") => {
+    const issue = (kind: TeamPullReport["directories"][number]["items"][number]["kind"], id: string, error: unknown, target?: "codex" | "claude") => {
       if (error instanceof WorkspaceError && error.code === "CANCELLED") { result.status = "cancelled"; report.status = "cancelled"; return; }
       result.status = "partial"; if (report.status !== "cancelled") report.status = "partial";
       const previous = result.items.find((item) => item.kind === kind && item.id === id && item.target === target);
@@ -55,8 +59,8 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         await verify(); assertOwned(); assertConfigOwned(); return operation();
       });
       await verify();
-      const maximumItems = snapshot.skills.length * connection.targets.length
-        + (snapshot.schemaVersion === 3 ? snapshot.documents.length : 0)
+      const maximumItems = (snapshot.schemaVersion === 4 ? 5 : 0) + snapshot.skills.length * connection.targets.length
+        + ("documents" in snapshot ? snapshot.documents.length : 0)
         + connection.targets.reduce((count, target) => count + markedProjectSkills(root, target).length, 0)
         + new ProjectDocuments(root).state.documents.length;
       if (maximumItems > 511) throw new WorkspaceError("ASSETS_TOO_LARGE", "此目录的同步与退役条目超过 511 项，请先整理旧安装后重试。");
@@ -102,7 +106,7 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
       }
       await withAssetLock(root, ".agentrecall-document.lock", async (assertOwned) => {
         const documents = new ProjectDocuments(root);
-        const desired = snapshot.schemaVersion === 3 ? snapshot.documents.filter((doc) => doc.target === "AGENTS.md" ? connection.targets.includes("codex") : doc.target === "CLAUDE.md" ? connection.targets.includes("claude") : true) : [];
+        const desired = "documents" in snapshot ? snapshot.documents.filter((doc) => doc.target === "AGENTS.md" ? connection.targets.includes("codex") : doc.target === "CLAUDE.md" ? connection.targets.includes("claude") : true) : [];
         for (const document of desired) {
           cancelled();
           try {
@@ -115,12 +119,26 @@ export async function distributeTeamAssets(workspace: WorkspaceService, team: Te
         }
         // Disabling a client keeps its existing instruction file. Only resources
         // actually removed from the manifest are retirement candidates.
-        const publishedTargets = new Set(snapshot.schemaVersion === 3 ? snapshot.documents.map((doc) => doc.target.normalize("NFC").toLowerCase()) : []);
+        const publishedTargets = new Set("documents" in snapshot ? snapshot.documents.map((doc) => doc.target.normalize("NFC").toLowerCase()) : []);
         for (const entry of [...documents.state.documents].filter((doc) => doc.repository === team.repository && !publishedTargets.has(doc.target.normalize("NFC").toLowerCase()))) {
           cancelled();
           if (result.items.some((item) => item.kind === "document" && ["conflict", "failed"].includes(item.status))) { issue("document", entry.id, new WorkspaceError("DOCUMENT_CONFLICT", "本目录的文档更新尚未完成，旧文档保留，处理问题后重试。")); continue; }
           try { await publish(() => { const applied = documents.retire(entry.target, team.repository); result.items.push({ kind: "document", id: entry.id, status: "retired", ...(applied.backup ? { backup: path.relative(root, applied.backup) } : {}) }); }, assertOwned); }
           catch (error) { issue("document", entry.id, error); }
+          await setImmediate();
+        }
+      });
+      // Older manifests do not retire v4 configuration resources implicitly.
+      if (snapshot.schemaVersion === 4) await withAssetLock(root, ".agentrecall-configuration.lock", async (assertOwned) => {
+        const configuration = new ProjectConfiguration(root);
+        for (const target of connection.targets) for (const desired of configurationFiles(snapshot, target)) {
+          cancelled();
+          try {
+            await publish(() => {
+              const applied = configuration.apply(desired, team.repository);
+              if (applied) result.items.push({ kind: desired.kind, id: desired.file, target, status: applied.status, ...(applied.backup ? { backup: path.relative(root, applied.backup) } : {}) });
+            }, assertOwned);
+          } catch (error) { issue(desired.kind, desired.file, error, target); }
           await setImmediate();
         }
       });

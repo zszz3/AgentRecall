@@ -1,10 +1,10 @@
-# 团队 Skill：拉取、预览和项目安装
+# 团队资产：Skills、文档与共享配置
 
-团队资产支持 Skills 与 Markdown 文档。用户连接 GitHub 资产仓库并接入工作目录后，一次同步即可更新已启用客户端的 Skills 与文档。下文单项安装与工作配置命令保留为高级管理能力。独立 CLI 无需运行桌面、数据库或 Memory 服务；V2 的[团队工作区](team-workspace.md)也可操作相同资产。
+团队资产支持 Skills、Markdown 文档、共享指令、MCP 与公共环境变量。用户连接 GitHub 资产仓库并接入工作目录后，一次同步即可更新已启用客户端的团队资产。下文单项安装与工作配置命令保留为高级管理能力。独立 CLI 无需运行桌面、数据库或 Memory 服务；V2 的[团队工作区](team-workspace.md)也可操作相同资产。
 
 ## 准备资产仓库
 
-空 GitHub 仓库可先执行 `agentrecall init <仓库地址>` 自动生成并推送基础目录与版本 2 空清单；已有合法资产仓库重复初始化不会改动远端。完整行为见 [初始化说明](cli.md#初始化团队资产仓库)。接着添加所需 Skill，示例如下：
+空 GitHub 仓库可先执行 `agentrecall init <仓库地址>` 自动生成并推送基础目录与版本 4 空清单；已有合法资产仓库重复初始化不会改动远端。完整行为见 [初始化说明](cli.md#初始化团队资产仓库)。接着添加所需 Skill，示例如下：
 
 在资产仓库的默认分支保存以下目录：
 
@@ -195,4 +195,48 @@ agentrecall skill uninstall review --target codex
 
 `path` 是资产仓库中的 Markdown 文件，`target` 是业务项目中的位置，只允许根目录 `AGENTS.md`、`CLAUDE.md` 或 `docs/` 下的 `.md` 文件。ID 与目标路径必须唯一，拒绝路径穿越、大小写/规范化冲突、文件/目录冲突、符号链接和 Git LFS。文档是严格 UTF-8，保留 BOM，单文件最多 1 MiB，最多 128 份；与 Skills 合并计入 8 MiB 原始文件及 16 MiB 完整缓存限制。
 
-在 V2 团队顶部点击「同步团队」，统一更新 Skills 与文档。文档页仅浏览内容，不再逐项应用。新建的团队文档记录归属，后续未修改版本自动更新并保留备份；同名个人文件和本地修改保留。原先没有归属记录的文件不自动认领。完整兼容及退役规则见[团队空间指南](team-workspace.md)。仓库初始化仍生成版本 2 空清单，发布文档时显式升级资产清单到版本 3。
+在 V2 团队顶部点击「同步团队」，统一更新 Skills 与文档。文档页仅浏览内容，不再逐项应用。新建的团队文档记录归属，后续未修改版本自动更新并保留备份；同名个人文件和本地修改保留。原先没有归属记录的文件不自动认领。完整兼容及退役规则见[团队空间指南](team-workspace.md)。新仓库初始化生成版本 4 空清单；已有版本 1/2 仓库发布文档时显式升级到版本 3 或 4。
+
+
+## 共享指令、MCP 与 Env
+
+这些资源使用资产清单 `schemaVersion: 4`。保留原有字段，增加 `instructions`、`mcpServers`、`environment`，即使没有内容也使用空数组。旧版本 1—3 继续读取；同步旧版本不隐式删除此前安装的共享配置。旧客户端会拒绝版本 4，应同时升级桌面与 CLI。资产清单版本与本机连接配置版本各自独立。
+
+```json
+{
+  "schemaVersion": 4,
+  "skills": [],
+  "workConfigs": [],
+  "documents": [],
+  "instructions": [
+    { "id": "review-rules", "name": "代码审查约定", "path": "rules/review.md", "targets": ["codex", "claude"] }
+  ],
+  "mcpServers": [
+    {
+      "id": "docs", "name": "知识库", "transport": "http",
+      "url": "https://example.invalid/mcp",
+      "headers": { "Authorization": { "fromEnv": "TEAM_DOCS_AUTH" } }
+    },
+    {
+      "id": "local-tools", "name": "本地工具", "transport": "stdio",
+      "command": "node", "args": ["tools/server.mjs"],
+      "env": { "TEAM_TOOLS_TOKEN": { "fromEnv": "TEAM_TOOLS_TOKEN" }, "MODE": "team" }
+    }
+  ],
+  "environment": [
+    { "name": "TEAM_LOCALE", "value": "zh-CN" }
+  ]
+}
+```
+
+每项可声明 `targets`，省略时同时适用 Codex 与 Claude Code。最多 16 份指令、32 个 MCP、64 个公共变量；指令文件最多 1 MiB，纳入资产总大小限制。变量名称按 Windows 不区分大小写的规则去重。`instructions` 的 ID、MCP ID 各自唯一。
+
+共享指令按清单顺序合入客户端指令文件的 `agentrecall:team` 标记区块，保留区块之外的文字。更新或撤回只处理未被本地修改的区块。不能同时将同一客户端的根指令文件登记为普通文档和共享指令；正文不能包含受管标记。
+
+MCP 支持 stdio 与 HTTP。同步仅写配置，不下载、运行服务器，也不替用户通过客户端的信任或授权。stdio 所需程序、脚本及依赖应由成员自行准备。密钥用 `fromEnv` 表示；stdio 的引用名称必须与环境变量键相同。Codex 写入 `env_vars` 或 `env_http_headers`，Claude Code 写入 `${NAME}`，由客户端启动时从本机环境读取。HTTP Authorization 引用的值应包含服务需要的完整认证格式（如 `Bearer …`）。AgentRecall 不读取这些变量的实际值，也不在同步结果中判断其是否存在。
+
+Env 的 `value` 仅用于可共享的普通字符串，写入 Codex 的 `shell_environment_policy.set` 与 Claude Code 的 `env`。不导入个人 `.env` 文件，也不为普通字符串做 `${…}` 展开；包含此语法会拒绝，密钥引用应放在 MCP 的 `fromEnv` 中。Codex 现有的环境过滤策略仍然有效，公共 Env 不等同于传给所有 MCP 的变量；MCP 专用变量放在服务器自己的 `env` 中。
+
+团队配置通过「同步团队」统一更新，团队的「配置」页面可以查看内容与适用客户端，不提供自动上传本机配置的功能。配置落点、冲突与备份见[团队空间指南](team-workspace.md#同步写到哪里)。
+
+客户端格式依据：[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)、[Claude Code MCP](https://code.claude.com/docs/en/mcp)、[Claude Code 项目设置](https://code.claude.com/docs/en/settings)。

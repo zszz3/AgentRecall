@@ -1,6 +1,6 @@
 # AgentRecall CLI
 
-V2 配套独立命令 `agentrecall`，用于管理本地项目和可选团队配置，主动拉取、预览、安装、更新和回滚团队 Skill。团队默认关闭；`init <仓库地址>` 可初始化空团队仓库，`team sync` 主动读取资产，不上传 Session，也不要求安装或启动桌面应用。
+V2 配套独立命令 `agentrecall`，用于管理本地项目和可选团队配置，主动拉取、预览、安装、更新和回滚团队 Skill。团队默认关闭；`init <仓库地址>` 可初始化空团队仓库，`team sync` 主动读取并分发团队 Skills、文档、共享指令、MCP 和公共环境变量到启用的工作目录，不上传 Session，也不要求安装或启动桌面应用。
 
 这是源码预览包，尚未发布到 npm 或桌面 Release 附件。需要 Node.js 22.13+ 和 Git 2.31+。在仓库根目录构建：
 
@@ -27,6 +27,6 @@ agentrecall status --project backend
 
 完整的命令、项目识别、配置格式和限制见仓库中的 [CLI 使用与配置](../../docs/v2/cli.md)，或在线查看 [使用指南](https://github.com/zszz3/AgentRecall/blob/main/docs/v2/cli.md)。
 
-登记项目后，使用 `team sync`、`skill list` 和 `skill preview <id>` 查看团队资产。安装时必须显式提供目标客户端和预览中的版本。更新前用 `skill diff` 查看变化，`skill update` 保存旧版本备份，`skill backups` 和 `skill rollback` 可在离线时恢复。资产仓库格式、安装与恢复流程见 [团队 Skill 指南](../../docs/v2/team-assets.md)。
+接入工作目录后，`team sync` 统一安装和更新团队资产。`skill list` 和 `skill preview <id>` 可浏览 Skill；高级单项安装需提供目标客户端和预览中的版本。更新前用 `skill diff` 查看变化，`skill update` 保存旧版本备份，`skill backups` 和 `skill rollback` 可在离线时恢复。资产仓库格式、安装与恢复流程见 [团队 Skill 指南](../../docs/v2/team-assets.md)。
 
-团队可使用 `work-config list/preview/install` 选择一组 Skill。安装后可用 `work-config installed/status/uninstall` 查看归属和整组卸载，共用 Skill 与原有独立安装会保留。整组升级使用 `work-config diff/update` 并指定新旧版本；共享内容冲突会阻止更新。跨配置协调升级和其他资产类型尚未提供。
+团队可使用 `work-config list/preview/install` 选择一组 Skill。安装后可用 `work-config installed/status/uninstall` 查看归属和整组卸载，共用 Skill 与原有独立安装会保留。整组升级使用 `work-config diff/update` 并指定新旧版本；共享内容冲突会阻止更新。工作配置组合当前仅包含 Skills；其他资源随团队同步分发，跨组合协调升级尚未提供。

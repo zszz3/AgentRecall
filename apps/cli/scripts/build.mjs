@@ -16,7 +16,7 @@ for (const output of Object.values(result.metafile.outputs)) {
 }
 await fs.copyFile("../../LICENSE", "LICENSE");
 const notices = [];
-for (const name of ["proper-lockfile", "graceful-fs", "retry", "signal-exit", "zod", "yaml"]) {
+for (const name of ["proper-lockfile", "graceful-fs", "retry", "signal-exit", "zod", "yaml", "smol-toml"]) {
   let directory = path.dirname(require.resolve(name));
   while (true) {
     const pkg = await fs.readFile(path.join(directory, "package.json"), "utf8").catch((error) => {

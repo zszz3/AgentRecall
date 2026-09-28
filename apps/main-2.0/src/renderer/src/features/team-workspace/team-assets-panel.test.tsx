@@ -17,7 +17,7 @@ const config: WorkspaceConfig = { schemaVersion: 3, teamEnabled: true, defaultTe
 const selection = { team, enabled: true, busy: false };
 const ok = (data: TeamPayload): TeamReply => ({ ok: true, data });
 const documentAsset = { id: "rules", name: "团队规范", path: "AGENTS.md", target: "AGENTS.md", digest: "a".repeat(64) };
-const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], workConfigs: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
+const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice: null, assets: { teamId: team.id, repository, commit: revision, skills: [{ id: "review", description: "Review code", files: 1, digest: "b".repeat(64) }], configuration: { instructions: [{ id: "rules", name: "代码约定", path: "rules.md", content: "Run focused tests.", digest: "c".repeat(64), targets: ["codex", "claude"] }], mcpServers: [{ id: "docs", name: "知识工具", transport: "http", url: "https://example.invalid/mcp", headers: { Authorization: { fromEnv: "DOCS_AUTH" } }, targets: ["codex", "claude"] }], environment: [{ name: "TEAM_MODE", value: "review", targets: ["codex"] }] }, workConfigs: [], documents: [documentAsset, { ...documentAsset, id: "second", name: "第二文档", path: "docs/second.md", target: "docs/second.md" }] } };
 const preview = (id: string, content: string): TeamReply => ok({ kind: "document-preview", value: { ...documentAsset, id, content, repository, commit: revision, destination: null, local: null, status: "unselected" } });
 function base(input: TeamRequest): TeamReply {
   if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config, directories: config.directories, busy: false } });
@@ -107,4 +107,21 @@ it("session sharing remains explicit and never uploads when the dialog opens", a
   expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
   await act(async () => button("预览完整会话").click());
   expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
+});
+
+it("team configuration groups three resource kinds and opens details in the existing reader", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  await act(async () => button("配置").click());
+  expect(container.textContent).toContain("共享指令"); expect(container.textContent).toContain("MCP"); expect(container.textContent).toContain("TEAM_MODE");
+  await act(async () => button("知识工具").click());
+  expect(container.querySelector('[aria-label="配置详情"]')?.textContent).toContain("DOCS_AUTH");
+  await act(async () => button("关闭配置").click());
+  expect(document.activeElement).toBe(button("知识工具"));
+  await act(async () => button("代码约定").click());
+  expect(container.querySelector('[aria-label="配置详情"]')?.textContent).toContain("Run focused tests.");
+  await act(async () => container.querySelector('[aria-label="配置详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(container.querySelector('[aria-label="配置详情"]')).toBeNull();
+  expect(request.mock.calls.every(([input]) => ["snapshot", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });

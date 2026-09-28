@@ -33,7 +33,21 @@ const documentEntrySchema = z.strictObject({
   target: z.string().refine((value) => portableAssetPath(value) && (value === "AGENTS.md" || value === "CLAUDE.md" || value.startsWith("docs/") && value.endsWith(".md"))),
 });
 const manifestV3Schema = manifestV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentEntrySchema).max(128) });
-export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema]);
+const clients = z.array(z.enum(["codex", "claude"])).min(1).max(2).refine((items) => new Set(items).size === items.length).default(["codex", "claude"]);
+const configName = z.string().trim().min(1).max(200).refine((value) => !/[\r\n\0]/.test(value) && !value.includes("agentrecall:team"));
+const envName = z.string().max(128).regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((name) => !["__proto__", "constructor", "prototype"].includes(name));
+const plainValue = z.string().max(8192).refine((value) => !value.includes("\0") && !value.includes("${") && !value.includes("agentrecall:team"));
+const environmentValue = z.union([plainValue, z.strictObject({ fromEnv: envName })]);
+const instructionEntrySchema = z.strictObject({ id: assetId, name: configName, path: z.string().refine(portableAssetPath).refine((value) => value.endsWith(".md")), targets: clients });
+const mcpBase = { id: assetId, name: configName, targets: clients };
+const mcpSchema = z.discriminatedUnion("transport", [
+  z.strictObject({ ...mcpBase, transport: z.literal("stdio"), command: z.string().min(1).max(2048).refine((value) => !/[\r\n\0]/.test(value)), args: z.array(plainValue).max(64).default([]), env: z.record(envName, environmentValue).refine((env) => Object.keys(env).length <= 64 && Object.entries(env).every(([key, value]) => typeof value === "string" || value.fromEnv === key)).default({}) }),
+  z.strictObject({ ...mcpBase, transport: z.literal("http"), url: z.string().url().max(2048).refine((value) => { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !value.includes("${"); }), headers: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9-]{0,127}$/).refine((name) => !["constructor", "prototype"].includes(name)), environmentValue).refine((value) => Object.keys(value).length <= 64).default({}) }),
+]);
+const environmentSchema = z.strictObject({ name: envName, value: plainValue, targets: clients });
+const configurationFields = { instructions: z.array(instructionEntrySchema).max(16), mcpServers: z.array(mcpSchema).max(32), environment: z.array(environmentSchema).max(64) };
+const manifestV4Schema = manifestV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields });
+export const manifestSchema = z.union([manifestV1Schema, manifestV2Schema, manifestV3Schema, manifestV4Schema]);
 const fileSchema = z.strictObject({
   path: z.string().refine(portableAssetPath),
   content: z.string().refine((value) => Buffer.from(value, "base64").toString("base64") === value),
@@ -53,11 +67,14 @@ const snapshotV2Schema = z.strictObject({
 });
 const documentSchema = documentEntrySchema.extend({ content: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/) });
 const snapshotV3Schema = snapshotV2Schema.extend({ schemaVersion: z.literal(3), documents: z.array(documentSchema).max(128) });
+const instructionSchema = instructionEntrySchema.extend({ content: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/) });
+const snapshotV4Schema = snapshotV3Schema.extend({ schemaVersion: z.literal(4), ...configurationFields, instructions: z.array(instructionSchema).max(16) });
+export type TeamConfiguration = Pick<z.infer<typeof snapshotV4Schema>, "instructions" | "mcpServers" | "environment">;
 export type TeamDocument = z.infer<typeof documentSchema>;
 export type SkillFile = z.infer<typeof fileSchema>;
 export type TeamSkill = z.infer<typeof skillSchema>;
 export type WorkConfig = z.infer<typeof workConfigSchema>;
-export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema>;
+export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema> | z.infer<typeof snapshotV4Schema>;
 
 export function fileDigest(files: SkillFile[]): string {
   return createHash("sha256").update(JSON.stringify([...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0))).digest("hex");
@@ -103,7 +120,7 @@ export function skillFromFiles(id: string, files: SkillFile[]): TeamSkill {
 }
 
 export function validateSnapshot(value: unknown, repository: string): AssetSnapshot {
-  const parsed = z.union([snapshotV1Schema, snapshotV2Schema, snapshotV3Schema]).safeParse(value);
+  const parsed = z.union([snapshotV1Schema, snapshotV2Schema, snapshotV3Schema, snapshotV4Schema]).safeParse(value);
   if (!parsed.success || parsed.data.repository !== repository) throw invalidAsset();
   const snapshot = parsed.data;
   if (new Set(snapshot.skills.map((skill) => skill.id)).size !== snapshot.skills.length) throw invalidAsset();
@@ -118,7 +135,7 @@ export function validateSnapshot(value: unknown, repository: string): AssetSnaps
       throw invalidAsset();
     }
   }
-  if (snapshot.schemaVersion === 3) {
+  if ("documents" in snapshot) {
     const ids = new Set<string>(); const targets = new Set<string>();
     const spellings = new Map<string, string>();
     for (const document of snapshot.documents) {
@@ -135,11 +152,21 @@ export function validateSnapshot(value: unknown, repository: string): AssetSnaps
       ids.add(document.id); targets.add(key);
     }
   }
-  if (snapshot.schemaVersion === 3) {
+  if ("documents" in snapshot) {
     const targets = new Set(snapshot.documents.map((document) => document.target.normalize("NFC").toLowerCase()));
     for (const target of targets) {
       const parts = target.split("/");
       for (let i = 1; i < parts.length; i++) if (targets.has(parts.slice(0, i).join("/"))) throw invalidAsset();
+    }
+  }
+  if (snapshot.schemaVersion === 4) {
+    if (new Set(snapshot.instructions.map((item) => item.id)).size !== snapshot.instructions.length
+      || new Set(snapshot.mcpServers.map((item) => item.id)).size !== snapshot.mcpServers.length
+      || new Set(snapshot.environment.map((item) => item.name.toUpperCase())).size !== snapshot.environment.length) throw invalidAsset();
+    for (const item of snapshot.instructions) {
+      if (Buffer.byteLength(item.content) > MAX_FILE_BYTES || item.content.includes("agentrecall:team")
+        || createHash("sha256").update(item.content).digest("hex") !== item.digest
+        || snapshot.documents.some((doc) => item.targets.some((target) => doc.target === (target === "codex" ? "AGENTS.md" : "CLAUDE.md")))) throw invalidAsset();
     }
   }
   if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > MAX_SNAPSHOT_BYTES) {

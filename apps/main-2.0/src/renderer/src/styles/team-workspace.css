@@ -173,3 +173,9 @@
 .team-sync-results small { display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 .team-sync-results strong { font-size: 12px; }
 @container team-space (max-width: 680px) { .team-sync-control { padding: 0 20px 14px; } .team-sync-control-main { flex-wrap: wrap; } }
+
+.team-configuration-group { padding: 22px 0; border-bottom: 1px solid var(--border-color, #e8e8ed); }
+.team-configuration-group > header { display: flex; align-items: center; gap: 9px; }
+.team-configuration-group h3 { margin: 0; font-size: 14px; }
+.team-configuration-group > p { margin: 8px 0 12px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.team-configuration-empty { color: var(--text-muted); }

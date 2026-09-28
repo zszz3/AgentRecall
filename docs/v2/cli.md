@@ -12,7 +12,7 @@
 agentrecall init https://github.com/your-team/ai-assets --name 我的团队
 ```
 
-仓库必须已在 GitHub 创建。这个命令会主动访问远端：空仓库会在 `main` 创建并推送一条基础模板提交，包含 `agentrecall.json`、说明文件和参考 TeamAI 的 `skills/rules/docs/env/members` 目录。当前清单支持 Skills 与工作配置，其余目录仅预留，不代表已实现自动分发、成员系统或 TeamAI 格式兼容。
+仓库必须已在 GitHub 创建。这个命令会主动访问远端：空仓库会在 `main` 创建并推送一条基础模板提交，包含 `agentrecall.json`、说明文件和参考 TeamAI 的 `skills/rules/docs/env/members` 目录。新仓库生成版本 4 空清单，支持 Skills、工作配置、文档、共享指令、MCP 和公共 Env；members 仅预留，不代表成员系统或 TeamAI 格式兼容。完整字段见[团队资产指南](team-assets.md)。
 
 非空仓库必须已有合法的 AgentRecall 清单；命令只校验，不补写或覆盖已有文件。重复运行复用远端版本和本地团队 ID，不重复创建提交。`--name` 只用于首次登记；已有名称保留。默认 HTTPS，也可使用 `--transport ssh`，沿用已有 Git 身份，不自动登录或安装认证工具。
 
@@ -60,7 +60,7 @@ agentrecall team disable
 | `team use <id>` / `team use --personal` | 设置或清除默认团队 |
 | `team enable` / `team disable` | 开启或关闭团队功能 |
 | `team current [--project <id>]` | 读取当前生效的项目和团队；未开启、未绑定或个人项目会明确报错 |
-| `team sync [--project <id>] [--transport https\|ssh]` | 拉取资产仓库默认分支，并安装/更新该团队所有已启用工作目录中的 Skills 和文档 |
+| `team sync [--project <id>] [--transport https\|ssh]` | 拉取资产仓库默认分支，并安装/更新该团队所有已启用工作目录中的 Skills、文档和配置 |
 | `skill list [--project <id>]` | 查看当前团队已缓存的 Skill |
 | `skill preview <id> [--target codex\|claude] [--file <path>] [--project <id>]` | 预览正文、支持文件、完整版本号和可选安装位置 |
 | `skill install <id> --target codex\|claude --revision <sha> [--project <id>]` | 安装已选择版本；不同内容或本地修改均不覆盖 |

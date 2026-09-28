@@ -5,6 +5,7 @@ import type { TeamSnapshot, TeamRequest } from "../../../../shared/ipc/team-work
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 import { TeamAssetsPanel } from "./team-assets-panel";
+import { TeamConfigurationPanel } from "./team-configuration-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
 import { TeamSyncControl } from "./team-sync-control";
 import { TeamSessionsPanel } from "./team-sessions-panel";
@@ -28,7 +29,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
   }, [api, refresh, settingsOpen]);
   const team = snapshot?.config?.teams.find((entry) => entry.id === teamId);
   return <section className="team-space-page">
-    <header className="team-space-heading"><div className="team-space-title">{team ? <button className="team-icon-button" aria-label={l("Back to teams", "返回团队列表")} title={l("Back to teams", "返回团队列表")} onClick={() => setTeamId(undefined)}><ArrowLeft size={18} /></button> : <span className="team-heading-icon"><UsersRound size={21} /></span>}<div><h1>{team?.name ?? l("Team Space", "团队空间")}</h1><p>{team ? team.repository.replace("https://github.com/", "") : l("Shared assets for your everyday work", "团队共用的会话、技能与文档")}</p></div></div><div className="team-space-actions"><button className="team-icon-button" aria-label={l("Refresh teams", "刷新团队")} title={l("Refresh teams", "刷新团队")} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} /></button><button className="team-icon-button" aria-label={l("Team settings", "团队设置")} title={l("Team settings", "团队设置")} onClick={onOpenSettings}><Settings size={17} /></button></div></header>
+    <header className="team-space-heading"><div className="team-space-title">{team ? <button className="team-icon-button" aria-label={l("Back to teams", "返回团队列表")} title={l("Back to teams", "返回团队列表")} onClick={() => setTeamId(undefined)}><ArrowLeft size={18} /></button> : <span className="team-heading-icon"><UsersRound size={21} /></span>}<div><h1>{team?.name ?? l("Team Space", "团队空间")}</h1><p>{team ? team.repository.replace("https://github.com/", "") : l("Shared assets for your everyday work", "团队共用的会话、技能、文档与配置")}</p></div></div><div className="team-space-actions"><button className="team-icon-button" aria-label={l("Refresh teams", "刷新团队")} title={l("Refresh teams", "刷新团队")} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} /></button><button className="team-icon-button" aria-label={l("Team settings", "团队设置")} title={l("Team settings", "团队设置")} onClick={onOpenSettings}><Settings size={17} /></button></div></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}
     {!snapshot ? <p role="status">{l("Loading teams…", "正在读取团队…")}</p> : !team ? <div className="team-project-list"><header><h2>{l("Your teams", "我的团队")}</h2><button className="team-button is-primary" onClick={onOpenSettings}><Plus size={14} />{l("Connect team", "连接团队")}</button></header>{snapshot.config?.teams.map((item) => <button className="team-project-row" key={item.id} onClick={() => setTeamId(item.id)}><span className="team-avatar"><UsersRound size={20} /></span><span><strong>{item.name}</strong><small>{item.repository.replace("https://github.com/", "")}</small></span><ChevronRight size={16} /></button>)}{!snapshot.config?.teams.length && <p>{l("Connect a team repository in Settings to get started.", "先在设置中连接一个团队资产仓库。")}</p>}</div> : <>
 
@@ -38,7 +39,7 @@ export function TeamWorkspacePage({ language, settingsOpen, onOpenSettings, api 
 }
 function TeamContent({ language, team, snapshot, api, onSnapshot }: { language: LanguageMode; team: TeamSpace; snapshot: TeamSnapshot; api: TeamWorkspaceApi; onSnapshot(value: TeamSnapshot): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
-  const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "directories">("sessions");
+  const [tab, setTab] = useState<"sessions" | "skills" | "documents" | "configuration" | "directories">("sessions");
   const [syncing, setSyncing] = useState(false), [refreshKey, setRefreshKey] = useState(0);
   const directories = (snapshot.directories ?? []).filter((entry) => entry.teamId === team.id);
   const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing };
@@ -48,9 +49,10 @@ function TeamContent({ language, team, snapshot, api, onSnapshot }: { language: 
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
       <button aria-pressed={tab === "skills"} onClick={() => setTab("skills")}><PackageSearch size={16} />Skills</button>
       <button aria-pressed={tab === "documents"} onClick={() => setTab("documents")}><FileText size={16} />{l("Documents", "文档")}</button>
+      <button aria-pressed={tab === "configuration"} onClick={() => setTab("configuration")}><Settings size={16} />{l("Configuration", "配置")}</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
     </div>
-    {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
+    {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "configuration" ? <TeamConfigurationPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : <Directories language={language} team={team} directories={directories} busy={selection.busy} api={api} onSnapshot={onSnapshot} />}
 
   </div>;
 }
@@ -74,7 +76,7 @@ function Directories({ language, team, directories, busy: externalBusy, api, onS
     finally { running.current = false; if (alive.current) setBusy(false); }
   }
   const locked = busy || externalBusy;
-  return <section className="team-workspace"><header className="team-workspace-head"><div><h2>{l("Working directories", "工作目录")}</h2><p>{l("Choose where to use your team assets.", "在这些目录中使用团队资产，各自管理安装与更新。")}</p></div><button className="is-primary" disabled={locked} onClick={() => setAdding(true)}><Plus size={15} />{l("Connect working directory", "接入工作目录")}</button></header>
+  return <section className="team-workspace"><header className="team-workspace-head"><div><h2>{l("Working directories", "工作目录")}</h2><p>{l("Choose where to use your team assets.", "选择使用团队资产的目录，点击「同步团队」统一更新。")}</p></div><button className="is-primary" disabled={locked} onClick={() => setAdding(true)}><Plus size={15} />{l("Connect working directory", "接入工作目录")}</button></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}
     {adding && <form className="team-directory-form" onSubmit={(event) => { event.preventDefault(); void run({ action: "connect-directory", teamId: team.id, directory, targets }); }}><label>{l("Local directory", "本地目录")}<span className="team-settings-folder"><input required value={directory} disabled={locked} onChange={(event) => setDirectory(event.currentTarget.value)} /><button type="button" disabled={locked} onClick={() => void run({ action: "choose-folder" })}>{l("Choose", "选择")}</button></span></label><div className="team-space-actions">{(["codex", "claude"] as const).map((target) => <label className="team-client-chip" key={target}><input type="checkbox" checked={targets.includes(target)} disabled={locked} onChange={(event) => setTargets(event.currentTarget.checked ? [...targets, target] : targets.filter((item) => item !== target))} /><span>{target === "codex" ? <Code2 size={14} /> : <Terminal size={14} />}{target === "codex" ? "Codex" : "Claude Code"}</span></label>)}</div><small>{l("After connecting, Sync team installs and updates resources. Sessions are never uploaded automatically.", "接入后点击「同步团队」，统一安装和更新资源；不会上传会话。")}</small><footer><button type="button" disabled={locked} onClick={() => setAdding(false)}>{l("Cancel", "取消")}</button><button className="is-primary" disabled={locked || !directory || !targets.length}>{l("Connect", "确认接入")}</button></footer></form>}
     {!directories.length && <p className="team-empty">{l("No directories connected. You can already browse assets and share sessions in this team.", "还没有接入工作目录。你已经可以浏览团队资产和分享会话。")}</p>}

@@ -29,7 +29,7 @@ test("initializes an empty team repository once, preserves personal defaults and
   assert.equal(result.team.name, "研发团队");
   assert.equal(result.teamEnabled, false);
   const manifest = JSON.parse((await execute("git", ["-C", remote, "show", "HEAD:agentrecall.json"])).stdout);
-  assert.deepEqual(manifest, { schemaVersion: 2, skills: [], workConfigs: [] });
+  assert.deepEqual(manifest, { schemaVersion: 4, skills: [], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [] });
   const files = (await execute("git", ["-C", remote, "ls-tree", "-r", "--name-only", "HEAD"])).stdout.trim().split("\n");
   assert.deepEqual(files.sort(), ["README.md", "agentrecall.json", "docs/.gitkeep", "env/.gitkeep", "members/.gitkeep", "rules/.gitkeep", "skills/.gitkeep"].sort());
   assert.equal((await execute("git", ["-C", remote, "log", "-1", "--format=%ae"])).stdout.trim(), "agentrecall@users.noreply.github.com");

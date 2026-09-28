@@ -69,8 +69,8 @@ export class GitAssetSource {
     if (refs.length > 0) return { created: false, snapshot: await this.readSnapshot(canonical, gitDirectory, signal) };
 
     const files: Record<string, string> = {
-      "agentrecall.json": JSON.stringify({ schemaVersion: 2, skills: [], workConfigs: [] }, null, 2) + "\n",
-      "README.md": "# AgentRecall 团队资产\n\n此仓库由 agentrecall init 初始化。团队资产在 Git 中共同维护，项目选择需要的资产安装到本地。\n\n## 目录\n\n- agentrecall.json：AgentRecall 资产清单。当前支持 Skills 和工作配置。\n- skills/：每个 Skill 使用独立目录和 SKILL.md，并在清单 skills 中登记 id 与 path。\n- rules/、docs/、env/、members/：参考 TeamAI 的目录组织预留，当前不会自动分发或上传成员信息。请勿提交密钥。\n\n## 使用\n\n在 AgentRecall V2 设置中连接团队；进入团队后创建项目并关联本地 Git 目录，再手动同步和选择安装。CLI 也可使用 team enable、project add --team、team sync。初始化不会自动开启团队功能、安装 Hook 或上传 Session。\n\n## 添加 Skill\n\n创建 skills/review/SKILL.md，YAML frontmatter 包含 name: review 与非空 description，然后在 agentrecall.json 的 skills 中添加 {\"id\":\"review\",\"path\":\"skills/review\"}。提交并推送后，团队成员可手动同步、预览和安装。\n",
+      "agentrecall.json": JSON.stringify({ schemaVersion: 4, skills: [], workConfigs: [], documents: [], instructions: [], mcpServers: [], environment: [] }, null, 2) + "\n",
+      "README.md": "# AgentRecall 团队资产\n\n此仓库由 agentrecall init 初始化。团队资产在 Git 中共同维护，一次同步更新所有已启用的工作目录。\n\n## 资源\n\nagentrecall.json 使用版本 4 清单：skills、workConfigs、documents、instructions、mcpServers、environment。Skills 放入 skills/；共享指令放入 rules/，同步到 AGENTS.md 或 CLAUDE.md 的团队区块；普通文档放入 docs/。MCP 与公共环境变量直接在清单中维护，密钥只使用 fromEnv 引用，不提交密钥值。\n\n格式与完整示例：https://github.com/zszz3/AgentRecall/blob/main/docs/v2/team-assets.md\n\n## 使用\n\n在 AgentRecall V2 设置中连接团队，再在团队空间接入本地工作目录并选择客户端。点击「同步团队」统一更新，CLI 可运行 team sync。初始化不会自动开启团队功能、安装 Hook、启动 MCP 或上传会话。已有本地内容会受到保护；请在客户端信任工作目录并按需确认 MCP。\n\n## 添加 Skill\n\n创建 skills/review/SKILL.md，YAML frontmatter 包含 name: review 与非空 description，再在清单 skills 中添加 {\"id\":\"review\",\"path\":\"skills/review\"}。提交并推送后，成员可同步使用。\n",
       ...Object.fromEntries(["skills", "rules", "docs", "env", "members"].map((directory) => [`${directory}/.gitkeep`, ""])),
     };
     // Build Git objects directly: no checkout, filters, hooks, user files or signing.
@@ -155,7 +155,7 @@ export class GitAssetSource {
       skills.push(skillFromFiles(item.id, files));
     }
     const documents = [];
-    if (parsed.data.schemaVersion === 3) {
+    if ("documents" in parsed.data) {
       for (const document of parsed.data.documents) {
         const entry = entries.find((item) => item.path === document.path);
         if (!entry) throw new WorkspaceError("INVALID_ASSET", "清单中的文档不存在，请检查文档路径。");
@@ -168,13 +168,27 @@ export class GitAssetSource {
         documents.push({ ...document, content, digest: createHash("sha256").update(content).digest("hex") });
       }
     }
+    const instructions = [];
+    if (parsed.data.schemaVersion === 4) {
+      for (const instruction of parsed.data.instructions) {
+        const entry = entries.find((item) => item.path === instruction.path);
+        if (!entry) throw new WorkspaceError("INVALID_ASSET", "共享指令文件不存在，请检查清单路径。");
+        const bytes = await read(entry); retainedBytes += bytes.length;
+        if (retainedBytes > 8 * 1024 * 1024) throw new WorkspaceError("ASSETS_TOO_LARGE", "团队资产总大小超过 8 MiB，请拆分仓库。");
+        let content: string;
+        try { content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); }
+        catch { throw new WorkspaceError("INVALID_ASSET", "共享指令必须为 UTF-8 文本。"); }
+        instructions.push({ ...instruction, content, digest: createHash("sha256").update(content).digest("hex") });
+      }
+    }
     return validateSnapshot({
       schemaVersion: parsed.data.schemaVersion,
       repository: canonical,
       commit,
       skills,
+      ...(parsed.data.schemaVersion === 4 ? { instructions, mcpServers: parsed.data.mcpServers, environment: parsed.data.environment } : {}),
       ...("workConfigs" in parsed.data ? { workConfigs: parsed.data.workConfigs } : {}),
-      ...(parsed.data.schemaVersion === 3 ? { documents } : {}),
+      ...("documents" in parsed.data ? { documents } : {}),
     }, canonical);
   }
 }

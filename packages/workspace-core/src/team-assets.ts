@@ -164,14 +164,15 @@ export class TeamAssetService {
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       skills: snapshot.skills.map((skill) => ({ id: skill.id, description: skill.description, files: skill.files.length, digest: skill.digest })),
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
-      documents: snapshot.schemaVersion === 3 ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
+      configuration: snapshot.schemaVersion === 4 ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
+      documents: "documents" in snapshot ? snapshot.documents.map(({ content: _content, ...document }) => document) : [],
     }));
   }
 
   async previewDocument(directory: string, id: string, projectId?: string) {
     const context = await this.currentTeam(directory, projectId);
     const snapshot = await this.snapshot(context);
-    const document = snapshot.schemaVersion === 3 ? snapshot.documents.find((item) => item.id === id) : undefined;
+    const document = "documents" in snapshot ? snapshot.documents.find((item) => item.id === id) : undefined;
     if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "当前团队没有这份文档，请同步后重试。");
     const root = context.project?.root || this.selection?.directory ? await this.projectRoot(directory, context.project?.id) : null;
     const destination = root ? path.join(root, ...document.target.split("/")) : null;
@@ -205,7 +206,7 @@ export class TeamAssetService {
     return withAssetLock(root, ".agentrecall-document.lock", async (assertOwned) => {
       const snapshot = await this.snapshot(context);
       if (snapshot.commit !== commit) throw new WorkspaceError("SNAPSHOT_CHANGED", "文档版本已改变，请重新预览。");
-      const document = snapshot.schemaVersion === 3 ? snapshot.documents.find((item) => item.id === id) : undefined;
+      const document = "documents" in snapshot ? snapshot.documents.find((item) => item.id === id) : undefined;
       if (!document) throw new WorkspaceError("DOCUMENT_NOT_FOUND", "找不到指定文档。");
       return this.commitForTeam(directory, context, async () => {
         assertOwned();
@@ -242,6 +243,7 @@ export class TeamAssetService {
     return this.commitForTeam(directory, context, () => ({
       teamId: context.team.id, repository: snapshot.repository, commit: snapshot.commit,
       workConfigs: "workConfigs" in snapshot ? snapshot.workConfigs : [],
+      configuration: snapshot.schemaVersion === 4 ? { instructions: snapshot.instructions, mcpServers: snapshot.mcpServers, environment: snapshot.environment } : { instructions: [], mcpServers: [], environment: [] },
     }));
   }
 
