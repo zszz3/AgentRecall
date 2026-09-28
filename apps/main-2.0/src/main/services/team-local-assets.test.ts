@@ -51,3 +51,19 @@ it("reports partial listings instead of claiming a bounded scan is complete", as
   expect(result).toMatchObject({ limited: true });
   expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(1024 * 1024);
 });
+
+it("captures the selected Skill's complete files, ignores its install marker and refuses links or environment files", async () => {
+  const { readTeamLocalPush } = await import("./team-local-assets");
+  const directory = path.join(root, ".agents", "skills", "review"); await fs.mkdir(path.join(directory, "scripts"), { recursive: true });
+  await fs.writeFile(path.join(directory, "SKILL.md"), "---\nname: review\ndescription: Review\n---\n");
+  await fs.writeFile(path.join(directory, "scripts", "check.sh"), "exit 0\n", { mode: 0o755 });
+  await fs.writeFile(path.join(directory, "icon.bin"), Buffer.from([0, 255, 2]));
+  await fs.writeFile(path.join(directory, ".agentrecall-install.json"), "private local installation metadata");
+  const captured = await readTeamLocalPush(root, "skills", ".agents/skills/review/SKILL.md");
+  expect(captured.files?.map(file => file.path)).toEqual(["icon.bin", "scripts/check.sh", "SKILL.md"]);
+  expect(Buffer.from(captured.files![0]!.content, "base64")).toEqual(Buffer.from([0, 255, 2]));
+  if (process.platform !== "win32") expect(captured.files?.find(file => file.path === "scripts/check.sh")?.executable).toBe(true);
+  await fs.writeFile(path.join(directory, ".env"), "PRIVATE_VALUE=fixture");
+  await expect(readTeamLocalPush(root, "skills", ".agents/skills/review/SKILL.md")).rejects.toMatchObject({ code: "LOCAL_ASSET_INVALID" });
+  await expect(readTeamLocalPush(root, "documents", "../private.md")).rejects.toMatchObject({ code: "LOCAL_ASSET_NOT_FOUND" });
+});

@@ -1,7 +1,8 @@
 import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_PREVIEW_BYTES } from "@agentrecall/workspace-core";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ConfigurationChange, ConfigurationPreview } from "@agentrecall/workspace-core";
+import type { AssetChange, ConfigurationPreview } from "@agentrecall/workspace-core";
+import { TeamPushService } from "./team-push-service";
 import { readTeamLocalAssets } from "./team-local-assets";
 import type { TeamSessionContext, TeamSessionSharing } from "./team-session-sharing";
 import type { TeamPayload, TeamReply, TeamRequest, TeamScope } from "../../shared/ipc/team-workspace";
@@ -11,18 +12,20 @@ interface TeamDialogs {
   confirm(owner: number, message: string): Promise<boolean>;
 }
 
-const writes = new Set<TeamRequest["action"]>(["configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
+const writes = new Set<TeamRequest["action"]>(["push-preview", "push-publish", "configuration-preview", "configuration-publish", "team-transport", "connect-directory", "update-directory", "disconnect-directory", "create-project", "document-install", "session-preview", "session-publish", "session-withdraw", "session-download", "enable", "add-team", "default-team", "add-project", "bind-project", "remove-project", "sync", "skill-install", "work-install", "work-update", "work-uninstall"]);
 
 export class TeamWorkspaceService {
   private closed = false;
   private busy = false;
-  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: ConfigurationChange }>();
+  private readonly configurationPreviews = new Map<string, { owner: number; team: string; expiresAt: number; preview: ConfigurationPreview; change: AssetChange }>();
   private readonly operations = new Map<AbortController, number>();
   private readonly pending = new Set<Promise<TeamPayload>>();
 
-  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing) {}
+  private readonly push: TeamPushService;
+  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
 
   cancel(owner: number): void {
+    this.push.cancel(owner);
     for (const [token, draft] of this.configurationPreviews) if (draft.owner === owner) this.configurationPreviews.delete(token);
     for (const [abort, requestOwner] of this.operations) if (requestOwner === owner) abort.abort();
     this.sharing?.cancel(owner);
@@ -30,6 +33,7 @@ export class TeamWorkspaceService {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.push.close();
     this.configurationPreviews.clear();
     for (const abort of this.operations.keys()) abort.abort();
     this.sharing?.close();
@@ -61,6 +65,7 @@ export class TeamWorkspaceService {
       }
       if (request.action === "enable" && !request.enabled) {
         this.configurationPreviews.clear();
+        this.push.close();
         for (const abort of this.operations.keys()) abort.abort();
         this.sharing?.close();
         await Promise.allSettled([...this.pending]);
@@ -93,6 +98,9 @@ export class TeamWorkspaceService {
     };
     switch (request.action) {
       case "snapshot": return snapshot();
+      case "push-discard": this.push.discard(owner, request.token); return { kind: "cancelled" };
+      case "push-preview": return { kind: "push-preview", value: await this.push.preview(owner, request.scope, request.revision, request.items, signal) };
+      case "push-publish": return { kind: "push-result", value: await this.push.publish(owner, request.scope, request.token, signal) };
       case "configuration-discard":
         if (this.configurationPreviews.get(request.token)?.owner === owner) this.configurationPreviews.delete(request.token);
         return { kind: "cancelled" };
@@ -194,16 +202,17 @@ export class TeamWorkspaceService {
     }
     switch (request.action) {
       case "configuration-preview": {
+        const change = request.change;
         for (const [token, draft] of this.configurationPreviews) if (draft.owner === owner || draft.expiresAt <= Date.now()) this.configurationPreviews.delete(token);
         if (this.configurationPreviews.size >= 8) throw new WorkspaceError("CONFIGURATION_PREVIEWS_BUSY", "待发布预览过多，请先关闭其他编辑窗口。");
-        const preview = await assets.previewConfiguration(root, request.revision, request.change, projectId, signal);
+        const preview = await assets.previewConfiguration(root, request.revision, change, projectId, signal);
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
         const current = await workspace.teamContext(request.scope.teamId);
         if (JSON.stringify(current.team) !== JSON.stringify(teamContext?.team)) throw new WorkspaceError("TEAM_CHANGED", "团队设置已改变，请重新预览。");
         const token = randomUUID(), expiresAt = Date.now() + 10 * 60 * 1000;
         const value = { ...preview, token, expiresAt };
         if (Buffer.byteLength(JSON.stringify({ ok: true, data: { kind: "configuration-preview", value } })) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整变更预览超过 4 MiB，请缩小内容后重试。");
-        this.configurationPreviews.set(token, { owner, expiresAt, team: JSON.stringify(current.team), preview, change: structuredClone(request.change) });
+        this.configurationPreviews.set(token, { owner, expiresAt, team: JSON.stringify(current.team), preview, change: structuredClone(change) });
         return { kind: "configuration-preview", value };
       }
       case "configuration-publish": {

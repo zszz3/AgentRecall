@@ -56,3 +56,5 @@
 `TeamAssetService.pull` 持有独立团队操作锁，拉取并固定快照后调用 `distributeTeamAssets`；复用 Skill 安装、备份与归属检查，`ProjectDocuments` 负责文档文件与归属记录的更新恢复。结果按目录/条目区分成功、未变、退役、冲突、失败和取消，保存最近一次报告。连接方式属于团队配置，不放在资源页面。
 
 界面只有顶部 `TeamSyncControl` 发起整轮同步，Skills/文档面板只浏览并使用右侧阅读器；不再挂载本地资产大区块。同步不会执行 Skill 脚本或上传 Session。仍没有个人资产贡献 PR、自动会话启动同步及用户全局安装。
+
+团队桌面已提供 Pull / Push 分向入口和按项 Diff 清单；资源批量发布与轮次分享的范围、限制及结果处理见[团队空间指南](team-workspace.md#按项-push-与当前-diff)。

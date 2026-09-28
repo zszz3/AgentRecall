@@ -134,3 +134,45 @@ test("compares the preview revision atomically even if the remote rewinds immedi
   await assert.rejects(prepared.publish(() => { execFileSync("git", ["-C", f.remote, "update-ref", "refs/heads/assets", ancestor, before]); }), { code: "ASSET_PUBLISH_UNCONFIRMED" });
   assert.equal(await head(f.remote), ancestor);
 });
+
+test("pushes selected Skill and document items atomically, with file additions, removals, binary bytes and modes in Diff", async t => {
+  const f = await setup(t);
+  const file = (path: string, content: string | Buffer, executable = false) => ({ path, content: Buffer.from(content).toString("base64"), executable });
+  const markdown = "---\nname: review\ndescription: Review changes\n---\nReview carefully.\n";
+  const create: import("@agentrecall/workspace-core").AssetChange = { kind: "batch", operation: "update", value: { name: "Selected items", changes: [
+    { kind: "skills", operation: "create", value: { id: "review", name: "review", files: [file("SKILL.md", markdown), file("scripts/old.sh", "exit 0\n", true), file("icon.bin", Buffer.from([0, 255, 4]))] } },
+    { kind: "documents", operation: "create", value: { id: "guide", name: "Guide", target: "docs/team/guide.md", content: "# Before\n" } },
+  ] } };
+  const original = await head(f.remote), preview = await f.assets.previewConfiguration(f.root, original, create);
+  assert.equal(await head(f.remote), original);
+  assert.deepEqual(preview.items!.map(item => [item.key, item.status]), [["skills:review", "added"], ["documents:guide", "added"]]);
+  const published = await f.assets.publishConfiguration(f.root, preview, create);
+  const commit = published.commit;
+  assert.equal((await execute("git", ["-C", f.remote, "rev-parse", "HEAD^"])).stdout.trim(), original);
+  assert.equal((await execute("git", ["-C", f.remote, "show", "HEAD:README.md"])).stdout, "Unrelated repository content\n");
+  const update: import("@agentrecall/workspace-core").AssetChange = { kind: "batch", operation: "update", value: { name: "Selected items", changes: [
+    { kind: "skills", operation: "update", value: { id: "review", name: "review", files: [file("SKILL.md", markdown + "Run checks.\n"), file("scripts/new.sh", "exit 1\n", true), file("icon.bin", Buffer.from([0, 255, 5]))] } },
+    { kind: "documents", operation: "update", value: { id: "guide", name: "Guide", target: "docs/team/guide.md", content: "# Before\n" } },
+  ] } };
+  const diff = await f.assets.previewConfiguration(f.root, commit, update);
+  assert.deepEqual(diff.items!.map(item => item.status), ["modified", "unchanged"]);
+  assert.equal(diff.files.find(item => item.path === "skills/review/scripts/old.sh")!.after, null);
+  assert.equal(diff.files.find(item => item.path === "skills/review/scripts/new.sh")!.executable, true);
+  await f.assets.publishConfiguration(f.root, diff, update);
+  const scratch = path.join(f.root, "verify-push"); await fs.mkdir(scratch);
+  const snapshot = await f.source.load(url, scratch, "https");
+  assert.deepEqual(snapshot.skills[0]!.files.map(item => item.path).sort(), ["SKILL.md", "icon.bin", "scripts/new.sh"]);
+  assert.deepEqual(Buffer.from(snapshot.skills[0]!.files.find(item => item.path === "icon.bin")!.content, "base64"), Buffer.from([0, 255, 5]));
+  assert.equal(snapshot.skills[0]!.files.find(item => item.path === "scripts/new.sh")!.executable, true);
+  await assert.rejects(f.assets.previewConfiguration(f.root, await head(f.remote), update), { code: "NO_CONFIGURATION_CHANGE" });
+});
+
+test("rejects duplicate push destinations and existing unowned files before a batch can publish", async t => {
+  const f = await setup(t), before = await head(f.remote);
+  const document: import("@agentrecall/workspace-core").AssetChange = { kind: "documents", operation: "create", value: { id: "guide", name: "Guide", target: "docs/team/guide.md", content: "Guide" } };
+  await assert.rejects(f.assets.previewConfiguration(f.root, before, { kind: "batch", operation: "update", value: { name: "Duplicates", changes: [document, document] } }), { code: "INVALID_CONFIGURATION_CHANGE" });
+  await fs.mkdir(path.join(f.seed, "docs")); await fs.writeFile(path.join(f.seed, "docs", "guide.md"), "Unowned\n"); await f.push();
+  const current = await head(f.remote);
+  await assert.rejects(f.assets.previewConfiguration(f.root, current, document), { code: "CONFIGURATION_FILE_CONFLICT" });
+  assert.equal(await head(f.remote), current);
+});

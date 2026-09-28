@@ -1,3 +1,4 @@
+import type { TeamPushDraft } from "../../shared/team-push";
 import {
   Suspense,
   lazy,
@@ -190,6 +191,7 @@ export function App(): ReactElement {
   const skills = useSkillsController(language);
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
+  const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
   const [teamShare, setTeamShare] = useState<{ sessionKey: string; turnIds?: string[] } | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
@@ -2108,7 +2110,7 @@ export function App(): ReactElement {
               />
             ) : null}
           </Suspense>
-          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
+          {activePage === "team-space" && <Suspense fallback={<p role="status">{t("Loading team space…", "正在读取团队空间…")}</p>}><TeamWorkspacePage onStage={draft => setTeamPushDrafts(previous => [...previous.filter(item => item.item.key !== draft.item.key), draft])} drafts={teamPushDrafts} onPushed={keys => setTeamPushDrafts(previous => previous.filter(item => !keys.includes(item.item.key)))} language={language} settingsOpen={settingsOpen} onOpenSettings={() => { setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
         </div>
       </section>
 
@@ -2170,7 +2172,11 @@ export function App(): ReactElement {
             t("Resume command sent to iTerm.", "Resume 命令已发送到 iTerm。"),
           ),
           migrate: beginMigrate,
-          shareTurns: (session, turnIds) => setTeamShare({ sessionKey: session.sessionKey, turnIds }),
+          shareTurns: (session, turnIds) => {
+            const entries: TeamPushDraft[] = detailTurns.filter(turn => turnIds.includes(turn.id)).map(turn => ({ item: { kind: "turn", key: `turn:${session.sessionKey}:${turn.id}`, sessionKey: session.sessionKey, turnId: turn.id }, title: `${session.displayTitle || session.originalTitle} · Turn ${turn.turnIndex + 1}`, subtitle: turn.userPreview || turn.assistantPreview }));
+            setTeamPushDrafts(previous => [...previous.filter(item => !entries.some(entry => entry.item.key === item.item.key)), ...entries]);
+            closeDetail(); setActivePage("team-space");
+          },
           uploadRemote: (session) => void uploadRemoteSession(session),
           copyResume: (session) => void runAction(
             t("Copying resume command", "正在复制 Resume 命令"),

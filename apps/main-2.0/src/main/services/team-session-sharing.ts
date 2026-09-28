@@ -58,6 +58,7 @@ export class TeamSessionSharing {
   private readonly previews = new Map<string, Pending>();
   constructor(private readonly dependencies: Dependencies, private readonly remote = new TeamSessionGitHub()) {}
   cancel(owner: number): void { for (const [key, item] of this.previews) if (item.owner === owner) { clearTimeout(item.timer); this.previews.delete(key); } }
+  discard(owner: number, token: string): void { const item = this.previews.get(token); if (item?.owner === owner) { clearTimeout(item.timer); this.previews.delete(token); } }
   close(): void { for (const item of this.previews.values()) clearTimeout(item.timer); this.previews.clear(); }
   private project(context: TeamSessionContext): string { return createHash("sha256").update(context.projectIdentity).digest("hex").slice(0, 32); }
   private cancelled(signal: AbortSignal): void { if (signal.aborted) throw new WorkspaceError("CANCELLED", "团队会话操作已取消。"); }
@@ -76,7 +77,7 @@ export class TeamSessionSharing {
     const root = details.find((detail) => detail.session.sessionKey === packet.rootSessionKey);
     if (!root) throw new WorkspaceError("TEAM_SESSION_INVALID", "分享包缺少主会话。");
     return { root, ...(packet.schemaVersion === 3 ? { selectedTurns: packet.selectedTurns } : {}), children: details.filter((detail) => detail !== root), bytes,
-      files: packet.records.flatMap((record) => record.files.map((file) => ({ name: file.name, kind: file.kind, bytes: Buffer.byteLength(file.data, "base64") }))),
+      files: packet.records.flatMap((record) => record.files.map((file) => ({ name: file.name, kind: file.kind, bytes: Buffer.byteLength(file.data, "base64"), ...(file.attachmentId ? { attachmentId: file.attachmentId } : {}) }))),
       missingAttachments: packet.records.flatMap((record) => record.missingAttachments),
     };
   }
@@ -89,7 +90,7 @@ export class TeamSessionSharing {
       return this.content(packet, data.length);
     } catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("TEAM_SESSION_INVALID", "会话包格式或版本无效，或解压后超过 64 MiB。"); }
   }
-  async prepare(owner: number, context: TeamSessionContext, sessionKey: string, signal: AbortSignal, turnIds?: string[]): Promise<TeamSessionPreview> {
+  async prepare(owner: number, context: TeamSessionContext, sessionKey: string, signal: AbortSignal, turnIds?: string[], retainOtherPreviews = false): Promise<TeamSessionPreview> {
     const selection = turnIds === undefined ? undefined : teamTurnSelectionSchema.safeParse(turnIds);
     if (selection && !selection.success) throw new WorkspaceError("TEAM_TURN_SELECTION_INVALID", `请选择 1–${MAX_SHARED_TURNS} 个不同轮次。`);
     this.cancelled(signal);
@@ -140,7 +141,7 @@ export class TeamSessionSharing {
         sessionKey, originalTitle: session.originalTitle, displayTitle: session.displayTitle, source: session.source,
       }, messages: [], traceEvents: [] };
       return this.remember(owner, context, { schemaVersion: 3, repository: context.repository, projectIdentity: context.projectIdentity,
-        rootSessionKey: sessionKey, selectedTurns, records: [{ detail, files, missingAttachments }] }, signal);
+        rootSessionKey: sessionKey, selectedTurns, records: [{ detail, files, missingAttachments }] }, signal, retainOtherPreviews);
     }
     const all = await store.searchSessions({ limit: 100_000, excludeSubagents: false });
     if (all.length >= 100_000) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话索引过大，无法确认完整子会话范围，本次未分享。");
@@ -185,24 +186,24 @@ export class TeamSessionSharing {
     const packet = { schemaVersion: 2 as const, repository: context.repository, projectIdentity: context.projectIdentity, rootSessionKey: sessionKey, records };
     return this.remember(owner, context, packet, signal);
   }
-  private async remember(owner: number, context: TeamSessionContext, packet: Packet, signal: AbortSignal): Promise<TeamSessionPreview> {
+  private async remember(owner: number, context: TeamSessionContext, packet: Packet, signal: AbortSignal, retainOtherPreviews = false): Promise<TeamSessionPreview> {
     const json = Buffer.from(JSON.stringify(packet));
     if (json.length > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "含附件及元数据的完整会话包超过 64 MiB，未上传。");
     const data = await compress(json); this.cancelled(signal);
     const content = await this.decode(context, data);
     this.cancelled(signal);
     const expiresAt = Date.now() + 10 * 60_000;
-    for (const [key, value] of this.previews) if (value.expiresAt <= Date.now() || value.owner === owner) { clearTimeout(value.timer); this.previews.delete(key); }
+    for (const [key, value] of this.previews) if (value.expiresAt <= Date.now() || !retainOtherPreviews && value.owner === owner) { clearTimeout(value.timer); this.previews.delete(key); }
     if (this.previews.size >= 8) throw new WorkspaceError("TEAM_BUSY", "其他窗口有待处理的会话预览，请关闭后重试。");
     const token = randomUUID();
     const timer = setTimeout(() => this.previews.delete(token), expiresAt - Date.now()); timer.unref();
     this.previews.set(token, { owner, context, data, content, expiresAt, timer });
     return { ...content, token, repository: context.repository, projectIdentity: context.projectIdentity, expiresAt };
   }
-  async publish(owner: number, context: TeamSessionContext, token: string, signal: AbortSignal, assertContext: () => Promise<void>) {
+  async publish(owner: number, context: TeamSessionContext, token: string, signal: AbortSignal, assertContext: () => Promise<void>, confirm = this.dependencies.confirm) {
     const pending = this.previews.get(token);
     if (!pending || pending.owner !== owner || pending.expiresAt <= Date.now() || JSON.stringify(pending.context) !== JSON.stringify(context)) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期或目标已改变，请重新预览。");
-    if (!await this.dependencies.confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的${pending.content.selectedTurns ? `${pending.content.selectedTurns.length} 个所选轮次` : "完整快照"}分享到团队仓库 ${context.repository}？\n分享范围：${context.projectName ?? context.projectIdentity}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.data.length} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留。公开仓库中的分享可被任何人访问和下载；私有仓库按仓库权限访问。`)) return null;
+    if (!await confirm(owner, `将「${(pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话")}」的${pending.content.selectedTurns ? `${pending.content.selectedTurns.length} 个所选轮次` : "完整快照"}分享到团队仓库 ${context.repository}？\n分享范围：${context.projectName ?? context.projectIdentity}\n包括 ${pending.content.children.length} 个子会话、${pending.content.files.length} 个文件，共 ${pending.data.length} 字节。\n不可读取的附件：${pending.content.missingAttachments.length}。本地原会话保留。公开仓库中的分享可被任何人访问和下载；私有仓库按仓库权限访问。`)) return null;
     this.cancelled(signal); await assertContext();
     if (pending.expiresAt <= Date.now() || this.previews.get(token) !== pending) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期，请重新预览。");
     const title = pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话";

@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { configurationChangeSchema, type ConfigurationChange, type ConfigurationPreview } from "./configuration-format.js";
+import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
 import { revision as assetRevision } from "./asset-paths.js";
 import { renameSync } from "node:fs";
 import path from "node:path";
@@ -7,7 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceService } from "./workspace.js";
 import { WorkspaceError, hasErrorCode } from "./errors.js";
 import { GitAssetSource, type AssetTransport } from "./git-assets.js";
-import { MAX_SNAPSHOT_BYTES, validateSnapshot, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
+import { MAX_SNAPSHOT_BYTES, validateSnapshot, assetChangeSchema, type AssetChange, type AssetSnapshot, type WorkConfig } from "./asset-format.js";
 import { readBoundedJson, withAssetLock } from "./asset-storage.js";
 import { canonicalGitHubRepository, inspectCheckout } from "./git.js";
 import { distributeTeamAssets, validatePullReport, MAX_PULL_REPORT_BYTES, type TeamPullReport } from "./team-pull.js";
@@ -172,7 +172,8 @@ export class TeamAssetService {
   }
 
   private async withPreparedConfiguration<T>(context: Context, expectedRevision: string, input: unknown, signal: AbortSignal | undefined, operation: (prepared: Awaited<ReturnType<GitAssetSource["prepareConfiguration"]>>) => Promise<T>): Promise<T> {
-    const change = configurationChangeSchema.safeParse(input);
+    if (Buffer.byteLength(JSON.stringify(input) ?? "") > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整推送内容超过 4 MiB，请减少选择。");
+    const change = assetChangeSchema.safeParse(input);
     if (!change.success || !assetRevision.safeParse(expectedRevision).success) throw new WorkspaceError("INVALID_CONFIGURATION_CHANGE", "填写的资源格式无效，请检查名称、适用客户端、连接信息和变量引用；指令正文最多 1 MiB。");
     if (signal?.aborted) throw new WorkspaceError("CANCELLED", "操作已取消。");
     const staging = path.join(path.dirname(this.workspace.store.filePath), "configuration-edits");
@@ -197,7 +198,7 @@ export class TeamAssetService {
     }
   }
 
-  async previewConfiguration(directory: string, expectedRevision: string, change: ConfigurationChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
+  async previewConfiguration(directory: string, expectedRevision: string, change: AssetChange, projectId?: string, signal?: AbortSignal): Promise<ConfigurationPreview> {
     const context = await this.currentTeam(directory, projectId);
     return this.withPreparedConfiguration(context, expectedRevision, change, signal, async (prepared) => this.commitForTeam(directory, context, () => {
       if (signal?.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
@@ -205,7 +206,7 @@ export class TeamAssetService {
     }));
   }
 
-  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: ConfigurationChange, projectId?: string, signal?: AbortSignal) {
+  async publishConfiguration(directory: string, preview: ConfigurationPreview, change: AssetChange, projectId?: string, signal?: AbortSignal) {
     const context = await this.currentTeam(directory, projectId);
     if (preview.repository !== context.team.repository) throw new WorkspaceError("TEAM_CHANGED", "团队仓库已改变，请重新预览。");
     return withAssetLock(this.cacheDirectory, `.${context.team.id}.lock`, async (assertOwned) => this.withPreparedConfiguration(context, preview.revision, change, signal, async (prepared) => {

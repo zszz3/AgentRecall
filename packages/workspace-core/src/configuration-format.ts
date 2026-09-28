@@ -25,11 +25,12 @@ export const configurationChangeSchema = z.discriminatedUnion("kind", [
 ]);
 export type ConfigurationChange = z.infer<typeof configurationChangeSchema>;
 export type ConfigurationPreview = {
+  items?: Array<{ key: string; name: string; status: "added" | "modified" | "unchanged"; files: Array<{ path: string; before: string | null; after: string | null; executable?: boolean; previousExecutable?: boolean }> }>;
   repository: string;
   revision: string;
   branch: string;
-  kind: ConfigurationChange["kind"];
+  kind: ConfigurationChange["kind"] | "skills" | "documents" | "batch";
   operation: ConfigurationChange["operation"];
   name: string;
-  files: Array<{ path: string; before: string | null; after: string }>;
+  files: Array<{ itemKey?: string; path: string; before: string | null; after: string | null; executable?: boolean; previousExecutable?: boolean }>;
 };

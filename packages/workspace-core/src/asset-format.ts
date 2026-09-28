@@ -6,7 +6,7 @@ import { WorkspaceError } from "./errors.js";
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 export { MAX_FILE_BYTES, assetId, revision, portableAssetPath } from "./asset-paths.js";
 import { MAX_FILE_BYTES, assetId, revision, portableAssetPath } from "./asset-paths.js";
-import { configurationFields, instructionEntrySchema } from "./configuration-format.js";
+import { configurationFields, instructionEntrySchema, configurationChangeSchema } from "./configuration-format.js";
 const manifestV1Schema = z.strictObject({
   schemaVersion: z.literal(1),
   skills: z.array(z.strictObject({ id: assetId, path: z.string().refine(portableAssetPath) })).max(64),
@@ -57,6 +57,17 @@ export type SkillFile = z.infer<typeof fileSchema>;
 export type TeamSkill = z.infer<typeof skillSchema>;
 export type WorkConfig = z.infer<typeof workConfigSchema>;
 export type AssetSnapshot = z.infer<typeof snapshotV1Schema> | z.infer<typeof snapshotV2Schema> | z.infer<typeof snapshotV3Schema> | z.infer<typeof snapshotV4Schema>;
+
+const singleAssetChangeSchema = z.union([
+  configurationChangeSchema,
+  z.strictObject({ kind: z.literal("documents"), operation: z.enum(["create", "update"]), value: documentEntrySchema.omit({ path: true }).extend({ content: z.string().refine((value) => Buffer.byteLength(value) <= MAX_FILE_BYTES && Buffer.from(value).toString("utf8") === value) }) }),
+  z.strictObject({ kind: z.literal("skills"), operation: z.enum(["create", "update"]), value: z.strictObject({ id: assetId, name: z.string().min(1).max(200), files: z.array(fileSchema).min(1).max(200) }) }),
+]);
+export const assetChangeSchema = z.union([singleAssetChangeSchema, z.strictObject({
+  kind: z.literal("batch"), operation: z.literal("update"), value: z.strictObject({ name: z.string().min(1).max(200), changes: z.array(singleAssetChangeSchema).min(1).max(64)
+    .refine(changes => new Set(changes.map(change => `${change.kind}:${change.kind === "environment" ? change.value.name.toLowerCase() : change.value.id}`)).size === changes.length) }),
+})]);
+export type AssetChange = z.infer<typeof assetChangeSchema>;
 
 export function fileDigest(files: SkillFile[]): string {
   return createHash("sha256").update(JSON.stringify([...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0))).digest("hex");

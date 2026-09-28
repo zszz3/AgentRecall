@@ -98,3 +98,60 @@ export async function readTeamLocalAssets(directory: string, kind: "skills" | "d
   if (Buffer.byteLength(JSON.stringify(result)) > 1024 * 1024) throw new WorkspaceError("LOCAL_ASSET_TOO_LARGE", "预览数据超过 1 MiB，请在本地编辑器中查看。");
   return result;
 }
+
+/** Capture only the explicitly selected local resource; publication uses this immutable copy. */
+export async function readTeamLocalPush(directory: string, kind: "skills" | "documents", file: string, signal?: AbortSignal) {
+  const listed = await readTeamLocalAssets(directory, kind, undefined, signal);
+  if (!("entries" in listed) || !listed.entries.some(entry => entry.path === file)) throw new WorkspaceError("LOCAL_ASSET_NOT_FOUND", "所选资源已不存在，请重新选择。");
+  const root = listed.directory;
+  const check = () => { if (signal?.aborted) throw new WorkspaceError("CANCELLED", "推送预览已取消。"); };
+  let total = 0;
+  const read = async (relative: string) => {
+    check();
+    const candidate = await ordinaryPath(root, relative);
+    if (!candidate || !(await fs.lstat(candidate)).isFile()) throw new WorkspaceError("LOCAL_ASSET_INVALID", "资源包含链接或非普通文件，无法推送。");
+    const handle = await fs.open(candidate, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > 1024 * 1024) throw new WorkspaceError("LOCAL_ASSET_TOO_LARGE", "单个资源文件超过 1 MiB 或不是普通文件。");
+      if (await ordinaryPath(root, relative) !== candidate) throw new WorkspaceError("LOCAL_ASSET_CHANGED", "资源路径在读取期间发生变化，请重新预览。");
+      const bytes = Buffer.alloc(stat.size + 1); let size = 0;
+      while (size < bytes.length) { check(); const result = await handle.read(bytes, size, bytes.length - size, null); if (!result.bytesRead) break; size += result.bytesRead; }
+      const finished = await handle.stat();
+      if (size !== stat.size || finished.mtimeMs !== stat.mtimeMs || finished.ctimeMs !== stat.ctimeMs) throw new WorkspaceError("LOCAL_ASSET_CHANGED", "资源在读取期间发生变化，请重新预览。");
+      total += size;
+      if (total > 1024 * 1024) throw new WorkspaceError("LOCAL_ASSET_TOO_LARGE", "一次推送的资源总量最多 1 MiB，请缩小资源后重试。");
+      return { bytes: bytes.subarray(0, size), executable: Boolean(stat.mode & 0o111) };
+    } finally { await handle.close(); }
+  };
+  if (kind === "documents") {
+    const { bytes } = await read(file);
+    try { return { kind, content: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) }; }
+    catch { throw new WorkspaceError("LOCAL_ASSET_INVALID", "文档必须是 UTF-8 文本。"); }
+  }
+  const skillRoot = path.posix.dirname(file), files: Array<{ path: string; content: string; executable: boolean }> = [];
+  let visited = 0;
+  const walk = async (relative: string): Promise<void> => {
+    check();
+    const location = relative ? `${skillRoot}/${relative}` : skillRoot;
+    const candidate = await ordinaryPath(root, location);
+    if (!candidate) throw new WorkspaceError("LOCAL_ASSET_INVALID", "Skill 包含链接，无法推送。");
+    const handle = await fs.opendir(candidate);
+    for await (const entry of handle) {
+      check();
+      if (++visited > 512) throw new WorkspaceError("LOCAL_ASSET_TOO_LARGE", "Skill 包含过多目录或文件。");
+      if (!relative && entry.name === ".agentrecall-install.json") continue;
+      const name = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile() || /^\.env(?:$|\.)/i.test(entry.name) || entry.name === ".git") throw new WorkspaceError("LOCAL_ASSET_INVALID", "Skill 包含链接、环境文件或仓库元数据，请整理后再推送。");
+      if (entry.isDirectory()) await walk(name);
+      else {
+        if (files.length >= 200) throw new WorkspaceError("LOCAL_ASSET_TOO_LARGE", "单个 Skill 最多包含 200 个文件。");
+        const value = await read(`${skillRoot}/${name}`);
+        files.push({ path: name, content: value.bytes.toString("base64"), executable: value.executable });
+      }
+    }
+  };
+  await walk("");
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { kind, files };
+}

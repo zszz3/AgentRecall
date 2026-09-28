@@ -8,7 +8,7 @@ import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
 
 type Resource = { key: string; name: string; summary: string; content: string; targets: string[]; change: ConfigurationChange };
-export function TeamConfigurationPanel({ kind, selection, language, refreshKey, api, onBusy }: { kind: "instructions" | "mcp" | "environment"; selection: TeamSelection; language: LanguageMode; refreshKey: number; api: TeamWorkspaceApi; onBusy(value: boolean): void }) {
+export function TeamConfigurationPanel({ kind, selection, language, refreshKey, api, onBusy, onStage }: { kind: "instructions" | "mcp" | "environment"; selection: TeamSelection; language: LanguageMode; refreshKey: number; api: TeamWorkspaceApi; onBusy(value: boolean): void; onStage?(change: ConfigurationChange): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null), [error, setError] = useState(""), [reader, setReader] = useState<Resource | null>(null), [retry, setRetry] = useState(0);
   const [editor, setEditor] = useState<ConfigurationChange | null | undefined>(undefined), [notice, setNotice] = useState("");
@@ -36,19 +36,19 @@ export function TeamConfigurationPanel({ kind, selection, language, refreshKey, 
   const detailsLabel = l(`${title} details`, `${title}详情`);
   return <div className={`team-documents-layout${reader ? " has-reader" : ""}`} onKeyDown={(event) => { if (event.key === "Escape" && reader) { event.stopPropagation(); setReader(null); } }}>
     <section className="team-workspace team-documents-list" aria-label={title}>
-      <header className="team-workspace-head"><div><h2>{title} {catalog?.assets && <span className="team-count">{items.length}</span>}</h2><p>{description}</p></div><button className="is-primary" disabled={!enabled || selection.busy || !catalog?.assets} title={!catalog?.assets ? l("Sync team first", "请先同步团队") : undefined} onClick={() => setEditor(null)}><Plus size={15} />{l("Add ", "新增 ")}{title}</button></header>
+      <header className="team-workspace-head"><div><h2>{title} {catalog?.assets && <span className="team-count">{items.length}</span>}</h2><p>{description}</p></div><button className="is-primary" disabled={!enabled || selection.busy || !catalog?.assets} title={!catalog?.assets ? l("Pull first", "请先Pull 拉取") : undefined} onClick={() => setEditor(null)}><Plus size={15} />{l("Add ", "新增 ")}{title}</button></header>
       {notice && <p role="status" className="team-workspace-notice">{notice}</p>}
       {!enabled ? <p>{l("Enable teams in Settings to view shared resources.", "在设置中启用团队后，可查看共享资源。")}</p> : error ? <div role="alert" className="team-workspace-error">{error}<button onClick={() => setRetry((value) => value + 1)}>{l("Retry", "重试")}</button></div> : !catalog ? <p role="status">{l("Loading…", "正在读取…")}</p> : <>
         {catalog.notice && <p className="team-workspace-notice">{catalog.notice}</p>}
         <div className="team-resource-list">{items.map((item) => <button className="team-resource-row" key={item.key} aria-pressed={reader?.key === item.key} onClick={(event) => { trigger.current = event.currentTarget; setReader(item); }}><Icon size={17} /><span><strong>{item.name}</strong><small>{item.summary}</small></span><span>{l("View", "查看")}</span></button>)}</div>
-        {catalog.assets && !items.length && <div className="team-empty"><Icon size={26} /><strong>{emptyTitle}</strong><p>{l("Published resources will appear here after syncing.", "团队发布后，点击上方「同步团队」即可获取。")}</p></div>}
-        {items.length > 0 && <p className="team-footnote">{kind === "mcp" ? l("Updated with Sync team. The client may require trust or MCP approval.", "随「同步团队」统一更新，客户端可能需要信任工作目录或确认 MCP。") : l("Updated in enabled working directories with Sync team.", "随「同步团队」统一更新到已启用的工作目录。")}</p>}
+        {catalog.assets && !items.length && <div className="team-empty"><Icon size={26} /><strong>{emptyTitle}</strong><p>{l("Published resources will appear here after syncing.", "团队发布后，点击上方「Pull 拉取」即可获取。")}</p></div>}
+        {items.length > 0 && <p className="team-footnote">{kind === "mcp" ? l("Updated with Pull. The client may require trust or MCP approval.", "随「Pull 拉取」统一更新，客户端可能需要信任工作目录或确认 MCP。") : l("Updated in enabled working directories with Pull.", "随「Pull 拉取」统一更新到已启用的工作目录。")}</p>}
       </>}
     </section>
     {reader && <aside ref={panel} tabIndex={-1} className="team-document-reader team-workspace" aria-label={detailsLabel}><header className="team-document-reader-head"><div><small>{reader.targets.map((target) => target === "codex" ? "Codex" : "Claude Code").join(" · ")}</small><h3>{reader.name}</h3></div><div className="team-space-actions"><button disabled={selection.busy} onClick={() => setEditor(reader.change)}><Pencil size={14} />{l("Edit", "编辑")}</button><button className="team-icon-button" aria-label={l("Close details", "关闭详情")} onClick={() => setReader(null)}><X size={17} /></button></div></header><div className="team-document-reader-body"><pre>{reader.content}</pre></div></aside>}
-    {editor !== undefined && catalog?.assets && <TeamConfigurationEditor kind={kind} initial={editor} selection={selection} revision={catalog.assets.commit} language={language} api={api} onBusy={onBusy} onClose={() => setEditor(undefined)} onPublished={(result) => {
+    {editor !== undefined && catalog?.assets && <TeamConfigurationEditor kind={kind} initial={editor} onStage={onStage ? change => { setEditor(undefined); onStage(change); } : undefined} selection={selection} revision={catalog.assets.commit} language={language} api={api} onBusy={onBusy} onClose={() => setEditor(undefined)} onPublished={(result) => {
       setEditor(undefined); setReader(null); setRetry(value => value + 1);
-      setNotice(result.cleanupRequired ? l("Published. Temporary files need cleanup; sync to check the resource before trying again.", "资源已发布，但临时文件需要清理。请先同步查看，不要重复发布。") : result.cacheUpdated ? l("Published to the team. Sync team to update working directories.", "已发布到团队。点击「同步团队」更新工作目录。") : l("Published, but the local cache could not be refreshed. Sync team to load the resource.", "已发布，但本地缓存未刷新。请点击「同步团队」获取资源。"));
+      setNotice(result.cleanupRequired ? l("Published. Temporary files need cleanup; sync to check the resource before trying again.", "资源已发布，但临时文件需要清理。请先同步查看，不要重复发布。") : result.cacheUpdated ? l("Published to the team. Pull to update working directories.", "已发布到团队。点击「Pull 拉取」更新工作目录。") : l("Published, but the local cache could not be refreshed. Pull to load the resource.", "已发布，但本地缓存未刷新。请点击「Pull 拉取」获取资源。"));
     }} />}
   </div>;
 }

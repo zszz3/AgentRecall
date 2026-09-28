@@ -135,6 +135,7 @@ it("exports only selected turns in source order, preserving tool payloads and on
   f.store.getSessionTurn.mockImplementation(async (sessionKey: string, id: string) => sessionKey === f.session.sessionKey ? [first, last].find((turn) => turn.id === id) ?? null : null);
   const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal, ["last", "first"]);
   expect(preview.selectedTurns?.map((turn) => turn.id)).toEqual(["first", "last"]);
+  expect(preview.files[0]?.attachmentId).toBe("selected-attachment");
   expect(preview.children).toEqual([]); expect(preview.root.messages).toEqual([]);
   expect(f.store.searchSessions).not.toHaveBeenCalled(); expect(f.store.getAllMessages).not.toHaveBeenCalled(); expect(f.store.getTraceEvents).not.toHaveBeenCalled(); expect(f.store.getSessionSourceArtifacts).not.toHaveBeenCalled();
   expect(f.store.getAttachmentFile).toHaveBeenCalledExactlyOnceWith(f.session.sessionKey, "selected-attachment");

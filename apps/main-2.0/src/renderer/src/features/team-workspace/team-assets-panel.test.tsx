@@ -22,6 +22,7 @@ const catalog: TeamCatalog = { projectId: "", root: null, installed: [], notice:
 const preview = (id: string, content: string): TeamReply => ok({ kind: "document-preview", value: { ...documentAsset, id, content, repository, commit: revision, destination: null, local: null, status: "unselected" } });
 function base(input: TeamRequest): TeamReply {
   if (input.action === "snapshot") return ok({ kind: "snapshot", value: { config, directories: config.directories, busy: false } });
+  if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, entries: [], limited: false, skipped: 0 } });
   if (input.action === "catalog") return ok({ kind: "catalog", value: catalog });
   if (input.action === "sync-status") return ok({ kind: "sync-status", value: null });
   if (input.action === "session-list") return ok({ kind: "session-list", value: { items: [], page: 1, hasMore: false } });
@@ -39,7 +40,7 @@ it("opens a team without a project and performs one full sync, exposing partial 
   await act(async () => button("Example").click());
   expect(container.textContent).not.toContain("新建项目");
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
-  const syncButton = button("同步团队");
+  const syncButton = button("Pull 拉取");
   await act(async () => { syncButton.click(); syncButton.click(); });
   expect(request.mock.calls.filter(([input]) => input.action === "sync")).toHaveLength(1);
   expect(request).toHaveBeenCalledWith({ action: "sync", scope: { teamId: team.id, repository } });
@@ -88,7 +89,7 @@ it("cancels a running sync on leaving the team and does not sync merely on conne
   await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(request).toHaveBeenCalledWith({ action: "connect-directory", teamId: team.id, directory: rootPath, targets: ["codex"] });
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
-  await act(async () => button("同步团队").click()); await act(async () => root.render(<p>Local page</p>));
+  await act(async () => button("Pull 拉取").click()); await act(async () => root.render(<p>Local page</p>));
   expect(request).toHaveBeenCalledWith({ action: "cancel-sync" });
 });
 
@@ -138,9 +139,12 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   expect(request.mock.calls.every(([input]) => ["snapshot", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });
 
-it.each(["共享指令", "MCP", "Env"])("adds %s through an explicit preview and publish flow", async (label) => {
+it.each(["共享指令", "MCP", "Env"])("adds %s by staging an item, reviewing Diff and pushing only selected changes", async (label) => {
   const token = "00000000-0000-4000-8000-000000000001";
+  let keys: string[] = [];
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "push-preview") { keys = input.items.map(item => item.key); return ok({ kind: "push-preview", value: { token, expiresAt: Date.now() + 600000, repository, items: input.items.map(item => ({ key: item.key, name: "Resource", status: "added", files: [{ path: "agentrecall.json", before: null, after: JSON.stringify(item) }] })) } }); }
+    if (input.action === "push-publish") return ok({ kind: "push-result", value: { items: keys.map(key => ({ key, status: "published" })) } });
     if (input.action === "configuration-preview") return ok({ kind: "configuration-preview", value: { token, expiresAt: Date.now() + 600000, repository, revision, branch: "main", kind: input.change.kind, operation: input.change.operation, name: input.change.value.name, files: [{ path: "agentrecall.json", before: "{}", after: JSON.stringify(input.change) }] } });
     if (input.action === "configuration-publish") return ok({ kind: "configuration-published", value: { repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false } });
     return base(input);
@@ -167,33 +171,35 @@ it.each(["共享指令", "MCP", "Env"])("adds %s through an explicit preview and
       await fill('dialog input[aria-label="字段值 1"]', "TEAM_TOKEN");
     }
   }
-  await act(async () => button("预览变更").click());
-  const prepared = request.mock.calls.find(([input]) => input.action === "configuration-preview")?.[0];
-  expect(prepared?.action).toBe("configuration-preview");
-  if (prepared?.action !== "configuration-preview") throw new Error("Preview missing");
-  expect(prepared.change.operation).toBe("create");
-  if (prepared.change.kind === "mcp" && prepared.change.value.transport === "http") expect(prepared.change.value.headers).toEqual({ Authorization: { fromEnv: "TEAM_TOKEN" } });
-  expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
-  expect(container.querySelector("dialog")?.textContent).toContain("修改后");
-  await act(async () => button("发布到团队").click());
-  expect(request).toHaveBeenCalledWith({ action: "configuration-publish", scope: { teamId: team.id, repository }, token });
-  expect(container.querySelector("dialog")).toBeNull(); expect(container.textContent).toContain("已发布到团队");
+  await act(async () => button("加入待上传").click());
+  expect(container.querySelector('dialog[aria-label="按项推送"]')).not.toBeNull();
+  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
+  await act(async () => button("查看所选 Diff").click());
+  const prepared = request.mock.calls.find(([input]) => input.action === "push-preview")?.[0];
+  if (prepared?.action !== "push-preview" || prepared.items[0]?.kind !== "configuration") throw new Error("Preview missing");
+  const change = prepared.items[0].change;
+  expect(change.operation).toBe("create");
+  if (change.kind === "mcp" && change.value.transport === "http") expect(change.value.headers).toEqual({ Authorization: { fromEnv: "TEAM_TOKEN" } });
+  expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("+");
+  await act(async () => button("Push 所选 1 项").click());
+  expect(request).toHaveBeenCalledWith({ action: "push-publish", scope: { teamId: team.id, repository }, token });
+  expect(container.textContent).toContain("已推送 1 项");
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
 });
 
 it("prefills edits and discards a preview on close without publishing", async () => {
   const token = "00000000-0000-4000-8000-000000000002";
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "configuration-preview" ? ok({ kind: "configuration-preview", value: { token, expiresAt: Date.now() + 600000, repository, revision, branch: "main", kind: input.change.kind, operation: input.change.operation, name: input.change.value.name, files: [] } }) : base(input));
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "push-preview" ? ok({ kind: "push-preview", value: { token, expiresAt: Date.now() + 600000, repository, items: input.items.map(item => ({ key: item.key, name: "Example", status: "modified", files: [] })) } }) : base(input));
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
   await act(async () => button("Example").click()); await act(async () => button("Env").click());
   await act(async () => button("TEAM_MODE").click()); await act(async () => { const edit = button("编辑"); edit.focus(); edit.click(); });
   const name = container.querySelector<HTMLInputElement>('dialog input[placeholder="TEAM_LOCALE"]')!;
   expect(name.value).toBe("TEAM_MODE"); expect(name.disabled).toBe(true);
   expect(container.querySelector("dialog textarea")?.textContent).toBe("review");
-  await act(async () => button("预览变更").click());
-  await act(async () => button("关闭编辑").click());
-  expect(request).toHaveBeenCalledWith({ action: "configuration-discard", token });
-  expect(document.activeElement).toBe(button("编辑"));
+  await act(async () => button("加入待上传").click());
+  await act(async () => button("查看所选 Diff").click());
+  await act(async () => button("关闭推送").click());
+  expect(request).toHaveBeenCalledWith({ action: "push-discard", token });
   expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
 });
 
@@ -228,4 +234,27 @@ it("reuses the session Turn reader for shared fragments without accessing local 
   const attachment = container.querySelector<HTMLButtonElement>(".message-attachments button")!;
   expect(attachment.disabled).toBe(true); expect(attachment.title).toContain("下载分享包");
   await act(async () => attachment.click()); expect(previewAttachment).not.toHaveBeenCalled();
+});
+
+it("selects individual local assets, shows their current Diff, and keeps only failed checked items after Push", async () => {
+  const token = "00000000-0000-4000-8000-000000000003";
+  let keys: string[] = [];
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "local-assets") return ok({ kind: "local-assets", value: { directory: rootPath, limited: false, skipped: 0, entries: input.kind === "skills" ? [{ name: "first", path: ".agents/skills/first/SKILL.md", bytes: 10 }, { name: "second", path: ".agents/skills/second/SKILL.md", bytes: 20 }, { name: "unchecked", path: ".agents/skills/unchecked/SKILL.md", bytes: 30 }] : [] } });
+    if (input.action === "push-preview") { keys = input.items.map(item => item.key); return ok({ kind: "push-preview", value: { token, repository, expiresAt: Date.now() + 600000, items: input.items.map(item => ({ key: item.key, name: item.key, status: "modified", files: [{ path: "SKILL.md", before: "Keep\nOld rule\n", after: "Keep\nNew rule\n" }] })) } }); }
+    if (input.action === "push-publish") return ok({ kind: "push-result", value: { items: keys.map((key, index) => ({ key, status: index === 0 ? "published" : "failed", ...(index ? { message: "fixture failure" } : {}) })) } });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{ request }} />));
+  await act(async () => button("Example").click());
+  expect(button("Pull 拉取")).toBeTruthy(); await act(async () => button("Push 推送").click());
+  const check = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="选择 ${name}"]`)!;
+  await act(async () => { check("first").click(); check("second").click(); });
+  await act(async () => button("查看所选 Diff").click());
+  expect(keys).toHaveLength(2); expect(keys.some(key => key.includes("unchecked"))).toBe(false);
+  expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("-Old rule");
+  expect(container.querySelector('[aria-label="文件差异"]')?.textContent).toContain("+New rule");
+  await act(async () => button("Push 所选 2 项").click());
+  expect(check("first")).toBeNull(); expect(check("second").checked).toBe(true); expect(check("unchecked").checked).toBe(false);
+  expect(container.textContent).toContain("fixture failure"); expect(container.textContent).toContain("已推送 1 项");
 });

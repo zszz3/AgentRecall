@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { TeamChangePreview } from "./team-change-preview";
 import { Plus, X } from "lucide-react";
 import type { ConfigurationChange } from "@agentrecall/workspace-core";
 import type { TeamPayload } from "../../../../shared/ipc/team-workspace";
@@ -12,8 +13,9 @@ type Published = Extract<TeamPayload, { kind: "configuration-published" }>["valu
 type Field = { key: string; value: string; source: "value" | "environment" };
 const fields = (values: Record<string, string | { fromEnv: string }>): Field[] => Object.entries(values).map(([key, value]) => ({ key, value: typeof value === "string" ? value : value.fromEnv, source: typeof value === "string" ? "value" : "environment" }));
 
-export function TeamConfigurationEditor({ kind, initial, selection, revision, language, api, onClose, onPublished, onBusy }: {
+export function TeamConfigurationEditor({ kind, initial, selection, revision, language, api, onClose, onPublished, onBusy, onStage }: {
   kind: ConfigurationChange["kind"]; initial: ConfigurationChange | null; selection: TeamSelection; revision: string; language: LanguageMode; api: TeamWorkspaceApi;
+  onStage?(change: ConfigurationChange): void;
   onClose(): void; onPublished(result: Published): void; onBusy(value: boolean): void;
 }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
@@ -67,6 +69,7 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
           : { kind, operation, value: { id: id.trim(), name: name.trim(), targets, ...(transport === "http" ? { transport, url: url.trim(), headers: values } : { transport, command: command.trim(), args: argumentsValue, env: values }) } };
         const parsed = configurationChangeSchema.safeParse(draft);
         if (!parsed.success) throw new Error(l("Check the identifier, fields and client selection. Local variable references must be names; STDIO references must match their field names.", "请检查标识、字段格式和客户端选择。本机变量引用应填写变量名；STDIO 引用名需与对应变量名一致。"));
+        if (onStage) { onStage(parsed.data); return; }
         reply = await api.request({ action: "configuration-preview", scope, revision, change: parsed.data });
       }
       if (!alive.current) {
@@ -104,8 +107,8 @@ export function TeamConfigurationEditor({ kind, initial, selection, revision, la
             </fieldset>
           </>}
           <fieldset><legend>{l("Clients", "适用客户端")}</legend><div className="team-space-actions">{(["codex", "claude"] as const).map(target => <label className="team-client-chip" key={target}><input type="checkbox" checked={targets.includes(target)} disabled={busy} onChange={event => setTargets(event.currentTarget.checked ? [...targets, target] : targets.filter(item => item !== target))} /><span>{target === "codex" ? "Codex" : "Claude Code"}</span></label>)}</div></fieldset>
-        </> : <div className="team-editor-preview"><h3>{l("Review changes", "预览变更")}</h3><p>{preview.operation === "create" ? l("Add", "新增") : l("Update", "更新")} · {preview.name}</p><p>{l("Publishing updates the team repository. Sync team applies it to your working directories.", "发布会更新团队仓库；之后点击「同步团队」应用到工作目录。")}</p>{preview.files.map(file => <details key={file.path}><summary>{file.before === null ? l("New file", "新增文件") : l("Updated file", "更新文件")} · {file.path}</summary><div className="team-editor-diff"><section><strong>{l("Before", "修改前")}</strong><pre>{file.before ?? l("File does not exist", "尚无此文件")}</pre></section><section><strong>{l("After", "修改后")}</strong><pre>{file.after}</pre></section></div></details>)}</div>}
-        <footer className="team-space-actions">{busy ? <button type="button" onClick={() => void api.request({ action: "cancel-sync" }).catch(() => { if (alive.current) setError(l("Cancellation could not be confirmed.", "取消未确认，请等待当前操作结束。")); })}>{l("Cancel operation", "取消操作")}</button> : preview ? <button type="button" onClick={backToEdit}>{l("Back to edit", "返回编辑")}</button> : <button type="button" onClick={onClose}>{l("Cancel", "取消")}</button>}<button className="is-primary" disabled={busy}>{busy ? l("Working…", "正在处理…") : preview ? l("Publish to team", "发布到团队") : l("Preview changes", "预览变更")}</button></footer>
+        </> : <TeamChangePreview preview={preview} language={language} />}
+        <footer className="team-space-actions">{busy ? <button type="button" onClick={() => void api.request({ action: "cancel-sync" }).catch(() => { if (alive.current) setError(l("Cancellation could not be confirmed.", "取消未确认，请等待当前操作结束。")); })}>{l("Cancel operation", "取消操作")}</button> : preview ? <button type="button" onClick={backToEdit}>{l("Back to edit", "返回编辑")}</button> : <button type="button" onClick={onClose}>{l("Cancel", "取消")}</button>}<button className="is-primary" disabled={busy}>{busy ? l("Working…", "正在处理…") : preview ? l("Publish to team", "发布到团队") : onStage ? l("Add to changes", "加入待上传") : l("Preview changes", "预览变更")}</button></footer>
       </form>
     </section>
   </dialog>;

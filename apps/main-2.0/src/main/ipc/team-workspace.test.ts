@@ -356,3 +356,23 @@ it("validates selected turn IDs at IPC and forwards them with the authenticated 
   expect(await api.request({ action: "session-preview", scope, sessionKey: "codex:one", turnIds: ["turn-2", "turn-9"] })).toMatchObject({ ok: false, error: { code: "FIXTURE_PREPARE" } });
   expect(prepare).toHaveBeenCalledWith(sender.id, expect.objectContaining({ repository: scope.repository, teamWide: true }), "codex:one", expect.any(AbortSignal), ["turn-2", "turn-9"]);
 });
+
+it("validates item selections at IPC and retains the batch confirmation and window ownership boundary", async () => {
+  const { api, workspace, confirm, service, sender } = harness();
+  await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
+  const scope = { teamId: "team", repository: "https://github.com/example/assets" }, revision = "1".repeat(40);
+  const change = { kind: "environment" as const, operation: "create" as const, value: { name: "TEAM_MODE", value: "review", targets: ["codex" as const] } };
+  const item = { key: "env", kind: "configuration" as const, change };
+  vi.spyOn(TeamAssetService.prototype, "list").mockResolvedValue({ teamId: "team", repository: scope.repository, commit: revision, skills: [], documents: [], workConfigs: [], configuration: { instructions: [], mcpServers: [], environment: [] } });
+  const preview = vi.spyOn(TeamAssetService.prototype, "previewConfiguration").mockResolvedValue({ repository: scope.repository, revision, branch: "main", kind: "environment", operation: "create", name: "TEAM_MODE", files: [], items: [{ key: "environment:TEAM_MODE", name: "TEAM_MODE", status: "added", files: [] }] });
+  const publish = vi.spyOn(TeamAssetService.prototype, "publishConfiguration").mockResolvedValue({ repository: scope.repository, commit: "2".repeat(40), cacheUpdated: true, cleanupRequired: false });
+  expect(await api.request({ action: "push-preview", scope, revision, items: [item, item] })).toMatchObject({ ok: false, error: { code: "TEAM_REQUEST_FAILED" } });
+  expect(preview).not.toHaveBeenCalled();
+  const reply = await api.request({ action: "push-preview", scope, revision, items: [item] });
+  if (!reply.ok || reply.data.kind !== "push-preview") throw new Error("Missing preview");
+  const token = reply.data.value.token;
+  expect(await service.request(sender.id + 1, { action: "push-publish", scope, token })).toMatchObject({ ok: false, error: { code: "PUSH_PREVIEW_EXPIRED" } });
+  expect(publish).not.toHaveBeenCalled(); confirm.mockResolvedValue(true);
+  expect(await api.request({ action: "push-publish", scope, token })).toMatchObject({ ok: true, data: { kind: "push-result", value: { items: [{ key: "env", status: "published" }] } } });
+  expect(confirm).toHaveBeenCalledOnce(); expect(publish).toHaveBeenCalledOnce();
+});

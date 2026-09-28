@@ -3,16 +3,16 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
-import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationChange, type ConfigurationPreview } from "./configuration-format.js";
+import { MAX_CONFIGURATION_PREVIEW_BYTES, type ConfigurationPreview } from "./configuration-format.js";
 import { WorkspaceError } from "./errors.js";
 import { canonicalGitHubRepository } from "./git.js";
-import { manifestSchema, MAX_FILE_BYTES, skillFromFiles, validateSnapshot, type AssetSnapshot, type SkillFile } from "./asset-format.js";
+import { manifestSchema, MAX_FILE_BYTES, skillFromFiles, validateSnapshot, type AssetChange, type AssetSnapshot, type SkillFile } from "./asset-format.js";
 
 const execute = promisify(execFile);
 export type AssetTransport = "https" | "ssh";
 type CloneRepository = (repository: string, destination: string, transport: AssetTransport, signal?: AbortSignal) => Promise<void>;
 
-async function runGit(args: string[], maximum: number, signal?: AbortSignal, input?: string): Promise<Buffer> {
+async function runGit(args: string[], maximum: number, signal?: AbortSignal, input?: string | Buffer): Promise<Buffer> {
   try {
     const pending = execute("git", args, {
       encoding: "buffer", timeout: 60_000, maxBuffer: maximum, windowsHide: true, signal,
@@ -63,7 +63,7 @@ export class GitAssetSource {
     const hooks = path.join(scratch, "empty-hooks");
     await fs.mkdir(hooks);
     await this.cloneRepository(canonical, gitDirectory, transport, signal);
-    const git = (args: string[], input?: string) => runGit(["--git-dir", gitDirectory, "-c", `core.hooksPath=${hooks}`, ...args], 1024 * 1024, signal, input);
+    const git = (args: string[], input?: string | Buffer) => runGit(["--git-dir", gitDirectory, "-c", `core.hooksPath=${hooks}`, ...args], 1024 * 1024, signal, input);
     // Use the clone's recorded fetch URL, never a separately configured push URL.
     const url = (await git(["config", "--local", "--get", "remote.origin.url"])).toString("utf8").trim();
     const refs = await git(["ls-remote", "--refs", "--", url]);
@@ -104,11 +104,11 @@ export class GitAssetSource {
     return { created: true, snapshot };
   }
 
-  async prepareConfiguration(repository: string, scratch: string, transport: AssetTransport, change: ConfigurationChange, expectedRevision: string, signal?: AbortSignal) {
+  async prepareConfiguration(repository: string, scratch: string, transport: AssetTransport, change: AssetChange, expectedRevision: string, signal?: AbortSignal) {
     const canonical = canonicalGitHubRepository(repository), gitDirectory = path.join(scratch, "repository.git");
     await this.cloneRepository(canonical, gitDirectory, transport, signal);
     const hooks = path.join(scratch, "empty-publish-hooks"); await fs.mkdir(hooks);
-    const git = (args: string[], input?: string, maximum = MAX_FILE_BYTES + 1) => runGit(["--git-dir", gitDirectory, "-c", `core.hooksPath=${hooks}`, ...args], maximum, signal, input);
+    const git = (args: string[], input?: string | Buffer, maximum = MAX_FILE_BYTES + 1) => runGit(["--git-dir", gitDirectory, "-c", `core.hooksPath=${hooks}`, ...args], maximum, signal, input);
     const snapshot = await this.readSnapshot(canonical, gitDirectory, signal);
     if (snapshot.commit !== expectedRevision) throw new WorkspaceError("ASSET_REVISION_CHANGED", "团队仓库已有新版本，请先同步团队，再重新编辑或预览。");
     const branch = (await git(["symbolic-ref", "HEAD"])).toString("utf8").trim();
@@ -124,13 +124,59 @@ export class GitAssetSource {
       mcpServers: oldManifest.schemaVersion === 4 ? [...oldManifest.mcpServers] : [],
       environment: oldManifest.schemaVersion === 4 ? [...oldManifest.environment] : [],
     };
+    const changes = change.kind === "batch" ? change.value.changes : [change];
     const files: ConfigurationPreview["files"] = [];
+    const skillWrites = new Map<string, { bytes: Buffer | null; executable: boolean }>();
+    const describeBytes = (bytes: Buffer): string => {
+      try {
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        if (!text.includes("\0")) return text;
+      } catch { /* Binary Skill files are preserved; the preview shows their digest. */ }
+      return `[Binary file · ${bytes.length} bytes · SHA-256 ${createHash("sha256").update(bytes).digest("hex")}]`;
+    };
+    const itemResults: NonNullable<ConfigurationPreview["items"]> = [];
+    for (const change of changes) {
+    const itemKey = `${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;
+    const itemName = change.value.name;
+    const beforeManifest = structuredClone(manifest);
+    const start = files.length;
     const changed = <T>(entries: T[], index: number, next: T) => {
       if (change.operation === "create" && index >= 0) throw new WorkspaceError("CONFIGURATION_EXISTS", "同名团队资源已经存在，请打开原条目编辑。");
       if (change.operation === "update" && index < 0) throw new WorkspaceError("CONFIGURATION_MISSING", "团队资源已不存在，请同步后重试。");
       if (index < 0) entries.push(next); else entries[index] = next;
     };
-    if (change.kind === "instructions") {
+    if (change.kind === "skills") {
+      const skill = skillFromFiles(change.value.id, change.value.files);
+      const index = manifest.skills.findIndex(item => item.id === skill.id);
+      const previous = snapshot.skills.find(item => item.id === skill.id);
+      const destination = manifest.skills[index]?.path ?? `skills/${skill.id}`;
+      if (index < 0 && (await git(["ls-tree", "HEAD", "--", destination])).length) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 目标目录已存在未归属的文件，请先整理后再推送。");
+      const key = destination.normalize("NFC").toLowerCase();
+      const overlap = (location: string) => { const other = location.normalize("NFC").toLowerCase(); return other === key || other.startsWith(key + "/") || key.startsWith(other + "/"); };
+      if (manifest.skills.some((item, i) => i !== index && overlap(item.path)) || [...manifest.documents, ...manifest.instructions].some(item => overlap(item.path))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "Skill 路径与其他团队资源重叠，请先拆分文件。");
+      changed(manifest.skills, index, { id: skill.id, path: destination });
+      if (previous?.digest === skill.digest) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
+      const before = new Map(previous?.files.map(file => [file.path, file]));
+      const after = new Map(skill.files.map(file => [file.path, file]));
+      for (const relative of new Set([...before.keys(), ...after.keys()])) {
+        const old = before.get(relative), next = after.get(relative);
+        if (old && next && old.content === next.content && old.executable === next.executable) continue;
+        const file = `${destination}/${relative}`, bytes = next ? Buffer.from(next.content, "base64") : null;
+        skillWrites.set(file, { bytes, executable: next?.executable ?? false });
+        files.push({ path: file, before: old ? describeBytes(Buffer.from(old.content, "base64")) : null, after: bytes === null ? null : describeBytes(bytes), previousExecutable: old?.executable, executable: next?.executable });
+      }
+    } else if (change.kind === "documents") {
+      const { content, ...metadata } = change.value;
+      const index = manifest.documents.findIndex(item => item.id === metadata.id);
+      const previous = "documents" in snapshot ? snapshot.documents.find(item => item.id === metadata.id) : undefined;
+      const destination = manifest.documents[index]?.path ?? `docs/${metadata.id}.md`, key = destination.normalize("NFC").toLowerCase();
+      if (manifest.documents.some((item, i) => i !== index && item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.instructions.some(item => item.path.normalize("NFC").toLowerCase() === key)
+        || manifest.skills.some(item => key.startsWith(item.path.normalize("NFC").toLowerCase() + "/"))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "文档文件还被其他团队资源使用，请先拆分文件。");
+      changed(manifest.documents, index, { ...metadata, path: destination });
+      if (previous?.content === content && previous.target === metadata.target && previous.name === metadata.name) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需推送。"); }
+      if (previous?.content !== content) files.push({ path: destination, before: previous?.content ?? null, after: content });
+    } else if (change.kind === "instructions") {
       const { content, ...metadata } = change.value;
       const index = manifest.instructions.findIndex((item) => item.id === metadata.id);
       const previous = manifest.instructions[index];
@@ -143,29 +189,40 @@ export class GitAssetSource {
       }
       const before = snapshot.schemaVersion === 4 ? snapshot.instructions.find((item) => item.id === metadata.id)?.content ?? null : null;
       changed(manifest.instructions, index, { ...metadata, path: destination });
-      if (previous && isDeepStrictEqual(previous, manifest.instructions[index]) && before === content) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。");
+      if (previous && isDeepStrictEqual(previous, manifest.instructions[index]) && before === content) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
       if (before !== content) files.push({ path: destination, before, after: content });
     } else if (change.kind === "mcp") {
       const index = manifest.mcpServers.findIndex((item) => item.id === change.value.id);
       const previous = manifest.mcpServers[index];
       changed(manifest.mcpServers, index, change.value);
-      if (previous && isDeepStrictEqual(previous, change.value)) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。");
+      if (previous && isDeepStrictEqual(previous, change.value)) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
     } else {
       const index = manifest.environment.findIndex((item) => item.name.toUpperCase() === change.value.name.toUpperCase());
       const previous = manifest.environment[index];
       if (previous && previous.name !== change.value.name) throw new WorkspaceError("CONFIGURATION_EXISTS", "已有名称仅大小写不同的变量，请使用原名称编辑。");
       changed(manifest.environment, index, change.value);
-      if (previous && isDeepStrictEqual(previous, change.value)) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。");
+      if (previous && isDeepStrictEqual(previous, change.value)) { if (changes.length > 1) { itemResults.push({ key: itemKey, name: itemName, status: "unchanged", files: [] }); continue; } throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "内容没有变化，无需发布。"); }
     }
+    const itemFiles = files.slice(start);
+    for (const file of itemFiles) file.itemKey = itemKey;
+    if (!itemFiles.length) {
+      const field = change.kind === "mcp" ? "mcpServers" : change.kind;
+      const before = beforeManifest[field].find(item => "id" in item ? change.kind !== "environment" && item.id === change.value.id : item.name === change.value.name);
+      const after = manifest[field].find(item => "id" in item ? change.kind !== "environment" && item.id === change.value.id : item.name === change.value.name);
+      itemFiles.push({ path: "agentrecall.json", before: before ? JSON.stringify(before, null, 2) : null, after: JSON.stringify(after, null, 2) });
+    }
+    itemResults.push({ key: itemKey, name: itemName, status: change.operation === "create" ? "added" : "modified", files: itemFiles });
+    }
+    if (itemResults.every(item => item.status === "unchanged")) throw new WorkspaceError("NO_CONFIGURATION_CHANGE", "所选资源与团队一致，无需推送。");
     const manifestText = JSON.stringify(manifestSchema.parse(manifest), null, 2) + "\n";
     if (Buffer.byteLength(manifestText) > MAX_FILE_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整团队清单超过 1 MiB，请在仓库中整理资源后重试。");
     files.unshift({ path: "agentrecall.json", before: originalManifest, after: manifestText });
-    const preview: ConfigurationPreview = { repository: canonical, revision: snapshot.commit, branch: branch.slice("refs/heads/".length), kind: change.kind, operation: change.operation, name: change.value.name, files };
+    const preview: ConfigurationPreview = { repository: canonical, revision: snapshot.commit, branch: branch.slice("refs/heads/".length), kind: change.kind, operation: change.operation, name: change.value.name, files, items: itemResults };
     if (Buffer.byteLength(JSON.stringify(preview)) > MAX_CONFIGURATION_PREVIEW_BYTES) throw new WorkspaceError("ASSETS_TOO_LARGE", "完整变更预览超过 4 MiB，请缩小内容后重试。");
 
     // Rebuild only the affected Git trees. No checkout, filters, hooks or user
     // index are involved, and unrelated files retain their object ids and modes.
-    const writeTree = async (tree: string | null, parts: string[], blob: string, overwrite: boolean): Promise<string> => {
+    const writeTree = async (tree: string | null, parts: string[], blob: string | null, overwrite: boolean, executable?: boolean): Promise<string> => {
       const raw = tree ? new TextDecoder("utf-8", { fatal: true }).decode(await git(["ls-tree", "-z", tree])) : "";
       const entries = raw.split("\0").filter(Boolean).map((entry) => {
         const match = /^(\d+) (blob|tree|commit) ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
@@ -178,18 +235,20 @@ export class GitAssetSource {
       let next;
       if (parts.length > 1) {
         if (existing && existing.type !== "tree") throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "目标父路径不是目录，未覆盖已有内容。");
-        next = { mode: "040000", type: "tree", oid: await writeTree(existing?.oid ?? null, parts.slice(1), blob, overwrite), name };
+        next = { mode: "040000", type: "tree", oid: await writeTree(existing?.oid ?? null, parts.slice(1), blob, overwrite, executable), name };
       } else {
         if (existing && (!overwrite || existing.type !== "blob" || !["100644", "100755"].includes(existing.mode))) throw new WorkspaceError("CONFIGURATION_FILE_CONFLICT", "目标文件已被其他内容占用，未覆盖已有文件。");
-        next = { mode: existing?.mode ?? "100644", type: "blob", oid: blob, name };
+        next = blob === null ? null : { mode: executable === undefined ? existing?.mode ?? "100644" : executable ? "100755" : "100644", type: "blob", oid: blob, name };
       }
-      const updated = entries.filter((entry) => entry !== existing).concat(next);
+      const updated = entries.filter((entry) => entry !== existing).concat(next ? [next] : []);
       return (await git(["mktree", "-z"], updated.map((entry) => `${entry.mode} ${entry.type} ${entry.oid}\t${entry.name}\0`).join(""))).toString("ascii").trim();
     };
     let tree = (await git(["rev-parse", "HEAD^{tree}"])).toString("ascii").trim();
     for (const file of files) {
-      const blob = (await git(["hash-object", "-w", "--stdin"], file.after)).toString("ascii").trim();
-      tree = await writeTree(tree, file.path.split("/"), blob, file.before !== null);
+      const skillWrite = skillWrites.get(file.path);
+      const bytes = skillWrite ? skillWrite.bytes : file.after;
+      const blob = bytes === null ? null : (await git(["hash-object", "-w", "--stdin"], bytes)).toString("ascii").trim();
+      tree = await writeTree(tree, file.path.split("/"), blob, file.before !== null, skillWrite?.executable);
     }
     const commit = (await git(["-c", "user.name=AgentRecall", "-c", "user.email=agentrecall@users.noreply.github.com", "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", snapshot.commit], `Update team ${change.kind}: ${change.value.name}\n`)).toString("ascii").trim();
     await git(["update-ref", branch, commit, snapshot.commit]);

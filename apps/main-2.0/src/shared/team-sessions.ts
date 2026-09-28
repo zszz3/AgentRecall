@@ -27,7 +27,7 @@ export interface TeamSessionContent {
   root: TeamSessionDetail;
   selectedTurns?: SessionTurnDetail[];
   children: TeamSessionDetail[];
-  files: Array<{ name: string; bytes: number; kind: string }>;
+  files: Array<{ name: string; bytes: number; kind: string; attachmentId?: string }>;
   bytes: number;
   missingAttachments: string[];
 }
