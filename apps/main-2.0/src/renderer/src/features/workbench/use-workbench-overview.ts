@@ -44,7 +44,7 @@ const EMPTY_LIVE_SESSIONS: LiveSessionSnapshot = {
   sessions: [],
 };
 
-export function useWorkbenchOverview(language: LanguageMode) {
+export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
   const [query, setQuery] = useState("");
   const [sessions, setSessions] = useState<SessionSearchResult[]>([]);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
@@ -59,6 +59,37 @@ export function useWorkbenchOverview(language: LanguageMode) {
   const liveSessionRefreshCoordinator = useRef(new LiveSessionSnapshotRefreshCoordinator()).current;
   const sessionsLoadSequence = useRef(0);
   const statsLoadSequence = useRef(0);
+  const quotaLoadSequence = useRef(0);
+  const alive = useRef(true);
+  const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
+  const enabled = active && visible;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const statsPending = useRef<{ key: string; request: Promise<SessionStats> } | null>(null);
+  const quotaPending = useRef<Promise<UsageQuotaSnapshot> | null>(null);
+  const feedbackTimers = useRef(new Set<number>());
+
+  useEffect(() => {
+    alive.current = true;
+    const visibilityChanged = () => setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", visibilityChanged);
+    return () => {
+      alive.current = false;
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      for (const timer of feedbackTimers.current) window.clearTimeout(timer);
+      feedbackTimers.current.clear();
+    };
+  }, []);
+  useEffect(() => {
+    sessionsLoadSequence.current++; statsLoadSequence.current++; quotaLoadSequence.current++;
+    statsPending.current = null; quotaPending.current = null;
+    if (!enabled) {
+      for (const timer of feedbackTimers.current) window.clearTimeout(timer);
+      feedbackTimers.current.clear();
+      setStatsFeedback(null); setQuotaFeedback(null); setStatsRefreshing(false); setQuotaLoading(false);
+    }
+  }, [enabled]);
+
   const t = useCallback(
     (en: string, zh: string) => localize(language, en, zh),
     [language],
@@ -72,6 +103,7 @@ export function useWorkbenchOverview(language: LanguageMode) {
   const liveSearchKeys = useMemo(() => [...liveSessionKeys], [liveSessionKeys]);
 
   const loadSessions = useCallback(async (): Promise<void> => {
+    if (!enabledRef.current || !alive.current) return;
     const requestId = ++sessionsLoadSequence.current;
     if (query.trim()) {
       const page = await window.sessionSearch.searchSessionPage({
@@ -82,7 +114,7 @@ export function useWorkbenchOverview(language: LanguageMode) {
         origin: statsOrigin,
         limit: WORKBENCH_SESSION_LIMIT,
       });
-      if (requestId === sessionsLoadSequence.current) setSessions(page.sessions);
+      if (alive.current && enabledRef.current && requestId === sessionsLoadSequence.current) setSessions(page.sessions);
       return;
     }
 
@@ -109,7 +141,7 @@ export function useWorkbenchOverview(language: LanguageMode) {
         })
       : Promise.resolve({ sessions: [], totalCount: 0, hasMore: false });
     const [recentPage, activePage] = await Promise.all([recentRequest, activeRequest]);
-    if (requestId !== sessionsLoadSequence.current) return;
+    if (!alive.current || !enabledRef.current || requestId !== sessionsLoadSequence.current) return;
 
     const sessionsByKey = new Map<string, SessionSearchResult>();
     for (const session of [...activePage.sessions, ...recentPage.sessions]) {
@@ -118,37 +150,50 @@ export function useWorkbenchOverview(language: LanguageMode) {
     setSessions([...sessionsByKey.values()]);
   }, [liveDetectionFailed, liveSearchKeys, query, statsOrigin]);
 
-  const loadStats = useCallback(async (): Promise<void> => {
+  const loadStats = useCallback(async (fresh = false): Promise<void> => {
+    if (!enabledRef.current || !alive.current) return;
     const requestId = ++statsLoadSequence.current;
-    const nextStats = await window.sessionSearch.getStats({
-      period: statsPeriod,
-      origin: statsOrigin,
-      dailyHistoryDays: 90,
-    });
-    if (requestId === statsLoadSequence.current) setStats(nextStats);
+    const key = `${statsPeriod}:${statsOrigin}`;
+    // A completed index/mutation must not reuse a query started before it.
+    if (fresh || statsPending.current?.key !== key) {
+      const request = Promise.resolve().then(() => window.sessionSearch.getStats({
+        period: statsPeriod, origin: statsOrigin, dailyHistoryDays: 90,
+      })).finally(() => {
+        if (statsPending.current?.request === request) statsPending.current = null;
+      });
+      statsPending.current = { key, request };
+    }
+    const nextStats = await statsPending.current.request;
+    if (alive.current && enabledRef.current && requestId === statsLoadSequence.current) setStats(nextStats);
   }, [statsOrigin, statsPeriod]);
 
   const refreshStats = useCallback(async (): Promise<void> => {
+    if (!enabledRef.current || !alive.current) return;
     setStatsRefreshing(true);
     setStatsFeedback({ kind: "running", message: t("Refreshing usage...", "正在刷新用量...") });
     try {
-      await loadStats();
+      await loadStats(true);
+      if (!alive.current || !enabledRef.current) return;
       const message = t("Usage refreshed.", "用量已刷新。");
       setStatsFeedback({ kind: "success", message });
-      window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
+        feedbackTimers.current.delete(timer);
         setStatsFeedback((current) =>
           current?.kind === "success" && current.message === message ? null : current);
       }, 1600);
+      feedbackTimers.current.add(timer);
     } catch (error) {
-      setStatsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      if (alive.current && enabledRef.current) setStatsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
-      setStatsRefreshing(false);
+      if (alive.current) setStatsRefreshing(false);
     }
   }, [loadStats, t]);
 
   const loadQuotas = useCallback(async (
     mode: "initial" | "manual" | "background" = "initial",
   ): Promise<void> => {
+    if (!enabledRef.current || !alive.current) return;
+    const requestId = ++quotaLoadSequence.current;
     const background = mode === "background";
     if (!background) setQuotaLoading(true);
     if (mode === "manual") {
@@ -158,43 +203,55 @@ export function useWorkbenchOverview(language: LanguageMode) {
       });
     }
     try {
-      const nextQuotas = await window.sessionSearch.getQuotas();
+      if (!quotaPending.current) {
+        const request = Promise.resolve().then(() => window.sessionSearch.getQuotas()).finally(() => {
+          if (quotaPending.current === request) quotaPending.current = null;
+        });
+        quotaPending.current = request;
+      }
+      const nextQuotas = await quotaPending.current;
+      if (!alive.current || !enabledRef.current || requestId !== quotaLoadSequence.current) return;
       setQuotas(nextQuotas);
       if (mode === "manual") {
         const message = t("Usage limits refreshed.", "额度已刷新。");
         setQuotaFeedback({ kind: "success", message });
-        window.setTimeout(() => {
+        const timer = window.setTimeout(() => {
+          feedbackTimers.current.delete(timer);
           setQuotaFeedback((current) =>
             current?.kind === "success" && current.message === message ? null : current);
         }, 1800);
+        feedbackTimers.current.add(timer);
       }
     } catch (error) {
-      if (!background) {
+      if (!background && alive.current && enabledRef.current) {
         setQuotaFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
       }
     } finally {
-      if (!background) setQuotaLoading(false);
+      if (!background && alive.current && enabledRef.current && requestId === quotaLoadSequence.current) setQuotaLoading(false);
     }
   }, [t]);
 
   const refreshLiveSessions = useCallback(
     () => liveSessionRefreshCoordinator.refresh(
       () => window.sessionSearch.getLiveSessions(),
-      setLiveSessions,
+      (snapshot) => { if (alive.current) setLiveSessions(snapshot); },
     ),
     [liveSessionRefreshCoordinator],
   );
 
   useEffect(() => {
+    if (!enabled) return;
     const initialTimer = window.setTimeout(() => void loadQuotas(), 100);
     const timer = window.setInterval(() => void loadQuotas("background"), QUOTA_REFRESH_INTERVAL_MS);
-    const unsubscribe = window.sessionSearch.onQuotaUpdated(setQuotas);
+    const unsubscribe = window.sessionSearch.onQuotaUpdated((snapshot) => {
+      if (alive.current && enabledRef.current) { quotaLoadSequence.current++; setQuotas(snapshot); setQuotaLoading(false); }
+    });
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
       unsubscribe();
     };
-  }, [loadQuotas]);
+  }, [enabled, loadQuotas]);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => void refreshLiveSessions(), 300);
@@ -209,21 +266,23 @@ export function useWorkbenchOverview(language: LanguageMode) {
   }, [refreshLiveSessions]);
 
   useEffect(() => {
+    if (!enabled) return;
     const timer = window.setTimeout(() => {
       void loadStats().catch((error) => {
-        setStatsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+        if (alive.current && enabledRef.current) setStatsFeedback({ kind: "error", message: error instanceof Error ? error.message : String(error) });
       });
     }, 0);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [loadStats]);
+  }, [enabled, loadStats]);
 
   useEffect(() => {
+    if (!enabled) return;
     void loadSessions().catch((error) => {
       console.warn("Failed to load workbench sessions:", error);
     });
-  }, [loadSessions]);
+  }, [enabled, loadSessions]);
 
   return {
     query,

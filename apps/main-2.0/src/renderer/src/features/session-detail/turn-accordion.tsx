@@ -1,5 +1,6 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { AlertCircle, ArrowRightLeft, BotMessageSquare, ChevronDown, ChevronRight, Clock3, GitFork, LoaderCircle, Paperclip, RotateCw, Wrench, X } from "lucide-react";
 
 import { formatMessageTime } from "../../../../core/format-session";
@@ -332,18 +333,33 @@ function payloadText(payload: Record<string, unknown>): string {
 const MESSAGE_TRUNCATE_LIMIT = 3_000;
 const SPAN_PAYLOAD_PREVIEW_LIMIT = 2_400;
 
+const TurnDisplayState = createContext<Map<string, boolean> | null>(null);
+function useTurnExpansion(key: string): [boolean, (value: boolean) => void] {
+  const remembered = useContext(TurnDisplayState);
+  const [expanded, setExpanded] = useState(() => remembered?.get(key) ?? false);
+  const update = useCallback((value: boolean) => {
+    remembered?.set(key, value);
+    setExpanded(value);
+  }, [key, remembered]);
+  return [expanded, update];
+}
+
+
 function TurnSpanPayload({
+  stateKey,
   label,
   payload,
   previewLimit,
   language,
 }: {
+  stateKey: string;
   label: string;
   payload: Record<string, unknown>;
   previewLimit?: number;
   language: LanguageMode;
 }): ReactElement {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useTurnExpansion(`${stateKey}:full`);
+  const [open, setOpen] = useTurnExpansion(`${stateKey}:open`);
   const text = payloadText(payload);
   const truncated = previewLimit !== undefined && text.length > previewLimit;
   const visibleText = truncated && !expanded
@@ -351,7 +367,7 @@ function TurnSpanPayload({
     : text;
 
   return (
-    <details className="msg-tool-payload">
+    <details className="msg-tool-payload" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>{label}</summary>
       <pre>{visibleText}</pre>
       {truncated ? (
@@ -359,7 +375,7 @@ function TurnSpanPayload({
           type="button"
           className="expand-toggle"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => setExpanded(!expanded)}
         >
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {expanded
@@ -384,7 +400,7 @@ function TurnMessageBlock({
   language: LanguageMode;
   target?: boolean;
 }): ReactElement {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useTurnExpansion(`message:${message.messageIndex}`);
   const [attachmentPreview, setAttachmentPreview] = useState<{
     name: string;
     kind: "image" | "text";
@@ -457,7 +473,7 @@ function TurnMessageBlock({
         </div>
       ) : null}
       {truncated ? (
-        <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+        <button className="expand-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {expanded ? localize(language, "Collapse", "收起") : localize(language, "Show full content", "展开全文")}
         </button>
@@ -529,6 +545,7 @@ function TurnSpanBlock({
   language: LanguageMode;
   target?: boolean;
 }): ReactElement {
+  const [open, setOpen] = useTurnExpansion(`${span.id}:open`);
   const elapsed = durationLabel(durationMs(span.startedAt, span.endedAt));
   const collaboration = collaborationMessageMetadata(span.attributes);
   const compactionSummary = traceCompactionSummary(span.attributes);
@@ -541,7 +558,7 @@ function TurnSpanBlock({
     ? `evidence-${evidence}`
     : "";
   return (
-    <details className={`msg tool ${span.status} ${children.length > 0 ? "msg-tool-group" : ""} ${evidenceClass} ${target ? "match-target" : ""}`}>
+    <details className={`msg tool ${span.status} ${children.length > 0 ? "msg-tool-group" : ""} ${evidenceClass} ${target ? "match-target" : ""}`} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="msg-tool-summary">
         <span className="msg-avatar" aria-hidden>
           <SpanIcon size={agentRelated ? 13 : 11} />
@@ -576,6 +593,7 @@ function TurnSpanBlock({
         ) : null}
         {span.input ? (
           <TurnSpanPayload
+            stateKey={`${span.id}:input`}
             label={localize(language, "Input", "输入")}
             payload={span.input}
             previewLimit={eventType === "codex.context.compaction" ? SPAN_PAYLOAD_PREVIEW_LIMIT : undefined}
@@ -584,6 +602,7 @@ function TurnSpanBlock({
         ) : null}
         {span.output ? (
           <TurnSpanPayload
+            stateKey={`${span.id}:output`}
             label={localize(language, "Output", "输出")}
             payload={span.output}
             previewLimit={eventType === "codex.context.compaction" ? SPAN_PAYLOAD_PREVIEW_LIMIT : undefined}
@@ -726,10 +745,12 @@ export function TurnAccordion({
   onFindMatchCountChange?: (count: number) => void;
 }): ReactElement {
   const [state, dispatch] = useReducer(turnAccordionReducer, sessionKey, createTurnAccordionState);
-  const activeSessionRef = useRef(sessionKey);
+  const activeSessionRef = useRef<string | null>(sessionKey);
   const detailsByIdRef = useRef(state.detailsById);
   const inFlightRef = useRef(new Map<string, Promise<void>>());
+  const sessionGeneration = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const focusFrame = useRef<number | null>(null);
   const highlightTerms = useMemo(() => searchHighlightTerms(query), [query]);
   const findTerms = useMemo(() => searchHighlightTerms(findQuery), [findQuery]);
   const displayHighlightTerms = findTerms.length > 0 ? findTerms : highlightTerms;
@@ -744,6 +765,7 @@ export function TurnAccordion({
   detailsByIdRef.current = currentDetailsById;
 
   const loadTurn = useCallback(async (turnId: string): Promise<void> => {
+    const generation = sessionGeneration.current;
     const requestKey = `${sessionKey}:${turnId}`;
     if (detailsByIdRef.current[turnId]) return;
     const inFlight = inFlightRef.current.get(requestKey);
@@ -752,11 +774,11 @@ export function TurnAccordion({
       dispatch({ type: "load-started", turnId });
       try {
         const detail = await onLoadTurn(turnId);
-        if (activeSessionRef.current !== sessionKey) return;
+        if (activeSessionRef.current !== sessionKey || generation !== sessionGeneration.current) return;
         if (!detail) throw new Error(localize(language, "Turn detail is unavailable.", "这一轮的详情不可用。"));
         dispatch({ type: "load-succeeded", turnId, detail });
       } catch (error) {
-        if (activeSessionRef.current === sessionKey) {
+        if (activeSessionRef.current === sessionKey && generation === sessionGeneration.current) {
           dispatch({
             type: "load-failed",
             turnId,
@@ -764,7 +786,7 @@ export function TurnAccordion({
           });
         }
       } finally {
-        inFlightRef.current.delete(requestKey);
+        if (generation === sessionGeneration.current) inFlightRef.current.delete(requestKey);
       }
     })();
     inFlightRef.current.set(requestKey, request);
@@ -790,11 +812,51 @@ export function TurnAccordion({
     ? null
     : findMatches[activeFindMatchIndex] ?? null;
 
+  const virtualized = turns.length > 100 && !loading;
+  const [focusedTurn, setFocusedTurn] = useState<string | null>(null);
+  const displayStates = useMemo(() => new Map<string, Map<string, boolean>>(), [sessionKey]);
+  const turnIndexes = useMemo(() => new Map(turns.map((turn, index) => [turn.id, index])), [turns]);
+  const getTurnKey = useCallback((index: number) => `${sessionKey}:${turns[index].id}`, [sessionKey, turns]);
+  const virtualizer = useVirtualizer({
+    count: turns.length,
+    enabled: virtualized,
+    getScrollElement: () => rootRef.current,
+    estimateSize: () => 112,
+    getItemKey: getTurnKey,
+    overscan: 6,
+    initialRect: { width: 800, height: 600 },
+    useAnimationFrameWithResizeObserver: true,
+    rangeExtractor: useCallback((range: Parameters<typeof defaultRangeExtractor>[0]) => {
+      const indexes = new Set(defaultRangeExtractor(range));
+      // Keep focus and its neighbors mounted so Tab can cross the window edge.
+      const focused = focusedTurn ? turnIndexes.get(focusedTurn) : undefined;
+      if (focused !== undefined) for (const index of [focused - 1, focused, focused + 1]) {
+        if (index >= 0 && index < turns.length) indexes.add(index);
+      }
+      for (const id of [matchedTurnId, activeFindMatch?.turnId]) {
+        const index = id ? turnIndexes.get(id) : undefined;
+        if (index !== undefined) indexes.add(index);
+      }
+      return [...indexes].sort((a, b) => a - b);
+    }, [activeFindMatch?.turnId, focusedTurn, matchedTurnId, turnIndexes, turns.length]),
+  });
+  const scrollToTurn = useCallback((id: string) => {
+    const index = turnIndexes.get(id);
+    if (virtualized && index !== undefined) virtualizer.scrollToIndex(index, { align: "center" });
+  }, [turnIndexes, virtualized, virtualizer]);
+
   useLayoutEffect(() => {
     activeSessionRef.current = sessionKey;
+    sessionGeneration.current++;
     inFlightRef.current.clear();
     dispatch({ type: "reset", sessionKey });
     setMigrationMenu(null);
+    setFocusedTurn(null);
+    rootRef.current?.scrollTo?.({ top: 0 });
+    return () => {
+      activeSessionRef.current = null;
+      if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
+    };
   }, [sessionKey]);
 
   useEffect(() => {
@@ -819,13 +881,14 @@ export function TurnAccordion({
   useEffect(() => {
     if (!activeFindMatch) return;
     dispatch({ type: "open", turnId: activeFindMatch.turnId });
+    scrollToTurn(activeFindMatch.turnId);
     const frame = window.requestAnimationFrame(() => {
       const target = [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-find-key]") ?? [])]
         .find((element) => element.dataset.findKey === activeFindMatch.key);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.scrollIntoView({ behavior: virtualized ? "auto" : "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activeFindMatch]);
+  }, [activeFindMatch?.key, scrollToTurn, virtualized]);
 
   useEffect(() => {
     if (!migrationMenu) return;
@@ -845,22 +908,22 @@ export function TurnAccordion({
     if (!matchedTurnId || !turns.some((turn) => turn.id === matchedTurnId)) return;
     dispatch({ type: "open", turnId: matchedTurnId });
     void loadTurn(matchedTurnId);
+    scrollToTurn(matchedTurnId);
     const frame = window.requestAnimationFrame(() => {
-      rootRef.current
-        ?.querySelector<HTMLElement>(`[data-turn-id="${matchedTurnId}"]`)
+      [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-turn-id]") ?? [])]
+        .find((element) => element.dataset.turnId === matchedTurnId)
         ?.scrollIntoView({ behavior: "auto", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [loadTurn, matchedTurnId, sessionKey, turns]);
+  }, [loadTurn, matchedTurnId, scrollToTurn, sessionKey, turns]);
 
   const matchedTurnDetail = matchedTurnId ? currentDetailsById[matchedTurnId] : undefined;
   useEffect(() => {
     if (!matchedTurnId || matchedMessageIndex === null || !matchedTurnDetail) return;
     const frame = window.requestAnimationFrame(() => {
-      rootRef.current
-        ?.querySelector<HTMLElement>(
-          `[data-turn-id="${matchedTurnId}"] [data-message-index="${matchedMessageIndex}"]`,
-        )
+      [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-turn-id]") ?? [])]
+        .find((element) => element.dataset.turnId === matchedTurnId)
+        ?.querySelector<HTMLElement>(`[data-message-index="${matchedMessageIndex}"]`)
         ?.scrollIntoView({ behavior: "auto", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -872,6 +935,33 @@ export function TurnAccordion({
     if (opening) void loadTurn(turnId);
   }
 
+  const { executionStartIndex, forkedTurnCount, turnPresentation } = useMemo(() => {
+    let visibleTurnNumber = 0;
+    let subagentTurnNumber = 0;
+    const executionStartIndex = isSubagent
+      ? turns.findIndex((turn) => turn.subagentExecutionStart === true)
+      : -1;
+    const forkedTurnCount = executionStartIndex > 0
+      ? turns.slice(0, executionStartIndex).filter((turn) => !turn.synthetic).length
+      : 0;
+    const turnPresentation = new Map(turns.map((turn, index) => {
+      const agentTriggered = turn.agentTriggered === true
+        && turn.sourceMessageIndex === null;
+      if (!turn.synthetic || agentTriggered) visibleTurnNumber += 1;
+      const origin = executionStartIndex >= 0
+        ? index < executionStartIndex ? "inherited" as const : "subagent" as const
+        : null;
+      if (origin === "subagent" && (!turn.synthetic || agentTriggered)) subagentTurnNumber += 1;
+      return [turn.id, {
+        agentTriggered,
+        displayTurnNumber: visibleTurnNumber,
+        origin,
+        subagentTurnNumber: origin === "subagent" ? subagentTurnNumber : null,
+      }] as const;
+    }));
+
+    return { executionStartIndex, forkedTurnCount, turnPresentation };
+  }, [isSubagent, turns]);
   if (loading) {
     return (
       <div className="turn-list-loading">
@@ -889,35 +979,45 @@ export function TurnAccordion({
     );
   }
 
-  let visibleTurnNumber = 0;
-  let subagentTurnNumber = 0;
-  const executionStartIndex = isSubagent
-    ? turns.findIndex((turn) => turn.subagentExecutionStart === true)
-    : -1;
-  const forkedTurnCount = executionStartIndex > 0
-    ? turns.slice(0, executionStartIndex).filter((turn) => !turn.synthetic).length
-    : 0;
-  const turnPresentation = new Map(turns.map((turn, index) => {
-    const agentTriggered = turn.agentTriggered === true
-      && turn.sourceMessageIndex === null;
-    if (!turn.synthetic || agentTriggered) visibleTurnNumber += 1;
-    const origin = executionStartIndex >= 0
-      ? index < executionStartIndex ? "inherited" as const : "subagent" as const
-      : null;
-    if (origin === "subagent" && (!turn.synthetic || agentTriggered)) subagentTurnNumber += 1;
-    return [turn.id, {
-      agentTriggered,
-      displayTurnNumber: visibleTurnNumber,
-      origin,
-      subagentTurnNumber: origin === "subagent" ? subagentTurnNumber : null,
-    }] as const;
-  }));
-
   return (
-    <div className="turn-list" ref={rootRef}>
-      {turns.map((turn, turnListIndex) => {
+    <div className="turn-list" ref={rootRef} data-virtualized={virtualized}
+      onFocusCapture={(event) => {
+        const row = (event.target as HTMLElement).closest<HTMLElement>("[data-turn-row]");
+        setFocusedTurn(row?.dataset.turnRow ?? null);
+      }}
+      onBlurCapture={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFocusedTurn(null);
+      }}
+      onKeyDown={(event) => {
+        if (!virtualized || !(event.target instanceof HTMLButtonElement) || !event.target.classList.contains("turn-card-summary")) return;
+        const id = event.target.closest<HTMLElement>("[data-turn-row]")?.dataset.turnRow;
+        const current = id ? turnIndexes.get(id) : undefined;
+        if (current === undefined) return;
+        const index = event.key === "ArrowDown" ? Math.min(turns.length - 1, current + 1)
+          : event.key === "ArrowUp" ? Math.max(0, current - 1)
+          : event.key === "Home" ? 0 : event.key === "End" ? turns.length - 1 : null;
+        if (index === null) return;
+        event.preventDefault();
+        const target = turns[index].id;
+        setFocusedTurn(target);
+        virtualizer.scrollToIndex(index, { align: "auto" });
+        if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
+        focusFrame.current = window.requestAnimationFrame(() => {
+          focusFrame.current = null;
+          if (activeSessionRef.current !== sessionKey) return;
+          [...(rootRef.current?.querySelectorAll<HTMLElement>("[data-turn-row]") ?? [])]
+            .find((row) => row.dataset.turnRow === target)?.querySelector<HTMLButtonElement>(".turn-card-summary")?.focus({ preventScroll: true });
+        });
+      }}>
+      <div className="turn-list-content" role="list" aria-label={localize(language, "Conversation turns", "对话轮次")}
+        style={virtualized ? { height: virtualizer.getTotalSize(), position: "relative" } : { display: "contents" }}>
+      {(virtualized ? virtualizer.getVirtualItems() : turns.map((turn, index) => ({ index, key: turn.id, start: 0 }))).map((row) => {
+        const turnListIndex = row.index;
+        const turn = turns[turnListIndex];
         const expanded = stateMatchesSession && state.expandedTurnIds.has(turn.id);
         const detail = currentDetailsById[turn.id];
+        let displayState = displayStates.get(turn.id);
+        if (expanded && !displayState) { displayState = new Map(); displayStates.set(turn.id, displayState); }
         const loadingDetail = stateMatchesSession && state.loadingTurnIds.has(turn.id);
         const error = stateMatchesSession ? state.errorsById[turn.id] : undefined;
         const elapsed = durationLabel(turn.durationMs ?? durationMs(turn.startedAt, turn.endedAt));
@@ -946,7 +1046,11 @@ export function TurnAccordion({
             )
           : localize(language, "No text captured", "没有记录文本"));
         return (
-          <Fragment key={turn.id}>
+          <div key={row.key} data-index={turnListIndex} data-turn-row={turn.id}
+            role="listitem" aria-posinset={turnListIndex + 1} aria-setsize={turns.length}
+            ref={virtualized ? virtualizer.measureElement : undefined}
+            className="turn-list-row"
+            style={virtualized ? { position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${row.start}px)`, paddingBottom: 7 } : undefined}>
             {turnListIndex === 0 && forkedTurnCount > 0 ? (
               <div className="turn-phase-divider inherited">
                 <GitFork size={15} />
@@ -1057,6 +1161,7 @@ export function TurnAccordion({
                     </button>
                   </div>
                 ) : detail ? (
+                  <TurnDisplayState.Provider value={displayState ?? null}>
                   <TurnDetailTimeline
                     sessionKey={sessionKey}
                     turnId={turn.id}
@@ -1068,13 +1173,15 @@ export function TurnAccordion({
                     matchedMessageIndex={turn.id === matchedTurnId ? matchedMessageIndex : null}
                     activeFindMatchKey={activeFindMatch?.key ?? null}
                   />
+                  </TurnDisplayState.Provider>
                 ) : null}
               </div>
             ) : null}
             </article>
-          </Fragment>
+          </div>
         );
       })}
+      </div>
       {migrationMenu ? (
         <TurnMigrationContextMenu
           point={migrationMenu.point}
