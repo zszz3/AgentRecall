@@ -16,7 +16,7 @@ import {
 import { migrationTargetDescriptor } from "./migration-targets";
 import { loadDeepSeekCliSessionFile, safeStat } from "./session-loader";
 import type { SessionStore } from "./session-store";
-import type { LoadedSession, MigrationTarget } from "./types";
+import type { LoadedSession, MigrationTarget, SessionSourceMetadata } from "./types";
 
 export interface IndexStatus {
   running: boolean;
@@ -253,8 +253,10 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
   const onSkippedFile = loadOptions.onSkippedFile;
   const scannedFilePaths = new Set<string>();
   const scannedSessionKeys = new Set<string>();
+  const metadataUpdates: SessionSourceMetadata[] = [];
   const rawLoaded = loadDefaultSessionsAsyncIterator({
     ...loadOptions,
+    refreshCodexSessionMetadata: (metadata) => { metadataUpdates.push(metadata); },
     loadIncrementalCodexSession: (filePath) => {
       const previous = incrementalCodexFiles.get(filePath);
       if (!previous) return undefined;
@@ -300,6 +302,7 @@ export function syncDefaultSessionsInBatches(store: SessionStore, options: Batch
       dependencyChangedFiles.has(item.session.filePath) || options.forceReindex?.(item) === true,
     onProgress: (status) => options.onProgress?.({ ...status, skipped: status.skipped + fileSkipped, total: status.total + fileSkipped }),
   }).then((status) => {
+    store.refreshSessionSourceMetadata(metadataUpdates);
     // Prune sessions whose source files no longer exist in local storage. Cursor
     // is the exception: its shared database can forget one conversation while our
     // parsed message cache remains the only readable copy.
