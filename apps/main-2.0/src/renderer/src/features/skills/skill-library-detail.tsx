@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactElement } from "react";
-import { Copy, FolderOpen, Settings2, Trash2 } from "lucide-react";
+import { Copy, FolderOpen, Settings2 } from "lucide-react";
 import type { ManagedSkill, SkillInstallTarget } from "../../../../core/managed-skill-library";
 import type { RemoteSkill, RemoteSkillGroup, SkillSyncSnapshot, SkillSyncUploadOutcome } from "../../../../core/skill-sync";
 import { localize, type LanguageMode } from "../../language";
@@ -29,7 +29,6 @@ export function SkillLibraryDetail({
   onOpenSqlEditor,
   onCopyPath,
   onReveal,
-  onRequestDelete,
 }: {
   skill: ManagedSkill | null;
   entry: UnifiedSkillEntry | null;
@@ -52,7 +51,6 @@ export function SkillLibraryDetail({
   onOpenSqlEditor: () => void | Promise<void>;
   onCopyPath: (skillPath: string) => void;
   onReveal: (skillPath: string) => void;
-  onRequestDelete: (skill: ManagedSkill) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [targetDialogOpen, setTargetDialogOpen] = useState(false);
@@ -94,9 +92,6 @@ export function SkillLibraryDetail({
             </button>
             <button type="button" onClick={() => onCopyPath(skill.path)} title={l("Copy path", "复制路径")} aria-label={l("Copy path", "复制路径")}><Copy size={14} /></button>
             <button type="button" onClick={() => onReveal(skill.directoryPath)} title={l(`Show in ${revealLabel}`, `在 ${revealLabel} 中显示`)} aria-label={l(`Show in ${revealLabel}`, `在 ${revealLabel} 中显示`)}><FolderOpen size={14} /></button>
-            {skill.origin.kind !== "builtin" ? (
-              <button type="button" className="danger" onClick={() => onRequestDelete(skill)} title={l("Delete from library", "从 Skill 库删除")} aria-label={l("Delete from library", "从 Skill 库删除")}><Trash2 size={14} /></button>
-            ) : null}
           </div>
         </header>
 

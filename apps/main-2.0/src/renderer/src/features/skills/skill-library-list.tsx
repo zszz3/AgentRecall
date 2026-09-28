@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactElement } from "react";
 import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
 import type { ManagedSkill, ManagedSkillOriginKind, ManagedSkillTargetState } from "../../../../core/managed-skill-library";
 import { SKILL_CATEGORY_IDS, type SkillCategoryId } from "../../../../core/skill-categories";
@@ -61,6 +61,7 @@ export function SkillLibraryList({
   onSelectRemote,
   evalBadgeCounts,
   onNavigateToEval,
+  onOpenContextMenu,
 }: {
   skills: ManagedSkill[];
   selectedId: string | null;
@@ -82,6 +83,7 @@ export function SkillLibraryList({
   onSelectRemote: (fingerprint: string) => void;
   evalBadgeCounts?: Map<string, { low: number; medium: number }>;
   onNavigateToEval?: (skillName: string) => void;
+  onOpenContextMenu: (event: ReactMouseEvent, skill: ManagedSkill) => void;
 }): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<ManagedSkillCategoryGroup>>(() => new Set());
@@ -205,6 +207,7 @@ export function SkillLibraryList({
                     aria-selected={active}
                     tabIndex={active ? 0 : -1}
                     onClick={() => onSelect(skill.managedId)}
+                    onContextMenu={(event) => onOpenContextMenu(event, skill)}
                   >
                     <button
                       type="button"

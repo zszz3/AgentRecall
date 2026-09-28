@@ -89,6 +89,26 @@ describe("ProviderPage", () => {
     })));
   }
 
+  it("exposes the entire configuration path when its summary is truncated", async () => {
+    const configPath = "/tmp/" + "long-config-directory/".repeat(20) + "config.toml";
+    const snapshot = codexSnapshot();
+    vi.mocked(window.sessionSearch.getCodexConfig).mockResolvedValue({ ...snapshot, configPath,
+      activeProvider: { ...snapshot.activeProvider, envKey: "", requiresOpenaiAuth: true,
+        hasApiKey: false, credentialSource: "" },
+    });
+    await mountProviderPage();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    const value = container.querySelector(".codex-config-visualizer strong[title]");
+    expect(value?.textContent).toBe(configPath);
+    expect(value?.getAttribute("title")).toBe(configPath);
+    const claudeTab = [...container.querySelectorAll<HTMLButtonElement>('.api-target-tabs button')]
+      .find(button => button.textContent === 'Claude Code')!;
+    await act(async () => claudeTab.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(container.querySelector('.codex-config-visualizer strong[title]')?.getAttribute('title'))
+      .toBe('/tmp/claude/settings.json');
+  });
+
   async function mountSummaryPane(): Promise<void> {
     await mountProviderPage();
     const summaryTab = [...container.querySelectorAll<HTMLButtonElement>(".api-target-tabs button")]
@@ -96,6 +116,23 @@ describe("ProviderPage", () => {
     if (!summaryTab) throw new Error("AI summary tab not rendered");
     await act(async () => summaryTab.click());
   }
+
+  it("keeps a complete long model-probe error in its own field after loading", async () => {
+    const message = "Probe failed: " + "long-unbroken-diagnostic-".repeat(30);
+    let rejectProbe!: (error: Error) => void;
+    vi.mocked(window.sessionSearch.probeCodexModels).mockImplementation(() => new Promise((_resolve, reject) => { rejectProbe = reject; }));
+    const settings = structuredClone(defaultSettings);
+    settings.apiConfig = { ...settings.apiConfig, activeProvider: "custom", customProviderId: "custom",
+      customProviderName: "Custom Codex", customBaseUrl: "https://example.invalid/v1", customApiKey: "synthetic", customModel: "test" };
+    await mountProviderPage(settings);
+    const button = container.querySelector<HTMLButtonElement>(".codex-model-detect-button")!;
+    await act(async () => button.click());
+    expect(button.disabled).toBe(true);
+    await act(async () => rejectProbe(new Error(message)));
+    expect(button.disabled).toBe(false);
+    const error = button.closest(".settings-field")?.querySelector(".api-config-status.error");
+    expect(error?.textContent).toBe(message);
+  });
 
   async function selectSource(label: string): Promise<void> {
     const button = [...container.querySelectorAll<HTMLButtonElement>(".summary-provider-switch button")]

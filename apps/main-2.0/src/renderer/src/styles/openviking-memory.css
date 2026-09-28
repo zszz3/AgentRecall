@@ -7,8 +7,10 @@
   flex-direction: column;
   gap: 16px;
   overflow: hidden;
-  padding: 24px 28px 28px;
+  padding: 0 28px 28px;
 }
+
+.openviking-memory-page > .app-page-head { margin-inline: -28px; }
 
 .openviking-page-head,
 .openviking-page-actions,
@@ -36,11 +38,13 @@
 }
 
 .openviking-page-head {
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 18px;
 }
 
 .openviking-page-actions {
+  flex-wrap: wrap;
   gap: 8px;
   -webkit-app-region: no-drag;
 }
@@ -167,6 +171,9 @@
 }
 
 .openviking-feedback {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
   justify-content: space-between;
   gap: 12px;
   min-height: 36px;
@@ -182,6 +189,7 @@
 }
 
 .openviking-feedback button {
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   width: 24px;
@@ -306,7 +314,7 @@
   border-radius: 999px;
   background: var(--panel-bg);
   color: var(--text-muted);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   font-style: normal;
   font-weight: 650;
 }
@@ -957,7 +965,7 @@
   border-radius: 999px;
   background: var(--panel-bg);
   color: var(--text-muted);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1130,7 +1138,7 @@
   border-radius: 999px;
   background: var(--panel-subtle);
   color: var(--text-muted);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   font-weight: 720;
   line-height: 1.2;
   white-space: nowrap;
@@ -1276,7 +1284,7 @@
 
 .openviking-runtime-facts small {
   color: var(--text-faint);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   font-weight: 650;
   text-transform: uppercase;
 }
@@ -1377,7 +1385,7 @@
 
 .openviking-directory-summary small {
   color: var(--text-faint);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
 }
 
 .openviking-directory-icon {
@@ -1404,7 +1412,7 @@
   padding: 8px 11px;
   border-top: 1px solid var(--border-subtle);
   color: var(--text-faint);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -2283,7 +2291,7 @@
 
 @media (max-width: 760px) {
   .openviking-memory-page {
-    padding: 18px;
+    padding: 0 28px 18px;
   }
 
   .openviking-memory-layout {

@@ -454,6 +454,9 @@
   align-items: flex-start;
   gap: 10px;
   max-width: min(420px, calc(100vw - 36px));
+  max-height: min(240px, 40vh);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   padding: 10px 12px;
   border: 1px solid var(--border-strong);
   border-left: 3px solid var(--accent);

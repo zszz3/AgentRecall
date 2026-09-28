@@ -1,3 +1,4 @@
+import { ResizableSplit } from "../../../../../../renderer/src/components/resizable-split";
 import type { ReactNode } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 
@@ -63,10 +64,18 @@ export function WorkbenchTabs<T extends string>({
 export function WorkbenchLayout({
   browser,
   children,
+  browserResize,
 }: {
   browser: ReactNode;
   children: ReactNode;
+  browserResize?: { storageKey: string; label: string };
 }) {
+  if (browserResize) return (
+    <ResizableSplit className="workbench-layout" {...browserResize} initialWidth={240} minWidth={200} maxWidth={440}>
+      <aside className="workbench-browser">{browser}</aside>
+      <section className="workbench-detail">{children}</section>
+    </ResizableSplit>
+  );
   return (
     <div className="workbench-layout">
       <aside className="workbench-browser">{browser}</aside>

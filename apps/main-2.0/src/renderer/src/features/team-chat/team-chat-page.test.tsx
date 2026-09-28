@@ -50,6 +50,9 @@ describe("TeamChatPage rooms", () => {
 
   beforeEach(() => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value) });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -67,6 +70,19 @@ describe("TeamChatPage rooms", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("resizes the room list while keeping the conversation and employee panels", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    await act(async () => root.render(<TeamChatPage language="en" />));
+    const handle = container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize room list"]')!;
+    expect(handle).not.toBeNull();
+    const before = Number(handle.getAttribute("aria-valuenow"));
+    await act(async () => { handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
+    expect(localStorage.getItem("agent-recall-chat-pane")).toBe(String(before + 16));
+    expect(container.querySelector(".team-chat-conversation")).not.toBeNull();
+    expect(container.querySelector(".team-chat-members")).not.toBeNull();
   });
 
   it("lets a newly created room be permanently deleted from the room list", async () => {

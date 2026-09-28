@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { ResizableSplit } from "../../components/resizable-split";
 import { Activity, ArrowLeft, Bot, Braces, CirclePause, Code2, Copy, File, FolderOpen, GitBranch, Hash, History, LayoutTemplate, List, Pause, Pencil, Play, Plus, RotateCcw, Save, Settings2, ShieldCheck, Square, ToggleLeft, Trash2, Type as TypeIcon, UserRound, X } from "lucide-react";
 import type {
   WorkflowDefinition,
@@ -641,7 +642,8 @@ export function WorkflowFeaturePage({
 
   return <div className="automation-page automation-workflow-page workflow-core-page" data-page="workflows">
     <header className="app-page-head automation-page-head"><div><h2>Workflow</h2><p>{localize(language, "Describe a goal, answer focused questions, then generate and edit your Workflow.", "描述目标、逐步澄清需求，生成 Workflow 后继续手动调整。")}</p></div></header>
-    <div className="workflow-core-shell">
+    <ResizableSplit className="workflow-core-shell" storageKey="agent-recall-workflow-pane" initialWidth={220} minWidth={180}
+      label={localize(language, "Resize Workflow list", "调整 Workflow 列表宽度")}>
       <aside className="workflow-core-list"><header><strong>Workflows</strong><button type="button" className="icon-btn" aria-label="New Workflow" onClick={createNewWorkflow}><Plus size={16} /></button></header>
         <div>{templates.length > 0 ? <section className="workflow-core-list-group is-template"><header><span><LayoutTemplate size={11} /> 模板</span><small>{templates.length}</small></header>{templates.map((definition) => <button type="button" key={definition.id} className={definition.id === selectedId ? "is-active" : ""} onClick={() => selectDefinition(definition)}><strong>{definition.name}</strong><span>预览</span><small>{definition.description}</small></button>)}</section> : null}<section className="workflow-core-list-group"><header><span><UserRound size={11} /> 我的 Workflow</span><small>{personalDefinitions.length}</small></header>{personalDefinitions.length > 0 ? personalDefinitions.map((definition) => <button type="button" key={definition.id} className={definition.id === selectedId ? "is-active" : ""} onClick={() => selectDefinition(definition)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); const position = { definitionId: definition.id, x: event.clientX, y: event.clientY }; setPersonalMenu(position); void api.getWorkflowCore(definition.id).then((snapshot) => { const hasActiveRun = snapshot.runs.some((run) => run.status === "running" || run.status === "paused" || run.status === "waiting"); setPersonalMenu((current) => current?.definitionId === definition.id ? { ...current, hasActiveRun } : current); }).catch(() => { setPersonalMenu((current) => current?.definitionId === definition.id ? { ...current, hasActiveRun: true } : current); }); }}><strong>{definition.name}</strong><span>{definition.nodes.length} nodes</span><small>{definition.description}</small></button>) : <p>还没有自己的 Workflow</p>}</section></div>
       </aside>
@@ -668,6 +670,6 @@ export function WorkflowFeaturePage({
         </div>
         </div>
       </main>}
-    </div>
+    </ResizableSplit>
   </div>;
 }
