@@ -12,3 +12,13 @@
 规格描述所在代码版本的行为，不代表相关能力已经发布。发布状态以对应产品的 Release 为准。计划、交接和设计草案不作为当前行为的依据；已有计划见 [CLI 团队计划](v2/agentrecall-cli-team-plan.md)，交接记录见 [CLI 交接](v2/agentrecall-cli-handoff.md)。
 
 文档维护规则见 [docs/AGENTS.md](AGENTS.md)。规格与实现不一致时，检查实现和测试后修正文档或代码，不能仅凭旧文档推断运行行为。
+
+## 按开发任务查阅
+
+- 理解整体进程和数据：先读 [架构总览](spec/architecture.md)。
+- 修改会话加载或流畅度：读 [索引](spec/session-indexing.md)和[桌面生命周期](spec/desktop-lifecycle.md)。
+- 修改执行和结果追踪：读 [Runtime](spec/runtime.md)、[Workflow](spec/workflow.md)及 [Eval](spec/evaluation.md)。
+- 修改客户端能力：读 [MCP](spec/mcp.md)与 [Skills](spec/skills.md)。
+- 修改目录知识：读 [Memory](spec/memory.md)；团队共享另读 [团队资产](spec/team-assets.md)。
+
+规格中的验收表不是已通过的测试报告；当前覆盖范围和跨模块修改矩阵见 [规格索引](spec/README.md)。
