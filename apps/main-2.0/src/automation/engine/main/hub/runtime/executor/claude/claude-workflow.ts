@@ -39,7 +39,6 @@ export async function runClaudeWorkflow(
       executionId: input.workflowNodeExecutionId,
       reviewRevision: input.workflowReviewRevision,
       ...(input.planningWorkflowId ? { managedToken: options.workflowMcpManagedToken?.() } : {}),
-      studioToken: input.agentRecallMcp?.studioToken,
     }),
   };
   const abortController = new AbortController();
@@ -58,7 +57,6 @@ export async function runClaudeWorkflow(
       approvalOwnerId: `workflow-draft:${input.planningWorkflowId ?? input.requestId}`,
       ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
       ...(workflowMcpScopeForContext(input) ? { workflowMcpScope: workflowMcpScopeForContext(input) } : {}),
-      ...(input.agentRecallMcp?.studioToken ? { studioMcpEnabled: true } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
       onEvent: (event) => {
         if (emitWorkflowAgentApprovalEvent(input, event)) return;

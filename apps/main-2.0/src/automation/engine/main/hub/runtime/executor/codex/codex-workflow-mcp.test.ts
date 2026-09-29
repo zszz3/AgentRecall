@@ -75,19 +75,4 @@ describe("codexWorkflowMcpArgs", () => {
     expect(config.requiredMcpTools).toEqual({ agent_recall: ["workflow_review_gate_submit"] });
   });
 
-  test("injects Workflow and Studio through one AgentRecall MCP server", () => {
-    const args = codexWorkflowMcpArgs({
-      discoveryPath: "C:/app/mcp-bridge.json",
-      workflowId: "wf-1",
-      studioToken: "studio-scope",
-    });
-    const text = args.join("\n");
-
-    expect(text.match(/mcp_servers\.agent_recall\.command/g)).toHaveLength(1);
-    expect(text).toContain("AGENT_RECALL_WORKFLOW_ID");
-    expect(text).toContain("AGENT_RECALL_STUDIO_TOKEN");
-    expect(text).toContain("studio_task_finish");
-    expect(text).not.toContain("studio_send_message");
-    expect(text).toContain("workspace_reserve");
-  });
 });

@@ -1504,3 +1504,16 @@
 .turn-conversation:has(.turn-list[data-virtualized="true"]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .turn-list[data-virtualized="true"] { display: block; min-height: 0; flex: 1; overflow-y: auto; overflow-anchor: none; }
 .turn-list-row { display: grid; gap: 7px; }
+
+/* Keep selection controls outside the measured virtual viewport. */
+.turn-list-shell:has(.turn-list[data-virtualized="true"]) { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
+.turn-list-shell > .turn-list { flex: 1; min-height: 0; }
+.turn-selection-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel-bg); font-size: 12px; }
+.turn-selection-toolbar > span { margin-right: auto; color: var(--text-muted); }
+.turn-selection-toolbar button { border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px; background: var(--panel-bg); color: var(--text); }
+.turn-selection-toolbar .turn-share-button { background: var(--accent); border-color: var(--accent); color: white; }
+.turn-selection-toolbar button:disabled { opacity: .45; cursor: default; }
+.turn-card-heading { display: flex; align-items: center; }
+.turn-card-heading > .turn-card-summary { min-width: 0; flex: 1; }
+.turn-selection-checkbox { margin: 0 0 0 12px; width: 15px; height: 15px; accent-color: var(--accent); flex-shrink: 0; }
+.turn-card.is-selected { border-color: var(--accent); background: var(--accent-soft); }

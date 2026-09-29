@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    resolve: { alias: { "@agentrecall/workspace-core": resolve("../../packages/workspace-core/src/index.ts") } },
     build: {
       rollupOptions: {
         input: {
@@ -19,6 +20,9 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
+    // Browser-safe workspace schemas share the app's validator instead of
+    // bundling the workspace root's second copy of Zod.
+    resolve: { dedupe: ["zod"] },
     build: {
       rollupOptions: {
         input: {

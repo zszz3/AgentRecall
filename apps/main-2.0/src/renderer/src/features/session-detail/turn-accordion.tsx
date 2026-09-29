@@ -1,3 +1,4 @@
+import { MAX_SHARED_TURNS } from "../../../../shared/team-sessions";
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
@@ -277,27 +278,30 @@ function turnTitle(
   return localize(language, `Turn ${displayTurnNumber}`, `第 ${displayTurnNumber} 轮`);
 }
 
-export function TurnMigrationContextMenu({
+function TurnContextMenu({
+  onSelect,
   point,
   language,
   onMigrate,
 }: {
   point: ContextMenuPoint;
   language: LanguageMode;
-  onMigrate: () => void;
+  onMigrate?: () => void;
+  onSelect?: () => void;
 }): ReactElement {
   const menu = useClampedContextMenuStyle(point);
   return (
     <div
       ref={menu.ref}
-      className="context-menu turn-migration-context-menu"
+      className="context-menu turn-context-menu"
       style={menu.style}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <button type="button" onClick={onMigrate}>
+      {onSelect && <button type="button" onClick={onSelect}>{localize(language, "Select turns…", "多选轮次…")}</button>}
+      {onMigrate && <button type="button" onClick={onMigrate}>
         <ArrowRightLeft size={14} /> {localize(language, "Migrate", "迁移")}
-      </button>
+      </button>}
     </div>
   );
 }
@@ -393,8 +397,10 @@ function TurnMessageBlock({
   query,
   language,
   target = false,
+  attachmentAccess,
 }: {
   sessionKey: string;
+  attachmentAccess: "session" | "download";
   message: SessionTurnMessage;
   query: string;
   language: LanguageMode;
@@ -439,11 +445,12 @@ function TurnMessageBlock({
             <button
               type="button"
               key={attachment.id}
-              disabled={attachment.status !== "available"}
-              title={attachment.status === "available"
+              disabled={attachmentAccess === "download" || attachment.status !== "available"}
+              title={attachmentAccess === "download" ? localize(language, "Download the shared package to view this attachment", "下载分享包查看此附件") : attachment.status === "available"
                 ? attachment.fileName
                 : localize(language, "Attachment unavailable", "附件不可用")}
               onClick={() => {
+                if (attachmentAccess === "download") return;
                 const previewRequest = attachment.remoteObjectKey && attachment.sha256
                   ? window.sessionSearch.previewRemoteSessionAttachment(
                     attachment.remoteObjectKey,
@@ -664,6 +671,7 @@ function TurnDetailTimeline({
   language,
   matchedMessageIndex,
   activeFindMatchKey,
+  attachmentAccess,
 }: {
   sessionKey: string;
   turnId: string;
@@ -674,6 +682,7 @@ function TurnDetailTimeline({
   language: LanguageMode;
   matchedMessageIndex: number | null;
   activeFindMatchKey: string | null;
+  attachmentAccess: "session" | "download";
 }): ReactElement {
   const timeline = useMemo(
     () => buildTurnTimeline(detail, showTools, roleFilter),
@@ -694,6 +703,7 @@ function TurnDetailTimeline({
             {item.kind === "message" ? (
               <TurnMessageBlock
                 sessionKey={sessionKey}
+                attachmentAccess={attachmentAccess}
                 message={item.message}
                 query={query}
                 language={language}
@@ -725,6 +735,9 @@ export function TurnAccordion({
   isSubagent = false,
   onLoadTurn,
   onMigrateTurn,
+  onShareTurns,
+  turnNumbering = "visible",
+  attachmentAccess = "session",
   onFindMatchCountChange,
 }: {
   sessionKey: string;
@@ -742,6 +755,9 @@ export function TurnAccordion({
   isSubagent?: boolean;
   onLoadTurn: (turnId: string) => Promise<SessionTurnDetail | null>;
   onMigrateTurn?: (turn: SessionTurnSummary) => void;
+  onShareTurns?: (turnIds: string[]) => void;
+  turnNumbering?: "visible" | "source";
+  attachmentAccess?: "session" | "download";
   onFindMatchCountChange?: (count: number) => void;
 }): ReactElement {
   const [state, dispatch] = useReducer(turnAccordionReducer, sessionKey, createTurnAccordionState);
@@ -759,6 +775,16 @@ export function TurnAccordion({
     point: ContextMenuPoint;
     turn: SessionTurnSummary;
   } | null>(null);
+  const [selection, setSelection] = useState<{ sessionKey: string; ids: Set<string> } | null>(null);
+  const selecting = Boolean(onShareTurns && selection?.sessionKey === sessionKey);
+  const selectedIds = selecting ? turns.filter((turn) => selection!.ids.has(turn.id)).map((turn) => turn.id) : [];
+  function toggleSelection(id: string) {
+    setSelection((current) => {
+      const ids = new Set(current?.sessionKey === sessionKey ? current.ids : []);
+      if (ids.has(id)) ids.delete(id); else ids.add(id);
+      return { sessionKey, ids };
+    });
+  }
   const stateMatchesSession = state.sessionKey === sessionKey;
   const currentDetailsById = stateMatchesSession ? state.detailsById : EMPTY_TURN_DETAILS;
 
@@ -851,6 +877,7 @@ export function TurnAccordion({
     inFlightRef.current.clear();
     dispatch({ type: "reset", sessionKey });
     setMigrationMenu(null);
+    setSelection(null);
     setFocusedTurn(null);
     rootRef.current?.scrollTo?.({ top: 0 });
     return () => {
@@ -954,14 +981,14 @@ export function TurnAccordion({
       if (origin === "subagent" && (!turn.synthetic || agentTriggered)) subagentTurnNumber += 1;
       return [turn.id, {
         agentTriggered,
-        displayTurnNumber: visibleTurnNumber,
+        displayTurnNumber: turnNumbering === "source" ? turn.turnIndex + 1 : visibleTurnNumber,
         origin,
         subagentTurnNumber: origin === "subagent" ? subagentTurnNumber : null,
       }] as const;
     }));
 
     return { executionStartIndex, forkedTurnCount, turnPresentation };
-  }, [isSubagent, turns]);
+  }, [isSubagent, turns, turnNumbering]);
   if (loading) {
     return (
       <div className="turn-list-loading">
@@ -980,6 +1007,14 @@ export function TurnAccordion({
   }
 
   return (
+    <div className="turn-list-shell">
+    {selecting && <div className="turn-selection-toolbar" role="toolbar" aria-label={localize(language, "Turn selection", "轮次多选")}>
+      <span role="status">{localize(language, `${selectedIds.length} selected`, `已选 ${selectedIds.length} 个轮次`)}</span>
+      <button type="button" onClick={() => setSelection({ sessionKey, ids: new Set() })}>{localize(language, "Clear", "清空")}</button>
+      <button type="button" className="turn-share-button" disabled={selectedIds.length === 0 || selectedIds.length > MAX_SHARED_TURNS} onClick={() => onShareTurns?.(selectedIds)}>{localize(language, "Share to team…", "分享到团队…")}</button>
+      <button type="button" onClick={() => setSelection(null)}>{localize(language, "Cancel", "取消")}</button>
+      {selectedIds.length > MAX_SHARED_TURNS && <small role="alert">{localize(language, `Select at most ${MAX_SHARED_TURNS} turns.`, `一次最多分享 ${MAX_SHARED_TURNS} 个轮次。`)}</small>}
+    </div>}
     <div className="turn-list" ref={rootRef} data-virtualized={virtualized}
       onFocusCapture={(event) => {
         const row = (event.target as HTMLElement).closest<HTMLElement>("[data-turn-row]");
@@ -1078,10 +1113,10 @@ export function TurnAccordion({
               </div>
             ) : null}
             <article
-              className={`turn-card ${displayStatus} ${presentation.origin ? `turn-origin-${presentation.origin}` : ""} ${turn.id === matchedTurnId ? "match-target" : ""}`}
+              className={`turn-card ${selecting && selection?.ids.has(turn.id) ? "is-selected" : ""} ${displayStatus} ${presentation.origin ? `turn-origin-${presentation.origin}` : ""} ${turn.id === matchedTurnId ? "match-target" : ""}`}
               data-turn-id={turn.id}
               data-turn-origin={presentation.origin ?? undefined}
-              onContextMenu={onMigrateTurn && !turn.synthetic && turn.sourceMessageIndex !== null
+              onContextMenu={onShareTurns || (onMigrateTurn && !turn.synthetic && turn.sourceMessageIndex !== null)
                 ? (event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1092,6 +1127,10 @@ export function TurnAccordion({
                   }
                 : undefined}
             >
+            <div className="turn-card-heading">
+            {selecting && <input type="checkbox" className="turn-selection-checkbox"
+              aria-label={localize(language, `Select turn ${turn.turnIndex + 1}`, `选择第 ${turn.turnIndex + 1} 轮`)}
+              checked={selection?.ids.has(turn.id) ?? false} onChange={() => toggleSelection(turn.id)} />}
             <button
               className="turn-card-summary"
               type="button"
@@ -1145,6 +1184,7 @@ export function TurnAccordion({
                 {turn.totalTokens > 0 ? <span>{formatTokenCount(turn.totalTokens)} token</span> : null}
               </span>
             </button>
+            </div>
             {expanded ? (
               <div className="turn-card-detail" id={`turn-detail-${turn.id}`}>
                 {loadingDetail ? (
@@ -1172,6 +1212,7 @@ export function TurnAccordion({
                     language={language}
                     matchedMessageIndex={turn.id === matchedTurnId ? matchedMessageIndex : null}
                     activeFindMatchKey={activeFindMatch?.key ?? null}
+                    attachmentAccess={attachmentAccess}
                   />
                   </TurnDisplayState.Provider>
                 ) : null}
@@ -1183,16 +1224,22 @@ export function TurnAccordion({
       })}
       </div>
       {migrationMenu ? (
-        <TurnMigrationContextMenu
+        <TurnContextMenu
           point={migrationMenu.point}
           language={language}
-          onMigrate={() => {
+          onSelect={onShareTurns ? () => {
+            const id = migrationMenu.turn.id;
+            setSelection((current) => ({ sessionKey, ids: new Set([...(current?.sessionKey === sessionKey ? current.ids : []), id]) }));
+            setMigrationMenu(null);
+          } : undefined}
+          onMigrate={onMigrateTurn && !migrationMenu.turn.synthetic && migrationMenu.turn.sourceMessageIndex !== null ? () => {
             const selectedTurn = migrationMenu.turn;
             setMigrationMenu(null);
-            onMigrateTurn?.(selectedTurn);
-          }}
+            onMigrateTurn(selectedTurn);
+          } : undefined}
         />
       ) : null}
+    </div>
     </div>
   );
 }

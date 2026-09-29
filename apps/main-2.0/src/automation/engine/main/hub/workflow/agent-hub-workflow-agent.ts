@@ -87,7 +87,6 @@ export function buildWorkflowAgentExecution<TResolved extends {
   invocationId?: string;
   environmentId?: string;
   invocation: WorkflowAgentRequest["invocation"];
-  agentRecallMcp?: WorkflowAgentRequest["agentRecallMcp"];
   prompt: string;
   runtime: NonNullable<TResolved["runtime"]>;
   channelId: string;
@@ -117,9 +116,6 @@ export function buildWorkflowAgentExecution<TResolved extends {
     ...(input.request.workflowRunId ? { workflowRunId: input.request.workflowRunId } : {}),
     ...(input.request.workflowNodeId ? { workflowNodeId: input.request.workflowNodeId } : {}),
     ...(input.request.workflowNodeExecutionId ? { workflowNodeExecutionId: input.request.workflowNodeExecutionId } : {}),
-    ...(input.request.agentRecallMcp
-      ? { agentRecallMcp: structuredClone(input.request.agentRecallMcp) }
-      : {}),
     configuredAgentId: resolved.agent.id,
     developerInstructions: [
       resolved.agent.instructions?.trim(),

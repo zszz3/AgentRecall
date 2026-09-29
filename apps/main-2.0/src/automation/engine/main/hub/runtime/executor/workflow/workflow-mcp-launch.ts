@@ -9,13 +9,6 @@ export interface WorkflowMcpLaunchConfig {
   env: Record<string, string>;
 }
 
-interface AgentRecallMcpLaunchContext {
-  workflowId?: string;
-  runId?: string;
-  nodeId?: string;
-  studioToken?: string;
-}
-
 export interface WorkflowMcpBinding {
   discoveryPath?: string;
   workflowId?: string;
@@ -25,7 +18,6 @@ export interface WorkflowMcpBinding {
   reviewRevision?: number;
   managedToken?: string;
   scope?: WorkflowMcpScope;
-  studioToken?: string;
 }
 
 interface WorkflowMcpLaunchOptions {
@@ -34,20 +26,12 @@ interface WorkflowMcpLaunchOptions {
   serverScriptPath?: string;
 }
 
-export function agentRecallMcpLaunchConfig(
-  discoveryPath: string | undefined,
-  context: AgentRecallMcpLaunchContext,
-  options: WorkflowMcpLaunchOptions = {},
-): WorkflowMcpLaunchConfig | undefined {
-  return workflowMcpLaunchConfig({ discoveryPath, ...context }, options);
-}
-
 export function workflowMcpLaunchConfig(
   binding: WorkflowMcpBinding,
   options: WorkflowMcpLaunchOptions = {},
 ): WorkflowMcpLaunchConfig | undefined {
   const { discoveryPath, workflowId } = binding;
-  if (!discoveryPath || (!workflowId && !binding.studioToken)) return undefined;
+  if (!discoveryPath || !workflowId) return undefined;
   const scope: WorkflowMcpScope = binding.scope
     ?? (binding.runId && binding.nodeId && binding.reviewRevision
       ? "runtime_review"
@@ -74,7 +58,6 @@ export function workflowMcpLaunchConfig(
         ...(binding.executionId ? { AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: binding.executionId } : {}),
         ...(binding.reviewRevision ? { AGENT_RECALL_WORKFLOW_REVIEW_REVISION: String(binding.reviewRevision) } : {}),
         ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
-        ...(binding.studioToken ? { AGENT_RECALL_STUDIO_TOKEN: binding.studioToken } : {}),
         ELECTRON_RUN_AS_NODE: "1",
       },
     };
@@ -102,7 +85,6 @@ export function workflowMcpLaunchConfig(
       ...(binding.executionId ? { AGENT_RECALL_WORKFLOW_NODE_EXECUTION_ID: binding.executionId } : {}),
       ...(binding.reviewRevision ? { AGENT_RECALL_WORKFLOW_REVIEW_REVISION: String(binding.reviewRevision) } : {}),
       ...(binding.managedToken ? { AGENT_RECALL_WORKFLOW_MCP_TOKEN: binding.managedToken } : {}),
-      ...(binding.studioToken ? { AGENT_RECALL_STUDIO_TOKEN: binding.studioToken } : {}),
       ELECTRON_RUN_AS_NODE: "1",
     },
   };

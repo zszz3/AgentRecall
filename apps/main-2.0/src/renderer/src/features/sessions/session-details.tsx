@@ -42,6 +42,7 @@ export interface SessionDetailsActions {
   summarize(session: SessionSearchResult): void;
   resume(session: SessionSearchResult): void;
   resumeInIterm(session: SessionSearchResult): void;
+  shareTurns?(session: SessionSearchResult, turnIds: string[]): void;
   migrate(session: SessionSearchResult, turn?: SessionTurnSummary): void;
   uploadRemote(session: SessionSearchResult): void;
   copyResume(session: SessionSearchResult): void;
@@ -142,6 +143,7 @@ export function SessionDetails({
         matchedTurnId={matchedTurnId}
         onLoadTurn={(turnId) => actions.loadTurn(detail, turnId)}
         onMigrateTurn={canMigrate ? (turn) => actions.migrate(detail, turn) : undefined}
+        onShareTurns={detail.environmentKind === "local" && actions.shareTurns ? (turnIds) => actions.shareTurns?.(detail, turnIds) : undefined}
         onOpenFamilySession={(sessionKey) => {
           void actions.openFamilySession(sessionKey).then((result) => {
             if (result === "missing") setFamilyRetryVersion((current) => current + 1);

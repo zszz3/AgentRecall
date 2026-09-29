@@ -1,6 +1,6 @@
 # Repository instructions
 
-AgentRecall is a local Electron application that indexes, displays, and resumes coding-agent sessions. The repository ships two applications from one npm workspace: V1 is the stable product and V2 is the preview product with the upgraded session experience, PostgreSQL storage, Runtime, Agents, Chat, Workflow, Eval, MCP, Memory, and a managed Skill library. Read [README.md](README.md) for the product surface and [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
+AgentRecall is a local Electron application that indexes, displays, and resumes coding-agent sessions. The repository ships two applications from one npm workspace: V1 is the stable product and V2 is the preview product with the upgraded session experience, PostgreSQL storage, Runtime, Agents, Workflow, Eval, MCP, Memory, and a managed Skill library. Read [README.md](README.md) for the product surface and [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
 
 ## Repository map
 
@@ -11,8 +11,10 @@ apps/main-2.0/   Preview Electron app; PostgreSQL and asynchronous stores
   src/preload/     Narrow typed bridge exposed to renderer windows
   src/renderer/    React UI; browser-safe code only
   src/core/        Domain logic, loaders, persistence, and shared application types
-  src/automation/  V2 Agent, Chat, Workflow, Eval, and runtime engine
+  src/automation/  V2 Agent, Workflow, Eval, and runtime engine
 scripts/         Repository setup, release-note, packaging, and release checks
+apps/cli/        Standalone CLI source preview; local project and team configuration
+packages/workspace-core/ Shared headless configuration and Git project resolution
 docs/            User guides, troubleshooting, and durable design documents
 .release-notes/ User-facing release-note fragments consumed by the release workflow
 assets/          Repository-level images and distributable assets
@@ -25,6 +27,9 @@ Keep changes in the lowest owning area. Do not place V2-only behavior in shared 
 ```sh
 npm run setup:v1              # install the V1 workspace
 npm run setup:v2              # install the V2 workspace
+npm run setup:cli             # install only CLI and workspace-core dependencies
+npm run test:cli              # isolated CLI and configuration tests
+npm run package:smoke:cli     # build and isolated CLI install/update/uninstall checks
 npm run dev:v1                # run V1 from source
 npm run dev:v2                # run V2 from source
 npm run test:v1               # V1 tests
@@ -38,6 +43,8 @@ npm run release:preflight     # full release preflight; expensive
 ```
 
 Run focused Vitest files from the affected app while iterating, for example `npm exec vitest run src/core/skill-manager.test.ts` with the working directory set to `apps/main-2.0`. Run the app-level test or typecheck only when the focused check passes. Do not default to the full repository suite or repeat a passing check merely before a commit; use the full suite for repository-wide changes, CI diagnosis, release preparation, or an explicit user request.
+
+The root npm workspaces contain only the CLI and its shared configuration module; V1/V2 keep independent installs. CLI configuration, current limitations, and source-package verification are documented in [docs/v2/cli.md](docs/v2/cli.md).
 
 ## Working method
 
@@ -64,7 +71,7 @@ Run focused Vitest files from the affected app while iterating, for example `npm
 - For every session-related bug fix or feature, inspect the relevant behavior in both `apps/main-1.0` and `apps/main-2.0` before changing code.
 - When the behavior applies to both products, implement and test it in both directories. Do not mechanically copy code: V1 uses SQLite and mostly synchronous store APIs, while V2 uses PostgreSQL and asynchronous store APIs.
 - If session behavior intentionally differs between V1 and V2, document the user-visible reason and cover the intended divergence with tests.
-- Changes unrelated to sessions may target only the affected application. V2-only Runtime, Agent, Chat, Workflow, Eval, Memory, and managed-Skill features do not require placeholder V1 changes.
+- Changes unrelated to sessions may target only the affected application. V2-only Runtime, Agent, Workflow, Eval, Memory, and managed-Skill features do not require placeholder V1 changes.
 - V1 and V2 use separate commands, app data, databases, MCP identifiers, and update caches. Do not introduce implicit cross-version reads, writes, migration, or cleanup.
 
 ## Session and durable-data rules

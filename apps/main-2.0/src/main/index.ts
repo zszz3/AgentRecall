@@ -12,9 +12,11 @@ import {
   screen,
   shell,
   Tray,
+  webContents,
   type IpcMainInvokeEvent,
 } from "electron";
 import Store from "electron-store";
+import { TeamSessionSharing } from "./services/team-session-sharing";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -129,7 +131,6 @@ import { QUOTA_EVENTS } from "../shared/ipc/quota";
 import type { OpenVikingRuntimeInstallProgress } from "../core/openviking-memory";
 import { registerOpenVikingMemoryIpc } from "./ipc/openviking-memory";
 import { registerAutomationIpc } from "./ipc/automation";
-import { registerTeamChatIpc } from "./ipc/team-chat";
 import { registerAppUpdateIpc } from "./ipc/app-update";
 import { registerQuotaIpc } from "./ipc/quota";
 import { registerProvidersIpc } from "./ipc/providers";
@@ -141,6 +142,8 @@ import {
 import { registerRemoteSessionsIpc } from "./ipc/remote-sessions";
 import { registerDiscoveryIpc, type DiscoveryIpcService } from "./ipc/discovery";
 import { registerSkillsIpc } from "./ipc/skills";
+import { registerTeamWorkspaceIpc } from "./ipc/team-workspace";
+import { TeamWorkspaceService } from "./services/team-workspace-service";
 import { registerSessionCatalogIpc } from "./ipc/session-catalog";
 import { registerSessionCommandIpc } from "./ipc/session-commands";
 import {
@@ -362,7 +365,6 @@ bootstrapApplicationPaths({
 let mainWindow: BrowserWindow | null = null;
 let automationService: NativeAutomationService | null = null;
 let disposeAutomationIpc: (() => void) | null = null;
-let disposeTeamChatIpc: (() => void) | null = null;
 let disposeOpenVikingMemoryIpc: (() => void) | null = null;
 let openVikingRuntimeService: OpenVikingRuntimeService | null = null;
 let openVikingControlService: OpenVikingControlService | null = null;
@@ -379,6 +381,8 @@ let postgresRuntimeStartup: Promise<PostgresRuntime> | null = null;
 let postgresDatabase: PostgresDatabase | null = null;
 let quickSearchWindow: BrowserWindow | null = null;
 let deepSeekWebWindow: BrowserWindow | null = null;
+let teamWorkspaceService: TeamWorkspaceService | null = null;
+let disposeTeamWorkspaceIpc: (() => void) | null = null;
 const interfaceZoomController = createInterfaceZoomController(() => [mainWindow, quickSearchWindow]);
 let tray: Tray | null = null;
 let store: SessionStore;
@@ -2706,12 +2710,6 @@ function registerIpc(): void {
       return filePath;
     },
   });
-  disposeTeamChatIpc = registerTeamChatIpc({
-    ipc: ipcMain,
-    service: automationService.teamChat,
-    send: (channel, payload) => mainWindow?.webContents.send(channel, payload),
-    ensureReady: () => automationService!.requireReady(),
-  });
   ipcMain.handle("markdown:open-external", (_event, value: unknown) => {
     const url = normalizeExternalLink(value);
     if (!url) throw new Error("Only HTTP, HTTPS, and mailto links can be opened externally.");
@@ -2990,6 +2988,42 @@ function registerIpc(): void {
     return result;
   });
   registerSkillsIpc(ipcMain, skillService);
+  const confirmTeamOperation = async (owner: number, message: string): Promise<boolean> => {
+    const sender = webContents.fromId(owner);
+    const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+    if (!parent) return false;
+    const result = await dialog.showMessageBox(parent, { type: "question", message: "确认团队操作", detail: message, buttons: ["取消", "确认"], defaultId: 0, cancelId: 0, noLink: true });
+    return result.response === 1 && !parent.isDestroyed();
+  };
+  const teamSharing = new TeamSessionSharing({
+    store,
+    ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
+    confirm: confirmTeamOperation,
+    save: async (owner, bytes, suggestedName) => {
+      const sender = webContents.fromId(owner);
+      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+      if (!parent) return false;
+      const result = await dialog.showSaveDialog(parent, { title: "保存完整团队会话包", defaultPath: suggestedName });
+      if (result.canceled || !result.filePath || parent.isDestroyed()) return false;
+      const temporary = path.join(path.dirname(result.filePath), `.agentrecall-${randomUUID()}.tmp`);
+      try {
+        await fs.writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
+        await fs.rename(temporary, result.filePath);
+      } finally { await fs.rm(temporary, { force: true }); }
+      return true;
+    },
+  });
+  teamWorkspaceService = new TeamWorkspaceService(process.env.AGENTRECALL_HOME ?? path.join(homedir(), ".agentrecall-cli"), {
+    chooseFolder: async (owner) => {
+      const sender = webContents.fromId(owner);
+      const parent = sender && !sender.isDestroyed() ? BrowserWindow.fromWebContents(sender) : null;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, { title: "选择本地目录", properties: ["openDirectory"] });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    confirm: confirmTeamOperation,
+  }, teamSharing);
+  disposeTeamWorkspaceIpc = registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService);
   registerDiscoveryIpc(ipcMain, createDiscoveryService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {
     clipboard.writeText(buildCombinedSupabaseSetupSql());
@@ -3266,12 +3300,13 @@ app.on("before-quit", (event) => {
   remoteEnvironmentLifecycle?.stopAll();
   disposeAutomationIpc?.();
   disposeAutomationIpc = null;
-  disposeTeamChatIpc?.();
-  disposeTeamChatIpc = null;
   disposeOpenVikingMemoryIpc?.();
   disposeOpenVikingMemoryIpc = null;
   globalShortcut.unregisterAll();
+  disposeTeamWorkspaceIpc?.();
+  disposeTeamWorkspaceIpc = null;
   void Promise.allSettled([
+    teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),
     providerService.stopCodexChatProxy(),

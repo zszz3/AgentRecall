@@ -210,11 +210,25 @@ function readCodexSessionMetaHint(filePath: string): CodexSessionMeta | null {
   let fd: number | undefined;
   try {
     fd = fs.openSync(filePath, "r");
-    const buffer = Buffer.allocUnsafe(256 * 1024);
-    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    const firstLine = buffer.toString("utf8", 0, bytesRead).split(/\r?\n/, 1)[0]?.trim();
+    // Most metadata fits in one page. Stop at the newline instead of reading
+    // conversation content for every unchanged file in the historical catalog.
+    const chunks: Buffer[] = [];
+    let length = 0;
+    while (length < 256 * 1024) {
+      const chunk = Buffer.allocUnsafe(Math.min(4096, 256 * 1024 - length));
+      const bytesRead = fs.readSync(fd, chunk, 0, chunk.length, length);
+      if (bytesRead === 0) break;
+      const newline = chunk.subarray(0, bytesRead).indexOf(0x0a);
+      chunks.push(chunk.subarray(0, newline < 0 ? bytesRead : newline));
+      length += bytesRead;
+      if (newline >= 0) break;
+    }
+    // Decode after joining chunks so multibyte characters crossing a page
+    // boundary remain intact. Oversized/partial metadata uses the full scanner.
+    const firstLine = Buffer.concat(chunks).toString("utf8").trim();
     return firstLine ? parseCodexSessionMetaLine(JSON.parse(firstLine)) : null;
   } catch {
+    // Missing or incomplete metadata is resolved by the full scanner.
     return null;
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
@@ -1588,6 +1602,22 @@ export function* loadCodexSessionsIterator(
   }
 }
 
+async function* walkCodexSessionFiles(dir: string): AsyncGenerator<string> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    // A source can disappear during discovery; other failures must remain visible.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  for (const entry of entries) {
+    const filePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) yield* walkCodexSessionFiles(filePath);
+    else if (entry.name.endsWith(".jsonl")) yield filePath;
+  }
+}
+
 export async function* loadCodexSessionsAsyncIterator(
   codexDir = path.join(os.homedir(), ".codex"),
   sourceOverride?: SessionSource,
@@ -1605,7 +1635,14 @@ export async function* loadCodexSessionsAsyncIterator(
     }
   }
 
-  for (const filePath of walkJsonlFiles(sessionsDir)) {
+  let sliceStartedAt = performance.now();
+  for await (const filePath of walkCodexSessionFiles(sessionsDir)) {
+    // Skipped files never reach the indexer's batch yield. Bound this path too;
+    // awaiting an already-resolved metadata callback only drains microtasks.
+    if (performance.now() - sliceStartedAt >= 8) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      sliceStartedAt = performance.now();
+    }
     const stat = safeStat(filePath);
     const metaHint = readCodexSessionMetaHint(filePath);
     const source = codexSessionSource(metaHint, sourceOverride, options.stepcodeSessionAgents);

@@ -17,7 +17,7 @@
   flex: 1;
   flex-direction: column;
   gap: 22px;
-  padding: 14px 18px 22px;
+  padding: 8px 28px 28px;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -43,11 +43,11 @@
   gap: 6px;
   margin-left: auto;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 8px;
-  background: var(--panel-bg);
+  background: var(--panel-subtle);
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -58,6 +58,7 @@
 }
 
 .workbench-overview {
+  flex: 0 0 auto;
   position: relative;
   z-index: 3;
   display: grid;
@@ -73,17 +74,9 @@
 .workbench-quota-card,
 .workbench-token-trend {
   min-width: 0;
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
-}
-
-.workbench-usage:hover,
-.workbench-quota-card:hover,
-.workbench-token-trend:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  border-radius: 12px;
+  background: var(--panel-subtle);
+  box-shadow: none;
 }
 
 .workbench-usage {
@@ -808,6 +801,7 @@
 .workbench-feedback.quota { margin-bottom: 0; }
 
 .workbench-primary-grid {
+  flex: 0 0 auto;
   position: relative;
   z-index: 1;
   display: flex;
@@ -869,7 +863,7 @@
   border-radius: 7px;
   background: var(--panel-bg);
   color: var(--accent);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
   pointer-events: auto;
 }
 
@@ -903,12 +897,12 @@
   min-height: 0;
   padding: 14px 16px;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
   transition: box-shadow var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
 }
 
 .workbench-card-slot > .workbench-panel:hover {
-  box-shadow: var(--shadow-md);
+  box-shadow: none;
 }
 
 .workbench-panel-head h2 {
@@ -1351,12 +1345,12 @@
 .workbench-resume {
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--accent-line);
+  border: 0;
   border-radius: 7px;
-  background: var(--accent-soft);
+  background: var(--panel-subtle);
   color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 680;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .workbench-resume:hover {
@@ -1406,7 +1400,7 @@
 
 @container (max-width: 900px) {
   .workbench-overview {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr);
   }
 
   .workbench-token-trend {

@@ -13,12 +13,12 @@ describe("workbench overview and work entries", () => {
       sessions: [], sessionQuery: "", liveSessionKeys: new Set(), liveDetectionFailed: false,
       platform: "darwin", language: "en", workflows: [], workflowTotalCount: 0, activeWorkflowCount: 0,
       workflowsLoading: false, workflowsError: "Workflow needs attention", runtimes: [], runtimeChannels: [],
-      runtimeOverviewAvailable: true, mcpServers: [], chatRooms: [], memoryEnabled: false,
+      runtimeOverviewAvailable: true, mcpServers: [], memoryEnabled: false,
       memorySnapshot: null, memoryLoading: false, skills: [], skillsLoading: false,
       onStatsPeriodChange: noop, onStatsOriginChange: noop, onRefreshStats: noop, onRefreshQuotas: noop,
       onOpenSettings: noop, onSearchSessions: noop, onOpenSession: noop, onResumeSession: noop,
       onShowSessions: noop, onSelectTrendDay: noop, onOpenWorkflow: noop, onNewWorkflow: noop,
-      onShowWorkflows: noop, onShowRuntimes: noop, onShowMcp: noop, onShowChat: noop,
+      onShowWorkflows: noop, onShowRuntimes: noop, onShowMcp: noop,
       onShowMemories: noop, onShowSkills: noop,
     };
     const html = renderToStaticMarkup(<WorkbenchPage {...props} />);
@@ -34,9 +34,14 @@ describe("workbench overview and work entries", () => {
     expect(refreshing).toContain("Open settings");
   });
 
-  it("prioritizes sessions/workflows/chat for new layouts without resetting existing custom order", () => {
-    expect(normalizeWorkbenchCardOrder(null).slice(0, 3)).toEqual(["sessions", "workflows", "chat"]);
+  it("prioritizes sessions/workflows for new layouts without resetting existing custom order", () => {
+    expect(normalizeWorkbenchCardOrder(null).slice(0, 2)).toEqual(["sessions", "workflows"]);
     expect(normalizeWorkbenchCardOrder(["skills", "memories", "skills", "unknown"]).slice(0, 2)).toEqual(["skills", "memories"]);
-    expect(reorderWorkbenchCard(normalizeWorkbenchCardOrder(null), "chat", "sessions")[0]).toBe("chat");
+    expect(reorderWorkbenchCard(normalizeWorkbenchCardOrder(null), "skills", "sessions")[0]).toBe("skills");
   });
+});
+
+it("drops the retired Chat card while preserving other saved positions", () => {
+  expect(normalizeWorkbenchCardOrder(["skills", "chat", "sessions", "workflows", "memories", "runtimes", "mcp"]))
+    .toEqual(["skills", "sessions", "workflows", "memories", "runtimes", "mcp"]);
 });

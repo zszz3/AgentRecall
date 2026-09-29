@@ -10,7 +10,7 @@ const v2 = JSON.parse(await readFile("apps/main-2.0/package.json", "utf8"));
 
 test("keeps V1 and V2 as independent app packages", () => {
   assert.equal(root.private, true);
-  assert.equal(root.workspaces, undefined);
+  assert.deepEqual(root.workspaces, ["packages/workspace-core", "apps/cli"]);
   assert.equal(v1.name, "agent-recall");
   assert.equal(v2.name, "agent-recall-v2");
   assert.notEqual(v1.productName, v2.productName);

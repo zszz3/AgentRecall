@@ -16,10 +16,10 @@ describe("grouped main navigation", () => {
     try {
       await act(async () => root.render(<AppNavigation activePage="sessions" settingsOpen={false}
         signalUpdate={true} language={language} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />));
-      expect([...host.querySelectorAll('[role="group"]')].map(group => group.getAttribute("aria-label"))).toEqual(
-        language === "en" ? ["Home", "Work", "Automation", "Knowledge", "Connections"] : ["首页", "工作", "自动化", "知识", "连接"],
+      expect([...host.querySelectorAll(".app-navigation-label")].map(group => group.textContent)).toEqual(
+        language === "en" ? ["Workspace", "Automation", "Resources", "Collaboration"] : ["工作区", "自动化", "资源", "协作"],
       );
-      const pages: AppPage[] = ["workbench", "sessions", "team-chat", "runtimes", "workflows", "evaluation", "memories", "skills", "mcp", "providers"];
+      const pages: AppPage[] = ["workbench", "sessions", "workflows", "evaluation", "runtimes", "mcp", "memories", "skills", "providers", "team-space"];
       const buttons = [...host.querySelectorAll<HTMLButtonElement>("nav button")];
       expect(buttons.map(button => button.dataset.page)).toEqual(pages);
       for (const button of buttons) await act(async () => button.click());
