@@ -204,3 +204,7 @@ npm run dev:v1
 > AgentRecall 是独立的开源项目，与 Anthropic、OpenAI、Cursor 等公司均无关联。Claude、Codex 等名称与商标归其各自所有者所有。
 
 有任何问题，请提交 Issue。如果觉得项目对你有帮助，欢迎 Star。
+
+## 开发文档
+
+[文档入口](docs/README.md) · [功能规格](docs/spec/README.md) · [架构决策](docs/adr/README.md) · [贡献指南](CONTRIBUTING.md)
