@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,6 +12,7 @@ import {
   loadCodexSessionFile,
   loadCodexSessionRows,
   loadCodexSessionsIterator,
+  loadCodexSessionsAsyncIterator,
   loadCodexSessions,
   loadDefaultSessions,
   loadWorkBuddyCliSessionFile,
@@ -4005,5 +4006,64 @@ describe("native child transcript paths", () => {
       .toMatchObject({ isSubagent: false, parentSessionId: null });
     expect(loadCodeBuddyCliSessionRows(rootPath, buddyRows, stat)?.session)
       .toMatchObject({ isSubagent: false, parentSessionId: null });
+  });
+});
+
+describe("Codex historical discovery responsiveness", () => {
+  it.each([4095, 4096, 4097, 256 * 1024, 256 * 1024 + 1])(
+    "preserves metadata at the %i-byte header boundary",
+    async (size) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-header-boundary-"));
+      const dir = path.join(root, "sessions");
+      fs.mkdirSync(dir);
+      const prefix = '{"type":"session_meta","payload":{"padding":"';
+      const middle = '","id":"';
+      const suffix = '","tail":"';
+      const ending = '"}}';
+      const id = "你好boundary";
+      const padding = size - Buffer.byteLength(prefix + middle + id + suffix + ending);
+      const beforeId = Math.min(padding, 4095 - prefix.length - middle.length);
+      const header = prefix + "x".repeat(beforeId) + middle + id
+        + suffix + "x".repeat(padding - beforeId) + ending;
+      fs.writeFileSync(path.join(dir, "session.jsonl"), header);
+      const updates: string[] = [];
+      try {
+        for await (const _ of loadCodexSessionsAsyncIterator(root, undefined, {
+          shouldSkipFile: () => true,
+          refreshCodexSessionMetadata: (metadata) => { updates.push(metadata.rawId); },
+        })) { throw new Error("Unchanged files must not be parsed"); }
+        expect(updates).toEqual(size <= 256 * 1024 ? [id] : []);
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    },
+  );
+
+  it("services the event loop while skipping unchanged files", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-skip-responsiveness-"));
+    const dir = path.join(root, "sessions");
+    fs.mkdirSync(dir);
+    for (let i = 0; i < 4; i++) {
+      fs.writeFileSync(path.join(dir, `${i}.jsonl`), JSON.stringify({
+        type: "session_meta", payload: { id: String(i), cwd: "/repo" },
+      }) + "\n" + "x".repeat(256 * 1024));
+    }
+    let clock = 0;
+    const now = vi.spyOn(performance, "now").mockImplementation(() => clock += 9);
+    let serviced = false;
+    let count = 0;
+    let heartbeat: ReturnType<typeof setImmediate> | undefined;
+    try {
+      for await (const _ of loadCodexSessionsAsyncIterator(root, undefined, {
+        shouldSkipFile: () => true,
+        refreshCodexSessionMetadata: () => {
+          if (count++ === 0) heartbeat = setImmediate(() => { serviced = true; });
+          else expect(serviced).toBe(true);
+        },
+      })) { throw new Error("Unchanged files must not be parsed"); }
+      expect(count).toBe(4);
+    } finally {
+      if (heartbeat) clearImmediate(heartbeat);
+      now.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

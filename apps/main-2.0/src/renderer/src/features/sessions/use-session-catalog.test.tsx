@@ -25,6 +25,41 @@ describe("useSessionCatalog pagination", () => {
     vi.restoreAllMocks();
   });
 
+  it("coalesces submitted searches and discards queued work after leaving", async () => {
+    const pending: Array<() => void> = [];
+    const searchSessionPage = vi.fn((options: SearchOptions) => new Promise<{
+      sessions: SessionSearchResult[]; totalCount: number; hasMore: boolean;
+    }>((resolve) => pending.push(() => resolve({
+      sessions: [session(options.query || "initial")], totalCount: 1, hasMore: false,
+    }))));
+    Object.defineProperty(window, "sessionSearch", { configurable: true, value: { searchSessionPage } });
+    let catalog!: ReturnType<typeof useSessionCatalog>;
+    function Harness({ active }: { active: boolean }) {
+      catalog = useSessionCatalog({ active, liveSessions: emptyLiveSessions, projects: [], environments: [], tags: [] });
+      return null;
+    }
+    await act(async () => root.render(createElement(Harness, { active: true })));
+    for (const query of ["c", "co", "codex"]) await act(async () => catalog.setQuery(query));
+    expect(catalog.query).toBe("codex");
+    expect(searchSessionPage).toHaveBeenCalledTimes(1);
+    await act(async () => pending.shift()!());
+    expect(searchSessionPage).toHaveBeenCalledTimes(2);
+    expect(searchSessionPage).toHaveBeenLastCalledWith(expect.objectContaining({ query: "codex" }));
+    expect(catalog.displayedResults).toEqual([]);
+    await act(async () => pending.shift()!());
+    expect(catalog.displayedResults[0].sessionKey).toBe("codex");
+
+    await act(async () => catalog.setQuery("first"));
+    await act(async () => catalog.setQuery("queued"));
+    await act(async () => root.render(createElement(Harness, { active: false })));
+    await act(async () => pending.shift()!());
+    expect(searchSessionPage).toHaveBeenCalledTimes(3);
+    await act(async () => root.render(createElement(Harness, { active: true })));
+    expect(searchSessionPage).toHaveBeenLastCalledWith(expect.objectContaining({ query: "queued" }));
+    await act(async () => pending.shift()!());
+    expect(catalog.displayedResults[0].sessionKey).toBe("queued");
+  });
+
   it("returns to the last valid page when the result set shrinks", async () => {
     let shrinking = false;
     const searchSessionPage = vi.fn(async (options: SearchOptions) => {
