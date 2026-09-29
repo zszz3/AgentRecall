@@ -369,7 +369,16 @@ export type SessionSourceMetadata = Pick<IndexedSession, "filePath" | "rawId" | 
   originalTitle: string | null;
 };
 
+/** A checked, message-only suffix; commit it against the exact source cursor. */
+export interface SessionMessageAppend {
+  expectedSize: number;
+  expectedMtimeMs: number;
+  turnIndex: number;
+  rawEventIndex: number;
+}
+
 export interface LoadedSession {
+  messageAppend?: SessionMessageAppend;
   session: IndexedSession;
   messages: SessionMessage[];
   tokenEvents?: TokenUsageEvent[];

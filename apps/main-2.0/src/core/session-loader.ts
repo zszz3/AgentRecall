@@ -1665,9 +1665,57 @@ export async function* loadCodexSessionsAsyncIterator(
     }
     const incrementalBase = await options.loadIncrementalCodexSession?.(filePath)
       ?? options.incrementalCodexSessions?.get(filePath);
+    if (incrementalBase?.loaded.messageAppend && stat.size > incrementalBase.offset) {
+      const base = incrementalBase.loaded;
+      const accumulator = createCodexScanAccumulator(incrementalBase);
+      let supported = true;
+      let timestamp = Date.parse(base.messages.at(-1)!.timestamp);
+      const result = await scanCompleteJsonlAsync(filePath, {
+        startOffset: incrementalBase.offset,
+        onRecord: (row) => {
+          const payload = isRecord(row) ? objectField(row, "payload") : null;
+          const nextTimestamp = isRecord(row) && typeof row.timestamp === "string" ? Date.parse(row.timestamp) : NaN;
+          // Lifecycle, usage, tools, compaction and paginated replacements need
+          // their owning parser state. Never reinterpret them as a text append.
+          if (!isRecord(row) || row.type !== "response_item" || payload?.type !== "message"
+            || payload.id || payload.internal_chat_message_metadata_passthrough
+            || (payload.role !== "user" && payload.role !== "assistant")
+            || !Array.isArray(payload.content)
+            || payload.content.some((part: unknown) => !isRecord(part) || !["input_text", "output_text"].includes(String(part.type)))
+            || !Number.isFinite(nextTimestamp) || nextTimestamp < timestamp) {
+            supported = false;
+            return;
+          }
+          timestamp = nextTimestamp;
+          accumulator.onRecord(row);
+        },
+      });
+      const scanned = supported ? accumulator.finish(result.committedOffset) : null;
+      if (scanned && !scanned.traceEvents.length && !scanned.tokenEvents.length) {
+        const firstIndex = base.messages[0].index;
+        scanned.messages = scanned.messages.map((message) => ({ ...message, index: message.index + firstIndex }));
+        scanned.codexIncrementalState.messageProvenance = scanned.codexIncrementalState.messageProvenance.map((entry) => ({
+          ...entry, messageIndex: entry.messageIndex + firstIndex,
+        }));
+        const indexedTitle = titleMap.get(scanned.meta.id);
+        yield {
+          ...base,
+          session: {
+            ...base.session,
+            originalTitle: cleanTitle(indexedTitle?.title || base.session.originalTitle),
+            timestamp: indexedTitle?.updatedAt ? Date.parse(indexedTitle.updatedAt) : base.session.timestamp,
+            fileMtimeMs: stat.mtimeMs,
+            fileSize: scanned.committedOffset,
+          },
+          messages: scanned.messages,
+          codexIncrementalState: scanned.codexIncrementalState,
+        };
+        continue;
+      }
+    }
     const scanned = await scanCodexSessionFileAsync(
       filePath,
-      incrementalBase && stat.size > incrementalBase.offset ? incrementalBase : undefined,
+      incrementalBase && !incrementalBase.loaded.messageAppend && stat.size > incrementalBase.offset ? incrementalBase : undefined,
     );
     if (!scanned) continue;
     const indexedTitle = titleMap.get(scanned.meta.id);

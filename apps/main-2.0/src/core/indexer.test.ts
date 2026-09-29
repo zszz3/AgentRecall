@@ -718,6 +718,103 @@ describe("indexer", () => {
     }
   });
 
+  it("updates only the last Codex Turn across store recreation and matches a complete rebuild", async () => {
+    const database = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+    let store = new SessionStore(database, database.initialize());
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-tail-commit-"));
+    const message = (index: number, role: "user" | "assistant", text: string) => JSON.stringify({
+      type: "response_item", timestamp: new Date(Date.parse("2026-06-01T11:00:00Z") + index * 1000).toISOString(),
+      payload: { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] },
+    }) + "\n";
+    try {
+      const filePath = writeCodexSession(homeDir, "bounded-tail", "original question", "Tail");
+      fs.appendFileSync(filePath, "\n");
+      for (let index = 0; index < 20; index++) fs.appendFileSync(filePath, message(index, index % 2 ? "assistant" : "user", `text ${index}`));
+      await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+      const before = await store.listSessionTurns("codex:bounded-tail");
+      // Recreate the service over the same durable database: no process-local cache.
+      store = new SessionStore(database, database.initialize());
+      const fullRead = vi.spyOn(store, "getAllMessages");
+      const fullWrite = vi.spyOn(store, "upsertIndexedSession");
+      fs.appendFileSync(filePath, message(20, "assistant", "追加回答") + message(21, "user", "new question") + message(22, "assistant", "new answer"));
+      expect(await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).toMatchObject({ indexed: 1, error: null });
+      expect(fullRead).not.toHaveBeenCalled();
+      expect(fullWrite).not.toHaveBeenCalled();
+      const turns = await store.listSessionTurns("codex:bounded-tail");
+      expect(turns.slice(0, -2)).toEqual(before.slice(0, -1));
+      const messages = await store.getAllMessages("codex:bounded-tail");
+      const details = await Promise.all(turns.map((turn) => store.getSessionTurn("codex:bounded-tail", turn.id)));
+      const raw = await database.query("select * from agent_recall.session_raw_events where session_key = $1 order by event_index", ["codex:bounded-tail"]);
+      // Force the existing full parser by invalidating the derived version.
+      await database.query("update agent_recall.session_turns set derivation_version = 0 where session_key = $1", ["codex:bounded-tail"]);
+      expect(await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).toMatchObject({ indexed: 1, error: null });
+      expect(await store.getAllMessages("codex:bounded-tail")).toEqual(messages);
+      expect(await store.listSessionTurns("codex:bounded-tail")).toEqual(turns);
+      expect(await Promise.all(turns.map((turn) => store.getSessionTurn("codex:bounded-tail", turn.id)))).toEqual(details);
+      expect((await database.query("select * from agent_recall.session_raw_events where session_key = $1 order by event_index", ["codex:bounded-tail"])).rows).toEqual(raw.rows);
+    } finally {
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retries an incomplete UTF-8 message and rejects a stale append without changing stored Turns", async () => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-tail-partial-"));
+    try {
+      const filePath = writeCodexSession(homeDir, "partial-tail", "question", "Tail");
+      fs.appendFileSync(filePath, "\n");
+      await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+      const originalSize = fs.statSync(filePath).size;
+      const bytes = Buffer.from(JSON.stringify({ type: "response_item", timestamp: "2026-06-01T12:00:00Z",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "中文回答" }] } }) + "\n");
+      const split = bytes.indexOf(Buffer.from("中")) + 1;
+      fs.appendFileSync(filePath, bytes.subarray(0, split));
+      expect((await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).error).toBeNull();
+      expect((await store.listIndexedSessionFiles())[0].contentIndexedSize).toBe(originalSize);
+      const base = await store.getCodexMessageTail("codex:partial-tail", originalSize);
+      const session = await store.getSession("codex:partial-tail");
+      expect(base).not.toBeNull();
+      expect(session).not.toBeNull();
+      fs.appendFileSync(filePath, bytes.subarray(split));
+      expect((await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).error).toBeNull();
+      expect((await store.getAllMessages("codex:partial-tail")).at(-1)?.content).toBe("中文回答");
+      const turns = await store.listSessionTurns("codex:partial-tail");
+      await expect(store.appendIndexedMessages({ session: session!, ...base!, messages: base!.messages }))
+        .rejects.toThrow("Session changed while indexing");
+      expect(await store.listSessionTurns("codex:partial-tail")).toEqual(turns);
+      expect((await store.listIndexedSessionFiles())[0].contentIndexedSize).toBe(fs.statSync(filePath).size);
+    } finally {
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["older-timestamp", "identified-message", "rollback"] as const)("rebuilds safely when a text suffix contains %s", async (change) => {
+    const store = createInMemoryStore();
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-tail-fallback-"));
+    try {
+      const filePath = writeCodexSession(homeDir, "fallback-tail", "question", "Tail");
+      await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } });
+      const fullWrite = vi.spyOn(store, "upsertIndexedSession");
+      const row = change === "rollback"
+        ? { type: "event_msg", timestamp: "2026-06-01T12:00:00Z", payload: { type: "thread_rolled_back", num_turns: 1 } }
+        : { type: "response_item", timestamp: change === "older-timestamp" ? "2020-01-01T00:00:00Z" : "2026-06-01T12:00:00Z",
+          payload: { type: "message", role: "assistant", ...(change === "identified-message" ? { id: "item-1" } : {}),
+            content: [{ type: "output_text", text: "answer" }] } };
+      fs.appendFileSync(filePath, "\n" + JSON.stringify(row) + "\n");
+      expect((await syncDefaultSessionsInBatches(store, { loadOptions: { homeDir } })).error).toBeNull();
+      expect(fullWrite).toHaveBeenCalledTimes(1);
+      expect((await store.listIndexedSessionFiles())[0].contentIndexedSize).toBe(fs.statSync(filePath).size);
+      const messages = await store.getAllMessages("codex:fallback-tail");
+      if (change === "rollback") expect(messages).toEqual([]);
+      else expect(messages.map((message) => message.content)).toEqual(["question", "answer"]);
+    } finally {
+      await store.close();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("indexes custom tool traces appended to a Codex session", async () => {
     const store = createInMemoryStore();
     const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-recall-v2-codex-custom-tail-"));

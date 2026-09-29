@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   CodexIncrementalState,
   IndexedSession,
+  LoadedSession,
   IndexedSessionFileState,
   ProjectQueryOptions,
   ProjectSummary,
@@ -685,6 +686,49 @@ export class PostgresSessionRepository {
     private readonly database: PostgresDatabase,
     private readonly attachmentCacheRoot: string | null = null,
   ) {}
+
+  async appendIndexedMessages(loaded: LoadedSession): Promise<void> {
+    const { session, messageAppend, codexIncrementalState } = loaded;
+    if (!messageAppend || !loaded.messages.length) throw new Error("Missing message append checkpoint");
+    const messages = loaded.messages.map((message) => postgresJsonValue({
+      ...message, content: postgresText(message.content),
+    }));
+    const timeline = deriveSessionTimeline({ sessionKey: session.sessionKey, messages, codexIncrementalState });
+    const turns = timeline.turns.map((turn) => {
+      const indexed = { ...turn, turnIndex: turn.turnIndex + messageAppend.turnIndex };
+      return { ...indexed, indexFingerprint: createHash("sha256").update(JSON.stringify(indexed)).digest("hex") };
+    });
+    const events = timeline.rawEvents.map((event) => {
+      const indexed = { ...event, eventIndex: event.eventIndex + messageAppend.rawEventIndex };
+      return { ...indexed, indexFingerprint: createHash("sha256").update(JSON.stringify(indexed)).digest("hex") };
+    });
+    await this.database.transaction(async (client) => {
+      // Lock and compare before touching any derived rows. Concurrent reindexing
+      // must not publish a suffix built from a different committed file cursor.
+      const previous = await client.query<{ content_indexed_size: number | string; content_indexed_mtime_ms: number | string }>(
+        "select content_indexed_size, content_indexed_mtime_ms from agent_recall.sessions where session_key = $1 for update", [session.sessionKey]);
+      if (!previous.rows[0] || numberValue(previous.rows[0].content_indexed_size) !== messageAppend.expectedSize
+        || numberValue(previous.rows[0].content_indexed_mtime_ms) !== messageAppend.expectedMtimeMs) {
+        throw new Error("Session changed while indexing; retry the update");
+      }
+      await client.query("delete from agent_recall.session_turns where session_key = $1 and turn_index >= $2",
+        [session.sessionKey, messageAppend.turnIndex]);
+      await insertTurns(client, session.sessionKey, turns);
+      await insertRawEvents(client, session.sessionKey, events);
+      await client.query(`insert into agent_recall.session_message_events (session_key, message_index, occurred_at)
+        select $1, message_index, occurred_at from jsonb_to_recordset($2::jsonb)
+          as records(message_index integer, occurred_at timestamptz)
+        on conflict (session_key, message_index) do update set occurred_at = excluded.occurred_at
+        where session_message_events.occurred_at is distinct from excluded.occurred_at`,
+      [session.sessionKey, JSON.stringify(messages.map((message) => ({ message_index: message.index, occurred_at: message.timestamp })))]);
+      await client.query(`update agent_recall.sessions set
+        file_mtime_ms = $2, file_size = $3, content_indexed_mtime_ms = $2, content_indexed_size = $3,
+        message_count = $4, turn_count = $5, original_title = $6, started_at = $7,
+        indexed_at = now(), source_available = true where session_key = $1`,
+      [session.sessionKey, session.fileMtimeMs, session.fileSize, messages.at(-1)!.index + 1,
+        messageAppend.turnIndex + turns.length, postgresText(session.originalTitle), new Date(session.timestamp).toISOString()]);
+    });
+  }
 
   async upsertIndexedSession(
     session: IndexedSession,
