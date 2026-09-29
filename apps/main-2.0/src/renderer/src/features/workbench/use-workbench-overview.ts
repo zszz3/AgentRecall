@@ -3,7 +3,6 @@ import { LIVE_SESSION_REFRESH_INTERVAL_MS, QUOTA_REFRESH_INTERVAL_MS } from "../
 import type {
   LiveSessionSnapshot,
   SessionSearchResult,
-  SessionOriginFilter,
   SessionStats,
   SessionStatsPeriod,
   UsageQuotaSnapshot,
@@ -49,7 +48,6 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
   const [sessions, setSessions] = useState<SessionSearchResult[]>([]);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
   const [statsPeriod, setStatsPeriod] = useState<SessionStatsPeriod>("today");
-  const [statsOrigin, setStatsOrigin] = useState<SessionOriginFilter>("ordinary");
   const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [statsFeedback, setStatsFeedback] = useState<StatsFeedback>(null);
   const [quotas, setQuotas] = useState<UsageQuotaSnapshot>(EMPTY_QUOTAS);
@@ -111,7 +109,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
         source: "all",
         visibility: "default",
         sortBy: "smart",
-        origin: statsOrigin,
+        origin: "all",
         limit: WORKBENCH_SESSION_LIMIT,
       });
       if (alive.current && enabledRef.current && requestId === sessionsLoadSequence.current) setSessions(page.sessions);
@@ -123,7 +121,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
       source: "all",
       visibility: "default",
       sortBy: "activity",
-      origin: statsOrigin,
+      origin: "all",
       liveStatus: liveDetectionFailed ? undefined : "closed",
       liveSessionKeys: liveDetectionFailed ? [] : liveSearchKeys,
       limit: WORKBENCH_SESSION_LIMIT,
@@ -134,7 +132,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
           source: "all",
           visibility: "default",
           sortBy: "activity",
-          origin: statsOrigin,
+          origin: "all",
           liveStatus: "open",
           liveSessionKeys: liveSearchKeys,
           limit: WORKBENCH_SESSION_LIMIT,
@@ -148,16 +146,16 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
       sessionsByKey.set(session.sessionKey, session);
     }
     setSessions([...sessionsByKey.values()]);
-  }, [liveDetectionFailed, liveSearchKeys, query, statsOrigin]);
+  }, [liveDetectionFailed, liveSearchKeys, query]);
 
   const loadStats = useCallback(async (fresh = false): Promise<void> => {
     if (!enabledRef.current || !alive.current) return;
     const requestId = ++statsLoadSequence.current;
-    const key = `${statsPeriod}:${statsOrigin}`;
+    const key = statsPeriod;
     // A completed index/mutation must not reuse a query started before it.
     if (fresh || statsPending.current?.key !== key) {
       const request = Promise.resolve().then(() => window.sessionSearch.getStats({
-        period: statsPeriod, origin: statsOrigin, dailyHistoryDays: 90,
+        period: statsPeriod, origin: "all", dailyHistoryDays: 90,
       })).finally(() => {
         if (statsPending.current?.request === request) statsPending.current = null;
       });
@@ -165,7 +163,7 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
     }
     const nextStats = await statsPending.current.request;
     if (alive.current && enabledRef.current && requestId === statsLoadSequence.current) setStats(nextStats);
-  }, [statsOrigin, statsPeriod]);
+  }, [statsPeriod]);
 
   const refreshStats = useCallback(async (): Promise<void> => {
     if (!enabledRef.current || !alive.current) return;
@@ -291,8 +289,6 @@ export function useWorkbenchOverview(language: LanguageMode, active: boolean) {
     stats,
     statsPeriod,
     setStatsPeriod,
-    statsOrigin,
-    setStatsOrigin,
     statsRefreshing,
     statsFeedback,
     quotas,

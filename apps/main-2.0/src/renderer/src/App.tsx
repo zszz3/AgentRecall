@@ -298,8 +298,6 @@ export function App(): ReactElement {
     stats,
     statsPeriod,
     setStatsPeriod,
-    statsOrigin,
-    setStatsOrigin,
     statsRefreshing,
     statsFeedback,
     quotas,
@@ -1793,7 +1791,6 @@ export function App(): ReactElement {
             <WorkbenchPage
               stats={stats}
               statsPeriod={statsPeriod}
-              statsOrigin={statsOrigin}
               statsRefreshing={statsRefreshing}
               statsFeedback={statsFeedback}
               quotas={quotas}
@@ -1806,7 +1803,6 @@ export function App(): ReactElement {
               platform={RUNTIME_PLATFORM}
               language={language}
               onStatsPeriodChange={setStatsPeriod}
-              onStatsOriginChange={setStatsOrigin}
               onRefreshStats={() => void refreshStats()}
               onRefreshQuotas={() => void loadQuotas("manual")}
               onOpenSettings={() => { setSettingsInitialSection("usage"); setSettingsOpen(true); }}
