@@ -56,6 +56,7 @@ import type {
   EnvironmentSyncState,
   EnvironmentUpsertInput,
   IndexedSession,
+  LoadedSession,
   IndexedSessionFileState,
   ProjectQueryOptions,
   ProjectSummary,
@@ -184,6 +185,16 @@ export class SessionStore {
       sanitizedTraceEvents,
       codexIncrementalState,
     );
+  }
+
+  async getCodexMessageTail(sessionKey: string, expectedSize: number) {
+    await this.ready;
+    return this.turns.getCodexMessageTail(sessionKey, expectedSize);
+  }
+
+  async appendIndexedMessages(loaded: LoadedSession): Promise<void> {
+    await this.ready;
+    await this.sessions.appendIndexedMessages(loaded);
   }
 
   async isIndexedSessionFresh(session: IndexedSession): Promise<boolean> {

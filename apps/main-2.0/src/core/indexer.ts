@@ -212,13 +212,17 @@ export async function syncLoadedSessionsInBatches(
           await store.touchIndexedAtIfMissing(item.session.sessionKey);
           skipped++;
         } else {
-          await store.upsertIndexedSession(
-            item.session,
-            item.messages,
-            item.tokenEvents,
-            item.traceEvents,
-            item.codexIncrementalState,
-          );
+          if (item.messageAppend) {
+            await store.appendIndexedMessages(item);
+          } else {
+            await store.upsertIndexedSession(
+              item.session,
+              item.messages,
+              item.tokenEvents,
+              item.traceEvents,
+              item.codexIncrementalState,
+            );
+          }
           indexed++;
         }
         options.failureState?.recovered(loadedItem.session.sessionKey);
@@ -358,6 +362,8 @@ export async function syncDefaultSessionsInBatches(
       if (!previous) return undefined;
       const session = await store.getSession(previous.sessionKey);
       if (!session) return undefined;
+      const tail = session.firstQuestion ? await store.getCodexMessageTail(previous.sessionKey, previous.offset) : null;
+      if (tail) return { offset: previous.offset, loaded: { session, ...tail } };
       const messages = await store.getAllMessages(previous.sessionKey);
       const tokenEvents = await store.getTokenEvents(previous.sessionKey);
       const traceEvents = await store.getTraceEvents(previous.sessionKey);

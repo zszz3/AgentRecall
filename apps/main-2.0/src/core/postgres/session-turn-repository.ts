@@ -1,5 +1,6 @@
 import type {
   CodexIncrementalState,
+  LoadedSession,
   SessionAttachment,
   SessionMessage,
   SessionTraceEvent,
@@ -207,6 +208,65 @@ export class PostgresSessionTurnRepository {
         ...(attachments ? { attachments } : {}),
       };
     });
+  }
+
+  async getCodexMessageTail(sessionKey: string, expectedSize: number): Promise<Pick<LoadedSession, "messages" | "codexIncrementalState" | "messageAppend"> | null> {
+    // Both lookups use session-local ordered indexes. No OFFSET or history scan.
+    const result = await this.database.query<{
+      id: string; turn_index: number; source_message_index: number;
+      message_count: number; event_index: number; content_indexed_mtime_ms: number | string;
+    }>(`
+      select turns.id, turns.turn_index, turns.source_message_index,
+        sessions.message_count, events.event_index, sessions.content_indexed_mtime_ms
+      from agent_recall.sessions sessions
+      join lateral (
+        select id, turn_index, source_message_index from agent_recall.session_turns
+        where session_key = sessions.session_key order by turn_index desc limit 1
+      ) turns on true
+      join lateral (
+        select event_index from agent_recall.session_raw_events
+        where session_key = sessions.session_key order by event_index desc limit 1
+      ) events on true
+      where sessions.session_key = $1 and sessions.content_indexed_size = $2
+        and sessions.codex_history_mode = 'legacy'
+        and events.event_index + 1 = sessions.message_count
+    `, [sessionKey, expectedSize]);
+    const tail = result.rows[0];
+    if (!tail || tail.source_message_index === null) return null;
+    const rows = await this.database.query<{
+      role: SessionMessage["role"]; content: string; occurred_at: Date | string;
+      source_message_index: number; metadata: Record<string, unknown> | string;
+    }>(`select role, content, occurred_at, source_message_index, metadata
+      from agent_recall.turn_messages where turn_id = $1 order by source_message_index`, [tail.id]);
+    const messages: SessionMessage[] = [];
+    const messageProvenance: CodexIncrementalState["messageProvenance"] = [];
+    let timestamp = -Infinity;
+    for (const row of rows.rows) {
+      const metadata = jsonValue(row.metadata);
+      const occurredAt = isoValue(row.occurred_at);
+      const nextTimestamp = Date.parse(occurredAt);
+      if (metadata.sourceTurnId || attachmentsFromMetadata(row.metadata)
+        || !Number.isFinite(nextTimestamp) || nextTimestamp < timestamp) return null;
+      timestamp = nextTimestamp;
+      const index = numberValue(row.source_message_index);
+      if (index !== numberValue(tail.source_message_index) + messages.length) return null;
+      messages.push({ role: row.role, content: row.content, timestamp: occurredAt, index, ...messageFieldsFromMetadata(row.metadata) });
+      const codex = jsonValue(metadata.codex);
+      messageProvenance.push({ messageIndex: index, sourceRecordId: typeof codex.sourceItemId === "string" ? codex.sourceItemId : null });
+    }
+    if (!messages.length || messages.at(-1)!.index + 1 !== numberValue(tail.message_count)) return null;
+    // Verify that raw chronological ordering matches the message suffix as well.
+    const raw = await this.database.query<{ payload: Record<string, unknown> | string; kind: string }>(`
+      select payload, kind from agent_recall.session_raw_events
+      where session_key = $1 and event_index >= $2 order by event_index
+    `, [sessionKey, messages[0].index]);
+    if (raw.rows.length !== messages.length || raw.rows.some((row, index) =>
+      row.kind !== "message" || jsonValue(row.payload).sourceMessageIndex !== messages[index].index)) return null;
+    return {
+      messages,
+      codexIncrementalState: { historyMode: "legacy", activeTurnIds: [], messageProvenance },
+      messageAppend: { expectedSize, expectedMtimeMs: numberValue(tail.content_indexed_mtime_ms), turnIndex: numberValue(tail.turn_index), rawEventIndex: messages[0].index },
+    };
   }
 
   async getAllMessages(sessionKey: string): Promise<SessionMessage[]> {
