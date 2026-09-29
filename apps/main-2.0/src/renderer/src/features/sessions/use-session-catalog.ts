@@ -20,6 +20,7 @@ import {
   filterSessionsByLiveStatus,
   type LiveStatusFilter,
 } from "../../live-filter";
+import { createLatestTaskQueue } from "../../latest-task-queue";
 import { resolveSearchScope } from "../search/search-scope";
 
 export type SessionVisibility = "default" | "favorites" | "hidden";
@@ -74,6 +75,10 @@ export function useSessionCatalog({
   const [resultsScopeKey, setResultsScopeKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const loadSeqRef = useRef(0);
+  const [searchQueue] = useState(() => createLatestTaskQueue<void>());
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  useEffect(() => () => { loadSeqRef.current++; }, []);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const liveSessionKeys = useMemo(
@@ -152,36 +157,42 @@ export function useSessionCatalog({
       liveStatus: liveStatus === "all" ? undefined : liveStatus,
       liveSessionKeys: liveDetectionFailed ? [] : liveSearchKeys,
     };
-    const page = searchScope.projectEnvironmentConflict
-      ? {
-          sessions: [],
-          totalCount: 0,
-          hasMore: false,
-          originCounts: { ordinary: 0, agentRecall: 0, all: 0 },
-          invocationSurfaceCounts: EMPTY_INVOCATION_SURFACE_COUNTS,
-        }
-      : await window.sessionSearch.searchSessionPage(options);
-    if (requestId !== loadSeqRef.current) return;
-    const lastPage = Math.max(1, Math.ceil(page.totalCount / SESSION_PAGE_SIZE));
-    if (sessionPage > lastPage) {
-      setPagination({ scopeKey: requestScopeKey, page: lastPage });
-      return;
-    }
+    return searchQueue.request(async () => {
+      // Only one database search runs at a time. Superseded queued work and
+      // requests whose page has closed must not start or publish a result.
+      if (!activeRef.current || requestId !== loadSeqRef.current) return;
+      const page = searchScope.projectEnvironmentConflict
+        ? {
+            sessions: [],
+            totalCount: 0,
+            hasMore: false,
+            originCounts: { ordinary: 0, agentRecall: 0, all: 0 },
+            invocationSurfaceCounts: EMPTY_INVOCATION_SURFACE_COUNTS,
+          }
+        : await window.sessionSearch.searchSessionPage(options);
+      if (!activeRef.current || requestId !== loadSeqRef.current) return;
+      const lastPage = Math.max(1, Math.ceil(page.totalCount / SESSION_PAGE_SIZE));
+      if (sessionPage > lastPage) {
+        setPagination({ scopeKey: requestScopeKey, page: lastPage });
+        return;
+      }
 
-    startTransition(() => {
-      setResults(page.sessions);
-      setResultsScopeKey(requestScopeKey);
-      setSessionTotalCount(page.totalCount);
-      setOriginCounts(page.originCounts ?? { ordinary: page.totalCount, agentRecall: 0, all: page.totalCount });
-      setInvocationSurfaceCounts(page.invocationSurfaceCounts ?? EMPTY_INVOCATION_SURFACE_COUNTS);
-      setSelectedKey((current) =>
-        current &&
-        !page.sessions.some((session) => session.sessionKey === current)
-          ? null
-          : current,
-      );
+      startTransition(() => {
+        setResults(page.sessions);
+        setResultsScopeKey(requestScopeKey);
+        setSessionTotalCount(page.totalCount);
+        setOriginCounts(page.originCounts ?? { ordinary: page.totalCount, agentRecall: 0, all: page.totalCount });
+        setInvocationSurfaceCounts(page.invocationSurfaceCounts ?? EMPTY_INVOCATION_SURFACE_COUNTS);
+        setSelectedKey((current) =>
+          current &&
+          !page.sessions.some((session) => session.sessionKey === current)
+            ? null
+            : current,
+        );
+      });
     });
   }, [
+    searchQueue,
     query,
     source,
     origin,
