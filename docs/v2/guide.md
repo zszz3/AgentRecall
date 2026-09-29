@@ -112,7 +112,7 @@ dsh --version
 
 工作台集中显示当前设备上的主要状态：
 
-- 会话数、消息数、Token 用量、缓存率和来源分布。
+- 会话数、消息数和总 Token 用量；不再展示输入、缓存、输出与推理的拆分统计或缓存率。
 - Claude Code、Codex 的额度。
 - 最近会话和 Workflow。
 - Runtime、MCP、Memory 和 Skills 的当前状态。

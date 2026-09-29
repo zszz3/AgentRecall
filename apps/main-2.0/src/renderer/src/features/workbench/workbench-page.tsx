@@ -48,10 +48,9 @@ import {
   isRemoteSession,
   selectWorkbenchSessions,
   sourceUiFamily,
+  usageStatsDisplayRows,
   statsPeriodLabel,
   supportsResumeSource,
-  usageCacheRate,
-  usageStatsDisplayRows,
   localizedLiveStateLabel,
   WORKBENCH_SESSION_LIMIT,
 } from "../../session-ui";
@@ -209,16 +208,7 @@ export function WorkbenchPage({
   onShowSkills,
 }: WorkbenchPageProps): ReactElement {
   const l = (en: string, zh: string) => localize(language, en, zh);
-  const cacheRate = usageCacheRate(stats.total);
   const sourceRows = usageStatsDisplayRows(stats.bySource);
-  const tokenParts = [
-    { key: "input", label: l("Input", "输入"), value: stats.total.inputTokens },
-    { key: "cache-read", label: l("Cache read", "缓存读取"), value: stats.total.cachedInputTokens },
-    { key: "cache-write", label: l("Cache write", "缓存写入"), value: stats.total.cacheCreationInputTokens ?? 0 },
-    { key: "output", label: l("Output", "输出"), value: stats.total.outputTokens },
-    { key: "reasoning", label: l("Reasoning", "推理"), value: stats.total.reasoningOutputTokens },
-  ];
-  const tokenPartTotal = tokenParts.reduce((total, part) => total + Math.max(0, part.value), 0);
   const visibleSessions = sessionQuery.trim()
     ? sessions.slice(0, WORKBENCH_SESSION_LIMIT)
     : selectWorkbenchSessions(sessions, liveSessionKeys, liveDetectionFailed);
@@ -353,36 +343,13 @@ export function WorkbenchPage({
             <UsageMetric value={formatCompactNumber(stats.total.sessionCount)} label={l("Sessions", "会话")} />
             <UsageMetric value={formatCompactNumber(stats.total.messageCount)} label={l("Messages", "消息")} />
             <UsageMetric value={formatTokenCount(stats.total.totalTokens)} label="Token" />
-            <UsageMetric value={cacheRate == null ? "—" : `${cacheRate}%`} label={l("Cache rate", "缓存率")} />
           </div>
-          <div className="workbench-usage-detail">
-            <div className="workbench-token-composition">
-              <div className="workbench-detail-title">
-                <strong>{l("Token composition", "Token 构成")}</strong>
-                <span>{cacheRate == null
-                  ? l("No input token data", "暂无输入 Token 数据")
-                  : l(`Cache hits cover ${cacheRate}% of input`, `缓存命中占输入 ${cacheRate}%`)}</span>
+          <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
+            {sourceRows.length > 0 ? sourceRows.map((row) => (
+              <div key={row.key} className="workbench-source-row" data-source={row.key}>
+                <span><i />{row.label}</span><strong>{formatTokenCount(row.totalTokens)}</strong>
               </div>
-              <div className="workbench-token-track" aria-hidden="true">
-                {tokenParts.map((part) => (
-                  <i
-                    key={part.key}
-                    className={part.key}
-                    style={{ width: tokenPartTotal > 0 ? `${(Math.max(0, part.value) / tokenPartTotal) * 100}%` : "0%" } as CSSProperties}
-                  />
-                ))}
-              </div>
-              <div className="workbench-token-legend">
-                {tokenParts.map((part) => <span key={part.key} className={part.key}><i /><span>{part.label}</span><strong>{formatTokenCount(part.value)}</strong></span>)}
-              </div>
-            </div>
-            <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>
-              {sourceRows.length > 0 ? sourceRows.map((row) => (
-                <div key={row.key} className="workbench-source-row" data-source={row.key}>
-                  <span><i />{row.label}</span><strong>{formatTokenCount(row.totalTokens)}</strong>
-                </div>
-              )) : <span className="workbench-source-empty">{l("No source data", "暂无来源数据")}</span>}
-            </div>
+            )) : <span className="workbench-source-empty">{l("No source data", "暂无来源数据")}</span>}
           </div>
           {statsFeedback ? <p className={`workbench-feedback ${statsFeedback.kind}`}>{statsFeedback.message}</p> : null}
         </div>

@@ -26,6 +26,9 @@ describe("workbench overview and work entries", () => {
     expect(html).toContain('aria-label="Continue work"');
     expect(html).toContain("Workflow needs attention");
     expect(html).toContain("Refresh usage");
+    expect(html).not.toContain("Token composition");
+    expect(html).not.toContain("Cache rate");
+    expect(html).toContain('aria-label="Token usage by Agent"');
     expect(html).not.toContain('aria-label="Session origin"');
     expect(html).toContain("Refresh model quotas");
     props.quotas.providers = [{ provider: "codex", displayName: "Codex", status: "not_configured", quotas: [], detail: "Existing quota guidance" }];

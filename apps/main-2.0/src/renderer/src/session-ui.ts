@@ -105,17 +105,6 @@ export function formatUsageDelta(delta: UsageDelta): string {
   return `${delta.kind === "up" ? "+" : "-"}${delta.percent ?? 0}%`;
 }
 
-export function usageCacheRate(
-  value: Pick<SessionStatsSummary, "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens">,
-): number | null {
-  const inputTokens = Math.max(0, value.inputTokens);
-  const cachedInputTokens = Math.max(0, value.cachedInputTokens);
-  const cacheCreationInputTokens = Math.max(0, value.cacheCreationInputTokens ?? 0);
-  const totalInputTokens = inputTokens + cacheCreationInputTokens + cachedInputTokens;
-  if (totalInputTokens === 0) return null;
-  return Math.round((cachedInputTokens / totalInputTokens) * 1_000) / 10;
-}
-
 export const WORKBENCH_SESSION_LIMIT = 30;
 
 export function selectWorkbenchSessions<
