@@ -373,7 +373,7 @@ export function WorkbenchPage({
                 ))}
               </div>
               <div className="workbench-token-legend">
-                {tokenParts.map((part) => <span key={part.key} className={part.key}><i />{part.label} {formatTokenCount(part.value)}</span>)}
+                {tokenParts.map((part) => <span key={part.key} className={part.key}><i /><span>{part.label}</span><strong>{formatTokenCount(part.value)}</strong></span>)}
               </div>
             </div>
             <div className="workbench-source-usage" aria-label={l("Token usage by Agent", "按 Agent 查看 Token 用量")}>

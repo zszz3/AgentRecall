@@ -459,8 +459,8 @@
 .workbench-usage-detail {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1.45fr) minmax(118px, .65fr);
-  gap: 15px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   margin-top: 0;
   padding: 10px 0 0;
   border-top: 1px solid var(--border-subtle);
@@ -524,23 +524,28 @@
 .workbench-token-legend .reasoning > i { background: var(--claude); }
 
 .workbench-token-legend {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
-  align-items: center;
-  gap: var(--space-1) var(--space-2);
-  margin-top: 6px;
+  gap: 10px 12px;
+  margin-top: 10px;
   color: var(--text-muted);
-  font-family: var(--mono);
   font-size: var(--text-xs);
-  white-space: nowrap;
 }
 
 .workbench-token-legend > span {
-  display: inline-flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: 5px minmax(0, 1fr);
   align-items: center;
-  gap: 3px;
+  gap: 4px 5px;
+}
+
+.workbench-token-legend strong {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-weight: 550;
 }
 
 .workbench-token-legend i {
