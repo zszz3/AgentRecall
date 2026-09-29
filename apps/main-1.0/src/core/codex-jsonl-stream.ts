@@ -80,11 +80,16 @@ export function scanCompleteJsonl(
         }
         const text = normalized.toString("utf8");
         if (text.trim()) {
+          let record: unknown;
           try {
-            options.onRecord(JSON.parse(text) as unknown);
+            record = JSON.parse(text) as unknown;
           } catch {
             malformedLines += 1;
+            committedOffset = position + newline + 1;
+            lineStart = newline + 1;
+            continue;
           }
+          options.onRecord(record);
         }
         committedOffset = position + newline + 1;
         lineStart = newline + 1;
@@ -99,11 +104,17 @@ export function scanCompleteJsonl(
       } else {
         const line = pending.toString("utf8").trim();
         if (line) {
+          let record: unknown;
+          let complete = false;
           try {
-            options.onRecord(JSON.parse(line) as unknown);
-            committedOffset = fileSize;
+            record = JSON.parse(line) as unknown;
+            complete = true;
           } catch {
             // Leave an incomplete final JSON value behind the committed cursor.
+          }
+          if (complete) {
+            options.onRecord(record);
+            committedOffset = fileSize;
           }
         }
       }
@@ -155,11 +166,15 @@ export async function scanCompleteJsonlAsync(
     }
     const text = normalized.toString("utf8");
     if (text.trim()) {
+      let record: unknown;
       try {
-        options.onRecord(JSON.parse(text) as unknown);
+        record = JSON.parse(text) as unknown;
       } catch {
         malformedLines += 1;
+        committedOffset = nextOffset;
+        return;
       }
+      options.onRecord(record);
     }
     committedOffset = nextOffset;
   };
@@ -218,11 +233,17 @@ export async function scanCompleteJsonlAsync(
       } else {
         const line = pending.toString("utf8").trim();
         if (line) {
+          let record: unknown;
+          let complete = false;
           try {
-            options.onRecord(JSON.parse(line) as unknown);
-            committedOffset = fileSize;
+            record = JSON.parse(line) as unknown;
+            complete = true;
           } catch {
             // Leave an incomplete final JSON value behind the committed cursor.
+          }
+          if (complete) {
+            options.onRecord(record);
+            committedOffset = fileSize;
           }
         }
       }

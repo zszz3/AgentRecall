@@ -268,14 +268,16 @@ export function parseJsonlText(content: string): unknown[] {
 }
 
 function readJsonl(filePath: string): unknown[] {
-  let content: string;
+  const rows: unknown[] = [];
   try {
-    content = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return [];
+    scanCompleteJsonl(filePath, { onRecord: (row) => { rows.push(row); } });
+  } catch (error) {
+    // Discovery races with agent cleanup; a disappeared source is retried by
+    // the next scan. Other failures must not look like an empty transcript.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
   }
-
-  return parseJsonlText(content);
+  return rows;
 }
 
 function extractMessages(rows: unknown[], format: SessionFormat): SessionMessage[] {
