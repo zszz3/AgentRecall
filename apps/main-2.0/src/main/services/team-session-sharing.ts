@@ -265,7 +265,21 @@ export class TeamSessionSharing {
     if (pending.expiresAt <= Date.now() || this.previews.get(token) !== pending) throw new WorkspaceError("TEAM_PREVIEW_EXPIRED", "分享预览已过期，请重新预览。");
     const title = pending.content.root.session.displayTitle || pending.content.root.session.originalTitle || "未命名会话";
     const result = await this.remote.uploadBlocks(context.repository, this.project(context), pending.content.selectedTurns ? `${title} · ${pending.content.selectedTurns.length} 个轮次` : title, pending.data, pending.bundle, signal);
-    clearTimeout(pending.timer); this.previews.delete(token); return result;
+    clearTimeout(pending.timer); this.previews.delete(token);
+    // Remote publication is irreversible here. Never retry an upload because local indexing failed.
+    let localReady = false;
+    if (this.dependencies.cache) {
+      try {
+        const contexts = context.teamWide ? [context] : [context, { ...context, teamWide: true }];
+        for (const target of contexts) await this.dependencies.cache.import(this.cacheKey(target, result.id, result.digest), pending.content, signal,
+          { repository: target.repository, assetId: result.id, digest: result.digest }, { scope: this.catalogScope(target), item: result });
+        localReady = true;
+      } catch {
+        // The remote share is already published; Pull can rebuild its local copy without publishing again.
+        localReady = false;
+      }
+    }
+    return { ...result, localReady };
   }
   private catalogScope(context: TeamSessionContext): string { return JSON.stringify([context.repository, context.teamWide ? null : context.projectIdentity]); }
   list(context: TeamSessionContext, page: number, _signal: AbortSignal, query?: string, mode?: "sessions" | "turns", includeTools?: boolean) {

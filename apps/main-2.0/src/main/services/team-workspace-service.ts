@@ -225,7 +225,10 @@ export class TeamWorkspaceService {
         }
         case "session-turns": return { kind: "session-turns", value: await sharing.turns(context, request.id, request.digest, request.record, request.offset) };
         case "session-turn": return { kind: "session-turn", value: await sharing.turn(context, request.id, request.digest, request.record, request.turnId) };
-        case "session-publish": return await sharing.publish(owner, context, request.token, signal, assertContext) ? complete("会话已分享到团队。本地原会话保留。") : { kind: "cancelled" };
+        case "session-publish": {
+          const published = await sharing.publish(owner, context, request.token, signal, assertContext);
+          return published ? complete(published.localReady ? "会话已分享到团队，可在本地共享会话中阅读与搜索。" : "会话已上传，本地整理未完成；请 Pull 恢复，无需重新上传。") : { kind: "cancelled" };
+        }
         case "session-download": return await sharing.download(owner, context, request.id, signal) ? complete("完整会话包已保存。") : { kind: "cancelled" };
         case "session-withdraw": return await sharing.withdraw(owner, context, request.id, signal, assertContext) ? complete("分享已撤回。本地原会话保留。") : { kind: "cancelled" };
       }

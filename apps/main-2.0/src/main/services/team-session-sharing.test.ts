@@ -274,3 +274,24 @@ it("only Pull reads the remote catalog; restart, listing and search remain offli
     expect((await sharing.list(f.context, 1, f.signal)).items).toHaveLength(1);
   } finally { await db.close(); }
 });
+
+it("publishes its retained snapshot to the local team catalog without downloading and preserves remote success on local failure", async () => {
+  const f = await fixture();
+  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS }); await db.initialize();
+  try {
+    const cache = new PostgresTeamSessionRepository(db);
+    const sharing = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote); services.push(sharing);
+    const download = vi.spyOn(f.remote, "download");
+    const preview = await sharing.prepare(1, f.context, f.session.sessionKey, f.signal);
+    expect(await sharing.publish(1, f.context, preview.token, f.signal, async () => undefined)).toMatchObject({ id: 17, localReady: true });
+    const team = { ...f.context, teamWide: true };
+    expect((await sharing.list(team, 1, f.signal)).items).toHaveLength(1);
+    expect((await sharing.list(team, 1, f.signal, "完整会话", "turns")).items.length).toBeGreaterThan(0);
+    expect(await sharing.cached(team, 17, "a".repeat(64))).not.toBeNull();
+    expect(download).not.toHaveBeenCalled();
+    const next = await sharing.prepare(1, f.context, f.session.sessionKey, f.signal);
+    vi.spyOn(cache, "import").mockRejectedValue(new Error("disk unavailable"));
+    expect(await sharing.publish(1, f.context, next.token, f.signal, async () => undefined)).toMatchObject({ id: 17, localReady: false });
+    await expect(sharing.publish(1, f.context, next.token, f.signal, async () => undefined)).rejects.toMatchObject({ code: "TEAM_PREVIEW_EXPIRED" });
+  } finally { await db.close(); }
+});

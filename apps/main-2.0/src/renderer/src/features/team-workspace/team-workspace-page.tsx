@@ -52,7 +52,7 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
     {pushNotice && <p role="status" className="team-workspace-notice">{pushNotice}</p>}
     {pushing && <TeamPushDialog selection={selection} directories={directories} drafts={[...drafts, ...configurationDrafts]} language={language} api={api} onClose={() => setPushing(false)} onBusy={setEditingBusy} onPublished={keys => {
       setConfigurationDrafts(previous => previous.filter(item => !keys.includes(item.item.key))); onPushed?.(keys); setRefreshKey(value => value + 1);
-      if (keys.length) setPushNotice(l("Selected items processed. Pull to apply team resources locally.", "所选项已处理，Pull 拉取后更新本地团队资源。"));
+      if (keys.length) setPushNotice(l("Selected items processed. See the individual results.", "所选项已处理，请查看各项上传结果。"));
     }} />}
     <div className="team-resource-toolbar">
     <div className="team-space-tabs" role="group" aria-label={l("Team resources", "团队资源")}>

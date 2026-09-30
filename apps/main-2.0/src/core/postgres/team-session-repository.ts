@@ -73,7 +73,7 @@ export class PostgresTeamSessionRepository {
       source: row.sources?.[sessionKey(key, index)] ?? record.source })) };
   }
 
-  async import(key: string, content: TeamSessionContent, signal: AbortSignal, origin: { repository: string; assetId: number; digest: string }): Promise<TeamSessionSnapshot> {
+  async import(key: string, content: TeamSessionContent, signal: AbortSignal, origin: { repository: string; assetId: number; digest: string }, catalog?: { scope: string; item: TeamSharedSession }): Promise<TeamSessionSnapshot> {
     const records = [content.root, ...content.children];
     const snapshot: TeamSessionSnapshot = { partial: Boolean(content.selectedTurns), bytes: content.bytes,
       files: content.files, missingAttachments: content.missingAttachments, records: [] };
@@ -130,6 +130,9 @@ export class PostgresTeamSessionRepository {
         snapshot.records.push({ source: record.session.source, sessionKey: record.session.sessionKey, title: record.session.displayTitle || record.session.originalTitle, turnCount: Number(count.rows[0].turn_count) });
       }
       await client.query("update agent_recall.team_session_snapshots set metadata = $2 where cache_key = $1", [key, JSON.stringify(snapshot)]);
+      if (catalog) await client.query(`insert into agent_recall.team_session_catalog (scope_key, asset_id, cache_key, item)
+        values ($1, $2, $3, $4) on conflict (scope_key, asset_id) do update set cache_key = excluded.cache_key, item = excluded.item`,
+        [catalog.scope, catalog.item.id, key, JSON.stringify(catalog.item)]);
       signal.throwIfAborted();
       return snapshot;
     });

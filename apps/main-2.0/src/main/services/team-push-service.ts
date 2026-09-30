@@ -150,8 +150,9 @@ export class TeamPushService {
         try {
           await assertCurrent();
           // The owning batch confirmation above authorizes only these retained, window-bound snapshots.
-          await this.sharing!.publish(owner, session.context, session.preview.token, signal, assertCurrent, async requester => requester === owner);
-          result.items.push(...session.keys.map(key => ({ key, status: "published" as const })));
+          const published = await this.sharing!.publish(owner, session.context, session.preview.token, signal, assertCurrent, async requester => requester === owner);
+          result.items.push(...session.keys.map(key => ({ key, status: "published" as const,
+            ...(published?.localReady === false ? { message: "会话已上传，本地整理未完成；请 Pull 恢复，无需重新上传。" } : {}) })));
         } catch (error) { result.items.push(...session.keys.map(key => ({ key, status: signal.aborted ? "cancelled" as const : "failed" as const, message: error instanceof WorkspaceError ? error.message : "会话推送未确认，请核对团队列表。" }))); }
       }
       return result;
