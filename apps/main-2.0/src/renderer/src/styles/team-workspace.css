@@ -3,20 +3,20 @@
 .team-space-page button:not(:where(.team-session-turns *)), .team-share-dialog button:not(:where(.team-session-turns *)) { font: inherit; cursor: pointer; }
 .team-space-page button:disabled, .team-share-dialog button:disabled { opacity: .4; cursor: not-allowed; }
 .team-space-page :is(button, select, input, summary):focus-visible, .team-share-dialog :is(button, select, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.team-space-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 28px 32px 22px; flex-shrink: 0; }
-.team-space-title { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.team-space-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 20px 8px; flex-shrink: 0; }
+.team-space-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .team-space-title > div { min-width: 0; }
-.team-space-heading h1 { margin: 0; font-size: 22px; line-height: 1.3; font-weight: 620; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.team-space-heading p { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.team-heading-icon, .team-avatar, .team-directory-icon { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 11px; background: var(--panel-subtle); color: var(--text-muted); }
+.team-space-heading h1 { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 600; letter-spacing: -.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.team-space-heading p { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.team-heading-icon, .team-avatar, .team-directory-icon { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; background: var(--panel-subtle); color: var(--text-muted); }
 .team-space-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .team-space-heading > .team-space-actions { flex-shrink: 0; flex-wrap: nowrap; }
 .team-space-project { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.team-space-tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 4px; margin: 0 32px 18px; border: 0; border-radius: 11px; background: var(--panel-subtle); align-self: flex-start; max-width: calc(100% - 64px); flex-shrink: 0; }
-.team-space-tabs button { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; white-space: nowrap; padding: 7px 12px; border-radius: 8px; border: 0; border: 0; background: transparent; color: var(--text-muted); font-size: 13px; }
+.team-space-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; margin: 0 20px 10px; border: 0; border-radius: 9px; background: var(--panel-subtle); align-self: flex-start; max-width: calc(100% - 40px); flex-shrink: 0; }
+.team-space-tabs button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; padding: 5px 10px; border-radius: 7px; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; }
 .team-space-tabs button:hover { color: var(--text); }
 .team-space-tabs button[aria-pressed=true] { color: var(--accent-bright); background: var(--surface-raised); box-shadow: var(--shadow-xs); font-weight: 550; }
-.team-workspace { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 24px 32px 40px; color: var(--text); display: flex; flex-direction: column; gap: 24px; }
+.team-workspace { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 16px 20px 32px; color: var(--text); display: flex; flex-direction: column; gap: 18px; }
 .team-workspace h2:not(:where(.team-session-turns *)), .team-workspace h3:not(:where(.team-session-turns *)), .team-workspace p:not(:where(.team-session-turns *)) { margin: 0; }
 .team-workspace h2:not(:where(.team-session-turns *)) { font-size: 18px; line-height: 1.4; font-weight: 600; letter-spacing: -.3px; }
 .team-workspace h3:not(:where(.team-session-turns *)) { font-size: 13px; font-weight: 600; }
@@ -124,13 +124,15 @@
 .team-share-dialog::backdrop { background: #0005; }
 .team-share-dialog > .team-workspace { height: auto; }
 @container team-space (max-width: 680px) {
-  .team-space-heading { padding: 22px 20px 16px; }
-  .team-space-heading h1 { font-size: 19px; }
-  .team-space-tabs { padding: 4px; margin: 0 20px 14px; gap: 2px; max-width: calc(100% - 40px); }
-  .team-workspace, .team-project-list { padding: 22px 20px; }
-  .team-local-destination { padding: 10px 20px; }
+  .team-space-heading { padding: 8px 14px 6px; }
+  .team-space-heading h1 { font-size: 14px; }
+  .team-space-tabs { padding: 3px; margin: 0 14px 8px; gap: 2px; max-width: calc(100% - 28px); }
+  .team-workspace, .team-project-list { padding: 14px 14px; }
+  .team-session-browser { padding: 0 14px 12px; }
+  .team-local-destination { padding: 8px 14px; }
   .team-local-destination label { flex-direction: column; align-items: flex-start; gap: 5px; }
   .team-local-destination select { width: min(340px, 60cqw); }
+  .team-sync-control { padding: 0 14px 8px; }
   .team-directory-row { flex-wrap: wrap; gap: 10px; }
   .team-directory-name { flex-basis: calc(100% - 54px); }
   .team-directory-clients { margin-left: 48px; margin-right: auto; }
@@ -162,8 +164,8 @@
   .team-document-reader.team-workspace { position: absolute; inset: 0; z-index: 4; border-left: 0; }
 }
 
-.team-sync-control { padding: 0 32px 18px; flex-shrink: 0; max-height: 38%; overflow: auto; }
-.team-sync-control-main { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.team-sync-control { padding: 0 20px 10px; flex-shrink: 0; max-height: 28%; overflow: auto; }
+.team-sync-control-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0 8px; border-bottom: 1px solid var(--border-subtle); }
 .team-sync-control-main strong { font-size: 12px; font-weight: 550; }
 .team-sync-control p { font-size: 12px; line-height: 1.6; color: var(--text-muted); margin: 4px 0 0; }
 .team-sync-control-main .team-space-actions { flex-shrink: 0; }
@@ -239,13 +241,11 @@
 @media (max-width: 720px) { .team-push-layout { grid-template-columns: 1fr; height: 65vh; grid-template-rows: 35% 65%; } .team-push-list { border-right: 0; border-bottom: 1px solid var(--border); } }
 
 /* Shared sessions use the same row, detail header and split controls as Sessions. */
-.team-session-browser { padding: 0 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; min-height: 560px; height: min(76vh, 1000px); min-width: 0; }
-.team-session-toolbar { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
-.team-session-toolbar > div { display: flex; align-items: baseline; gap: 10px; flex: 1; }
-.team-session-toolbar h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.team-session-toolbar > div > span { color: var(--text-muted); font-size: 12px; }
-.team-session-search { width: min(270px, 40%); flex: 0 1 270px; min-height: 32px; }
-.team-session-split { flex: 1; min-height: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; background: var(--panel-bg); }
+.team-session-browser { padding: 0 20px 16px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.team-session-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 0 10px; }
+.team-session-count { color: var(--text-muted); font-size: 11px; flex: 1; }
+.team-session-search { width: min(260px, 40%); flex: 0 1 260px; min-height: 30px; }
+.team-session-split { flex: 1; min-height: 0; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; overflow: hidden; background: var(--panel-bg); }
 .team-session-list-pane, .team-session-detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .team-session-list { flex: 1; overflow: auto; min-height: 0; }
 .team-session-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 12px 10px 12px 14px; }
@@ -270,10 +270,30 @@
 @keyframes team-session-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .team-session-spinner { animation: none; } }
 @media (max-width: 760px) { .team-session-toolbar { flex-wrap: wrap; } .team-session-search { flex: 1; width: auto; } .team-session-browser { height: 800px; } }
-.team-workspace .team-session-select { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
-.team-workspace .team-session-select:hover:not(:disabled) { background: transparent; }
-.team-workspace .team-session-search { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px; }
-.team-workspace .team-session-search input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; }
-.team-workspace .team-session-browser .icon-button { width: 30px; height: 30px; padding: 0; background: transparent; color: var(--text-muted); flex-shrink: 0; }
+/* session-select and session-search live inside .team-session-browser which is
+   a direct child of .team-space-project, NOT inside .team-workspace. Rules
+   scoped through .team-workspace miss them in production. */
+.team-session-browser .team-session-select { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
+.team-session-browser .team-session-select:hover:not(:disabled) { background: transparent; }
+.team-session-browser .team-session-search { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px; }
+.team-session-browser .team-session-search input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; }
+.team-session-browser .icon-button { width: 30px; height: 30px; padding: 0; background: transparent; color: var(--text-muted); flex-shrink: 0; }
 .team-session-reader-footer button { border: 0; padding: 4px 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .team-session-reader-footer button:hover { color: var(--danger); }
+
+/* Resource navigation and transfer actions form one compact toolbar. */
+.team-resource-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; padding: 0 20px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+.team-resource-toolbar .team-space-tabs { flex: 1; max-width: 100%; margin: 0; padding: 0; border-radius: 0; background: transparent; }
+.team-resource-toolbar .team-space-tabs button { padding: 10px 8px; border-radius: 0; font-size: 12px; border-bottom: 2px solid transparent; }
+.team-resource-toolbar .team-space-tabs button[aria-pressed=true] { box-shadow: none; background: transparent; border-bottom-color: var(--accent); }
+.team-resource-toolbar .team-sync-control { position: relative; display: flex; align-items: center; gap: 10px; padding: 0; max-height: none; overflow: visible; margin-left: auto; }
+.team-resource-toolbar .team-sync-control-main { padding: 0; border: 0; }
+.team-resource-toolbar .team-transfer-actions { border: 0; box-shadow: none; background: transparent; padding: 0; gap: 2px; }
+.team-resource-toolbar .team-transfer-actions > button { min-width: 52px; font-size: 12px; padding: 0 6px; }
+.team-resource-toolbar .team-sync-results { order: -1; margin: 0; font-size: 11px; }
+.team-resource-toolbar .team-sync-results summary { padding: 6px 0; white-space: nowrap; }
+.team-resource-toolbar .team-sync-result-popover { position: absolute; right: 0; top: calc(100% + 8px); z-index: 8; width: min(380px, 75cqw); max-height: 300px; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-bg); box-shadow: var(--shadow-xs); }
+.team-sync-result-popover > div { margin-top: 10px; }
+.team-sync-result-popover time { color: var(--text-muted); font-size: 11px; }
+.team-resource-toolbar .team-sync-control > .team-workspace-error { position: absolute; right: 0; top: calc(100% + 8px); z-index: 9; width: min(380px, 75cqw); }
+@container team-space (max-width: 850px) { .team-resource-toolbar { gap: 0; padding: 0 14px; } .team-resource-toolbar .team-space-tabs { flex-basis: 100%; } .team-resource-toolbar .team-sync-control { padding-bottom: 6px; } }

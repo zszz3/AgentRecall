@@ -49,12 +49,12 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
   const directories = (snapshot.directories ?? []).filter((entry) => entry.teamId === team.id);
   const selection = { team, enabled: Boolean(snapshot.config?.teamEnabled), busy: snapshot.busy || syncing || editingBusy };
   return <div className="team-space-project">
-    <TeamSyncControl team={team} pendingCount={drafts.length + configurationDrafts.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     {pushNotice && <p role="status" className="team-workspace-notice">{pushNotice}</p>}
     {pushing && <TeamPushDialog selection={selection} directories={directories} drafts={[...drafts, ...configurationDrafts]} language={language} api={api} onClose={() => setPushing(false)} onBusy={setEditingBusy} onPublished={keys => {
       setConfigurationDrafts(previous => previous.filter(item => !keys.includes(item.item.key))); onPushed?.(keys); setRefreshKey(value => value + 1);
       if (keys.length) setPushNotice(l("Selected items processed. Pull to apply team resources locally.", "所选项已处理，Pull 拉取后更新本地团队资源。"));
     }} />}
+    <div className="team-resource-toolbar">
     <div className="team-space-tabs" role="group" aria-label={l("Team resources", "团队资源")}>
       <button aria-pressed={tab === "sessions"} onClick={() => setTab("sessions")}><MessagesSquare size={16} />{l("Shared sessions", "共享会话")}</button>
       <button aria-pressed={tab === "skills"} onClick={() => setTab("skills")}><PackageSearch size={16} />Skills</button>
@@ -63,6 +63,8 @@ function TeamContent({ language, team, snapshot, api, onSnapshot, drafts, onPush
       <button aria-pressed={tab === "mcp"} onClick={() => setTab("mcp")}><Plug size={16} />MCP</button>
       <button aria-pressed={tab === "environment"} onClick={() => setTab("environment")}><SlidersHorizontal size={16} />Env</button>
       <button aria-pressed={tab === "directories"} onClick={() => setTab("directories")}><FolderOpen size={16} />{l("Working directories", "工作目录")}</button>
+    </div>
+    <TeamSyncControl team={team} pendingCount={drafts.length + configurationDrafts.length} enabled={selection.enabled} externalBusy={snapshot.busy || editingBusy || pushing} language={language} api={api} onBusy={setSyncing} onPush={() => setPushing(true)} onSynced={() => setRefreshKey((value) => value + 1)} />
     </div>
     {tab === "sessions" ? <TeamSessionsPanel selection={selection} language={language} api={api} /> : tab === "skills" ? <TeamAssetsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : tab === "documents" ? <TeamDocumentsPanel selection={selection} refreshKey={refreshKey} language={language} api={api} /> : (tab === "instructions" || tab === "mcp" || tab === "environment") ? <TeamConfigurationPanel key={tab} kind={tab} onStage={change => {
       const key = `configuration:${team.id}:${change.kind}:${change.kind === "environment" ? change.value.name : change.value.id}`;

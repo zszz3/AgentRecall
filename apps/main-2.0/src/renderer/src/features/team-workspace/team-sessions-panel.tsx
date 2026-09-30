@@ -106,9 +106,10 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   const cancelItem = (item: TeamSharedSession) => void run({ action: "session-fetch-cancel", scope, id: item.id, digest: item.digest }, item);
   const visible = list?.items.filter(item => `${item.title} ${item.author}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) ?? [];
   return <section className="team-session-browser">
-    <header className="team-session-toolbar"><div><h2>{l("Shared sessions", "共享会话")}</h2><span>{list?.items.length ?? 0} {l("sessions on this page", "条会话")}</span></div>
-      <label className="searchbox team-session-search"><Search size={16}/><input aria-label={l("Search this page", "搜索当前页会话")} placeholder={l("Search title or author", "搜索标题、分享者")} value={query} onChange={event => setQuery(event.target.value)}/></label>
-      <button className="icon-button" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={16}/></button>
+    <header className="team-session-toolbar">
+      <label className="searchbox team-session-search"><Search size={14}/><input aria-label={l("Search this page", "搜索当前页会话")} placeholder={l("Search title or author…", "搜索标题、分享者…")} value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <span className="team-session-count" aria-live="polite">{list ? `${list.items.length} ${l("sessions", "条")}` : ""}</span>
+      <button className="icon-button" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/></button>
     </header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{feedback && <p role="status" className="team-workspace-notice">{feedback}</p>}
     <ResizableSplit className="team-session-split" label={l("Session list width", "会话列表宽度")} storageKey="agentrecall.team-session-list-width" initialWidth={340} minWidth={250} maxWidth={480} minContentWidth={400}>
