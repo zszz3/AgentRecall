@@ -9,7 +9,6 @@ import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
 import { TeamWorkspacePage } from "./team-workspace-page";
 import { TeamSessionContentView } from "./team-session-content";
-import { TeamSessionShareDialog } from "./team-session-share-dialog";
 import { TeamSettings } from "../settings/team-settings";
 
 const repository = "https://github.com/example/assets", revision = "1".repeat(40), rootPath = path.resolve("fixtures/team");
@@ -102,14 +101,7 @@ it("keeps transport in team settings and persists an explicit connection choice"
   expect(request.mock.calls.some(([input]) => input.action === "sync")).toBe(false);
 });
 
-it("session sharing remains explicit and never uploads when the dialog opens", async () => {
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "session-preview" ? ok({ kind: "session-preview", value: { token: "00000000-0000-4000-8000-000000000001", repository, projectIdentity: "team:shared", expiresAt: Date.now() + 60_000, bytes: 1, files: [], missingAttachments: [], children: [], root: { schemaVersion: 2, exportedAt: 1, session: { sessionKey: "codex:one", originalTitle: "Example", displayTitle: "Example", source: "codex-cli" }, messages: [], traceEvents: [] } } }) : base(input));
-  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);
-  await act(async () => root.render(<TeamSessionShareDialog sessionKey="codex:one" language="zh" onClose={vi.fn()} api={{ request }} />));
-  expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
-  await act(async () => button("预览完整会话").click());
-  expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
-});
+
 
 it("opens instructions, MCP and Env independently and clears the previous reader when switching", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
@@ -203,17 +195,7 @@ it("prefills edits and discards a preview on close without publishing", async ()
   expect(request.mock.calls.some(([input]) => input.action === "configuration-publish")).toBe(false);
 });
 
-it("previews selected turn IDs explicitly and keeps full-session sharing separate", async () => {
-  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
-  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(() => undefined);
-  await act(async () => root.render(<TeamSessionShareDialog sessionKey="codex:one" turnIds={["turn-2", "turn-9"]} language="zh" onClose={vi.fn()} api={{ request }} />));
-  expect(request.mock.calls.map(([input]) => input.action)).toEqual(["snapshot"]);
-  expect(container.textContent).toContain("分享 2 个所选轮次");
-  expect(container.textContent).not.toContain("预览完整会话");
-  await act(async () => button("预览所选轮次").click());
-  expect(request).toHaveBeenCalledWith({ action: "session-preview", scope: { teamId: team.id, repository }, sessionKey: "codex:one", turnIds: ["turn-2", "turn-9"] });
-  expect(request.mock.calls.some(([input]) => input.action === "session-publish")).toBe(false);
-});
+
 
 
 it("reuses the session Turn reader for shared fragments without accessing local attachments", async () => {
@@ -285,4 +267,13 @@ it("keeps selection responsive during inspection, ignores stale replies and reus
   expect(inspections).toHaveLength(2);
   await act(async () => button("刷新 Diff").click()); expect(inspections).toHaveLength(3);
   expect(request.mock.calls.some(([input]) => input.action === "push-preview" || input.action === "push-publish")).toBe(false);
+});
+
+it("opens queued full sessions in Push without invoking the old share preview", async () => {
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} drafts={[{ item: { kind: "session", key: "session:one", sessionKey: "one" }, title: "Queued session", subtitle: "完整会话快照" }]} api={{ request }} />));
+  await act(async () => button("Example").click());
+  await act(async () => button("Push 推送").click());
+  expect(container.textContent).toContain("Queued session");
+  expect(request.mock.calls.some(([input]) => ["session-preview", "session-publish", "push-preview", "push-publish"].includes(input.action))).toBe(false);
 });

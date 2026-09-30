@@ -93,3 +93,14 @@ it("inspects locally without preparing an upload or invalidating an existing sel
   await expect(service.inspect({ ...scope, repository: "https://github.com/example/other" }, revision, config, signal)).rejects.toMatchObject({ code: "TEAM_CHANGED" });
   expect((await service.publish(7, scope, preview.token, signal)).items[0]?.status).toBe("published");
 });
+
+it("stages complete sessions through Push and rejects overlapping turn selections", async () => {
+  const full: TeamPushItem = { kind: "session", key: "session:one", sessionKey: "one" };
+  const preview = await service.preview(7, scope, undefined, [full], new AbortController().signal);
+  expect(preview.items[0]!.key).toBe(full.key);
+  expect(preview.items[0]!.session).toBeUndefined();
+  expect(preview.items[0]!.files[0]!.after).toContain("MiB");
+  expect(publishSession).not.toHaveBeenCalled();
+  expect((await service.publish(7, scope, preview.token, new AbortController().signal)).items).toEqual([{ key: full.key, status: "published" }]);
+  await expect(service.preview(7, scope, undefined, [full, ...turns], new AbortController().signal)).rejects.toMatchObject({ code: "INVALID_ARGUMENTS" });
+});

@@ -91,7 +91,6 @@ import {
 import { useSessionCatalog } from "./features/sessions/use-session-catalog";
 import { useSessionDetail } from "./features/sessions/use-session-detail";
 import { useMainSearchShortcut } from "./features/search/use-main-search-shortcut";
-import { TeamSessionShareDialog } from "./features/team-workspace/team-session-share-dialog";
 import { SettingsDialog, type SettingsSection } from "./features/settings/settings-dialog";
 import { SshEnvironmentDialog } from "./features/settings/ssh-environment-dialog";
 import { WslEnvironmentDialog } from "./features/settings/wsl-environment-dialog";
@@ -192,7 +191,6 @@ export function App(): ReactElement {
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
   const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
-  const [teamShare, setTeamShare] = useState<{ sessionKey: string; turnIds?: string[] } | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
@@ -2241,7 +2239,6 @@ export function App(): ReactElement {
           ),
         }}
       />
-      {teamShare && <TeamSessionShareDialog language={language} {...teamShare} onClose={() => setTeamShare(null)} />}
       {contextMenu ? (
         <SessionContextMenu
           state={contextMenu}
@@ -2263,7 +2260,12 @@ export function App(): ReactElement {
             )
           )}
           canMigrate={canMigrateSession(contextMenu.session, appSettings ?? DEFAULT_MIGRATION_TARGET_SETTINGS)}
-          onShareTeam={() => { setTeamShare({ sessionKey: contextMenu.session.sessionKey }); setContextMenu(null); }}
+          onShareTeam={() => {
+            const session = contextMenu.session;
+            const draft: TeamPushDraft = { item: { kind: "session", key: `session:${session.sessionKey}`, sessionKey: session.sessionKey }, title: session.displayTitle || session.originalTitle, subtitle: t("Full session snapshot", "完整会话快照") };
+            setTeamPushDrafts(previous => [...previous.filter(item => item.item.key !== draft.item.key), draft]);
+            setContextMenu(null); closeDetail(); setActivePage("team-space");
+          }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}
           onSelectMultiple={() => beginBulkSelection(contextMenu.session.sessionKey)}

@@ -1,3 +1,4 @@
+import { decodeSessionBlocks } from "./team-session-blocks";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -31,7 +32,11 @@ async function fixture() {
   const remote = new TeamSessionGitHub(vi.fn(), async () => "fixture");
   vi.spyOn(remote, "check").mockResolvedValue();
   const upload = vi.spyOn(remote, "upload").mockResolvedValue({ id: 17, title: "Example", author: "fixture", createdAt: "2026-09-26", bytes: 1, digest: "a".repeat(64), canWithdraw: true });
-  const confirm = vi.fn(async () => true), save = vi.fn(async () => true);
+  vi.spyOn(remote, "uploadBlocks").mockImplementation(async (repository, project, title, _data, bundle, signal) => {
+    const packet = await decodeSessionBlocks(bundle.manifest, async hash => bundle.blocks.get(hash)!, signal);
+    return remote.upload(repository, project, title, gzipSync(JSON.stringify(packet)), signal);
+  });
+  const confirm = vi.fn(async () => true), save = vi.fn<(owner: number, bytes: Uint8Array, suggestedName: string) => Promise<boolean>>(async () => true);
   const service = new TeamSessionSharing({ store, confirm, save, ensureDetails: async () => undefined }, remote); services.push(service);
   const context = { repository: "https://github.com/example/private", projectIdentity: "https://github.com/example/business", projectId: "business", root };
   return { service, remote, upload, confirm, save, store, context, session, messages, traceEvents, signal: new AbortController().signal };
@@ -177,4 +182,19 @@ it("inspects a local Turn without GitHub, attachment packaging or retained uploa
   expect((await f.service.inspectTurn(f.session.sessionKey, turn.id, f.signal)).selectedTurns).toEqual([turn]);
   expect(f.remote.check).not.toHaveBeenCalled(); expect(f.store.getAttachmentFile).not.toHaveBeenCalled(); expect(f.upload).not.toHaveBeenCalled();
   await expect(f.service.prepare(1, f.context, f.session.sessionKey, f.signal, [turn.id])).rejects.toThrow("offline");
+});
+
+it("reads block manifests, reports all compressed bytes, exports a portable snapshot and rejects changed provenance", async () => {
+  const f = await fixture();
+  const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal);
+  await f.service.publish(1, f.context, preview.token, f.signal, async () => undefined);
+  const call = vi.mocked(f.remote.uploadBlocks).mock.calls[0]!;
+  const bundle = call[4], read = vi.spyOn(f.remote, "blockReader").mockResolvedValue(async hash => bundle.blocks.get(hash)!);
+  const download = vi.spyOn(f.remote, "download").mockResolvedValue(call[3]);
+  expect((await f.service.detail(f.context, 17, f.signal)).bytes).toBe(preview.bytes);
+  await f.service.download(1, f.context, 17, f.signal);
+  expect(JSON.parse(gunzipSync(f.save.mock.calls[0]![1]).toString())).toEqual(JSON.parse(gunzipSync(f.upload.mock.calls[0]![3]).toString()));
+  expect(read).toHaveBeenCalledTimes(2);
+  download.mockResolvedValue(gzipSync(JSON.stringify({ ...bundle.manifest, source: { ...bundle.manifest.source, sessionKey: "other" } })));
+  await expect(f.service.detail(f.context, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
 });

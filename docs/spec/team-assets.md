@@ -49,11 +49,12 @@ CLI 会话分享、自动会话启动同步、桌面贡献 PR 流程尚未提供
 
 ## Push 输入与响应模型
 
-[TeamPushItem](../../apps/main-2.0/src/shared/team-push.ts)是三种明确输入，不接收任意目录打包指令：
+[TeamPushItem](../../apps/main-2.0/src/shared/team-push.ts)是四种明确输入，不接收任意目录打包指令：
 
 | kind | 关键输入 | 服务端需要再次核对 |
 | --- | --- | --- |
 | resource | skills/documents、connectionId、directory、file、资源 id | 目录连接、真实路径、可读取内容与目标资源身份 |
+| session | sessionKey | 完整会话范围、源文件与子会话可读取性 |
 | turn | sessionKey、turnId | 会话与轮次归属、实际消息及附件 |
 | configuration | 通过 schema 的 change | 资源类型、当前清单版本、目标冲突 |
 
@@ -112,3 +113,11 @@ Preview 返回 token、expiresAt、repository 和逐项 Diff，状态为 added/m
 | 公开仓库分享 | 允许，但明确可见范围和上传内容 |
 
 验收应区分合成服务测试、组件交互验证和真实仓库联调。没有真实上传证据时不能称“团队分享全链路已验收”。
+
+## 会话压缩与归属
+
+新分享使用独立清单与内容寻址块，数据格式和归属决策见 [ADR 0007](../adr/0007-team-session-blocks.md)。压缩不能截断工具输出、删除重复字段或降低图片质量；还原后保留完整 JSON 值，原始文件字节通过包内文件还原。路径引用位于协议清单，不能将用户消息中的相似对象当作引用。
+
+块按压缩字节的 SHA-256 命名；读取校验压缩长度、摘要、解压长度和完整还原大小。上传复用前验证已有块，最后才发布窗口冻结的清单。分享归属取自 GitHub 附件上传账号；不可从复用块的首个上传者推导。来源 Agent 和 sessionKey 必须与还原后的主会话匹配。
+
+当前限制见[团队空间指南](../v2/team-workspace.md#共享会话)。这不是流式大会话方案：准备和阅读仍保留完整快照，现有大小限制继续执行。对应测试为 [分块编码](../../apps/main-2.0/src/main/services/team-session-blocks.test.ts)、[远端归属与块复用](../../apps/main-2.0/src/main/services/team-session-github.test.ts)和会话分享服务测试。

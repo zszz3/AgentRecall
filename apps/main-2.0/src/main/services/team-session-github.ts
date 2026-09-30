@@ -1,3 +1,4 @@
+import type { SessionBlockBundle } from "./team-session-blocks";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
@@ -8,6 +9,8 @@ import type { TeamSessionPage, TeamSharedSession } from "../../shared/team-sessi
 const execute = promisify(execFile);
 const TAG = "agentrecall-sessions-v1";
 const MARKER = "AgentRecall team sessions schema=1";
+const BLOCK_TAG = "agentrecall-session-blocks-v1";
+const BLOCK_MARKER = "AgentRecall team session blocks schema=1";
 export const MAX_TEAM_SESSION_BYTES = 64 * 1024 * 1024;
 const repoSchema = z.object({ private: z.boolean(), default_branch: z.string().min(1), permissions: z.object({ push: z.boolean().optional(), admin: z.boolean().optional() }).optional() });
 const assetSchema = z.object({ id: z.number().int().positive(), name: z.string().max(256), label: z.string().max(2048).nullable(), state: z.string(), size: z.number().int().nonnegative(), digest: z.string().nullable().optional(), created_at: z.string(), uploader: z.object({ id: z.number().int().positive(), login: z.string().max(100) }) });
@@ -51,18 +54,18 @@ export class TeamSessionGitHub {
     if (write && !repo.permissions?.push) throw new WorkspaceError("TEAM_SESSION_FORBIDDEN", "当前 GitHub 身份没有这个团队仓库的写权限。");
     return { path, token, repo };
   }
-  private async release(path: string, token: string, signal?: AbortSignal) {
+  private async release(path: string, token: string, signal?: AbortSignal, blocks = false) {
     try {
-      const release = releaseSchema.parse(await this.json(token, `https://api.github.com/repos/${path}/releases/tags/${TAG}`, signal));
-      if (release.body !== MARKER) throw new WorkspaceError("TEAM_SESSION_STORAGE_CONFLICT", "仓库中存在同名的非受管存储，请联系团队维护者处理。");
+      const release = releaseSchema.parse(await this.json(token, `https://api.github.com/repos/${path}/releases/tags/${blocks ? BLOCK_TAG : TAG}`, signal));
+      if (release.body !== (blocks ? BLOCK_MARKER : MARKER)) throw new WorkspaceError("TEAM_SESSION_STORAGE_CONFLICT", "仓库中存在同名的非受管存储，请联系团队维护者处理。");
       return release;
     } catch (error) { if (error instanceof GitHubFailure && error.status === 404) return null; throw error; }
   }
   private async actor(token: string, signal?: AbortSignal) { return z.object({ id: z.number().int().positive() }).parse(await this.json(token, "https://api.github.com/user", signal)).id; }
   private item(asset: Asset, actor: number, admin: boolean): TeamSharedSession {
-    const match = /^ar1_([a-f0-9]{32})_([a-f0-9]{64})\.json\.gz$/.exec(asset.name);
+    const match = /^ar(?:1|4)_([a-f0-9]{32})_(?:[0-9]+_[a-f0-9-]{36}_)?([a-f0-9]{64})\.json\.gz$/.exec(asset.name);
     if (!match || asset.state !== "uploaded" || asset.size > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_INVALID", "共享会话对象格式无效或尚未完成上传。");
-    return { id: asset.id, title: asset.label || "共享会话", author: asset.uploader.login, createdAt: asset.created_at, bytes: asset.size, digest: match[2]!, canWithdraw: asset.uploader.id === actor || admin };
+    return { id: asset.id, title: asset.label || "共享会话", author: asset.uploader.login, createdAt: asset.created_at, bytes: asset.size, digest: match[2]!, ...(asset.name.startsWith("ar4_") ? { storage: "blocks" as const } : {}), canWithdraw: asset.uploader.id === actor || admin };
   }
   async check(repository: string, signal?: AbortSignal): Promise<void> { await this.access(repository, true, signal); }
   async list(repository: string, project: string | null, page = 1, signal?: AbortSignal): Promise<TeamSessionPage> {
@@ -70,7 +73,7 @@ export class TeamSessionGitHub {
     const release = await this.release(path, token, signal); if (!release) return { items: [], page, hasMore: false };
     const [actor, assets] = await Promise.all([this.actor(token, signal), this.json(token, `https://api.github.com/repos/${path}/releases/${release.id}/assets?per_page=100&page=${page}`, signal)]);
     const all = z.array(assetSchema).max(100).parse(assets);
-    return { items: all.filter((asset) => (project === null ? /^ar1_[a-f0-9]{32}_[a-f0-9]{64}\.json\.gz$/.test(asset.name) : asset.name.startsWith(`ar1_${project}_`)) && asset.state === "uploaded").map((asset) => this.item(asset, actor, repo.permissions?.admin === true)), page, hasMore: all.length === 100 };
+    return { items: all.filter((asset) => (project === null ? /^ar(?:1|4)_[a-f0-9]{32}_(?:[0-9]+_[a-f0-9-]{36}_)?[a-f0-9]{64}\.json\.gz$/.test(asset.name) : (asset.name.startsWith(`ar1_${project}_`) || asset.name.startsWith(`ar4_${project}_`))) && asset.state === "uploaded").map((asset) => this.item(asset, actor, repo.permissions?.admin === true)), page, hasMore: all.length === 100 };
   }
   private async binary(path: string, token: string, asset: Asset, signal?: AbortSignal): Promise<Buffer> {
     let response = await this.request(token, `https://api.github.com/repos/${path}/releases/assets/${asset.id}`, signal, { headers: { Accept: "application/octet-stream" } });
@@ -93,7 +96,7 @@ export class TeamSessionGitHub {
       const all = z.array(assetSchema).max(100).parse(await this.json(token, `https://api.github.com/repos/${path}/releases/${release.id}/assets?per_page=100&page=${page}`, signal));
       const asset = all.find((entry) => entry.id === id);
       if (asset) {
-        if (project !== null && !asset.name.startsWith(`ar1_${project}_`)) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "该会话不属于当前项目。");
+        if (project !== null && !(asset.name.startsWith(`ar1_${project}_`) || asset.name.startsWith(`ar4_${project}_`))) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "该会话不属于当前项目。");
         this.item(asset, 0, false);
         return asset;
       }
@@ -106,7 +109,7 @@ export class TeamSessionGitHub {
     const asset = await this.managedAsset(path, token, project, id, signal);
     return this.binary(path, token, asset, signal);
   }
-  async upload(repository: string, project: string, title: string, data: Buffer, signal?: AbortSignal): Promise<TeamSharedSession> {
+  async upload(repository: string, project: string, title: string, data: Buffer, signal?: AbortSignal, shareId?: string): Promise<TeamSharedSession> {
     if (data.length > MAX_TEAM_SESSION_BYTES) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "完整分享包超过 64 MiB，未上传，不会自动截断。");
     const { path, token, repo } = await this.access(repository, true, signal);
     let release = await this.release(path, token, signal);
@@ -114,15 +117,15 @@ export class TeamSessionGitHub {
       try { release = releaseSchema.parse(await this.json(token, `https://api.github.com/repos/${path}/releases`, signal, { tag_name: TAG, target_commitish: repo.default_branch, name: "AgentRecall shared sessions", body: MARKER, draft: false, prerelease: true, make_latest: "false" })); }
       catch (error) { if (!(error instanceof GitHubFailure) || error.status !== 422) throw error; release = await this.release(path, token, signal); if (!release) throw error; }
     }
-    const name = `ar1_${project}_${createHash("sha256").update(data).digest("hex")}.json.gz`;
     const actor = await this.actor(token, signal);
+    const name = `${shareId ? `ar4_${project}_${actor}_${shareId}` : `ar1_${project}`}_${createHash("sha256").update(data).digest("hex")}.json.gz`;
     try {
       // Recheck immediately before the content write; opening a preview never uploads.
       const fresh = repoSchema.parse(await this.json(token, `https://api.github.com/repos/${path}`, signal));
       if (!fresh.permissions?.push) throw new WorkspaceError("TEAM_SESSION_FORBIDDEN", "当前 GitHub 身份已失去这个团队仓库的写权限，本次上传取消。");
       const response = await this.request(token, `https://uploads.github.com/repos/${path}/releases/${release.id}/assets?name=${encodeURIComponent(name)}&label=${encodeURIComponent(title.slice(0, 120))}`, signal, { method: "POST", headers: { "Content-Type": "application/gzip" }, body: new Uint8Array(data) });
       const asset = assetSchema.parse(JSON.parse((await this.bytes(response, 1024 * 1024)).toString("utf8")));
-      if (asset.name !== name || asset.size !== data.length) throw new Error("Upload receipt mismatch");
+      if (asset.name !== name || asset.size !== data.length || shareId && asset.uploader.id !== actor) throw new Error("Upload receipt mismatch");
       return this.item(asset, actor, repo.permissions?.admin === true);
     } catch (error) {
       if (error instanceof WorkspaceError && !(error instanceof GitHubFailure)) throw error;
@@ -130,12 +133,73 @@ export class TeamSessionGitHub {
         for (let page = 1; page <= 20; page++) {
           const all = z.array(assetSchema).parse(await this.json(token, `https://api.github.com/repos/${path}/releases/${release.id}/assets?per_page=100&page=${page}`, signal));
           const existing = all.find((asset) => asset.name === name);
-          if (existing) { await this.binary(path, token, existing, signal); return this.item(existing, actor, repo.permissions?.admin === true); }
+          if (existing) {
+            if (shareId && existing.uploader.id !== actor) throw new WorkspaceError("TEAM_SESSION_INVALID", "这条分享的上传人不匹配，请刷新列表核对。");
+            await this.binary(path, token, existing, signal); return this.item(existing, actor, repo.permissions?.admin === true);
+          }
           if (all.length < 100) break;
         }
       }
       throw new WorkspaceError("TEAM_SHARE_UNCONFIRMED", "上传结果未确认。保留当前预览并重试会复用同一会话包，不会覆盖已有分享。");
     }
+  }
+  private async blockAssets(path: string, token: string, releaseId: number, signal: AbortSignal) {
+    const result = new Map<string, Asset>();
+    for (let page = 1; page <= 100; page++) {
+      const assets = z.array(assetSchema).parse(await this.json(token, `https://api.github.com/repos/${path}/releases/${releaseId}/assets?per_page=100&page=${page}`, signal));
+      for (const asset of assets) result.set(asset.name, asset);
+      if (assets.length < 100) return result;
+    }
+    throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "团队附件列表过大，未完成完整性检查。");
+  }
+  async uploadBlocks(repository: string, project: string, title: string, data: Buffer, bundle: SessionBlockBundle, signal: AbortSignal): Promise<TeamSharedSession> {
+    const { path, token, repo } = await this.access(repository, true, signal);
+    let release = await this.release(path, token, signal, true);
+    if (!release) {
+      try { release = releaseSchema.parse(await this.json(token, `https://api.github.com/repos/${path}/releases`, signal, { tag_name: BLOCK_TAG, target_commitish: repo.default_branch, name: "AgentRecall shared session blocks", body: BLOCK_MARKER, draft: false, prerelease: true, make_latest: "false" })); }
+      catch (error) { if (!(error instanceof GitHubFailure) || error.status !== 422) throw error; release = await this.release(path, token, signal, true); if (!release) throw error; }
+    }
+    const existing = await this.blockAssets(path, token, release.id, signal);
+    for (const [hash, bytes] of bundle.blocks) {
+      if (signal.aborted) throw new WorkspaceError("CANCELLED", "会话上传已取消。");
+      const name = `arb1_${hash}.gz`, prior = existing.get(name);
+      if (prior?.state === "uploaded" && prior.size === bytes.length) {
+        await this.blockBinary(path, token, prior, hash, signal); continue;
+      }
+      try {
+        const response = await this.request(token, `https://uploads.github.com/repos/${path}/releases/${release.id}/assets?name=${name}`, signal, { method: "POST", headers: { "Content-Type": "application/gzip" }, body: new Uint8Array(bytes) });
+        const asset = assetSchema.parse(JSON.parse((await this.bytes(response, 1024 * 1024)).toString("utf8")));
+        if (asset.name !== name || asset.size !== bytes.length || asset.state !== "uploaded") throw new WorkspaceError("TEAM_SHARE_UNCONFIRMED", "分块上传未确认，请重试。");
+      } catch (error) {
+        if (!(error instanceof GitHubFailure) || error.status !== 422) throw error;
+        await (await this.blockReader(repository, signal))(hash);
+      }
+    }
+    // Each share has its own ownership even when all its blocks are reused.
+    return this.upload(repository, project, title, data, signal, bundle.manifest.shareId);
+  }
+  private async blockBinary(path: string, token: string, asset: Asset, hash: string, signal: AbortSignal): Promise<Buffer> {
+    let response = await this.request(token, `https://api.github.com/repos/${path}/releases/assets/${asset.id}`, signal, { headers: { Accept: "application/octet-stream" } });
+    if (response.status === 302) {
+      const url = new URL(response.headers.get("location") ?? ""); await response.body?.cancel();
+      if (url.protocol !== "https:" || !url.hostname.endsWith(".githubusercontent.com") || url.username || url.password || url.port) throw new WorkspaceError("TEAM_SESSION_INVALID", "分块下载地址无效。");
+      response = await this.fetcher(url, { redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(60000)]) });
+      if (!response.ok) { await response.body?.cancel(); throw new GitHubFailure(response.status); }
+    }
+    const bytes = await this.bytes(response, 4 * 1024 * 1024 + 65536);
+    if (bytes.length !== asset.size || createHash("sha256").update(bytes).digest("hex") !== hash) throw new WorkspaceError("TEAM_SESSION_INVALID", "分块校验失败。");
+    return bytes;
+  }
+  async blockReader(repository: string, signal: AbortSignal): Promise<(hash: string) => Promise<Buffer>> {
+    const { path, token } = await this.access(repository, false, signal), release = await this.release(path, token, signal, true);
+    if (!release) throw new WorkspaceError("TEAM_SESSION_NOT_FOUND", "找不到会话内容。");
+    const assets = await this.blockAssets(path, token, release.id, signal);
+    return async hash => {
+      if (!/^[a-f0-9]{64}$/.test(hash)) throw new WorkspaceError("TEAM_SESSION_INVALID", "分块标识无效。");
+      const asset = assets.get(`arb1_${hash}.gz`);
+      if (!asset || asset.state !== "uploaded") throw new WorkspaceError("TEAM_SESSION_NOT_FOUND", "会话分块缺失，无法完整读取。");
+      return this.blockBinary(path, token, asset, hash, signal);
+    };
   }
   async withdraw(repository: string, project: string | null, id: number, signal?: AbortSignal): Promise<void> {
     const { path, token, repo } = await this.access(repository, true, signal);

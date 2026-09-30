@@ -100,3 +100,47 @@ it("rechecks write permission immediately before uploading content", async () =>
   await expect(remote.upload(repository, project, "Example", data)).rejects.toMatchObject({ code: "TEAM_SESSION_FORBIDDEN" });
   expect(fetcher.mock.calls.some(([url]) => String(url).startsWith("https://uploads."))).toBe(false);
 });
+
+it("publishes independent manifests for members while reusing verified blocks and leaves blocks on withdrawal", async () => {
+  const { encodeSessionBlocks } = await import("./team-session-blocks");
+  const { gzipSync } = await import("node:zlib");
+  const signal = new AbortController().signal;
+  const bundle = await encodeSessionBlocks({ text: "shared".repeat(10000) }, { agent: "codex", sessionKey: "same" }, repository, signal);
+  const stored = new Map<number, { meta: ReturnType<typeof asset>; data: Buffer }>();
+  let actor = 1, next = 30;
+  let failBlockOnce = true;
+  const uploads: string[] = [];
+  const { remote } = harness((url, init) => {
+    if (url.endsWith("/user")) return json({ id: actor });
+    if (url.endsWith("/releases/tags/agentrecall-session-blocks-v1")) return json({ id: 2, body: "AgentRecall team session blocks schema=1" });
+    if (url.includes("/assets?per_page=")) return json([...stored.values()].filter(item => item.meta.name.startsWith("arb1_") === url.includes("/releases/2/")).map(item => item.meta));
+    if (url.startsWith("https://uploads.")) {
+      const name = new URL(url).searchParams.get("name")!;
+      if ([...stored.values()].some(item => item.meta.name === name)) return json({}, 422);
+      if (name.startsWith("arb1_") && stored.size === 1 && failBlockOnce) { failBlockOnce = false; return json({}, 503); }
+      const bytes = Buffer.from(init!.body as Uint8Array), id = next++;
+      const meta = asset({ id, name, size: bytes.length, uploader: { id: actor, login: `member-${actor}` } });
+      stored.set(id, { meta, data: bytes }); uploads.push(name); return json(meta, 201);
+    }
+    const match = /\/releases\/assets\/(\d+)$/.exec(url);
+    if (match) {
+      const item = stored.get(Number(match[1]));
+      if (init?.method === "DELETE") { stored.delete(Number(match[1])); return new Response(null, { status: 204 }); }
+      return item ? new Response(new Uint8Array(item.data)) : json({}, 404);
+    }
+    return undefined;
+  });
+  const bytes = gzipSync(JSON.stringify(bundle.manifest));
+  await expect(remote.uploadBlocks(repository, project, "Example", bytes, bundle, signal)).rejects.toMatchObject({ code: "TEAM_GITHUB_ACCESS" });
+  expect([...stored.values()].every(item => item.meta.name.startsWith("arb1_"))).toBe(true);
+  const first = await remote.uploadBlocks(repository, project, "Example", bytes, bundle, signal);
+  expect((await remote.uploadBlocks(repository, project, "Example", bytes, bundle, signal)).id).toBe(first.id);
+  actor = 2;
+  const second = await remote.uploadBlocks(repository, project, "Example", bytes, bundle, signal);
+  expect(first.id).not.toBe(second.id); expect(first.author).toBe("member-1"); expect(second.author).toBe("member-2");
+  expect(uploads.filter(name => name.startsWith("arb1_"))).toHaveLength(bundle.blocks.size);
+  expect((await remote.list(repository, project)).items).toHaveLength(2);
+  await expect(remote.withdraw(repository, project, first.id)).rejects.toMatchObject({ code: "TEAM_SESSION_FORBIDDEN" });
+  await remote.withdraw(repository, project, second.id);
+  expect([...stored.values()].filter(item => item.meta.name.startsWith("arb1_"))).toHaveLength(bundle.blocks.size);
+});

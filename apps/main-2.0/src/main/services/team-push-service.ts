@@ -19,7 +19,11 @@ export class TeamPushService {
     const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
     if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
     let result: TeamPushPreview["items"][number];
-    if (item.kind === "turn") {
+    if (item.kind === "session") {
+      if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话读取服务不可用。");
+      const summary = await this.sharing.inspectSession(item.sessionKey, signal);
+      result = { key: item.key, name: summary.title, status: "added", files: [{ path: "会话分享范围", before: null, after: `完整会话快照：包含消息、工具记录、源文件、可读取附件及子会话。\n主源文件：${summary.sourceBytes} 字节。\nPush 准备时核对完整分享包大小；上限 64 MiB，超限请改选 Turn。` }] };
+    } else if (item.kind === "turn") {
       if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话读取服务不可用。");
       const session = await this.sharing.inspectTurn(item.sessionKey, item.turnId, signal), turn = session.selectedTurns![0]!;
       result = { key: item.key, name: `${session.root.session.displayTitle} · 第 ${turn.turnIndex + 1} 轮`, status: "added", files: [{ path: `Turn ${turn.turnIndex + 1}`, before: null, after: JSON.stringify(turn, null, 2) }], session };
@@ -49,14 +53,14 @@ export class TeamPushService {
     const workspace = new WorkspaceService(this.directory), current = await workspace.teamContext(scope.teamId);
     if (current.team.repository !== scope.repository) throw new WorkspaceError("TEAM_CHANGED", "团队已改变，请重新选择。");
     const team = JSON.stringify(current.team), assets = new TeamAssetService(workspace, undefined, scope);
-    const changes: SingleChange[] = [], identities = new Map<string, string>(), groups = new Map<string, Array<Extract<TeamPushItem, { kind: "turn" }>>>();
+    const changes: SingleChange[] = [], identities = new Map<string, string>(), groups = new Map<string, Array<Extract<TeamPushItem, { kind: "turn" | "session" }>>>();
     const result: TeamPushPreview["items"] = [], sessions: Pending["sessions"] = [];
     let retained = 0;
-    const catalog = items.some(item => item.kind !== "turn") ? await assets.list(this.directory) : null;
+    const catalog = items.some(item => item.kind === "resource" || item.kind === "configuration") ? await assets.list(this.directory) : null;
     try {
       for (const item of items) {
         if (signal.aborted) throw new WorkspaceError("CANCELLED", "预览已取消。");
-        if (item.kind === "turn") { const group = groups.get(item.sessionKey) ?? []; if (group.some(other => other.turnId === item.turnId)) throw new WorkspaceError("INVALID_ARGUMENTS", "同一轮次不能重复选择。"); group.push(item); groups.set(item.sessionKey, group); continue; }
+        if (item.kind === "turn" || item.kind === "session") { const group = groups.get(item.sessionKey) ?? []; if (group.some(other => other.kind === "session" || item.kind === "session" || other.turnId === item.turnId)) throw new WorkspaceError("INVALID_ARGUMENTS", "同一会话请只选择完整快照或所需 Turn，不要重复选择。"); group.push(item); groups.set(item.sessionKey, group); continue; }
         let change: SingleChange;
         if (item.kind === "configuration") change = structuredClone(item.change);
         else {
@@ -87,9 +91,14 @@ export class TeamPushService {
       for (const [sessionKey, entries] of groups) {
         if (!this.sharing) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话分享服务不可用，请重启应用。");
         const context: TeamSessionContext = { repository: scope.repository, projectIdentity: "team:shared", teamWide: true, projectId: "", root: null, projectName: current.team.name };
-        const preview = await this.sharing.prepare(owner, context, sessionKey, signal, entries.map(item => item.turnId), true);
+        const preview = await this.sharing.prepare(owner, context, sessionKey, signal, entries[0]!.kind === "session" ? undefined : entries.map(item => { if (item.kind !== "turn") throw new WorkspaceError("INVALID_ARGUMENTS", "分享选择无效。"); return item.turnId; }), true);
         sessions.push({ keys: entries.map(item => item.key), preview, context });
         for (const entry of entries) {
+          if (entry.kind === "session") {
+            const summary = [`压缩后：${(preview.bytes / 1024 / 1024).toFixed(2)} MiB`, `子会话：${preview.children.length} 个`, `包含文件：${preview.files.length} 个`, ...preview.files.map(file => `  ${file.name} · ${(file.bytes / 1024).toFixed(1)} KiB`), `无法读取的附件：${preview.missingAttachments.length} 个`, ...preview.missingAttachments.map(name => `  ${name}`)].join("\n");
+            result.push({ key: entry.key, name: preview.root.session.displayTitle || preview.root.session.originalTitle, status: "added", files: [{ path: "完整会话快照", before: null, after: summary }] });
+            continue;
+          }
           const turn = preview.selectedTurns!.find(turn => turn.id === entry.turnId)!;
           const attachments = turn.messages.flatMap(message => message.attachments ?? []);
           const ids = new Set(attachments.map(attachment => attachment.id)), names = new Set(attachments.map(attachment => attachment.fileName));

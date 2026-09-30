@@ -19,6 +19,8 @@ export interface TeamSharedSession {
   author: string;
   createdAt: string;
   bytes: number;
+  /** Block shares list manifest bytes; detail includes referenced content. */
+  storage?: "blocks";
   digest: string;
   canWithdraw: boolean;
 }
