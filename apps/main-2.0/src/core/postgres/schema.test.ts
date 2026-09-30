@@ -117,7 +117,9 @@ describe("AgentRecall PostgreSQL schema", () => {
       "openviking_operation_events",
       "openviking_recall_traces",
     ]));
-    expect(names).toHaveLength(67);
+    expect(names).toContain("team_session_snapshots");
+    expect(names).toContain("local_sessions");
+    expect(names).toHaveLength(69);
     const sessionColumns = await database.query<{
       column_name: string;
       is_nullable: string;

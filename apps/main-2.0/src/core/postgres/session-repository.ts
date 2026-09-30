@@ -32,6 +32,7 @@ import {
   deriveSessionTimeline,
   type DerivedRawEvent,
   type DerivedSessionTurn,
+  type DerivedSessionTimeline,
 } from "../turns/derive-turns";
 import type { PostgresDatabase, PostgresQueryable } from "./database";
 import {
@@ -189,13 +190,13 @@ async function readSessionDeletionRelations(
   if (includeOrphanedSubagents) {
     const result = await queryable.query<SessionDeletionRelationRow>(`
       select session_key, raw_id, source, environment_id, is_subagent, parent_session_id
-      from agent_recall.sessions
+      from agent_recall.local_sessions sessions
     `);
     return result.rows;
   }
   const requestedResult = await queryable.query<Pick<SessionDeletionRelationRow, "source" | "environment_id">>(`
     select distinct source, environment_id
-    from agent_recall.sessions
+    from agent_recall.local_sessions sessions
     where session_key = any($1::text[])
   `, [requestedSessionKeys]);
   const scopePairs = new Map<string, { source: SessionSource; environmentId: string }>();
@@ -213,7 +214,7 @@ async function readSessionDeletionRelations(
     )
     select sessions.session_key, sessions.raw_id, sessions.source, sessions.environment_id,
       sessions.is_subagent, sessions.parent_session_id
-    from agent_recall.sessions sessions
+    from agent_recall.local_sessions sessions
     join requested_scopes
       on requested_scopes.source = sessions.source
       and requested_scopes.environment_id = sessions.environment_id
@@ -683,7 +684,7 @@ async function insertTurns(
 
 export class PostgresSessionRepository {
   constructor(
-    private readonly database: PostgresDatabase,
+    private readonly database: Pick<PostgresDatabase, "query" | "transaction">,
     private readonly attachmentCacheRoot: string | null = null,
   ) {}
 
@@ -706,7 +707,7 @@ export class PostgresSessionRepository {
       // Lock and compare before touching any derived rows. Concurrent reindexing
       // must not publish a suffix built from a different committed file cursor.
       const previous = await client.query<{ content_indexed_size: number | string; content_indexed_mtime_ms: number | string }>(
-        "select content_indexed_size, content_indexed_mtime_ms from agent_recall.sessions where session_key = $1 for update", [session.sessionKey]);
+        "select content_indexed_size, content_indexed_mtime_ms from agent_recall.local_sessions where session_key = $1 for update", [session.sessionKey]);
       if (!previous.rows[0] || numberValue(previous.rows[0].content_indexed_size) !== messageAppend.expectedSize
         || numberValue(previous.rows[0].content_indexed_mtime_ms) !== messageAppend.expectedMtimeMs) {
         throw new Error("Session changed while indexing; retry the update");
@@ -721,7 +722,7 @@ export class PostgresSessionRepository {
         on conflict (session_key, message_index) do update set occurred_at = excluded.occurred_at
         where session_message_events.occurred_at is distinct from excluded.occurred_at`,
       [session.sessionKey, JSON.stringify(messages.map((message) => ({ message_index: message.index, occurred_at: message.timestamp })))]);
-      await client.query(`update agent_recall.sessions set
+      await client.query(`update agent_recall.local_sessions set
         file_mtime_ms = $2, file_size = $3, content_indexed_mtime_ms = $2, content_indexed_size = $3,
         message_count = $4, turn_count = $5, original_title = $6, started_at = $7,
         indexed_at = now(), source_available = true where session_key = $1`,
@@ -736,6 +737,8 @@ export class PostgresSessionRepository {
     tokenEvents: readonly TokenUsageEvent[] = [],
     traceEvents: readonly SessionTraceEvent[] = [],
     codexIncrementalState?: CodexIncrementalState,
+    // Partial imports retain exported Turn boundaries instead of merging separated excerpts.
+    importedTimeline?: DerivedSessionTimeline,
   ): Promise<void> {
     let remainingAttachmentBytes = MAX_SESSION_ATTACHMENT_BYTES;
     const attachmentRows: Array<MaterializedAttachment & { messageIndex: number }> = [];
@@ -776,7 +779,7 @@ export class PostgresSessionRepository {
       ...(event.callId ? { callId: postgresText(event.callId) } : {}),
       ...(event.eventType ? { eventType: postgresText(event.eventType) } : {}),
     }));
-    const timeline = deriveSessionTimeline({
+    const timeline = importedTimeline ? postgresJsonValue(importedTimeline) : deriveSessionTimeline({
       sessionKey: session.sessionKey,
       messages: persistedMessages,
       tokenEvents: persistedTokenEvents,
@@ -1281,7 +1284,7 @@ export class PostgresSessionRepository {
           sessions.pr_number,
           sessions.is_subagent,
           sessions.parent_session_id
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         where sessions.session_key = $1
       `,
       [session.sessionKey, TURN_DERIVATION_VERSION],
@@ -1321,7 +1324,7 @@ export class PostgresSessionRepository {
     }>(
       `
         select content_indexed_mtime_ms, content_indexed_size
-        from agent_recall.sessions
+        from agent_recall.local_sessions sessions
         where session_key = $1
       `,
       [sessionKey],
@@ -1344,7 +1347,7 @@ export class PostgresSessionRepository {
         started_at: new Date(Math.max(0, numberValue(metadata.timestamp))).toISOString(),
       }));
       await this.database.query(`
-        update agent_recall.sessions sessions
+        update agent_recall.local_sessions sessions
         set original_title = coalesce(records.original_title, nullif(sessions.first_question, ''), 'Untitled Session'),
             started_at = records.started_at
         from jsonb_to_recordset($1::jsonb) as records(
@@ -1361,7 +1364,7 @@ export class PostgresSessionRepository {
   async touchIndexedAtIfMissing(sessionKey: string): Promise<void> {
     await this.database.query(
       `
-        update agent_recall.sessions
+        update agent_recall.local_sessions
         set indexed_at = case
               when indexed_at <= to_timestamp(0) then now()
               else indexed_at
@@ -1375,7 +1378,7 @@ export class PostgresSessionRepository {
 
   async setSessionSourceAvailable(sessionKey: string, available: boolean): Promise<void> {
     await this.database.query(
-      "update agent_recall.sessions set source_available = $2 where session_key = $1",
+      "update agent_recall.local_sessions set source_available = $2 where session_key = $1",
       [sessionKey, available],
     );
   }
@@ -1410,7 +1413,7 @@ export class PostgresSessionRepository {
               and turns.derivation_version < $2
           ) as turn_derivation_current,
           sessions.indexed_at
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         where sessions.environment_id = $1 and sessions.file_path <> ''
         order by sessions.file_path
       `,
@@ -1464,35 +1467,35 @@ export class PostgresSessionRepository {
 
   async setCustomTitle(sessionKey: string, title: string | null): Promise<void> {
     await this.database.query(
-      "update agent_recall.sessions set custom_title = $2 where session_key = $1",
+      "update agent_recall.local_sessions set custom_title = $2 where session_key = $1",
       [sessionKey, title?.trim() || null],
     );
   }
 
   async setFavorited(sessionKey: string, favorited: boolean): Promise<void> {
     await this.database.query(
-      "update agent_recall.sessions set favorited = $2 where session_key = $1",
+      "update agent_recall.local_sessions set favorited = $2 where session_key = $1",
       [sessionKey, favorited],
     );
   }
 
   async setHidden(sessionKey: string, hidden: boolean): Promise<void> {
     await this.database.query(
-      "update agent_recall.sessions set hidden = $2 where session_key = $1",
+      "update agent_recall.local_sessions set hidden = $2 where session_key = $1",
       [sessionKey, hidden],
     );
   }
 
   async markOpened(sessionKey: string): Promise<void> {
     await this.database.query(
-      "update agent_recall.sessions set last_opened_at = now() where session_key = $1",
+      "update agent_recall.local_sessions set last_opened_at = now() where session_key = $1",
       [sessionKey],
     );
   }
 
   async markResumed(sessionKey: string): Promise<void> {
     await this.database.query(
-      "update agent_recall.sessions set last_resumed_at = now() where session_key = $1",
+      "update agent_recall.local_sessions set last_resumed_at = now() where session_key = $1",
       [sessionKey],
     );
   }
@@ -1555,7 +1558,7 @@ export class PostgresSessionRepository {
           select distinct tags.name
           from agent_recall.tags
           join agent_recall.session_tags on session_tags.tag_id = tags.id
-          join agent_recall.sessions sessions on sessions.session_key = session_tags.session_key
+          join agent_recall.local_sessions sessions on sessions.session_key = session_tags.session_key
           ${conditions.length > 0 ? `where ${conditions.join(" and ")}` : ""}
         ) distinct_tags
         order by lower(name), name
@@ -1580,7 +1583,7 @@ export class PostgresSessionRepository {
           tags.name as tag_name
         from agent_recall.tags
         join agent_recall.session_tags on session_tags.tag_id = tags.id
-        join agent_recall.sessions sessions on sessions.session_key = session_tags.session_key
+        join agent_recall.local_sessions sessions on sessions.session_key = session_tags.session_key
         where trim(sessions.project_path) <> ''
           ${options.excludeSubagents ? "and sessions.is_subagent = false" : ""}
         order by sessions.environment_id, sessions.project_path, lower(tags.name)
@@ -1644,7 +1647,7 @@ export class PostgresSessionRepository {
               where events.session_key = sessions.session_key
             ) end
           ) as root_started_at
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where ${conditions.join(" and ")}
         group by sessions.project_path, sessions.environment_id, environments.label
@@ -1731,11 +1734,11 @@ export class PostgresSessionRepository {
   async deleteSessionRecord(sessionKey: string): Promise<boolean> {
     return this.database.transaction(async (client) => {
       const existing = await client.query<{ session_key: string }>(
-        "select session_key from agent_recall.sessions where session_key = $1",
+        "select session_key from agent_recall.local_sessions where session_key = $1",
         [sessionKey],
       );
       if (existing.rows.length === 0) return false;
-      await client.query("delete from agent_recall.sessions where session_key = $1", [sessionKey]);
+      await client.query("delete from agent_recall.local_sessions where session_key = $1", [sessionKey]);
       await client.query(`
         delete from agent_recall.tags
         where not exists (
@@ -1777,7 +1780,7 @@ export class PostgresSessionRepository {
         sessions.is_subagent, sessions.parent_session_id,
         sessions.source_available, sessions.favorited, ${SESSION_ACTIVITY_SQL} as last_activity_at,
         sessions.environment_id, environments.kind as environment_kind
-      from agent_recall.sessions sessions
+      from agent_recall.local_sessions sessions
       join agent_recall.environments environments on environments.id = sessions.environment_id
       where sessions.session_key = any($1::text[])
     `, [targetKeys]);
@@ -1818,7 +1821,7 @@ export class PostgresSessionRepository {
       }
       if (expandedKeys.length === 0) return [];
       const result = await client.query<{ session_key: string }>(
-        "delete from agent_recall.sessions where session_key = any($1::text[]) returning session_key",
+        "delete from agent_recall.local_sessions where session_key = any($1::text[]) returning session_key",
         [expandedKeys],
       );
       await client.query(`
@@ -1856,7 +1859,7 @@ export class PostgresSessionRepository {
           select custom_title, favorited, hidden, last_opened_at, last_resumed_at,
             ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
             codex_history_mode, codex_tool_call_state
-          from agent_recall.sessions
+          from agent_recall.local_sessions sessions
           where session_key = $1
         `,
         [legacyKey],
@@ -1864,7 +1867,7 @@ export class PostgresSessionRepository {
       const legacy = legacyResult.rows[0];
       if (!legacy) return false;
       const targetResult = await client.query<{ session_key: string }>(
-        "select session_key from agent_recall.sessions where session_key = $1",
+        "select session_key from agent_recall.local_sessions where session_key = $1",
         [targetKey],
       );
 
@@ -1890,7 +1893,7 @@ export class PostgresSessionRepository {
               total_tokens, indexed_at, is_subagent, parent_session_id,
               ai_summary, ai_summary_model, ai_summary_at, ai_summary_basis,
               codex_history_mode, codex_tool_call_state
-            from agent_recall.sessions
+            from agent_recall.local_sessions sessions
             where session_key = $1
           `,
           [legacyKey, targetKey],
@@ -1910,7 +1913,7 @@ export class PostgresSessionRepository {
       } else {
         await client.query(
           `
-            update agent_recall.sessions
+            update agent_recall.local_sessions
             set
               custom_title = coalesce(custom_title, $2),
               favorited = favorited or $3,
@@ -1980,7 +1983,7 @@ export class PostgresSessionRepository {
         "delete from agent_recall.session_sync_bindings where local_session_key = $1",
         [legacyKey],
       );
-      await client.query("delete from agent_recall.sessions where session_key = $1", [legacyKey]);
+      await client.query("delete from agent_recall.local_sessions where session_key = $1", [legacyKey]);
       return true;
     });
   }
@@ -1997,7 +2000,7 @@ export class PostgresSessionRepository {
     }>(
       `
         select session_key, raw_id, storage_environment_id
-        from agent_recall.sessions
+        from agent_recall.local_sessions sessions
         where source = $1
         order by session_key
       `,
@@ -2023,7 +2026,7 @@ export class PostgresSessionRepository {
     }>(
       `
         select session_key, source, file_path, message_count
-        from agent_recall.sessions
+        from agent_recall.local_sessions sessions
         where storage_environment_id = $1 and file_path <> ''
       `,
       [environmentId],
@@ -2043,7 +2046,7 @@ export class PostgresSessionRepository {
     const result = await this.database.query<SessionRow>(
       `
         select ${SESSION_DETAIL_SELECT_SQL}
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where sessions.session_key = $1
       `,
@@ -2056,7 +2059,7 @@ export class PostgresSessionRepository {
     const result = await this.database.query<SessionRow>(
       `
         select ${SESSION_SELECT_SQL}
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where sessions.raw_id = $1
         order by sessions.file_mtime_ms desc
@@ -2113,7 +2116,7 @@ export class PostgresSessionRepository {
     const result = await this.database.query<SessionRow>(
       `
         select ${SESSION_SELECT_SQL}
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where exists (
           select 1
@@ -2152,14 +2155,14 @@ export class PostgresSessionRepository {
 
   async setAiSummary(sessionKey: string, summary: string, model: string): Promise<boolean> {
     const result = await this.database.query<{ file_mtime_ms: number | string }>(
-      "select file_mtime_ms from agent_recall.sessions where session_key = $1",
+      "select file_mtime_ms from agent_recall.local_sessions where session_key = $1",
       [sessionKey],
     );
     const row = result.rows[0];
     if (!row) return false;
     await this.database.query(
       `
-        update agent_recall.sessions
+        update agent_recall.local_sessions
         set ai_summary = $2,
           ai_summary_model = $3,
           ai_summary_at = now(),
@@ -2179,7 +2182,7 @@ export class PostgresSessionRepository {
     const result = await this.database.query<SessionRow>(
       `
         select ${SESSION_SELECT_SQL}
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         join agent_recall.environments environments on environments.id = sessions.environment_id
         where sessions.file_mtime_ms >= $1
           and sessions.source <> 'codewiz-cli'
@@ -2197,12 +2200,12 @@ export class PostgresSessionRepository {
 
   async clearSearchIndex(): Promise<void> {
     await this.database.transaction(async (client) => {
-      await client.query("delete from agent_recall.session_raw_events");
-      await client.query("delete from agent_recall.session_message_events");
-      await client.query("delete from agent_recall.session_turns");
-      await client.query("delete from agent_recall.token_events");
+      await client.query("delete from agent_recall.session_raw_events where session_key in (select session_key from agent_recall.local_sessions)");
+      await client.query("delete from agent_recall.session_message_events where session_key in (select session_key from agent_recall.local_sessions)");
+      await client.query("delete from agent_recall.session_turns where session_key in (select session_key from agent_recall.local_sessions)");
+      await client.query("delete from agent_recall.token_events where session_key in (select session_key from agent_recall.local_sessions)");
       await client.query(`
-        update agent_recall.sessions
+        update agent_recall.local_sessions
         set file_mtime_ms = 0,
           file_size = 0,
           content_indexed_mtime_ms = 0,
@@ -2225,7 +2228,7 @@ export class PostgresSessionRepository {
     if (sources.length === 0) return;
     await this.database.transaction(async (client) => {
       await client.query(
-        "delete from agent_recall.sessions where source = any($1::text[])",
+        "delete from agent_recall.local_sessions where source = any($1::text[])",
         [[...sources]],
       );
       await client.query(`

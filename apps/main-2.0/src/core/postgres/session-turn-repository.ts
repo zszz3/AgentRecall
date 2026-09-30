@@ -77,14 +77,15 @@ export class PostgresSessionTurnRepository {
     return numberValue(result.rows[0]?.message_count);
   }
 
-  async listSessionTurns(sessionKey: string): Promise<SessionTurnSummary[]> {
+  async listSessionTurns(sessionKey: string, page?: { offset: number; limit: number }): Promise<SessionTurnSummary[]> {
     const result = await this.database.query<SessionTurnSummaryRow>(
       `
         ${SESSION_TURN_SUMMARY_SQL}
         where turns.session_key = $1
         order by turns.turn_index
+        ${page ? "offset $2 limit $3" : ""}
       `,
-      [sessionKey],
+      page ? [sessionKey, page.offset, page.limit] : [sessionKey],
     );
     return result.rows.map(sessionTurnSummaryFromRow);
   }

@@ -1,3 +1,4 @@
+import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
 import {
   app,
   BrowserWindow,
@@ -2995,6 +2996,7 @@ function registerIpc(): void {
     return result.response === 1 && !parent.isDestroyed();
   };
   const teamSharing = new TeamSessionSharing({
+    cache: new PostgresTeamSessionRepository(postgresDatabase!),
     store,
     ensureDetails: (key) => remoteSessionAccess.ensureDetails(key),
     confirm: confirmTeamOperation,

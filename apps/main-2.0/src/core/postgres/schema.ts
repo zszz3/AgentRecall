@@ -2129,4 +2129,17 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
     `DROP INDEX IF EXISTS agent_recall.session_turns_search_vector_idx;`,
     `ALTER TABLE agent_recall.session_turns DROP COLUMN IF EXISTS search_vector;`,
   ],
+}, {
+  version: 58,
+  name: "cache team session snapshots independently from local history",
+  statements: [
+    `CREATE TABLE agent_recall.team_session_snapshots (
+      cache_key text PRIMARY KEY, repository text NOT NULL, asset_id bigint NOT NULL, digest text NOT NULL,
+      metadata jsonb NOT NULL, source jsonb NOT NULL
+    )`,
+    `ALTER TABLE agent_recall.sessions ADD COLUMN team_snapshot_key text
+      REFERENCES agent_recall.team_session_snapshots(cache_key) ON DELETE CASCADE`,
+    `CREATE INDEX sessions_team_snapshot_idx ON agent_recall.sessions(team_snapshot_key) WHERE team_snapshot_key IS NOT NULL`,
+    `CREATE VIEW agent_recall.local_sessions AS SELECT * FROM agent_recall.sessions WHERE team_snapshot_key IS NULL`,
+  ],
 }];

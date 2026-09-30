@@ -206,6 +206,16 @@ it("enforces team/project scope for sessions and cancels retained previews on wi
   await workspace.setTeamEnabled(true);
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true, data: { kind: "session-list" } });
   expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: `legacy:${saved.id}` }), 1, expect.any(AbortSignal));
+  const open = vi.spyOn(sharing, "open").mockResolvedValue({ partial: false, records: [], bytes: 0, files: [], missingAttachments: [] });
+  const turns = vi.spyOn(sharing, "turns").mockResolvedValue({ turns: [], offset: 0, hasMore: false });
+  const turn = vi.spyOn(sharing, "turn").mockResolvedValue(null);
+  const share = { scope, id: 17, digest: "a".repeat(64) };
+  expect(await api.request({ action: "session-open", ...share })).toMatchObject({ ok: true, data: { kind: "session-open" } });
+  expect(await api.request({ action: "session-turns", ...share, record: 0, offset: 0 })).toMatchObject({ ok: true, data: { kind: "session-turns" } });
+  expect(await api.request({ action: "session-turn", ...share, record: 0, turnId: "turn" })).toMatchObject({ ok: true, data: { kind: "session-turn", value: null } });
+  expect(open).toHaveBeenCalledOnce(); expect(turns).toHaveBeenCalledOnce(); expect(turn).toHaveBeenCalledOnce();
+  expect(await api.request({ action: "session-turns", ...share, record: -1, offset: 0 })).toMatchObject({ ok: false });
+  expect(turns).toHaveBeenCalledOnce();
   sender.emit("destroyed");
   expect(cancel).toHaveBeenCalledWith(sender.id);
   expect(sender.listenerCount("destroyed")).toBe(0);

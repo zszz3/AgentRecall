@@ -217,7 +217,7 @@ export class PostgresSessionStatsRepository {
               order by events.total_tokens desc, events.occurred_at
             ) as row_rank
           from agent_recall.token_events events
-          join agent_recall.sessions sessions on sessions.session_key = events.session_key
+          join agent_recall.local_sessions sessions on sessions.session_key = events.session_key
           where events.occurred_at >= $1 and events.occurred_at <= $2
             ${sessionAnd}
         )
@@ -282,19 +282,19 @@ export class PostgresSessionStatsRepository {
     const sessionsSql = range.since === null
       ? `
         select source, count(*) as session_count
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         ${sessionWhere}
         group by source
       `
       : `
         with active as (
           select sessions.source, sessions.session_key
-          from agent_recall.sessions sessions
+          from agent_recall.local_sessions sessions
           join agent_recall.session_message_events events on events.session_key = sessions.session_key
           where events.occurred_at >= $1 and events.occurred_at <= $2 ${sessionAnd}
           union
           select sessions.source, sessions.session_key
-          from agent_recall.sessions sessions
+          from agent_recall.local_sessions sessions
           join agent_recall.token_events events on events.session_key = sessions.session_key
           where events.occurred_at >= $1 and events.occurred_at <= $2 ${sessionAnd}
         )
@@ -305,14 +305,14 @@ export class PostgresSessionStatsRepository {
     const messagesSql = range.since === null
       ? `
         select source, coalesce(sum(message_count), 0) as message_count
-        from agent_recall.sessions sessions
+        from agent_recall.local_sessions sessions
         ${sessionWhere}
         group by source
       `
       : `
         select sessions.source, count(*) as message_count
         from agent_recall.session_message_events events
-        join agent_recall.sessions sessions on sessions.session_key = events.session_key
+        join agent_recall.local_sessions sessions on sessions.session_key = events.session_key
         where events.occurred_at >= $1 and events.occurred_at <= $2 ${sessionAnd}
         group by sessions.source
       `;
@@ -346,7 +346,7 @@ export class PostgresSessionStatsRepository {
               events.occurred_at
           ) as row_rank
         from agent_recall.token_events events
-        join agent_recall.sessions sessions on sessions.session_key = events.session_key
+        join agent_recall.local_sessions sessions on sessions.session_key = events.session_key
         ${tokenWhere.length > 0 ? `where ${tokenWhere.join(" and ")}` : ""}
       )
       select
@@ -400,7 +400,7 @@ export class PostgresSessionStatsRepository {
             coalesce(sum(cache_creation_input_tokens), 0) as cache_creation_input_tokens,
             coalesce(sum(reasoning_output_tokens), 0) as reasoning_output_tokens,
             coalesce(sum(total_tokens), 0) as total_tokens
-          from agent_recall.sessions sessions
+          from agent_recall.local_sessions sessions
           ${sessionWhere}
           group by source
         `,
@@ -490,7 +490,7 @@ export class PostgresSessionStatsRepository {
                 events.occurred_at
             ) as row_rank
           from agent_recall.token_events events
-          join agent_recall.sessions sessions on sessions.session_key = events.session_key
+          join agent_recall.local_sessions sessions on sessions.session_key = events.session_key
           where events.occurred_at >= $1
             and events.occurred_at <= $2
             ${sessionAnd}

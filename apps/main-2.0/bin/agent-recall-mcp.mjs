@@ -160,10 +160,11 @@ export async function searchSessions(db, { query = "", source = "", project = ""
     const rows = await db.query(
       `SELECT ${RESULT_COLUMNS},
               max(similarity(lower(t.search_text), lower($${params.length - 1}))) AS score
-         FROM agent_recall.sessions s
+         FROM agent_recall.local_sessions s
          JOIN agent_recall.session_turns t ON t.session_key = s.session_key
         WHERE ${filters.join(" AND ")}
-        GROUP BY s.session_key
+        GROUP BY s.session_key, s.source, s.project_path, s.started_at, s.original_title,
+                 s.first_question, s.custom_title, s.ai_summary, s.file_mtime_ms
         ORDER BY score DESC, s.file_mtime_ms DESC
         LIMIT $${params.length}`,
       params,
@@ -175,7 +176,7 @@ export async function searchSessions(db, { query = "", source = "", project = ""
   params.push(cap);
   const rows = await db.query(
     `SELECT ${RESULT_COLUMNS}
-       FROM agent_recall.sessions s
+       FROM agent_recall.local_sessions s
        ${where}
       ORDER BY s.file_mtime_ms DESC
       LIMIT $${params.length}`,
@@ -188,7 +189,7 @@ export async function getSession(db, { sessionKey, maxMessages = 40, offset = 0 
   if (!sessionKey) return null;
   const row = (await db.query(
     `SELECT ${RESULT_COLUMNS}
-       FROM agent_recall.sessions s
+       FROM agent_recall.local_sessions s
       WHERE s.session_key = $1`,
     [sessionKey],
   )).rows[0];
@@ -282,7 +283,7 @@ export async function getLatestSessions(db, { source = "", projectPath = "", lim
   params.push(cap);
   const rows = await db.query(
     `SELECT ${RESULT_COLUMNS}
-       FROM agent_recall.sessions s
+       FROM agent_recall.local_sessions s
        ${where}
       ORDER BY s.file_mtime_ms DESC
       LIMIT $${params.length}`,
@@ -298,7 +299,7 @@ export async function getLatestSessions(db, { source = "", projectPath = "", lim
 
 async function sessionExists(db, sessionKey) {
   return (await db.query(
-    "SELECT 1 FROM agent_recall.sessions WHERE session_key = $1",
+    "SELECT 1 FROM agent_recall.local_sessions WHERE session_key = $1",
     [sessionKey],
   )).rows.length > 0;
 }
@@ -361,7 +362,7 @@ export async function tagSession(db, { sessionKey, action, tag } = {}) {
 export async function toggleFavorite(db, { sessionKey, favorited } = {}) {
   if (!sessionKey || !await sessionExists(db, sessionKey)) return { ok: false, error: "Session not found." };
   await db.query(
-    "UPDATE agent_recall.sessions SET favorited = $1 WHERE session_key = $2",
+    "UPDATE agent_recall.local_sessions SET favorited = $1 WHERE session_key = $2",
     [Boolean(favorited), sessionKey],
   );
   return { ok: true, sessionKey, favorited: Boolean(favorited) };
@@ -375,19 +376,19 @@ export async function setVisibility(db, { sessionKey, visibility } = {}) {
   switch (visibility) {
     case "default":
       await db.query(
-        "UPDATE agent_recall.sessions SET hidden = false WHERE session_key = $1",
+        "UPDATE agent_recall.local_sessions SET hidden = false WHERE session_key = $1",
         [sessionKey],
       );
       break;
     case "favorites":
       await db.query(
-        "UPDATE agent_recall.sessions SET favorited = true, hidden = false WHERE session_key = $1",
+        "UPDATE agent_recall.local_sessions SET favorited = true, hidden = false WHERE session_key = $1",
         [sessionKey],
       );
       break;
     case "hidden":
       await db.query(
-        "UPDATE agent_recall.sessions SET hidden = true WHERE session_key = $1",
+        "UPDATE agent_recall.local_sessions SET hidden = true WHERE session_key = $1",
         [sessionKey],
       );
       break;
@@ -395,7 +396,7 @@ export async function setVisibility(db, { sessionKey, visibility } = {}) {
       return { ok: false, error: 'visibility must be one of "default", "favorites", or "hidden".' };
   }
   const row = (await db.query(
-    "SELECT favorited, hidden FROM agent_recall.sessions WHERE session_key = $1",
+    "SELECT favorited, hidden FROM agent_recall.local_sessions WHERE session_key = $1",
     [sessionKey],
   )).rows[0];
   return {

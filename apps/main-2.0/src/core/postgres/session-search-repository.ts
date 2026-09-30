@@ -274,7 +274,7 @@ export class PostgresSessionSearchRepository {
           coalesce(
             (
               select array_agg(distinct related.source order by related.source)
-              from agent_recall.sessions related
+              from agent_recall.local_sessions related
               where related.environment_id = base_sessions.environment_id
                 and related.raw_id = base_sessions.raw_id
                 and related.project_path = base_sessions.project_path
@@ -308,7 +308,7 @@ export class PostgresSessionSearchRepository {
               ${preferredSourceOrder}
               base_sessions.session_key
           ) as source_rank
-        from agent_recall.sessions base_sessions
+        from agent_recall.local_sessions base_sessions
       ) sessions
       join agent_recall.environments environments on environments.id = sessions.environment_id
       ${bestTurnJoin}

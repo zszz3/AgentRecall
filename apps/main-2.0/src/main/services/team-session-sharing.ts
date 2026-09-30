@@ -1,3 +1,5 @@
+import { TURN_DERIVATION_VERSION } from "../../core/turns/derive-turns";
+import { TEAM_SESSION_CACHE_VERSION, type PostgresTeamSessionRepository } from "../../core/postgres/team-session-repository";
 import { encodeSessionBlocks, decodeSessionBlocks, sessionBlockManifestSchema, type SessionBlockBundle } from "./team-session-blocks";
 import fs from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
@@ -52,6 +54,7 @@ export interface TeamSessionContext { repository: string; projectIdentity: strin
 type Store = Pick<SessionStore, "getSession" | "searchSessions" | "getAllMessages" | "getTraceEvents" | "getSessionSourceArtifacts" | "getAttachmentFile" | "getSessionTurn">;
 interface Dependencies {
   store: Store;
+  cache?: PostgresTeamSessionRepository;
   ensureDetails(sessionKey: string): Promise<void>;
   confirm(owner: number, message: string): Promise<boolean>;
   save(owner: number, bytes: Uint8Array, suggestedName: string): Promise<boolean>;
@@ -265,8 +268,31 @@ export class TeamSessionSharing {
     clearTimeout(pending.timer); this.previews.delete(token); return result;
   }
   list(context: TeamSessionContext, page: number, signal: AbortSignal) { return this.remote.list(context.repository, context.teamWide ? null : this.project(context), page, signal); }
-  async detail(context: TeamSessionContext, id: number, signal: AbortSignal) {
-    const content = await this.decode(context, await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal), signal, true);
+  private cacheKey(context: TeamSessionContext, id: number, digest: string): string {
+    return createHash("sha256").update(JSON.stringify([TEAM_SESSION_CACHE_VERSION, TURN_DERIVATION_VERSION, context.repository, context.teamWide ? null : context.projectIdentity, id, digest])).digest("hex");
+  }
+  private cache() {
+    if (!this.dependencies.cache) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话缓存不可用，请重启应用。");
+    return this.dependencies.cache;
+  }
+  async open(context: TeamSessionContext, id: number, digest: string, signal: AbortSignal) {
+    const cache = this.cache(), key = this.cacheKey(context, id, digest);
+    const existing = await cache.get(key);
+    this.cancelled(signal);
+    if (existing) return existing;
+    const content = await this.detail(context, id, signal, digest);
+    return cache.import(key, content, signal, { repository: context.repository, assetId: id, digest });
+  }
+  async turns(context: TeamSessionContext, id: number, digest: string, record: number, offset: number) {
+    return this.cache().turns(this.cacheKey(context, id, digest), record, offset);
+  }
+  async turn(context: TeamSessionContext, id: number, digest: string, record: number, turnId: string) {
+    return this.cache().turn(this.cacheKey(context, id, digest), record, turnId);
+  }
+  async detail(context: TeamSessionContext, id: number, signal: AbortSignal, expectedDigest?: string) {
+    const data = await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal);
+    if (expectedDigest && createHash("sha256").update(data).digest("hex") !== expectedDigest) throw new WorkspaceError("TEAM_SESSION_CHANGED", "分享已改变，请刷新会话列表后重试。");
+    const content = await this.decode(context, data, signal, true);
     this.cancelled(signal);
     return content.content;
   }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SessionTurnDetail, SessionMessage } from "../core/types";
+import type { SessionTurnDetail, SessionTurnSummary, SessionMessage } from "../core/types";
 
 export const MAX_SHARED_TURNS = 500;
 export const teamTurnSelectionSchema = z.array(z.string().min(1).max(1024)).min(1).max(MAX_SHARED_TURNS)
@@ -38,4 +38,18 @@ export interface TeamSessionPreview extends TeamSessionContent {
   repository: string;
   projectIdentity: string;
   expiresAt: number;
+}
+
+/** Downloaded shares are read-only snapshots, separate from resumable local sessions. */
+export interface TeamSessionSnapshot {
+  partial: boolean;
+  records: Array<{ sessionKey: string; title: string; turnCount: number }>;
+  bytes: number;
+  files: TeamSessionContent["files"];
+  missingAttachments: string[];
+}
+export interface TeamSessionTurnsPage {
+  turns: SessionTurnSummary[];
+  offset: number;
+  hasMore: boolean;
 }

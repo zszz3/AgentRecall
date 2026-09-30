@@ -1,8 +1,9 @@
+import type { SessionTurnDetail } from "../../core/types";
 import { teamPushItemSchema, type TeamPushPreview, type TeamPushResult } from "../team-push";
 import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
 import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
-import type { TeamSessionPage, TeamSessionContent, TeamSessionPreview } from "../team-sessions";
+import type { TeamSessionPage, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPreview } from "../team-sessions";
 import { teamTurnSelectionSchema } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
 
@@ -18,6 +19,7 @@ const scope = z.union([legacyScope, teamScope]);
 const selectedScope = z.union([legacyScope.extend({ repository }), teamScope]);
 export type TeamScope = z.infer<typeof scope>;
 const asset = { scope, id, target };
+const share = { scope: selectedScope, id: z.number().int().positive(), digest: z.string().regex(/^[a-f0-9]{64}$/) };
 const selectedAsset = { scope: selectedScope, id, target };
 
 export const teamRequestSchema = z.discriminatedUnion("action", [
@@ -46,10 +48,13 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("local-assets"), scope, kind: z.enum(["skills", "documents"]), file: z.string().min(1).max(2048).optional() }).strict(),
   z.object({ action: z.literal("document-preview"), scope: selectedScope, id }).strict(),
   z.object({ action: z.literal("document-install"), scope: selectedScope, id, revision }).strict(),
+  z.object({ action: z.literal("session-open"), ...share }).strict(),
+  z.object({ action: z.literal("session-turns"), ...share, record: z.number().int().min(0).max(127), offset: z.number().int().min(0).max(200000) }).strict(),
+  z.object({ action: z.literal("session-turn"), ...share, record: z.number().int().min(0).max(127), turnId: z.string().min(1).max(1024) }).strict(),
   z.object({ action: z.literal("session-list"), scope: selectedScope, page: z.number().int().min(1).max(100) }).strict(),
   z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory, turnIds: teamTurnSelectionSchema.optional() }).strict(),
   z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
-  ...(["session-detail", "session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
+  ...(["session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),
   z.object({ action: z.literal("sync"), scope: selectedScope, transport: z.enum(["https", "ssh"]).optional() }).strict(),
   z.object({ action: z.literal("cancel-sync") }).strict(),
   z.object({ action: z.literal("skill-preview"), ...asset, target: target.optional(), file: z.string().min(1).max(180).optional() }).strict(),
@@ -87,7 +92,9 @@ export type TeamPayload =
   | { kind: "document-preview"; value: Result<"previewDocument"> }
   | { kind: "session-list"; value: TeamSessionPage }
   | { kind: "session-preview"; value: TeamSessionPreview }
-  | { kind: "session-detail"; value: TeamSessionContent }
+  | { kind: "session-open"; value: TeamSessionSnapshot }
+  | { kind: "session-turns"; value: TeamSessionTurnsPage }
+  | { kind: "session-turn"; value: SessionTurnDetail | null }
   | { kind: "catalog"; value: TeamCatalog }
   | { kind: "skill-preview"; value: Result<"preview"> }
   | { kind: "work-preview"; value: Result<"previewWorkConfig"> }

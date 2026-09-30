@@ -254,7 +254,7 @@ export class PostgresSkillRepository {
               sessions.first_question
             ) as session_title,
             sessions.project_path
-          from agent_recall.sessions sessions
+          from agent_recall.local_sessions sessions
           where
             (
               events.session_id is not null
@@ -308,7 +308,7 @@ export class PostgresSkillRepository {
       `
         select distinct events.skill
         from agent_recall.skill_usage_events events
-        join agent_recall.sessions sessions
+        join agent_recall.local_sessions sessions
           on (
             events.session_id is not null
             and sessions.raw_id = events.session_id
@@ -348,7 +348,7 @@ export class PostgresSkillRepository {
         from agent_recall.skill_usage_events events
         left join lateral (
           select sessions.session_key
-          from agent_recall.sessions sessions
+          from agent_recall.local_sessions sessions
           where
             (
               events.session_id is not null
@@ -393,7 +393,7 @@ export class PostgresSkillRepository {
         from agent_recall.skill_usage_events events
         join lateral (
           select sessions.session_key
-          from agent_recall.sessions sessions
+          from agent_recall.local_sessions sessions
           where
             (
               events.session_id is not null
@@ -510,7 +510,7 @@ export class PostgresSkillRepository {
           from agent_recall.skill_usage_events events
           join lateral (
             select sessions.session_key
-            from agent_recall.sessions sessions
+            from agent_recall.local_sessions sessions
             where
               (
                 events.session_id is not null

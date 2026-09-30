@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, MessagesSquare, RefreshCw } from "lucide-react";
-import type { TeamSessionContent, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
+import type { TeamSessionSnapshot, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
-import { TeamSessionContentView } from "./team-session-content";
+import { TeamSessionReader } from "./team-session-reader";
 
 export function TeamSessionsPanel({ selection, language, api = window.sessionSearch.teamWorkspace }: { selection: TeamSelection; language: LanguageMode; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
@@ -13,15 +13,14 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   const scope = { teamId: team.id, repository: team.repository };
   const [list, setList] = useState<TeamSessionPage | null>(null);
   const [page, setPage] = useState(1), [refresh, setRefresh] = useState(0);
-  const [selectionDetail, setSelectionDetail] = useState<{ item: TeamSharedSession; content: TeamSessionContent } | null>(null);
+  const [selectionDetail, setSelectionDetail] = useState<{ item: TeamSharedSession; content: TeamSessionSnapshot } | null>(null);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const alive = useRef(false), running = useRef(false), generation = useRef(0);
-  const cache = useRef(new Map<string, { content: TeamSessionContent; bytes: number }>());
-  useEffect(() => { alive.current = true; return () => { alive.current = false; generation.current++; cache.current.clear(); void api.request({ action: "cancel-sync" }).catch(() => undefined); }; }, [api]);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; generation.current++; void api.request({ action: "cancel-sync" }).catch(() => undefined); }; }, [api]);
   useEffect(() => {
     let active = true;
-    generation.current++; cache.current.clear();
+    generation.current++;
     setList(null); setSelectionDetail(null); setError("");
     if (enabled && team) {
       setLoading(true);
@@ -35,22 +34,15 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   }, [api, team.id, team.repository, enabled, page, refresh]);
   async function run(request: TeamRequest, item: TeamSharedSession) {
     if (running.current) return;
-    const key = `${team.repository}:${item.id}:${item.digest}`, current = generation.current;
-    const cached = request.action === "session-detail" ? cache.current.get(key) : undefined;
-    if (cached) { setSelectionDetail({ item, content: cached.content }); setError(""); setFeedback(""); return; }
+    const current = generation.current;
     running.current = true; setBusy(true); setError(""); setFeedback("");
-    if (request.action === "session-detail") setSelectionDetail(null);
+    if (request.action === "session-open") setSelectionDetail(null);
     try {
       const reply = await api.request(request);
       if (!alive.current || current !== generation.current) return;
       if (!reply.ok) setError(reply.error.message);
-      else if (reply.data.kind === "session-detail") {
-        const content = reply.data.value, bytes = new TextEncoder().encode(JSON.stringify(content)).length;
-        if (bytes <= 32 * 1024 * 1024) {
-          cache.current.set(key, { content, bytes });
-          let retained = [...cache.current.values()].reduce((sum, entry) => sum + entry.bytes, 0);
-          while (retained > 32 * 1024 * 1024 || cache.current.size > 4) { const oldest = cache.current.keys().next().value!; retained -= cache.current.get(oldest)!.bytes; cache.current.delete(oldest); }
-        }
+      else if (reply.data.kind === "session-open") {
+        const content = reply.data.value;
         setSelectionDetail({ item, content });
       }
       else if (reply.data.kind === "complete") { setFeedback(reply.data.message); if (request.action === "session-withdraw") setRefresh((value) => value + 1); }
@@ -61,11 +53,11 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   return <section className="team-workspace">
     <header className="team-workspace-head"><div><h2>{l("Shared sessions", "共享会话")}</h2><p>{l("Share from a local session’s right-click menu. Nothing is uploaded automatically.", "在本地会话的右键菜单中分享，不会自动上传。")}</p></div><button className="team-icon-button" aria-label={l("Refresh sessions", "刷新会话")} title={l("Refresh sessions", "刷新会话")} disabled={locked} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} /></button></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{feedback && <p role="status" className="team-workspace-notice">{feedback}</p>}
-    {!enabled || !team ? <p className="team-workspace-notice">{l("Enable teams in Settings to access shared sessions.", "在设置中启用团队后，可查看共享会话。")}</p> : loading ? <p role="status">{l("Loading…", "正在读取…")}</p> : list && <>
-      <div className="team-resource-list">{list.items.length ? list.items.map((item) => <button className="team-resource-row" key={item.id} disabled={locked} onClick={() => void run({ action: "session-detail", scope, id: item.id }, item)}><MessagesSquare size={19} /><span><strong>{item.title}</strong><small>{item.author} · {new Date(item.createdAt).toLocaleDateString()} · {item.storage === "blocks" ? l("Compressed blocks", "分块压缩") : `${(item.bytes / 1024 / 1024).toFixed(2)} MiB`}</small></span><span>{l("Read", "阅读")}</span></button>) : <div className="team-empty"><MessagesSquare size={28} /><strong>{l("No shared sessions yet", "还没有共享会话")}</strong><p>{l("Right-click a local session and choose Upload to team.", "在本地 Session 上右键，选择「上传到团队」。")}</p></div>}</div>
+    {!enabled || !team ? <p className="team-workspace-notice">{l("Enable teams in Settings to access shared sessions.", "在设置中启用团队后，可查看共享会话。")}</p> : loading ? <p role="status">{l("Loading…", "正在读取…")}</p> : list && !selectionDetail && <>
+      <div className="team-resource-list">{list.items.length ? list.items.map((item) => <button className="team-resource-row" key={item.id} disabled={locked} onClick={() => void run({ action: "session-open", scope, id: item.id, digest: item.digest }, item)}><MessagesSquare size={19} /><span><strong>{item.title}</strong><small>{item.author} · {new Date(item.createdAt).toLocaleDateString()} · {item.storage === "blocks" ? l("Compressed blocks", "分块压缩") : `${(item.bytes / 1024 / 1024).toFixed(2)} MiB`}</small></span><span>{l("Read", "阅读")}</span></button>) : <div className="team-empty"><MessagesSquare size={28} /><strong>{l("No shared sessions yet", "还没有共享会话")}</strong><p>{l("Right-click a local session and choose Upload to team.", "在本地 Session 上右键，选择「上传到团队」。")}</p></div>}</div>
       {(page > 1 || list.hasMore) && <div className="team-space-actions"><button disabled={locked || page === 1} onClick={() => setPage((value) => value - 1)}>{l("Previous", "上一页")}</button><small>{page}</small><button disabled={locked || !list.hasMore || page >= 100} onClick={() => setPage((value) => value + 1)}>{l("Next", "下一页")}</button></div>}
     </>}
-    {busy && <p role="status">{l("Working…", "正在处理…")}</p>}
-    {selectionDetail && <section className="team-workspace-inspection"><header><h3>{selectionDetail.item.title}</h3><div className="team-space-actions"><button disabled={locked} onClick={() => void run({ action: "session-download", scope, id: selectionDetail.item.id }, selectionDetail.item)}><Download size={14} />{l("Download shared package", "下载分享包")}</button>{selectionDetail.item.canWithdraw && <button disabled={locked} onClick={() => void run({ action: "session-withdraw", scope, id: selectionDetail.item.id }, selectionDetail.item)}>{l("Withdraw share", "撤回分享")}</button>}</div></header><TeamSessionContentView key={selectionDetail.item.id} content={selectionDetail.content} language={language} /></section>}
+    {busy && <p role="status">{l("Loading session… The first open downloads and indexes it locally.", "正在读取会话…首次打开需要下载并建立本地索引。")}</p>}
+    {selectionDetail && <section className="team-workspace-inspection"><header><div><button className="team-subtle-action" onClick={() => setSelectionDetail(null)}>{l("Back to sessions", "返回会话列表")}</button><h3>{selectionDetail.item.title}</h3></div><div className="team-space-actions"><button disabled={locked} onClick={() => void run({ action: "session-download", scope, id: selectionDetail.item.id }, selectionDetail.item)}><Download size={14} />{l("Download shared package", "下载分享包")}</button>{selectionDetail.item.canWithdraw && <button disabled={locked} onClick={() => void run({ action: "session-withdraw", scope, id: selectionDetail.item.id }, selectionDetail.item)}>{l("Withdraw share", "撤回分享")}</button>}</div></header><TeamSessionReader key={selectionDetail.item.id} snapshot={selectionDetail.content} item={selectionDetail.item} scope={scope} api={api} language={language} /></section>}
   </section>;
 }

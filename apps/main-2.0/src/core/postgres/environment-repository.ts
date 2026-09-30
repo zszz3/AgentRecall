@@ -237,7 +237,7 @@ export class PostgresEnvironmentRepository {
 
   async deleteEnvironmentSessions(environmentId: string): Promise<void> {
     await this.database.transaction(async (client) => {
-      await client.query("delete from agent_recall.sessions where environment_id = $1", [environmentId]);
+      await client.query("delete from agent_recall.local_sessions where environment_id = $1", [environmentId]);
       await client.query(`
         delete from agent_recall.tags
         where not exists (
@@ -250,7 +250,7 @@ export class PostgresEnvironmentRepository {
   async deleteEnvironment(environmentId: string): Promise<void> {
     if (environmentId === "local") throw new Error("Local environment cannot be deleted.");
     await this.database.transaction(async (client) => {
-      await client.query("delete from agent_recall.sessions where environment_id = $1", [environmentId]);
+      await client.query("delete from agent_recall.local_sessions where environment_id = $1", [environmentId]);
       await client.query("delete from agent_recall.environments where id = $1", [environmentId]);
       await client.query(`
         delete from agent_recall.tags

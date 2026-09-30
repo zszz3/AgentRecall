@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { PostgresDatabase } from "../../core/postgres/database";
+import { PostgresTeamSessionRepository } from "../../core/postgres/team-session-repository";
+import { POSTGRES_MIGRATIONS } from "../../core/postgres/schema";
+import { PGliteTestPool } from "../../core/postgres/test-pglite";
 import { decodeSessionBlocks } from "./team-session-blocks";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -218,4 +223,32 @@ it("reads an already published session without fetching source files, but verifi
   await f.service.download(1, f.context, 17, f.signal);
   expect(read.mock.calls.some(([hash]) => fileBlocks.includes(hash))).toBe(true);
   expect(f.save).toHaveBeenCalledOnce();
+});
+
+it("downloads once, then reopens and expands turns from PostgreSQL without the remote", async () => {
+  const f = await fixture();
+  const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal);
+  await f.service.publish(1, f.context, preview.token, f.signal, async () => undefined);
+  const data = f.upload.mock.calls[0]![3], digest = createHash("sha256").update(data).digest("hex");
+  const download = vi.spyOn(f.remote, "download").mockResolvedValue(data);
+  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  await db.initialize();
+  const openService = () => {
+    const service = new TeamSessionSharing({ store: f.store, confirm: f.confirm, save: f.save, ensureDetails: vi.fn(), cache: new PostgresTeamSessionRepository(db) }, f.remote);
+    services.push(service); return service;
+  };
+  try {
+    const first = openService();
+    const snapshot = await first.open(f.context, 17, digest, f.signal);
+    expect(snapshot.records).toHaveLength(2);
+    first.close(); download.mockRejectedValue(new Error("Offline"));
+    const reopened = openService();
+    expect(await reopened.open(f.context, 17, digest, f.signal)).toEqual(snapshot);
+    const page = await reopened.turns(f.context, 17, digest, 0, 0);
+    expect(await reopened.turn(f.context, 17, digest, 0, page.turns[0].id)).toMatchObject({ messages: [{ content: "完整会话" }] });
+    expect(download).toHaveBeenCalledTimes(1);
+    await expect(reopened.open(f.context, 18, digest, f.signal)).rejects.toThrow("Offline");
+    download.mockResolvedValue(data);
+    await expect(reopened.open(f.context, 17, "b".repeat(64), f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_CHANGED" });
+  } finally { await db.close(); }
 });

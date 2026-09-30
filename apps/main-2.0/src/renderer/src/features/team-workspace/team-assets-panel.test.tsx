@@ -310,19 +310,23 @@ it("asks for the destination inside a dialog when several teams exist", async ()
   expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });
 
-it("reuses read session content until the team list is refreshed", async () => {
+it("opens the durable snapshot and requests turn summaries separately", async () => {
   const item = {id:17,title:"Shared fixture",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"a".repeat(64),canWithdraw:false};
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
     if(input.action === "session-list") return ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
-    if(input.action === "session-detail") return ok({kind:"session-detail",value:{bytes:100,files:[],children:[],missingAttachments:[],root:{schemaVersion:2,exportedAt:1,session:{sessionKey:"fixture",source:"codex",originalTitle:"Fixture",displayTitle:"Fixture"},messages:[],traceEvents:[]}}});
+    if(input.action === "session-open") return ok({kind:"session-open",value:{bytes:100,files:[],missingAttachments:[],partial:false,records:[{sessionKey:"fixture",title:"Fixture",turnCount:0}]}});
+    if(input.action === "session-turns") return ok({kind:"session-turns",value:{offset:0,hasMore:false,turns:[]}});
     return base(input);
   });
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
   await act(async () => button("Example").click());
   await act(async () => button("Shared fixture").click());
+  await act(async () => button("返回会话列表").click());
   await act(async () => button("Shared fixture").click());
-  expect(request.mock.calls.filter(([input]) => input.action === "session-detail")).toHaveLength(1);
+  expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(2);
+  expect(request.mock.calls.some(([input]) => input.action === "session-turns")).toBe(true);
+  expect(request.mock.calls.some(([input]) => input.action === "session-turn")).toBe(false);
   await act(async () => button("刷新会话").click());
   await act(async () => button("Shared fixture").click());
-  expect(request.mock.calls.filter(([input]) => input.action === "session-detail")).toHaveLength(2);
+  expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(3);
 });

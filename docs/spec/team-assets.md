@@ -122,4 +122,15 @@ Preview 返回 token、expiresAt、repository 和逐项 Diff，状态为 added/m
 
 阅读分块分享使用只读投影：文件信息保留，单独编码的原文件及附件数据暂不读取，完整下载时再校验。空文件数据只允许出现在有对应清单描述符的投影中，不能作为完整包或旧包通过校验。需要的内容块并行读取并按摘要复用解压结果，失败或取消时等待已发出的请求结束；不修改远端清单。
 
-当前限制见[团队空间指南](../v2/team-workspace.md#共享会话)。这不是流式大会话方案：准备仍保留完整快照，阅读仍一次还原正文，现有大小限制继续执行。对应测试为 [分块编码](../../apps/main-2.0/src/main/services/team-session-blocks.test.ts)、[远端归属与块复用](../../apps/main-2.0/src/main/services/team-session-github.test.ts)和会话分享服务测试。
+当前限制见[团队空间指南](../v2/team-workspace.md#共享会话)。这不是流式大会话方案：准备仍保留完整快照，首次导入仍一次还原正文，现有大小限制继续执行。对应测试为 [分块编码](../../apps/main-2.0/src/main/services/team-session-blocks.test.ts)、[远端归属与块复用](../../apps/main-2.0/src/main/services/team-session-github.test.ts)和会话分享服务测试。
+
+
+### 共享会话的本地读取
+
+V2 首次打开分享时校验仓库、分享资产 ID 和摘要，下载并解码阅读投影，在一个 PostgreSQL 事务中导入。`team_session_snapshots` 保存来源与原始阅读投影；会话、消息、原始事件、轮次、工具轨迹使用普通 Session 的表与写入器。部分分享保留所选 Turn 的原序号、消息和工具关系，内部主键按分享隔离，原始标识保留在投影中。
+
+`session-open` 只返回轻量元数据；`session-turns` 每页最多 50 个轮次摘要；`session-turn` 使用普通 Session 的轮次仓库读取正文。完整会话与片段均使用同一个 TurnAccordion 阅读组件。再次打开、刷新列表或重启后命中同一分享版本，直接读取本地数据库，不重新下载或解压。列表刷新仍访问团队仓库；未缓存的新分享仍需网络。
+
+普通历史查询、用量、项目、MCP、自动索引与来源清理使用 `local_sessions` 视图，排除有 `team_snapshot_key` 的只读团队副本。团队文件路径不会作为本机附件路径打开；附件仍通过下载分享包获取。分享撤回后不再出现在远端列表，但已下载的本地副本不能被远程抹除。导入失败或取消时回滚，不暴露半份会话。摘要或缓存版本变化会创建独立快照；旧分享包无需重新上传，首次打开时按现有兼容解码路径导入。
+
+验证见 [团队 PostgreSQL 存储测试](../../apps/main-2.0/src/core/postgres/team-session-repository.test.ts)、会话分享服务和团队 IPC 测试。数据归属决策见 [ADR 0008](../adr/0008-team-session-local-index.md)。
