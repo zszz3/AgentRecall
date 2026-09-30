@@ -198,3 +198,24 @@ it("reads block manifests, reports all compressed bytes, exports a portable snap
   download.mockResolvedValue(gzipSync(JSON.stringify({ ...bundle.manifest, source: { ...bundle.manifest.source, sessionKey: "other" } })));
   await expect(f.service.detail(f.context, 17, f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
 });
+
+it("reads an already published session without fetching source files, but verifies them on download", async () => {
+  const f = await fixture();
+  const bytes = (await import("node:crypto")).randomBytes(1024 * 1024);
+  f.store.getSessionSourceArtifacts.mockResolvedValue([{kind:"session-file",mimeType:"application/json",fileName:"synthetic.jsonl",bytes}]);
+  const preview = await f.service.prepare(1, f.context, f.session.sessionKey, f.signal);
+  await f.service.publish(1, f.context, preview.token, f.signal, async () => undefined);
+  const call = vi.mocked(f.remote.uploadBlocks).mock.calls[0]!, bundle = call[4];
+  const fileBlocks = bundle.manifest.strings.filter(entry => entry.path[2] === "files").flatMap(entry => entry.value.blocks.map(block => block.hash));
+  expect(fileBlocks.length).toBeGreaterThan(0);
+  const read = vi.fn(async (hash: string) => bundle.blocks.get(hash)!);
+  vi.spyOn(f.remote, "blockReader").mockResolvedValue(read);
+  vi.spyOn(f.remote, "download").mockResolvedValue(call[3]);
+  const content = await f.service.detail(f.context, 17, f.signal);
+  expect(content.root.messages).toEqual(preview.root.messages);
+  expect(content.files[0]!.bytes).toBe(bytes.length);
+  expect(read.mock.calls.some(([hash]) => fileBlocks.includes(hash))).toBe(false);
+  await f.service.download(1, f.context, 17, f.signal);
+  expect(read.mock.calls.some(([hash]) => fileBlocks.includes(hash))).toBe(true);
+  expect(f.save).toHaveBeenCalledOnce();
+});

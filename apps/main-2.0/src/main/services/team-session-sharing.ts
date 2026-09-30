@@ -13,7 +13,9 @@ import { TeamSessionGitHub, MAX_TEAM_SESSION_BYTES } from "./team-session-github
 
 const compress = promisify(gzip), decompress = promisify(gunzip);
 const SOURCE_LIMIT = 16 * 1024 * 1024;
-const fileSchema = z.object({ name: z.string().max(1024), kind: z.string().max(100), attachmentId: z.string().optional(), data: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+// Null is an internal read projection only. content() requires a matching
+// deferred-file descriptor; complete downloads and legacy packets reject it.
+const fileSchema = z.object({ name: z.string().max(1024), kind: z.string().max(100), attachmentId: z.string().optional(), data: z.string().nullable(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const attachmentSchema = z.object({ id: z.string(), fileName: z.string(), mimeType: z.string(), sizeBytes: z.number().optional(), previewKind: z.enum(["image", "pdf", "text", "file"]), status: z.enum(["available", "unsafe", "missing", "too_large"]), source: z.object({ kind: z.enum(["inline", "path"]), value: z.string() }).optional(), remoteObjectKey: z.string().optional(), sha256: z.string().optional() }).passthrough();
 const messageSchema = z.object({ role: z.enum(["user", "assistant"]), content: z.string(), timestamp: z.string(), index: z.number(), sourceTurnId: z.string().nullable().optional(), phase: z.enum(["commentary", "final_answer"]).nullable().optional(), attachments: z.array(attachmentSchema).optional() }).passthrough();
 const traceSchema = z.object({ index: z.number(), kind: z.string(), source: z.string(), title: z.string(), detail: z.string(), timestamp: z.string() }).passthrough();
@@ -63,13 +65,18 @@ export class TeamSessionSharing {
   close(): void { for (const item of this.previews.values()) clearTimeout(item.timer); this.previews.clear(); }
   private project(context: TeamSessionContext): string { return createHash("sha256").update(context.projectIdentity).digest("hex").slice(0, 32); }
   private cancelled(signal: AbortSignal): void { if (signal.aborted) throw new WorkspaceError("CANCELLED", "团队会话操作已取消。"); }
-  private content(packet: Packet, bytes: number): TeamSessionContent {
+  private content(packet: Packet, bytes: number, deferredFiles = new Map<string, number>()): TeamSessionContent {
     const seen = new Set<string>();
-    const details = packet.records.map((record) => {
+    const details = packet.records.map((record, recordIndex) => {
       if (seen.has(record.detail.session.sessionKey)) throw new WorkspaceError("TEAM_SESSION_INVALID", "分享包包含重复会话。");
       seen.add(record.detail.session.sessionKey);
       const detail = record.detail;
-      for (const file of record.files) {
+      for (const [fileIndex, file] of record.files.entries()) {
+        if (file.data === null) {
+          const size = deferredFiles.get(`${recordIndex}:${fileIndex}`);
+          if (size === undefined || size > SOURCE_LIMIT) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话文件引用无效。");
+          continue;
+        }
         const data = Buffer.from(file.data, "base64");
         if (data.toString("base64") !== file.data || data.length > SOURCE_LIMIT || createHash("sha256").update(data).digest("hex") !== file.sha256) throw new WorkspaceError("TEAM_SESSION_INVALID", "分享包文件校验失败。");
       }
@@ -78,31 +85,39 @@ export class TeamSessionSharing {
     const root = details.find((detail) => detail.session.sessionKey === packet.rootSessionKey);
     if (!root) throw new WorkspaceError("TEAM_SESSION_INVALID", "分享包缺少主会话。");
     return { root, ...(packet.schemaVersion === 3 ? { selectedTurns: packet.selectedTurns } : {}), children: details.filter((detail) => detail !== root), bytes,
-      files: packet.records.flatMap((record) => record.files.map((file) => ({ name: file.name, kind: file.kind, bytes: Buffer.byteLength(file.data, "base64"), ...(file.attachmentId ? { attachmentId: file.attachmentId } : {}) }))),
+      files: packet.records.flatMap((record, recordIndex) => record.files.map((file, fileIndex) => ({ name: file.name, kind: file.kind, bytes: file.data === null ? deferredFiles.get(`${recordIndex}:${fileIndex}`)! : Buffer.byteLength(file.data, "base64"), ...(file.attachmentId ? { attachmentId: file.attachmentId } : {}) }))),
       missingAttachments: packet.records.flatMap((record) => record.missingAttachments),
     };
   }
-  private async decode(context: TeamSessionContext, data: Buffer, signal: AbortSignal): Promise<{ packet: Packet; content: TeamSessionContent; blocked: boolean }> {
+  private async decode(context: TeamSessionContext, data: Buffer, signal: AbortSignal, reading = false): Promise<{ packet: Packet; content: TeamSessionContent; blocked: boolean }> {
     try {
       if (data.length > MAX_TEAM_SESSION_BYTES) throw new Error("Too large");
       const json = await decompress(data, { maxOutputLength: MAX_TEAM_SESSION_BYTES });
       let bytes = data.length;
       let blocked = false;
+      let claimedSource: { agent: string; sessionKey: string } | undefined;
+      const deferredFiles = new Map<string, number>();
       let decoded: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(json));
       if (decoded && typeof decoded === "object" && "schemaVersion" in decoded && decoded.schemaVersion === 4) {
         if (!("repository" in decoded) || decoded.repository !== context.repository) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "会话清单不属于当前团队。");
         blocked = true;
         const manifest = sessionBlockManifestSchema.parse(decoded);
+        claimedSource = manifest.source;
         const refs = new Map([...manifest.body, ...manifest.strings.flatMap(entry => entry.value.blocks)].map(ref => [ref.hash, ref.storedBytes]));
         bytes += [...refs.values()].reduce((sum, size) => sum + size, 0);
-        decoded = await decodeSessionBlocks(manifest, await this.remote.blockReader(context.repository, signal), signal);
-        const restored = packetSchema.parse(decoded);
-        if (restored.rootSessionKey !== manifest.source.sessionKey || restored.records.find(record => record.detail.session.sessionKey === restored.rootSessionKey)?.detail.session.source !== manifest.source.agent) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话来源与清单不一致。");
+        decoded = await decodeSessionBlocks(manifest, await this.remote.blockReader(context.repository, signal), signal, reading ? entry => {
+          const [records, recordIndex, files, fileIndex, field] = entry.path;
+          if (entry.path.length !== 5 || records !== "records" || typeof recordIndex !== "number" || files !== "files" || typeof fileIndex !== "number" || field !== "data" || entry.value.encoding !== "base64" || entry.prefix !== "") return false;
+          deferredFiles.set(`${recordIndex}:${fileIndex}`, entry.value.bytes);
+          return true;
+        } : undefined);
+
       }
       const packet = packetSchema.parse(decoded);
+      if (claimedSource && (packet.rootSessionKey !== claimedSource.sessionKey || packet.records.find(record => record.detail.session.sessionKey === packet.rootSessionKey)?.detail.session.source !== claimedSource.agent)) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话来源与清单不一致。");
       if (packet.repository !== context.repository || !context.teamWide && packet.projectIdentity !== context.projectIdentity) throw new WorkspaceError("TEAM_SESSION_PROJECT_MISMATCH", "分享包的团队或项目与当前选择不一致。");
-      return { packet, content: this.content(packet, bytes), blocked };
-    } catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("TEAM_SESSION_INVALID", "会话包格式或版本无效，或解压后超过 64 MiB。"); }
+      return { packet, content: this.content(packet, bytes, deferredFiles), blocked };
+    } catch (error) { this.cancelled(signal); if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("TEAM_SESSION_INVALID", "会话包格式或版本无效，或解压后超过 64 MiB。"); }
   }
   async inspectSession(sessionKey: string, signal: AbortSignal) {
     this.cancelled(signal);
@@ -251,7 +266,7 @@ export class TeamSessionSharing {
   }
   list(context: TeamSessionContext, page: number, signal: AbortSignal) { return this.remote.list(context.repository, context.teamWide ? null : this.project(context), page, signal); }
   async detail(context: TeamSessionContext, id: number, signal: AbortSignal) {
-    const content = await this.decode(context, await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal), signal);
+    const content = await this.decode(context, await this.remote.download(context.repository, context.teamWide ? null : this.project(context), id, signal), signal, true);
     this.cancelled(signal);
     return content.content;
   }

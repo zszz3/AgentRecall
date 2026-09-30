@@ -47,3 +47,29 @@ it("counts wrappers and all restored references when enforcing the complete JSON
   await expect(encodeSessionBlocks({ ...value, extra: true }, source, repository, signal)).rejects.toMatchObject({ code: "TEAM_SESSION_TOO_LARGE" });
   await expect(decodeSessionBlocks({ ...bundle.manifest, originalBytes: limit - 1 }, async hash => bundle.blocks.get(hash)!, signal)).rejects.toMatchObject({ code: "TEAM_SESSION_INVALID" });
 });
+
+it("fetches each repeated block once with at most four concurrent reads", async () => {
+  const texts = Array.from({length: 6}, () => randomBytes(20000).toString("hex"));
+  const value = {items:[...texts,...texts]}, signal = new AbortController().signal;
+  const bundle = await encodeSessionBlocks(value, source, repository, signal);
+  let active = 0, peak = 0;
+  const reads: string[] = [];
+  const restored = await decodeSessionBlocks(bundle.manifest, async hash => {
+    reads.push(hash); peak = Math.max(peak, ++active);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    active--; return bundle.blocks.get(hash)!;
+  }, signal);
+  expect(restored).toEqual(value);
+  expect(reads).toHaveLength(bundle.blocks.size);
+  expect(new Set(reads).size).toBe(reads.length);
+  expect(peak).toBe(4); expect(active).toBe(0);
+});
+
+it("validates deferred reference paths and lengths without reading their payloads", async () => {
+  const signal = new AbortController().signal;
+  const bundle = await encodeSessionBlocks({file:randomBytes(20000).toString("base64")}, source, repository, signal);
+  const entry = bundle.manifest.strings[0]!;
+  const read = async (hash: string) => bundle.blocks.get(hash)!;
+  await expect(decodeSessionBlocks({...bundle.manifest, strings:[{...entry,path:["missing"]}]}, read, signal, () => true)).rejects.toMatchObject({code:"TEAM_SESSION_INVALID"});
+  await expect(decodeSessionBlocks({...bundle.manifest, strings:[{...entry,value:{...entry.value,bytes:entry.value.bytes+1}}]}, read, signal, () => true)).rejects.toMatchObject({code:"TEAM_SESSION_INVALID"});
+});

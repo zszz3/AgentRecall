@@ -120,4 +120,6 @@ Preview 返回 token、expiresAt、repository 和逐项 Diff，状态为 added/m
 
 块按压缩字节的 SHA-256 命名；读取校验压缩长度、摘要、解压长度和完整还原大小。上传复用前验证已有块，最后才发布窗口冻结的清单。分享归属取自 GitHub 附件上传账号；不可从复用块的首个上传者推导。来源 Agent 和 sessionKey 必须与还原后的主会话匹配。
 
-当前限制见[团队空间指南](../v2/team-workspace.md#共享会话)。这不是流式大会话方案：准备和阅读仍保留完整快照，现有大小限制继续执行。对应测试为 [分块编码](../../apps/main-2.0/src/main/services/team-session-blocks.test.ts)、[远端归属与块复用](../../apps/main-2.0/src/main/services/team-session-github.test.ts)和会话分享服务测试。
+阅读分块分享使用只读投影：文件信息保留，单独编码的原文件及附件数据暂不读取，完整下载时再校验。空文件数据只允许出现在有对应清单描述符的投影中，不能作为完整包或旧包通过校验。需要的内容块并行读取并按摘要复用解压结果，失败或取消时等待已发出的请求结束；不修改远端清单。
+
+当前限制见[团队空间指南](../v2/team-workspace.md#共享会话)。这不是流式大会话方案：准备仍保留完整快照，阅读仍一次还原正文，现有大小限制继续执行。对应测试为 [分块编码](../../apps/main-2.0/src/main/services/team-session-blocks.test.ts)、[远端归属与块复用](../../apps/main-2.0/src/main/services/team-session-github.test.ts)和会话分享服务测试。

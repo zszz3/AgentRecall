@@ -309,3 +309,20 @@ it("asks for the destination inside a dialog when several teams exist", async ()
   expect(request).toHaveBeenCalledWith({action:"catalog",scope:{teamId:second.id,repository:second.repository}});
   expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });
+
+it("reuses read session content until the team list is refreshed", async () => {
+  const item = {id:17,title:"Shared fixture",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"a".repeat(64),canWithdraw:false};
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if(input.action === "session-list") return ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
+    if(input.action === "session-detail") return ok({kind:"session-detail",value:{bytes:100,files:[],children:[],missingAttachments:[],root:{schemaVersion:2,exportedAt:1,session:{sessionKey:"fixture",source:"codex",originalTitle:"Fixture",displayTitle:"Fixture"},messages:[],traceEvents:[]}}});
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
+  await act(async () => button("Example").click());
+  await act(async () => button("Shared fixture").click());
+  await act(async () => button("Shared fixture").click());
+  expect(request.mock.calls.filter(([input]) => input.action === "session-detail")).toHaveLength(1);
+  await act(async () => button("刷新会话").click());
+  await act(async () => button("Shared fixture").click());
+  expect(request.mock.calls.filter(([input]) => input.action === "session-detail")).toHaveLength(2);
+});

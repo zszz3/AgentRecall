@@ -16,10 +16,12 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   const [selectionDetail, setSelectionDetail] = useState<{ item: TeamSharedSession; content: TeamSessionContent } | null>(null);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
-  const alive = useRef(false), running = useRef(false);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; void api.request({ action: "cancel-sync" }).catch(() => undefined); }; }, [api]);
+  const alive = useRef(false), running = useRef(false), generation = useRef(0);
+  const cache = useRef(new Map<string, { content: TeamSessionContent; bytes: number }>());
+  useEffect(() => { alive.current = true; return () => { alive.current = false; generation.current++; cache.current.clear(); void api.request({ action: "cancel-sync" }).catch(() => undefined); }; }, [api]);
   useEffect(() => {
     let active = true;
+    generation.current++; cache.current.clear();
     setList(null); setSelectionDetail(null); setError("");
     if (enabled && team) {
       setLoading(true);
@@ -33,15 +35,26 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   }, [api, team.id, team.repository, enabled, page, refresh]);
   async function run(request: TeamRequest, item: TeamSharedSession) {
     if (running.current) return;
+    const key = `${team.repository}:${item.id}:${item.digest}`, current = generation.current;
+    const cached = request.action === "session-detail" ? cache.current.get(key) : undefined;
+    if (cached) { setSelectionDetail({ item, content: cached.content }); setError(""); setFeedback(""); return; }
     running.current = true; setBusy(true); setError(""); setFeedback("");
     if (request.action === "session-detail") setSelectionDetail(null);
     try {
       const reply = await api.request(request);
-      if (!alive.current) return;
+      if (!alive.current || current !== generation.current) return;
       if (!reply.ok) setError(reply.error.message);
-      else if (reply.data.kind === "session-detail") setSelectionDetail({ item, content: reply.data.value });
+      else if (reply.data.kind === "session-detail") {
+        const content = reply.data.value, bytes = new TextEncoder().encode(JSON.stringify(content)).length;
+        if (bytes <= 32 * 1024 * 1024) {
+          cache.current.set(key, { content, bytes });
+          let retained = [...cache.current.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+          while (retained > 32 * 1024 * 1024 || cache.current.size > 4) { const oldest = cache.current.keys().next().value!; retained -= cache.current.get(oldest)!.bytes; cache.current.delete(oldest); }
+        }
+        setSelectionDetail({ item, content });
+      }
       else if (reply.data.kind === "complete") { setFeedback(reply.data.message); if (request.action === "session-withdraw") setRefresh((value) => value + 1); }
-    } catch { if (alive.current) setError(l("Request failed. Try again.", "请求未完成，请重试。")); }
+    } catch { if (alive.current && current === generation.current) setError(l("Request failed. Try again.", "请求未完成，请重试。")); }
     finally { running.current = false; if (alive.current) setBusy(false); }
   }
   const locked = busy || loading || selection.busy || !enabled || !team;

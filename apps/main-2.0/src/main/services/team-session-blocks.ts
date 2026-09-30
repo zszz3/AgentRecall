@@ -71,44 +71,58 @@ export async function encodeSessionBlocks(value: unknown, source: SessionBlockMa
   if (Buffer.byteLength(JSON.stringify(manifest)) > 4 * 1024 * 1024) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话清单过大，请减少所选轮次。");
   return { manifest, blocks };
 }
-export async function decodeSessionBlocks(input: unknown, read: (hash: string) => Promise<Buffer>, signal: AbortSignal): Promise<unknown> {
+export async function decodeSessionBlocks(input: unknown, read: (hash: string) => Promise<Buffer>, signal: AbortSignal, omit?: (entry: SessionBlockManifest["strings"][number]) => boolean): Promise<unknown> {
   const manifest = sessionBlockManifestSchema.parse(input);
+  const skipped = new Set(manifest.strings.filter(entry => omit?.(entry)));
+  const references = [...manifest.body, ...manifest.strings.flatMap(entry => entry.value.blocks)];
+  for (const entry of manifest.strings) if (entry.value.blocks.reduce((sum, ref) => sum + ref.bytes, 0) !== entry.value.bytes) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话内容长度无效。");
+  const unique = new Map<string, z.infer<typeof reference>>();
   let total = 0;
-  const cache = new Map<string, Buffer>();
-  const load = async (refs: z.infer<typeof reference>[]) => {
-    const parts: Buffer[] = [];
-    for (const ref of refs) {
-      check(signal); total += ref.bytes;
-      // Includes repeated references and metadata, not just unique compressed blocks.
-      if (total > MAX_TOTAL_BYTES * 2) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话解压内容超过限制。");
-      let data = cache.get(ref.hash);
-      if (!data) { data = await read(ref.hash); if (cache.size >= 4) cache.delete(cache.keys().next().value!); cache.set(ref.hash, data); }
+  for (const ref of references) {
+    total += ref.bytes;
+    if (total > MAX_TOTAL_BYTES * 2) throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "会话解压内容超过限制。");
+    const prior = unique.get(ref.hash);
+    if (prior && (prior.bytes !== ref.bytes || prior.storedBytes !== ref.storedBytes)) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话分块长度不一致。");
+    unique.set(ref.hash, ref);
+  }
+  // Bound concurrency, fetch and inflate each required block once, and await
+  // every in-flight read even when one fails. File payloads can be deferred by
+  // the read-only projection; full downloads still validate every block.
+  const needed = new Set([...manifest.body, ...manifest.strings.filter(entry => !skipped.has(entry)).flatMap(entry => entry.value.blocks)].map(ref => ref.hash));
+  const cache = new Map<string, Buffer>(), refs = [...unique.values()].filter(ref => needed.has(ref.hash));
+  for (let offset = 0; offset < refs.length; offset += 4) {
+    check(signal);
+    const results = await Promise.allSettled(refs.slice(offset, offset + 4).map(async ref => {
+      const data = await read(ref.hash); check(signal);
       if (data.length !== ref.storedBytes || digest(data) !== ref.hash) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话分块校验失败。");
       const raw = await decompress(data, { maxOutputLength: SESSION_BLOCK_BYTES });
       if (raw.length !== ref.bytes) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话分块长度无效。");
-      parts.push(raw);
-    }
-    return Buffer.concat(parts);
-  };
+      cache.set(ref.hash, raw);
+    }));
+    const failure = results.find(result => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
+  const load = (entries: z.infer<typeof reference>[]) => { check(signal); return Buffer.concat(entries.map(entry => cache.get(entry.hash)!)); };
   let result: unknown = JSON.parse((await load(manifest.body)).toString("utf8"));
   const seen = new Set<string>();
   for (const entry of manifest.strings) {
     const key = JSON.stringify(entry.path);
     if (seen.has(key)) throw new WorkspaceError("TEAM_SESSION_INVALID", "重复的内容引用。"); seen.add(key);
-    const bytes = await load(entry.value.blocks);
-    if (bytes.length !== entry.value.bytes) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话内容长度无效。");
-    const text = entry.value.encoding === "base64" ? entry.prefix + bytes.toString("base64") : JSON.parse(bytes.toString("utf8"));
-    if (typeof text !== "string") throw new WorkspaceError("TEAM_SESSION_INVALID", "字符串分块格式无效。");
-    if (!entry.path.length) { if (result !== null) throw new WorkspaceError("TEAM_SESSION_INVALID", "内容引用无效。"); result = text; continue; }
     let parent = result;
     for (const part of entry.path.slice(0, -1)) {
       if (!parent || typeof parent !== "object" || !Object.hasOwn(parent, part)) throw new WorkspaceError("TEAM_SESSION_INVALID", "内容引用不存在。");
       parent = (parent as Record<string | number, unknown>)[part];
     }
     const last = entry.path.at(-1)!;
-    if (!parent || typeof parent !== "object" || !Object.hasOwn(parent, last) || (parent as Record<string | number, unknown>)[last] !== null) throw new WorkspaceError("TEAM_SESSION_INVALID", "内容引用无效。");
+    if (entry.path.length ? !parent || typeof parent !== "object" || !Object.hasOwn(parent, last) || (parent as Record<string | number, unknown>)[last] !== null : result !== null) throw new WorkspaceError("TEAM_SESSION_INVALID", "内容引用无效。");
+    if (skipped.has(entry)) continue;
+    const bytes = load(entry.value.blocks);
+    const text = entry.value.encoding === "base64" ? entry.prefix + bytes.toString("base64") : JSON.parse(bytes.toString("utf8"));
+    if (typeof text !== "string") throw new WorkspaceError("TEAM_SESSION_INVALID", "字符串分块格式无效。");
+    if (!entry.path.length) { result = text; continue; }
     Object.defineProperty(parent, last, { value: text, writable: true, configurable: true, enumerable: true });
   }
-  if (Buffer.byteLength(JSON.stringify(result)) !== manifest.originalBytes) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话还原长度无效。");
+  const restoredBytes = Buffer.byteLength(JSON.stringify(result));
+  if (restoredBytes > MAX_TOTAL_BYTES || skipped.size === 0 && restoredBytes !== manifest.originalBytes) throw new WorkspaceError("TEAM_SESSION_INVALID", "会话还原长度无效。");
   return result;
 }
