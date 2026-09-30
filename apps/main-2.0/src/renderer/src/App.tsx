@@ -112,6 +112,7 @@ import {
   migrationTargetsForSession,
 } from "./session-ui";
 
+const TeamUploadDialog = lazy(() => import("./features/team-workspace/team-upload-dialog").then(module => ({ default: module.TeamUploadDialog })));
 const TeamWorkspacePage = lazy(() => import("./features/team-workspace/team-workspace-page").then((module) => ({ default: module.TeamWorkspacePage })));
 const RUNTIME_PLATFORM: NodeJS.Platform = window.sessionSearch.platform;
 const IS_MAC = RUNTIME_PLATFORM === "darwin";
@@ -191,6 +192,7 @@ export function App(): ReactElement {
   const remoteSessions = useRemoteSessionsCache();
   const [activePage, setActivePage] = useState<AppPage>("workbench");
   const [teamPushDrafts, setTeamPushDrafts] = useState<TeamPushDraft[]>([]);
+  const [teamUploadKeys, setTeamUploadKeys] = useState<string[] | null>(null);
   const pageNavigationVersionRef = useRef(0);
   useLayoutEffect(() => {
     pageNavigationVersionRef.current += 1;
@@ -2169,7 +2171,7 @@ export function App(): ReactElement {
           shareTurns: (session, turnIds) => {
             const entries: TeamPushDraft[] = detailTurns.filter(turn => turnIds.includes(turn.id)).map(turn => ({ item: { kind: "turn", key: `turn:${session.sessionKey}:${turn.id}`, sessionKey: session.sessionKey, turnId: turn.id }, title: `${session.displayTitle || session.originalTitle} · Turn ${turn.turnIndex + 1}`, subtitle: turn.userPreview || turn.assistantPreview }));
             setTeamPushDrafts(previous => [...previous.filter(item => !entries.some(entry => entry.item.key === item.item.key)), ...entries]);
-            closeDetail(); setActivePage("team-space");
+            setTeamUploadKeys(entries.map(entry => entry.item.key));
           },
           uploadRemote: (session) => void uploadRemoteSession(session),
           copyResume: (session) => void runAction(
@@ -2239,6 +2241,7 @@ export function App(): ReactElement {
           ),
         }}
       />
+      {teamUploadKeys !== null && <Suspense fallback={<p role="status">{t("Opening upload…", "正在打开上传窗口…")}</p>}><TeamUploadDialog language={language} drafts={teamPushDrafts.filter(draft => teamUploadKeys.includes(draft.item.key))} onClose={() => setTeamUploadKeys(null)} onPushed={keys => setTeamPushDrafts(previous => previous.filter(draft => !keys.includes(draft.item.key)))} onOpenSettings={() => { setTeamUploadKeys(null); setSettingsInitialSection("team"); setSettingsOpen(true); }} /></Suspense>}
       {contextMenu ? (
         <SessionContextMenu
           state={contextMenu}
@@ -2264,7 +2267,7 @@ export function App(): ReactElement {
             const session = contextMenu.session;
             const draft: TeamPushDraft = { item: { kind: "session", key: `session:${session.sessionKey}`, sessionKey: session.sessionKey }, title: session.displayTitle || session.originalTitle, subtitle: t("Full session snapshot", "完整会话快照") };
             setTeamPushDrafts(previous => [...previous.filter(item => item.item.key !== draft.item.key), draft]);
-            setContextMenu(null); closeDetail(); setActivePage("team-space");
+            setContextMenu(null); setTeamUploadKeys([draft.item.key]);
           }}
           onRename={() => beginRename(contextMenu.session)}
           onAddTag={() => beginAddTag(contextMenu.session)}

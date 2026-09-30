@@ -156,7 +156,7 @@ export function SessionContextMenu({
           <Copy size={14} /> {l("Copy Resume Cmd", "复制 Resume 命令")}
         </button>
       ) : null}
-      {onShareTeam && <button onClick={onShareTeam} disabled={localOnlyDisabled || state.session.sourceAvailable === false}><Share2 size={14} />{l("Add to team Push", "加入团队待上传")}</button>}
+      {onShareTeam && <button onClick={onShareTeam} disabled={localOnlyDisabled || state.session.sourceAvailable === false}><Share2 size={14} />{l("Upload to team…", "上传到团队…")}</button>}
       <button onClick={onCopyMarkdown}>{l("Copy Markdown", "复制 Markdown")}</button>
       <button onClick={() => onExportMarkdown(false)}>
         <Download size={14} /> {l("Export Markdown (No Tool Trace)", "导出 Markdown（不含 Tool Trace）")}

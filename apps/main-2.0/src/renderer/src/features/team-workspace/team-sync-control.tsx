@@ -4,7 +4,7 @@ import type { TeamPullReport, TeamSpace } from "@agentrecall/workspace-core";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { LanguageMode } from "../../language";
 
-export function TeamSyncControl({ team, enabled, externalBusy, language, api, onBusy, onSynced, onPush }: { team: TeamSpace; enabled: boolean; externalBusy: boolean; language: LanguageMode; api: TeamWorkspaceApi; onBusy(value: boolean): void; onPush(): void; onSynced(report: TeamPullReport): void }) {
+export function TeamSyncControl({ team, enabled, externalBusy, language, api, onBusy, onSynced, onPush, pendingCount = 0 }: { pendingCount?: number; team: TeamSpace; enabled: boolean; externalBusy: boolean; language: LanguageMode; api: TeamWorkspaceApi; onBusy(value: boolean): void; onPush(): void; onSynced(report: TeamPullReport): void }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const [report, setReport] = useState<TeamPullReport | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const alive = useRef(false), running = useRef(false), version = useRef(0);
@@ -39,7 +39,7 @@ export function TeamSyncControl({ team, enabled, externalBusy, language, api, on
         <button type="button" aria-label={busy ? l("Pulling team resources", "拉取中…") : l("Pull team resources", "Pull 拉取")} title={l("Pull · Update local team resources", "Pull 拉取 · 更新本地团队资源")} disabled={!enabled || busy || externalBusy} onClick={() => void sync()}>
           {busy ? <LoaderCircle size={14} className="team-transfer-spinner" aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}<span>{busy ? "Pulling…" : "Pull"}</span>
         </button>
-        <button type="button" aria-label={l("Push selected resources", "Push 推送")} title={l("Push · Choose changes to publish", "Push 推送 · 选择要发布的变更")} disabled={!enabled || busy || externalBusy} onClick={onPush}><ArrowUp size={14} aria-hidden="true" /><span>Push</span></button>
+        <button type="button" aria-label={l("Push selected resources", "Push 推送")} title={l("Push · Choose changes to publish", "Push 推送 · 选择要发布的变更")} disabled={!enabled || busy || externalBusy} onClick={onPush}><ArrowUp size={14} aria-hidden="true" /><span>Push{pendingCount > 0 ? ` · ${pendingCount}` : ""}</span></button>
       </div>
     </div></div>
     {error && <p className="team-workspace-error" role="alert">{error}</p>}

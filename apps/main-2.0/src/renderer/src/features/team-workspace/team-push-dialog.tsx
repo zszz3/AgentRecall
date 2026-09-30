@@ -15,6 +15,7 @@ export function TeamPushDialog({ selection, directories, drafts, language, api, 
 }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const choices = directories.filter(item => item.enabled);
+  const sessionUpload = drafts.some(draft => draft.item.kind === "session" || draft.item.kind === "turn");
   const [directoryId, setDirectoryId] = useState(choices[0]?.id ?? ""), [catalog, setCatalog] = useState<TeamCatalog | null>(null);
   const [resources, setResources] = useState<TeamPushDraft[]>([]), [selected, setSelected] = useState(() => new Set(drafts.map(draft => draft.item.key)));
   const [completed, setCompleted] = useState(new Set<string>()), [active, setActive] = useState<string | null>(null);
@@ -123,15 +124,17 @@ export function TeamPushDialog({ selection, directories, drafts, language, api, 
         inspectionCache.current.clear();
         for (const item of value.items) { const entry = entries.find(entry => entry.item.key === item.key)!; remember(entry, item, new TextEncoder().encode(JSON.stringify(item)).length); }
         setActive(entries[0]!.item.key); setView(entries[0]!.item.kind === "turn" ? "conversation" : "diff");
+        return value;
       }
     } catch { if (alive.current) setError(l("Could not build Diff. Try again.", "Diff 读取失败，请重试。")); }
     finally { running.current = false; onBusy(false); if (alive.current) setBusy(false); }
   }
-  async function publish() {
-    if (!ready || running.current || !plan) return;
+  async function publish(prepared?: TeamPushPreview) {
+    const currentPlan = prepared ?? (ready ? plan : null);
+    if (!alive.current || running.current || !currentPlan) return;
     running.current = true; setBusy(true); onBusy(true); setError("");
     try {
-      const reply = await api.request({ action: "push-publish", scope, token: plan.token });
+      const reply = await api.request({ action: "push-publish", scope, token: currentPlan.token });
       if (!alive.current) return;
       if (!reply.ok) { setError(reply.error.message); invalidate(); }
       else if (reply.data.kind === "push-result") {
@@ -148,12 +151,13 @@ export function TeamPushDialog({ selection, directories, drafts, language, api, 
     finally { running.current = false; onBusy(false); if (alive.current) setBusy(false); }
   }
   return <dialog ref={dialog} className="team-share-dialog team-push-dialog" aria-label={l("Push selected items", "按项推送")} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><section className="team-workspace">
-    <header className="team-workspace-head"><div><h2>{l("Changes", "待上传变更")}</h2><p>{selection.team.name} · {l("Last Pull → local · remote checked before Push", "上次 Pull 版本 → 本地 · 推送前核对远端")}</p></div><button className="team-icon-button" disabled={busy} aria-label={l("Close push", "关闭推送")} onClick={onClose}><X size={18} /></button></header>
+    <header className="team-workspace-head"><div><h2>{l("Changes", "待上传变更")}</h2><p>{selection.team.name} · {sessionUpload ? l("Upload only the selected conversation content. Local sessions are preserved.", "仅上传所选会话内容，本地原会话保留。") : l("Last Pull → local · remote checked before Push", "上次 Pull 版本 → 本地 · 推送前核对远端")}</p></div><button className="team-icon-button" disabled={busy} aria-label={l("Close push", "关闭推送")} onClick={onClose}><X size={18} /></button></header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{notice && <p role="status" className="team-workspace-notice">{notice}</p>}
+    {items.length > 0 && <p role="status" className="team-workspace-notice">{l("Not uploaded yet. Upload checks and packages your selection before confirmation.", "尚未上传。点击上传后会打包并校验所选内容，再确认发送到团队。")}</p>}
     <div className="team-push-layout"><aside className="team-push-list" aria-label={l("Changes to upload", "待上传项")}>
       {choices.length > 0 && <label>{l("Read resources from", "读取资源目录")}<select disabled={busy} value={directoryId} onChange={event => { invalidate(); setDirectoryId(event.currentTarget.value); }}>{choices.map(item => <option key={item.id} value={item.id}>{item.path}</option>)}</select></label>}
       <div className="team-push-select-all"><label><input type="checkbox" aria-label={l("Select all items", "全选待上传项")} checked={items.length > 0 && checked.length === items.length} disabled={busy || !items.length} onChange={event => { invalidate(); setSelected(event.currentTarget.checked ? new Set(items.map(item => item.item.key)) : new Set()); }} />{l("Select all", "全选")}</label><small>{checked.length} / {items.length}</small></div>
-      {catalog && !catalog.assets && <p>{catalog.notice ?? l("Pull to load the team baseline for local resource comparison.", "请先 Pull 获取团队版本，再比较本地 Skills 和文档。")}</p>}
+      {catalog && !catalog.assets && !sessionUpload && <p>{catalog.notice ?? l("Pull to load the team baseline for local resource comparison.", "请先 Pull 获取团队版本，再比较本地 Skills 和文档。")}</p>}
       {loading && <p role="status">{l("Reading resources…", "正在读取资源…")}</p>}
       {items.map(entry => { const item = diffs[entry.item.key], outcome = outcomes[entry.item.key]; return <div key={entry.item.key} className={`team-push-row${active === entry.item.key ? " active" : ""}`}>
         <input type="checkbox" aria-label={l("Select ", "选择 ") + entry.title} checked={selected.has(entry.item.key)} disabled={busy} onChange={event => { const checked = event.currentTarget.checked; invalidate(); setSelected(previous => { const next = new Set(previous); if (checked) next.add(entry.item.key); else next.delete(entry.item.key); return next; }); }} />
@@ -161,9 +165,9 @@ export function TeamPushDialog({ selection, directories, drafts, language, api, 
       </div>; })}
       {!items.length && !loading && <p>{l("No pending items. Add Turns from their right-click menu, or connect a working directory for Skills and documents.", "暂无待上传项。可从 Turn 右键加入轮次，或接入工作目录读取 Skills 和文档。")}</p>}
     </aside><section className="team-push-diff" aria-label={l("Current Diff", "当前 Diff")}>
-      {focused ? <><header><h3>{focused.title}</h3><button className="team-icon-button" disabled={busy} aria-label={l("Refresh Diff", "刷新 Diff")} onClick={() => void inspect(focused, true)}><RefreshCw size={14} /></button></header>{(busy || inspecting === active) && <p role="status">{l("Working…", "正在处理…")}</p>}{diff && <>{diff.session && <div className="team-space-actions"><button aria-pressed={view === "diff"} onClick={() => setView("diff")}>Diff</button><button aria-pressed={view === "conversation"} onClick={() => setView("conversation")}>{l("Conversation", "会话视图")}</button><small>{l("New snapshot; previous shares are preserved.", "新增快照，历史分享保留。")}</small></div>}{diff.status === "unchanged" ? <p>{l("Matches the team version. Nothing to upload.", "与团队版本一致，无需上传。")}</p> : view === "conversation" && diff.session ? <TeamSessionContentView content={diff.session} language={language} /> : <TeamChangePreview key={focused.item.key} preview={diff} language={language} />}</>}</> : <div className="team-empty"><FileText size={25} /><p>{l("Select an item to inspect its Diff.", "点击左侧条目查看当前 Diff。")}</p></div>}
+      {focused ? <><header><h3>{focused.title}</h3><button className="team-icon-button" disabled={busy} aria-label={l("Refresh Diff", "刷新 Diff")} onClick={() => void inspect(focused, true)}><RefreshCw size={14} /></button></header>{(busy || inspecting === active) && <p role="status">{l("Working…", "正在处理…")}</p>}{diff && <>{diff.session && <div className="team-space-actions"><button aria-pressed={view === "diff"} onClick={() => setView("diff")}>Diff</button><button aria-pressed={view === "conversation"} onClick={() => setView("conversation")}>{l("Conversation", "会话视图")}</button><small>{l("New snapshot; previous shares are preserved.", "新增快照，历史分享保留。")}</small></div>}{diff.status === "unchanged" ? <p>{l("Matches the team version. Nothing to upload.", "与团队版本一致，无需上传。")}</p> : view === "conversation" && diff.session ? <TeamSessionContentView content={diff.session} language={language} /> : <TeamChangePreview key={focused.item.key} preview={diff} language={language} />}</>}</> : <div className="team-empty"><FileText size={25} /><p>{completed.size > 0 && items.length === 0 ? l("Finished. Close this window to continue with your session.", "处理完成，关闭窗口即可继续查看会话。") : sessionUpload ? l("Ready to upload your selection. You can optionally inspect its Diff first.", "可直接上传所选内容，也可以先查看 Diff。") : l("Select an item to inspect its Diff.", "点击左侧条目查看当前 Diff。")}</p></div>}
     </section></div>
-    <footer className="team-push-footer"><span role="status">{busy ? l("Processing selected changes…", "正在处理所选变更…") : l(`${checked.length} selected`, `已选 ${checked.length} 项`)}</span><div className="team-space-actions">{busy && <button onClick={() => void api.request({ action: "cancel-sync" }).catch(() => { if (alive.current) setError(l("Cancellation could not be confirmed.", "取消未确认，请等待操作结束。")); })}>{l("Cancel operation", "取消操作")}</button>}<button className="is-primary" disabled={busy || loading || inspecting !== null || checked.length === 0 || checked.length > 64} onClick={() => ready ? void publish() : void preparePush(checked)}><ArrowUp size={14} />{ready ? l(`Push ${checked.length} items`, `Push 所选 ${checked.length} 项`) : l("Review selected Diff", "查看所选 Diff")}</button></div></footer>
+    <footer className="team-push-footer"><span role="status">{busy ? l("Processing selected changes…", "正在处理所选变更…") : l(`${checked.length} selected`, `已选 ${checked.length} 项`)}</span><div className="team-space-actions">{busy && <button onClick={() => void api.request({ action: "cancel-sync" }).catch(() => { if (alive.current) setError(l("Cancellation could not be confirmed.", "取消未确认，请等待操作结束。")); })}>{l("Cancel operation", "取消操作")}</button>}{items.length === 0 && completed.size > 0 ? <button className="is-primary" onClick={onClose}>{l("Done", "完成")}</button> : <><button disabled={busy || loading || checked.length === 0 || checked.length > 64} onClick={() => void preparePush(checked)}>{l("Review selected Diff", "查看所选 Diff")}</button><button className="is-primary" disabled={busy || loading || inspecting !== null || checked.length === 0 || checked.length > 64} onClick={async () => { if (ready) await publish(); else { const prepared = await preparePush(checked); if (prepared) await publish(prepared); } }}><ArrowUp size={14} />{sessionUpload ? l(`Upload ${checked.length} items`, `上传所选 ${checked.length} 项`) : l(`Push ${checked.length} items`, `Push 所选 ${checked.length} 项`)}</button></>}</div></footer>
     {checked.length > 64 && <p role="alert">{l("Select at most 64 items per Push.", "一次最多选择 64 项。")}</p>}
   </section></dialog>;
 }

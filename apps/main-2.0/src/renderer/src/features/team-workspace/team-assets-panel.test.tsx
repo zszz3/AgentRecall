@@ -7,6 +7,7 @@ import type { WorkspaceConfig, TeamPullReport } from "@agentrecall/workspace-cor
 import type { TeamPayload, TeamReply, TeamRequest, TeamCatalog } from "../../../../shared/ipc/team-workspace";
 import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
+import { TeamUploadDialog } from "./team-upload-dialog";
 import { TeamWorkspacePage } from "./team-workspace-page";
 import { TeamSessionContentView } from "./team-session-content";
 import { TeamSettings } from "../settings/team-settings";
@@ -271,9 +272,40 @@ it("keeps selection responsive during inspection, ignores stale replies and reus
 
 it("opens queued full sessions in Push without invoking the old share preview", async () => {
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => base(input));
-  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} drafts={[{ item: { kind: "session", key: "session:one", sessionKey: "one" }, title: "Queued session", subtitle: "完整会话快照" }]} api={{ request }} />));
-  await act(async () => button("Example").click());
-  await act(async () => button("Push 推送").click());
+  await act(async () => root.render(<TeamUploadDialog language="zh" onClose={vi.fn()} onPushed={vi.fn()} onOpenSettings={vi.fn()} drafts={[{ item: { kind: "session", key: "session:one", sessionKey: "one" }, title: "Queued session", subtitle: "完整会话快照" }]} api={{ request }} />));
+  expect(container.querySelector('dialog[aria-label="按项推送"]')).not.toBeNull();
   expect(container.textContent).toContain("Queued session");
   expect(request.mock.calls.some(([input]) => ["session-preview", "session-publish", "push-preview", "push-publish"].includes(input.action))).toBe(false);
+});
+
+it("uploads from the dialog in one action and keeps a preparation failure retryable", async () => {
+  let fail = true;
+  const onPushed = vi.fn();
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "push-preview") return fail ? {ok:false,error:{code:"TEAM_SESSION_TOO_LARGE",message:"Reduce selection"}} : ok({kind:"push-preview",value:{token:"prepared",expiresAt:Date.now()+600000,repository,items:[{key:"session:one",name:"Queued session",status:"added",files:[]}]}});
+    if (input.action === "push-publish") return ok({kind:"push-result",value:{items:[{key:"session:one",status:"published"}]}});
+    return base(input);
+  });
+  await act(async () => root.render(<TeamUploadDialog language="zh" onClose={vi.fn()} onPushed={onPushed} onOpenSettings={vi.fn()} drafts={[{item:{kind:"session",key:"session:one",sessionKey:"one"},title:"Queued session",subtitle:"Full session"}]} api={{request}} />));
+  expect(request.mock.calls.some(([input]) => input.action === "push-preview")).toBe(false);
+  await act(async () => button("上传所选 1 项").click());
+  expect(container.textContent).toContain("Reduce selection");
+  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
+  fail = false;
+  await act(async () => button("上传所选 1 项").click());
+  expect(request).toHaveBeenCalledWith({action:"push-publish",scope:{teamId:team.id,repository},token:"prepared"});
+  expect(onPushed).toHaveBeenCalledWith(["session:one"]);
+  expect(container.textContent).toContain("已推送 1 项");
+});
+
+it("asks for the destination inside a dialog when several teams exist", async () => {
+  const second = {...team,id:"second",name:"Second team",repository:"https://github.com/example/second"};
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => input.action === "snapshot" ? ok({kind:"snapshot",value:{config:{...config,teams:[team,second]},directories:[],busy:false}}) : base(input));
+  await act(async () => root.render(<TeamUploadDialog language="zh" onClose={vi.fn()} onPushed={vi.fn()} onOpenSettings={vi.fn()} drafts={[{item:{kind:"session",key:"session:one",sessionKey:"one"},title:"Queued session",subtitle:"Full session"}]} api={{request}} />));
+  expect(container.querySelector('dialog[aria-label="上传到团队"]')).not.toBeNull();
+  expect(request.mock.calls.some(([input]) => input.action === "catalog")).toBe(false);
+  await act(async () => button("Second team").click());
+  expect(container.querySelector('dialog[aria-label="按项推送"]')).not.toBeNull();
+  expect(request).toHaveBeenCalledWith({action:"catalog",scope:{teamId:second.id,repository:second.repository}});
+  expect(request.mock.calls.some(([input]) => input.action === "push-publish")).toBe(false);
 });
