@@ -12,6 +12,7 @@ export default defineConfig({
           index: resolve("src/main/index.ts"),
           "live-session-worker": resolve("src/main/live-session-worker.ts"),
           "session-index-worker": resolve("src/main/session-index-worker.ts"),
+          "team-session-download-worker": resolve("src/main/team-session-download-worker.ts"),
         },
       },
     },

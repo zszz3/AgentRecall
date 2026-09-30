@@ -275,12 +275,21 @@ export class TeamSessionSharing {
     if (!this.dependencies.cache) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "会话缓存不可用，请重启应用。");
     return this.dependencies.cache;
   }
-  async open(context: TeamSessionContext, id: number, digest: string, signal: AbortSignal) {
+  cached(context: TeamSessionContext, id: number, digest: string) {
+    return this.cache().get(this.cacheKey(context, id, digest));
+  }
+  async cachedIds(context: TeamSessionContext, items: Array<{ id: number; digest: string }>) {
+    const keys = items.map(item => this.cacheKey(context, item.id, item.digest));
+    const cached = await this.cache().has(keys);
+    return items.filter((_item, index) => cached.has(keys[index]));
+  }
+  async open(context: TeamSessionContext, id: number, digest: string, signal: AbortSignal, onIndexing?: () => void) {
     const cache = this.cache(), key = this.cacheKey(context, id, digest);
     const existing = await cache.get(key);
     this.cancelled(signal);
     if (existing) return existing;
     const content = await this.detail(context, id, signal, digest);
+    onIndexing?.();
     return cache.import(key, content, signal, { repository: context.repository, assetId: id, digest });
   }
   async turns(context: TeamSessionContext, id: number, digest: string, record: number, offset: number) {

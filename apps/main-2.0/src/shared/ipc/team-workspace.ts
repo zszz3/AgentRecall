@@ -3,7 +3,7 @@ import { teamPushItemSchema, type TeamPushPreview, type TeamPushResult } from ".
 import { z } from "zod";
 import { configurationChangeSchema } from "../../../../../packages/workspace-core/src/configuration-format";
 import type { WorkspaceConfig, TeamAssetService, DirectoryConnection, TeamPullReport } from "@agentrecall/workspace-core";
-import type { TeamSessionPage, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPreview } from "../team-sessions";
+import type { TeamSessionFetchState, TeamSessionPage, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPreview } from "../team-sessions";
 import { teamTurnSelectionSchema } from "../team-sessions";
 import { defineIpcRequest } from "./contract";
 
@@ -48,6 +48,9 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("local-assets"), scope, kind: z.enum(["skills", "documents"]), file: z.string().min(1).max(2048).optional() }).strict(),
   z.object({ action: z.literal("document-preview"), scope: selectedScope, id }).strict(),
   z.object({ action: z.literal("document-install"), scope: selectedScope, id, revision }).strict(),
+  z.object({ action: z.literal("session-status"), scope: selectedScope, items: z.array(z.object({ id: share.id, digest: share.digest }).strict()).max(100) }).strict(),
+  z.object({ action: z.literal("session-fetch"), ...share }).strict(),
+  z.object({ action: z.literal("session-fetch-cancel"), ...share }).strict(),
   z.object({ action: z.literal("session-open"), ...share }).strict(),
   z.object({ action: z.literal("session-turns"), ...share, record: z.number().int().min(0).max(127), offset: z.number().int().min(0).max(200000) }).strict(),
   z.object({ action: z.literal("session-turn"), ...share, record: z.number().int().min(0).max(127), turnId: z.string().min(1).max(1024) }).strict(),
@@ -92,6 +95,8 @@ export type TeamPayload =
   | { kind: "document-preview"; value: Result<"previewDocument"> }
   | { kind: "session-list"; value: TeamSessionPage }
   | { kind: "session-preview"; value: TeamSessionPreview }
+  | { kind: "session-status"; value: TeamSessionFetchState[] }
+  | { kind: "session-fetch"; value: TeamSessionFetchState }
   | { kind: "session-open"; value: TeamSessionSnapshot }
   | { kind: "session-turns"; value: TeamSessionTurnsPage }
   | { kind: "session-turn"; value: SessionTurnDetail | null }

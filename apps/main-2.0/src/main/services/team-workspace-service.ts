@@ -1,3 +1,4 @@
+import type { TeamSessionDownloads } from "./team-session-downloads";
 import { WorkspaceError, WorkspaceService, TeamAssetService, MAX_CONFIGURATION_PREVIEW_BYTES } from "@agentrecall/workspace-core";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -23,7 +24,7 @@ export class TeamWorkspaceService {
   private readonly pending = new Set<Promise<TeamPayload>>();
 
   private readonly push: TeamPushService;
-  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
+  constructor(private readonly directory: string, private readonly dialogs: TeamDialogs, private readonly sharing?: TeamSessionSharing, private readonly downloads?: TeamSessionDownloads) { this.push = new TeamPushService(directory, (owner, message) => dialogs.confirm(owner, message), sharing); }
 
   cancel(owner: number): void {
     this.push.cancel(owner);
@@ -34,6 +35,7 @@ export class TeamWorkspaceService {
 
   async close(): Promise<void> {
     this.closed = true;
+    await this.downloads?.close();
     this.push.close();
     this.configurationPreviews.clear();
     for (const abort of this.operations.keys()) abort.abort();
@@ -65,6 +67,7 @@ export class TeamWorkspaceService {
         if (!await this.dialogs.confirm(owner, message)) return { ok: true, data: { kind: "cancelled" } };
       }
       if (request.action === "enable" && !request.enabled) {
+        await this.downloads?.pause();
         this.configurationPreviews.clear();
         this.push.close();
         for (const abort of this.operations.keys()) abort.abort();
@@ -112,6 +115,7 @@ export class TeamWorkspaceService {
       case "enable":
         await workspace.store.initialize();
         await workspace.setTeamEnabled(request.enabled);
+        if (request.enabled) this.downloads?.resume();
         return snapshot();
       case "add-team":
         await workspace.store.initialize();
@@ -199,7 +203,25 @@ export class TeamWorkspaceService {
       switch (request.action) {
         case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal) };
         case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal, request.turnIds) };
-        case "session-open": return { kind: "session-open", value: await sharing.open(context, request.id, request.digest, signal) };
+        case "session-status": {
+          const ready = await sharing.cachedIds(context, request.items);
+          return { kind: "session-status", value: request.items.flatMap(item => {
+            if (ready.some(entry => entry.id === item.id && entry.digest === item.digest)) return [{ ...item, phase: "ready" as const }];
+            const state = this.downloads?.status({ context, ...item });
+            return state ? [state] : [];
+          }) };
+        }
+        case "session-fetch": {
+          if (await sharing.cached(context, request.id, request.digest)) return { kind: "session-fetch", value: { id: request.id, digest: request.digest, phase: "ready" } };
+          if (!this.downloads) throw new WorkspaceError("TEAM_SESSION_UNAVAILABLE", "后台下载不可用，请重启应用。");
+          return { kind: "session-fetch", value: this.downloads.start({ context, id: request.id, digest: request.digest }) };
+        }
+        case "session-fetch-cancel": this.downloads?.cancel({ context, id: request.id, digest: request.digest }); return { kind: "cancelled" };
+        case "session-open": {
+          const snapshot = await sharing.cached(context, request.id, request.digest);
+          if (!snapshot) throw new WorkspaceError("TEAM_SESSION_NOT_READY", "请先下载此会话，后台处理完成后即可阅读。");
+          return { kind: "session-open", value: snapshot };
+        }
         case "session-turns": return { kind: "session-turns", value: await sharing.turns(context, request.id, request.digest, request.record, request.offset) };
         case "session-turn": return { kind: "session-turn", value: await sharing.turn(context, request.id, request.digest, request.record, request.turnId) };
         case "session-publish": return await sharing.publish(owner, context, request.token, signal, assertContext) ? complete("会话已分享到团队。本地原会话保留。") : { kind: "cancelled" };

@@ -53,3 +53,11 @@ export interface TeamSessionTurnsPage {
   offset: number;
   hasMore: boolean;
 }
+
+export type TeamSessionFetchPhase = "queued" | "downloading" | "indexing" | "ready" | "failed" | "cancelled";
+export interface TeamSessionFetchState {
+  id: number;
+  digest: string;
+  phase: TeamSessionFetchPhase;
+  error?: string;
+}

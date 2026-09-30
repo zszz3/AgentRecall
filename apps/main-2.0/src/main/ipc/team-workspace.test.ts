@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitAssetSource, TeamAssetService, WorkspaceError, WorkspaceService } from "@agentrecall/workspace-core";
 import { TeamSessionSharing } from "../services/team-session-sharing";
+import { TeamSessionDownloads } from "../services/team-session-downloads";
 import { TeamWorkspaceService } from "../services/team-workspace-service";
 import { createTeamWorkspaceApi } from "../../preload/team-workspace";
 import { registerTeamWorkspaceIpc } from "./team-workspace";
@@ -32,10 +33,10 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-function harness(sharing?: TeamSessionSharing) {
+function harness(sharing?: TeamSessionSharing, downloads?: TeamSessionDownloads) {
   const chooseFolder = vi.fn(async () => null as string | null);
   const confirm = vi.fn(async () => false);
-  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm }, sharing);
+  const service = new TeamWorkspaceService(path.join(root, "shared-cli"), { chooseFolder, confirm }, sharing, downloads);
   services.push(service);
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const sender = Object.assign(new EventEmitter(), { id: 17 });
@@ -206,7 +207,7 @@ it("enforces team/project scope for sessions and cancels retained previews on wi
   await workspace.setTeamEnabled(true);
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true, data: { kind: "session-list" } });
   expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: `legacy:${saved.id}` }), 1, expect.any(AbortSignal));
-  const open = vi.spyOn(sharing, "open").mockResolvedValue({ partial: false, records: [], bytes: 0, files: [], missingAttachments: [] });
+  const open = vi.spyOn(sharing, "cached").mockResolvedValue({ partial: false, records: [], bytes: 0, files: [], missingAttachments: [] });
   const turns = vi.spyOn(sharing, "turns").mockResolvedValue({ turns: [], offset: 0, hasMore: false });
   const turn = vi.spyOn(sharing, "turn").mockResolvedValue(null);
   const share = { scope, id: 17, digest: "a".repeat(64) };
@@ -405,4 +406,25 @@ it("cancels superseded Diff reads without marking the workspace busy or preparin
   expect(await first).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
   sender.emit("destroyed");
   expect(await second).toMatchObject({ ok: false, error: { code: "CANCELLED" } });
+});
+
+
+it("starts app-owned downloads through IPC while reads remain cache-only", async () => {
+  const sharing = new TeamSessionSharing({store:{ getSession:vi.fn(), searchSessions:vi.fn(), getAllMessages:vi.fn(), getTraceEvents:vi.fn(), getSessionTurn:vi.fn(), getSessionSourceArtifacts:vi.fn(), getAttachmentFile:vi.fn() },ensureDetails:vi.fn(),confirm:vi.fn(),save:vi.fn()});
+  vi.spyOn(sharing,"cached").mockResolvedValue(null);
+  vi.spyOn(sharing,"cachedIds").mockResolvedValue([]);
+  const directOpen = vi.spyOn(sharing,"open");
+  const run = vi.fn(async (_input, signal:AbortSignal) => new Promise<void>((_resolve,reject) => signal.addEventListener("abort",()=>reject(new Error("cancel")),{once:true})));
+  const {api,workspace,sender} = harness(sharing,new TeamSessionDownloads(run));
+  const saved = await project(workspace);
+  const share = {scope:{projectId:saved.id,root:saved.root,repository:"https://github.com/example/assets"},id:17,digest:"a".repeat(64)};
+  await workspace.setTeamEnabled(true);
+  expect(await api.request({action:"session-open",...share})).toMatchObject({ok:false,error:{code:"TEAM_SESSION_NOT_READY"}});
+  expect(directOpen).not.toHaveBeenCalled();
+  expect(await api.request({action:"session-fetch",...share})).toMatchObject({ok:true,data:{value:{phase:"downloading"}}});
+  sender.emit("destroyed");
+  expect(run.mock.calls[0]![1].aborted).toBe(false);
+  expect(await api.request({action:"session-status",scope:share.scope,items:[{id:share.id,digest:share.digest}]})).toMatchObject({ok:true,data:{value:[{phase:"downloading"}]}});
+  await api.request({action:"session-fetch-cancel",...share});
+  expect(run.mock.calls[0]![1].aborted).toBe(true);
 });

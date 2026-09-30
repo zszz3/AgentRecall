@@ -237,3 +237,43 @@
 .team-unified-diff .added { background: var(--success-bg); color: var(--success-text); }
 .team-unified-diff .deleted { background: var(--danger-soft); color: var(--danger); }
 @media (max-width: 720px) { .team-push-layout { grid-template-columns: 1fr; height: 65vh; grid-template-rows: 35% 65%; } .team-push-list { border-right: 0; border-bottom: 1px solid var(--border); } }
+
+/* Shared sessions use the same row, detail header and split controls as Sessions. */
+.team-session-browser { padding: 0 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; min-height: 560px; height: min(76vh, 1000px); min-width: 0; }
+.team-session-toolbar { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
+.team-session-toolbar > div { display: flex; align-items: baseline; gap: 10px; flex: 1; }
+.team-session-toolbar h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.team-session-toolbar > div > span { color: var(--text-muted); font-size: 12px; }
+.team-session-search { width: min(270px, 40%); flex: 0 1 270px; min-height: 32px; }
+.team-session-split { flex: 1; min-height: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; background: var(--panel-bg); }
+.team-session-list-pane, .team-session-detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.team-session-list { flex: 1; overflow: auto; min-height: 0; }
+.team-session-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 12px 10px 12px 14px; }
+.team-session-select { min-width: 0; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.team-session-select:hover { background: transparent; }
+.team-session-select .session-title { margin: 0 0 6px; }
+.team-session-select .session-name { font-size: 13px; }
+.team-session-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
+.team-session-select > .team-session-status { margin-top: 7px; }
+.team-session-status.ready { color: var(--accent); }
+.team-session-status.failed { color: var(--danger); }
+.team-session-pagination { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 8px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 12px; }
+.team-session-detail-actions { display: flex; gap: 4px; align-items: start; }
+.team-session-detail-pane .detail-title-row { font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.team-session-detail-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 18px; }
+.team-session-placeholder { display: flex; flex: 1; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--text-muted); padding: 28px; }
+.team-session-placeholder h3, .team-session-placeholder p { margin: 0; }
+.team-session-placeholder h3 { color: var(--text); font-size: 14px; font-weight: 500; }
+.team-session-placeholder p { max-width: 320px; line-height: 1.7; font-size: 12px; }
+.team-session-reader-footer { padding: 8px 18px; border-top: 1px solid var(--border-subtle); }
+.team-session-spinner { animation: team-session-spin 1s linear infinite; }
+@keyframes team-session-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .team-session-spinner { animation: none; } }
+@media (max-width: 760px) { .team-session-toolbar { flex-wrap: wrap; } .team-session-search { flex: 1; width: auto; } .team-session-browser { height: 800px; } }
+.team-workspace .team-session-select { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
+.team-workspace .team-session-select:hover:not(:disabled) { background: transparent; }
+.team-workspace .team-session-search { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px; }
+.team-workspace .team-session-search input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; }
+.team-workspace .team-session-browser .icon-button { width: 30px; height: 30px; padding: 0; background: transparent; color: var(--text-muted); flex-shrink: 0; }
+.team-session-reader-footer button { border: 0; padding: 4px 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.team-session-reader-footer button:hover { color: var(--danger); }

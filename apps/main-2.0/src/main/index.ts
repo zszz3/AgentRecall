@@ -1,3 +1,4 @@
+import { TeamSessionDownloads } from "./services/team-session-downloads";
 import { PostgresTeamSessionRepository } from "../core/postgres/team-session-repository";
 import {
   app,
@@ -3023,7 +3024,7 @@ function registerIpc(): void {
       return result.canceled ? null : result.filePaths[0] ?? null;
     },
     confirm: confirmTeamOperation,
-  }, teamSharing);
+  }, teamSharing, TeamSessionDownloads.worker(path.join(__dirname, "team-session-download-worker.js"), postgresRuntime!.connectionUrl));
   disposeTeamWorkspaceIpc = registerTeamWorkspaceIpc(ipcMain, teamWorkspaceService);
   registerDiscoveryIpc(ipcMain, createDiscoveryService());
   ipcMain.handle("supabase:copy-combined-setup-sql", () => {

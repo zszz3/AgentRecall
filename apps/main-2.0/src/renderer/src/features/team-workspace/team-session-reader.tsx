@@ -34,7 +34,7 @@ export function TeamSessionReader({ snapshot, item, scope, api, language }: {
   }, [api, scopeKey, item.id, item.digest, record]);
   const key = `${scope.repository}:${item.id}:${item.digest}:${record}:${offset}`;
   return <div ref={top} className="team-session-content">
-    <p className="team-workspace-notice">{snapshot.partial ? l("Shared excerpt · read-only local copy", "分享片段 · 本地只读副本") : l("Shared session · read-only local copy", "共享会话 · 本地只读副本")}</p>
+    <p className="team-session-status">{snapshot.partial ? l("Shared excerpt · read-only local copy", "分享片段 · 本地只读副本") : l("Shared session · read-only local copy", "共享会话 · 本地只读副本")}</p>
     {snapshot.records.length > 1 && <label>{l("Session", "会话")} <select value={record} onChange={event => { setRecord(Number(event.target.value)); setOffset(0); }}>
       {snapshot.records.map((entry, index) => <option key={index} value={index}>{entry.title} · {entry.turnCount}</option>)}
     </select></label>}

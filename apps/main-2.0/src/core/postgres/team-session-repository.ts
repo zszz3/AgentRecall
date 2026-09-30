@@ -17,6 +17,12 @@ export class PostgresTeamSessionRepository {
   private readonly reader: PostgresSessionTurnRepository;
   constructor(private readonly database: PostgresDatabase) { this.reader = new PostgresSessionTurnRepository(database); }
 
+  async has(keys: string[]): Promise<Set<string>> {
+    const result = await this.database.query<{ cache_key: string }>(
+      "select cache_key from agent_recall.team_session_snapshots where cache_key = any($1::text[])", [keys]);
+    return new Set(result.rows.map(row => row.cache_key));
+  }
+
   async get(key: string): Promise<TeamSessionSnapshot | null> {
     const result = await this.database.query<{ metadata: TeamSessionSnapshot }>(
       "select metadata from agent_recall.team_session_snapshots where cache_key = $1", [key]);

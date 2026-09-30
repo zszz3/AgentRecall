@@ -129,7 +129,7 @@ it("opens instructions, MCP and Env independently and clears the previous reader
   expect(container.querySelector('[aria-label="Env详情"]')?.textContent).toContain("TEAM_MODE=review");
   await act(async () => container.querySelector('[aria-label="Env详情"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(container.querySelector('[aria-label="Env详情"]')).toBeNull();
-  expect(request.mock.calls.every(([input]) => ["snapshot", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
+  expect(request.mock.calls.every(([input]) => ["snapshot", "session-status", "session-list", "sync-status", "catalog", "cancel-sync"].includes(input.action))).toBe(true);
 });
 
 it.each(["共享指令", "MCP", "Env"])("adds %s by staging an item, reviewing Diff and pushing only selected changes", async (label) => {
@@ -314,6 +314,7 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
   const item = {id:17,title:"Shared fixture",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"a".repeat(64),canWithdraw:false};
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
     if(input.action === "session-list") return ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
+    if(input.action === "session-status") return ok({kind:"session-status",value:[{id:item.id,digest:item.digest,phase:"ready"}]});
     if(input.action === "session-open") return ok({kind:"session-open",value:{bytes:100,files:[],missingAttachments:[],partial:false,records:[{sessionKey:"fixture",title:"Fixture",turnCount:0}]}});
     if(input.action === "session-turns") return ok({kind:"session-turns",value:{offset:0,hasMore:false,turns:[]}});
     return base(input);
@@ -321,7 +322,7 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
   await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
   await act(async () => button("Example").click());
   await act(async () => button("Shared fixture").click());
-  await act(async () => button("返回会话列表").click());
+  await act(async () => button("关闭阅读").click());
   await act(async () => button("Shared fixture").click());
   expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(2);
   expect(request.mock.calls.some(([input]) => input.action === "session-turns")).toBe(true);
@@ -329,4 +330,26 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
   await act(async () => button("刷新会话").click());
   await act(async () => button("Shared fixture").click());
   expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(3);
+});
+
+
+it("selects remote sessions without downloading and keeps accepted downloads alive when leaving", async () => {
+  const item = {id:18,title:"Remote fixture",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"b".repeat(64),canWithdraw:false};
+  let started = false;
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if(input.action === "session-list") return ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
+    if(input.action === "session-status") return ok({kind:"session-status",value:started ? [{id:item.id,digest:item.digest,phase:"downloading"}] : []});
+    if(input.action === "session-fetch") { started = true; return ok({kind:"session-fetch",value:{id:item.id,digest:item.digest,phase:"downloading"}}); }
+    return base(input);
+  });
+  await act(async () => root.render(<TeamWorkspacePage language="zh" settingsOpen={false} onOpenSettings={vi.fn()} api={{request}}/>));
+  await act(async () => button("Example").click());
+  await act(async () => button("Remote fixture").click());
+  expect(request.mock.calls.some(([input]) => ["session-fetch", "session-open"].includes(input.action))).toBe(false);
+  await act(async () => button("下载会话").click());
+  expect(container.textContent).toContain("任务会在后台继续");
+  await act(async () => button("关闭阅读").click());
+  await act(async () => root.render(<div/>));
+  expect(request.mock.calls.filter(([input]) => input.action === "session-fetch")).toHaveLength(1);
+  expect(request.mock.calls.some(([input]) => input.action === "session-fetch-cancel")).toBe(false);
 });
