@@ -242,9 +242,6 @@
 
 /* Shared sessions use the same row, detail header and split controls as Sessions. */
 .team-session-browser { padding: 0 20px 16px; box-sizing: border-box; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.team-session-toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 0 10px; }
-.team-session-count { color: var(--text-muted); font-size: 11px; flex: 1; }
-.team-session-search { width: min(260px, 40%); flex: 0 1 260px; min-height: 30px; }
 .team-session-split { flex: 1; min-height: 0; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; overflow: hidden; background: var(--panel-bg); }
 .team-session-list-pane, .team-session-detail-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .team-session-list { flex: 1; overflow: auto; min-height: 0; }
@@ -275,8 +272,6 @@
    scoped through .team-workspace miss them in production. */
 .team-session-browser .team-session-select { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
 .team-session-browser .team-session-select:hover:not(:disabled) { background: transparent; }
-.team-session-browser .team-session-search { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px; }
-.team-session-browser .team-session-search input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; }
 .team-session-browser .icon-button { width: 30px; height: 30px; padding: 0; background: transparent; color: var(--text-muted); flex-shrink: 0; }
 .team-session-reader-footer button { border: 0; padding: 4px 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .team-session-reader-footer button:hover { color: var(--danger); }
@@ -299,6 +294,42 @@
 @container team-space (max-width: 850px) { .team-resource-toolbar { gap: 0; padding: 0 14px; } .team-resource-toolbar .team-space-tabs { flex-basis: 100%; } .team-resource-toolbar .team-sync-control { padding-bottom: 6px; } }
 
 .team-session-match { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin: 6px 0; }
-.team-session-toolbar .team-session-tool-search { display: flex; flex-direction: row; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; color: var(--text-muted); }
-.team-session-toolbar .team-session-tool-search input { width: auto; margin: 0; }
-.team-session-toolbar select { width: auto; padding: 4px 8px; font-size: 12px; }
+
+/* Search controls share the compact Session toolbar rhythm. */
+.team-session-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 0; flex-wrap: wrap; }
+.team-session-search { position: relative; display: flex; align-items: center; gap: 8px; flex: 1 1 200px; min-width: 160px; height: 34px; padding: 0 11px; border: 1px solid transparent; border-radius: 6px; background: var(--panel-subtle); transition: border-color var(--duration-fast), box-shadow var(--duration-fast); }
+.team-session-search:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--accent-ring); }
+.team-session-search svg { flex-shrink: 0; color: var(--text-faint); }
+.team-session-search:focus-within svg { color: var(--accent); }
+.team-session-search input { min-width: 0; flex: 1; width: 100%; padding: 0; border: 0; outline: 0; box-shadow: none; background: transparent; color: var(--text); font-size: 13px; }
+.team-space-page .team-session-search input:focus-visible { outline: none; }
+.team-session-search input::placeholder { color: var(--text-faint); }
+
+.team-session-mode-tabs { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 6px; background: transparent; flex-shrink: 0; }
+.team-session-mode-tabs button { display: inline-flex; align-items: center; justify-content: center; min-width: 68px; height: 28px; padding: 0 11px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 500; transition: background .12s ease, color .12s ease; white-space: nowrap; }
+.team-session-mode-tabs button:hover:not(.active) { background: var(--panel-hover); color: var(--text); }
+.team-session-mode-tabs button.active { background: var(--accent-soft); color: var(--accent); box-shadow: none; font-weight: 550; }
+
+.team-session-toolbar .team-session-tool-toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 12px; transition: background .12s ease, color .12s ease, border-color .12s ease; flex-shrink: 0; }
+.team-session-tool-toggle svg { flex-shrink: 0; }
+.team-session-tool-toggle:hover:not(.active) { background: var(--panel-hover); color: var(--text); }
+.team-session-tool-toggle.active { background: var(--accent-soft); color: var(--accent-bright); border-color: transparent; }
+
+.team-session-count { flex: 1; margin-left: auto; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.team-session-refresh { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); flex-shrink: 0; transition: background .12s ease, color .12s ease; }
+.team-session-refresh:hover:not(:disabled) { background: var(--panel-hover); color: var(--text); }
+
+/* Calmer accent for matched turns in team reader only */
+.team-session-content .turn-card { border: 0; border-bottom: 1px solid var(--border-subtle); border-radius: 0; box-shadow: none; }
+.team-session-content .turn-card.match-target { border-left: 2px solid var(--accent-line); box-shadow: none; background: transparent; }
+.team-session-content .turn-card.failed { border-left: 2px solid var(--danger); }
+.team-session-content .turn-card .msg.match-target { background: color-mix(in srgb, var(--accent-soft) 50%, transparent); box-shadow: inset 2px 0 0 var(--accent-line); }
+
+@container team-space (max-width: 760px) {
+  .team-session-toolbar { gap: 8px; padding: 8px 0; }
+  .team-session-search { flex: 1 1 100%; order: -1; }
+  .team-session-mode-tabs { order: 0; }
+  .team-session-tool-toggle { order: 1; }
+  .team-session-count { order: 2; flex: 1 1 auto; }
+  .team-session-refresh { order: 3; }
+}

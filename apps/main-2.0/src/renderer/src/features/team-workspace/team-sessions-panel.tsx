@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, LoaderCircle, MessagesSquare, RefreshCw, Search, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, MessagesSquare, RefreshCw, Search, Wrench, X } from "lucide-react";
 import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
@@ -133,11 +133,14 @@ export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = w
   const visible = list?.items ?? [];
   return <section className="team-session-browser">
     <header className="team-session-toolbar">
-      <label className="searchbox team-session-search"><Search size={14}/><input aria-label={l("Search shared sessions and turns", "搜索共享会话与 Turn")} placeholder={mode === "turns" ? l("Search local turns…", "搜索本地 Turn 内容…") : l("Search title or author…", "搜索标题、分享者…")} value={query} onChange={event => setQuery(event.target.value)}/></label>
-      <select aria-label={l("Search mode", "搜索类型")} value={mode} onChange={event => { setMode(event.target.value as "sessions" | "turns"); setPage(1); }}><option value="turns">Turn</option><option value="sessions">{l("Sessions", "会话")}</option></select>
-      {mode === "turns" && <label className="team-session-tool-search"><input type="checkbox" checked={includeTools} onChange={event => { setIncludeTools(event.target.checked); setPage(1); }}/>{l("Tool output", "工具输出")}</label>}
+      <label className="team-session-search"><Search size={14}/><input aria-label={l("Search shared sessions and turns", "搜索共享会话与 Turn")} placeholder={mode === "turns" ? l("Search local turns…", "搜索本地 Turn 内容…") : l("Search title or author…", "搜索标题、分享者…")} value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <div className="team-session-mode-tabs" role="group" aria-label={l("Search mode", "搜索类型")}>
+        <button type="button" className={mode === "turns" ? "active" : ""} onClick={() => { setMode("turns"); setPage(1); }} aria-pressed={mode === "turns"}>Turn</button>
+        <button type="button" className={mode === "sessions" ? "active" : ""} onClick={() => { setMode("sessions"); setPage(1); }} aria-pressed={mode === "sessions"}>{l("Sessions", "会话")}</button>
+      </div>
+      {mode === "turns" && <button type="button" className={`team-session-tool-toggle ${includeTools ? "active" : ""}`} onClick={() => { setIncludeTools(value => !value); setPage(1); }} aria-pressed={includeTools} aria-label={l("Tool output", "工具输出")}><Wrench size={13}/><span>{l("Tool output", "工具输出")}</span></button>}
       <span className="team-session-count" aria-live="polite">{list ? `${list.items.length} ${l("sessions", "条")}` : ""}</span>
-      <button className="icon-button" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/></button>
+      <button className="team-session-refresh" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/></button>
     </header>
     {error && <p role="alert" className="team-workspace-error">{error}</p>}{feedback && <p role="status" className="team-workspace-notice">{feedback}</p>}
     <ResizableSplit className="team-session-split" label={l("Session list width", "会话列表宽度")} storageKey="agentrecall.team-session-list-width" initialWidth={340} minWidth={250} maxWidth={480} minContentWidth={400}>
