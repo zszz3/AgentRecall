@@ -201,7 +201,7 @@ export class TeamWorkspaceService {
         if (JSON.stringify(await sessionContext()) !== JSON.stringify(context)) throw new WorkspaceError("PROJECT_MISMATCH", "分享目标已改变，请重新预览。");
       };
       switch (request.action) {
-        case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal) };
+        case "session-list": return { kind: "session-list", value: await sharing.list(context, request.page, signal, request.query, request.mode, request.includeTools) };
         case "session-preview": return { kind: "session-preview", value: await sharing.prepare(owner, context, request.sessionKey, signal, request.turnIds) };
         case "session-status": {
           const ready = await sharing.cachedIds(context, request.items);
@@ -283,7 +283,24 @@ export class TeamWorkspaceService {
         }
       }
       case "sync-status": return { kind: "sync-status", value: await assets.pullStatus(request.scope.teamId) };
-      case "sync": return { kind: "sync-result", value: await assets.pull(root, projectId, request.transport, signal) };
+      case "sync": {
+        const value = await assets.pull(root, projectId, request.transport, signal);
+        if (this.sharing && this.downloads) {
+          const context = await sessionContext();
+          try {
+            const items = await this.sharing.pullCatalog(context, signal);
+            for (const item of items) {
+              signal.throwIfAborted();
+              if (!await this.sharing.cached(context, item.id, item.digest)) await this.downloads.fetch({ context, id: item.id, digest: item.digest }, signal);
+            }
+          } catch (error) {
+            throw new WorkspaceError("TEAM_SESSION_SYNC_INCOMPLETE", signal.aborted
+              ? "资源 Pull 已处理，会话同步已取消；已完成的本地会话保留。"
+              : "资源 Pull 已处理，但会话同步未完成；已完成的本地会话保留，请重新 Pull 重试。", { cause: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        return { kind: "sync-result", value };
+      }
       case "skill-preview": return { kind: "skill-preview", value: await assets.preview(root, request.id, projectId, request.target, request.file) };
       case "skill-install": {
         const result = await assets.install(root, request.id, request.target, request.revision, projectId);

@@ -57,6 +57,18 @@ export class TeamSessionDownloads {
     this.drain();
     return { ...job.state };
   }
+  async fetch(input: TeamSessionDownloadInput, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    this.start(input);
+    const cancel = () => this.cancel(input);
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      if (signal.aborted) cancel();
+      await this.draining;
+      signal.throwIfAborted();
+      if (this.status(input)?.phase !== "ready") throw new Error("共享会话同步未完成，请重新 Pull 重试。");
+    } finally { signal.removeEventListener("abort", cancel); }
+  }
   status(input: TeamSessionDownloadInput): TeamSessionFetchState | null { return this.jobs.get(key(input))?.state ?? null; }
   cancel(input: TeamSessionDownloadInput): void {
     const job = this.jobs.get(key(input));

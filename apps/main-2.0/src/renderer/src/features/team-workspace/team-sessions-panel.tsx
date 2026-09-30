@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, MessagesSquare, RefreshCw, Search, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, MessagesSquare, RefreshCw, Search, X } from "lucide-react";
 import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
@@ -7,6 +7,7 @@ import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
 import { ResizableSplit } from "../../components/resizable-split";
 import { teamSessionReadCache } from "./team-session-read-cache";
+import { HighlightedSearchText } from "../../search-highlight";
 import { SOURCE_LABEL } from "../../session-ui";
 import { isSessionSource } from "../../../../core/session-sources";
 import { TeamSessionReader } from "./team-session-reader";
@@ -14,7 +15,7 @@ import { TeamSessionReader } from "./team-session-reader";
 const itemKey = (item: { id: number; digest: string }) => `${item.id}:${item.digest}`;
 const active = (phase?: TeamSessionFetchState["phase"]) => phase === "queued" || phase === "downloading" || phase === "indexing";
 
-export function TeamSessionsPanel({ selection, language, api = window.sessionSearch.teamWorkspace }: { selection: TeamSelection; language: LanguageMode; api?: TeamWorkspaceApi }) {
+export function TeamSessionsPanel({ selection, language, refreshKey = 0, api = window.sessionSearch.teamWorkspace }: { selection: TeamSelection; language: LanguageMode; refreshKey?: number; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const { team, enabled } = selection;
   const cache = teamSessionReadCache(api);
@@ -26,6 +27,13 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   const [firstPage, setFirstPage] = useState<TeamSessionTurnsPage | null>(null);
   const [states, setStates] = useState<TeamSessionFetchState[]>([]);
   const [query, setQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mode, setMode] = useState<"sessions" | "turns">("turns");
+  const [includeTools, setIncludeTools] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => { setSearchQuery(query.trim()); setPage(1); }, 200);
+    return () => clearTimeout(timer);
+  }, [query]);
   const [loading, setLoading] = useState(false), [opening, setOpening] = useState(false);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const [pending, setPending] = useState<string[]>([]);
@@ -39,19 +47,19 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   const selectedState = selected ? stateFor(selected) : undefined;
   const phaseLabel = (phase?: TeamSessionFetchState["phase"]) => {
     switch (phase) {
-      case "queued": return l("Queued", "等待下载");
-      case "downloading": return l("Downloading", "下载中");
+      case "queued": return l("Queued", "等待同步");
+      case "downloading": return l("Syncing", "同步中");
       case "indexing": return l("Indexing", "建立索引");
       case "ready": return l("Ready", "可阅读");
       case "failed": return l("Failed", "失败");
       case "cancelled": return l("Cancelled", "已取消");
-      default: return l("Not downloaded", "未下载");
+      default: return l("Pull required", "等待 Pull");
     }
   };
   useEffect(() => {
     let live = true;
     generation.current++;
-    const request = { action: "session-list" as const, scope, page };
+    const request = { action: "session-list" as const, scope, page, query: searchQuery, mode, includeTools };
     const previous = enabled ? cache.peek(request) : undefined;
     const cachedList = previous?.ok && previous.data.kind === "session-list" ? previous.data.value : null;
     setList(cachedList); setSelected(null); setSnapshot(null); setFirstPage(null); setStates([]); setError(""); setPending([]);
@@ -64,7 +72,7 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
       }).catch(() => { if (live) setError(l("Could not load shared sessions.", "共享会话读取失败，请刷新重试。")); }).finally(() => { if (live) setLoading(false); });
     }
     return () => { live = false; generation.current++; };
-  }, [api, team.id, team.repository, enabled, page, refresh]);
+  }, [api, team.id, team.repository, enabled, page, refresh, refreshKey, selection.busy, searchQuery, mode, includeTools]);
   useEffect(() => {
     if (!list || !enabled) return;
     let live = true;
@@ -88,7 +96,7 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
     let live = true;
     if (!selected || selectedState?.phase !== "ready") { setSnapshot(null); setFirstPage(null); setOpening(false); return; }
     const request = { action: "session-open" as const, scope, id: selected.id, digest: selected.digest };
-    const turnsRequest = { action: "session-turns" as const, scope, id: selected.id, digest: selected.digest, record: 0, offset: 0 };
+    const turnsRequest = { action: "session-turns" as const, scope, id: selected.id, digest: selected.digest, record: selected.match?.record ?? 0, offset: selected.match?.offset ?? 0 };
     const previous = cache.peek(request), previousTurns = cache.peek(turnsRequest);
     if (previous?.ok && previous.data.kind === "session-open" && previousTurns?.ok && previousTurns.data.kind === "session-turns") {
       setSnapshot(previous.data.value); setFirstPage(previousTurns.data.value); setOpening(false);
@@ -122,12 +130,12 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
     } catch { if (current === generation.current) setError(l("Request failed. Try again.", "请求未完成，请重试。")); }
     finally { inFlight.current.delete(key); if (current === generation.current) setPending([...inFlight.current].filter(value => value.startsWith(`${current}:`)).map(value => value.slice(value.indexOf(":") + 1))); }
   }
-  const fetchItem = (item: TeamSharedSession) => void run({ action: "session-fetch", scope, id: item.id, digest: item.digest }, item);
-  const cancelItem = (item: TeamSharedSession) => void run({ action: "session-fetch-cancel", scope, id: item.id, digest: item.digest }, item);
-  const visible = list?.items.filter(item => `${item.title} ${item.author}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) ?? [];
+  const visible = list?.items ?? [];
   return <section className="team-session-browser">
     <header className="team-session-toolbar">
-      <label className="searchbox team-session-search"><Search size={14}/><input aria-label={l("Search this page", "搜索当前页会话")} placeholder={l("Search title or author…", "搜索标题、分享者…")} value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <label className="searchbox team-session-search"><Search size={14}/><input aria-label={l("Search shared sessions and turns", "搜索共享会话与 Turn")} placeholder={mode === "turns" ? l("Search local turns…", "搜索本地 Turn 内容…") : l("Search title or author…", "搜索标题、分享者…")} value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <select aria-label={l("Search mode", "搜索类型")} value={mode} onChange={event => { setMode(event.target.value as "sessions" | "turns"); setPage(1); }}><option value="turns">Turn</option><option value="sessions">{l("Sessions", "会话")}</option></select>
+      {mode === "turns" && <label className="team-session-tool-search"><input type="checkbox" checked={includeTools} onChange={event => { setIncludeTools(event.target.checked); setPage(1); }}/>{l("Tool output", "工具输出")}</label>}
       <span className="team-session-count" aria-live="polite">{list ? `${list.items.length} ${l("sessions", "条")}` : ""}</span>
       <button className="icon-button" aria-label={l("Refresh sessions", "刷新会话")} disabled={loading} onClick={() => setRefresh(value => value + 1)}><RefreshCw size={15}/></button>
     </header>
@@ -136,37 +144,37 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
       <div className="team-session-list-pane">
         <div className="team-session-list" aria-label={l("Shared session list", "共享会话列表")}>
           {loading ? <p className="team-session-placeholder" role="status">{l("Loading…", "正在读取…")}</p> : visible.map(item => {
-            const phase = stateFor(item)?.phase, key = itemKey(item), busy = pending.includes(key);
-            return <div className={`session-row team-session-row ${selected && itemKey(selected) === key ? "selected" : ""}`} key={key}>
+            const phase = stateFor(item)?.phase, key = itemKey(item);
+            return <div className={`session-row team-session-row ${selected && itemKey(selected) === key && selected.match?.turnId === item.match?.turnId ? "selected" : ""}`} key={`${key}:${item.match?.turnId ?? "session"}`}>
               <button className="team-session-select session-main" onClick={() => {
                 const cached = cache.peek({ action: "session-open", scope, id: item.id, digest: item.digest });
-                const turns = cache.peek({ action: "session-turns", scope, id: item.id, digest: item.digest, record: 0, offset: 0 });
+                const turns = cache.peek({ action: "session-turns", scope, id: item.id, digest: item.digest, record: item.match?.record ?? 0, offset: item.match?.offset ?? 0 });
                 setSelected(item); setError("");
                 setSnapshot(cached?.ok && cached.data.kind === "session-open" && turns?.ok ? cached.data.value : null);
                 setFirstPage(turns?.ok && turns.data.kind === "session-turns" ? turns.data.value : null);
-              }} aria-pressed={selected?.id === item.id}>
+              }} aria-pressed={selected?.id === item.id && selected?.match?.turnId === item.match?.turnId}>
                 <span className="session-title"><span className="session-name">{item.title}</span></span>
                 <span className="session-meta"><span className="team-session-agent">{agentLabel(item.source ?? stateFor(item)?.source)}</span><span>{item.author}</span><span>{new Date(item.createdAt).toLocaleDateString()}</span></span>
+                {item.match && <span className="team-session-match">Turn {item.match.turnIndex + 1} · <HighlightedSearchText text={item.match.snippet} terms={[searchQuery]}/></span>}
                 <span className={`team-session-status ${phase ?? "remote"}`}>{active(phase) ? <LoaderCircle size={12} className="team-session-spinner"/> : phase === "ready" ? <Check size={12}/> : null}{phaseLabel(phase)}</span>
               </button>
-              {phase !== "ready" && <button className="icon-button" disabled={busy || !enabled} aria-label={active(phase) ? l(`Cancel ${item.title}`, `取消下载 ${item.title}`) : l(`Download ${item.title}`, `下载 ${item.title}`)} onClick={() => active(phase) ? cancelItem(item) : fetchItem(item)}>{active(phase) ? <X size={15}/> : <Download size={15}/>}</button>}
             </div>;
           })}
-          {!loading && !visible.length && <div className="team-session-placeholder"><MessagesSquare size={24}/><p>{query ? l("No matching sessions", "没有匹配的会话") : l("No shared sessions yet", "还没有共享会话")}</p></div>}
+          {!loading && !visible.length && <div className="team-session-placeholder"><MessagesSquare size={24}/><p>{query ? l("No matching sessions", "没有匹配的会话") : l("No shared sessions yet", "本地没有共享会话，请先 Pull")}</p></div>}
         </div>
         <footer className="team-session-pagination"><button className="icon-button" aria-label={l("Previous page", "上一页会话")} disabled={loading || page === 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={15}/></button><span>{page}</span><button className="icon-button" aria-label={l("Next page", "下一页会话")} disabled={loading || !list?.hasMore || page >= 100} onClick={() => setPage(value => value + 1)}><ChevronRight size={15}/></button></footer>
       </div>
       <div className="team-session-detail-pane">
         {selected ? <>
           <header className="detail-header"><div><div className="detail-badges"><span className="source-badge">{agentLabel(selected.source ?? selectedState?.source)}</span><span className="team-session-status">{phaseLabel(selectedState?.phase)}</span></div><h3 className="detail-title-row">{selected.title}</h3><div className="session-meta"><span>{selected.author}</span><span>{new Date(selected.createdAt).toLocaleDateString()}</span></div></div>
-            <div className="team-session-detail-actions"><button className="icon-button" title={l("Export shared package", "导出分享包")} aria-label={l("Export shared package", "导出分享包")} disabled={!enabled || pending.includes(itemKey(selected))} onClick={() => void run({action:"session-download",scope,id:selected.id},selected)}><Download size={16}/></button><button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
+            <div className="team-session-detail-actions"><button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
           </header>
           <div className="team-session-detail-body">
-            {snapshot ? <TeamSessionReader key={`${team.id}:${itemKey(selected)}`} snapshot={snapshot} initialPage={firstPage} item={selected} scope={scope} api={api} language={language}/> : <div className="team-session-placeholder">
+            {snapshot ? <TeamSessionReader key={`${team.id}:${itemKey(selected)}:${selected.match?.turnId ?? "session"}`} query={searchQuery} snapshot={snapshot} initialPage={firstPage} item={selected} scope={scope} api={api} language={language}/> : <div className="team-session-placeholder">
               {opening || active(selectedState?.phase) ? <LoaderCircle size={26} className="team-session-spinner"/> : <MessagesSquare size={30}/>}
-              <h3>{opening ? l("Opening…", "正在打开…") : active(selectedState?.phase) ? phaseLabel(selectedState?.phase) : l("Download to read", "下载后即可阅读")}</h3>
-              <p>{selectedState?.error ?? (active(selectedState?.phase) ? l("You can browse other sessions. This continues in the background.", "可以继续浏览其他会话，任务会在后台继续。") : l("Download once. Future reads use the local copy.", "首次下载并建立索引，之后直接读取本地副本。"))}</p>
-              {!opening && <button className="is-primary" disabled={!enabled || pending.includes(itemKey(selected))} onClick={() => selectedState?.phase === "ready" ? setSelected({ ...selected }) : active(selectedState?.phase) ? cancelItem(selected) : fetchItem(selected)}>{selectedState?.phase === "ready" ? l("Retry opening", "重试读取") : active(selectedState?.phase) ? l("Cancel download", "取消下载") : selectedState?.phase === "failed" ? l("Retry download", "重试下载") : l("Download session", "下载会话")}</button>}
+              <h3>{opening ? l("Opening…", "正在打开…") : active(selectedState?.phase) ? phaseLabel(selectedState?.phase) : l("Pull to prepare this session", "请先 Pull 同步这条会话")}</h3>
+              <p>{selectedState?.error ?? (active(selectedState?.phase) ? l("You can browse other sessions. This continues in the background.", "可以继续浏览其他会话，任务会在后台继续。") : l("Use Pull above. Searching and reading use only local data.", "点击上方 Pull 完成同步；搜索和阅读仅使用本地数据。"))}</p>
+
             </div>}
           </div>
           {selected.canWithdraw && <footer className="team-session-reader-footer"><button className="team-subtle-action" disabled={!enabled || pending.includes(itemKey(selected))} onClick={() => void run({action:"session-withdraw",scope,id:selected.id},selected)}>{l("Withdraw share", "撤回分享")}</button></footer>}

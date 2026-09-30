@@ -82,10 +82,38 @@ it("preserves selected turn numbering and spans without reading uploaded filesys
   expect(read.messages[0].attachments?.[0]).toMatchObject({ status: "missing" });
   expect(read.messages[0].attachments?.[0].source).toBeUndefined();
   expect(read.spans[0]).toMatchObject({ callId: "call", output: { text: "result" } });
+  await cache.replaceCatalog("excerpt-team", [{ key: "excerpt", item: { id: 17, digest: origin.digest, title: "Excerpt", author: "fixture", bytes: 1, createdAt: "2026-09-30", canWithdraw: false } }], new AbortController().signal);
+  expect((await cache.list("excerpt-team", 1, "result", "turns")).items).toEqual([]);
+  expect((await cache.list("excerpt-team", 1, "result", "turns", true)).items[0].match).toMatchObject({ turnIndex: 42, offset: 0 });
 });
 
 it("reads source labels for older snapshot metadata without reimporting content", async () => {
   await cache.import("old", content(), new AbortController().signal, origin);
   await db.query("update agent_recall.team_session_snapshots set metadata = jsonb_set(metadata, '{records,0}', (metadata #> '{records,0}') - 'source') where cache_key = $1", ["old"]);
   expect((await cache.get("old"))?.records[0].source).toBe("codex-cli");
+});
+
+it("persists scoped catalogs and finds turns beyond the first page without reading remote data", async () => {
+  const signal = new AbortController().signal;
+  await cache.import("search-a", content(105), signal, origin);
+  const item = { id: 17, digest: origin.digest, title: "共享修复", author: "member", createdAt: "2026-09-30", bytes: 10, canWithdraw: false, source: "codex-cli" };
+  await cache.replaceCatalog("team-a", [{ item, key: "search-a" }], signal);
+  const restarted = new PostgresTeamSessionRepository(db);
+  expect((await restarted.list("team-a", 1)).items).toEqual([item]);
+  expect((await restarted.list("team-b", 1, "Question", "turns")).items).toEqual([]);
+  const hits = await restarted.list("team-a", 1, "Question 104", "turns");
+  expect(hits.items).toHaveLength(1);
+  expect(hits.items[0].match).toMatchObject({ record: 0, turnIndex: 104, offset: 100 });
+  expect(hits.items[0].match?.snippet).toContain("Question 104");
+  expect(hits.items[0].match!.snippet.length).toBeLessThanOrEqual(240);
+  expect((await restarted.turns("search-a", 0, 100)).turns.map(turn => turn.id)).toContain(hits.items[0].match!.turnId);
+  expect((await restarted.list("team-a", 1, "%", "turns")).items).toEqual([]);
+  const turns = await restarted.turns("search-a", 0, 0);
+  await db.query("update agent_recall.session_turns set tool_text = 'secret-output-marker', tool_names = ARRAY['rg'] where id = $1", [turns.turns[0].id]);
+  expect((await restarted.list("team-a", 1, "secret-output-marker", "turns")).items).toEqual([]);
+  expect((await restarted.list("team-a", 1, "secret-output-marker", "turns", true)).items).toHaveLength(1);
+  expect((await restarted.list("team-a", 1, "rg", "turns")).items).toHaveLength(1);
+  await restarted.replaceCatalog("team-a", [], signal);
+  expect((await restarted.list("team-a", 1)).items).toEqual([]);
+  expect(await restarted.get("search-a")).not.toBeNull();
 });

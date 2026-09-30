@@ -24,6 +24,7 @@ export interface TeamSharedSession {
   storage?: "blocks";
   digest: string;
   canWithdraw: boolean;
+  match?: { record: number; turnId: string; turnIndex: number; offset: number; snippet: string };
 }
 export interface TeamSessionPage { items: TeamSharedSession[]; page: number; hasMore: boolean; }
 export interface TeamSessionContent {

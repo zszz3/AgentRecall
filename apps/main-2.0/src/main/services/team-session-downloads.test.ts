@@ -44,3 +44,16 @@ it("runs worker progress off the caller thread and waits for worker exit on canc
     await queue.close(); expect(queue.status(item(2))?.phase).toBe("cancelled");
   } finally { await queue.close(); await fs.rm(root, {recursive:true,force:true}); }
 });
+
+it("Pull waits for completion and propagates failure and cancellation", async () => {
+  const run = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined)
+    .mockImplementationOnce(async (_input, signal: AbortSignal) => new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })));
+  const queue = new TeamSessionDownloads(run); queues.push(queue);
+  await expect(queue.fetch(item(), new AbortController().signal)).rejects.toThrow("Pull");
+  await queue.fetch(item(), new AbortController().signal);
+  expect(queue.status(item())?.phase).toBe("ready");
+  const abort = new AbortController(), pending = queue.fetch(item(2), abort.signal);
+  const rejected = expect(pending).rejects.toThrow();
+  abort.abort(); await rejected;
+  expect(queue.status(item(2))?.phase).toBe("cancelled");
+});

@@ -297,3 +297,8 @@
 .team-sync-result-popover time { color: var(--text-muted); font-size: 11px; }
 .team-resource-toolbar .team-sync-control > .team-workspace-error { position: absolute; right: 0; top: calc(100% + 8px); z-index: 9; width: min(380px, 75cqw); }
 @container team-space (max-width: 850px) { .team-resource-toolbar { gap: 0; padding: 0 14px; } .team-resource-toolbar .team-space-tabs { flex-basis: 100%; } .team-resource-toolbar .team-sync-control { padding-bottom: 6px; } }
+
+.team-session-match { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin: 6px 0; }
+.team-session-toolbar .team-session-tool-search { display: flex; flex-direction: row; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; color: var(--text-muted); }
+.team-session-toolbar .team-session-tool-search input { width: auto; margin: 0; }
+.team-session-toolbar select { width: auto; padding: 4px 8px; font-size: 12px; }

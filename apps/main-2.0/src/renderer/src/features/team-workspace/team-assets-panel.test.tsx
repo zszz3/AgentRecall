@@ -335,7 +335,7 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
 });
 
 
-it("selects remote sessions without downloading and keeps accepted downloads alive when leaving", async () => {
+it("never downloads while browsing unprepared sessions and directs preparation to Pull", async () => {
   const item = {id:18,title:"Remote fixture",source:"claude-cli",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"b".repeat(64),canWithdraw:false};
   let started = false;
   const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
@@ -349,11 +349,10 @@ it("selects remote sessions without downloading and keeps accepted downloads ali
   expect(container.textContent).toContain("Claude Code");
   await act(async () => button("Remote fixture").click());
   expect(request.mock.calls.some(([input]) => ["session-fetch", "session-open"].includes(input.action))).toBe(false);
-  await act(async () => button("下载会话").click());
-  expect(container.textContent).toContain("任务会在后台继续");
+  expect(container.textContent).toContain("请先 Pull 同步这条会话");
   await act(async () => button("关闭阅读").click());
   await act(async () => root.render(<div/>));
-  expect(request.mock.calls.filter(([input]) => input.action === "session-fetch")).toHaveLength(1);
+  expect(request.mock.calls.filter(([input]) => input.action === "session-fetch")).toHaveLength(0);
   expect(request.mock.calls.some(([input]) => input.action === "session-fetch-cancel")).toBe(false);
 });
 
@@ -379,4 +378,25 @@ it("loads local metadata and first turns concurrently and displays the previous 
   expect(container.textContent).not.toContain("正在读取…");
   await act(async()=>finishList(ok({kind:"session-list",value:{items:[],page:1,hasMore:false}})));
   expect(container.textContent).not.toContain("Cached listing");
+});
+
+it("searches persisted turns and opens the matched record and page without fetching", async () => {
+  const item = { id: 17, title: "Turn search fixture", source: "codex-cli", author: "member", createdAt: "2026-09-30", bytes: 1, digest: "a".repeat(64), canWithdraw: false,
+    match: { record: 1, turnId: "matched-turn", turnIndex: 104, offset: 100, snippet: "修复搜索" } };
+  const request = vi.fn(async (input: TeamRequest): Promise<TeamReply> => {
+    if (input.action === "session-list") return ok({ kind: "session-list", value: { items: input.query ? [item] : [], page: 1, hasMore: false } });
+    if (input.action === "session-status") return ok({ kind: "session-status", value: [{ id: item.id, digest: item.digest, phase: "ready" }] });
+    if (input.action === "session-open") return ok({ kind: "session-open", value: { bytes: 1, files: [], missingAttachments: [], partial: true, records: [0, 1].map(n => ({ sessionKey: String(n), title: String(n), turnCount: 105 })) } });
+    if (input.action === "session-turns") return ok({ kind: "session-turns", value: { offset: input.offset, hasMore: false, turns: [] } });
+    return base(input);
+  });
+  await act(async () => root.render(<TeamSessionsPanel selection={selection} language="zh" api={{ request }}/>));
+  const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索共享会话与 Turn"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(input, "修复"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-list", query: "修复", mode: "turns", includeTools: false }));
+  expect(container.textContent).toContain("Turn 105");
+  await act(async () => button("Turn search fixture").click());
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ action: "session-turns", record: 1, offset: 100 }));
+  expect(request.mock.calls.some(([value]) => ["session-fetch", "session-download", "sync"].includes(value.action))).toBe(false);
 });

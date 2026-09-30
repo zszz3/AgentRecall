@@ -206,7 +206,7 @@ it("enforces team/project scope for sessions and cancels retained previews on wi
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: false, error: { code: "TEAM_DISABLED" } });
   await workspace.setTeamEnabled(true);
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true, data: { kind: "session-list" } });
-  expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: `legacy:${saved.id}` }), 1, expect.any(AbortSignal));
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: `legacy:${saved.id}` }), 1, expect.any(AbortSignal), undefined, undefined, undefined);
   const open = vi.spyOn(sharing, "cached").mockResolvedValue({ partial: false, records: [], bytes: 0, files: [], missingAttachments: [] });
   const turns = vi.spyOn(sharing, "turns").mockResolvedValue({ turns: [], offset: 0, hasMore: false });
   const turn = vi.spyOn(sharing, "turn").mockResolvedValue(null);
@@ -249,7 +249,7 @@ it("creates a name-only space and exposes asset previews and sessions without a 
   const scope = { projectId: project.id, root: null, repository: "https://github.com/example/assets" };
   expect(await api.request({ action: "catalog", scope })).toMatchObject({ ok: true, data: { kind: "catalog", value: { installed: [], root: null } } });
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true });
-  expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: project.sharingKey, root: null, projectName: "Research" }), 1, expect.any(AbortSignal));
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ projectIdentity: project.sharingKey, root: null, projectName: "Research" }), 1, expect.any(AbortSignal), undefined, undefined, undefined);
   expect(await api.request({ action: "skill-install", scope, id: "review", target: "codex", revision: "1".repeat(40) })).toMatchObject({ ok: false, error: { code: "LOCAL_DIRECTORY_REQUIRED" } });
   expect(await api.request({ action: "catalog", scope: { ...scope, directory: "relative" } })).toMatchObject({ ok: false, error: { code: "INVALID_ARGUMENTS" } });
   confirm.mockResolvedValue(true);
@@ -264,7 +264,7 @@ it("opens teams without projects, reads connected local assets and guards instal
   await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
   const scope = { teamId: "team", repository: "https://github.com/example/assets" };
   expect(await api.request({ action: "session-list", scope, page: 1 })).toMatchObject({ ok: true });
-  expect(list).toHaveBeenCalledWith(expect.objectContaining({ teamWide: true, projectIdentity: "team:shared" }), 1, expect.any(AbortSignal));
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ teamWide: true, projectIdentity: "team:shared" }), 1, expect.any(AbortSignal), undefined, undefined, undefined);
   expect(await api.request({ action: "catalog", scope })).toMatchObject({ ok: true, data: { kind: "catalog", value: { installed: [] } } });
   const directory = path.join(root, "no-git"); await fs.mkdir(directory); await fs.writeFile(path.join(directory, "AGENTS.md"), "personal rules");
   expect(await api.request({ action: "connect-directory", teamId: "team", directory, targets: ["codex"] })).toMatchObject({ ok: true });
@@ -427,4 +427,22 @@ it("starts app-owned downloads through IPC while reads remain cache-only", async
   expect(await api.request({action:"session-status",scope:share.scope,items:[{id:share.id,digest:share.digest}]})).toMatchObject({ok:true,data:{value:[{phase:"downloading"}]}});
   await api.request({action:"session-fetch-cancel",...share});
   expect(run.mock.calls[0]![1].aborted).toBe(true);
+});
+
+it("Pull prepares only missing shares and reports an incomplete sync instead of success", async () => {
+  const sharing = new TeamSessionSharing({ store: { getSession: vi.fn(), searchSessions: vi.fn(), getAllMessages: vi.fn(), getTraceEvents: vi.fn(), getSessionTurn: vi.fn(), getSessionSourceArtifacts: vi.fn(), getAttachmentFile: vi.fn() }, ensureDetails: vi.fn(), confirm: vi.fn(), save: vi.fn() });
+  const items = [1, 2].map(id => ({ id, digest: "a".repeat(64), title: "Fixture", author: "member", bytes: 1, createdAt: "2026-09-30", canWithdraw: false }));
+  const catalog = vi.spyOn(sharing, "pullCatalog").mockResolvedValue(items);
+  vi.spyOn(sharing, "cached").mockImplementation(async (_context, id) => id === 1 ? { partial: false, records: [], bytes: 0, files: [], missingAttachments: [] } : null);
+  const run = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+  const { api, workspace } = harness(sharing, new TeamSessionDownloads(run));
+  await workspace.store.initialize(); await workspace.addTeam({ id: "team", repository: "https://github.com/example/assets" }); await workspace.setTeamEnabled(true);
+  const scope = { teamId: "team", repository: "https://github.com/example/assets" };
+  vi.spyOn(TeamAssetService.prototype, "pull").mockResolvedValue({ schemaVersion: 1, repository: scope.repository, commit: "a".repeat(40), startedAt: 1, finishedAt: 2, status: "no-directories", directories: [] });
+  expect(await api.request({ action: "sync", scope })).toMatchObject({ ok: false, error: { code: "TEAM_SESSION_SYNC_INCOMPLETE" } });
+  expect(await api.request({ action: "sync", scope })).toMatchObject({ ok: true, data: { kind: "sync-result" } });
+  expect(catalog).toHaveBeenCalledTimes(2);
+  expect(run).toHaveBeenCalledTimes(2);
+  expect(run.mock.calls.every(([input]) => input.id === 2)).toBe(true);
+  expect(await api.request({ action: "session-list", scope, page: 1, query: "x".repeat(201), mode: "turns" })).toMatchObject({ ok: false });
 });

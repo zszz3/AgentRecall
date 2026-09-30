@@ -252,3 +252,25 @@ it("downloads once, then reopens and expands turns from PostgreSQL without the r
     await expect(reopened.open(f.context, 17, "b".repeat(64), f.signal)).rejects.toMatchObject({ code: "TEAM_SESSION_CHANGED" });
   } finally { await db.close(); }
 });
+
+it("only Pull reads the remote catalog; restart, listing and search remain offline", async () => {
+  const f = await fixture();
+  const db = new PostgresDatabase(new PGliteTestPool(), { migrationLock: false, migrations: POSTGRES_MIGRATIONS });
+  await db.initialize();
+  try {
+    const cache = new PostgresTeamSessionRepository(db);
+    const sharing = new TeamSessionSharing({ store: f.store, cache, confirm: f.confirm, save: f.save, ensureDetails: async () => undefined }, f.remote);
+    services.push(sharing);
+    const remoteList = vi.spyOn(f.remote, "list").mockResolvedValue({ items: [{ id: 17, digest: "a".repeat(64), title: "Local catalog", author: "fixture", createdAt: "2026-09-30", bytes: 10, canWithdraw: true }], page: 1, hasMore: false });
+    expect((await sharing.list(f.context, 1, f.signal)).items).toEqual([]);
+    expect(remoteList).not.toHaveBeenCalled();
+    await sharing.pullCatalog(f.context, f.signal);
+    remoteList.mockRejectedValue(new Error("offline"));
+    expect((await sharing.list(f.context, 1, f.signal)).items).toHaveLength(1);
+    expect((await sharing.list(f.context, 1, f.signal, "Local", "sessions")).items).toHaveLength(1);
+    expect((await sharing.list(f.context, 1, f.signal, "question", "turns")).items).toEqual([]);
+    expect(remoteList).toHaveBeenCalledTimes(1);
+    await expect(sharing.pullCatalog(f.context, f.signal)).rejects.toThrow("offline");
+    expect((await sharing.list(f.context, 1, f.signal)).items).toHaveLength(1);
+  } finally { await db.close(); }
+});

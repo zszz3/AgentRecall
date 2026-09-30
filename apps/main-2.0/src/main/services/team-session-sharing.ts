@@ -10,7 +10,7 @@ import { WorkspaceError } from "@agentrecall/workspace-core";
 import type { SessionStore } from "../../core/session-store";
 import type { SessionSearchResult } from "../../core/types";
 import { MAX_SHARED_TURNS, teamTurnSelectionSchema } from "../../shared/team-sessions";
-import type { TeamSessionContent, TeamSessionPreview } from "../../shared/team-sessions";
+import type { TeamSessionContent, TeamSessionPreview, TeamSharedSession } from "../../shared/team-sessions";
 import { TeamSessionGitHub, MAX_TEAM_SESSION_BYTES } from "./team-session-github";
 
 const compress = promisify(gzip), decompress = promisify(gunzip);
@@ -267,7 +267,23 @@ export class TeamSessionSharing {
     const result = await this.remote.uploadBlocks(context.repository, this.project(context), pending.content.selectedTurns ? `${title} · ${pending.content.selectedTurns.length} 个轮次` : title, pending.data, pending.bundle, signal);
     clearTimeout(pending.timer); this.previews.delete(token); return result;
   }
-  list(context: TeamSessionContext, page: number, signal: AbortSignal) { return this.remote.list(context.repository, context.teamWide ? null : this.project(context), page, signal); }
+  private catalogScope(context: TeamSessionContext): string { return JSON.stringify([context.repository, context.teamWide ? null : context.projectIdentity]); }
+  list(context: TeamSessionContext, page: number, _signal: AbortSignal, query?: string, mode?: "sessions" | "turns", includeTools?: boolean) {
+    return this.cache().list(this.catalogScope(context), page, query, mode, includeTools);
+  }
+  async pullCatalog(context: TeamSessionContext, signal: AbortSignal): Promise<TeamSharedSession[]> {
+    const items: TeamSharedSession[] = [];
+    for (let page = 1; page <= 100; page++) {
+      this.cancelled(signal);
+      const result = await this.remote.list(context.repository, context.teamWide ? null : this.project(context), page, signal);
+      items.push(...result.items);
+      if (!result.hasMore) {
+        await this.cache().replaceCatalog(this.catalogScope(context), items.map(item => ({ item, key: this.cacheKey(context, item.id, item.digest) })), signal);
+        return items;
+      }
+    }
+    throw new WorkspaceError("TEAM_SESSION_TOO_LARGE", "团队会话目录超过同步上限，本地目录保留。");
+  }
   private cacheKey(context: TeamSessionContext, id: number, digest: string): string {
     return createHash("sha256").update(JSON.stringify([TEAM_SESSION_CACHE_VERSION, TURN_DERIVATION_VERSION, context.repository, context.teamWide ? null : context.projectIdentity, id, digest])).digest("hex");
   }

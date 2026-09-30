@@ -54,7 +54,7 @@ export const teamRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("session-open"), ...share }).strict(),
   z.object({ action: z.literal("session-turns"), ...share, record: z.number().int().min(0).max(127), offset: z.number().int().min(0).max(200000) }).strict(),
   z.object({ action: z.literal("session-turn"), ...share, record: z.number().int().min(0).max(127), turnId: z.string().min(1).max(1024) }).strict(),
-  z.object({ action: z.literal("session-list"), scope: selectedScope, page: z.number().int().min(1).max(100) }).strict(),
+  z.object({ action: z.literal("session-list"), scope: selectedScope, page: z.number().int().min(1).max(100), query: z.string().trim().max(200).optional(), mode: z.enum(["sessions", "turns"]).optional(), includeTools: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("session-preview"), scope: selectedScope, sessionKey: directory, turnIds: teamTurnSelectionSchema.optional() }).strict(),
   z.object({ action: z.literal("session-publish"), scope: selectedScope, token: z.string().uuid() }).strict(),
   ...(["session-download", "session-withdraw"] as const).map((action) => z.object({ action: z.literal(action), scope: selectedScope, id: z.number().int().positive() }).strict()),

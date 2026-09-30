@@ -8,12 +8,12 @@ import { SOURCE_LABEL } from "../../session-ui";
 import { isSessionSource } from "../../../../core/session-sources";
 import { TurnAccordion } from "../session-detail/turn-accordion";
 
-export function TeamSessionReader({ snapshot, initialPage, item, scope, api, language }: {
-  initialPage?: TeamSessionTurnsPage | null; snapshot: TeamSessionSnapshot; item: TeamSharedSession; scope: TeamScope & { repository: string };
+export function TeamSessionReader({ snapshot, initialPage, item, scope, api, language, query = "" }: {
+  query?: string; initialPage?: TeamSessionTurnsPage | null; snapshot: TeamSessionSnapshot; item: TeamSharedSession; scope: TeamScope & { repository: string };
   api: TeamWorkspaceApi; language: LanguageMode;
 }) {
   const top = useRef<HTMLDivElement>(null);
-  const [record, setRecord] = useState(0), [offset, setOffset] = useState(0);
+  const [record, setRecord] = useState(item.match?.record ?? 0), [offset, setOffset] = useState(item.match?.offset ?? 0);
   useEffect(() => { top.current?.scrollIntoView({ block: "start" }); }, [record, offset]);
   const [page, setPage] = useState<TeamSessionTurnsPage | null>(initialPage ?? null);
   const [error, setError] = useState(""), [retry, setRetry] = useState(0);
@@ -47,7 +47,7 @@ export function TeamSessionReader({ snapshot, initialPage, item, scope, api, lan
       {snapshot.records.map((entry, index) => <option key={index} value={index}>{entry.source ? (isSessionSource(entry.source) ? SOURCE_LABEL[entry.source] : entry.source) + " · " : ""}{entry.title} · {entry.turnCount}</option>)}
     </select></label>}
     {error ? <p role="alert">{error} <button onClick={() => setRetry(value => value + 1)}>{l("Retry", "重试")}</button></p> : <TurnAccordion key={key} sessionKey={key} turns={page?.turns ?? []}
-      loading={!page} matchedTurnId={null} matchedMessageIndex={null} showTools query="" language={language}
+      loading={!page} matchedTurnId={item.match?.record === record ? item.match.turnId : null} matchedMessageIndex={null} showTools query={query} language={language}
       onLoadTurn={loadTurn} turnNumbering="source" attachmentAccess="download" />}
     <div className="team-space-actions"><button disabled={!page || offset === 0} onClick={() => setOffset(value => Math.max(0, value - 50))}>{l("Previous turns", "上一页轮次")}</button>
       <small>{Math.floor(offset / 50) + 1} / {Math.max(1, Math.ceil((snapshot.records[record]?.turnCount ?? 0) / 50))}</small>

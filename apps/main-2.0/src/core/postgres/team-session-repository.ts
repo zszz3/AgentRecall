@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import type { TeamSessionContent, TeamSessionSnapshot, TeamSessionTurnsPage } from "../../shared/team-sessions";
+import type { TeamSessionContent, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../shared/team-sessions";
 import type { SessionMessage, SessionTraceEvent, SessionTurnDetail } from "../types";
+import { escapeLike } from "../session-search-query";
 import { isSessionSource } from "../session-sources";
 import { deriveSessionTimeline, TURN_DERIVATION_VERSION, type DerivedSessionTimeline } from "../turns/derive-turns";
 import { PostgresSessionRepository } from "./session-repository";
@@ -8,7 +9,7 @@ import { PostgresSessionTurnRepository } from "./session-turn-repository";
 import { postgresJsonValue } from "./session-records";
 import type { PostgresDatabase } from "./database";
 
-export const TEAM_SESSION_CACHE_VERSION = 1;
+export const TEAM_SESSION_CACHE_VERSION = 2;
 const scopedId = (...parts: string[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 const sessionKey = (key: string, record: number) => `team:${key}:${record}`;
 
@@ -16,6 +17,42 @@ const sessionKey = (key: string, record: number) => `team:${key}:${record}`;
 export class PostgresTeamSessionRepository {
   private readonly reader: PostgresSessionTurnRepository;
   constructor(private readonly database: PostgresDatabase) { this.reader = new PostgresSessionTurnRepository(database); }
+
+  async replaceCatalog(scope: string, entries: Array<{ item: TeamSharedSession; key: string }>, signal: AbortSignal): Promise<void> {
+    await this.database.transaction(async client => {
+      signal.throwIfAborted();
+      await client.query("delete from agent_recall.team_session_catalog where scope_key = $1", [scope]);
+      if (entries.length) await client.query(`insert into agent_recall.team_session_catalog (scope_key, asset_id, cache_key, item)
+        select $1, (entry->'item'->>'id')::bigint, entry->>'key', entry->'item'
+        from jsonb_array_elements($2::jsonb) entry`, [scope, JSON.stringify(entries)]);
+      signal.throwIfAborted();
+    });
+  }
+
+  async list(scope: string, page: number, query = "", mode: "sessions" | "turns" = "sessions", includeTools = false): Promise<TeamSessionPage> {
+    const offset = (page - 1) * 50, pattern = `%${escapeLike(query)}%`;
+    if (mode === "sessions" || !query) {
+      const result = await this.database.query<{ item: TeamSharedSession }>(`select item from agent_recall.team_session_catalog
+        where scope_key = $1 and (item->>'title' ilike $2 escape '\\' or item->>'author' ilike $2 escape '\\')
+        order by item->>'createdAt' desc, asset_id desc offset $3 limit 51`, [scope, pattern, offset]);
+      return { items: result.rows.slice(0, 50).map(row => row.item), page, hasMore: result.rows.length > 50 };
+    }
+    // Search the persisted conversation projection; only opt-in searches touch tool output.
+    const text = includeTools ? "concat_ws(E'\\n', turns.search_text, turns.tool_names::text, turns.tool_text)" : "concat_ws(E'\\n', turns.search_text, turns.tool_names::text)";
+    const result = await this.database.query<{ item: TeamSharedSession; record: number; turn_id: string; turn_index: number; ordinal: number; snippet: string }>(`
+      select catalog.item, split_part(sessions.session_key, ':', 3)::int as record,
+        turns.id as turn_id, turns.turn_index,
+        (select count(*)::int from agent_recall.session_turns earlier where earlier.session_key = turns.session_key and earlier.turn_index < turns.turn_index) as ordinal,
+        substring(${text} from greatest(1, strpos(lower(${text}), lower($3)) - 60) for 240) as snippet
+      from agent_recall.team_session_catalog catalog
+      join agent_recall.sessions sessions on sessions.team_snapshot_key = catalog.cache_key
+      join agent_recall.session_turns turns on turns.session_key = sessions.session_key
+      where catalog.scope_key = $1 and (turns.search_text ilike $2 escape '\\' or turns.tool_names::text ilike $2 escape '\\' or ($5 and turns.tool_text ilike $2 escape '\\'))
+      order by catalog.item->>'createdAt' desc, catalog.asset_id desc, sessions.session_key, turns.turn_index
+      offset $4 limit 51`, [scope, pattern, query, offset, includeTools]);
+    return { page, hasMore: result.rows.length > 50, items: result.rows.slice(0, 50).map(row => ({ ...row.item,
+      match: { record: Number(row.record), turnId: row.turn_id, turnIndex: Number(row.turn_index), offset: Math.floor(Number(row.ordinal) / 50) * 50, snippet: row.snippet } })) };
+  }
 
   async sources(keys: string[]): Promise<Map<string, string | null>> {
     const result = await this.database.query<{ cache_key: string; source: string | null }>(
@@ -70,7 +107,7 @@ export class PostgresTeamSessionRepository {
               timeToFirstTokenMs: turn.timeToFirstTokenMs ?? null, abortReason: turn.abortReason ?? null,
               userText: turn.messages.filter(message => message.role === "user").map(message => message.content).join("\n"),
               assistantText: turn.messages.filter(message => message.role === "assistant").map(message => message.content).join("\n"),
-              toolText: turn.toolNames.join(" "), searchText: turn.messages.map(message => message.content).join("\n"),
+              toolText: turn.spans.map(span => [span.name, JSON.stringify(span.input), JSON.stringify(span.output), span.error].filter(Boolean).join(" ")).join("\n"), searchText: turn.messages.map(message => message.content).join("\n"),
               inputTokens: turn.inputTokens, outputTokens: turn.outputTokens, cachedInputTokens: turn.cachedInputTokens,
               cacheCreationInputTokens: turn.cacheCreationInputTokens ?? 0, reasoningOutputTokens: turn.reasoningOutputTokens,
               totalTokens: turn.totalTokens, errorCount: turn.errorCount, toolNames: turn.toolNames, derivationVersion: TURN_DERIVATION_VERSION,

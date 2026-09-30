@@ -2142,4 +2142,14 @@ export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [{
     `CREATE INDEX sessions_team_snapshot_idx ON agent_recall.sessions(team_snapshot_key) WHERE team_snapshot_key IS NOT NULL`,
     `CREATE VIEW agent_recall.local_sessions AS SELECT * FROM agent_recall.sessions WHERE team_snapshot_key IS NULL`,
   ],
+}, {
+  version: 59,
+  name: "persist pulled team session catalogs",
+  statements: [
+    `CREATE TABLE agent_recall.team_session_catalog (
+      scope_key text NOT NULL, asset_id bigint NOT NULL, cache_key text NOT NULL,
+      item jsonb NOT NULL, PRIMARY KEY (scope_key, asset_id)
+    )`,
+    `CREATE INDEX team_session_catalog_cache_idx ON agent_recall.team_session_catalog(cache_key)`,
+  ],
 }];
