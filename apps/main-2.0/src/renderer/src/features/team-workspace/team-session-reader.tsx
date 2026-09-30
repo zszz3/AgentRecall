@@ -3,23 +3,29 @@ import type { TeamSessionSnapshot, TeamSessionTurnsPage, TeamSharedSession } fro
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamScope } from "../../../../shared/ipc/team-workspace";
 import type { LanguageMode } from "../../language";
+import { teamSessionReadCache } from "./team-session-read-cache";
 import { TurnAccordion } from "../session-detail/turn-accordion";
 
-export function TeamSessionReader({ snapshot, item, scope, api, language }: {
-  snapshot: TeamSessionSnapshot; item: TeamSharedSession; scope: TeamScope & { repository: string };
+export function TeamSessionReader({ snapshot, initialPage, item, scope, api, language }: {
+  initialPage?: TeamSessionTurnsPage | null; snapshot: TeamSessionSnapshot; item: TeamSharedSession; scope: TeamScope & { repository: string };
   api: TeamWorkspaceApi; language: LanguageMode;
 }) {
   const top = useRef<HTMLDivElement>(null);
   const [record, setRecord] = useState(0), [offset, setOffset] = useState(0);
   useEffect(() => { top.current?.scrollIntoView({ block: "start" }); }, [record, offset]);
-  const [page, setPage] = useState<TeamSessionTurnsPage | null>(null);
+  const [page, setPage] = useState<TeamSessionTurnsPage | null>(initialPage ?? null);
   const [error, setError] = useState(""), [retry, setRetry] = useState(0);
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const scopeKey = JSON.stringify(scope);
   useEffect(() => {
     let active = true;
-    setPage(null); setError("");
-    void api.request({ action: "session-turns", scope, id: item.id, digest: item.digest, record, offset }).then(reply => {
+    const cache = teamSessionReadCache(api);
+    const request = { action: "session-turns" as const, scope, id: item.id, digest: item.digest, record, offset };
+    const cached = cache.peek(request);
+    setError("");
+    if (cached?.ok && cached.data.kind === "session-turns") { setPage(cached.data.value); return; }
+    setPage(null);
+    void cache.read(request).then(reply => {
       if (!active) return;
       if (!reply.ok) setError(reply.error.message);
       else if (reply.data.kind === "session-turns") setPage(reply.data.value);

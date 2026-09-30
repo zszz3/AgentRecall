@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { WorkspaceConfig, TeamPullReport } from "@agentrecall/workspace-core";
 import type { TeamPayload, TeamReply, TeamRequest, TeamCatalog } from "../../../../shared/ipc/team-workspace";
+import { TeamSessionsPanel } from "./team-sessions-panel";
 import { TeamAssetsPanel } from "./team-assets-panel";
 import { TeamDocumentsPanel } from "./team-documents-panel";
 import { TeamUploadDialog } from "./team-upload-dialog";
@@ -324,12 +325,12 @@ it("opens the durable snapshot and requests turn summaries separately", async ()
   await act(async () => button("Shared fixture").click());
   await act(async () => button("关闭阅读").click());
   await act(async () => button("Shared fixture").click());
-  expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(2);
+  expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(1);
   expect(request.mock.calls.some(([input]) => input.action === "session-turns")).toBe(true);
   expect(request.mock.calls.some(([input]) => input.action === "session-turn")).toBe(false);
   await act(async () => button("刷新会话").click());
   await act(async () => button("Shared fixture").click());
-  expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(3);
+  expect(request.mock.calls.filter(([input]) => input.action === "session-open")).toHaveLength(1);
 });
 
 
@@ -352,4 +353,28 @@ it("selects remote sessions without downloading and keeps accepted downloads ali
   await act(async () => root.render(<div/>));
   expect(request.mock.calls.filter(([input]) => input.action === "session-fetch")).toHaveLength(1);
   expect(request.mock.calls.some(([input]) => input.action === "session-fetch-cancel")).toBe(false);
+});
+
+
+it("loads local metadata and first turns concurrently and displays the previous list while refreshing", async () => {
+  const item={id:19,title:"Cached listing",author:"fixture",createdAt:"2026-09-30",bytes:100,digest:"c".repeat(64),canWithdraw:false};
+  let finishOpen!: (value: TeamReply)=>void, finishList!: (value: TeamReply)=>void, refreshing=false;
+  const request=vi.fn(async(input:TeamRequest):Promise<TeamReply>=>{
+    if(input.action==="session-list") return refreshing ? new Promise(resolve=>{finishList=resolve;}) : ok({kind:"session-list",value:{items:[item],page:1,hasMore:false}});
+    if(input.action==="session-status") return ok({kind:"session-status",value:[{id:item.id,digest:item.digest,phase:"ready"}]});
+    if(input.action==="session-open") return new Promise(resolve=>{finishOpen=resolve;});
+    if(input.action==="session-turns") return ok({kind:"session-turns",value:{offset:0,hasMore:false,turns:[]}});
+    return base(input);
+  });
+  const api={request};
+  await act(async()=>root.render(<TeamSessionsPanel selection={selection} language="zh" api={api}/>));
+  await act(async()=>button("Cached listing").click());
+  expect(request.mock.calls.some(([input])=>input.action==="session-turns")).toBe(true);
+  await act(async()=>finishOpen(ok({kind:"session-open",value:{bytes:100,files:[],missingAttachments:[],partial:false,records:[{sessionKey:"fixture",title:"Fixture",turnCount:0}]}})));
+  await act(async()=>root.render(<div/>)); refreshing=true;
+  await act(async()=>root.render(<TeamSessionsPanel selection={selection} language="zh" api={api}/>));
+  expect(container.textContent).toContain("Cached listing");
+  expect(container.textContent).not.toContain("正在读取…");
+  await act(async()=>finishList(ok({kind:"session-list",value:{items:[],page:1,hasMore:false}})));
+  expect(container.textContent).not.toContain("Cached listing");
 });

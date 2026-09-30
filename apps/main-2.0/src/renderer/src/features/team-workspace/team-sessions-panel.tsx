@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Download, LoaderCircle, MessagesSquare, RefreshCw, Search, X } from "lucide-react";
-import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
+import type { TeamSessionFetchState, TeamSessionSnapshot, TeamSessionTurnsPage, TeamSessionPage, TeamSharedSession } from "../../../../shared/team-sessions";
 import type { TeamWorkspaceApi } from "../../../../preload/team-workspace";
 import type { TeamRequest } from "../../../../shared/ipc/team-workspace";
 import type { LanguageMode } from "../../language";
 import type { TeamSelection } from "./team-workspace-page";
 import { ResizableSplit } from "../../components/resizable-split";
+import { teamSessionReadCache } from "./team-session-read-cache";
 import { TeamSessionReader } from "./team-session-reader";
 
 const itemKey = (item: { id: number; digest: string }) => `${item.id}:${item.digest}`;
@@ -14,18 +15,24 @@ const active = (phase?: TeamSessionFetchState["phase"]) => phase === "queued" ||
 export function TeamSessionsPanel({ selection, language, api = window.sessionSearch.teamWorkspace }: { selection: TeamSelection; language: LanguageMode; api?: TeamWorkspaceApi }) {
   const l = (en: string, zh: string) => language === "zh" ? zh : en;
   const { team, enabled } = selection;
+  const cache = teamSessionReadCache(api);
   const scope = { teamId: team.id, repository: team.repository };
   const [list, setList] = useState<TeamSessionPage | null>(null);
   const [page, setPage] = useState(1), [refresh, setRefresh] = useState(0), [pollVersion, setPollVersion] = useState(0);
   const [selected, setSelected] = useState<TeamSharedSession | null>(null);
   const [snapshot, setSnapshot] = useState<TeamSessionSnapshot | null>(null);
+  const [firstPage, setFirstPage] = useState<TeamSessionTurnsPage | null>(null);
   const [states, setStates] = useState<TeamSessionFetchState[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false), [opening, setOpening] = useState(false);
   const [error, setError] = useState(""), [feedback, setFeedback] = useState("");
   const [pending, setPending] = useState<string[]>([]);
   const inFlight = useRef(new Set<string>()), generation = useRef(0);
-  const stateFor = (item: TeamSharedSession) => states.find(state => itemKey(state) === itemKey(item));
+  const stateFor = (item: TeamSharedSession): TeamSessionFetchState | undefined => {
+    const cached = cache.peek({ action: "session-open", scope, id: item.id, digest: item.digest });
+    if (cached?.ok) return { id: item.id, digest: item.digest, phase: "ready" };
+    return states.find(state => itemKey(state) === itemKey(item));
+  };
   const selectedState = selected ? stateFor(selected) : undefined;
   const phaseLabel = (phase?: TeamSessionFetchState["phase"]) => {
     switch (phase) {
@@ -40,13 +47,17 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   };
   useEffect(() => {
     let live = true;
-    generation.current++; setList(null); setSelected(null); setSnapshot(null); setStates([]); setError(""); setPending([]);
+    generation.current++;
+    const request = { action: "session-list" as const, scope, page };
+    const previous = enabled ? cache.peek(request) : undefined;
+    const cachedList = previous?.ok && previous.data.kind === "session-list" ? previous.data.value : null;
+    setList(cachedList); setSelected(null); setSnapshot(null); setFirstPage(null); setStates([]); setError(""); setPending([]);
     if (enabled) {
-      setLoading(true);
-      void api.request({ action: "session-list", scope, page }).then(reply => {
+      setLoading(!cachedList);
+      void api.request(request).then(reply => {
         if (!live) return;
         if (!reply.ok) setError(reply.error.message);
-        else if (reply.data.kind === "session-list") setList(reply.data.value);
+        else if (reply.data.kind === "session-list") { cache.remember(request, reply); setList(reply.data.value); }
       }).catch(() => { if (live) setError(l("Could not load shared sessions.", "共享会话读取失败，请刷新重试。")); }).finally(() => { if (live) setLoading(false); });
     }
     return () => { live = false; generation.current++; };
@@ -72,13 +83,19 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
   }, [api, list, team.id, team.repository, enabled, pollVersion]);
   useEffect(() => {
     let live = true;
-    setSnapshot(null); setOpening(false);
-    if (selected && selectedState?.phase === "ready") {
-      setOpening(true);
-      void api.request({ action: "session-open", scope, id: selected.id, digest: selected.digest }).then(reply => {
+    if (!selected || selectedState?.phase !== "ready") { setSnapshot(null); setFirstPage(null); setOpening(false); return; }
+    const request = { action: "session-open" as const, scope, id: selected.id, digest: selected.digest };
+    const turnsRequest = { action: "session-turns" as const, scope, id: selected.id, digest: selected.digest, record: 0, offset: 0 };
+    const previous = cache.peek(request), previousTurns = cache.peek(turnsRequest);
+    if (previous?.ok && previous.data.kind === "session-open" && previousTurns?.ok && previousTurns.data.kind === "session-turns") {
+      setSnapshot(previous.data.value); setFirstPage(previousTurns.data.value); setOpening(false);
+    } else {
+      setSnapshot(null); setFirstPage(null); setOpening(true);
+      void Promise.all([cache.read(request), cache.read(turnsRequest)]).then(([reply, turns]) => {
         if (!live) return;
         if (!reply.ok) setError(reply.error.message);
-        else if (reply.data.kind === "session-open") setSnapshot(reply.data.value);
+        else if (!turns.ok) setError(turns.error.message);
+        else if (reply.data.kind === "session-open" && turns.data.kind === "session-turns") { setSnapshot(reply.data.value); setFirstPage(turns.data.value); }
       }).catch(() => { if (live) setError(l("Could not open session.", "会话读取失败，请重试。")); }).finally(() => { if (live) setOpening(false); });
     }
     return () => { live = false; };
@@ -118,7 +135,13 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
           {loading ? <p className="team-session-placeholder" role="status">{l("Loading…", "正在读取…")}</p> : visible.map(item => {
             const phase = stateFor(item)?.phase, key = itemKey(item), busy = pending.includes(key);
             return <div className={`session-row team-session-row ${selected && itemKey(selected) === key ? "selected" : ""}`} key={key}>
-              <button className="team-session-select session-main" onClick={() => { setSelected(item); setError(""); }} aria-pressed={selected?.id === item.id}>
+              <button className="team-session-select session-main" onClick={() => {
+                const cached = cache.peek({ action: "session-open", scope, id: item.id, digest: item.digest });
+                const turns = cache.peek({ action: "session-turns", scope, id: item.id, digest: item.digest, record: 0, offset: 0 });
+                setSelected(item); setError("");
+                setSnapshot(cached?.ok && cached.data.kind === "session-open" && turns?.ok ? cached.data.value : null);
+                setFirstPage(turns?.ok && turns.data.kind === "session-turns" ? turns.data.value : null);
+              }} aria-pressed={selected?.id === item.id}>
                 <span className="session-title"><span className="session-name">{item.title}</span></span>
                 <span className="session-meta"><span>{item.author}</span><span>{new Date(item.createdAt).toLocaleDateString()}</span></span>
                 <span className={`team-session-status ${phase ?? "remote"}`}>{active(phase) ? <LoaderCircle size={12} className="team-session-spinner"/> : phase === "ready" ? <Check size={12}/> : null}{phaseLabel(phase)}</span>
@@ -136,7 +159,7 @@ export function TeamSessionsPanel({ selection, language, api = window.sessionSea
             <div className="team-session-detail-actions"><button className="icon-button" title={l("Export shared package", "导出分享包")} aria-label={l("Export shared package", "导出分享包")} disabled={!enabled || pending.includes(itemKey(selected))} onClick={() => void run({action:"session-download",scope,id:selected.id},selected)}><Download size={16}/></button><button className="icon-button" aria-label={l("Close reader", "关闭阅读")} onClick={() => setSelected(null)}><X size={16}/></button></div>
           </header>
           <div className="team-session-detail-body">
-            {snapshot ? <TeamSessionReader key={`${team.id}:${itemKey(selected)}`} snapshot={snapshot} item={selected} scope={scope} api={api} language={language}/> : <div className="team-session-placeholder">
+            {snapshot ? <TeamSessionReader key={`${team.id}:${itemKey(selected)}`} snapshot={snapshot} initialPage={firstPage} item={selected} scope={scope} api={api} language={language}/> : <div className="team-session-placeholder">
               {opening || active(selectedState?.phase) ? <LoaderCircle size={26} className="team-session-spinner"/> : <MessagesSquare size={30}/>}
               <h3>{opening ? l("Opening…", "正在打开…") : active(selectedState?.phase) ? phaseLabel(selectedState?.phase) : l("Download to read", "下载后即可阅读")}</h3>
               <p>{selectedState?.error ?? (active(selectedState?.phase) ? l("You can browse other sessions. This continues in the background.", "可以继续浏览其他会话，任务会在后台继续。") : l("Download once. Future reads use the local copy.", "首次下载并建立索引，之后直接读取本地副本。"))}</p>
