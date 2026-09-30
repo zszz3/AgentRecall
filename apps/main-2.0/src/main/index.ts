@@ -28,11 +28,10 @@ import { homedir } from "node:os";
 import { loadActiveCodexSummaryEndpointDefaults } from "../core/codex-profile";
 import { mergeCodexDesktopProjects, readCodexDesktopProjects } from "../core/codex-projects";
 import type { CodexRequestFidelity } from "../core/codex-request-export";
-import { indexMigratedSessionFile, syncDefaultSessionsInBatches, type IndexStatus } from "../core/indexer";
+import { indexMigratedSessionFile, type IndexStatus } from "../core/indexer";
 import { createIndexRunCoordinator } from "../core/index-run-coordinator";
 import { createIndexProgressPublisher } from "./index-progress";
-import { createSessionIndexFailureLogger } from "./session-index-failure-log";
-import { SessionIndexFailures } from "../core/session-index-failures";
+import { LocalSessionIndexService } from "./services/local-session-index-service";
 import { LocalLiveSessionService } from "./services/local-live-session-service";
 import { createStartupTaskScheduler } from "./startup-tasks";
 import { createInterfaceZoomController } from "./interface-zoom";
@@ -388,7 +387,7 @@ let tray: Tray | null = null;
 let store: SessionStore;
 let indexStatus: IndexStatus = { running: false, indexed: 0, skipped: 0, total: 0, lastIndexedAt: null, error: null };
 const indexRunCoordinator = createIndexRunCoordinator<IndexStatus>({
-  afterRun: () => pruneDisabledOptionalSources(getSettings()),
+  afterRun: () => automationQuitStarted ? undefined : pruneDisabledOptionalSources(getSettings()),
 });
 const indexProgressPublisher = createIndexProgressPublisher(
   (status) => mainWindow?.webContents.send("index-status", status),
@@ -1979,62 +1978,62 @@ function ensureRemoteEnvironmentLifecycle(): RemoteEnvironmentLifecycle {
   return remoteEnvironmentLifecycle;
 }
 
-const sessionIndexFailures = new SessionIndexFailures();
-let indexFailureLogger: ReturnType<typeof createSessionIndexFailureLogger> | undefined;
+let localSessionIndexService: LocalSessionIndexService | null = null;
 let retryIndexFailures = false;
 
 function runIndexSync(retryFailures = false): Promise<IndexStatus> {
   retryIndexFailures ||= retryFailures;
   return indexRunCoordinator.request(async () => {
+    if (automationQuitStarted) return indexStatus;
     const retryFailuresThisRun = retryIndexFailures;
     retryIndexFailures = false;
     const settings = getSettings();
     await pruneDisabledOptionalSources(settings);
+    if (automationQuitStarted) return indexStatus;
     indexStatus = { ...indexStatus, running: true, error: null };
     indexProgressPublisher.publish(indexStatus, true);
-    indexFailureLogger ??= createSessionIndexFailureLogger(app.getPath("userData"));
-
-    return syncDefaultSessionsInBatches(store, {
-      batchSize: 50,
-      timeBudgetMs: 8,
-      loadOptions: {
-        includeStepcode: settings.includeStepcode,
-        includeTclaude: settings.includeTclaude,
-        includeTcodex: settings.includeTcodex,
-        includeCodeBuddyCli: settings.includeCodeBuddyCli,
-        includeWorkBuddy: settings.includeWorkBuddy,
-        includeCodeWizCli: settings.includeCodeWizCli,
-        includeOpenClaw: settings.includeOpenClaw,
-        includeHermes: settings.includeHermes,
-        includeOpenCode: settings.includeOpenCode,
-        includeZcode: settings.includeZcode,
-        includePi: settings.includePi,
-        includeKimiCli: settings.includeKimiCli,
-        includeQwenCode: settings.includeQwenCode,
-        includeGeminiCli: settings.includeGeminiCli,
-        includeCursorAgent: settings.includeCursorAgent,
-        includeTrae: settings.includeTrae,
-        includeQoder: settings.includeQoder,
-        includeQoderIde: settings.includeQoderIde,
-        includeDeepSeekCli: settings.includeDeepSeekCli,
-      },
-      indexFailureLogPath: indexFailureLogger.logPath,
-      logIndexFailure: indexFailureLogger.write,
-      failureState: sessionIndexFailures,
-      retryFailures: retryFailuresThisRun,
-      onEnvironmentsChanged: emitEnvironmentsUpdated,
+    if (!postgresRuntime) throw new Error("Session database is not ready.");
+    localSessionIndexService ??= new LocalSessionIndexService(path.join(__dirname, "session-index-worker.js"), {
+      connectionUrl: postgresRuntime.connectionUrl,
+      userDataPath: app.getPath("userData"),
+    });
+    return localSessionIndexService.run({
+      includeStepcode: settings.includeStepcode,
+      includeTclaude: settings.includeTclaude,
+      includeTcodex: settings.includeTcodex,
+      includeCodeBuddyCli: settings.includeCodeBuddyCli,
+      includeWorkBuddy: settings.includeWorkBuddy,
+      includeCodeWizCli: settings.includeCodeWizCli,
+      includeOpenClaw: settings.includeOpenClaw,
+      includeHermes: settings.includeHermes,
+      includeOpenCode: settings.includeOpenCode,
+      includeZcode: settings.includeZcode,
+      includePi: settings.includePi,
+      includeKimiCli: settings.includeKimiCli,
+      includeQwenCode: settings.includeQwenCode,
+      includeGeminiCli: settings.includeGeminiCli,
+      includeCursorAgent: settings.includeCursorAgent,
+      includeTrae: settings.includeTrae,
+      includeQoder: settings.includeQoder,
+      includeQoderIde: settings.includeQoderIde,
+      includeDeepSeekCli: settings.includeDeepSeekCli,
+    }, retryFailuresThisRun, {
+      onEnvironmentsChanged: () => { if (!automationQuitStarted) emitEnvironmentsUpdated(); },
       onProgress: (status) => {
+        if (automationQuitStarted) return;
         indexStatus = { ...status, lastIndexedAt: indexStatus.lastIndexedAt };
         indexProgressPublisher.publish(indexStatus);
       },
     })
       .then((status) => {
+        if (automationQuitStarted) return status;
         indexStatus = status;
         indexProgressPublisher.publish(indexStatus, true);
         void maybeAutoBackfillSummaries();
         return indexStatus;
       })
       .catch((error) => {
+        if (automationQuitStarted) return indexStatus;
         indexStatus = {
           running: false,
           indexed: 0,
@@ -2047,13 +2046,13 @@ function runIndexSync(retryFailures = false): Promise<IndexStatus> {
         return indexStatus;
       })
       .finally(() => {
-        void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
+        if (!automationQuitStarted) void ensureRemoteEnvironmentLifecycle().startEnabledEnvironments();
       });
   });
 }
 
-// V2 catalog and statistics reads already use asynchronous PostgreSQL APIs;
-// only local process and session-file inspection needs a worker here.
+// Live process detection and indexing have separate workers so a long index
+// cannot queue interactive live-session requests.
 const localLiveSessionService = new LocalLiveSessionService(
   path.join(__dirname, "live-session-worker.js"),
 );
@@ -3306,6 +3305,7 @@ app.on("before-quit", (event) => {
   disposeTeamWorkspaceIpc?.();
   disposeTeamWorkspaceIpc = null;
   void Promise.allSettled([
+    localSessionIndexService?.stop() ?? Promise.resolve(),
     teamWorkspaceService?.close() ?? Promise.resolve(),
     appUpdateService.clearRunningProcess(),
     automationService?.shutdown() ?? Promise.resolve(),

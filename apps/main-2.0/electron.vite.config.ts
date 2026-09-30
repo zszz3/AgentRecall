@@ -11,6 +11,7 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           "live-session-worker": resolve("src/main/live-session-worker.ts"),
+          "session-index-worker": resolve("src/main/session-index-worker.ts"),
         },
       },
     },

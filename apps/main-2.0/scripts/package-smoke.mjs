@@ -125,6 +125,7 @@ try {
   await Promise.all([
     access(path.join(installedRoot, "out", "main", "index.js")),
     access(path.join(installedRoot, "out", "main", "live-session-worker.js")),
+    access(path.join(installedRoot, "out", "main", "session-index-worker.js")),
   ]);
   await access(path.join(installedRoot, "out", "mcp", "workflow-entry.js"));
   await access(path.join(installedRoot, "dist", "main", "index.js"));

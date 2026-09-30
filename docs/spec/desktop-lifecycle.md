@@ -22,6 +22,8 @@
 
 renderer 卸载不能代替 main-process 清理；反过来，离开一个页面也不应无条件终止产品明确允许后台运行的任务。
 
+V2 本地会话索引由 `LocalSessionIndexService` 持有独立线程。重复刷新仍由索引协调器合并；线程完成数据库写入并关闭本轮连接后返回最终结果，主进程再发布完成状态。线程崩溃使当前请求失败，下次刷新可重建线程；退出开始后不允许排队任务重新拉起线程，也不再启动索引后的远端任务。关闭内置数据库前必须等待索引线程终止，避免后台继续访问已关闭的运行时。
+
 ## 更新对象
 
 [AppUpdateStatus](../../apps/main-2.0/src/core/app-update-types.ts)包含 currentVersion、developmentBuild、checkedAt、fromCache、updateAvailable、manifest 和 error。缓存结果与刚刚联网检查不同；error 非空不能解释为已经确认没有更新。
